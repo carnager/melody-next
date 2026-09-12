@@ -8,6 +8,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_fetch_service.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
+#include "bench/replaygain_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/operations/file_publication_apply.hpp"
@@ -362,6 +363,203 @@ void BenchMainWindow::showConvertDialog() {
     dialog->show();
 }
 
+MetadataPropertiesSourceReader
+BenchMainWindow::selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows) {
+    const QPointer model{tab.model};
+    auto selected_rows = std::move(rows);
+    return [model, selected_rows = std::move(selected_rows)](
+               const std::size_t selected_index) -> std::optional<MetadataPropertiesSource> {
+        if (model == nullptr || selected_index >= selected_rows.size() ||
+            !selected_rows[selected_index].isValid()) {
+            return std::nullopt;
+        }
+        const auto row_index = selected_rows[selected_index].row();
+        if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
+            return std::nullopt;
+        }
+        const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
+        auto label = model->index(row_index, local_title_column).data().toString();
+        if (!row.artist.empty()) {
+            label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
+        }
+        // ADR-0139: CUE-bound occurrences capture their sheet identity
+        // and revision so ReplayGain drafts can resolve to a sheet
+        // rewrite instead of blocked whole-file tags.
+        auto cue_binding = [&row]() -> std::optional<metadata::StagedCueSheetBinding> {
+            if (!row.logical_reference) {
+                return std::nullopt;
+            }
+            auto parts = parse_cue_logical_reference(*row.logical_reference);
+            if (!parts) {
+                return std::nullopt;
+            }
+            auto revision = core::observe_local_source_revision(parts->raw_cue_path);
+            return metadata::StagedCueSheetBinding{
+                .raw_cue_path = std::move(parts->raw_cue_path),
+                .cue_revision = revision ? std::optional{*revision} : std::nullopt,
+                .file_index = parts->file_index,
+                .track_index = parts->track_index,
+            };
+        }();
+        const auto logical = row.logical_reference.has_value() || row.segment ||
+                             row.selection.stream_index || row.selection.subsong_index;
+        // ADR-0141: non-CUE logical occurrences carry their in-file
+        // identity so loudness drafts can resolve to the sidecar.
+        auto logical_identity =
+            logical ? std::optional{metadata::StagedLogicalIdentity{
+                          .stream_index = row.selection.stream_index,
+                          .subsong_index = row.selection.subsong_index,
+                          .start_sample =
+                              row.segment ? std::optional{row.segment->start_sample} : std::nullopt,
+                          .end_sample = row.segment ? row.segment->end_sample : std::nullopt,
+                      }}
+                    : std::nullopt;
+        return MetadataPropertiesSource{
+            .source =
+                metadata::StagedMetadataSource{
+                    .raw_path = row.raw_path,
+                    .source_revision = row.source_revision,
+                    .baseline = row.metadata,
+                    .logical_track = logical,
+                    .cue_sheet = std::move(cue_binding),
+                    .logical_identity = logical_identity,
+                },
+            .track_label = std::move(label),
+            .audio = {.selection = row.selection, .range = row.segment},
+        };
+    };
+}
+
+MetadataWritePlanApplierFactory BenchMainWindow::metadataPlanApplierFactory() {
+    auto* const persistence_service = persistence_;
+    const auto database_path = database_path_;
+    return [this, database_path, persistence_service] {
+        auto documents = collectDocuments();
+        auto view_layouts = collectTrackViewLayouts();
+        return MetadataWritePlanApplier{
+            [database_path, persistence_service, documents = std::move(documents),
+             view_layouts =
+                 std::move(view_layouts)](const metadata::MetadataWritePlan& plan,
+                                          const operations::MetadataApplyProgressCallback& progress,
+                                          const core::CancellationToken& cancellation) mutable
+                -> core::Result<operations::MetadataApplyResult> {
+                if (!persistence_service) {
+                    return std::unexpected(core::Error{
+                        .code = core::ErrorCode::cancelled,
+                        .message = "Trackknife closed during metadata Apply",
+                        .context = {},
+                    });
+                }
+                const auto persistence_error = persistence_service->saveWorkspaceAndWait(
+                    std::move(documents), std::move(view_layouts));
+                if (!persistence_error.isEmpty()) {
+                    return std::unexpected(core::Error{
+                        .code = core::ErrorCode::database,
+                        .message = utf8Bytes(persistence_error),
+                        .context = {},
+                    });
+                }
+                auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
+                if (!opened) {
+                    return std::unexpected(std::move(opened.error()));
+                }
+                auto journal = std::move(*opened);
+                const auto dependent =
+                    [persistence_service](
+                        const operations::MetadataCommitResult& result) -> core::Result<void> {
+                    if (!persistence_service) {
+                        return std::unexpected(core::Error{
+                            .code = core::ErrorCode::cancelled,
+                            .message = "Trackknife closed during metadata Apply",
+                            .context = {},
+                        });
+                    }
+                    // ADR-0145: carrier commits have no tag document;
+                    // their rows refresh through the apply observers.
+                    if (result.content_kind !=
+                        operations::MetadataOperationContentKind::text_fields) {
+                        return {};
+                    }
+                    auto refreshed =
+                        persistence_service->refreshLocalMetadataAndWait(metadata_refresh(result));
+                    return refreshed ? core::Result<void>{}
+                                     : std::unexpected(std::move(refreshed.error()));
+                };
+                return operations::apply_metadata_write_plan(
+                    plan,
+                    [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
+                                           const core::CancellationToken& source_cancellation) {
+                        return operations::commit_flac_metadata_source(source, journal, dependent,
+                                                                       source_cancellation);
+                    },
+                    [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
+                                           const core::CancellationToken& sheet_cancellation) {
+                        return operations::commit_cue_replay_gain_sheet(sheet, journal, dependent,
+                                                                        sheet_cancellation);
+                    },
+                    [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
+                                           const core::CancellationToken& sidecar_cancellation) {
+                        return operations::commit_loudness_sidecar(sidecar, journal, dependent,
+                                                                   sidecar_cancellation);
+                    },
+                    progress, cancellation,
+                    operations::MetadataApplyOptions{.maximum_parallelism = 2U});
+            }};
+    };
+}
+
+MetadataApplyObserver BenchMainWindow::metadataApplyObserver() {
+    return [this](const operations::MetadataApplyResult& result) {
+        auto committed = false;
+        for (const auto& source : result.sources) {
+            if (!source.commit) {
+                continue;
+            }
+            applyCommittedMetadata(*source.commit);
+            committed = true;
+        }
+        for (const auto& sheet : result.cue_sheets) {
+            if (!sheet.commit) {
+                continue;
+            }
+            applyCommittedCueReplayGain(*sheet.commit);
+            committed = true;
+        }
+        for (const auto& sidecar : result.sidecars) {
+            if (!sidecar.commit) {
+                continue;
+            }
+            applyCommittedLoudnessSidecar(*sidecar.commit);
+            committed = true;
+        }
+        if (committed) {
+            schedulePersist();
+        }
+    };
+}
+
+void BenchMainWindow::showReplayGainDialog() {
+    auto* tab = currentListTab();
+    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
+        return;
+    }
+    auto selected = tab->view->selectionModel()->selectedRows();
+    std::ranges::sort(selected, {}, &QModelIndex::row);
+    if (selected.empty()) {
+        return;
+    }
+    std::vector<QPersistentModelIndex> selected_rows;
+    selected_rows.reserve(static_cast<std::size_t>(selected.size()));
+    for (const auto& index : selected) {
+        selected_rows.emplace_back(index);
+    }
+    const auto count = selected_rows.size();
+    auto* dialog =
+        new ReplayGainDialog(count, selectionSourceReader(*tab, std::move(selected_rows)),
+                             metadataPlanApplierFactory(), metadataApplyObserver(), this);
+    dialog->show();
+}
+
 void BenchMainWindow::showMetadataProperties() {
     auto* tab = currentListTab();
     if (tab == nullptr || tab->view->selectionModel() == nullptr) {
@@ -382,170 +580,8 @@ void BenchMainWindow::showMetadataProperties() {
     auto* const persistence_service = persistence_;
     const auto database_path = database_path_;
     auto* properties = new MetadataPropertiesDialog(
-        selected_row_count,
-        [model, selected_rows = std::move(selected_rows)](
-            const std::size_t selected_index) -> std::optional<MetadataPropertiesSource> {
-            if (model == nullptr || selected_index >= selected_rows.size() ||
-                !selected_rows[selected_index].isValid()) {
-                return std::nullopt;
-            }
-            const auto row_index = selected_rows[selected_index].row();
-            if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
-                return std::nullopt;
-            }
-            const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
-            auto label = model->index(row_index, local_title_column).data().toString();
-            if (!row.artist.empty()) {
-                label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
-            }
-            // ADR-0139: CUE-bound occurrences capture their sheet identity
-            // and revision so ReplayGain drafts can resolve to a sheet
-            // rewrite instead of blocked whole-file tags.
-            auto cue_binding = [&row]() -> std::optional<metadata::StagedCueSheetBinding> {
-                if (!row.logical_reference) {
-                    return std::nullopt;
-                }
-                auto parts = parse_cue_logical_reference(*row.logical_reference);
-                if (!parts) {
-                    return std::nullopt;
-                }
-                auto revision = core::observe_local_source_revision(parts->raw_cue_path);
-                return metadata::StagedCueSheetBinding{
-                    .raw_cue_path = std::move(parts->raw_cue_path),
-                    .cue_revision = revision ? std::optional{*revision} : std::nullopt,
-                    .file_index = parts->file_index,
-                    .track_index = parts->track_index,
-                };
-            }();
-            const auto logical = row.logical_reference.has_value() || row.segment ||
-                                 row.selection.stream_index || row.selection.subsong_index;
-            // ADR-0141: non-CUE logical occurrences carry their in-file
-            // identity so loudness drafts can resolve to the sidecar.
-            auto logical_identity =
-                logical ? std::optional{metadata::StagedLogicalIdentity{
-                              .stream_index = row.selection.stream_index,
-                              .subsong_index = row.selection.subsong_index,
-                              .start_sample = row.segment ? std::optional{row.segment->start_sample}
-                                                          : std::nullopt,
-                              .end_sample = row.segment ? row.segment->end_sample : std::nullopt,
-                          }}
-                        : std::nullopt;
-            return MetadataPropertiesSource{
-                .source =
-                    metadata::StagedMetadataSource{
-                        .raw_path = row.raw_path,
-                        .source_revision = row.source_revision,
-                        .baseline = row.metadata,
-                        .logical_track = logical,
-                        .cue_sheet = std::move(cue_binding),
-                        .logical_identity = logical_identity,
-                    },
-                .track_label = std::move(label),
-                .audio = {.selection = row.selection, .range = row.segment},
-            };
-        },
-        std::span{default_metadata_fields},
-        [this, database_path, persistence_service] {
-            auto documents = collectDocuments();
-            auto view_layouts = collectTrackViewLayouts();
-            return MetadataWritePlanApplier{
-                [database_path, persistence_service, documents = std::move(documents),
-                 view_layouts = std::move(view_layouts)](
-                    const metadata::MetadataWritePlan& plan,
-                    const operations::MetadataApplyProgressCallback& progress,
-                    const core::CancellationToken& cancellation) mutable
-                    -> core::Result<operations::MetadataApplyResult> {
-                    if (!persistence_service) {
-                        return std::unexpected(core::Error{
-                            .code = core::ErrorCode::cancelled,
-                            .message = "Trackknife closed during metadata Apply",
-                            .context = {},
-                        });
-                    }
-                    const auto persistence_error = persistence_service->saveWorkspaceAndWait(
-                        std::move(documents), std::move(view_layouts));
-                    if (!persistence_error.isEmpty()) {
-                        return std::unexpected(core::Error{
-                            .code = core::ErrorCode::database,
-                            .message = utf8Bytes(persistence_error),
-                            .context = {},
-                        });
-                    }
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    const auto dependent =
-                        [persistence_service](
-                            const operations::MetadataCommitResult& result) -> core::Result<void> {
-                        if (!persistence_service) {
-                            return std::unexpected(core::Error{
-                                .code = core::ErrorCode::cancelled,
-                                .message = "Trackknife closed during metadata Apply",
-                                .context = {},
-                            });
-                        }
-                        // ADR-0145: carrier commits have no tag document;
-                        // their rows refresh through the apply observers.
-                        if (result.content_kind !=
-                            operations::MetadataOperationContentKind::text_fields) {
-                            return {};
-                        }
-                        auto refreshed = persistence_service->refreshLocalMetadataAndWait(
-                            metadata_refresh(result));
-                        return refreshed ? core::Result<void>{}
-                                         : std::unexpected(std::move(refreshed.error()));
-                    };
-                    return operations::apply_metadata_write_plan(
-                        plan,
-                        [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
-                                               const core::CancellationToken& source_cancellation) {
-                            return operations::commit_flac_metadata_source(
-                                source, journal, dependent, source_cancellation);
-                        },
-                        [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
-                                               const core::CancellationToken& sheet_cancellation) {
-                            return operations::commit_cue_replay_gain_sheet(
-                                sheet, journal, dependent, sheet_cancellation);
-                        },
-                        [&journal,
-                         &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
-                                     const core::CancellationToken& sidecar_cancellation) {
-                            return operations::commit_loudness_sidecar(sidecar, journal, dependent,
-                                                                       sidecar_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::MetadataApplyOptions{.maximum_parallelism = 2U});
-                }};
-        },
-        [this](const operations::MetadataApplyResult& result) {
-            auto committed = false;
-            for (const auto& source : result.sources) {
-                if (!source.commit) {
-                    continue;
-                }
-                applyCommittedMetadata(*source.commit);
-                committed = true;
-            }
-            for (const auto& sheet : result.cue_sheets) {
-                if (!sheet.commit) {
-                    continue;
-                }
-                applyCommittedCueReplayGain(*sheet.commit);
-                committed = true;
-            }
-            for (const auto& sidecar : result.sidecars) {
-                if (!sidecar.commit) {
-                    continue;
-                }
-                applyCommittedLoudnessSidecar(*sidecar.commit);
-                committed = true;
-            }
-            if (committed) {
-                schedulePersist();
-            }
-        },
+        selected_row_count, selectionSourceReader(*tab, std::move(selected_rows)),
+        std::span{default_metadata_fields}, metadataPlanApplierFactory(), metadataApplyObserver(),
         MetadataTransformationStore{
             .load =
                 [persistence_service](MetadataTransformationStore::LoadCompletion completion) {

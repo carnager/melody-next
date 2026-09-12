@@ -201,6 +201,7 @@ class BenchMainWindowTest final : public QObject {
     void propertiesShowTechnicalSummary();
     void searchDialogFiltersTabAndOpensResults();
     void searchDialogProbesMissingTechnicalsOnDemand();
+    void contextReplayGainScansAndApplies();
     void loudnessSidecarProjectsOntoProbedRows();
     void desktopNotificationsNotifyBackgroundTrackChanges();
     void replayGainScanPreservesLogicalSources_data();
@@ -4182,6 +4183,58 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     QVERIFY(reported.empty());
     QVERIFY(!status->text().contains(QStringLiteral("scanned")));
     mode->setChecked(false);
+}
+
+// ADR-0156: the context-menu ReplayGain dialog scans the selection and
+// writes immediately through the shared journaled pipeline — here two
+// unwritable WAVs divert into loudness sidecars (ADR-0143).
+void BenchMainWindowTest::contextReplayGainScansAndApplies() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto first = media.filePath(QStringLiteral("one.wav"));
+    const auto second = media.filePath(QStringLiteral("two.wav"));
+    write_sine_wav_fixture(first, 0.6);
+    write_sine_wav_fixture(second, 0.3);
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths(
+        {QFile::encodeName(first).toStdString(), QFile::encodeName(second).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    QTRY_COMPARE(view->model()->rowCount(), 2);
+    view->selectAll();
+
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
+    QVERIFY(action != nullptr);
+    action->trigger();
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog"))) !=
+                nullptr);
+    auto* grouping =
+        dialog->findChild<QComboBox*>(QStringLiteral("bench-replaygain-dialog-grouping"));
+    auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-replaygain-dialog-status"));
+    QVERIFY(grouping != nullptr && run != nullptr && status != nullptr);
+    grouping->setCurrentIndex(3);
+    run->click();
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Applied gains to 2")),
+                             30'000);
+
+    // Unwritable WAVs landed in sidecars with the measured track gains.
+    for (const auto& path : {first, second}) {
+        const auto encoded = QFile::encodeName(path);
+        const auto sidecar = metadata::read_loudness_sidecar(
+            std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
+        QVERIFY(sidecar.has_value());
+        QVERIFY(sidecar->has_value());
+        QCOMPARE((*sidecar)->entries.size(), 1U);
+        QVERIFY((*sidecar)->entries.front().track_gain_db.has_value());
+    }
+    dialog->close();
 }
 
 void BenchMainWindowTest::replayGainScanPreservesLogicalSources_data() {

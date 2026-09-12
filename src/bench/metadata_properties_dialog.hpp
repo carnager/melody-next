@@ -5,6 +5,7 @@
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
+#include "bench/replaygain_scan.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/transformation.hpp"
 #include "trackknife/metadata/write_plan.hpp"
@@ -57,10 +58,6 @@ namespace trackknife::bench {
 
 class MetadataGridModel;
 class MetadataAggregateModel;
-struct MetadataPropertiesAudioSource {
-    formats::AudioSourceSelection selection;
-    std::optional<formats::SampleRange> range;
-};
 
 struct MetadataPropertiesSource {
     metadata::StagedMetadataSource source;
@@ -258,15 +255,6 @@ class MetadataPropertiesDialog final : public QDialog {
         proposal_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<metadata::MetadataTransformationPreview>>>
         automatic_watcher_;
-    struct ReplayGainScanOutcome {
-        core::Result<metadata::MetadataProposalSet> proposals{metadata::MetadataProposalSet{}};
-        std::vector<PreparationFeedbackRow> problems;
-        // ADR-0146: items whose measurement failed or was cancelled and
-        // can be re-run; structurally unmeasurable tracks are excluded.
-        std::vector<std::size_t> retry_items;
-        // ADR-0147: pre-escaped CSV data rows snapshotting the measurement.
-        QStringList export_rows;
-    };
     QFutureWatcher<std::shared_ptr<ReplayGainScanOutcome>> replaygain_watcher_;
     MetadataPropertiesSourceReader source_reader_;
     MetadataWritePlanApplierFactory plan_applier_factory_;

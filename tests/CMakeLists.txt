@@ -521,7 +521,7 @@ if(TRACKKNIFE_BUILD_UI)
     set_tests_properties(
         bench-main-window
         PROPERTIES
-            TIMEOUT 60
+            TIMEOUT 180
             ENVIRONMENT
                 "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
     )

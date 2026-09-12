@@ -1174,6 +1174,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     }
 
     track_context_menu_->addAction(properties_action_);
+    track_context_menu_->addAction(replaygain_action_);
     track_context_menu_->addAction(convert_action_);
 
     auto* source_tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());

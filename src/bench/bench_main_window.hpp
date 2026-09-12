@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/local_list_model.hpp"
+#include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/core/cancellation.hpp"
@@ -208,6 +209,13 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
+    // ADR-0156: shared capture/apply plumbing for Properties and the
+    // compact context-menu ReplayGain dialog.
+    [[nodiscard]] MetadataPropertiesSourceReader
+    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
+    [[nodiscard]] MetadataWritePlanApplierFactory metadataPlanApplierFactory();
+    [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
+    void showReplayGainDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
@@ -375,6 +383,7 @@ class BenchMainWindow final : public QMainWindow {
     QTabWidget* tabs_{nullptr};
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QPointer<SearchDialog> search_dialog_;
+    QAction* replaygain_action_{nullptr};
     std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
     std::vector<std::unique_ptr<MpdSearchTab>> mpd_search_tabs_;
     // Enter pressed before the debounced search finished: commit this

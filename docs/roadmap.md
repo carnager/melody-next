@@ -99,6 +99,10 @@ References: [working lists and interchange](playback-library-conversion.md#worki
   on a bounded worker pool while the walk and every guarded per-file
   commit stay serial; the library connection drops to WAL
   synchronous=NORMAL.
+- [x] Context-menu ReplayGain (ADR-0156): a compact scan-and-write
+  dialog for the selection — shared persisted options, the shared scan
+  pipeline, immediate journaled apply with a bounded problems pane;
+  Properties stays the review-first surface.
 - [x] Standalone search dialog (ADR-0153): one non-modal surface over
   tkq-1 and word search with a database/current-tab scope switch;
   tab scope evaluates the shared row semantics, probes missing

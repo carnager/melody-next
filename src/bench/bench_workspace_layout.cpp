@@ -366,6 +366,9 @@ void BenchMainWindow::buildWorkspace() {
     play_selected_action_->setObjectName(QStringLiteral("action-play-selected-track"));
     connect(play_selected_action_, &QAction::triggered, this, &BenchMainWindow::playCurrentRow);
     properties_action_ = edit_menu->addAction(QStringLiteral("Properties…"));
+    replaygain_action_ = edit_menu->addAction(QStringLiteral("ReplayGain…"));
+    replaygain_action_->setObjectName(QStringLiteral("action-replaygain-dialog"));
+    connect(replaygain_action_, &QAction::triggered, this, &BenchMainWindow::showReplayGainDialog);
     properties_action_->setObjectName(QStringLiteral("action-track-properties"));
     properties_action_->setShortcut(QKeySequence(QStringLiteral("Alt+Return")));
     properties_action_->setEnabled(false);

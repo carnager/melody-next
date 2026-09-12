@@ -176,7 +176,11 @@ persisted stream duplicates on restore. A genuinely embedded freeform `TRACK`,
 ReplayGain has its own rules in `replaygain.md`. A user must be able to inspect
 the source of an effective value and choose the write target.
 
-## Properties/tag editor
+## Tag editor
+
+**Edit tags…** in the Edit menu and local-track context menu opens this
+workspace; **Alt+Return** is its keyboard shortcut. The workspace tab is named
+**Tags · N tracks**. Earlier specifications call this workspace Properties.
 
 Opening one or many locally resolved tracks produces a non-modal, job-backed
 workspace optimized for keyboard and bulk data entry. It must not resemble a

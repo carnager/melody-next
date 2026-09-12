@@ -6595,6 +6595,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY(tabs != nullptr);
     QVERIFY(properties != nullptr);
     QCOMPARE(properties->shortcut(), QKeySequence(QStringLiteral("Alt+Return")));
+    QCOMPARE(properties->text(), QStringLiteral("Edit tags…"));
     QTRY_COMPARE(tabs->count(), 2);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
@@ -6626,6 +6627,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QTRY_COMPARE(tabs->count(), 3);
     QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(dialog));
     QVERIFY(tabs->tabText(tabs->currentIndex()).startsWith(QStringLiteral("Tags · 2 tracks")));
+    QCOMPARE(dialog->windowTitle(), QStringLiteral("Edit tags"));
     QVERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-metadata-loading")) != nullptr);
 
     QTableView* files = nullptr;

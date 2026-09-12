@@ -140,7 +140,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
       file_apply_observer_(std::move(file_apply_observer)), layout_store_(std::move(layout_store)),
       musicbrainz_(std::move(musicbrainz)), requested_item_count_(requested_item_count) {
     setObjectName(QStringLiteral("bench-metadata-properties"));
-    setWindowTitle(QStringLiteral("Track properties"));
+    setWindowTitle(QStringLiteral("Edit tags"));
     setModal(false);
     setAttribute(Qt::WA_DeleteOnClose);
     resize(1'020, 620);
@@ -346,7 +346,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     layout_manager->resize(820, 540);
     auto* layout_manager_box = new QVBoxLayout(layout_manager);
     auto* layout_manager_hint =
-        new QLabel(QStringLiteral("Changes the layout currently selected in Track properties. "
+        new QLabel(QStringLiteral("Changes the layout currently selected in the tag editor. "
                                   "“New” starts a blank layout."),
                    layout_manager);
     layout_manager_hint->setWordWrap(true);
@@ -429,7 +429,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     destination_manager->setMinimumWidth(460);
     auto* destination_manager_box = new QVBoxLayout(destination_manager);
     auto* destination_manager_hint =
-        new QLabel(QStringLiteral("Changes the destination currently selected in Track properties. "
+        new QLabel(QStringLiteral("Changes the destination currently selected in the tag editor. "
                                   "“New” starts a blank destination."),
                    destination_manager);
     destination_manager_hint->setWordWrap(true);

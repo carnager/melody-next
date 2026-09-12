@@ -365,7 +365,7 @@ void BenchMainWindow::buildWorkspace() {
     play_selected_action_ = new QAction(QStringLiteral("Play"), this);
     play_selected_action_->setObjectName(QStringLiteral("action-play-selected-track"));
     connect(play_selected_action_, &QAction::triggered, this, &BenchMainWindow::playCurrentRow);
-    properties_action_ = edit_menu->addAction(QStringLiteral("Properties…"));
+    properties_action_ = edit_menu->addAction(QStringLiteral("Edit tags…"));
     replaygain_action_ = edit_menu->addAction(QStringLiteral("ReplayGain…"));
     replaygain_action_->setObjectName(QStringLiteral("action-replaygain-dialog"));
     connect(replaygain_action_, &QAction::triggered, this, &BenchMainWindow::showReplayGainDialog);

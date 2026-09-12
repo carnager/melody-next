@@ -11,6 +11,11 @@ requested usability work after the workspace review. M5 remains active.
 
 ## Decision
 
+The local-track action is named **Edit tags…** in the Edit and context menus
+to make editing discoverable. It retains **Alt+Return** and opens the existing
+**Tags · N tracks** workspace. The editor title and supporting help text use
+the same terminology.
+
 **Trackknife decision:** Properties adds a case-insensitive substring filter
 over display and canonical field names, a Changed fields only switch, and a
 Show files switch. These controls are temporary presentation state. Collapsing

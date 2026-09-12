@@ -384,6 +384,10 @@ void carriesMetadataIntoEveryPreset() {
     document.fields.push_back(field("title", "TITLE", {"Converted Tone"}));
     document.fields.push_back(field("artist", "ARTIST", {"Fixture Band"}));
     document.fields.push_back(field("tracknumber", "TRACKNUMBER", {"7"}));
+    // FFmpeg's vorbis writer renames the generic comment key to
+    // DESCRIPTION; the post-encode normalization must undo that so the
+    // verification and every reader see COMMENT again.
+    document.fields.push_back(field("comment", "COMMENT", {"Visit https://example.org"}));
     // Loudness claims measured against the source signal are stale after a
     // re-encode and must be stripped, never transferred (ADR-0133).
     document.fields.push_back(field("replaygaintrackgain", "REPLAYGAIN_TRACK_GAIN", {"-6.50 dB"}));
@@ -424,6 +428,9 @@ void carriesMetadataIntoEveryPreset() {
               std::optional<std::string>{"Fixture Band"});
         CHECK(reread->document.first_effective_value("tracknumber") ==
               std::optional<std::string>{"7"});
+        CHECK(reread->document.first_effective_value("comment") ==
+              std::optional<std::string>{"Visit https://example.org"});
+        CHECK(!reread->document.first_effective_value("description").has_value());
         CHECK(!reread->document.first_effective_value("replaygaintrackgain").has_value());
         CHECK(!reread->document.first_effective_value("replaygaintrackpeak").has_value());
         CHECK(!reread->document.first_effective_value("replaygainalbumgain").has_value());

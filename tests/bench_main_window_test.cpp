@@ -3579,30 +3579,15 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QVERIFY(!mirror->isChecked());
     mirror->setChecked(true);
     QVERIFY(!directory_field->isEnabled());
-    QTRY_VERIFY(preview->count() >= 3 &&
-                preview->item(0)->text().startsWith(QStringLiteral("Recreating source paths below")));
-    QCOMPARE(preview->item(1)->text(), QStringLiteral("loud.flac"));
-    QCOMPARE(preview->item(2)->text(), QStringLiteral("quiet.flac"));
+    QTRY_VERIFY(preview->count() >= 3 && preview->item(0)->text().startsWith(
+                                             QStringLiteral("Recreating full source paths")));
 
-    // ADR-0154: an explicit mirror root keeps the album folders even when
-    // the whole selection lives inside one directory.
-    auto* mirror_root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-mirror-root"));
-    QVERIFY(mirror_root != nullptr);
-    QVERIFY(mirror_root->isEnabled());
-    const QFileInfo media_info{media.path()};
-    mirror_root->setText(media_info.absolutePath());
-    const auto prefixed = media_info.fileName() + QStringLiteral("/loud.flac");
-    QTRY_VERIFY(preview->count() >= 2 && preview->item(1)->text() == prefixed);
-
-    // A root that does not contain the sources blocks the plan visibly.
-    mirror_root->setText(destination.path());
-    QTRY_VERIFY(!run->isEnabled());
-    QTRY_VERIFY(problems->isVisible());
-    mirror_root->clear();
-    QTRY_VERIFY(run->isEnabled());
+    // ADR-0154: mirror recreates the complete source path beneath the
+    // destination, so single-album selections keep their folders too.
+    const auto media_relative = QString{media.path()}.mid(1) + QStringLiteral("/loud.flac");
+    QTRY_VERIFY(preview->count() >= 2 && preview->item(1)->text() == media_relative);
     mirror->setChecked(false);
     QVERIFY(directory_field->isEnabled());
-    QVERIFY(!mirror_root->isEnabled());
     delete dialog;
 }
 

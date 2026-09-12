@@ -11,6 +11,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+
 #include <libavutil/audio_fifo.h>
 #include <libavutil/base64.h>
 #include <libavutil/channel_layout.h>
@@ -20,6 +21,9 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 }
+
+#include <taglib/fileref.h>
+#include <taglib/tpropertymap.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -535,6 +539,53 @@ strip_loudness_fields(const metadata::MetadataDocument& document) {
     return {};
 }
 
+// FFmpeg's vorbis-comment writer converts the generic "comment" key to
+// DESCRIPTION at write_header (its conversion table matches keys
+// case-insensitively), so a transferred COMMENT resurfaces under the
+// wrong name in FLAC/Ogg/Opus output. Rename it back with the proven
+// tag layer before verification — only when the request carried a
+// comment and no description of its own.
+[[nodiscard]] core::Result<void>
+normalize_vorbis_comment(const std::string& temporary_path, const EncoderPreset& preset,
+                         const metadata::MetadataDocument& document, const std::string& raw_path) {
+    const auto vorbis_family = preset.container_name == "flac" || preset.container_name == "ogg" ||
+                               preset.container_name == "opus";
+    if (!vorbis_family) {
+        return {};
+    }
+    const auto comment = document.effective_values("comment");
+    if (comment.empty() || !document.effective_values("description").empty()) {
+        return {};
+    }
+    TagLib::FileRef file{temporary_path.c_str()};
+    if (file.isNull()) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = "reopening the converted file for tag normalization failed",
+                        .context = {{.key = "path", .value = raw_path}}});
+    }
+    auto properties = file.properties();
+    if (!properties.contains("DESCRIPTION") || properties.contains("COMMENT")) {
+        return {};
+    }
+    TagLib::StringList values;
+    for (const auto& value : comment) {
+        values.append(TagLib::String{value, TagLib::String::UTF8});
+    }
+    if (properties.value("DESCRIPTION") != values) {
+        return {};
+    }
+    properties.erase("DESCRIPTION");
+    properties.insert("COMMENT", values);
+    file.setProperties(properties);
+    if (!file.save()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                           .message = "renaming the converted comment tag failed",
+                                           .context = {{.key = "path", .value = raw_path}}});
+    }
+    return {};
+}
+
 // Every requested field must reread from the finished file with exactly the
 // requested values — the same honesty the qualified tag writers prove.
 [[nodiscard]] core::Result<void> verify_written_metadata(const std::string& temporary_path,
@@ -932,6 +983,11 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
                         {.key = "verified_frames", .value = std::to_string(verified_frames)}}});
     }
 
+    if (auto normalized = normalize_vorbis_comment(temporary.native(), request.preset,
+                                                   transfer_metadata, request.destination_raw_path);
+        !normalized) {
+        return std::unexpected(std::move(normalized.error()));
+    }
     if (auto tags_verified = verify_written_metadata(temporary.native(), transfer_metadata,
                                                      request.destination_raw_path);
         !tags_verified) {

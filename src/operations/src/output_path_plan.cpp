@@ -402,7 +402,7 @@ plan_output_paths(const std::span<const OutputPathPlanningItem> items,
         target_extension = converted->target_extension;
         mirror_root = converted->mirror_source_root_raw_path;
     }
-    if (mirror_root && !is_normal_absolute_path(*mirror_root)) {
+    if (mirror_root && *mirror_root != "/" && !is_normal_absolute_path(*mirror_root)) {
         return std::unexpected(
             plan_error(core::ErrorCode::invalid_argument,
                        "mirror planning requires a normalized absolute source root"));

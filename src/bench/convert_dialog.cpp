@@ -250,38 +250,9 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     mirror_structure_->setChecked(
         settings.value(QStringLiteral("convert/mirror-structure"), false).toBool());
     mirror_structure_->setToolTip(
-        QStringLiteral("Reproduces the folder structure below the sources' deepest common "
-                       "directory beneath the destination, keeping source file names instead of "
-                       "the expressions"));
+        QStringLiteral("Recreates each source's complete folder path beneath the destination, "
+                       "keeping source file names instead of the expressions"));
     form->addRow(QString{}, mirror_structure_);
-
-    // ADR-0154: an explicit, persisted mirror root keeps the mirrored
-    // layout independent of how broad the selection is; empty falls back
-    // to the inferred deepest common directory.
-    auto* mirror_root_row = new QHBoxLayout;
-    mirror_root_ = new QLineEdit(this);
-    mirror_root_->setObjectName(QStringLiteral("bench-convert-mirror-root"));
-    mirror_root_->setPlaceholderText(
-        QStringLiteral("auto: deepest folder all selected files share"));
-    mirror_root_->setText(settings.value(QStringLiteral("convert/mirror-root")).toString());
-    mirror_root_->setToolTip(
-        QStringLiteral("The part of each SOURCE path below this folder is recreated inside the "
-                       "destination — set it to your library root (e.g. …/Rips/flac) so "
-                       "Artist/Album folders survive even when you convert a single album. "
-                       "Sources outside it block the plan; empty guesses the deepest folder the "
-                       "selection shares."));
-    mirror_root_row->addWidget(mirror_root_, 1);
-    auto* mirror_browse = new QPushButton(QStringLiteral("Browse…"), this);
-    mirror_browse->setObjectName(QStringLiteral("bench-convert-mirror-root-browse"));
-    connect(mirror_browse, &QPushButton::clicked, this, [this] {
-        const auto chosen = QFileDialog::getExistingDirectory(this, QStringLiteral("Mirror below"),
-                                                              mirror_root_->text());
-        if (!chosen.isEmpty()) {
-            mirror_root_->setText(chosen);
-        }
-    });
-    mirror_root_row->addWidget(mirror_browse);
-    form->addRow(QStringLiteral("Keep paths below:"), mirror_root_row);
 
     directory_expression_ = new QLineEdit(this);
     directory_expression_->setObjectName(QStringLiteral("bench-convert-directory-expression"));
@@ -404,11 +375,9 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         directory_expression_->setEnabled(!mirrored);
         basename_expression_->setEnabled(!mirrored);
         layout_choice_->setEnabled(!mirrored);
-        mirror_root_->setEnabled(mirrored);
         schedule();
     };
     connect(mirror_structure_, &QCheckBox::toggled, this, apply_mirror_mode);
-    connect(mirror_root_, &QLineEdit::textChanged, this, [schedule] { schedule(); });
     apply_mirror_mode();
     connect(preset_, &QComboBox::currentIndexChanged, this, schedule);
     connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
@@ -667,23 +636,10 @@ void ConvertDialog::refreshPreview() {
     operations::ConvertedPublicationPolicy converted{.target_extension = preset->file_extension,
                                                      .mirror_source_root_raw_path = {}};
     if (mirror_structure_->isChecked()) {
-        std::vector<std::string> source_paths;
-        source_paths.reserve(planning_items.size());
-        for (const auto& planning_item : planning_items) {
-            source_paths.push_back(planning_item.source_raw_path);
-        }
-        auto mirror_root = mirror_root_ != nullptr && !mirror_root_->text().trimmed().isEmpty()
-                               ? std::filesystem::path{mirror_root_->text().trimmed().toStdString()}
-                                     .lexically_normal()
-                                     .native()
-                               : operations::common_source_directory_raw_path(source_paths);
-        if (mirror_root.empty()) {
-            status_->setText(QStringLiteral("No common source folder to mirror."));
-            return;
-        }
-        preview_->addItem(
-            QStringLiteral("Recreating source paths below %1").arg(displayText(mirror_root)));
-        converted.mirror_source_root_raw_path = std::move(mirror_root);
+        // ADR-0154: mirror recreates each source's complete folder path
+        // beneath the destination — no root inference, no extra knob.
+        preview_->addItem(QStringLiteral("Recreating full source paths beneath the destination"));
+        converted.mirror_source_root_raw_path = "/";
     }
     auto planned = operations::plan_output_paths(
         planning_items, {.rename_files = true, .move_files = true}, std::move(layout),
@@ -745,7 +701,6 @@ void ConvertDialog::startConversion() {
     settings.setValue(QStringLiteral("convert/resample-rate"), resample_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/bit-depth"), bit_depth_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/embed-artwork"), embed_artwork_->isChecked());
-    settings.setValue(QStringLiteral("convert/mirror-root"), mirror_root_->text());
     settings.setValue(QStringLiteral("convert/mirror-structure"), mirror_structure_->isChecked());
 
     std::vector<convert::ConversionScanItem> scan_items;

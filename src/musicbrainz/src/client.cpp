@@ -2,13 +2,17 @@
 
 #include "trackknife/musicbrainz/client.hpp"
 
+#include <QDateTime>
+#include <QLocale>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QTimeZone>
 #include <QTimer>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace trackknife::musicbrainz {
@@ -59,9 +63,12 @@ void MusicBrainzClient::scheduleDispatch() {
         return;
     }
     const auto elapsed = dispatched_once_ ? since_last_dispatch_.elapsed() : minimum_interval_ms_;
-    const auto wait = std::max<qint64>(0, minimum_interval_ms_ - elapsed);
+    const auto cooldown =
+        since_throttle_.isValid() ? throttle_delay_ms_ - since_throttle_.elapsed() : 0;
+    const auto wait = std::max<qint64>({0, minimum_interval_ms_ - elapsed, cooldown});
     dispatch_scheduled_ = true;
-    QTimer::singleShot(static_cast<int>(wait), this, &MusicBrainzClient::dispatchNext);
+    QTimer::singleShot(static_cast<int>(wait), Qt::PreciseTimer, this,
+                       &MusicBrainzClient::dispatchNext);
 }
 
 void MusicBrainzClient::dispatchNext() {
@@ -75,29 +82,42 @@ void MusicBrainzClient::dispatchNext() {
     dispatched_once_ = true;
     since_last_dispatch_.restart();
     QPointer<MusicBrainzClient> self{this};
-    transport_(QUrl{request.url},
-               [self, url = request.url,
-                completion = std::move(request.completion)](const WebResponse& response) {
-                   if (self.isNull()) {
-                       return;
-                   }
-                   self->finishRequest(url, completion, response);
-               });
+    const auto url = QUrl{request.url};
+    transport_(url, [self, request = std::move(request)](const WebResponse& response) mutable {
+        if (self.isNull()) {
+            return;
+        }
+        self->finishRequest(std::move(request), response);
+    });
 }
 
-void MusicBrainzClient::finishRequest(const QString& url, Completion completion,
-                                      const WebResponse& response) {
+void MusicBrainzClient::finishRequest(Pending request, const WebResponse& response) {
     in_flight_ = false;
+    if (response.transport_error.isEmpty() &&
+        (response.status_code == 429 || response.status_code == 503)) {
+        throttle_delay_ms_ =
+            std::max(response.retry_after_ms.value_or(0), 1'000 * (1 << request.retries));
+        since_throttle_.restart();
+        if (request.retries < 2 && throttle_delay_ms_ <= 60'000) {
+            ++request.retries;
+            pending_.push_front(std::move(request));
+            scheduleDispatch();
+            return;
+        }
+        scheduleDispatch();
+        request.completion(std::unexpected(client_error(
+            core::ErrorCode::backend,
+            "MusicBrainz is busy or rate-limiting requests; retry after " +
+                std::to_string((static_cast<qint64>(throttle_delay_ms_) + 999) / 1'000) +
+                " seconds")));
+        return;
+    }
     scheduleDispatch();
+    auto completion = std::move(request.completion);
     if (!response.transport_error.isEmpty()) {
         completion(std::unexpected(
             client_error(core::ErrorCode::io,
                          "MusicBrainz is unreachable: " + response.transport_error.toStdString())));
-        return;
-    }
-    if (response.status_code == 503) {
-        completion(std::unexpected(client_error(
-            core::ErrorCode::backend, "MusicBrainz asked to slow down; try again shortly")));
         return;
     }
     if (response.status_code == 404) {
@@ -112,7 +132,7 @@ void MusicBrainzClient::finishRequest(const QString& url, Completion completion,
         return;
     }
     if (cache_.store) {
-        cache_.store(url, response.body);
+        cache_.store(request.url, response.body);
     }
     completion(response.body);
 }
@@ -128,6 +148,7 @@ WebTransport MusicBrainzClient::qtNetworkTransport(QNetworkAccessManager* manage
             return;
         }
         QNetworkRequest request{url};
+        request.setTransferTimeout(30'000);
         request.setHeader(QNetworkRequest::UserAgentHeader, user_agent);
         // Cover Art Archive image URLs redirect cross-origin to the
         // Internet Archive; refuse only scheme downgrades.
@@ -144,6 +165,29 @@ WebTransport MusicBrainzClient::qtNetworkTransport(QNetworkAccessManager* manage
                     .transport_error =
                         reply->error() == QNetworkReply::NoError ? QString{} : reply->errorString(),
                 };
+                const auto retry_after = reply->rawHeader("Retry-After").trimmed();
+                if (!retry_after.isEmpty()) {
+                    bool numeric = false;
+                    const auto seconds = retry_after.toLongLong(&numeric);
+                    auto date =
+                        QDateTime::fromString(QString::fromLatin1(retry_after), Qt::RFC2822Date);
+                    if (!date.isValid()) {
+                        const auto parsed = QLocale::c().toDateTime(
+                            QString::fromLatin1(retry_after),
+                            QStringLiteral("ddd, dd MMM yyyy HH:mm:ss 'GMT'"));
+                        date =
+                            QDateTime{parsed.date(), parsed.time(), QTimeZone{QByteArray{"UTC"}}};
+                    }
+                    const auto max_seconds = std::numeric_limits<int>::max() / 1'000;
+                    if (numeric && seconds >= 0) {
+                        response.retry_after_ms =
+                            static_cast<int>(std::min<qint64>(seconds, max_seconds) * 1'000);
+                    } else if (date.isValid()) {
+                        response.retry_after_ms = static_cast<int>(
+                            std::clamp<qint64>(QDateTime::currentDateTimeUtc().msecsTo(date), 0,
+                                               std::numeric_limits<int>::max()));
+                    }
+                }
                 // HTTP-level failures carry a status; keep them
                 // out of the transport-error channel so the
                 // client maps them precisely.

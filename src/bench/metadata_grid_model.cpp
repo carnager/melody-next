@@ -862,6 +862,18 @@ QVariant MetadataAggregateModel::data(const QModelIndex& index, const int role) 
     const auto field_index = static_cast<std::size_t>(index.row());
     const auto& field = grid_model_->selection().field(field_index);
     if (index.column() == 0) {
+        const auto staged =
+            summary_ready_ && draft_counts_ready_ && staged_counts_[field_index] > 0U;
+        if (role == Qt::FontRole && staged) {
+            auto font = QApplication::font();
+            font.setBold(true);
+            return font;
+        }
+        if (role == Qt::AccessibleDescriptionRole) {
+            return staged ? QStringLiteral("Field has staged edits in the selected files")
+                          : QString{};
+        }
+
         if (role == Qt::DisplayRole) {
             return display_utf8(field.display_name);
         }
@@ -1075,7 +1087,7 @@ void MetadataAggregateModel::setSelectedItems(std::vector<std::size_t> item_inde
     const auto generation = ++selection_generation_;
     summary_ready_ = false;
     if (rowCount() > 0) {
-        emit dataChanged(index(0, 1), index(rowCount() - 1, 2));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
     }
     emit selectionProjectionChanged(false, static_cast<int>(item_indexes_.size()));
     emit draftProjectionChanged(false);
@@ -1330,7 +1342,7 @@ void MetadataAggregateModel::applySelectionSummary(
     refreshDraftCounts();
     invalidateDraftProjection();
     if (rowCount() > 0) {
-        emit dataChanged(index(0, 1), index(rowCount() - 1, 2));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
     }
     emit selectionProjectionChanged(true, static_cast<int>(item_indexes_.size()));
 }
@@ -1389,13 +1401,13 @@ void MetadataAggregateModel::invalidateDraftProjection() {
         draft_counts_ready_ = true;
         draft_matches_original_ = true;
         if (rowCount() > 0) {
-            emit dataChanged(index(0, 2), index(rowCount() - 1, 2));
+            emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
         }
         emit draftProjectionChanged(true);
         return;
     }
     if (rowCount() > 0) {
-        emit dataChanged(index(0, 2), index(rowCount() - 1, 2));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
     }
     draft_debounce_->start();
 }
@@ -1454,7 +1466,7 @@ void MetadataAggregateModel::applyDraftProjection(
     draft_matches_original_ =
         std::ranges::none_of(staged_counts_, [](const std::size_t count) { return count > 0U; });
     if (rowCount() > 0) {
-        emit dataChanged(index(0, 2), index(rowCount() - 1, 2));
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 2));
     }
     emit draftProjectionChanged(true);
 }
@@ -1486,7 +1498,7 @@ void MetadataAggregateModel::gridDataChanged(const QModelIndex& top_left,
         std::fill(staged_counts_.begin(), staged_counts_.end(), 0U);
         uniform_drafts_.clear();
         invalidateDraftProjection();
-        emit dataChanged(index(static_cast<int>(first_field), 1),
+        emit dataChanged(index(static_cast<int>(first_field), 0),
                          index(static_cast<int>(last_field), 2));
         return;
     }
@@ -1499,13 +1511,13 @@ void MetadataAggregateModel::gridDataChanged(const QModelIndex& top_left,
         refreshDraftCount(field_index);
     }
     invalidateDraftProjection();
-    emit dataChanged(index(static_cast<int>(first_field), 1),
+    emit dataChanged(index(static_cast<int>(first_field), 0),
                      index(static_cast<int>(last_field), 2));
 }
 
 void MetadataAggregateModel::notifyField(const std::size_t field_index) {
     const auto row = static_cast<int>(field_index);
-    emit dataChanged(index(row, 1), index(row, 2));
+    emit dataChanged(index(row, 0), index(row, 2));
 }
 
 } // namespace trackknife::bench

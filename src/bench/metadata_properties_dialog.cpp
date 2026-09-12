@@ -5,6 +5,7 @@
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_exact_value_dialog.hpp"
+#include "bench/metadata_field_review_bar.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_rule_script_import_dialog.hpp"
 #include "bench/metadata_scalar_delegate.hpp"
@@ -1017,6 +1018,9 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     auto* fields_pane_layout = new QVBoxLayout(fields_pane);
     fields_pane_layout->setContentsMargins(0, 0, 0, 0);
     fields_pane_layout->setSpacing(4);
+    field_review_bar_ =
+        new MetadataFieldReviewBar(fields_, aggregate_model_, file_list_, fields_pane);
+    fields_pane_layout->addWidget(field_review_bar_);
     grid_tools_->setParent(fields_pane);
     fields_pane_layout->addWidget(grid_tools_);
     fields_pane_layout->addWidget(fields_, 1);
@@ -3435,6 +3439,7 @@ void MetadataPropertiesDialog::promptAddField() {
         updateFieldButtons();
         updateTransformationButton();
         if (has_field_row && fields_ != nullptr && aggregate_model_ != nullptr) {
+            field_review_bar_->revealField(field_row);
             const auto draft = aggregate_model_->index(field_row, 2);
             fields_->setCurrentIndex(draft);
             fields_->selectionModel()->select(draft, QItemSelectionModel::ClearAndSelect |

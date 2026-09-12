@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/core/cancellation.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
 
 #include <cstddef>
@@ -58,8 +59,9 @@ struct TrackAlignment {
     // Index into the flattened release track list; absent when no release
     // track could be assigned.
     std::optional<std::size_t> release_track_index;
-    // [0, 1]: agreement of title, duration, and position for this pair.
+    // [0, 1]: automatic agreement, or 1 for an explicitly confirmed assignment.
     double confidence{0.0};
+    bool user_confirmed{false};
 
     friend bool operator==(const TrackAlignment&, const TrackAlignment&) = default;
 };
@@ -79,8 +81,16 @@ struct ReleaseAlignment {
 // exact (disc, track-number) permutation, then plain order when counts
 // match, then a conservative greedy assignment by title similarity and
 // duration proximity. Assignments are never duplicated and never invented —
-// a file that fits nothing stays unmatched with zero confidence.
+// a file that fits nothing stays unmatched with zero confidence. Cancellation
+// returns an empty alignment; callers must discard it.
 [[nodiscard]] ReleaseAlignment
-align_release_tracks(std::span<const LocalTrackDescriptor> local_tracks, const Release& release);
+align_release_tracks(std::span<const LocalTrackDescriptor> local_tracks, const Release& release,
+                     const core::CancellationToken& cancellation = {});
+
+// Explicitly reviewed assignments may include untagged or unmatched files.
+// Each release track can be assigned once; null entries stage nothing.
+[[nodiscard]] core::Result<ReleaseAlignment>
+confirm_release_mapping(ReleaseAlignment alignment,
+                        std::span<const std::optional<std::size_t>> assignments);
 
 } // namespace trackknife::musicbrainz

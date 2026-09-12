@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/musicbrainz_identify_dialog.hpp"
+#include "bench/musicbrainz_track_match_widget.hpp"
 
 #include "trackknife/musicbrainz/acoustid.hpp"
 #include "trackknife/musicbrainz/proposal_bridge.hpp"
@@ -15,6 +16,7 @@
 #include <QLineEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QStackedWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -87,14 +89,23 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         setMinimumSize(640, 400);
         resize(940, 520);
 
-        auto* layout = new QVBoxLayout(this);
+        auto* root = new QVBoxLayout(this);
+        pages_ = new QStackedWidget(this);
+        root->addWidget(pages_);
+        auto* search_page = new QWidget(pages_);
+        pages_->addWidget(search_page);
+        auto* layout = new QVBoxLayout(search_page);
+        layout->setContentsMargins(0, 0, 0, 0);
         auto* form = new QFormLayout;
         form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         artist_ = new QLineEdit(initial_artist, this);
         artist_->setObjectName(QStringLiteral("bench-musicbrainz-identify-artist"));
+        artist_->setPlaceholderText(QStringLiteral("Artist name (optional if you enter an album)"));
         form->addRow(QStringLiteral("Artist:"), artist_);
         release_ = new QLineEdit(initial_release, this);
         release_->setObjectName(QStringLiteral("bench-musicbrainz-identify-release"));
+        release_->setPlaceholderText(
+            QStringLiteral("Type an album title — existing tags are not required"));
         form->addRow(QStringLiteral("Album:"), release_);
         auto* form_row = new QHBoxLayout;
         form_row->addLayout(form, 1);
@@ -138,11 +149,11 @@ class MusicBrainzIdentifyDialog final : public QDialog {
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
         buttons->setObjectName(QStringLiteral("bench-musicbrainz-identify-buttons"));
-        use_ = buttons->addButton(QStringLiteral("Use this version"), QDialogButtonBox::ActionRole);
+        use_ =
+            buttons->addButton(QStringLiteral("Match this version…"), QDialogButtonBox::ActionRole);
         use_->setObjectName(QStringLiteral("bench-musicbrainz-identify-use"));
-        use_->setToolTip(QStringLiteral(
-            "Match the selected files to this release and stage the result as colored draft "
-            "edits — nothing is written until you apply"));
+        use_->setToolTip(
+            QStringLiteral("Load the release tracks and review their assignments to local files"));
         use_->setEnabled(false);
         layout->addWidget(buttons);
 
@@ -328,8 +339,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
         const auto url = musicbrainz::build_release_search_url(musicbrainz::ReleaseSearchQuery{
             .artist = artist_->text().trimmed().toStdString(),
             .release = release_->text().trimmed().toStdString(),
-            .track_count = local_tracks_.empty() ? std::optional<std::size_t>{}
-                                                 : std::optional{local_tracks_.size()},
+            .track_count = std::nullopt,
             .limit = 25U,
         });
         if (!url) {
@@ -368,7 +378,12 @@ class MusicBrainzIdentifyDialog final : public QDialog {
             const auto& release = candidates_[entry.release_index];
             auto* item = new QTreeWidgetItem(results_);
             item->setData(0, Qt::UserRole, static_cast<qulonglong>(entry.release_index));
-            item->setText(0, QString::number(entry.score));
+            item->setText(0, release.track_count == local_tracks_.size()
+                                 ? QStringLiteral("Same track count")
+                                 : QStringLiteral("Different track count"));
+            item->setToolTip(0, QStringLiteral("Search relevance: %1/100 · ranking score: %2")
+                                    .arg(release.search_score)
+                                    .arg(entry.score));
             item->setText(1, display_utf8(release.title));
             item->setText(2, credit_text(release.artist_credits));
             item->setText(3, QString::number(release.track_count));
@@ -427,23 +442,23 @@ class MusicBrainzIdentifyDialog final : public QDialog {
                                  .arg(QString::fromStdString(release.error().message)));
             return;
         }
-        const auto alignment = musicbrainz::align_release_tracks(local_tracks_, *release);
-        auto proposals =
-            musicbrainz::release_metadata_proposals(*release, alignment, item_indexes_);
-        if (!proposals) {
-            status_->setText(QStringLiteral("Matching failed · %1")
-                                 .arg(QString::fromStdString(proposals.error().message)));
-            return;
-        }
-        if (proposals->items.empty()) {
-            status_->setText(QStringLiteral(
-                "No confident match between the selected files and this version — try another"));
-            return;
-        }
-        if (accepted_) {
-            accepted_(std::move(*proposals));
-        }
-        close();
+        auto* review = createMusicBrainzTrackMatchWidget(
+            std::move(*release), local_tracks_, local_paths_, item_indexes_,
+            [this](metadata::MetadataProposalSet proposals) {
+                if (accepted_) {
+                    accepted_(std::move(proposals));
+                }
+                close();
+            },
+            [this] {
+                auto* current = pages_->currentWidget();
+                pages_->setCurrentIndex(0);
+                pages_->removeWidget(current);
+                current->deleteLater();
+            },
+            pages_);
+        pages_->addWidget(review);
+        pages_->setCurrentWidget(review);
     }
 
     MusicBrainzLookupService service_;
@@ -459,6 +474,7 @@ class MusicBrainzIdentifyDialog final : public QDialog {
     QPushButton* use_{nullptr};
     QLabel* status_{nullptr};
     QTreeWidget* results_{nullptr};
+    QStackedWidget* pages_{nullptr};
     bool busy_{false};
     std::map<std::string, std::set<std::size_t>> scan_votes_;
     std::vector<std::pair<std::string, std::size_t>> scan_candidates_;

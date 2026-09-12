@@ -152,7 +152,8 @@ release_metadata_proposals(const Release& release, const ReleaseAlignment& align
         const auto& flattened = alignment.release_tracks[*aligned.release_track_index];
         const auto& track = flattened.track;
         const auto confidence = aligned.confidence;
-        std::string rationale = "Matched to \"";
+        std::string rationale =
+            aligned.user_confirmed ? "User-confirmed assignment to \"" : "Matched to \"";
         rationale += track.title;
         rationale += "\" on ";
         rationale += version;

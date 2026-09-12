@@ -43,6 +43,8 @@ qt_add_library(
     metadata_exact_value_dialog.hpp
     metadata_grid_model.cpp
     metadata_grid_model.hpp
+    metadata_field_review_bar.cpp
+    metadata_field_review_bar.hpp
     metadata_properties_dialog.cpp
     metadata_properties_dialog.hpp
     metadata_rule_script_import_dialog.cpp
@@ -58,6 +60,8 @@ qt_add_library(
     musicbrainz_fetch_service.hpp
     musicbrainz_identify_dialog.cpp
     musicbrainz_identify_dialog.hpp
+    musicbrainz_track_match_widget.cpp
+    musicbrainz_track_match_widget.hpp
     metadata_transformation_preview_model.hpp
     preparation_feedback_dialog.cpp
     preparation_feedback_dialog.hpp

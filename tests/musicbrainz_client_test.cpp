@@ -3,7 +3,11 @@
 #include "trackknife/musicbrainz/client.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QElapsedTimer>
+#include <QNetworkAccessManager>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTest>
 #include <QUrl>
 
@@ -21,6 +25,11 @@ class MusicBrainzClientTest final : public QObject {
     void requestsAreSerializedAndPaced();
     void failureStatesAreTyped();
     void successStoresIntoTheCache();
+    void throttlingRetriesRespectCooldownAndQueueOrder();
+    void throttlingRetriesAreBounded();
+    void longRetryAfterReturnsActionableFailure();
+    void transportParsesRetryAfter_data();
+    void transportParsesRetryAfter();
 };
 
 void MusicBrainzClientTest::cacheHitAnswersWithoutTransport() {
@@ -115,6 +124,125 @@ void MusicBrainzClientTest::failureStatesAreTyped() {
     scripted = WebResponse{.status_code = 500, .body = "oops", .transport_error = {}};
     auto server = fetch_error(QStringLiteral("https://musicbrainz.org/d"));
     QVERIFY(server && server->code == core::ErrorCode::backend);
+}
+
+void MusicBrainzClientTest::throttlingRetriesRespectCooldownAndQueueOrder() {
+    QElapsedTimer clock;
+    clock.start();
+    std::vector<qint64> times;
+    QStringList urls;
+    int completions = 0;
+    int cached = 0;
+    MusicBrainzClient client{
+        [&](const QUrl& url, std::function<void(WebResponse)> complete) {
+            times.push_back(clock.elapsed());
+            urls.push_back(url.path());
+            complete(times.size() == 1U
+                         ? WebResponse{.status_code = 429,
+                                       .body = "busy",
+                                       .transport_error = {},
+                                       .retry_after_ms = 1'500}
+                         : WebResponse{.status_code = 200, .body = "ok", .transport_error = {}});
+        },
+        ResponseCacheHooks{.load = {},
+                           .store = [&](const QString&, const QByteArray&) { ++cached; }},
+        0};
+    const auto done = [&](core::Result<QByteArray> result) {
+        QVERIFY(result);
+        ++completions;
+    };
+    client.fetch(QStringLiteral("https://musicbrainz.org/first"), done);
+    client.fetch(QStringLiteral("https://musicbrainz.org/second"), done);
+    QTRY_COMPARE(completions, 2);
+    QCOMPARE(urls, (QStringList{QStringLiteral("/first"), QStringLiteral("/first"),
+                                QStringLiteral("/second")}));
+    QVERIFY(times[1] - times[0] >= 1'500);
+    QCOMPARE(cached, 2);
+    QCOMPARE(client.pending_request_count(), 0U);
+}
+
+void MusicBrainzClientTest::throttlingRetriesAreBounded() {
+    int calls = 0;
+    int completed = 0;
+    MusicBrainzClient client{
+        [&](const QUrl&, std::function<void(WebResponse)> complete) {
+            ++calls;
+            complete(WebResponse{.status_code = 503, .body = "busy", .transport_error = {}});
+        },
+        {},
+        0};
+    client.fetch(QStringLiteral("https://musicbrainz.org/busy"),
+                 [&](core::Result<QByteArray> result) {
+                     QVERIFY(!result);
+                     QVERIFY(result.error().message.find("rate-limiting") != std::string::npos);
+                     ++completed;
+                 });
+    QTRY_COMPARE_WITH_TIMEOUT(completed, 1, 6'000);
+    QCOMPARE(calls, 3);
+    QCOMPARE(client.pending_request_count(), 0U);
+}
+
+void MusicBrainzClientTest::longRetryAfterReturnsActionableFailure() {
+    int calls = 0;
+    std::optional<core::Result<QByteArray>> result;
+    MusicBrainzClient client{
+        [&](const QUrl&, std::function<void(WebResponse)> complete) {
+            ++calls;
+            complete(WebResponse{
+                .status_code = 429, .body = {}, .transport_error = {}, .retry_after_ms = 70'000});
+        },
+        {},
+        0};
+    client.fetch(QStringLiteral("https://musicbrainz.org/busy"),
+                 [&](core::Result<QByteArray> value) { result = std::move(value); });
+    QTRY_VERIFY(result.has_value());
+    QVERIFY(!result->has_value());
+    QVERIFY(result->error().message.find("70 seconds") != std::string::npos);
+    QCOMPARE(calls, 1);
+}
+
+void MusicBrainzClientTest::transportParsesRetryAfter_data() {
+    QTest::addColumn<bool>("http_date");
+    QTest::newRow("seconds") << false;
+    QTest::newRow("http-date") << true;
+}
+
+void MusicBrainzClientTest::transportParsesRetryAfter() {
+    QFETCH(bool, http_date);
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    QByteArray request;
+    connect(&server, &QTcpServer::newConnection, &server, [&] {
+        auto* socket = server.nextPendingConnection();
+        connect(socket, &QTcpSocket::readyRead, &server, [&, socket] {
+            request += socket->readAll();
+            if (!request.contains("\r\n\r\n")) {
+                return;
+            }
+            const auto delay =
+                http_date ? QLocale::c()
+                                .toString(QDateTime::currentDateTimeUtc().addSecs(30),
+                                          QStringLiteral("ddd, dd MMM yyyy HH:mm:ss 'GMT'"))
+                                .toLatin1()
+                          : QByteArray{"30"};
+            socket->write("HTTP/1.1 429 Too Many Requests\r\nRetry-After: " + delay +
+                          "\r\nContent-Length: 4\r\nConnection: close\r\n\r\nbusy");
+            socket->disconnectFromHost();
+        });
+    });
+    QNetworkAccessManager manager;
+    const auto transport =
+        MusicBrainzClient::qtNetworkTransport(&manager, QStringLiteral("Trackknife-test/1.0"));
+    std::optional<WebResponse> response;
+    transport(QUrl{QStringLiteral("http://127.0.0.1:%1/test").arg(server.serverPort())},
+              [&](WebResponse result) { response = std::move(result); });
+    QTRY_VERIFY(response.has_value());
+    QCOMPARE(response->status_code, 429);
+    QVERIFY(response->transport_error.isEmpty());
+    QCOMPARE(response->body, QByteArray{"busy"});
+    QVERIFY(response->retry_after_ms.has_value());
+    QVERIFY(*response->retry_after_ms <= 30'000 && *response->retry_after_ms >= 28'000);
+    QVERIFY(request.contains("User-Agent: Trackknife-test/1.0"));
 }
 
 void MusicBrainzClientTest::successStoresIntoTheCache() {

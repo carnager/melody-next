@@ -23,6 +23,7 @@ struct WebResponse {
     int status_code{0};
     QByteArray body;
     QString transport_error;
+    std::optional<int> retry_after_ms{};
 };
 
 using WebTransport = std::function<void(const QUrl&, std::function<void(WebResponse)>)>;
@@ -52,7 +53,7 @@ class MusicBrainzClient final : public QObject {
     [[nodiscard]] std::size_t pending_request_count() const noexcept;
 
     // The production transport: sets the identifying User-Agent MusicBrainz
-    // requires and follows no cross-origin redirects.
+    // requires and follows redirects without allowing an HTTPS downgrade.
     [[nodiscard]] static WebTransport qtNetworkTransport(QNetworkAccessManager* manager,
                                                          const QString& user_agent);
 
@@ -60,17 +61,20 @@ class MusicBrainzClient final : public QObject {
     struct Pending {
         QString url;
         Completion completion;
+        int retries{0};
     };
 
     void scheduleDispatch();
     void dispatchNext();
-    void finishRequest(const QString& url, Completion completion, const WebResponse& response);
+    void finishRequest(Pending request, const WebResponse& response);
 
     WebTransport transport_;
     ResponseCacheHooks cache_;
     int minimum_interval_ms_{minimum_request_interval_ms};
     std::deque<Pending> pending_;
     QElapsedTimer since_last_dispatch_;
+    QElapsedTimer since_throttle_;
+    int throttle_delay_ms_{0};
     bool dispatched_once_{false};
     bool in_flight_{false};
     bool dispatch_scheduled_{false};

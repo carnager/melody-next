@@ -400,7 +400,7 @@ if(TRACKKNIFE_BUILD_UI)
     qt_add_executable(trackknife_musicbrainz_client_tests musicbrainz_client_test.cpp)
     target_link_libraries(
         trackknife_musicbrainz_client_tests
-        PRIVATE Trackknife::MusicBrainz Qt6::Test trackknife_project_options
+        PRIVATE Trackknife::MusicBrainz Qt6::Test Qt6::Network trackknife_project_options
                 trackknife_project_warnings
     )
     add_test(NAME musicbrainz-client COMMAND trackknife_musicbrainz_client_tests)

@@ -193,6 +193,7 @@ class BenchMainWindowTest final : public QObject {
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
     void combinedTagAndRenameReviewReachesPreparationApply();
     void metadataSuggestionsStageSelectionConsistency();
+    void musicBrainzIdentifyStagesChosenVersion_data();
     void musicBrainzIdentifyStagesChosenVersion();
     void musicBrainzFingerprintScanRanksAndStages();
     void replayGainScanStagesMeasuredGainsAsDrafts();
@@ -231,6 +232,7 @@ class BenchMainWindowTest final : public QObject {
     void persistsPinnedDuplicatedAndDirtyTabs();
     void richMetadataValuesAndIdentitiesSurviveListRestart();
     void metadataPropertiesFileSelectionDrivesIndividualAndBulkEdits();
+    void metadataFieldReviewPreservesDraftAndSelectionScope();
     void metadataPropertiesArtworkSectionShowsProvenanceAndCapabilities();
     void metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes();
     void cueSheetsExpandIntoPersistentSegmentRows();
@@ -2907,7 +2909,14 @@ void BenchMainWindowTest::metadataSuggestionsStageSelectionConsistency() {
     delete properties;
 }
 
+void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion_data() {
+    QTest::addColumn<bool>("untagged");
+    QTest::newRow("tagged") << false;
+    QTest::newRow("untagged-manual-mapping") << true;
+}
+
 void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
+    QFETCH(bool, untagged);
     const auto field = [](std::string name, std::vector<std::string> values) {
         return metadata::MetadataField{
             .canonical_name = metadata::canonicalize_field_name(name),
@@ -2917,8 +2926,8 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
             .provenance = metadata::FieldProvenance::embedded,
         };
     };
-    const auto make_source = [&field](const QString& label, const QString& title,
-                                      const QString& track_number) {
+    const auto make_source = [&field, untagged](const QString& label, const QString& title,
+                                                const QString& track_number) {
         return MetadataPropertiesSource{
             .source =
                 metadata::StagedMetadataSource{
@@ -2926,9 +2935,12 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
                     .source_revision = std::nullopt,
                     .baseline =
                         metadata::MetadataDocument{
-                            .fields = {field("ALBUM", {"Alpha"}), field("ARTIST", {"Band"}),
-                                       field("TITLE", {title.toStdString()}),
-                                       field("TRACKNUMBER", {track_number.toStdString()})},
+                            .fields = untagged ? std::vector<metadata::MetadataField>{}
+                                               : std::vector{field("ALBUM", {"Alpha"}),
+                                                             field("ARTIST", {"Band"}),
+                                                             field("TITLE", {title.toStdString()}),
+                                                             field("TRACKNUMBER",
+                                                                   {track_number.toStdString()})},
                             .unsupported_native_objects = {},
                         },
                 },
@@ -2936,8 +2948,10 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
         };
     };
     const std::vector sources{
-        make_source(QStringLiteral("one"), QStringLiteral("One"), QStringLiteral("1")),
-        make_source(QStringLiteral("two"), QStringLiteral("Two"), QStringLiteral("2"))};
+        make_source(untagged ? QStringLiteral("10-second") : QStringLiteral("one"),
+                    QStringLiteral("One"), QStringLiteral("1")),
+        make_source(untagged ? QStringLiteral("2-first") : QStringLiteral("two"),
+                    QStringLiteral("Two"), QStringLiteral("2"))};
 
     static constexpr auto search_body = R"json({
       "count": 1,
@@ -2967,12 +2981,14 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
       ]}]
     })json";
     int fetches = 0;
+    QString search_url;
     const MusicBrainzLookupService service{
         .fetch =
-            [&fetches](const QString& url,
-                       std::function<void(core::Result<QByteArray>)> completion) {
+            [&fetches, &search_url](const QString& url,
+                                    std::function<void(core::Result<QByteArray>)> completion) {
                 ++fetches;
                 if (url.contains(QStringLiteral("?query="))) {
+                    search_url = QUrl::fromPercentEncoding(url.toUtf8());
                     completion(QByteArray{search_body});
                     return;
                 }
@@ -3025,19 +3041,68 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     auto* results =
         dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-identify-results"));
     auto* use = dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-identify-use"));
-    QVERIFY(artist != nullptr && artist->text() == QStringLiteral("Band"));
-    QVERIFY(album != nullptr && album->text() == QStringLiteral("Alpha"));
+    QVERIFY(artist && album);
+    QCOMPARE(artist->text(), untagged ? QString{} : QStringLiteral("Band"));
+    QCOMPARE(album->text(), untagged ? QString{} : QStringLiteral("Alpha"));
+    artist->setText(QStringLiteral("Band"));
+    album->setText(QStringLiteral("Alpha"));
     QVERIFY(search != nullptr);
     QVERIFY(results != nullptr);
     QVERIFY(use != nullptr);
 
     QTest::mouseClick(search, Qt::LeftButton);
     QTRY_COMPARE(results->topLevelItemCount(), 1);
+    QVERIFY(search_url.contains(QStringLiteral("artist:")));
+    QVERIFY(search_url.contains(QStringLiteral("release:")));
+    QVERIFY(!search_url.contains(QStringLiteral("tracks:")));
     QCOMPARE(results->topLevelItem(0)->text(1), QStringLiteral("Alpha"));
     QCOMPARE(results->topLevelItem(0)->text(2), QStringLiteral("Band"));
     QVERIFY(results->topLevelItem(0)->text(5).contains(QStringLiteral("1999-09-09")));
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
+    auto* stage_matches =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
+    QVERIFY(stage_matches);
+    if (untagged) {
+        auto* local_files =
+            dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-files"));
+        auto* release_tracks =
+            dialog->findChild<QTreeWidget*>(QStringLiteral("bench-musicbrainz-match-tracks"));
+        auto* order =
+            dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-order"));
+        auto* assign =
+            dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-assign"));
+        auto* unmatch =
+            dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-unmatch"));
+        QVERIFY(local_files && release_tracks && order && assign && unmatch);
+        QTRY_COMPARE(local_files->topLevelItemCount(), 2);
+        QVERIFY(!stage_matches->isEnabled());
+        auto* sort =
+            dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-sort"));
+        QVERIFY(sort);
+        sort->click();
+        QCOMPARE(local_files->topLevelItem(0)->text(0), QStringLiteral("2-first.flac"));
+        order->click();
+        QVERIFY(stage_matches->isEnabled());
+        // Reverse the file-to-track mapping without reordering the source selection.
+        local_files->setCurrentItem(local_files->topLevelItem(0));
+        release_tracks->setCurrentItem(release_tracks->topLevelItem(1));
+        QVERIFY(assign->isEnabled());
+        assign->click();
+        QVERIFY(local_files->topLevelItem(0)->text(2).contains(QStringLiteral("Two")));
+        QVERIFY(local_files->topLevelItem(1)->text(2).contains(QStringLiteral("One")));
+        release_tracks->setCurrentItem(release_tracks->topLevelItem(0));
+        assign->click();
+        unmatch->click();
+        QCOMPARE(local_files->topLevelItem(0)->text(2), QStringLiteral("Unmatched"));
+        assign->click();
+    }
+    QTRY_VERIFY(stage_matches->isEnabled());
+    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (untagged && !screenshot_dir.isEmpty()) {
+        QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/musicbrainz-matching.png")));
+    }
+    QTest::mouseClick(stage_matches, Qt::LeftButton);
 
     // The chosen version stages as one ordinary colored draft transaction.
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
@@ -3045,6 +3110,14 @@ void BenchMainWindowTest::musicBrainzIdentifyStagesChosenVersion() {
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
     QTRY_VERIFY(status->text().contains(QStringLiteral("MusicBrainz")));
     QCOMPARE(fetches, 2);
+    if (untagged) {
+        const auto title = grid_model->fieldColumn(QStringLiteral("Title"));
+        QVERIFY(title);
+        QCOMPARE(grid_model->index(0, *title).data(metadata_cell_values_role).toStringList(),
+                 QStringList{QStringLiteral("Two")});
+        QCOMPARE(grid_model->index(1, *title).data(metadata_cell_values_role).toStringList(),
+                 QStringList{QStringLiteral("One")});
+    }
     const auto album_id_column = grid_model->fieldColumn(QStringLiteral("MUSICBRAINZ_ALBUMID"));
     QVERIFY(album_id_column.has_value());
     QCOMPARE(
@@ -3201,6 +3274,11 @@ void BenchMainWindowTest::musicBrainzFingerprintScanRanksAndStages() {
 
     QTRY_VERIFY(use->isEnabled());
     QTest::mouseClick(use, Qt::LeftButton);
+    auto* stage_matches =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-musicbrainz-match-stage"));
+    QVERIFY(stage_matches);
+    QTRY_VERIFY(stage_matches->isEnabled());
+    QTest::mouseClick(stage_matches, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-musicbrainz-identify")) ==
                 nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(grid_model->patches().patch_count() > 0U, 5'000);
@@ -4221,8 +4299,11 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     QVERIFY(grouping != nullptr && run != nullptr && status != nullptr);
     grouping->setCurrentIndex(3);
     run->click();
-    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Applied gains to 2")),
-                             30'000);
+    QTRY_VERIFY_WITH_TIMEOUT(run->isEnabled(), 30'000);
+    const auto problems = dialog->findChild<QPlainTextEdit*>();
+    QVERIFY2(status->text().startsWith(QStringLiteral("Applied gains to 2")),
+             qPrintable(status->text() + QStringLiteral(" · ") +
+                        (problems ? problems->toPlainText() : QString{})));
 
     // Unwritable WAVs landed in sidecars with the measured track gains.
     for (const auto& path : {first, second}) {
@@ -6364,6 +6445,132 @@ void BenchMainWindowTest::richMetadataValuesAndIdentitiesSurviveListRestart() {
     // list save from a later external refresh.
     QVERIFY(row.source_revision.has_value());
     QCOMPARE(row.source_revision->size, 2'308U);
+}
+
+void BenchMainWindowTest::metadataFieldReviewPreservesDraftAndSelectionScope() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    std::vector<MetadataPropertiesSource> sources;
+    for (int index = 0; index < 2; ++index) {
+        const auto path = media.filePath(QStringLiteral("review-%1.flac").arg(index));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+        const auto encoded = QFile::encodeName(path);
+        const std::string raw{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+        const auto read = metadata::read_local_metadata(raw);
+        QVERIFY(read.has_value());
+        sources.push_back(MetadataPropertiesSource{
+            .source = {.raw_path = raw,
+                       .source_revision = read->source_revision,
+                       .baseline = read->document},
+            .track_label = QStringLiteral("Review %1").arg(index),
+        });
+    }
+    auto dialog = std::make_unique<MetadataPropertiesDialog>(
+        sources.size(),
+        [sources](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index < sources.size() ? std::optional{sources[index]} : std::nullopt;
+        },
+        std::span<const std::string_view>{}, MetadataWritePlanApplierFactory{},
+        MetadataApplyObserver{});
+    dialog->show();
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = dialog->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* files = dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-files"));
+    auto* model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* grid = qobject_cast<MetadataGridModel*>(files->model());
+    auto* search = dialog->findChild<QLineEdit*>(QStringLiteral("bench-metadata-field-filter"));
+    auto* changed = dialog->findChild<QCheckBox*>(QStringLiteral("bench-metadata-changed-only"));
+    auto* show_files = dialog->findChild<QCheckBox*>(QStringLiteral("bench-metadata-show-files"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-metadata-field-filter-status"));
+    QVERIFY(model && grid && search && changed && show_files && status);
+    QTRY_VERIFY(model->summaryReady() && model->draftPreviewReady());
+    const auto title = model->fieldRow(QStringLiteral("title"));
+    const auto artist = model->fieldRow(QStringLiteral("artist"));
+    QVERIFY(title && artist);
+
+    // Filtering is a view operation: hidden selections cannot be removed accidentally.
+    fields->setCurrentIndex(model->index(*artist, 2));
+    fields->selectRow(*artist);
+    search->setText(QStringLiteral("TiTlE"));
+    QTRY_VERIFY(fields->isRowHidden(*artist));
+    QVERIFY(!fields->isRowHidden(*title));
+    QVERIFY(fields->selectionModel()->selectedRows().empty());
+    QVERIFY(!fields->currentIndex().isValid());
+    QVERIFY(grid->patches().empty());
+    search->setText(QStringLiteral("musicbrainz_albumid"));
+    const auto mbid = model->fieldRow(QStringLiteral("musicbrainz_albumid"));
+    QVERIFY(mbid);
+    QTRY_VERIFY(!fields->isRowHidden(*mbid));
+    search->clear();
+
+    // Stage only one file, then switch the selected-file scope under the filter.
+    files->selectionModel()->select(grid->index(0, 0), QItemSelectionModel::ClearAndSelect |
+                                                           QItemSelectionModel::Rows);
+    QTRY_COMPARE(model->selectedItemCount(), 1U);
+    QTRY_VERIFY(model->summaryReady());
+    QVERIFY(
+        model->setData(model->index(*title, 2), QStringLiteral("Reviewed title"), Qt::EditRole));
+    changed->setChecked(true);
+    QTRY_VERIFY(status->text().contains(QStringLiteral("1 changed")));
+    QVERIFY(!fields->isRowHidden(*title));
+    QVERIFY(fields->isRowHidden(*artist));
+    QVERIFY(model->index(*title, 0).data(Qt::FontRole).value<QFont>().bold());
+    QVERIFY(!model->index(*title, 0).data(Qt::AccessibleDescriptionRole).toString().isEmpty());
+    files->selectionModel()->select(grid->index(1, 0), QItemSelectionModel::ClearAndSelect |
+                                                           QItemSelectionModel::Rows);
+    QTRY_VERIFY(status->text().contains(QStringLiteral("0 changed")));
+    QVERIFY(fields->isRowHidden(*title));
+    QVERIFY(!grid->patches().empty());
+    files->selectionModel()->select(grid->index(0, 0), QItemSelectionModel::ClearAndSelect |
+                                                           QItemSelectionModel::Rows);
+    QTRY_VERIFY2(
+        !fields->isRowHidden(*title),
+        qPrintable(QStringLiteral("%1; selected=%2; summary=%3 draft=%4; query=%5; value=%6")
+                       .arg(status->text())
+                       .arg(model->selectedItemCount())
+                       .arg(model->summaryReady())
+                       .arg(model->draftPreviewReady())
+                       .arg(search->text())
+                       .arg(model->index(*title, 2).data(Qt::DisplayRole).toString())));
+
+    // Collapsing the selector preserves scope; hiding all fields preserves the draft.
+    show_files->setChecked(false);
+    QVERIFY(files->isHidden());
+    QCOMPARE(model->selectedItemCount(), 1U);
+    search->setText(QStringLiteral("no-such-field"));
+    QTRY_VERIFY(fields->isRowHidden(*title));
+    QVERIFY(status->text().contains(QStringLiteral("Apply includes hidden edits")));
+    QCOMPARE(model->index(*title, 2).data(Qt::EditRole).toString(),
+             QStringLiteral("Reviewed title"));
+    search->clear();
+    QTRY_VERIFY(!fields->isRowHidden(*title));
+    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (!screenshot_dir.isEmpty()) {
+        QVERIFY(dialog->grab().save(screenshot_dir + QStringLiteral("/tag-field-review.png")));
+    }
+    QVERIFY(grid->undo());
+    QTRY_VERIFY(fields->isRowHidden(*title));
+    QVERIFY(!model->index(*title, 0).data(Qt::FontRole).value<QFont>().bold());
+    QVERIFY(grid->redo());
+    QTRY_VERIFY(!fields->isRowHidden(*title));
+
+    // Adding a field clears the review filter so the new blank field is editable.
+    auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-add-field"));
+    QVERIFY(add);
+    add->click();
+    QInputDialog* prompt = nullptr;
+    QTRY_VERIFY((prompt = dialog->findChild<QInputDialog*>()) != nullptr);
+    prompt->setTextValue(QStringLiteral("REVIEW_CUSTOM"));
+    prompt->accept();
+    QTRY_VERIFY(model->fieldRow(QStringLiteral("REVIEW_CUSTOM")).has_value());
+    const auto custom = *model->fieldRow(QStringLiteral("REVIEW_CUSTOM"));
+    QTRY_VERIFY(!changed->isChecked());
+    QVERIFY(!fields->isRowHidden(custom));
+    QCOMPARE(fields->currentIndex().row(), custom);
+    QVERIFY(grid->discardAll());
+    QTRY_VERIFY(status->text().contains(QStringLiteral("0 changed")));
+    QVERIFY(!fields->isRowHidden(*artist));
 }
 
 void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulkEdits() {

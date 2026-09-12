@@ -14,6 +14,37 @@
 #include <vector>
 
 namespace trackknife::musicbrainz {
+
+core::Result<ReleaseAlignment>
+confirm_release_mapping(ReleaseAlignment alignment,
+                        const std::span<const std::optional<std::size_t>> assignments) {
+    const auto invalid = [](const char* message) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::invalid_argument, .message = message, .context = {}});
+    };
+    if (assignments.size() != alignment.tracks.size()) {
+        return invalid("manual matching needs one assignment per local file");
+    }
+    std::set<std::size_t> used;
+    alignment.matched_count = 0U;
+    for (std::size_t local = 0; local < assignments.size(); ++local) {
+        const auto target = assignments[local];
+        if (target &&
+            (*target >= alignment.release_tracks.size() || !used.insert(*target).second)) {
+            return invalid("manual matching has a duplicate or out-of-range release track");
+        }
+        alignment.tracks[local] = TrackAlignment{.local_index = local,
+                                                 .release_track_index = target,
+                                                 .confidence = target ? 1.0 : 0.0,
+                                                 .user_confirmed = target.has_value()};
+        alignment.matched_count += target ? 1U : 0U;
+    }
+    alignment.confidence = assignments.empty() ? 0.0
+                                               : static_cast<double>(alignment.matched_count) /
+                                                     static_cast<double>(assignments.size());
+    return alignment;
+}
+
 namespace {
 
 constexpr std::size_t maximum_similarity_bytes = 512U;
@@ -158,7 +189,8 @@ rank_release_candidates(const std::span<const LocalTrackDescriptor> local_tracks
 }
 
 ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor> local_tracks,
-                                      const Release& release) {
+                                      const Release& release,
+                                      const core::CancellationToken& cancellation) {
     ReleaseAlignment alignment{
         .release_tracks = flatten(release),
         .tracks = {},
@@ -168,6 +200,9 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
     alignment.tracks.reserve(local_tracks.size());
     if (local_tracks.empty() || alignment.release_tracks.empty()) {
         for (std::size_t local_index = 0U; local_index < local_tracks.size(); ++local_index) {
+            if (cancellation.is_cancellation_requested()) {
+                return {};
+            }
             alignment.tracks.push_back(TrackAlignment{.local_index = local_index,
                                                       .release_track_index = std::nullopt,
                                                       .confidence = 0.0});
@@ -185,10 +220,16 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         auto complete = true;
         std::vector<std::optional<std::size_t>> by_number(local_tracks.size());
         for (std::size_t local_index = 0U; local_index < local_tracks.size(); ++local_index) {
+            if (cancellation.is_cancellation_requested()) {
+                return {};
+            }
             const auto& local = local_tracks[local_index];
             std::optional<std::size_t> found;
             for (std::size_t release_index = 0U; release_index < alignment.release_tracks.size();
                  ++release_index) {
+                if (cancellation.is_cancellation_requested()) {
+                    return {};
+                }
                 if (used.contains(release_index)) {
                     continue;
                 }
@@ -228,8 +269,14 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         std::vector<Pair> pairs;
         pairs.reserve(local_tracks.size() * alignment.release_tracks.size());
         for (std::size_t local_index = 0U; local_index < local_tracks.size(); ++local_index) {
+            if (cancellation.is_cancellation_requested()) {
+                return {};
+            }
             for (std::size_t release_index = 0U; release_index < alignment.release_tracks.size();
                  ++release_index) {
+                if (cancellation.is_cancellation_requested()) {
+                    return {};
+                }
                 const auto& release_track = alignment.release_tracks[release_index];
                 const auto score = pair_confidence(
                     local_tracks[local_index], release_track,
@@ -253,6 +300,9 @@ ReleaseAlignment align_release_tracks(const std::span<const LocalTrackDescriptor
         }
     }
 
+    if (cancellation.is_cancellation_requested()) {
+        return {};
+    }
     double total = 0.0;
     for (std::size_t local_index = 0U; local_index < local_tracks.size(); ++local_index) {
         TrackAlignment track{.local_index = local_index,

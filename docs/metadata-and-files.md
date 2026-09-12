@@ -16,6 +16,26 @@ artwork within Properties advances the pending tag draft's revision through
 that verified commit, preserving MusicBrainz edits and undo/redo. Apply still
 rejects unrelated file changes through fresh revision checks.
 
+## Reviewing fields and identifying untagged albums
+
+**Trackknife decision (ADR-0157):** Properties can filter field names and show
+only fields changed in the selected files. **Show files** collapses the file
+selector while preserving its scope. Bold field names supplement draft colors;
+the review bar reports visible/changed counts. Filters only affect presentation:
+**Apply includes hidden edits**. Adding a field clears filters to reveal it.
+
+**Trackknife decision (ADR-0158):** Identify works with manually entered artist
+or album text even when files have no tags. Search no longer requires the
+selected file count to equal a release's track count. **Match this version…**
+opens local files and release tracks side by side. Select a pair and **Assign**,
+or **Sort files by name** then **Match in file order**. Occupied assignments
+swap; **Unmatch** leaves that file untouched. **Stage matches** confirms the
+shown mapping and creates an undoable draft; **Apply** writes it later.
+
+Throttled MusicBrainz requests retry twice at most, honoring server cooldowns.
+Trackknife keeps its own identifying User-Agent and normal request pacing.
+See ADR-0158 for limits, evidence, and the API policy.
+
 ## Metadata is a typed, multi-source model
 
 The core must not reduce tags to `Map<String, String>`. A useful logical model

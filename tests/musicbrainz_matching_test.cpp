@@ -356,9 +356,41 @@ void lowConfidenceTracksReceiveNothing() {
     CHECK(!release_metadata_proposals(release, alignment, mismatched).has_value());
 }
 
+void manualMappingValidatesIdentityAndAllowsUntaggedFiles() {
+    const auto release = two_disc_release();
+    const std::vector<LocalTrackDescriptor> local(3);
+    const auto initial = align_release_tracks(local, release);
+    const std::vector<std::optional<std::size_t>> mapping{2U, std::nullopt, 0U};
+    const auto confirmed = confirm_release_mapping(initial, mapping);
+    CHECK(confirmed.has_value());
+    if (!confirmed) {
+        return;
+    }
+    CHECK(confirmed->matched_count == 2U);
+    const std::vector<std::size_t> items{9U, 4U, 17U};
+    const auto proposals = release_metadata_proposals(release, *confirmed, items);
+    CHECK(proposals.has_value());
+    if (!proposals) {
+        return;
+    }
+    CHECK(proposals->items.size() == 2U);
+    CHECK(proposals->items[0].item_index == 9U);
+    CHECK(proposals->items[1].item_index == 17U);
+    CHECK(proposals->items[0].fields.front().values == std::vector<std::string>{"Three"});
+    CHECK(proposals->items[1].fields.front().values == std::vector<std::string>{"One"});
+    CHECK(proposals->items[0].fields.front().rationale.starts_with("User-confirmed"));
+    CHECK(!confirm_release_mapping(initial, std::vector<std::optional<std::size_t>>{0U, 0U, 1U}));
+    CHECK(!confirm_release_mapping(initial, std::vector<std::optional<std::size_t>>{0U, 3U, 1U}));
+    CHECK(!confirm_release_mapping(initial, std::vector<std::optional<std::size_t>>{0U}));
+    trackknife::core::CancellationSource cancellation;
+    cancellation.request_cancellation();
+    CHECK(align_release_tracks(local, release, cancellation.token()).tracks.empty());
+}
+
 } // namespace
 
 int main() {
+    manualMappingValidatesIdentityAndAllowsUntaggedFiles();
     rankingCorroboratesTrackCount();
     alignsByDiscAndTrackNumberPermutation();
     alignsByOrderAndThenGreedyTitles();

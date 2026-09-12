@@ -58,6 +58,7 @@ namespace trackknife::bench {
 
 class MetadataGridModel;
 class MetadataAggregateModel;
+class MetadataFieldReviewBar;
 
 struct MetadataPropertiesSource {
     metadata::StagedMetadataSource source;
@@ -345,6 +346,7 @@ class MetadataPropertiesDialog final : public QDialog {
     void pumpTechnicalQueue();
 
     QTableView* fields_{nullptr};
+    MetadataFieldReviewBar* field_review_bar_{nullptr};
     QTableView* file_list_{nullptr};
     QLabel* technical_status_{nullptr};
     std::map<std::string, std::optional<TechnicalInfo>> technical_cache_;

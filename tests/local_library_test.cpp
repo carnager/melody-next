@@ -11,6 +11,7 @@
 #include "uicommon/queue_table_view.hpp"
 
 #include <QBuffer>
+#include <QCheckBox>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFile>
@@ -717,7 +718,7 @@ void LocalLibraryTest::queryModeFiltersAndCommitsResults() {
     LocalLibraryPanel panel{database};
     panel.show();
     auto* search = panel.findChild<QLineEdit*>(QStringLiteral("local-library-search"));
-    auto* toggle = panel.findChild<QToolButton*>(QStringLiteral("local-library-query-toggle"));
+    auto* toggle = panel.findChild<QCheckBox*>(QStringLiteral("local-library-query-toggle"));
     auto* error = panel.findChild<QLabel*>(QStringLiteral("local-library-query-error"));
     auto* tree = panel.findChild<QTreeView*>();
     QVERIFY(search != nullptr && toggle != nullptr && error != nullptr && tree != nullptr);

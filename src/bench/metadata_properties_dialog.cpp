@@ -156,6 +156,13 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
                           this);
     summary_->setObjectName(QStringLiteral("bench-metadata-summary"));
     root_layout_->addWidget(summary_);
+    // ADR-0152: read-only technical summary for the selected files, fed
+    // by the bounded background prober; sits under the selection summary.
+    technical_status_ = new QLabel(this);
+    technical_status_->setObjectName(QStringLiteral("bench-metadata-technical"));
+    technical_status_->setWordWrap(true);
+    technical_status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    root_layout_->addWidget(technical_status_);
 
     read_only_ =
         new QLabel(QStringLiteral("Read-only metadata preview · preparing selection"), this);
@@ -951,12 +958,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_splitter_->setObjectName(QStringLiteral("bench-metadata-splitter"));
     metadata_splitter_->setChildrenCollapsible(false);
 
-    auto* files_pane = new QWidget(metadata_splitter_);
-    files_pane->setObjectName(QStringLiteral("bench-metadata-files-pane"));
-    auto* files_pane_layout = new QVBoxLayout(files_pane);
-    files_pane_layout->setContentsMargins(0, 0, 0, 0);
-    files_pane_layout->setSpacing(2);
-    file_list_ = new QTableView(files_pane);
+    file_list_ = new QTableView(metadata_splitter_);
     file_list_->setObjectName(QStringLiteral("bench-metadata-files"));
     file_list_->setAccessibleName(QStringLiteral("Files included in metadata edit"));
     grid_model_ = new MetadataGridModel(std::move(selection), std::move(track_labels_), file_list_);
@@ -985,14 +987,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                     file_list_->hideColumn(column);
                 }
             });
-    files_pane_layout->addWidget(file_list_, 1);
-    // ADR-0152: read-only technical summary for the selected files, fed
-    // by the bounded background prober.
-    technical_status_ = new QLabel(files_pane);
-    technical_status_->setObjectName(QStringLiteral("bench-metadata-technical"));
-    technical_status_->setWordWrap(true);
-    technical_status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    files_pane_layout->addWidget(technical_status_);
 
     fields_ = new QTableView(metadata_splitter_);
     fields_->setObjectName(QStringLiteral("bench-metadata-fields"));

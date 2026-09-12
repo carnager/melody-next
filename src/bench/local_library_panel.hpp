@@ -18,6 +18,7 @@
 #include <functional>
 #include <memory>
 
+class QCheckBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
@@ -109,7 +110,7 @@ class LocalLibraryPanel final : public QWidget {
     core::CancellationSource scan_cancellation_;
     std::shared_ptr<persistence::LibraryScanProgress> progress_;
     QLineEdit* search_{nullptr};
-    QToolButton* query_toggle_{nullptr};
+    QCheckBox* query_toggle_{nullptr};
     QLabel* query_error_{nullptr};
     QTreeView* tree_{nullptr};
     QStandardItemModel* model_{nullptr};

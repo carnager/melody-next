@@ -3436,8 +3436,13 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     auto* preview = dialog->findChild<QListWidget*>(QStringLiteral("bench-convert-preview"));
     auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-run"));
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-status"));
+    auto* problems = dialog->findChild<QPlainTextEdit*>(QStringLiteral("bench-convert-problems"));
     QVERIFY(preset != nullptr && root != nullptr && directories != nullptr && names != nullptr);
-    QVERIFY(preview != nullptr && run != nullptr && status != nullptr);
+    QVERIFY(preview != nullptr && run != nullptr && status != nullptr && problems != nullptr);
+    // Problem reports scroll inside a bounded pane instead of stretching
+    // the dialog; without problems it stays hidden.
+    QVERIFY(!problems->isVisible());
+    QVERIFY(problems->maximumHeight() <= 200);
 
     // The app's saved naming layouts and destination roots are offered
     // directly; picking them fills the editable fields.
@@ -3506,12 +3511,16 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QCOMPARE(preview->item(1)->text(), QStringLiteral("Converted Album/02 - Quiet.opus"));
     QTRY_VERIFY(run->isEnabled());
 
-    // A colliding layout blocks Convert with a problems-only explanation.
+    // A colliding layout blocks Convert; the explanation scrolls in the
+    // bounded problems pane while the status stays a one-line count.
     names->setText(QStringLiteral("same"));
     QTRY_VERIFY(!run->isEnabled());
-    QTRY_VERIFY(status->text().contains(QStringLiteral("target")));
+    QTRY_VERIFY(problems->isVisible() &&
+                problems->toPlainText().contains(QStringLiteral("target")));
+    QVERIFY(status->text().contains(QStringLiteral("problem")));
     names->setText(QStringLiteral("%tracknumber% - %title%"));
     QTRY_VERIFY(run->isEnabled());
+    QTRY_VERIFY(!problems->isVisible());
 
     QTest::mouseClick(run, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Converted 2 of 2 files.")),

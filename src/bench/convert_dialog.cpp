@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
@@ -332,6 +333,14 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     status_->setObjectName(QStringLiteral("bench-convert-status"));
     status_->setWordWrap(true);
     layout->addWidget(status_);
+    // Per-file problem reports scroll inside a bounded pane; unbounded
+    // multi-line status text used to stretch the dialog past the screen.
+    problems_ = new QPlainTextEdit(this);
+    problems_->setObjectName(QStringLiteral("bench-convert-problems"));
+    problems_->setReadOnly(true);
+    problems_->setMaximumHeight(140);
+    problems_->hide();
+    layout->addWidget(problems_);
 
     auto* buttons = new QHBoxLayout;
     run_ = new QPushButton(QStringLiteral("Convert"), this);
@@ -610,8 +619,11 @@ void ConvertDialog::refreshPreview() {
         });
     }
     if (planning_items.empty()) {
-        status_->setText(problems.isEmpty() ? QStringLiteral("Nothing to convert.")
-                                            : problems.join(QStringLiteral("\n")));
+        status_->setText(
+            problems.isEmpty()
+                ? QStringLiteral("Nothing to convert.")
+                : QStringLiteral("No convertible files (%1 with problems).").arg(problems.size()));
+        showProblems(problems);
         return;
     }
 
@@ -666,12 +678,15 @@ void ConvertDialog::refreshPreview() {
 
     const auto ready = planned->ready();
     if (!problems.isEmpty()) {
-        status_->setText(problems.join(QStringLiteral("\n")));
+        status_->setText(QStringLiteral("%1 problem%2 block the plan.")
+                             .arg(problems.size())
+                             .arg(problems.size() == 1 ? QString{} : QStringLiteral("s")));
     } else {
         status_->setText(QStringLiteral("%1 file%2 ready.")
                              .arg(planned->sources.size())
                              .arg(planned->sources.size() == 1U ? QString{} : QStringLiteral("s")));
     }
+    showProblems(problems);
     plan_ = std::move(*planned);
     run_->setEnabled(ready);
 }
@@ -802,9 +817,20 @@ void ConvertDialog::finishConversion() {
         summary += QStringLiteral(" Stopped early.");
     }
     if (!problems.isEmpty()) {
-        summary += QStringLiteral("\n") + problems.join(QStringLiteral("\n"));
+        summary += QStringLiteral(" %1 failed.").arg(problems.size());
     }
     status_->setText(summary);
+    showProblems(problems);
+}
+
+void ConvertDialog::showProblems(const QStringList& problems) {
+    if (problems.isEmpty()) {
+        problems_->hide();
+        problems_->clear();
+        return;
+    }
+    problems_->setPlainText(problems.join(QStringLiteral("\n")));
+    problems_->show();
 }
 
 } // namespace trackknife::bench

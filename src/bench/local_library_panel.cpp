@@ -5,6 +5,7 @@
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
@@ -150,16 +151,15 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     search_row->addWidget(search_, 1);
     // ADR-0150: the explicit query toggle switches the field into the tkq
     // dialect; word search stays byte-for-byte what it was when off, and a
-    // malformed query is an inline error, never a silent word search.
-    query_toggle_ = new QToolButton(this);
+    // malformed query is an inline error, never a silent word search. A
+    // checkbox, not a button: its state must be legible at a glance.
+    query_toggle_ = new QCheckBox(tr("Query"), this);
     query_toggle_->setObjectName(QStringLiteral("local-library-query-toggle"));
-    query_toggle_->setText(tr("Query"));
-    query_toggle_->setCheckable(true);
     query_toggle_->setToolTip(
         tr("Interpret the search as a tkq query, e.g. genre HAS jazz AND date GREATER 1990"));
     query_toggle_->setChecked(
         QSettings{}.value(QStringLiteral("library/query-mode"), false).toBool());
-    connect(query_toggle_, &QToolButton::toggled, this, [this](const bool enabled) {
+    connect(query_toggle_, &QCheckBox::toggled, this, [this](const bool enabled) {
         QSettings{}.setValue(QStringLiteral("library/query-mode"), enabled);
         search_->setPlaceholderText(enabled ? tr("tkq query, e.g. genre HAS jazz")
                                             : tr("Search albums and tracks"));

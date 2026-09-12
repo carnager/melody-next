@@ -25,6 +25,7 @@ class QCheckBox;
 class QComboBox;
 class QFormLayout;
 class QLabel;
+class QPlainTextEdit;
 class QLineEdit;
 class QListWidget;
 class QProgressBar;
@@ -114,6 +115,8 @@ class ConvertDialog final : public QDialog {
     QSpinBox* parallelism_{nullptr};
     QListWidget* preview_{nullptr};
     QLabel* status_{nullptr};
+    QPlainTextEdit* problems_{nullptr};
+    void showProblems(const QStringList& problems);
     QProgressBar* progress_{nullptr};
     QPushButton* run_{nullptr};
     QPushButton* stop_{nullptr};

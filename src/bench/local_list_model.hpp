@@ -35,6 +35,18 @@ enum LocalTrackColumn : int {
 // One row of a Trackknife working list: raw Linux path bytes plus the
 // display metadata enriched by the background probe or restored from the
 // persisted document.
+// ADR-0153: probe-retained technical facts; absent until a probe ran
+// (rows restored from a saved workspace fill on demand).
+struct LocalTrackTechnicals {
+    std::string codec;
+    int sample_rate{0};
+    int bits{0};
+    int channels{0};
+    std::int64_t bit_rate{0};
+
+    friend bool operator==(const LocalTrackTechnicals&, const LocalTrackTechnicals&) = default;
+};
+
 struct LocalTrackRow {
     std::string raw_path;
     std::optional<std::string> logical_reference;
@@ -52,6 +64,7 @@ struct LocalTrackRow {
     // any future mutation must revalidate it immediately before commit.
     metadata::MetadataDocument metadata;
     std::optional<core::LocalSourceRevision> source_revision;
+    std::optional<LocalTrackTechnicals> technicals{};
     // True once a probe ran or persisted metadata was restored; unprobed rows
     // fall back to their file name and are queued for enrichment.
     bool probed{false};

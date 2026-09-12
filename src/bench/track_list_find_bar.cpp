@@ -285,6 +285,20 @@ void TrackListFindBar::pump() {
                         fields.push_back(value);
                     }
                 }
+                // ADR-0153: retained probe technicals join the haystack the
+                // way MPD rows already expose their audio_format. Reserved
+                // up front: fields holds views into owned_texts, so the
+                // vector must never reallocate after the first push.
+                owned_texts.reserve(4U);
+                if (row.technicals) {
+                    fields.push_back(row.technicals->codec);
+                    owned_texts.push_back(std::to_string(row.technicals->sample_rate));
+                    fields.push_back(owned_texts.back());
+                    owned_texts.push_back(std::to_string(row.technicals->bits));
+                    fields.push_back(owned_texts.back());
+                    owned_texts.push_back(std::to_string(row.technicals->channels));
+                    fields.push_back(owned_texts.back());
+                }
                 duration_text(row.duration_ms);
                 fields.push_back(row.raw_path);
             }

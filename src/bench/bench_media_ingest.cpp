@@ -151,6 +151,28 @@ void append_missing_probed_metadata(metadata::MetadataDocument& document,
     return (seconds * 1'000) + (((frames % sample_rate) * 1'000) / sample_rate);
 }
 
+// ADR-0153: the ingest probe already knows the stream facts; keep them
+// on the row so tab searches and the Find bar can answer technical
+// questions without re-probing.
+[[nodiscard]] std::optional<LocalTrackTechnicals>
+probe_technicals(const formats::MediaProbe& probe) {
+    if (!probe.best_audio_stream) {
+        return std::nullopt;
+    }
+    const auto found = std::ranges::find(probe.audio_streams, *probe.best_audio_stream,
+                                         &formats::AudioStreamInfo::stream_index);
+    if (found == probe.audio_streams.end()) {
+        return std::nullopt;
+    }
+    LocalTrackTechnicals technicals;
+    technicals.codec = found->codec_name;
+    technicals.sample_rate = found->sample_rate;
+    technicals.bits = formats::bits_per_sample_hint(found->sample_format);
+    technicals.channels = found->channels;
+    technicals.bit_rate = found->bit_rate > 0 ? found->bit_rate : probe.bit_rate;
+    return technicals;
+}
+
 [[nodiscard]] LocalTrackRow
 whole_file_row(const formats::MediaProbe& probe, metadata::MetadataDocument document,
                std::optional<core::LocalSourceRevision> source_revision) {
@@ -160,6 +182,7 @@ whole_file_row(const formats::MediaProbe& probe, metadata::MetadataDocument docu
     row.duration_ms = probe.duration_ms;
     row.metadata = std::move(document);
     row.source_revision = source_revision;
+    row.technicals = probe_technicals(probe);
     project_display_metadata(row);
     row.probed = true;
     return row;
@@ -217,6 +240,7 @@ chapter_rows(const formats::MediaProbe& probe, const metadata::MetadataDocument&
         }
         row.duration_ms =
             sample_duration_ms(chapter.end_sample - chapter.start_sample, sample_rate);
+        row.technicals = probe_technicals(probe);
         project_display_metadata(row);
         row.probed = true;
         rows.push_back(std::move(row));
@@ -281,6 +305,7 @@ subsong_rows(const formats::MediaProbe& probe, const metadata::MetadataDocument&
         append_metadata_value(row.metadata, "TRACKNUMBER", std::to_string(index + 1U),
                               metadata::FieldProvenance::segment);
         row.duration_ms = subsong.duration_ms;
+        row.technicals = probe_technicals(probe);
         project_display_metadata(row);
         row.probed = true;
         rows.push_back(std::move(row));

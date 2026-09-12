@@ -92,8 +92,10 @@ void TrackListFindTest::searchesCachedFieldsAndEscapedPaths_data() {
     QTest::addColumn<QString>("query");
     // ADR-0142: beyond the display projection, arbitrary metadata values
     // (any provenance, any multiplicity) and the formatted duration match.
+    // ADR-0153: retained probe technicals (codec, rate, depth, channels)
+    // match like MPD rows' audio_format.
     for (const auto* text : {"Björk", "RELEASE", "collective", "2026", "07", "\\xff", "cue title",
-                             "hidden GEM", "-6.02 db", "0:07"})
+                             "hidden GEM", "-6.02 db", "0:07", "wavpack", "44100", "16"})
         QTest::newRow(text) << QString::fromUtf8(text);
 }
 
@@ -105,8 +107,10 @@ void TrackListFindTest::searchesCachedFieldsAndEscapedPaths() {
     row.album_artist = "Collective";
     row.date = "2026";
     row.track_number = "07";
-    row.raw_path = std::string{"/music/raw-"} + static_cast<char>(0xff) + ".flac";
+    row.raw_path = std::string{"/music/raw-"} + static_cast<char>(0xff) + ".dat";
     row.duration_ms = 7'000;
+    row.technicals = LocalTrackTechnicals{
+        .codec = "wavpack", .sample_rate = 44'100, .bits = 16, .channels = 2, .bit_rate = 900'000};
     row.metadata.fields.push_back(metadata::MetadataField{
         .canonical_name = "comment",
         .native_name = "COMMENT",

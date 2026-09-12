@@ -103,6 +103,15 @@ void LocalListModel::appendPaths(std::vector<std::string> raw_paths, const int i
     appendRows(std::move(rows), insertion_row);
 }
 
+void LocalListModel::applyTechnicals(const std::string& raw_path,
+                                     const LocalTrackTechnicals& technicals) {
+    for (auto& row : rows_) {
+        if (row.raw_path == raw_path) {
+            row.technicals = technicals;
+        }
+    }
+}
+
 void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row) {
     if (rows.empty()) {
         return;

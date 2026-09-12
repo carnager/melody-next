@@ -9,6 +9,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/mpd_library_search_model.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -198,6 +199,8 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanUsesTruePeakWhenOptedIn();
     void replayGainScanStagesR128ForOpusTags();
     void propertiesShowTechnicalSummary();
+    void searchDialogFiltersTabAndOpensResults();
+    void searchDialogProbesMissingTechnicalsOnDemand();
     void loudnessSidecarProjectsOntoProbedRows();
     void desktopNotificationsNotifyBackgroundTrackChanges();
     void replayGainScanPreservesLogicalSources_data();
@@ -4062,6 +4065,123 @@ void BenchMainWindowTest::propertiesShowTechnicalSummary() {
     QVERIFY(technical->text().contains(QStringLiteral("16 bit")));
     QVERIFY(!technical->text().contains(QStringLiteral("mixed")));
     delete properties;
+}
+
+// ADR-0153: the standalone search dialog filters the current tab with
+// tkq over row metadata and technicals, and keeps results as tabs.
+void BenchMainWindowTest::searchDialogFiltersTabAndOpensResults() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto flac_path = media.filePath(QStringLiteral("tone.flac"));
+    const auto opus_path = media.filePath(QStringLiteral("tone.opus"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), flac_path));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("loudness-tone-opus.b64"), opus_path));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths(
+        {QFile::encodeName(flac_path).toStdString(), QFile::encodeName(opus_path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE(model->rowCount(), 2);
+    QTRY_VERIFY(model->rows().front().probed && model->rows().back().probed);
+
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-search-dialog"));
+    QVERIFY(action != nullptr);
+    action->trigger();
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
+                nullptr);
+    auto* scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* input = dialog->findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* mode = dialog->findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = dialog->findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* open_button = dialog->findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-search-status"));
+    QVERIFY(scope && input && mode && results && open_button && status);
+
+    scope->setCurrentIndex(1);
+    mode->setChecked(true);
+    input->setText(QStringLiteral("codec IS flac"));
+    QTRY_COMPARE(results->count(), 1);
+    input->setText(QStringLiteral("codec IS opus"));
+    QTRY_VERIFY(results->count() == 1 && status->text().startsWith(QStringLiteral("1 match")));
+
+    // Word search matches row metadata without tkq structure.
+    mode->setChecked(false);
+    input->setText(QStringLiteral("fixture"));
+    QTRY_VERIFY(results->count() >= 1);
+
+    // The full result set becomes an ordinary scratch tab with the rows.
+    mode->setChecked(true);
+    input->setText(QStringLiteral("codec IS opus"));
+    QTRY_COMPARE(results->count(), 1);
+    const auto tabs_before = tabs->count();
+    QTRY_VERIFY(open_button->isEnabled());
+    open_button->click();
+    QTRY_COMPARE(tabs->count(), tabs_before + 1);
+    auto* opened = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(opened != nullptr);
+    auto* opened_model = qobject_cast<LocalListModel*>(opened->model());
+    QVERIFY(opened_model != nullptr);
+    QTRY_COMPARE(opened_model->rowCount(), 1);
+    QCOMPARE(opened_model->rows().front().raw_path,
+             std::string{QFile::encodeName(opus_path).constData()});
+
+    mode->setChecked(false);
+    dialog->close();
+}
+
+// ADR-0153: a technical query against rows without retained technicals
+// probes exactly those files once and reports the facts back.
+void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto flac_path = media.filePath(QStringLiteral("tone.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), flac_path));
+    const auto encoded = QFile::encodeName(flac_path);
+
+    LocalTrackRow row;
+    row.raw_path = std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    row.title = "Restored";
+    row.probed = true;
+
+    std::vector<std::pair<std::string, LocalTrackTechnicals>> reported;
+    SearchDialog dialog{std::filesystem::path{},
+                        [&row]() -> std::optional<SearchDialog::TabSnapshot> {
+                            return SearchDialog::TabSnapshot{QStringLiteral("Fixture"), {row}};
+                        },
+                        [&reported](std::string path, LocalTrackTechnicals technicals) {
+                            reported.emplace_back(std::move(path), technicals);
+                        }};
+    dialog.show();
+    auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* status = dialog.findChild<QLabel*>(QStringLiteral("bench-search-status"));
+    QVERIFY(scope && input && mode && results && status);
+    scope->setCurrentIndex(1);
+    mode->setChecked(true);
+    input->setText(QStringLiteral("samplerate GREATER 8000"));
+    QTRY_COMPARE_WITH_TIMEOUT(results->count(), 1, 15'000);
+    QVERIFY(status->text().contains(QStringLiteral("scanned 1 file")));
+    QCOMPARE(reported.size(), 1U);
+    QCOMPARE(reported.front().first, row.raw_path);
+    QCOMPARE(reported.front().second.codec, std::string{"flac"});
+
+    // Metadata-only queries never probe.
+    reported.clear();
+    input->setText(QStringLiteral("title HAS restored"));
+    QTRY_COMPARE(results->count(), 1);
+    QVERIFY(reported.empty());
+    QVERIFY(!status->text().contains(QStringLiteral("scanned")));
+    mode->setChecked(false);
 }
 
 void BenchMainWindowTest::replayGainScanPreservesLogicalSources_data() {

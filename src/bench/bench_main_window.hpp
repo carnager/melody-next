@@ -78,6 +78,7 @@ namespace trackknife::bench {
 struct MetadataOperationJobOutcome;
 class MusicBrainzFetchService;
 class LocalLibraryPanel;
+class SearchDialog;
 class MpdLibrarySearchModel;
 class DesktopNotifier;
 class MprisService;
@@ -205,6 +206,8 @@ class BenchMainWindow final : public QMainWindow {
 
     ListTab* addListTab(persistence::ListDocument document, bool select);
     [[nodiscard]] ListTab* currentListTab();
+    // ADR-0153: the standalone search dialog, created lazily, one instance.
+    void openSearchDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
@@ -371,6 +374,7 @@ class BenchMainWindow final : public QMainWindow {
     int pending_mpd_library_insertion_row_{-1};
     QTabWidget* tabs_{nullptr};
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
+    QPointer<SearchDialog> search_dialog_;
     std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
     std::vector<std::unique_ptr<MpdSearchTab>> mpd_search_tabs_;
     // Enter pressed before the debounced search finished: commit this

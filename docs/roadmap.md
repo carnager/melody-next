@@ -99,6 +99,12 @@ References: [working lists and interchange](playback-library-conversion.md#worki
   on a bounded worker pool while the walk and every guarded per-file
   commit stay serial; the library connection drops to WAL
   synchronous=NORMAL.
+- [x] Standalone search dialog (ADR-0153): one non-modal surface over
+  tkq-1 and word search with a database/current-tab scope switch;
+  tab scope evaluates the shared row semantics, probes missing
+  technicals on demand, and results flow to the standard destinations
+  or a new tab. Rows retain probe technicals from dump time (ADR-0142
+  follow-up closed for probed rows; the Find bar matches them).
 - [ ] Idea: a headless scanner binary to run directly on the NAS that
   hosts the library — build the same sqlite index locally without the
   network bottleneck, then copy it into the workspace.

@@ -10,6 +10,7 @@ qt_add_library(
     bench_media_ingest.cpp
     bench_playlists.cpp
     playlist_transfer_bar.cpp
+    search_dialog.cpp
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp
     bench_mpd.cpp

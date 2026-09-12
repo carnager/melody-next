@@ -406,6 +406,10 @@ void BenchMainWindow::buildWorkspace() {
     });
 
     auto* workspace_menu = menuBar()->addMenu(QStringLiteral("&Workspace"));
+    auto* search_action = workspace_menu->addAction(QStringLiteral("Search…"));
+    search_action->setObjectName(QStringLiteral("action-search-dialog"));
+    search_action->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
+    connect(search_action, &QAction::triggered, this, &BenchMainWindow::openSearchDialog);
     duplicate_tab_action_ = workspace_menu->addAction(QStringLiteral("Duplicate tab"));
     duplicate_tab_action_->setObjectName(QStringLiteral("action-duplicate-tab"));
     duplicate_tab_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+D")));

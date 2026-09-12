@@ -131,7 +131,7 @@ Evidence: [conversion](playback-library-conversion.md#converter),
 | Collection integrity/comparison/relinking | Open | Internal conversion verification exists; standalone collection scans, audio duplicate comparison, missing-file relinking, and album-completeness tools do not. |
 | Melody playback endpoint | Open | Client output controls exist; registration, streaming/direct-source playback, queue/clock synchronization, preload, and reconnect as an endpoint do not. |
 | DSP graph | Deferred | Versioned processing presets and exact bypass require separate qualification. |
-| Query dialect | Implemented | `tkq-1` (ADR-0150): own versioned dialect, foobar-inspired keyword surface, normative spec in [query-language.md](query-language.md); no external dialect compatibility. Structured filtering runs over the migration-30 index substrate behind the library panel's query toggle. Saved searches, autoplaylists, and the query builder remain open. |
+| Query dialect | Implemented | `tkq-1` (ADR-0150): own versioned dialect, foobar-inspired keyword surface, normative spec in [query-language.md](query-language.md); no external dialect compatibility. Structured filtering runs over the migration-30 index substrate behind the library panel's query toggle and the standalone search dialog (ADR-0153), whose tab scope shares the exact row evaluation and probes missing technicals on demand. Saved searches, autoplaylists, and the query builder remain open. |
 | Plugin API, CD ripping, radio, remote import | Deferred | Separate product/compatibility decisions. No transactional Melody upload/import capability is claimed by this client. |
 
 ## Format-support dimensions

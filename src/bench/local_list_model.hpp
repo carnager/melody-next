@@ -94,6 +94,9 @@ class LocalListModel final : public QAbstractTableModel {
     void replaceRows(std::vector<LocalTrackRow> rows);
     void appendPaths(std::vector<std::string> raw_paths, int insertion_row = -1);
     void appendRows(std::vector<LocalTrackRow> rows, int insertion_row = -1);
+    // ADR-0153: stores on-demand probed technicals onto every row of the
+    // given physical source.
+    void applyTechnicals(const std::string& raw_path, const LocalTrackTechnicals& technicals);
     void removeRowIndexes(std::vector<int> rows, bool remember = true, QString label = {});
     bool applyPermutation(const std::vector<int>& order, QString label);
     [[nodiscard]] bool canUndo() const noexcept { return history_cursor_ > 0; }

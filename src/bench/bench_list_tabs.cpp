@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
+#include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "uicommon/local_files_mime_data.hpp"
@@ -613,6 +614,102 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     refreshTabActions();
     refreshSelectionStatus();
     return raw_tab;
+}
+
+void BenchMainWindow::openSearchDialog() {
+    if (search_dialog_ != nullptr) {
+        search_dialog_->show();
+        search_dialog_->raise();
+        search_dialog_->activateWindow();
+        return;
+    }
+    // ADR-0153: database scope reads the workspace index; tab scope
+    // snapshots the current local tab's rows and reports on-demand
+    // technicals back onto every tab holding the probed file.
+    search_dialog_ = new SearchDialog(
+        database_path_,
+        [this]() -> std::optional<SearchDialog::TabSnapshot> {
+            auto* tab = currentListTab();
+            if (tab == nullptr) {
+                return std::nullopt;
+            }
+            return SearchDialog::TabSnapshot{QString::fromUtf8(tab->document.name),
+                                             tab->model->rows()};
+        },
+        [this](std::string raw_path, LocalTrackTechnicals technicals) {
+            for (const auto& tab : list_tabs_) {
+                tab->model->applyTechnicals(raw_path, technicals);
+            }
+        },
+        this);
+    search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    connect(search_dialog_, &SearchDialog::resultsRequested, this,
+            [this](const QString& name, std::vector<std::string> paths,
+                   const LocalLibraryAction action) {
+                if (discovery_running_) {
+                    statusBar()->showMessage(QStringLiteral("A file intake is already running"),
+                                             3'000);
+                    return;
+                }
+                auto* destination = currentListTab();
+                int insertion = -1;
+                if (action == LocalLibraryAction::new_list) {
+                    destination =
+                        addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                             .kind = persistence::ListKind::scratch,
+                                                             .name = utf8Bytes(name),
+                                                             .pinned = false,
+                                                             .dirty = false,
+                                                             .items = {}},
+                                   true);
+                    schedulePersist();
+                } else if (destination != nullptr && action == LocalLibraryAction::next) {
+                    const auto id = QString::fromStdString(destination->document.id.to_string());
+                    insertion = playback_document_id_ == id ? playback_row_ + 1
+                                : destination->view->currentIndex().isValid()
+                                    ? destination->view->currentIndex().row() + 1
+                                    : 0;
+                }
+                if (destination == nullptr) {
+                    return;
+                }
+                startDiscovery(std::move(paths),
+                               QString::fromStdString(destination->document.id.to_string()),
+                               insertion, action == LocalLibraryAction::replace);
+            });
+    connect(search_dialog_, &SearchDialog::rowsRequested, this,
+            [this](const QString& name, std::vector<LocalTrackRow> rows,
+                   const LocalLibraryAction action) {
+                auto* destination = currentListTab();
+                int insertion = -1;
+                if (action == LocalLibraryAction::new_list) {
+                    destination =
+                        addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                             .kind = persistence::ListKind::scratch,
+                                                             .name = utf8Bytes(name),
+                                                             .pinned = false,
+                                                             .dirty = false,
+                                                             .items = {}},
+                                   true);
+                    schedulePersist();
+                } else if (destination != nullptr && action == LocalLibraryAction::next) {
+                    const auto id = QString::fromStdString(destination->document.id.to_string());
+                    insertion = playback_document_id_ == id ? playback_row_ + 1
+                                : destination->view->currentIndex().isValid()
+                                    ? destination->view->currentIndex().row() + 1
+                                    : 0;
+                }
+                if (destination == nullptr) {
+                    return;
+                }
+                if (action == LocalLibraryAction::replace) {
+                    destination->model->replaceRows(std::move(rows));
+                } else {
+                    destination->model->appendRows(std::move(rows), insertion);
+                }
+                markTabDirty(*destination);
+            });
+    search_dialog_->show();
 }
 
 BenchMainWindow::ListTab* BenchMainWindow::currentListTab() {

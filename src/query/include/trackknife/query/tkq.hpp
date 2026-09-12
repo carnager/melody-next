@@ -93,4 +93,10 @@ struct CompiledTkq {
 [[nodiscard]] core::Result<CompiledTkq> compile_tkq(std::string_view source,
                                                     const TkqLimits& limits = {});
 
+// Compiles the input as a plain all-word search regardless of any
+// keywords or quotes it contains — the word-search surfaces share the
+// evaluation pipeline without inheriting tkq structure (ADR-0153).
+[[nodiscard]] core::Result<CompiledTkq> compile_tkq_word_search(std::string_view source,
+                                                                const TkqLimits& limits = {});
+
 } // namespace trackknife::query

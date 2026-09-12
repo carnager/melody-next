@@ -462,6 +462,35 @@ std::vector<std::string> CompiledTkq::field_dependencies() const {
     return names;
 }
 
+core::Result<CompiledTkq> compile_tkq_word_search(const std::string_view source,
+                                                  const TkqLimits& limits) {
+    if (source.size() > limits.maximum_source_bytes) {
+        return std::unexpected(parse_error(
+            "the query is longer than " + std::to_string(limits.maximum_source_bytes) + " bytes",
+            0U, source.size()));
+    }
+    CompiledTkq compiled;
+    compiled.source = std::string{source};
+    TkqPredicate predicate;
+    predicate.operand = TkqOperandKind::any_field;
+    predicate.comparison = TkqComparison::has;
+    predicate.text = compiled.source;
+    predicate.normalized = lower(predicate.text);
+    predicate.words = split_words(predicate.normalized);
+    if (predicate.words.empty()) {
+        return std::unexpected(parse_error("the query is empty", 0U, source.size()));
+    }
+    if (predicate.words.size() > limits.maximum_words) {
+        return std::unexpected(parse_error("the query carries more than " +
+                                               std::to_string(limits.maximum_words) + " words",
+                                           0U, source.size()));
+    }
+    compiled.predicates.push_back(std::move(predicate));
+    compiled.nodes.push_back({TkqNodeKind::predicate, 0U, {}});
+    compiled.root = 0U;
+    return compiled;
+}
+
 core::Result<CompiledTkq> compile_tkq(const std::string_view source, const TkqLimits& limits) {
     auto tokens = internal::lex_tkq(source, limits.maximum_source_bytes);
     if (!tokens) {

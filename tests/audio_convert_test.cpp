@@ -388,6 +388,14 @@ void carriesMetadataIntoEveryPreset() {
     // DESCRIPTION; the post-encode normalization must undo that so the
     // verification and every reader see COMMENT again.
     document.fields.push_back(field("comment", "COMMENT", {"Visit https://example.org"}));
+    // ADR-0155: the tag layer transfers everything — multi-values in
+    // order, multiline lyrics, and arbitrary custom fields included.
+    document.fields.push_back(field("genre", "GENRE", {"Rock", "Shoegaze"}));
+    document.fields.push_back(
+        field("unsyncedlyrics", "UNSYNCEDLYRICS", {"first line\nsecond line"}));
+    document.fields.push_back(field("mycustomfield", "MYCUSTOMFIELD", {"custom value"}));
+    document.fields.push_back(field("musicbrainzalbumid", "MUSICBRAINZ_ALBUMID",
+                                    {"11111111-2222-3333-4444-555555555555"}));
     // Loudness claims measured against the source signal are stale after a
     // re-encode and must be stripped, never transferred (ADR-0133).
     document.fields.push_back(field("replaygaintrackgain", "REPLAYGAIN_TRACK_GAIN", {"-6.50 dB"}));
@@ -431,6 +439,14 @@ void carriesMetadataIntoEveryPreset() {
         CHECK(reread->document.first_effective_value("comment") ==
               std::optional<std::string>{"Visit https://example.org"});
         CHECK(!reread->document.first_effective_value("description").has_value());
+        CHECK(reread->document.effective_values("genre") ==
+              (std::vector<std::string>{"Rock", "Shoegaze"}));
+        CHECK(reread->document.first_effective_value("unsyncedlyrics") ==
+              std::optional<std::string>{"first line\nsecond line"});
+        CHECK(reread->document.first_effective_value("mycustomfield") ==
+              std::optional<std::string>{"custom value"});
+        CHECK(reread->document.first_effective_value("musicbrainzalbumid") ==
+              std::optional<std::string>{"11111111-2222-3333-4444-555555555555"});
         CHECK(!reread->document.first_effective_value("replaygaintrackgain").has_value());
         CHECK(!reread->document.first_effective_value("replaygaintrackpeak").has_value());
         CHECK(!reread->document.first_effective_value("replaygainalbumgain").has_value());

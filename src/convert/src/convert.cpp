@@ -343,50 +343,6 @@ strip_loudness_fields(const metadata::MetadataDocument& document) {
     return stripped;
 }
 
-// The ID3 muxer only writes proper frames for FFmpeg's generic key names;
-// everything else becomes a TXXX frame with the key as its description.
-[[nodiscard]] std::string id3_metadata_key(const std::string& canonical_name,
-                                           const std::string& native_name) {
-    if (canonical_name == "title" || canonical_name == "artist" || canonical_name == "album" ||
-        canonical_name == "date" || canonical_name == "genre" || canonical_name == "composer" ||
-        canonical_name == "comment") {
-        return canonical_name;
-    }
-    if (canonical_name == "albumartist") {
-        return "album_artist";
-    }
-    if (canonical_name == "tracknumber") {
-        return "track";
-    }
-    if (canonical_name == "discnumber") {
-        return "disc";
-    }
-    return native_name;
-}
-
-[[nodiscard]] core::Result<void> apply_request_metadata(AVFormatContext* format,
-                                                        const EncoderPreset& preset,
-                                                        const metadata::MetadataDocument& document,
-                                                        const std::string& raw_path) {
-    const auto id3 = preset.container_name == "mp3";
-    for (const auto& field : document.effective_fields()) {
-        const auto& key =
-            id3 ? id3_metadata_key(field.canonical_name, field.native_name) : field.native_name;
-        if (key.empty()) {
-            continue;
-        }
-        for (const auto& value : field.values) {
-            if (const auto set =
-                    av_dict_set(&format->metadata, key.c_str(), value.c_str(), AV_DICT_MULTIKEY);
-                set < 0) {
-                return std::unexpected(
-                    convert_error(set, "recording metadata for " + key, raw_path));
-            }
-        }
-    }
-    return {};
-}
-
 // FFmpeg's shared FLAC/ID3v2 picture-type vocabulary: the muxers map an
 // attached-picture stream's "comment" metadata onto the numeric type
 // through exactly these strings.
@@ -539,48 +495,37 @@ strip_loudness_fields(const metadata::MetadataDocument& document) {
     return {};
 }
 
-// FFmpeg's vorbis-comment writer converts the generic "comment" key to
-// DESCRIPTION at write_header (its conversion table matches keys
-// case-insensitively), so a transferred COMMENT resurfaces under the
-// wrong name in FLAC/Ogg/Opus output. Rename it back with the proven
-// tag layer before verification — only when the request carried a
-// comment and no description of its own.
-[[nodiscard]] core::Result<void>
-normalize_vorbis_comment(const std::string& temporary_path, const EncoderPreset& preset,
-                         const metadata::MetadataDocument& document, const std::string& raw_path) {
-    const auto vorbis_family = preset.container_name == "flac" || preset.container_name == "ogg" ||
-                               preset.container_name == "opus";
-    if (!vorbis_family) {
-        return {};
-    }
-    const auto comment = document.effective_values("comment");
-    if (comment.empty() || !document.effective_values("description").empty()) {
-        return {};
-    }
+// ADR-0155: FFmpeg writes audio; the finished file's text tags come
+// from the tag layer as one property map — every effective field under
+// its exact native name with all values — so no muxer key-conversion
+// table can rename or drop anything. Pictures live outside the
+// property view and stay untouched.
+[[nodiscard]] core::Result<void> write_transfer_tags(const std::string& temporary_path,
+                                                     const metadata::MetadataDocument& document,
+                                                     const std::string& raw_path) {
     TagLib::FileRef file{temporary_path.c_str()};
     if (file.isNull()) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::io,
-                        .message = "reopening the converted file for tag normalization failed",
+                        .message = "reopening the converted file for tag writing failed",
                         .context = {{.key = "path", .value = raw_path}}});
     }
-    auto properties = file.properties();
-    if (!properties.contains("DESCRIPTION") || properties.contains("COMMENT")) {
-        return {};
+    TagLib::PropertyMap properties;
+    for (const auto& field : document.effective_fields()) {
+        if (field.values.empty()) {
+            continue;
+        }
+        const auto& name = field.native_name.empty() ? field.canonical_name : field.native_name;
+        TagLib::StringList values;
+        for (const auto& value : field.values) {
+            values.append(TagLib::String{value, TagLib::String::UTF8});
+        }
+        properties.insert(TagLib::String{name, TagLib::String::UTF8}.upper(), values);
     }
-    TagLib::StringList values;
-    for (const auto& value : comment) {
-        values.append(TagLib::String{value, TagLib::String::UTF8});
-    }
-    if (properties.value("DESCRIPTION") != values) {
-        return {};
-    }
-    properties.erase("DESCRIPTION");
-    properties.insert("COMMENT", values);
     file.setProperties(properties);
     if (!file.save()) {
         return std::unexpected(core::Error{.code = core::ErrorCode::io,
-                                           .message = "renaming the converted comment tag failed",
+                                           .message = "writing the converted tags failed",
                                            .context = {{.key = "path", .value = raw_path}}});
     }
     return {};
@@ -619,11 +564,12 @@ normalize_vorbis_comment(const std::string& temporary_path, const EncoderPreset&
     return {};
 }
 
-[[nodiscard]] core::Result<std::unique_ptr<EncoderPipeline>> open_pipeline(
-    const EncoderPreset& preset, const formats::PcmFormat& source_format,
-    const std::optional<int>& target_sample_rate, const std::optional<int>& target_bit_depth,
-    const metadata::MetadataDocument& document, const std::optional<ConversionArtwork>& artwork,
-    const std::string& temporary_path, const std::string& destination_raw_path) {
+[[nodiscard]] core::Result<std::unique_ptr<EncoderPipeline>>
+open_pipeline(const EncoderPreset& preset, const formats::PcmFormat& source_format,
+              const std::optional<int>& target_sample_rate,
+              const std::optional<int>& target_bit_depth,
+              const std::optional<ConversionArtwork>& artwork, const std::string& temporary_path,
+              const std::string& destination_raw_path) {
     const auto* const codec = avcodec_find_encoder_by_name(preset.codec_name.c_str());
     if (codec == nullptr) {
         return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
@@ -718,11 +664,8 @@ normalize_vorbis_comment(const std::string& temporary_path, const EncoderPreset&
             convert_error(AVERROR(ENOMEM), "allocating the encoder frame", destination_raw_path));
     }
 
-    if (auto applied =
-            apply_request_metadata(pipeline->format, preset, document, destination_raw_path);
-        !applied) {
-        return std::unexpected(applied.error());
-    }
+    // ADR-0155: text tags are written by the tag layer after encoding;
+    // the muxer dictionary stays empty of transfer metadata.
     if (artwork) {
         if (auto cover = apply_request_artwork(*pipeline, preset, *artwork, destination_raw_path);
             !cover) {
@@ -840,9 +783,9 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
     }
 
     const auto transfer_metadata = strip_loudness_fields(request.metadata);
-    auto pipeline_result = open_pipeline(request.preset, source_format, effective_sample_rate,
-                                         effective_bit_depth, transfer_metadata, request.artwork,
-                                         temporary.native(), request.destination_raw_path);
+    auto pipeline_result =
+        open_pipeline(request.preset, source_format, effective_sample_rate, effective_bit_depth,
+                      request.artwork, temporary.native(), request.destination_raw_path);
     if (!pipeline_result) {
         return std::unexpected(pipeline_result.error());
     }
@@ -983,10 +926,10 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
                         {.key = "verified_frames", .value = std::to_string(verified_frames)}}});
     }
 
-    if (auto normalized = normalize_vorbis_comment(temporary.native(), request.preset,
-                                                   transfer_metadata, request.destination_raw_path);
-        !normalized) {
-        return std::unexpected(std::move(normalized.error()));
+    if (auto written = write_transfer_tags(temporary.native(), transfer_metadata,
+                                           request.destination_raw_path);
+        !written) {
+        return std::unexpected(std::move(written.error()));
     }
     if (auto tags_verified = verify_written_metadata(temporary.native(), transfer_metadata,
                                                      request.destination_raw_path);

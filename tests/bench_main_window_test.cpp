@@ -3580,7 +3580,7 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     mirror->setChecked(true);
     QVERIFY(!directory_field->isEnabled());
     QTRY_VERIFY(preview->count() >= 3 &&
-                preview->item(0)->text().startsWith(QStringLiteral("Mirroring below")));
+                preview->item(0)->text().startsWith(QStringLiteral("Recreating source paths below")));
     QCOMPARE(preview->item(1)->text(), QStringLiteral("loud.flac"));
     QCOMPARE(preview->item(2)->text(), QStringLiteral("quiet.flac"));
 

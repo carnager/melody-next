@@ -261,11 +261,15 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     auto* mirror_root_row = new QHBoxLayout;
     mirror_root_ = new QLineEdit(this);
     mirror_root_->setObjectName(QStringLiteral("bench-convert-mirror-root"));
-    mirror_root_->setPlaceholderText(QStringLiteral("auto: deepest common folder"));
+    mirror_root_->setPlaceholderText(
+        QStringLiteral("auto: deepest folder all selected files share"));
     mirror_root_->setText(settings.value(QStringLiteral("convert/mirror-root")).toString());
     mirror_root_->setToolTip(
-        QStringLiteral("Mirror each source's path below this folder; sources outside it block "
-                       "the plan. Leave empty to use the selection's deepest common folder."));
+        QStringLiteral("The part of each SOURCE path below this folder is recreated inside the "
+                       "destination — set it to your library root (e.g. …/Rips/flac) so "
+                       "Artist/Album folders survive even when you convert a single album. "
+                       "Sources outside it block the plan; empty guesses the deepest folder the "
+                       "selection shares."));
     mirror_root_row->addWidget(mirror_root_, 1);
     auto* mirror_browse = new QPushButton(QStringLiteral("Browse…"), this);
     mirror_browse->setObjectName(QStringLiteral("bench-convert-mirror-root-browse"));
@@ -277,7 +281,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         }
     });
     mirror_root_row->addWidget(mirror_browse);
-    form->addRow(QStringLiteral("Mirror below:"), mirror_root_row);
+    form->addRow(QStringLiteral("Keep paths below:"), mirror_root_row);
 
     directory_expression_ = new QLineEdit(this);
     directory_expression_->setObjectName(QStringLiteral("bench-convert-directory-expression"));
@@ -677,7 +681,8 @@ void ConvertDialog::refreshPreview() {
             status_->setText(QStringLiteral("No common source folder to mirror."));
             return;
         }
-        preview_->addItem(QStringLiteral("Mirroring below %1").arg(displayText(mirror_root)));
+        preview_->addItem(
+            QStringLiteral("Recreating source paths below %1").arg(displayText(mirror_root)));
         converted.mirror_source_root_raw_path = std::move(mirror_root);
     }
     auto planned = operations::plan_output_paths(

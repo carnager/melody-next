@@ -16,6 +16,7 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "quick/mpd_search_result_model.hpp"
+#include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/formats/probe.hpp"
@@ -210,6 +211,8 @@ class BenchMainWindowTest final : public QObject {
     void savedSearchesCanBeManagedAndReopened();
     void searchDialogFiltersTabAndOpensResults();
     void searchDialogProbesMissingTechnicalsOnDemand();
+    void musicBrainzStagesFromCachedSearchMetadata();
+    void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
     void loudnessSidecarProjectsOntoProbedRows();
     void desktopNotificationsNotifyBackgroundTrackChanges();
@@ -4502,13 +4505,106 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
 // ADR-0156: the context-menu ReplayGain dialog scans the selection and
 // writes immediately through the shared journaled pipeline — here two
 // unwritable WAVs divert into loudness sidecars (ADR-0143).
+void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
+    QTemporaryDir media;
+    const auto path = media.filePath(QStringLiteral("cached-release.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    auto native = metadata::read_local_metadata(QFile::encodeName(path).toStdString());
+    QVERIFY(native && native->document.first_effective_value("musicbrainzworkid"));
+    auto cached = native->document;
+    for (auto& field : cached.fields) {
+        // The library index retains canonical names, not native tag spellings.
+        field.native_name = field.canonical_name;
+        field.provenance = metadata::FieldProvenance::cached_snapshot;
+    }
+    metadata::StagedMetadataSource source{.raw_path = QFile::encodeName(path).toStdString(),
+                                          .source_revision = {},
+                                          .baseline = cached,
+                                          .needs_metadata_capture = true};
+    const metadata::MetadataProposalSet proposals{
+        .provider_name = "MusicBrainz",
+        .provider_detail = "Matched release",
+        .items = {{.item_index = 0,
+                   .fields = {{.canonical_field = "musicbrainzworkid",
+                               .display_field = "MUSICBRAINZ_WORKID",
+                               .values = {"11111111-2222-3333-4444-555555555555"},
+                               .confidence = 1.0,
+                               .rationale = "Matched recording"}},
+                   .artwork = {}}}};
+    // Reproduce the old false-stale rejection when a cache document is used
+    // directly as a native baseline.
+    auto old_selection = metadata::StagedMetadataSelection::create({source}, {});
+    QVERIFY(old_selection);
+    MetadataGridModel old_grid{std::move(*old_selection), {QStringLiteral("Cached")}};
+    auto old_preview = metadata::metadata_proposal_preview(old_grid.selection(), old_grid.patches(),
+                                                           proposals, 0.5);
+    QVERIFY(old_preview);
+    QSignalSpy rejected{&old_grid, &MetadataGridModel::editRejected};
+    QVERIFY(!old_grid.stageTransformation(*old_preview));
+    QVERIFY(rejected.front().front().toString().contains(QStringLiteral("draft changed")));
+
+    MetadataPropertiesDialog properties{
+        1,
+        [source](std::size_t) -> std::optional<MetadataPropertiesSource> {
+            return MetadataPropertiesSource{.source = source,
+                                            .track_label = QStringLiteral("Cached")};
+        },
+        {},
+        {},
+        {}};
+    properties.show();
+    MetadataGridModel* grid = nullptr;
+    QTRY_VERIFY((grid = properties.findChild<MetadataGridModel*>()) != nullptr);
+    QVERIFY(grid->selection().source(0).source_revision);
+    const auto preview =
+        metadata::metadata_proposal_preview(grid->selection(), grid->patches(), proposals, 0.5);
+    QVERIFY(preview);
+    QVERIFY(grid->stageTransformation(*preview, {QStringLiteral("MusicBrainz")}));
+    QCOMPARE(grid->patches().patch_count(), 1U);
+    QVERIFY(grid->undo());
+    QCOMPARE(grid->patches().patch_count(), 0U);
+}
+
+void BenchMainWindowTest::contextReplayGainScansAndApplies_data() {
+    QTest::addColumn<bool>("cached");
+    QTest::addColumn<bool>("embedded");
+    QTest::newRow("imported") << false << false;
+    QTest::newRow("cached-sidecar") << true << false;
+    QTest::newRow("cached-embedded") << true << true;
+}
+
 void BenchMainWindowTest::contextReplayGainScansAndApplies() {
+    QFETCH(bool, cached);
+    QFETCH(bool, embedded);
     QTemporaryDir media;
     QVERIFY(media.isValid());
-    const auto first = media.filePath(QStringLiteral("one.wav"));
-    const auto second = media.filePath(QStringLiteral("two.wav"));
-    write_sine_wav_fixture(first, 0.6);
-    write_sine_wav_fixture(second, 0.3);
+    const auto first =
+        media.filePath(embedded ? QStringLiteral("one.flac") : QStringLiteral("one.wav"));
+    const auto second =
+        media.filePath(embedded ? QStringLiteral("two.flac") : QStringLiteral("two.wav"));
+    if (embedded) {
+        const auto wav = media.filePath(QStringLiteral("tone.wav"));
+        write_sine_wav_fixture(wav, 0.6);
+        const auto preset = convert::find_encoder_preset("flac");
+        QVERIFY(preset);
+        convert::AudioConversionRequest request{};
+        request.source_raw_path = QFile::encodeName(wav).toStdString();
+        request.preset = *preset;
+        request.metadata.fields.push_back({.canonical_name = "title",
+                                           .native_name = "TITLE",
+                                           .values = {"Preserve this title"},
+                                           .qualifier = {},
+                                           .provenance = metadata::FieldProvenance::embedded});
+        for (const auto& output : {first, second}) {
+            request.destination_raw_path = QFile::encodeName(output).toStdString();
+            QVERIFY(convert::convert_audio_file(request));
+        }
+    } else {
+        write_sine_wav_fixture(first, 0.6);
+        write_sine_wav_fixture(second, 0.3);
+    }
+    const auto original = metadata::read_local_metadata(QFile::encodeName(first).toStdString());
+    QVERIFY(original);
 
     BenchMainWindow window;
     window.show();
@@ -4523,7 +4619,28 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     auto* local_model = qobject_cast<LocalListModel*>(view->model());
     QVERIFY(local_model != nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(local_model->rows()[0].probed && local_model->rows()[1].probed, 5000);
+    if (cached) {
+        auto rows = local_model->rows();
+        for (auto& row : rows) {
+            row.source_revision.reset();
+            row.metadata.fields.clear();
+        }
+        local_model->replaceRows(std::move(rows));
+    }
     view->selectAll();
+
+    if (cached && embedded) {
+        window.findChild<QAction*>(QStringLiteral("action-track-properties"))->trigger();
+        auto* properties = window.findChild<MetadataPropertiesDialog*>();
+        QVERIFY(properties);
+        MetadataGridModel* grid = nullptr;
+        QTRY_VERIFY((grid = properties->findChild<MetadataGridModel*>()) != nullptr);
+        QVERIFY(grid->selection().source(0).source_revision.has_value());
+        QCOMPARE(grid->selection().source(0).baseline, original->document);
+        delete properties;
+        tabs->setCurrentWidget(view);
+        view->selectAll();
+    }
 
     auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
     QVERIFY(action != nullptr);
@@ -4547,6 +4664,17 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     // Unwritable WAVs landed in sidecars with the measured track gains.
     for (const auto& path : {first, second}) {
         const auto encoded = QFile::encodeName(path);
+        if (embedded) {
+            const auto reread = metadata::read_local_metadata(encoded.toStdString());
+            QVERIFY(reread);
+            QVERIFY(reread->document.first_effective_value("replaygaintrackgain"));
+            for (const auto& field : original->document.effective_fields()) {
+                if (!field.canonical_name.starts_with("replaygain")) {
+                    QCOMPARE(reread->document.effective_values(field.canonical_name), field.values);
+                }
+            }
+            continue;
+        }
         const auto sidecar = metadata::read_loudness_sidecar(
             std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())});
         QVERIFY(sidecar.has_value());

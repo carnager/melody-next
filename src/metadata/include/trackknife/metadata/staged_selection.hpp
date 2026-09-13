@@ -66,6 +66,9 @@ struct StagedMetadataSource {
     bool logical_track{false};
     std::optional<StagedCueSheetBinding> cue_sheet{};
     std::optional<StagedLogicalIdentity> logical_identity{};
+    // A cache-only physical occurrence needs a worker-side native read before
+    // becoming an editable baseline. Other revisionless previews stay read-only.
+    bool needs_metadata_capture{false};
 
     friend bool operator==(const StagedMetadataSource&, const StagedMetadataSource&) = default;
 };

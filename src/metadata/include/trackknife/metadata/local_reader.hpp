@@ -6,6 +6,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/metadata/staged_selection.hpp"
 
 #include <string>
 
@@ -36,5 +37,12 @@ struct LocalMetadataRead {
 // revision checks; callers run it on a bounded worker, never the UI thread.
 [[nodiscard]] core::Result<LocalMetadataRead>
 read_local_metadata(const std::string& raw_path, const core::CancellationToken& cancellation = {});
+
+// Prepare revisionless physical cache rows for an explicit metadata operation.
+// Repeated paths share one fresh read; existing revisions and logical overlays
+// remain subject to the existing stale-source checks. Run on a worker.
+[[nodiscard]] core::Result<std::vector<StagedMetadataSource>>
+capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const core::CancellationToken& cancellation = {});
 
 } // namespace trackknife::metadata

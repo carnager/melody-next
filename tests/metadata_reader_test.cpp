@@ -227,6 +227,28 @@ void readsWavPackAndRawBytePath(const std::filesystem::path& fixture_directory) 
     CHECK(raw_read && raw_read->document.first_effective_value("title") ==
                           std::optional<std::string>{"Metadata Fixture"});
 
+    trackknife::metadata::StagedMetadataSource cached{.raw_path = raw_path.native(),
+                                                      .source_revision = {},
+                                                      .baseline = {},
+                                                      .needs_metadata_capture = true};
+    auto prepared = trackknife::metadata::capture_uncached_metadata_sources({cached, cached});
+    CHECK(prepared && prepared->size() == 2);
+    CHECK(prepared && prepared->at(0).source_revision == raw_read->source_revision);
+    CHECK(prepared && prepared->at(0).baseline == raw_read->document);
+    CHECK(prepared && prepared->at(0) == prepared->at(1));
+    CHECK(prepared && !prepared->at(0).needs_metadata_capture);
+    auto stale = prepared->at(0);
+    stale.raw_path = "/already-captured-but-missing.flac";
+    auto unchanged = trackknife::metadata::capture_uncached_metadata_sources({stale});
+    CHECK(unchanged && unchanged->front() == stale);
+    cached.raw_path = "/missing-cache-source.flac";
+    CHECK(!trackknife::metadata::capture_uncached_metadata_sources({cached}));
+    trackknife::core::CancellationSource cancel;
+    cancel.request_cancellation();
+    auto stopped =
+        trackknife::metadata::capture_uncached_metadata_sources({cached}, cancel.token());
+    CHECK(!stopped && stopped.error().code == trackknife::core::ErrorCode::cancelled);
+
     std::filesystem::remove(wavpack, error);
     CHECK(!error);
     std::filesystem::remove_all(directory, error);

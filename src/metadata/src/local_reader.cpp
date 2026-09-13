@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -252,6 +253,42 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
                 .unknown_data_preserved_on_write = preservation_supported,
             },
     };
+}
+
+core::Result<std::vector<StagedMetadataSource>>
+capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const core::CancellationToken& cancellation) {
+    std::map<std::string, LocalMetadataRead> captured;
+    for (auto& source : sources) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(cancelled(source.raw_path));
+        }
+        if (!source.needs_metadata_capture || source.source_revision || source.logical_track) {
+            continue;
+        }
+        auto found = captured.find(source.raw_path);
+        if (found == captured.end()) {
+            auto read = read_local_metadata(source.raw_path, cancellation);
+            if (!read) {
+                // Tagless decodable formats can still store gains in a sidecar.
+                // No native metadata baseline is claimed for these sources.
+                if (read.error().code != core::ErrorCode::unsupported) {
+                    return std::unexpected(read.error());
+                }
+                auto revision = core::observe_local_source_revision(source.raw_path);
+                if (!revision)
+                    return std::unexpected(revision.error());
+                source.source_revision = *revision;
+                source.needs_metadata_capture = false;
+                continue;
+            }
+            found = captured.emplace(source.raw_path, std::move(*read)).first;
+        }
+        source.source_revision = found->second.source_revision;
+        source.baseline = found->second.document;
+        source.needs_metadata_capture = false;
+    }
+    return sources;
 }
 
 } // namespace trackknife::metadata

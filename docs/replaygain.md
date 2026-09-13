@@ -21,6 +21,11 @@ storing are separate capabilities:
 - **Fallback persistence support** means results can be stored in a Trackbench
   sidecar and cached in the library when embedding is impossible or disabled.
 
+For cached physical list rows without captured revisions, starting ReplayGain
+first reads the current native metadata and revision on a background worker
+(ADR-0165). Existing captured revisions still undergo conflict detection.
+Opening the search tab itself does not trigger this preparation.
+
 A normal scan writes metadata only. It never changes encoded audio samples.
 Permanently applying gain is a separate, conspicuously named conversion or
 codec-global-gain operation.

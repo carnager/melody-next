@@ -423,6 +423,7 @@ BenchMainWindow::selectionSourceReader(ListTab& tab, std::vector<QPersistentMode
                     .logical_track = logical,
                     .cue_sheet = std::move(cue_binding),
                     .logical_identity = logical_identity,
+                    .needs_metadata_capture = !row.source_revision && row.probed && !logical,
                 },
             .track_label = std::move(label),
             .audio = {.selection = row.selection, .range = row.segment},

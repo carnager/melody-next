@@ -18,6 +18,7 @@
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/metadata/field_suggestions.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/metadata/rule_script_import.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
@@ -905,15 +906,20 @@ void MetadataPropertiesDialog::captureSources() {
 }
 
 void MetadataPropertiesDialog::startSelection() {
-    selection_watcher_.setFuture(QtConcurrent::run(
-        [sources = std::move(sources_), preferred = std::move(preferred_fields_)]() mutable {
+    selection_watcher_.setFuture(
+        QtConcurrent::run([sources = std::move(sources_), preferred = std::move(preferred_fields_),
+                           token = technical_cancellation_.token()]() mutable {
+            auto prepared = metadata::capture_uncached_metadata_sources(std::move(sources), token);
+            if (!prepared) {
+                return std::make_shared<SelectionResult>(std::unexpected(prepared.error()));
+            }
             std::vector<std::string_view> preferred_views;
             preferred_views.reserve(preferred.size());
             for (const auto& field : preferred) {
                 preferred_views.emplace_back(field);
             }
             return std::make_shared<SelectionResult>(
-                metadata::StagedMetadataSelection::create(std::move(sources), preferred_views));
+                metadata::StagedMetadataSelection::create(std::move(*prepared), preferred_views));
         }));
 }
 

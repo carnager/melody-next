@@ -23,7 +23,8 @@ cached-snapshot provenance; native spellings, unsupported objects, file revision
 and absent technical properties are not fabricated. The index's existing field
 limits still apply, and these documents are presentation snapshots, never a
 complete native write baseline. Playback and Edit tags retain their existing
-on-demand file access and fresh validation boundaries. Search insertion also
+on-demand file access and fresh validation boundaries. ADR-0165 explicitly
+captures revisionless physical cache rows before editing or ReplayGain. Search insertion also
 schedules the existing independent artwork loader: cached covers are reused,
 and missing covers are read asynchronously once per album without tag probing.
 

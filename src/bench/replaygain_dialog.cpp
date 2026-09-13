@@ -3,6 +3,7 @@
 #include "bench/replaygain_dialog.hpp"
 
 #include "bench/metadata_dialog_helpers.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 
 #include <QCheckBox>
@@ -178,30 +179,35 @@ void ReplayGainDialog::startRun() {
     scan_problems_.clear();
     cancellation_ = core::CancellationSource{};
     status_->setText(QStringLiteral("Reading the selection…"));
-    capture_watcher_.setFuture(QtConcurrent::run(
-        [reader = source_reader_, count = item_count_, token = cancellation_.token()] {
-            auto capture = std::make_shared<Capture>();
-            std::vector<metadata::StagedMetadataSource> sources;
-            sources.reserve(count);
-            capture->audio.reserve(count);
-            for (std::size_t index = 0U; index < count; ++index) {
-                if (token.is_cancellation_requested()) {
-                    capture->selection =
-                        std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
-                                                    .message = "ReplayGain capture cancelled",
-                                                    .context = {}});
-                    return capture;
-                }
-                auto source = reader(index);
-                if (!source) {
-                    continue;
-                }
-                sources.push_back(std::move(source->source));
-                capture->audio.push_back(source->audio);
+    capture_watcher_.setFuture(QtConcurrent::run([reader = source_reader_, count = item_count_,
+                                                  token = cancellation_.token()] {
+        auto capture = std::make_shared<Capture>();
+        std::vector<metadata::StagedMetadataSource> sources;
+        sources.reserve(count);
+        capture->audio.reserve(count);
+        for (std::size_t index = 0U; index < count; ++index) {
+            if (token.is_cancellation_requested()) {
+                capture->selection =
+                    std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                                .message = "ReplayGain capture cancelled",
+                                                .context = {}});
+                return capture;
             }
-            capture->selection = metadata::StagedMetadataSelection::create(std::move(sources), {});
+            auto source = reader(index);
+            if (!source) {
+                continue;
+            }
+            sources.push_back(std::move(source->source));
+            capture->audio.push_back(source->audio);
+        }
+        auto prepared = metadata::capture_uncached_metadata_sources(std::move(sources), token);
+        if (!prepared) {
+            capture->selection = std::unexpected(prepared.error());
             return capture;
-        }));
+        }
+        capture->selection = metadata::StagedMetadataSelection::create(std::move(*prepared), {});
+        return capture;
+    }));
 }
 
 void ReplayGainDialog::finishCapture() {

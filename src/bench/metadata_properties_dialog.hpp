@@ -368,6 +368,8 @@ class MetadataPropertiesDialog final : public QDialog {
     QPointer<QInputDialog> field_name_dialog_;
     QPointer<QDialog> transformation_dialog_;
     QPointer<QDialog> identify_dialog_;
+    std::shared_ptr<const operations::PreparationPlan> active_metadata_plan_;
+    bool metadata_had_commits_{false};
     QPointer<QDialog> feedback_dialog_;
     std::shared_ptr<MetadataApplyProgressState> apply_progress_state_;
     std::shared_ptr<FilePublicationApplyProgressState> file_apply_progress_state_;

@@ -213,6 +213,8 @@ class BenchMainWindowTest final : public QObject {
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
+    void metadataRetrySkipsSavedFiles_data();
+    void metadataRetrySkipsSavedFiles();
     void metadataApplyCombinesTagsAndArtwork_data();
     void metadataApplyCombinesTagsAndArtwork();
     void artworkArchivePickerAddsChosenImageWithItsRole();
@@ -4522,6 +4524,143 @@ void BenchMainWindowTest::folderBookmarksMigrateFromLibraryRoots() {
         QSettings settings;
         settings.remove(QStringLiteral("library/roots"));
         settings.remove(QStringLiteral("library/bookmarks"));
+    }
+}
+
+void BenchMainWindowTest::metadataRetrySkipsSavedFiles_data() {
+    QTest::addColumn<bool>("change_source");
+    QTest::addColumn<bool>("stopped");
+    QTest::newRow("failed-then-saved") << false << false;
+    QTest::newRow("stopped-then-saved") << false << true;
+    QTest::newRow("changed-file-blocked") << true << false;
+}
+
+void BenchMainWindowTest::metadataRetrySkipsSavedFiles() {
+    QFETCH(bool, change_source);
+    QFETCH(bool, stopped);
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    std::vector<MetadataPropertiesSource> sources;
+    std::vector<std::string> paths;
+    for (int index = 0; index < 2; ++index) {
+        const auto path = media.filePath(QStringLiteral("retry-%1.flac").arg(index));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), path));
+        paths.push_back(QFile::encodeName(path).toStdString());
+        const auto read = metadata::read_local_metadata(paths.back());
+        QVERIFY(read.has_value());
+        sources.push_back({.source = {.raw_path = paths.back(),
+                                      .source_revision = read->source_revision,
+                                      .baseline = read->document},
+                           .track_label = path});
+    }
+    std::array<int, 2> attempts{};
+    std::vector<operations::MetadataApplyResult> outcomes;
+    const auto database = std::filesystem::path{
+        QFile::encodeName(media.filePath(QStringLiteral("retry.sqlite3"))).toStdString()};
+    auto* dialog = new MetadataPropertiesDialog(
+        sources.size(),
+        [sources](std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return sources.at(index);
+        },
+        {},
+        [&, database] {
+            return MetadataWritePlanApplier{
+                [&, database](const metadata::MetadataWritePlan& plan,
+                              const operations::MetadataApplyProgressCallback& progress,
+                              const core::CancellationToken& cancellation)
+                    -> core::Result<operations::MetadataApplyResult> {
+                    auto journal = persistence::SqliteMetadataOperationJournal::open(database);
+                    if (!journal) {
+                        return std::unexpected(journal.error());
+                    }
+                    return operations::apply_metadata_write_plan(
+                        plan,
+                        [&](const metadata::MetadataWritePlanSource& source,
+                            const core::CancellationToken& token)
+                            -> core::Result<operations::MetadataCommitResult> {
+                            const auto index = source.raw_path == paths[0] ? 0U : 1U;
+                            ++attempts[index];
+                            if (index == 1U && attempts[index] == 1) {
+                                return std::unexpected(
+                                    core::Error{.code = stopped ? core::ErrorCode::cancelled
+                                                                : core::ErrorCode::io,
+                                                .message = "injected temporary failure",
+                                                .context = {}});
+                            }
+                            return operations::commit_flac_metadata_source(
+                                source, *journal,
+                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                                    return {};
+                                },
+                                token);
+                        },
+                        {}, {}, progress, cancellation,
+                        operations::MetadataApplyOptions{.maximum_parallelism = 1U});
+                }};
+        },
+        [&](const operations::MetadataApplyResult& result) { outcomes.push_back(result); });
+    dialog->setArtworkMutationServices([] { return ArtworkWritePlanApplier{}; }, {});
+    dialog->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-files"))) !=
+                nullptr);
+    auto* grid = qobject_cast<MetadataGridModel*>(files->model());
+    QVERIFY(grid != nullptr);
+    const auto title = grid->ensureField(QStringLiteral("TITLE"));
+    QVERIFY(title.has_value());
+    const std::vector<std::size_t> indexes{0U, 1U};
+    QVERIFY(grid->replaceFieldValues(indexes, title->field_index, {"Retried title"}));
+    auto* sections = dialog->findChild<QTabWidget*>(QStringLiteral("bench-metadata-sections"));
+    QVERIFY(sections != nullptr);
+    sections->setCurrentIndex(1);
+    auto* covers = dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-items"));
+    QVERIFY(covers != nullptr);
+    QTRY_COMPARE(covers->model()->rowCount(), 2);
+    covers->selectAll();
+    auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-remove"));
+    QVERIFY(remove != nullptr);
+    QTRY_VERIFY(remove->isEnabled());
+    remove->click();
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QVERIFY(apply != nullptr);
+    QTRY_VERIFY(apply->isEnabled());
+    apply->click();
+    QTRY_COMPARE(outcomes.size(), 1U);
+    QCOMPARE(outcomes.front().committed_source_count(), 1U);
+    QFile first{QString::fromStdString(paths[0])};
+    QVERIFY(first.open(QIODevice::ReadOnly));
+    const auto saved_bytes = first.readAll();
+    first.close();
+    if (change_source) {
+        QFile changed{QString::fromStdString(paths[1])};
+        QVERIFY(changed.open(QIODevice::Append));
+        QCOMPARE(changed.write("external-change"), 15);
+        changed.close();
+    }
+    QPushButton* retry = nullptr;
+    QTRY_VERIFY((retry = dialog->findChild<QPushButton*>(
+                     QStringLiteral("bench-preparation-retry"))) != nullptr);
+    QPointer guard{dialog};
+    retry->click();
+    QTRY_COMPARE(outcomes.size(), 2U);
+    QCOMPARE(attempts[0], 1);
+    QCOMPARE(attempts[1], 2);
+    QVERIFY(first.open(QIODevice::ReadOnly));
+    QCOMPARE(first.readAll(), saved_bytes);
+    if (change_source) {
+        QCOMPARE(outcomes.back().failed_source_count(), 1U);
+        QCOMPARE(outcomes.back().sources.front().issue->code, core::ErrorCode::conflict);
+        QVERIFY(!guard.isNull());
+        delete dialog;
+    } else {
+        QCOMPARE(outcomes.back().committed_source_count(), 1U);
+        QTRY_VERIFY(guard.isNull());
+        const auto art = metadata::read_local_artwork_inventory(paths[1]);
+        QVERIFY(art && art->items.empty());
+        const auto tags = metadata::read_local_metadata(paths[1]);
+        QVERIFY(tags.has_value());
+        QCOMPARE(tags->document.first_effective_value("title"),
+                 std::optional<std::string>{"Retried title"});
     }
 }
 

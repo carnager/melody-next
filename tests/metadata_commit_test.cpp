@@ -1618,6 +1618,11 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
             recovery.published_revision.reset();
             recovery.failure.reset();
             CHECK(journal->create(recovery).has_value());
+            const auto blocked_retry = operations::commit_flac_metadata_source(
+                combined->sources.front(), *journal,
+                [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+            CHECK(!blocked_retry && blocked_retry.error().code == core::ErrorCode::conflict &&
+                  read_bytes(path) == original_bytes);
             const auto prepared = metadata::prepare_qualified_metadata_write_copy(
                 combined->sources.front(), recovery.prepared_raw_path);
             CHECK(prepared.has_value());

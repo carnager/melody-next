@@ -2973,6 +2973,9 @@ void MetadataPropertiesDialog::showPreparationFeedback(const QString& window_tit
         if (feedback_dialog_ == dialog) {
             feedback_dialog_ = nullptr;
         }
+        if (dialog->property("retry-starting").toBool()) {
+            return;
+        }
         if (apply_committed_) {
             QTimer::singleShot(0, this, &QDialog::close);
         } else {
@@ -3022,6 +3025,7 @@ void MetadataPropertiesDialog::startMetadataApply(
         showStickyStatus(QStringLiteral("Metadata Apply is unavailable"));
         return;
     }
+    active_metadata_plan_ = plan;
     apply_cancellation_.request_cancellation();
     apply_cancellation_ = core::CancellationSource{};
     apply_progress_state_ = std::make_shared<MetadataApplyProgressState>();
@@ -3035,7 +3039,7 @@ void MetadataPropertiesDialog::startMetadataApply(
     }
     applying_file_paths_ = false;
     apply_stop_requested_ = false;
-    apply_committed_ = false;
+    apply_committed_ = metadata_had_commits_;
     updateWritePlanButton();
     const auto total = plan->metadata->sources.size();
     read_only_->setText(QStringLiteral("Saving metadata · 0 of %1").arg(total));
@@ -3153,7 +3157,8 @@ void MetadataPropertiesDialog::finishMetadataApply() {
     setApplyProgressVisible(false);
     const auto result = metadata_apply_watcher_.result();
     if (result && *result) {
-        apply_committed_ = (**result).committed_source_count() > 0U;
+        metadata_had_commits_ = metadata_had_commits_ || (**result).committed_source_count() > 0U;
+        apply_committed_ = metadata_had_commits_;
         if (apply_observer_) {
             apply_observer_(**result);
         }
@@ -3235,7 +3240,7 @@ void MetadataPropertiesDialog::finishMetadataApply() {
     const auto stopped = stopped_count > 0U && failed == 0U;
     const auto summary =
         QStringLiteral("%1 saved · %2 failed · %3 stopped. Saved files are done; the files below "
-                       "were not touched.")
+                       "need attention. Files with recovery problems may already have changed.")
             .arg(saved)
             .arg(failed)
             .arg(stopped_count);
@@ -3246,6 +3251,38 @@ void MetadataPropertiesDialog::finishMetadataApply() {
     showPreparationFeedback(stopped ? QStringLiteral("Save stopped")
                                     : QStringLiteral("Saved with problems"),
                             summary, std::move(rows));
+    // Retry the reviewed per-file intent, retaining its original revision and
+    // fingerprints. Never reconstruct a retry from displayed or freshly read tags.
+    if (active_metadata_plan_ && active_metadata_plan_->metadata && outcome.cue_sheets.empty() &&
+        outcome.sidecars.empty()) {
+        auto retry = std::make_shared<operations::PreparationPlan>(*active_metadata_plan_);
+        std::erase_if(retry->metadata->sources, [&outcome](const auto& source) {
+            const auto found = std::ranges::find(outcome.sources, source.raw_path,
+                                                 &operations::MetadataApplySourceResult::raw_path);
+            return found == outcome.sources.end() || found->commit ||
+                   (found->state != operations::MetadataApplySourceState::failed &&
+                    found->state != operations::MetadataApplySourceState::cancelled);
+        });
+        if (retry->ready() && !retry->metadata->sources.empty() && feedback_dialog_) {
+            auto* dialog = feedback_dialog_.data();
+            auto* buttons = dialog->findChild<QDialogButtonBox*>(
+                QStringLiteral("bench-preparation-feedback-buttons"));
+            auto* retry_button = buttons->addButton(QStringLiteral("Retry failed / stopped files"),
+                                                    QDialogButtonBox::ActionRole);
+            retry_button->setObjectName(QStringLiteral("bench-preparation-retry"));
+            retry_button->setToolTip(
+                QStringLiteral("Retry only unfinished files using the reviewed changes. Changed "
+                               "files and unresolved recovery records remain blocked."));
+            if (apply_committed_) {
+                buttons->button(QDialogButtonBox::Close)->setText(QStringLiteral("Close editor"));
+            }
+            connect(retry_button, &QPushButton::clicked, this, [this, dialog, retry] {
+                dialog->setProperty("retry-starting", true);
+                dialog->close();
+                startMetadataApply(retry);
+            });
+        }
+    }
 }
 
 void MetadataPropertiesDialog::finishFileApply() {

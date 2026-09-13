@@ -1917,6 +1917,18 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
     if (!process_lock) {
         return std::unexpected(std::move(process_lock.error()));
     }
+    const auto incomplete = journal.load_incomplete();
+    if (!incomplete) {
+        return std::unexpected(incomplete.error());
+    }
+    for (const auto& operation : *incomplete) {
+        if (operation.source_raw_path == source_plan.raw_path) {
+            return std::unexpected(operation_error(
+                core::ErrorCode::conflict,
+                "An unfinished operation for this file requires recovery before another save",
+                source_plan.raw_path, operation.id));
+        }
+    }
     auto source_descriptor =
         open_and_lock_file(source_plan.raw_path, cancellation, source_plan.raw_path);
     if (!source_descriptor) {

@@ -199,7 +199,12 @@ covers. Each physical file is prepared and verified once before publication,
 with one recovery backup for all its changes. A failed replacement leaves that
 file's original tags and pictures intact; one operation undo restores both.
 Cancellation or failure can still leave earlier files committed in a multi-file
-batch. Feedback reports those outcomes. External image deletion and artwork
+batch. Feedback reports those outcomes. For physical tag/artwork saves, use
+**Retry failed / stopped files** to retry only unfinished files. Previously saved
+files are skipped. Changed source files and unresolved recovery records remain
+blocked; reopen changed files to review them again. This retry control does not
+yet cover rename/move, CUE sheets, or loudness sidecars (ADR-0161).
+External image deletion and artwork
 mutation in unqualified containers remain outside this workflow (ADR-0160).
 
 ## Tag editor

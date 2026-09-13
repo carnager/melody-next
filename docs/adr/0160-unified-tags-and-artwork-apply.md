@@ -35,7 +35,7 @@ donors, never deletion targets. The pending list displays Before/After thumbnail
 cancellable background worker, revision-checked core image reads, bounded
 decode dimensions, and generation rejection after draft changes. Only small
 thumbnail images are retained; previews do not replace commit revalidation.
-A dedicated retry workflow remains a separate improvement.
+ADR-0161 adds explicit retry for unfinished physical tag/artwork files.
 
 ## Verification
 

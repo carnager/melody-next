@@ -14,6 +14,7 @@
 #include <QDropEvent>
 #include <QHeaderView>
 #include <QMimeData>
+#include <QScrollBar>
 #include <QUrl>
 #include <QtTest>
 
@@ -22,6 +23,7 @@ namespace {
 
 class CueBatchModel final : public QAbstractTableModel {
   public:
+    int group_size{0};
     void appendCueAlbum(const int tracks) {
         if (tracks <= 0) {
             return;
@@ -45,7 +47,7 @@ class CueBatchModel final : public QAbstractTableModel {
             return {};
         }
         if (role == track_album_group_start_role) {
-            return index.row() == 0;
+            return group_size > 0 ? index.row() % group_size == 0 : index.row() == 0;
         }
         if (role == track_album_artist_role) {
             return QStringLiteral("Cue Artist");
@@ -98,6 +100,7 @@ class QueueTableViewTest final : public QObject {
 
   private slots:
     void preGroupedBatchReservesHeaderAboveFirstTrack();
+    void largeGroupedResultsScrollToLastRow();
     void homeAndEndSelectQueueBoundaries();
     void shiftHomeAndEndExtendFromSelectionAnchor();
     void boundaryKeysHandleEmptyQueue();
@@ -233,6 +236,34 @@ void QueueTableViewTest::boundaryKeysHandleEmptyQueue() {
         QVERIFY(!view.currentIndex().isValid());
         QVERIFY(view.selectionModel()->selectedRows().isEmpty());
     }
+}
+
+void QueueTableViewTest::largeGroupedResultsScrollToLastRow() {
+    CueBatchModel model;
+    model.group_size = 5;
+    QueueTableView view{nullptr};
+    view.setModel(&model);
+    view.setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    view.verticalHeader()->setDefaultSectionSize(22);
+    view.verticalHeader()->setMinimumSectionSize(18);
+    view.setAlbumGroupingEnabled(true);
+    view.resize(640, 360);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    model.appendCueAlbum(2000);
+    QTRY_COMPARE(view.rowHeight(1995), 22 + QueueItemDelegate::album_header_height);
+    view.setCurrentIndex(model.index(0, track_title_column));
+    QTest::keyClick(&view, Qt::Key_End);
+    QCOMPARE(view.currentIndex().row(), 1999);
+    QTRY_VERIFY(view.viewport()->rect().contains(view.visualRect(view.currentIndex()).center()));
+    const auto last = view.visualRect(view.currentIndex());
+    QVERIFY(last.bottom() < view.viewport()->height());
+    QTest::keyClick(&view, Qt::Key_Up);
+    QCOMPARE(view.currentIndex().row(), 1998);
+    QVERIFY(view.viewport()->rect().contains(view.visualRect(view.currentIndex()).center()));
+    // Removing header heights must also shrink the scroll range.
+    view.setAlbumGroupingEnabled(false);
+    QTRY_VERIFY(view.verticalScrollBar()->maximum() <= 2000 * 22);
 }
 
 void QueueTableViewTest::preGroupedBatchReservesHeaderAboveFirstTrack() {

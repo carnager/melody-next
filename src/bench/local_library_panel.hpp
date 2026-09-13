@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/local_list_model.hpp"
 #include "trackknife/persistence/local_library.hpp"
 
 #include <QCache>
@@ -51,7 +52,7 @@ class LocalLibraryPanel final : public QWidget {
 
   signals:
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
-    void searchCommitted(QString query, std::vector<std::string> raw_paths);
+    void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -61,6 +62,7 @@ class LocalLibraryPanel final : public QWidget {
         persistence::LibraryPage page;
         std::vector<persistence::LibraryRoot> roots;
         std::vector<std::string> paths;
+        std::vector<LocalTrackRow> rows;
         QString error;
         std::size_t unavailable{0};
     };

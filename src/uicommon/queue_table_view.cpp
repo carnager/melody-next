@@ -424,6 +424,7 @@ void QueueTableView::rebuildAlbumRowGeometry() {
     }
     row_header->hide();
     if (!album_grouping_enabled_ || model() == nullptr || model()->rowCount() < 2) {
+        updateGeometries();
         return;
     }
 
@@ -444,6 +445,9 @@ void QueueTableView::rebuildAlbumRowGeometry() {
         row_header->resizeSection(row, default_height + QueueItemDelegate::album_header_height);
     }
     setUpdatesEnabled(true);
+    // Section-size signals are deliberately batched above. QTableView therefore
+    // needs one explicit scroll-range update after the final header heights.
+    updateGeometries();
     viewport()->update();
 }
 
@@ -461,6 +465,9 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
             row,
             default_height + (beginsAlbum(this, row) ? QueueItemDelegate::album_header_height : 0));
     }
+    // Section-size signals are deliberately batched above. QTableView therefore
+    // needs one explicit scroll-range update after the final header heights.
+    updateGeometries();
     viewport()->update();
 }
 

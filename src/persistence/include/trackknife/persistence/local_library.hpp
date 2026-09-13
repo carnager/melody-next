@@ -6,6 +6,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/persistence/tkq_row.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <atomic>
@@ -53,6 +54,12 @@ struct LibraryPage {
     bool more{false};
 };
 
+// Presentation snapshot only; never a complete native metadata write baseline.
+struct LibraryTrackSnapshot {
+    std::string raw_path;
+    TkqRowFacts facts;
+};
+
 struct LibraryScanProgress {
     std::atomic<std::size_t> visited{0};
     std::atomic<std::size_t> indexed{0};
@@ -92,6 +99,11 @@ class LocalLibrary final {
     core::Result<std::vector<std::string>>
     filter_paths(const query::CompiledTkq& compiled,
                  const core::CancellationToken& cancellation = {}) const;
+    // Reads cached fields/technicals in input order, preserving raw paths and duplicates.
+    // No filesystem access; missing index records fail rather than trigger discovery.
+    core::Result<std::vector<LibraryTrackSnapshot>>
+    cached_tracks(const std::vector<std::string>& raw_paths,
+                  const core::CancellationToken& cancellation = {}) const;
     core::Result<std::optional<std::string>>
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const;

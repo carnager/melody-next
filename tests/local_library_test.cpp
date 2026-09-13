@@ -2,6 +2,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/local_library_panel.hpp"
+#include "bench/search_dialog.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
@@ -17,8 +18,10 @@
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -134,6 +137,7 @@ class LocalLibraryTest final : public QObject {
     void scansOnlyOnRefresh_data();
     void scansOnlyOnRefresh();
     void queryModeFiltersAndCommitsResults();
+    void databaseSearchOpensCachedRowsWithoutFiles();
     void localViewBrowsesSearchesAndOpensFiles();
     void dragResolvesUnloadedPagesAndRawPaths();
     void trackNumbersAppearInTreeAndSearch();
@@ -706,6 +710,58 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
 // structured results in the tree, inline diagnostics for malformed
 // queries (never a silent word search), and Enter committing the
 // filtered result set through the ADR-0140 snapshot-tab path.
+void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto alpha = fixture(root, "raw-\xff.flac", "Alpha");
+    const auto beta = fixture(root, "02.flac", "Beta");
+    const auto database = base / "state.sqlite";
+    auto library = persistence::LocalLibrary::open(database);
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress progress;
+    QVERIFY(library->scan({}, progress));
+    std::filesystem::rename(root, base / "offline");
+    const auto cached = library->cached_tracks({beta, alpha, beta});
+    QVERIFY(cached && cached->size() == 3);
+    QCOMPARE(cached->at(0).raw_path, beta);
+    QCOMPARE(cached->at(1).raw_path, alpha);
+    QCOMPARE(cached->at(2).raw_path, beta);
+    QCOMPARE(cached->at(1).facts.title, std::string{"Alpha"});
+    QVERIFY(cached->at(1).facts.sample_rate > 0);
+    QVERIFY(!library->cached_tracks({"/not-indexed.flac"}));
+    core::CancellationSource cancellation;
+    cancellation.request_cancellation();
+    const auto cancelled = library->cached_tracks({alpha}, cancellation.token());
+    QVERIFY(!cancelled && cancelled.error().code == core::ErrorCode::cancelled);
+
+    SearchDialog dialog{database, {}, {}};
+    dialog.show();
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* open = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+    QVERIFY(input && mode && results && open);
+    QSignalSpy requested{&dialog, &SearchDialog::rowsRequested};
+    mode->setChecked(true);
+    input->setText(QStringLiteral("codec IS flac SORT DESCENDING BY %title%"));
+    QTRY_COMPARE(results->count(), 2);
+    open->click();
+    QCOMPARE(requested.size(), 1);
+    const auto rows = requested.takeFirst().at(1).value<std::vector<LocalTrackRow>>();
+    QCOMPARE(rows.size(), 2U);
+    QCOMPARE(rows[0].raw_path, beta);
+    QCOMPARE(rows[1].raw_path, alpha);
+    QCOMPARE(rows[1].title, std::string{"Alpha"});
+    QCOMPARE(rows[1].metadata.first_effective_value("albumartist"),
+             std::optional<std::string>{"Björk"});
+    QCOMPARE(rows[1].metadata.fields.front().provenance,
+             metadata::FieldProvenance::cached_snapshot);
+    QVERIFY(rows[1].probed && rows[1].technicals && rows[1].duration_ms);
+    QVERIFY(!rows[1].source_revision);
+    mode->setChecked(false);
+}
+
 void LocalLibraryTest::queryModeFiltersAndCommitsResults() {
     QTemporaryDir temporary;
     QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -767,8 +823,9 @@ void LocalLibraryTest::queryModeFiltersAndCommitsResults() {
     QTRY_COMPARE(committed.size(), 1);
     const auto arguments = committed.takeFirst();
     QCOMPARE(arguments.at(0).toString(), QStringLiteral("genre IS rock OR genre IS jazz"));
-    const auto paths = arguments.at(1).value<std::vector<std::string>>();
-    QCOMPARE(paths.size(), 2U);
+    const auto rows = arguments.at(1).value<std::vector<LocalTrackRow>>();
+    QCOMPARE(rows.size(), 2U);
+    QVERIFY(rows.front().probed && rows.front().technicals.has_value());
 
     // Off again: the plain word search is untouched and the sticky
     // setting resets for later tests.
@@ -901,6 +958,7 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         QTRY_COMPARE(new_view->model()->rowCount(), 2);
         // ADR-0140: Enter in the search field keeps the full result set as
         // a new list tab named after the query.
+        std::filesystem::rename(root, root.parent_path() / "offline");
         search->setFocus();
         QTest::keyClick(search, Qt::Key_Return);
         QTRY_COMPARE(tabs->count(), original_tabs + 2);
@@ -914,7 +972,13 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
             QVERIFY(committed_model != nullptr);
             QTRY_COMPARE(committed_model->rows()[0].raw_path, path);
             QCOMPARE(committed_model->rows()[1].raw_path, second);
+            QVERIFY(committed_model->rows()[0].probed);
+            QVERIFY(committed_model->rows()[0].technicals.has_value());
+            QCOMPARE(committed_model->rows()[0].title, std::string{"First song"});
+            QCOMPARE(committed_model->rows()[0].metadata.fields.front().provenance,
+                     metadata::FieldProvenance::cached_snapshot);
         }
+        std::filesystem::rename(root.parent_path() / "offline", root);
         const auto committed_index = tabs->currentIndex();
         QTimer::singleShot(0, [] {
             if (auto* confirmation =

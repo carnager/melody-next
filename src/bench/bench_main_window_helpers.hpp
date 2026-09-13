@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/local_list_model.hpp"
+#include "trackknife/persistence/local_library.hpp"
 
 #include <QString>
 #include <QStringList>
@@ -45,6 +46,7 @@ void remove_shadowed_probed_metadata(metadata::MetadataDocument& document);
 [[nodiscard]] std::string metadata_value(const metadata::MetadataDocument& document,
                                          std::initializer_list<std::string_view> candidate_names);
 void project_display_metadata(LocalTrackRow& row);
+[[nodiscard]] LocalTrackRow cached_library_row(persistence::LibraryTrackSnapshot snapshot);
 
 // ADR-0139: the stable CUE logical identity ("cue-v1" NUL sheet path NUL
 // file index NUL track index), shared by ingest, apply capture, and

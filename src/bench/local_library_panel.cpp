@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_library_panel.hpp"
+#include "bench/bench_main_window_helpers.hpp"
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
@@ -777,7 +778,14 @@ void LocalLibraryPanel::commitSearch() {
                  Outcome outcome;
                  auto paths = library.filter_paths(*shared, cancellation);
                  if (paths) {
-                     outcome.paths = std::move(*paths);
+                     auto cached = library.cached_tracks(*paths, cancellation);
+                     if (!cached) {
+                         outcome.error = text(cached.error().message);
+                         return outcome;
+                     }
+                     for (auto& track : *cached) {
+                         outcome.rows.push_back(cached_library_row(std::move(track)));
+                     }
                  } else {
                      outcome.error = text(paths.error().message);
                  }
@@ -788,12 +796,12 @@ void LocalLibraryPanel::commitSearch() {
                      status_->setText(outcome.error);
                      return;
                  }
-                 if (outcome.paths.empty()) {
+                 if (outcome.rows.empty()) {
                      status_->setText(tr("No search results to keep."));
                      return;
                  }
                  status_->setText(tr("Search kept as a new tab."));
-                 emit searchCommitted(query_text, std::move(outcome.paths));
+                 emit searchCommitted(query_text, std::move(outcome.rows));
              }});
         return;
     }
@@ -819,6 +827,14 @@ void LocalLibraryPanel::commitSearch() {
                          }
                      }
                  }
+                 auto cached = library.cached_tracks(outcome.paths, cancellation);
+                 if (!cached) {
+                     outcome.error = text(cached.error().message);
+                     return outcome;
+                 }
+                 for (auto& track : *cached) {
+                     outcome.rows.push_back(cached_library_row(std::move(track)));
+                 }
                  return outcome;
              },
              [this, query_text](Outcome outcome) {
@@ -826,12 +842,12 @@ void LocalLibraryPanel::commitSearch() {
                      status_->setText(outcome.error);
                      return;
                  }
-                 if (outcome.paths.empty()) {
+                 if (outcome.rows.empty()) {
                      status_->setText(tr("No search results to keep."));
                      return;
                  }
                  status_->setText(tr("Search kept as a new tab."));
-                 emit searchCommitted(query_text, std::move(outcome.paths));
+                 emit searchCommitted(query_text, std::move(outcome.rows));
              }});
 }
 

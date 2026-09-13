@@ -48,20 +48,15 @@ class SearchDialog final : public QDialog {
     ~SearchDialog() override;
 
   signals:
-    // Database-scope results resolve to paths for the discovery pipeline.
-    void resultsRequested(QString name, std::vector<std::string> raw_paths,
-                          LocalLibraryAction action);
-    // Tab-scope results carry the matched rows themselves.
+    // Both scopes carry cached rows directly; opening never starts file discovery.
     void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action);
 
   private:
     struct Outcome {
         std::vector<std::string> labels;
-        std::vector<std::string> paths;
         std::vector<LocalTrackRow> rows;
         std::vector<std::pair<std::string, LocalTrackTechnicals>> probed;
         QString error;
-        bool more{false};
         std::size_t scanned{0U};
     };
 
@@ -110,7 +105,6 @@ class SearchDialog final : public QDialog {
     std::size_t generation_{0U};
     bool searching_{false};
     // The last successful search's full result payload.
-    std::vector<std::string> result_paths_;
     std::vector<LocalTrackRow> result_rows_;
     QString result_query_;
 };

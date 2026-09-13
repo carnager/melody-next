@@ -109,6 +109,42 @@ void project_display_metadata(LocalTrackRow& row) {
     row.track_number = metadata_value(row.metadata, {"tracknumber", "track"});
 }
 
+LocalTrackRow cached_library_row(persistence::LibraryTrackSnapshot snapshot) {
+    LocalTrackRow row;
+    row.raw_path = std::move(snapshot.raw_path);
+    for (auto& [name, values] : snapshot.facts.fields) {
+        metadata::MetadataField field{.canonical_name = name,
+                                      .native_name = name,
+                                      .values = {},
+                                      .qualifier = {},
+                                      .provenance = metadata::FieldProvenance::cached_snapshot};
+        for (auto& value : values) {
+            field.values.push_back(std::move(value.first));
+        }
+        row.metadata.fields.push_back(std::move(field));
+    }
+    project_display_metadata(row);
+    if (row.title.empty())
+        row.title = std::move(snapshot.facts.title);
+    if (row.artist.empty())
+        row.artist = std::move(snapshot.facts.artist);
+    if (row.album.empty())
+        row.album = std::move(snapshot.facts.album);
+    if (row.date.empty())
+        row.date = std::move(snapshot.facts.date);
+    if (snapshot.facts.duration_ms >= 0)
+        row.duration_ms = snapshot.facts.duration_ms;
+    if (!snapshot.facts.codec.empty()) {
+        row.technicals =
+            LocalTrackTechnicals{.codec = std::move(snapshot.facts.codec),
+                                 .sample_rate = static_cast<int>(snapshot.facts.sample_rate),
+                                 .bits = static_cast<int>(snapshot.facts.bits),
+                                 .channels = static_cast<int>(snapshot.facts.channels)};
+    }
+    row.probed = true;
+    return row;
+}
+
 std::string cue_track_logical_reference(const std::string& raw_cue_path,
                                         const std::size_t file_index,
                                         const std::size_t track_index) {

@@ -109,7 +109,9 @@ class Statement {
 
 class Transaction {
   public:
-    explicit Transaction(sqlite3* db) : db_(db) { execute(db_, "BEGIN IMMEDIATE"); }
+    explicit Transaction(sqlite3* db, bool read_only = false) : db_(db) {
+        execute(db_, read_only ? "BEGIN" : "BEGIN IMMEDIATE");
+    }
     ~Transaction() {
         if (!done_) {
             sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
@@ -1102,6 +1104,51 @@ LocalLibrary::filter_paths(const query::CompiledTkq& compiled,
         for (const auto& row : matches) {
             result.push_back(row.raw_path);
         }
+        return result;
+    });
+}
+
+core::Result<std::vector<LibraryTrackSnapshot>>
+LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
+                            const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        if (raw_paths.size() > filter_match_cap) {
+            fail("Selection exceeds 100000 files", core::ErrorCode::limit_exceeded);
+        }
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        Transaction snapshot{db, true};
+        Statement select{db, std::string{"SELECT "} + filter_columns +
+                                 " FROM local_library_tracks t WHERE t.raw_path=?"};
+        Statement fields{db, "SELECT canonical_name,value,value_lower FROM local_library_fields "
+                             "WHERE raw_path=? ORDER BY canonical_name,position"};
+        std::vector<LibraryTrackSnapshot> result;
+        result.reserve(raw_paths.size());
+        for (const auto& path : raw_paths) {
+            if (cancellation.is_cancellation_requested()) {
+                fail("Library query cancelled", core::ErrorCode::cancelled);
+            }
+            select.reset();
+            select.blob(1, path);
+            if (!select.next()) {
+                fail("A search result is no longer indexed; run the search again",
+                     core::ErrorCode::conflict);
+            }
+            FilterRow row;
+            row.facts.title = select.bytes(1);
+            row.facts.artist = select.bytes(2);
+            row.facts.album = select.bytes(3);
+            row.facts.date = select.bytes(5);
+            row.facts.search_text = select.bytes(6);
+            row.facts.codec = select.bytes(9);
+            row.facts.sample_rate = select.number(10);
+            row.facts.bits = select.number(11);
+            row.facts.channels = select.number(12);
+            row.facts.duration_ms = select.number(13);
+            load_field_rows(fields, path, row);
+            result.push_back({path, std::move(row.facts)});
+        }
+        snapshot.commit();
         return result;
     });
 }

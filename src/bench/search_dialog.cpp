@@ -380,17 +380,12 @@ void SearchDialog::scheduleSearch() {
     updateSavedSearchButtons();
     debounce_->stop();
     results_->clear();
-    result_paths_.clear();
     result_rows_.clear();
     open_button_->setEnabled(false);
     ++generation_;
     cancellation_.request_cancellation();
     cancellation_ = core::CancellationSource{};
     if (input_->text().trimmed().isEmpty()) {
-        results_->clear();
-        result_paths_.clear();
-        result_rows_.clear();
-        open_button_->setEnabled(false);
         status_->clear();
         error_->hide();
         return;
@@ -436,20 +431,22 @@ void SearchDialog::startSearch() {
                     outcome.error = displayText(library.error().message);
                     return outcome;
                 }
-                auto page = library->filter(*shared, 0U, 200U, token);
-                if (!page) {
-                    outcome.error = displayText(page.error().message);
-                    return outcome;
-                }
-                outcome.more = page->more;
                 auto paths = library->filter_paths(*shared, token);
                 if (!paths) {
                     outcome.error = displayText(paths.error().message);
                     return outcome;
                 }
-                outcome.paths = std::move(*paths);
-                for (const auto& entry : page->entries) {
-                    outcome.labels.push_back(entry.label);
+                auto cached = library->cached_tracks(*paths, token);
+                if (!cached) {
+                    outcome.error = displayText(cached.error().message);
+                    return outcome;
+                }
+                for (auto& track : *cached) {
+                    auto row = cached_library_row(std::move(track));
+                    if (outcome.labels.size() < static_cast<std::size_t>(result_display_limit)) {
+                        outcome.labels.push_back(result_label(row));
+                    }
+                    outcome.rows.push_back(std::move(row));
                 }
                 return outcome;
             }));
@@ -572,9 +569,8 @@ void SearchDialog::finishSearch() {
         }
     }
     results_->clear();
-    result_paths_ = std::move(outcome.paths);
     result_rows_ = std::move(outcome.rows);
-    const auto total = databaseScope() ? result_paths_.size() : result_rows_.size();
+    const auto total = result_rows_.size();
     const auto shown = std::min<std::size_t>(outcome.labels.size(),
                                              static_cast<std::size_t>(result_display_limit));
     for (std::size_t index = 0U; index < shown; ++index) {
@@ -605,23 +601,6 @@ void SearchDialog::openResults(const LocalLibraryAction action, const bool selec
         if (positions.empty()) {
             return;
         }
-    }
-    if (databaseScope()) {
-        std::vector<std::string> paths;
-        if (selection_only) {
-            // Displayed rows map 1:1 onto the leading result paths.
-            for (const auto position : positions) {
-                if (position >= 0 && static_cast<std::size_t>(position) < result_paths_.size()) {
-                    paths.push_back(result_paths_[static_cast<std::size_t>(position)]);
-                }
-            }
-        } else {
-            paths = result_paths_;
-        }
-        if (!paths.empty()) {
-            emit resultsRequested(name, std::move(paths), action);
-        }
-        return;
     }
     std::vector<LocalTrackRow> rows;
     if (selection_only) {

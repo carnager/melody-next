@@ -57,7 +57,9 @@ active at that moment. Library queries use the cached index without scanning.
 Change the query and press **Update** to replace the selected definition;
 **Rename…** changes its name and **Delete…** removes it. Names must be unique.
 Saving zero-result searches is allowed. **Open results in tab** still creates an
-ordinary snapshot; these tabs do not update automatically. Autoplaylists remain
+ordinary snapshot; these tabs do not update automatically. Database-search tabs
+use cached tags and technicals directly, without rereading every audio file
+(ADR-0164). The same applies to Enter in the sidebar search. Autoplaylists remain
 a subsequent feature (ADR-0163).
 
 ## Indexing and consistency
@@ -109,8 +111,9 @@ existing declarative track-view engine, metadata reader, and local transport.
 
 ## Current limits
 
-The index catalogs physical audio files. Chapter/subsong expansion still happens
-when opening a source; separate indexed searches of those logical titles and
+The index catalogs physical audio files. Search-result tabs retain those physical
+file rows without probing or chapter/subsong expansion. Expansion still happens
+when importing a source through the file-intake workflow; separate indexed searches of those logical titles and
 external cue-sheet titles are not included. Structured tkq filters (ADR-0150)
 evaluate over the migration-30 field table and technical columns; index rows
 written before that migration carry them only after their next explicit

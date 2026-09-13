@@ -157,12 +157,7 @@ void BenchMainWindow::initializePersistence() {
             // ADR-0140: Enter in the library search keeps the full result
             // set as an ordinary scratch list tab.
             connect(local_library_, &LocalLibraryPanel::searchCommitted, this,
-                    [this](const QString& query, std::vector<std::string> paths) {
-                        if (discovery_running_) {
-                            statusBar()->showMessage(
-                                QStringLiteral("A file intake is already running"), 3'000);
-                            return;
-                        }
+                    [this](const QString& query, std::vector<LocalTrackRow> rows) {
                         auto* destination = addListTab(
                             persistence::ListDocument{
                                 .id = core::StableId::random(),
@@ -173,10 +168,8 @@ void BenchMainWindow::initializePersistence() {
                                 .items = {},
                             },
                             true);
-                        schedulePersist();
-                        startDiscovery(std::move(paths),
-                                       QString::fromStdString(destination->document.id.to_string()),
-                                       -1, false);
+                        destination->model->appendRows(std::move(rows));
+                        markTabDirty(*destination);
                     });
             refreshActiveContext();
         }
@@ -643,40 +636,6 @@ void BenchMainWindow::openSearchDialog() {
         },
         this);
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
-    connect(search_dialog_, &SearchDialog::resultsRequested, this,
-            [this](const QString& name, std::vector<std::string> paths,
-                   const LocalLibraryAction action) {
-                if (discovery_running_) {
-                    statusBar()->showMessage(QStringLiteral("A file intake is already running"),
-                                             3'000);
-                    return;
-                }
-                auto* destination = currentListTab();
-                int insertion = -1;
-                if (action == LocalLibraryAction::new_list) {
-                    destination =
-                        addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                             .kind = persistence::ListKind::scratch,
-                                                             .name = utf8Bytes(name),
-                                                             .pinned = false,
-                                                             .dirty = false,
-                                                             .items = {}},
-                                   true);
-                    schedulePersist();
-                } else if (destination != nullptr && action == LocalLibraryAction::next) {
-                    const auto id = QString::fromStdString(destination->document.id.to_string());
-                    insertion = playback_document_id_ == id ? playback_row_ + 1
-                                : destination->view->currentIndex().isValid()
-                                    ? destination->view->currentIndex().row() + 1
-                                    : 0;
-                }
-                if (destination == nullptr) {
-                    return;
-                }
-                startDiscovery(std::move(paths),
-                               QString::fromStdString(destination->document.id.to_string()),
-                               insertion, action == LocalLibraryAction::replace);
-            });
     connect(search_dialog_, &SearchDialog::rowsRequested, this,
             [this](const QString& name, std::vector<LocalTrackRow> rows,
                    const LocalLibraryAction action) {
@@ -708,6 +667,9 @@ void BenchMainWindow::openSearchDialog() {
                     destination->model->appendRows(std::move(rows), insertion);
                 }
                 markTabDirty(*destination);
+                if (action == LocalLibraryAction::replace && destination->model->rowCount() > 0) {
+                    playRow(*destination, 0);
+                }
             });
     search_dialog_->show();
 }

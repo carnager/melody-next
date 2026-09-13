@@ -101,7 +101,11 @@ later reconnection restores them after an explicit refresh. Scans run only when
 you press **Refresh**;
 startup displays cached entries, and adding folders or completing operations
 does not start a scan. External changes, newly converted files, and reconnected
-folders appear after the next Refresh. Only changed files need metadata probing.
+folders appear after the next Refresh. Only changed files normally need metadata probing. Schema 33 marks older field
+indexes incomplete because previous limits silently dropped some tags. After
+upgrading, run **Refresh** once to rebuild those records, then rerun saved
+searches; existing result tabs remain snapshots. Full-field queries report an
+incomplete index until Refresh finishes successfully (ADR-0166).
 Refreshing the view preserves expanded and selected entries.
 
 Metadata and relocation commits update matching index entries in the same
@@ -121,9 +125,8 @@ The index catalogs physical audio files. Search-result tabs retain those physica
 file rows without probing or chapter/subsong expansion. Expansion still happens
 when importing a source through the file-intake workflow; separate indexed searches of those logical titles and
 external cue-sheet titles are not included. Structured tkq filters (ADR-0150)
-evaluate over the migration-30 field table and technical columns; index rows
-written before that migration carry them only after their next explicit
-Refresh. Saved searches are available in the standalone Search dialog
+evaluate over the migration-30 field table and technical columns. Schema 33
+requires complete field evidence, with explicit Refresh repairing older rows. Saved searches are available in the standalone Search dialog
 (ADR-0163); autoplaylists, custom library-tree expressions, and an artwork grid
 remain future work.
 Album cover thumbnails are available in the current tree and search results.

@@ -126,3 +126,12 @@ translation.
 
 Saved query/word definitions with explicit dialects and scope are implemented
 in ADR-0163; see [Saved searches](local-library.md#saved-searches).
+
+## Index completeness
+
+Database queries require complete indexed field evidence (ADR-0166). Older
+indexes that may have truncated tags report a Refresh requirement instead of
+treating omitted values as missing. Refresh runs only on explicit request; rerun
+the query afterwards. Field indexing now uses overall per-file bounds of 4096
+field names, 16384 values, and 4 MiB of name/value text, with explicit failure
+instead of silent truncation.

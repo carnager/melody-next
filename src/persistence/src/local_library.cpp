@@ -399,9 +399,9 @@ Technicals technicals_from(const formats::MediaProbe& probe) {
 
 // ADR-0150: one bounded row per tag value, original bytes beside the
 // normalized form, replaced wholesale inside the caller's transaction.
-constexpr std::size_t maximum_field_names = 64U;
-constexpr std::size_t maximum_field_values = 32U;
-constexpr std::size_t maximum_field_value_bytes = 2'048U;
+constexpr std::size_t maximum_field_names = 4'096U;
+constexpr std::size_t maximum_field_values = 16'384U;
+constexpr std::size_t maximum_field_text_bytes = 4U * 1024U * 1024U;
 
 void write_field_rows(sqlite3* db, const std::string& raw_path,
                       const metadata::MetadataDocument& document) {
@@ -414,6 +414,8 @@ void write_field_rows(sqlite3* db, const std::string& raw_path,
                          "(raw_path,canonical_name,position,value,value_lower) "
                          "VALUES(?,?,?,?,?)"};
     std::map<std::string, int> positions;
+    std::size_t value_count = 0;
+    std::size_t text_bytes = 0;
     for (const auto& field : document.fields) {
         if (field.canonical_name.empty()) {
             continue;
@@ -421,17 +423,25 @@ void write_field_rows(sqlite3* db, const std::string& raw_path,
         auto position = positions.find(field.canonical_name);
         if (position == positions.end()) {
             if (positions.size() >= maximum_field_names) {
-                continue;
+                fail("Library metadata exceeds 4096 field names", core::ErrorCode::limit_exceeded);
             }
+            if (field.canonical_name.size() > maximum_field_text_bytes - text_bytes) {
+                fail("Library metadata exceeds 4 MiB of text", core::ErrorCode::limit_exceeded);
+            }
+            text_bytes += field.canonical_name.size();
             position = positions.emplace(field.canonical_name, 0).first;
         }
         for (const auto& value : field.values) {
-            if (position->second >= static_cast<int>(maximum_field_values)) {
-                break;
-            }
-            if (value.empty() || value.size() > maximum_field_value_bytes) {
+            if (value.empty()) {
                 continue;
             }
+            if (value_count >= maximum_field_values ||
+                value.size() > maximum_field_text_bytes - text_bytes) {
+                fail("Library metadata exceeds 16384 values or 4 MiB of text",
+                     core::ErrorCode::limit_exceeded);
+            }
+            ++value_count;
+            text_bytes += value.size();
             insert.reset();
             insert.blob(1, raw_path);
             insert.text(2, field.canonical_name);
@@ -441,6 +451,21 @@ void write_field_rows(sqlite3* db, const std::string& raw_path,
             insert.next();
             ++position->second;
         }
+    }
+    Statement complete{db,
+                       "UPDATE local_library_tracks SET field_index_complete=1 WHERE raw_path=?"};
+    complete.blob(1, raw_path);
+    complete.next();
+}
+
+void require_complete_field_index(sqlite3* db) {
+    Statement incomplete{
+        db,
+        "SELECT 1 FROM local_library_tracks WHERE available=1 AND field_index_complete=0 LIMIT 1"};
+    if (incomplete.next()) {
+        fail("The library field index is incomplete. Press Refresh in Library, wait for it to "
+             "finish, then run this search again.",
+             core::ErrorCode::conflict);
     }
 }
 
@@ -1035,6 +1060,7 @@ core::Result<LibraryPage> LocalLibrary::filter(const query::CompiledTkq& compile
     return checked([&] {
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
+        require_complete_field_index(db);
         const auto plan = plan_filter(compiled);
         const auto page_limit = std::clamp<std::size_t>(limit, 1U, 200U);
         LibraryPage page;
@@ -1081,6 +1107,7 @@ LocalLibrary::filter_paths(const query::CompiledTkq& compiled,
     return checked([&] {
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
+        require_complete_field_index(db);
         const auto plan = plan_filter(compiled);
         if (!plan.residual && !compiled.sort) {
             Statement statement{db, std::string{"SELECT t.raw_path FROM local_library_tracks t"} +
@@ -1309,6 +1336,8 @@ class PreparationPipeline {
                 const auto read = metadata::read_local_metadata(prepared.raw_path, cancellation_);
                 if (read) {
                     prepared.document = read->document;
+                } else if (read.error().code != core::ErrorCode::unsupported) {
+                    prepared.failed = true;
                 }
                 for (const auto& tag : probe->tags) {
                     const auto identity = metadata::resolve_text_property_identity(tag.name);
@@ -1396,6 +1425,11 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     return;
                 }
                 if (prepared.failed) {
+                    Statement incomplete{
+                        db,
+                        "UPDATE local_library_tracks SET field_index_complete=0 WHERE raw_path=?"};
+                    incomplete.blob(1, prepared.raw_path);
+                    incomplete.next();
                     ++progress.failed;
                     complete = false;
                     return;
@@ -1482,10 +1516,11 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 const auto revision = revision_key(*before);
                 bool unchanged = false;
                 {
-                    Statement previous{
-                        db, "SELECT revision FROM local_library_tracks WHERE raw_path=?"};
+                    Statement previous{db, "SELECT revision,field_index_complete FROM "
+                                           "local_library_tracks WHERE raw_path=?"};
                     previous.blob(1, raw);
-                    unchanged = previous.next() && previous.bytes(0) == revision;
+                    unchanged =
+                        previous.next() && previous.bytes(0) == revision && previous.number(1) == 1;
                 }
                 if (unchanged) {
                     Transaction transaction{db};

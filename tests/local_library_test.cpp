@@ -133,6 +133,7 @@ class LocalLibraryTest final : public QObject {
     void albumIdentityKeepsEditionsSeparate();
     void metadataAndMovesFollowTheListTransaction();
     void scanRetainsFieldRowsAndTechnicals();
+    void denseMetadataDoesNotProduceFalseMissingMatches();
     void parallelScanIndexesManyFiles();
     void migrationRoundTrip();
     void scansOnlyOnRefresh_data();
@@ -475,6 +476,75 @@ void LocalLibraryTest::metadataAndMovesFollowTheListTransaction() {
 // (original bytes beside the normalized form) and the probed technical
 // properties as typed columns; the reindex-once revision prefix backfills
 // rows written before migration 30 on the next Refresh.
+void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto tagged = fixture(root, "tagged.flac");
+    const auto missing = fixture(root, "missing.flac");
+    {
+        TagLib::FLAC::File file{tagged.c_str()};
+        auto properties = file.properties();
+        for (int index = 0; index < 90; ++index) {
+            properties.replace(TagLib::String{"A" + std::to_string(index)},
+                               TagLib::String{"value"});
+        }
+        properties.replace("REPLAYGAIN_ALBUM_GAIN", TagLib::String{"-9.25 dB"});
+        TagLib::StringList genres;
+        for (int index = 0; index < 40; ++index)
+            genres.append(TagLib::String{"Genre" + std::to_string(index)});
+        properties.replace("GENRE", genres);
+        properties.replace("ZZLONG", TagLib::String{std::string(4096, 'x')});
+        file.setProperties(properties);
+        QVERIFY(file.save());
+    }
+    {
+        TagLib::FLAC::File file{missing.c_str()};
+        auto properties = file.properties();
+        properties.erase("REPLAYGAIN_ALBUM_GAIN");
+        file.setProperties(properties);
+        QVERIFY(file.save());
+    }
+    const auto database = base / "state.sqlite";
+    auto library = persistence::LocalLibrary::open(database);
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress progress;
+    QVERIFY(library->scan({}, progress));
+    auto query = query::compile_tkq("REPLAYGAIN_ALBUM_GAIN MISSING");
+    QVERIFY(query);
+    QCOMPARE(*library->filter_paths(*query), std::vector<std::string>{missing});
+    auto last_genre = query::compile_tkq("genre IS Genre39");
+    QVERIFY(last_genre);
+    QCOMPARE(*library->filter_paths(*last_genre), std::vector<std::string>{tagged});
+    auto long_value = query::compile_tkq("ZZLONG PRESENT");
+    QVERIFY(long_value);
+    QCOMPARE(*library->filter_paths(*long_value), std::vector<std::string>{tagged});
+
+    // Downgrade/upgrade simulates a cache whose former per-field truncation
+    // cannot be distinguished from actual absence. No automatic scan repairs it.
+    sqlite3* db = nullptr;
+    QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+    QFile downgrade{
+        QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0033_complete_library_fields.down.sql")};
+    QVERIFY(downgrade.open(QIODevice::ReadOnly));
+    QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
+             SQLITE_OK);
+    sqlite3_close(db);
+    auto migrated = persistence::LocalLibrary::open(database);
+    QVERIFY(migrated);
+    const auto incomplete = migrated->filter_paths(*query);
+    QVERIFY(!incomplete && incomplete.error().code == core::ErrorCode::conflict);
+    QVERIFY(incomplete.error().message.find("Refresh") != std::string::npos);
+    QVERIFY(!migrated->filter(*query, 0, 200));
+    persistence::LibraryScanProgress refresh;
+    QVERIFY(migrated->scan({}, refresh));
+    QCOMPARE(refresh.indexed.load(), 2U);
+    QCOMPARE(*migrated->filter_paths(*query), std::vector<std::string>{missing});
+    persistence::LibraryScanProgress unchanged;
+    QVERIFY(migrated->scan({}, unchanged));
+    QCOMPARE(unchanged.indexed.load(), 0U);
+}
+
 void LocalLibraryTest::scanRetainsFieldRowsAndTechnicals() {
     QTemporaryDir temporary;
     const std::filesystem::path base{temporary.path().toStdString()};
@@ -599,16 +669,17 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 32U);
+        QCOMPARE(*repository->schema_version(), 33U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
-    for (const auto* name : {"0032_saved_searches.down", "0031_composed_metadata_artwork.down",
-                             "0030_library_query_index.down", "0028_local_library.down",
-                             "0028_local_library.up", "0030_library_query_index.up",
-                             "0031_composed_metadata_artwork.up", "0032_saved_searches.up"}) {
+    for (const auto* name : {"0033_complete_library_fields.down", "0032_saved_searches.down",
+                             "0031_composed_metadata_artwork.down", "0030_library_query_index.down",
+                             "0028_local_library.down", "0028_local_library.up",
+                             "0030_library_query_index.up", "0031_composed_metadata_artwork.up",
+                             "0032_saved_searches.up", "0033_complete_library_fields.up"}) {
         QFile migration{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
@@ -638,7 +709,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 32U);
+    QCOMPARE(*repository->schema_version(), 33U);
 }
 
 void LocalLibraryTest::scansOnlyOnRefresh_data() {

@@ -1137,6 +1137,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         return;
     }
 
+    track_context_menu_->addSeparator();
     track_context_menu_->addAction(properties_action_);
     track_context_menu_->addAction(replaygain_action_);
     track_context_menu_->addAction(convert_action_);
@@ -1161,6 +1162,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
             });
         }
     }
+    track_context_menu_->addSeparator();
     if (source_tab != nullptr && list_tabs_.size() > 1U) {
         auto* copy_menu = track_context_menu_->addMenu(QStringLiteral("Copy to list"));
         copy_menu->setObjectName(QStringLiteral("bench-track-copy-menu"));
@@ -1180,7 +1182,6 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
                     [this, view, target_id] { transferSelectedRows(view, target_id, true); });
         }
     }
-    track_context_menu_->addSeparator();
     track_context_menu_->addAction(remove_selected_action_);
     refreshListHistoryActions();
     track_context_menu_->addSeparator();

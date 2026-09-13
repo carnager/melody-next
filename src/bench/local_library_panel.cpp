@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QStandardItemModel>
 #include <QStyle>
 #include <QTimer>
@@ -411,7 +412,56 @@ void LocalLibraryPanel::pump() {
         }));
 }
 
+void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
+    search_timer_->stop();
+    ++generation_;
+    const auto generation = generation_;
+    status_->setText(tr("Locating in library…"));
+    enqueue(
+        {[raw_path = std::move(raw_path),
+          cancellation = lifetime_cancellation_.token()](persistence::LocalLibrary& library) {
+             Outcome outcome;
+             persistence::LibraryQuery query;
+             query.kind = persistence::LibraryEntryKind::album;
+             query.raw_path = raw_path;
+             auto page = library.query(query, cancellation);
+             if (page)
+                 outcome.page = std::move(*page);
+             else
+                 outcome.error = text(page.error().message);
+             return outcome;
+         },
+         [this, generation, album](Outcome outcome) {
+             if (generation != generation_)
+                 return;
+             if (!outcome.error.isEmpty()) {
+                 status_->setText(outcome.error);
+                 return;
+             }
+             if (outcome.page.entries.empty()) {
+                 status_->setText(tr(
+                     "This file is not in the local library. Add its folder and Refresh first."));
+                 return;
+             }
+             auto entry = outcome.page.entries.front();
+             {
+                 const QSignalBlocker blocker{search_};
+                 search_->clear();
+             }
+             expanded_entries_.clear();
+             current_entry_.clear();
+             reloadTree();
+             locate_artist_ = entry.artist;
+             if (!album) {
+                 entry.kind = persistence::LibraryEntryKind::artist;
+                 entry.key = entry.artist;
+             }
+             locate_target_ = std::move(entry);
+         }});
+}
+
 void LocalLibraryPanel::reloadTree() {
+    locate_target_.reset();
     ++generation_;
     artwork_cancellation_.request_cancellation();
     view_cancellation_.request_cancellation();
@@ -540,6 +590,21 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                      item->appendRow(new QStandardItem(tr("Loading…")));
                  }
                  target->appendRow(item);
+                 if (locate_target_) {
+                     const bool found =
+                         entry.kind == locate_target_->kind && entry.key == locate_target_->key;
+                     if (found) {
+                         tree_->setCurrentIndex(item->index());
+                         tree_->scrollTo(item->index());
+                         tree_->setFocus();
+                         locate_target_.reset();
+                         status_->setText(tr("Located in library."));
+                     }
+                     if (found || (entry.kind == persistence::LibraryEntryKind::artist &&
+                                   entry.key == locate_artist_)) {
+                         tree_->expand(item->index());
+                     }
+                 }
                  if (current_entry_ == entryKey(entry)) {
                      tree_->setCurrentIndex(item->index());
                  }
@@ -555,6 +620,25 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                  more->setData(true, more_role);
                  more->setData(QVariant::fromValue(query), query_role);
                  target->appendRow(more);
+                 if (locate_target_) {
+                     bool seek_more = query.kind == persistence::LibraryEntryKind::album &&
+                                      query.artist == locate_artist_;
+                     if (query.kind == persistence::LibraryEntryKind::artist) {
+                         seek_more = true;
+                         for (int row = 0; row < target->rowCount(); ++row) {
+                             const auto value = target->child(row)->data(entry_role);
+                             if (value.isValid() &&
+                                 value.value<persistence::LibraryEntry>().key == locate_artist_) {
+                                 seek_more = false;
+                                 break;
+                             }
+                         }
+                     }
+                     if (seek_more) {
+                         target->removeRow(more->row());
+                         loadChildren(parent, query);
+                     }
+                 }
              } else if (target->rowCount() == 0) {
                  auto* empty = new QStandardItem(tr("No matches"));
                  empty->setEnabled(false);

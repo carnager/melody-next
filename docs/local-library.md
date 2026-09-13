@@ -27,6 +27,12 @@ using the same controls as the MPD library. Insert next follows the playing row
 in that list, otherwise the selected row or the beginning of an unselected list.
 The MPD queue does not accept local library drops.
 
+Right-click a local track and choose **Locate artist** or **Locate album** to
+open its indexed entry in the Library sidebar. Navigation uses the exact file
+path and album identity, clears the current search, and loads additional tree
+pages when needed. It does not scan folders or change the track list. Files not
+in the index show a message explaining how to add their folder.
+
 Tracks show their tagged numbers, such as **03. Title**; tracks without a number
 keep their title without a numeric prefix. Album rows show embedded covers or
 fall back to sibling `cover`, `folder`, or `front` JPEG/PNG files. Covers load

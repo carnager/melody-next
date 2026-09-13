@@ -49,6 +49,7 @@ class LocalLibraryPanel final : public QWidget {
     // (matching albums' tracks first, then remaining matching tracks,
     // deduplicated by path) and emits searchCommitted. Enter triggers it.
     void commitSearch();
+    void locatePath(std::string raw_path, bool album);
 
   signals:
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
@@ -129,6 +130,8 @@ class LocalLibraryPanel final : public QWidget {
     QSet<QByteArray> expanded_entries_;
     QByteArray current_entry_;
     QString previous_search_;
+    std::optional<persistence::LibraryEntry> locate_target_;
+    std::string locate_artist_;
     bool querying_{false};
     bool scanning_{false};
     bool stopped_{false};

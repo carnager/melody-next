@@ -139,6 +139,7 @@ class LocalLibraryTest final : public QObject {
     void scansOnlyOnRefresh();
     void queryModeFiltersAndCommitsResults();
     void databaseSearchOpensCachedRowsWithoutFiles();
+    void locateLoadsAdditionalTreePages();
     void cachedSearchTabsLoadCovers_data();
     void cachedSearchTabsLoadCovers();
     void localViewBrowsesSearchesAndOpensFiles();
@@ -713,6 +714,42 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
 // structured results in the tree, inline diagnostics for malformed
 // queries (never a silent word search), and Enter committing the
 // filtered result set through the ADR-0140 snapshot-tab path.
+void LocalLibraryTest::locateLoadsAdditionalTreePages() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto path = fixture(root, "01.flac");
+    const auto database = base / "state.sqlite";
+    auto library = persistence::LocalLibrary::open(database);
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress progress;
+    QVERIFY(library->scan({}, progress));
+    sqlite3* db = nullptr;
+    QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+    // Fill both the artist and album levels beyond the 200-row page boundary.
+    const char* insert = R"SQL(
+        WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<410)
+        INSERT INTO local_library_tracks(raw_path,root,revision,title,artist,album,album_key,
+            release_id,date,disc,track,search_track,search_album,available,seen)
+        SELECT CAST(t.raw_path || n AS BLOB),root,revision,title,
+            CASE WHEN n<=205 THEN 'A artist ' || n ELSE artist END,
+            'A album ' || n,'page-' || n,release_id,date,disc,track,search_track,search_album,available,seen
+        FROM local_library_tracks t CROSS JOIN numbers
+    )SQL";
+    QCOMPARE(sqlite3_exec(db, insert, nullptr, nullptr, nullptr), SQLITE_OK);
+    sqlite3_close(db);
+    LocalLibraryPanel panel{database};
+    panel.show();
+    panel.locatePath(path, true);
+    auto* tree = panel.findChild<QTreeView*>();
+    QTRY_VERIFY(tree->currentIndex().data().toString().contains(QStringLiteral("Test album")));
+    QVERIFY(tree->currentIndex().parent().data().toString().contains(QStringLiteral("Björk")));
+    QVERIFY(tree->model()->rowCount() > 200);
+    QVERIFY(tree->model()->rowCount(tree->currentIndex().parent()) > 200);
+    QVERIFY(!panel.property("scanning").toBool());
+    panel.stop();
+}
+
 void LocalLibraryTest::cachedSearchTabsLoadCovers_data() {
     QTest::addColumn<bool>("standalone");
     QTest::newRow("sidebar") << false;
@@ -774,6 +811,34 @@ void LocalLibraryTest::cachedSearchTabsLoadCovers() {
         QCOMPARE(model->rows()[0].metadata.fields.front().provenance,
                  metadata::FieldProvenance::cached_snapshot);
         QTRY_VERIFY(model->hasArtwork(model->groupKey(0)));
+        if (auto* dialog = window.findChild<SearchDialog*>()) {
+            dialog->close();
+        }
+        auto* tree = panel->findChild<QTreeView*>();
+        for (const bool album : {false, true}) {
+            const auto position = view->visualRect(model->index(1, 0)).center();
+            QVERIFY(QMetaObject::invokeMethod(view, "customContextMenuRequested",
+                                              Qt::DirectConnection, Q_ARG(QPoint, position)));
+            auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
+            QVERIFY(menu);
+            auto* locate =
+                menu->findChild<QAction*>(album ? QStringLiteral("action-local-locate-album")
+                                                : QStringLiteral("action-local-locate-artist"));
+            QVERIFY(locate && locate->isEnabled());
+            locate->trigger();
+            menu->close();
+            QTRY_VERIFY(tree->currentIndex().data().toString().contains(
+                album ? QStringLiteral("Test album") : QStringLiteral("Björk")));
+            QCOMPARE(window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"))
+                         ->currentIndex(),
+                     1);
+            QCOMPARE(model->rowCount(), 2);
+            QVERIFY(!panel->property("scanning").toBool());
+        }
+        panel->locatePath("/not-indexed.flac", true);
+        QTRY_VERIFY(panel->findChild<QLabel*>(QStringLiteral("local-library-status"))
+                        ->text()
+                        .contains(QStringLiteral("not in the local library")));
     }
     qputenv("XDG_DATA_HOME", old_data);
 }

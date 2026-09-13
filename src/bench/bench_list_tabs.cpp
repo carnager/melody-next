@@ -1142,6 +1142,25 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addAction(convert_action_);
 
     auto* source_tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
+    if (source_tab != nullptr && target.row() < source_tab->model->rowCount()) {
+        const auto path =
+            source_tab->model->rows()[static_cast<std::size_t>(target.row())].raw_path;
+        track_context_menu_->addSeparator();
+        for (const bool album : {false, true}) {
+            auto* locate = track_context_menu_->addAction(album ? QStringLiteral("Locate album")
+                                                                : QStringLiteral("Locate artist"));
+            locate->setObjectName(album ? QStringLiteral("action-local-locate-album")
+                                        : QStringLiteral("action-local-locate-artist"));
+            locate->setEnabled(local_library_ != nullptr);
+            connect(locate, &QAction::triggered, this, [this, path, album] {
+                if (local_library_ == nullptr)
+                    return;
+                local_source_tabs_->setCurrentIndex(1);
+                refreshActiveContext();
+                local_library_->locatePath(path, album);
+            });
+        }
+    }
     if (source_tab != nullptr && list_tabs_.size() > 1U) {
         auto* copy_menu = track_context_menu_->addMenu(QStringLiteral("Copy to list"));
         copy_menu->setObjectName(QStringLiteral("bench-track-copy-menu"));

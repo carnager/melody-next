@@ -68,6 +68,13 @@ void BenchMainWindow::buildWorkspace() {
     tabs_->setDocumentMode(true);
     tabs_->setMovable(true);
     tabs_->setTabsClosable(true);
+    tabs_->setAcceptDrops(true);
+    tabs_->installEventFilter(this);
+    tabs_->tabBar()->setAcceptDrops(true);
+    tabs_->tabBar()->installEventFilter(this);
+    tabs_->tabBar()->setToolTip(
+        tr("Drop local tracks on a tab to transfer, or on empty tab-bar space to create a tab. "
+           "Hold Ctrl to copy."));
     connect(tabs_, &QTabWidget::tabCloseRequested, this, &BenchMainWindow::closeTabAt);
     connect(tabs_, &QTabWidget::currentChanged, this, [this](const int) {
         refreshTabActions();

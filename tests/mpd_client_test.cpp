@@ -151,6 +151,15 @@ class FakeMpdServer final {
             write_all(client, "directory: Artist\nLast-Modified: 2026-08-24T10:00:00Z\n"
                               "file: loose.flac\nArtist: Loose Artist\nTitle: Loose track\n"
                               "playlist: Road mix\nLast-Modified: 2026-08-24T11:00:00Z\nOK\n");
+        } else if (command.starts_with("list ") &&
+                   command.find("group") != std::string_view::npos) {
+            // Nested ordering captured from stock MPD 0.24: the last group
+            // is outermost. Repeated release IDs count once across dates.
+            write_all(client,
+                      "MUSICBRAINZ_ALBUMID: \nDate: 2020\nAlbumArtist: A\nAlbum: Same\n"
+                      "Date: 2021\nAlbumArtist: A\nAlbum: Same\n"
+                      "MUSICBRAINZ_ALBUMID: release-b\nDate: 2022\nAlbumArtist: B\nAlbum: Second\n"
+                      "Date: 2023\nAlbumArtist: B\nAlbum: Alternate title\nOK\n");
         } else if (command.starts_with("list ")) {
             write_all(client, "AlbumArtist: Credited Artist\nAlbumArtist: Various Artists\nOK\n");
         } else if (command.starts_with("search ")) {
@@ -322,6 +331,12 @@ void client_negotiates_and_preserves_extensions() {
     const auto artists = client.list_tag("AlbumArtist");
     require(artists && *artists == std::vector<std::string>{"Credited Artist", "Various Artists"},
             "server-side tag browse must preserve typed values");
+    const auto album_counts = client.album_counts("AlbumArtist");
+    require(album_counts && album_counts->size() == 2U && album_counts->at(0).artist == "A" &&
+                album_counts->at(0).albums == 2U && album_counts->at(1).artist == "B" &&
+                album_counts->at(1).albums == 1U,
+            "grouped counts separate editions and deduplicate releases without loading tracks");
+    require(!client.album_counts("Genre"), "album counts reject non-artist groupings");
     const auto artist_tracks = client.find_tag_tracks("AlbumArtist", "Credited Artist", 10'000U);
     require(artist_tracks && artist_tracks->size() == 2U &&
                 artist_tracks->back().uri == "Artist/Release/02.flac",

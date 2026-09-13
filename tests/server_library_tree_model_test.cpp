@@ -46,12 +46,41 @@ class ServerLibraryTreeModelTest final : public QObject {
 
   private slots:
     void buildsDefaultHierarchyLazily();
+    void albumCountsArriveWithoutExpandingAndIgnoreStaleResults();
     void filtersDescendantsAndServerMatches();
     void roundTripsDefinition();
     void rejectsBrokenExpression();
     void expandsMultiValueGrouping();
     void ordersRootsByNewestRanking();
 };
+
+void ServerLibraryTreeModelTest::albumCountsArriveWithoutExpandingAndIgnoreStaleResults() {
+    using Model = trackknife::ui::ServerLibraryTreeModel;
+    Model model;
+    QSignalSpy roots{&model, &Model::rootRequested};
+    QSignalSpy branches{&model, &Model::branchRequested};
+    model.reload();
+    const auto token = roots.back().front().toULongLong();
+    model.acceptRoot(token, QStringLiteral("AlbumArtist"),
+                     {QStringLiteral("A"), QStringLiteral("B")}, {});
+    model.acceptAlbumCounts(token, {{"A", 2}, {"B", 1}}, {});
+    QCOMPARE(model.index(0, 0).data(Model::SecondaryTextRole).toString(),
+             QStringLiteral("2 albums"));
+    QCOMPARE(model.index(1, 0).data(Model::SecondaryTextRole).toString(),
+             QStringLiteral("1 album"));
+    QCOMPARE(branches.size(), 0);
+    QCOMPARE(model.rowCount(model.index(0, 0)), 0);
+    QVERIFY(model.canFetchMore(model.index(0, 0)));
+    model.reload();
+    const auto refreshed = roots.back().front().toULongLong();
+    model.acceptRoot(refreshed, QStringLiteral("AlbumArtist"), {QStringLiteral("A")}, {});
+    model.acceptAlbumCounts(token, {{"A", 99}}, {});
+    QCOMPARE(model.index(0, 0).data(Model::SecondaryTextRole).toString(),
+             QStringLiteral("Counting albums…"));
+    model.acceptAlbumCounts(refreshed, {}, QStringLiteral("Not supported"));
+    QCOMPARE(model.index(0, 0).data(Model::SecondaryTextRole).toString(),
+             QStringLiteral("Album count unavailable"));
+}
 
 void ServerLibraryTreeModelTest::buildsDefaultHierarchyLazily() {
     trackknife::ui::ServerLibraryTreeModel model;
@@ -72,7 +101,7 @@ void ServerLibraryTreeModelTest::buildsDefaultHierarchyLazily() {
     QCOMPARE(model.index(1, 0)
                  .data(trackknife::ui::ServerLibraryTreeModel::SecondaryTextRole)
                  .toString(),
-             QStringLiteral("Expand to browse"));
+             QStringLiteral("Counting albums…"));
 
     const auto artist = model.index(1, 0);
     QVERIFY(model.hasChildren(artist));
@@ -104,7 +133,7 @@ void ServerLibraryTreeModelTest::buildsDefaultHierarchyLazily() {
     const auto early = model.index(0, 0, artist);
     const auto late = model.index(1, 0, artist);
     QCOMPARE(artist.data(trackknife::ui::ServerLibraryTreeModel::SecondaryTextRole).toString(),
-             QStringLiteral("2 Albums"));
+             QStringLiteral("2 albums"));
     QVERIFY(!artist.data(trackknife::ui::ServerLibraryTreeModel::AlbumRole).toBool());
     QCOMPARE(early.data().toString(), QStringLiteral("Early (2020)"));
     QCOMPARE(late.data().toString(), QStringLiteral("Late (2022)"));

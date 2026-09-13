@@ -464,10 +464,6 @@ void BenchMainWindow::buildMpdWorkspace() {
     server_library_view_->setAccessibleName(QStringLiteral("MPD server library"));
     server_library_view_->setModel(server_library_model_);
     server_library_view_->setHeaderHidden(true);
-    server_library_view_->setUniformRowHeights(false);
-    server_library_view_->setIconSize(QSize{32, 32});
-    server_library_view_->setIndentation(18);
-    server_library_view_->setAnimated(true);
     server_library_view_->setExpandsOnDoubleClick(false);
     server_library_view_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     server_library_view_->setDragEnabled(true);
@@ -518,6 +514,8 @@ void BenchMainWindow::buildMpdWorkspace() {
             });
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryRootLoaded,
             server_library_model_, &ui::ServerLibraryTreeModel::acceptRoot);
+    connect(mpd_controller_, &quick::MpdProbeController::serverLibraryAlbumCountsLoaded,
+            server_library_model_, &ui::ServerLibraryTreeModel::acceptAlbumCounts);
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryBranchLoaded,
             server_library_model_, &ui::ServerLibraryTreeModel::acceptBranch);
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryArtworkLoaded, this,
@@ -837,13 +835,11 @@ void BenchMainWindow::buildMpdSearch() {
     results->setAccessibleName(QStringLiteral("MPD library search results"));
     results->setModel(mpd_search_tree_model_);
     results->setHeaderHidden(true);
-    results->setUniformRowHeights(false);
     results->setSelectionMode(QAbstractItemView::ExtendedSelection);
     results->setDragEnabled(true);
     results->setDragDropMode(QAbstractItemView::DragOnly);
     results->setDefaultDropAction(Qt::CopyAction);
     results->setExpandsOnDoubleClick(false);
-    results->setIndentation(18);
     results->setEditTriggers(QAbstractItemView::NoEditTriggers);
     results->setActionsAvailable(
         [](const QModelIndex& index) { return MpdLibrarySearchModel::actionable(index); });

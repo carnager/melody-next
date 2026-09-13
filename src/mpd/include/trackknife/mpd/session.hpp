@@ -51,6 +51,7 @@ enum class SessionCommandKind {
     database_newest,
     database_browse,
     database_tag,
+    database_album_counts,
     database_tag_tracks,
     artwork,
     database_search,
@@ -80,7 +81,7 @@ enum class SessionCommandKind {
 using SessionCommandPayload =
     std::variant<std::monostate, std::vector<DatabaseEntry>, std::vector<Track>,
                  std::vector<StoredPlaylist>, std::vector<std::string>, std::vector<std::byte>,
-                 LibrarySearchResult>;
+                 LibrarySearchResult, std::vector<ArtistAlbumCount>>;
 
 struct SessionCommandResult {
     std::uint64_t id{0U};
@@ -132,6 +133,7 @@ class Session final {
     [[nodiscard]] std::uint64_t newest_root_values(std::string tag, unsigned track_limit);
     [[nodiscard]] std::uint64_t browse(std::string uri = {});
     [[nodiscard]] std::uint64_t list_tag(std::string tag);
+    [[nodiscard]] std::uint64_t album_counts(std::string artist_tag);
     [[nodiscard]] std::uint64_t find_tag_tracks(std::string tag, std::string value,
                                                 unsigned limit = 10'000U);
     [[nodiscard]] std::uint64_t load_artwork(std::string uri, bool embedded);

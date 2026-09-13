@@ -88,6 +88,8 @@ class ServerLibraryTreeModel final : public QAbstractItemModel {
   public slots:
     void acceptRoot(quint64 token, const QString& tag, const QStringList& values,
                     const QString& error);
+    void acceptAlbumCounts(quint64 token, const std::vector<mpd::ArtistAlbumCount>& counts,
+                           const QString& error);
     void acceptBranch(quint64 token, const std::vector<mpd::Track>& tracks, const QString& error);
     void acceptArtwork(quint64 token, const QImage& image);
 

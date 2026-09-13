@@ -13,12 +13,16 @@
 #include <QDropEvent>
 #include <QEvent>
 #include <QFile>
+#include <QItemSelectionModel>
 #include <QMetaObject>
 #include <QMimeData>
 #include <QPointer>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTableView>
+
 #include <QTimer>
+#include <algorithm>
 
 #include <cstddef>
 #include <string>
@@ -88,6 +92,70 @@ void BenchMainWindow::closeEvent(QCloseEvent* event) {
     stopBackgroundWork();
     persistNow(true);
     event->accept();
+}
+
+bool BenchMainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (tabs_ == nullptr || (watched != tabs_ && watched != tabs_->tabBar()) ||
+        (event->type() != QEvent::DragEnter && event->type() != QEvent::DragMove &&
+         event->type() != QEvent::Drop)) {
+        return QMainWindow::eventFilter(watched, event);
+    }
+    auto* drop = static_cast<QDropEvent*>(event);
+    const auto position = watched == tabs_->tabBar()
+                              ? drop->position().toPoint()
+                              : tabs_->tabBar()->mapFrom(tabs_, drop->position().toPoint());
+    return handleTabTrackDrop(qobject_cast<QTableView*>(drop->source()), drop, position);
+}
+
+bool BenchMainWindow::handleTabTrackDrop(QTableView* source, QDropEvent* drop,
+                                         const QPoint& position) {
+    // The QTabWidget receives drops in the unused strip beyond the bar's width.
+    if (position.y() < 0 || position.y() >= tabs_->tabBar()->height()) {
+        drop->ignore();
+        return true;
+    }
+    auto* source_tab = source == nullptr
+                           ? nullptr
+                           : tabForDocument(source->property("bench-document-id").toString());
+    const auto tab_index = tabs_->tabBar()->tabAt(position);
+    auto* target = tab_index < 0 ? nullptr : qobject_cast<QTableView*>(tabs_->widget(tab_index));
+    auto* target_tab = target == nullptr
+                           ? nullptr
+                           : tabForDocument(target->property("bench-document-id").toString());
+    if (source_tab == nullptr || source_tab->view != source ||
+        source->selectionModel() == nullptr || source->selectionModel()->selectedRows().isEmpty() ||
+        (tab_index >= 0 &&
+         (target_tab == nullptr || target_tab->view != target || source == target))) {
+        drop->ignore();
+        return true;
+    }
+    const auto action =
+        drop->modifiers().testFlag(Qt::ControlModifier) ? Qt::CopyAction : Qt::MoveAction;
+    if (!drop->possibleActions().testFlag(action)) {
+        drop->ignore();
+        return true;
+    }
+    if (drop->type() == QEvent::Drop) {
+        auto selected = source->selectionModel()->selectedRows(0);
+        std::ranges::sort(selected, {}, &QModelIndex::row);
+        QVariantList rows;
+        for (const auto& index : selected)
+            rows.push_back(index.row());
+        const auto transferred =
+            target_tab == nullptr
+                ? transferRowsToNewTab(source, rows, action == Qt::MoveAction, tr("Selection"))
+                : transferRows(source, rows, target->property("bench-document-id").toString(),
+                               action == Qt::MoveAction, -1);
+        if (!transferred) {
+            drop->ignore();
+            return true;
+        }
+        if (target_tab != nullptr)
+            tabs_->setCurrentWidget(target);
+    }
+    drop->setDropAction(action);
+    drop->accept();
+    return true;
 }
 
 void BenchMainWindow::dragEnterEvent(QDragEnterEvent* event) {

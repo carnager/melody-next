@@ -47,6 +47,7 @@ struct LibraryEntry {
     std::size_t tracks{0};
     std::size_t available{0};
     int track_number{0};
+    std::size_t albums{0};
 };
 
 struct LibraryPage {

@@ -759,6 +759,12 @@ void MpdProbeController::browseTag(const QString& tag) {
 }
 
 void MpdProbeController::loadServerLibraryRoot(const quint64 token, const QString& preferred_tag) {
+    if (session_) {
+        for (auto request = pending_library_album_counts_.cbegin();
+             request != pending_library_album_counts_.cend(); ++request)
+            session_->cancel_pending(request.key());
+    }
+    pending_library_album_counts_.clear();
     if (!session_ || !connected_) {
         emit serverLibraryRootLoaded(token, {}, {}, QStringLiteral("Not connected"));
         return;
@@ -1404,6 +1410,23 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         emit stateChanged();
         return;
     }
+    if (result.kind == mpd::SessionCommandKind::database_album_counts) {
+        const auto pending = pending_library_album_counts_.find(result.id);
+        if (pending == pending_library_album_counts_.end())
+            return;
+        const auto count_token = *pending;
+        pending_library_album_counts_.erase(pending);
+        if (result.error) {
+            emit serverLibraryAlbumCountsLoaded(count_token, {}, from_utf8(result.error->message));
+        } else if (const auto* counts =
+                       std::get_if<std::vector<mpd::ArtistAlbumCount>>(&result.payload)) {
+            emit serverLibraryAlbumCountsLoaded(count_token, *counts, {});
+        } else {
+            emit serverLibraryAlbumCountsLoaded(count_token, {},
+                                                QStringLiteral("Invalid album count response"));
+        }
+        return;
+    }
     if (result.kind == mpd::SessionCommandKind::database_tag) {
         const auto tree_query = pending_library_tree_roots_.find(result.id);
         if (tree_query != pending_library_tree_roots_.end()) {
@@ -1423,6 +1446,12 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
                 error = QStringLiteral("Library root returned an invalid response");
             }
             emit serverLibraryRootLoaded(request.token, request.tag, values, error);
+            if (error.isEmpty() && session_ && connected_ &&
+                (request.tag == QStringLiteral("AlbumArtist") ||
+                 request.tag == QStringLiteral("Artist"))) {
+                const auto count_id = session_->album_counts(request.tag.toStdString());
+                pending_library_album_counts_.insert(count_id, request.token);
+            }
             emit stateChanged();
             return;
         }
@@ -1920,6 +1949,7 @@ void MpdProbeController::clearSessionState() {
     pending_tag_query_.reset();
     pending_library_tree_roots_.clear();
     pending_library_tree_branches_.clear();
+    pending_library_album_counts_.clear();
     pending_library_tree_filters_.clear();
     pending_library_tree_artwork_.clear();
     pending_stored_playlists_query_.reset();

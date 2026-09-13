@@ -105,11 +105,14 @@ class BenchMainWindow final : public QMainWindow {
     void loadMpdUrisAsLocalFiles(const QStringList& uris);
 
   protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
 
   private:
+    friend class BenchMainWindowTest;
+    bool handleTabTrackDrop(QTableView* source, QDropEvent* event, const QPoint& position);
     struct ListTab {
         persistence::ListDocument document;
         LocalListModel* model{nullptr};
@@ -219,6 +222,8 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
+    bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
+                              const QString& name);
     void refreshTabChrome(ListTab& tab);
     void refreshTabActions();
     void refreshListHistoryActions();

@@ -216,6 +216,9 @@ class MpdProbeController final : public QObject {
     void newestRootOrderLoaded(const QStringList& values, const QString& error);
     void serverLibraryRootLoaded(quint64 token, const QString& tag, const QStringList& values,
                                  const QString& error);
+    void serverLibraryAlbumCountsLoaded(quint64 token,
+                                        const std::vector<mpd::ArtistAlbumCount>& counts,
+                                        const QString& error);
     void serverLibraryBranchLoaded(quint64 token, const std::vector<mpd::Track>& tracks,
                                    const QString& error);
     void serverLibraryArtworkLoaded(quint64 token, const QByteArray& data);
@@ -294,6 +297,7 @@ class MpdProbeController final : public QObject {
     };
     QHash<quint64, PendingLibraryTreeRoot> pending_library_tree_roots_;
     QHash<quint64, quint64> pending_library_tree_branches_;
+    QHash<quint64, quint64> pending_library_album_counts_;
     QHash<quint64, PendingLibraryTreeRoot> pending_library_tree_filters_;
     QHash<quint64, quint64> pending_library_tree_artwork_;
     std::optional<std::uint64_t> pending_artwork_query_;

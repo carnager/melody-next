@@ -20,8 +20,15 @@
 
 namespace trackknife::ui {
 
+static_assert(ServerLibraryTreeDelegate::secondaryTextRole ==
+              ServerLibraryTreeModel::SecondaryTextRole);
+
 ServerLibraryTreeView::ServerLibraryTreeView(QWidget* parent) : QTreeView(parent) {
     setMouseTracking(true);
+    setUniformRowHeights(false);
+    setIconSize(QSize{32, 32});
+    setIndentation(18);
+    setAnimated(true);
 }
 
 void ServerLibraryTreeView::setActionCallback(

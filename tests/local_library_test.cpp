@@ -198,6 +198,7 @@ void LocalLibraryTest::incrementalScanSearchAndPaging() {
     persistence::LibraryScanProgress first_scan;
     QVERIFY(library->scan({}, first_scan));
     QCOMPARE(first_scan.indexed.load(), 2U);
+    QCOMPARE(library->query({})->entries.front().albums, 1U);
     persistence::LibraryScanProgress repeat;
     QVERIFY(library->scan({}, repeat));
     QCOMPARE(repeat.indexed.load(), 0U);
@@ -252,6 +253,7 @@ void LocalLibraryTest::deletedSubfoldersArePrunedOnlyAfterCompleteScans() {
     persistence::LibraryScanProgress initial;
     QVERIFY(library->scan({}, initial));
     QCOMPARE(library->query(tracks())->entries.size(), 2U);
+    QCOMPARE(library->query({})->entries.front().albums, 2U);
     std::filesystem::remove_all(root / "removed");
     // A failed probe makes the traversal incomplete: retain unseen entries.
     {
@@ -1071,6 +1073,8 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
         QTRY_VERIFY(tree->model()->index(0, 0).data().toString().contains(QStringLiteral("Björk")));
         const auto artist = tree->model()->index(0, 0);
+        QCOMPARE(artist.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString(),
+                 QStringLiteral("1 album"));
         tree->expand(artist);
         QTRY_VERIFY(tree->model()
                         ->index(0, 0, tree->model()->index(0, 0))
@@ -1107,9 +1111,9 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
         QTRY_VERIFY(tree->model()
                         ->index(0, 0, tree->model()->index(0, 0))
-                        .data()
+                        .data(ui::ServerLibraryTreeDelegate::secondaryTextRole)
                         .toString()
-                        .contains(QStringLiteral("(2)")));
+                        .contains(QStringLiteral("2 tracks")));
         const auto album_index = [&] {
             return tree->model()->index(0, 0, tree->model()->index(0, 0));
         };
@@ -1130,7 +1134,19 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         QCOMPARE(mpd->model()->rowCount(), 0);
         tabs->setCurrentWidget(local_view);
         search->setText(QStringLiteral("Test album"));
-        QTRY_VERIFY(album_index().data().toString().contains(QStringLiteral("(2)")));
+        QTRY_VERIFY(album_index()
+                        .data(ui::ServerLibraryTreeDelegate::secondaryTextRole)
+                        .toString()
+                        .contains(QStringLiteral("2 tracks")));
+        {
+            ui::ServerLibraryTreeDelegate mpd_delegate{
+                static_cast<ui::ServerLibraryTreeView*>(tree), {}};
+            QStyleOptionViewItem option;
+            option.initFrom(tree);
+            const auto heading = tree->model()->index(0, 0);
+            QCOMPARE(tree->itemDelegate()->sizeHint(option, heading).height(),
+                     mpd_delegate.sizeHint(option, heading).height());
+        }
         // Append an overlapping album + track selection once, preserving the
         // multi-selection when opening the menu on an already selected entry.
         QTRY_COMPARE(tree->model()->rowCount(tree->model()->index(1, 0)), 2);

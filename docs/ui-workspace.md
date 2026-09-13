@@ -553,3 +553,17 @@ Fast also means low interaction cost:
   or the entire main window.
 - Unknown future panel configuration is preserved where possible and clearly
   marked rather than rewritten destructively.
+
+## Creating tabs from selected tracks
+
+**Trackknife decision (ADR-0167):** Local track menus offer **Copy to list →
+New tab…** and **Move to list → New tab…**, with a name prompt. Dropping local
+tracks on empty tab-strip space creates and selects a persistent **Selection**
+tab immediately. Drop on an existing local tab to append there. Dragging moves
+by default; hold **Ctrl** to copy. These actions transfer list occurrences,
+not files on disk; MPD and metadata tabs reject local track drops.
+
+Local and MPD library trees share row metrics, indentation, icon sizing, and
+animated expansion (ADR-0168). Artist subtitles display **1 album** / **N albums**.
+Local counts come from the background indexed query; MPD counts arrive through
+a background grouped tag query, without fetching every track or opening branches.

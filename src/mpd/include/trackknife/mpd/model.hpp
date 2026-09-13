@@ -16,6 +16,11 @@
 
 namespace trackknife::mpd {
 
+struct ArtistAlbumCount {
+    std::string artist;
+    std::size_t albums{0};
+};
+
 struct Pair {
     std::string name;
     std::string value;

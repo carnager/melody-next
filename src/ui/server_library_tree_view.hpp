@@ -63,6 +63,9 @@ class ServerLibraryTreeView final : public QTreeView {
 
 class ServerLibraryTreeDelegate final : public QStyledItemDelegate {
   public:
+    // Shared row subtitle role for local and server-backed models.
+    static constexpr int secondaryTextRole = Qt::UserRole + 6;
+
     struct Presentation {
         bool track{false};
         bool album{false};

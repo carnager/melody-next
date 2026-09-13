@@ -781,6 +781,7 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
         return false;
     }
     target->model->appendRows(std::move(transferred), insertion_row);
+    enqueueUnprobedRows(*target);
     markTabDirty(*target);
     syncArtwork(*target);
     if (move) {
@@ -788,6 +789,33 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
         markTabDirty(*source_tab);
     }
     return true;
+}
+
+bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantList& rows,
+                                           const bool move, const QString& name) {
+    const auto* source_tab = source == nullptr
+                                 ? nullptr
+                                 : tabForDocument(source->property("bench-document-id").toString());
+    if (source_tab == nullptr || source_tab->view != source || rows.isEmpty() ||
+        std::ranges::any_of(rows, [source_tab](const QVariant& row) {
+            bool valid = false;
+            const auto index = row.toInt(&valid);
+            return !valid || index < 0 || index >= source_tab->model->rowCount();
+        })) {
+        return false;
+    }
+    auto* destination = addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                             .kind = persistence::ListKind::scratch,
+                                                             .name = utf8Bytes(name),
+                                                             .pinned = false,
+                                                             .dirty = false,
+                                                             .items = {}},
+                                   false);
+    const auto transferred = transferRows(
+        source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
+    if (transferred)
+        tabs_->setCurrentWidget(destination->view);
+    return transferred;
 }
 
 void BenchMainWindow::markTabDirty(ListTab& tab) {
@@ -1163,11 +1191,40 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         }
     }
     track_context_menu_->addSeparator();
-    if (source_tab != nullptr && list_tabs_.size() > 1U) {
+    if (source_tab != nullptr) {
         auto* copy_menu = track_context_menu_->addMenu(QStringLiteral("Copy to list"));
         copy_menu->setObjectName(QStringLiteral("bench-track-copy-menu"));
         auto* move_menu = track_context_menu_->addMenu(QStringLiteral("Move to list"));
         move_menu->setObjectName(QStringLiteral("bench-track-move-menu"));
+        for (auto* menu : {copy_menu, move_menu}) {
+            const auto move = menu == move_menu;
+            auto* create = menu->addAction(tr("New tab…"));
+            create->setObjectName(move ? QStringLiteral("action-move-to-new-tab")
+                                       : QStringLiteral("action-copy-to-new-tab"));
+            connect(create, &QAction::triggered, this, [this, view, move] {
+                std::vector<QPersistentModelIndex> selected_rows;
+                auto selected = view->selectionModel()->selectedRows(0);
+                std::ranges::sort(selected, {}, &QModelIndex::row);
+                for (const auto& index : selected)
+                    selected_rows.emplace_back(index);
+                bool accepted = false;
+                const auto name =
+                    QInputDialog::getText(this, tr("New tab"), tr("Name:"), QLineEdit::Normal,
+                                          tr("Selection"), &accepted)
+                        .trimmed();
+                if (!accepted || name.isEmpty())
+                    return;
+                QVariantList rows;
+                for (const auto& index : selected_rows) {
+                    if (!index.isValid())
+                        return;
+                    rows.push_back(index.row());
+                }
+                transferRowsToNewTab(view, rows, move, name);
+            });
+            if (list_tabs_.size() > 1U)
+                menu->addSeparator();
+        }
         for (const auto& destination : list_tabs_) {
             if (destination.get() == source_tab) {
                 continue;

@@ -95,9 +95,34 @@ std::vector<persistence::LibraryEntry> selectedEntries(QModelIndexList indexes) 
 
 class LibraryModel final : public QStandardItemModel {
   public:
-    LibraryModel(LocalLibraryPanel* panel, std::function<QIcon(const QByteArray&)> artwork)
-        : QStandardItemModel(panel), panel_(panel), artwork_(std::move(artwork)) {}
+    LibraryModel(LocalLibraryPanel* panel, std::function<QIcon(const QByteArray&)> artwork,
+                 std::function<void(const QModelIndex&)> fetch)
+        : QStandardItemModel(panel), panel_(panel), artwork_(std::move(artwork)),
+          fetch_(std::move(fetch)) {}
+    bool canFetchMore(const QModelIndex& parent) const override {
+        return parent.isValid() && parent.data(query_role).isValid() &&
+               !parent.data(loaded_role).toBool();
+    }
+    bool hasChildren(const QModelIndex& parent = {}) const override {
+        return canFetchMore(parent) || QStandardItemModel::hasChildren(parent);
+    }
+    void fetchMore(const QModelIndex& parent) override {
+        if (canFetchMore(parent))
+            fetch_(parent);
+    }
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
+        if (role == ui::ServerLibraryTreeDelegate::secondaryTextRole) {
+            const auto value = QStandardItemModel::data(index, entry_role);
+            if (!value.isValid())
+                return {};
+            const auto entry = value.value<persistence::LibraryEntry>();
+            if (entry.kind == persistence::LibraryEntryKind::artist)
+                return tr("%1 album%2").arg(entry.albums).arg(entry.albums == 1U ? "" : "s");
+            if (entry.kind == persistence::LibraryEntryKind::album)
+                return text(entry.artist) + QStringLiteral(" · ") +
+                       tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
+            return {};
+        }
         if (role == Qt::DecorationRole) {
             const auto value = QStandardItemModel::data(index, entry_role);
             if (value.isValid()) {
@@ -131,6 +156,7 @@ class LibraryModel final : public QStandardItemModel {
   private:
     QPointer<LocalLibraryPanel> panel_;
     std::function<QIcon(const QByteArray&)> artwork_;
+    std::function<void(const QModelIndex&)> fetch_;
 };
 
 } // namespace
@@ -204,13 +230,11 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     tree_->setObjectName(QStringLiteral("local-library-tree"));
     tree_->setAccessibleName(tr("Local artists, albums, and tracks"));
     tree_->setHeaderHidden(true);
-    tree_->setUniformRowHeights(false);
     tree_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     tree_->setDragEnabled(true);
     tree_->setDragDropMode(QAbstractItemView::DragOnly);
     tree_->setDefaultDropAction(Qt::CopyAction);
     tree_->setExpandsOnDoubleClick(false);
-    tree_->setIndentation(18);
     library_view->setActionLabels({tr("Append to current list"), tr("Insert next in current list"),
                                    tr("Replace list and play")});
     library_view->setActionsAvailable([](const QModelIndex& index) {
@@ -222,20 +246,28 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     });
     tree_->setItemDelegate(new ui::ServerLibraryTreeDelegate(
         library_view, libraryActionIcons(this), [](const QModelIndex& index) {
-            const auto entry = index.data(entry_role).value<persistence::LibraryEntry>();
+            const auto value = index.data(entry_role);
+            const auto entry = value.value<persistence::LibraryEntry>();
             return ui::ServerLibraryTreeDelegate::Presentation{
-                .track = entry.kind == persistence::LibraryEntryKind::track,
-                .album = entry.kind == persistence::LibraryEntryKind::album,
+                .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
+                .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
                 .root = !index.parent().isValid(),
-                .secondary = entry.kind == persistence::LibraryEntryKind::album ? text(entry.artist)
-                                                                                : QString{}};
+                .secondary =
+                    index.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString()};
         }));
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-    model_ = new LibraryModel(this, [this](const QByteArray& key) {
-        const auto* icon = artwork_cache_.object(key);
-        return icon ? *icon : QIcon{};
-    });
+    model_ = new LibraryModel(
+        this,
+        [this](const QByteArray& key) {
+            const auto* icon = artwork_cache_.object(key);
+            return icon ? *icon : QIcon{};
+        },
+        [this](const QModelIndex& index) {
+            model_->setData(index, true, loaded_role);
+            loadChildren(QPersistentModelIndex{index},
+                         index.data(query_role).value<persistence::LibraryQuery>());
+        });
     tree_->setModel(model_);
     layout->addWidget(tree_, 1);
     connect(tree_, &QTreeView::expanded, this, [this](const QModelIndex& index) {
@@ -472,6 +504,7 @@ void LocalLibraryPanel::reloadTree() {
         expanded_entries_.clear();
         current_entry_.clear();
     }
+    static_cast<ui::ServerLibraryTreeView*>(tree_)->cancelPendingExpansions();
     model_->clear();
     const auto query_text = bytes(search_->text().trimmed());
     if (query_text.empty()) {
@@ -556,9 +589,6 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
              }
              for (const auto& entry : outcome.page.entries) {
                  auto label = text(entry.label);
-                 if (entry.kind != persistence::LibraryEntryKind::track) {
-                     label += tr(" (%1)").arg(entry.tracks);
-                 }
                  if (entry.available == 0U) {
                      label += tr(" — unavailable");
                  } else if (entry.available < entry.tracks) {
@@ -569,7 +599,7 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                  item->setDragEnabled(entry.available > 0U);
                  item->setDropEnabled(false);
                  item->setIcon(QIcon::fromTheme(entry.kind == persistence::LibraryEntryKind::artist
-                                                    ? QStringLiteral("user-identity")
+                                                    ? QStringLiteral("avatar-default")
                                                 : entry.kind == persistence::LibraryEntryKind::album
                                                     ? QStringLiteral("media-optical-audio")
                                                     : QStringLiteral("audio-x-generic")));
@@ -587,7 +617,6 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                          children.album_key = entry.key;
                      }
                      item->setData(QVariant::fromValue(children), query_role);
-                     item->appendRow(new QStandardItem(tr("Loading…")));
                  }
                  target->appendRow(item);
                  if (locate_target_) {
@@ -644,6 +673,7 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                  empty->setEnabled(false);
                  target->appendRow(empty);
              }
+             static_cast<ui::ServerLibraryTreeView*>(tree_)->completePendingExpansions();
          },
          true});
 }

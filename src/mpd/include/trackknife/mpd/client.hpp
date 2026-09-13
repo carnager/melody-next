@@ -77,6 +77,8 @@ class Client final {
     [[nodiscard]] core::Result<std::vector<Track>> queue_changes(std::uint32_t from_version);
     [[nodiscard]] core::Result<std::vector<DatabaseEntry>> browse(std::string_view uri = {});
     [[nodiscard]] core::Result<std::vector<std::string>> list_tag(std::string_view tag);
+    [[nodiscard]] core::Result<std::vector<ArtistAlbumCount>>
+    album_counts(std::string_view artist_tag);
     [[nodiscard]] core::Result<std::vector<Track>>
     find_tag_tracks(std::string_view tag, std::string_view value, unsigned limit = 10'000U);
     [[nodiscard]] core::Result<std::vector<std::byte>> artwork(std::string_view uri, bool embedded);

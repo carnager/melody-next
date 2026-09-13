@@ -320,6 +320,8 @@ struct ServerLibraryTreeModel::Impl {
         QString label;
         QString sort_key;
         QString query_value;
+        std::optional<std::size_t> album_count;
+        bool album_count_failed{false};
         QString filter_text;
         bool loaded{true};
         bool loading{false};
@@ -426,11 +428,20 @@ QVariant ServerLibraryTreeModel::data(const QModelIndex& index, const int role) 
             return QString{};
         }
         if (node->level == 0U) {
+            if (node->album_count) {
+                return QStringLiteral("%1 album%2")
+                    .arg(*node->album_count)
+                    .arg(*node->album_count == 1U ? QString{} : QStringLiteral("s"));
+            }
             if (!node->loaded) {
+                if (implementation_->active_root_tag == QStringLiteral("AlbumArtist") ||
+                    implementation_->active_root_tag == QStringLiteral("Artist"))
+                    return node->album_count_failed ? QStringLiteral("Album count unavailable")
+                                                    : QStringLiteral("Counting albums…");
                 return QStringLiteral("Expand to browse");
             }
             const auto child_count = node->children.size();
-            return QStringLiteral("%1 Album%2")
+            return QStringLiteral("%1 album%2")
                 .arg(child_count)
                 .arg(child_count == 1U ? QString{} : QStringLiteral("s"));
         }
@@ -650,6 +661,26 @@ void ServerLibraryTreeModel::acceptRoot(const quint64 token, const QString& tag,
     beginResetModel();
     implementation_->root.children = std::move(children);
     endResetModel();
+}
+
+void ServerLibraryTreeModel::acceptAlbumCounts(const quint64 token,
+                                               const std::vector<mpd::ArtistAlbumCount>& counts,
+                                               const QString& error) {
+    if (token != implementation_->root.request_token)
+        return;
+    QHash<QString, std::size_t> by_artist;
+    if (error.isEmpty()) {
+        for (const auto& count : counts)
+            by_artist.insert(display(count.artist), count.albums);
+    }
+    for (const auto& node : implementation_->root.children) {
+        const auto found = by_artist.constFind(node->query_value);
+        node->album_count_failed = !error.isEmpty() || found == by_artist.cend();
+        node->album_count =
+            node->album_count_failed ? std::nullopt : std::optional<std::size_t>{*found};
+    }
+    if (rowCount() > 0)
+        emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {SecondaryTextRole});
 }
 
 void ServerLibraryTreeModel::setRootOrdering(const QStringList& newest_first) {

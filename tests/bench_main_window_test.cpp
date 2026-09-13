@@ -235,6 +235,8 @@ class BenchMainWindowTest final : public QObject {
     void combinedPublicationStartupRecoversMetadataAndPath();
     void folderDiscoveryAdmitsWave64();
     void contextMenusTargetSelectionsListsAndFolders();
+    void contextTransfersCreateTabs();
+    void tabBarDropsTransferLocalRows();
     void panelLayoutPersistsAndPreservesFutureState();
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void localReorderPreservesVisibleRowGeometry();
@@ -658,6 +660,13 @@ void BenchMainWindowTest::mpdSearchProjectsControllerResults() {
     QVERIFY(dynamic_cast<ui::ServerLibraryTreeDelegate*>(results->itemDelegate()));
     QCOMPARE(results->selectionMode(), local_tree->selectionMode());
     QCOMPARE(results->indentation(), local_tree->indentation());
+    auto* browse = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
+    QVERIFY(browse);
+    QVERIFY(local_tree->isAnimated());
+    QCOMPARE(local_tree->isAnimated(), browse->isAnimated());
+    QCOMPARE(results->isAnimated(), browse->isAnimated());
+    QCOMPARE(local_tree->iconSize(), browse->iconSize());
+    QCOMPARE(local_tree->uniformRowHeights(), browse->uniformRowHeights());
     QCOMPARE(results->frameShape(), local_tree->frameShape());
     QCOMPARE(results->dragDropMode(), local_tree->dragDropMode());
     QCOMPARE(results->expandsOnDoubleClick(), local_tree->expandsOnDoubleClick());
@@ -6077,6 +6086,134 @@ void BenchMainWindowTest::folderDiscoveryAdmitsWave64() {
     QCOMPARE(model->rawPath(0), wave64_raw);
 }
 
+void BenchMainWindowTest::contextTransfersCreateTabs() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* source = qobject_cast<QTableView*>(tabs->widget(1));
+    QVERIFY(source != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(source->model());
+    QVERIFY(model != nullptr);
+    LocalTrackRow row;
+    row.raw_path = "/unmounted/é.flac";
+    row.title = "Cached title";
+    row.probed = true;
+    model->appendRows({row, row});
+    tabs->setCurrentWidget(source);
+    source->selectAll();
+    const auto open_menu = [&] {
+        window.showTrackContextMenu(source, source->visualRect(model->index(0, 0)).center());
+    };
+    open_menu();
+    auto* copy = window.findChild<QAction*>(QStringLiteral("action-copy-to-new-tab"));
+    auto* move = window.findChild<QAction*>(QStringLiteral("action-move-to-new-tab"));
+    QVERIFY(copy != nullptr);
+    QVERIFY(move != nullptr);
+    QTimer::singleShot(0, [] {
+        if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget()))
+            dialog->reject();
+    });
+    copy->trigger();
+    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(model->rowCount(), 2);
+    QTimer::singleShot(0, [] {
+        if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
+            dialog->setTextValue(QStringLiteral("Copied selection"));
+            dialog->accept();
+        }
+    });
+    copy->trigger();
+    QCOMPARE(tabs->count(), 3);
+    auto* copied =
+        qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
+    QCOMPARE(copied->rowCount(), 2);
+    QCOMPARE(model->rowCount(), 2);
+    QCOMPARE(copied->rows()[0].raw_path, row.raw_path);
+    QCOMPARE(copied->rows()[1].title, row.title);
+    QVERIFY(copied->rows()[0].probed);
+    QVERIFY(!copied->rows()[0].source_revision.has_value());
+    QVERIFY(tabs->tabText(tabs->currentIndex()).startsWith(QStringLiteral("Copied selection")));
+    tabs->setCurrentWidget(source);
+    open_menu();
+    move = window.findChild<QAction*>(QStringLiteral("action-move-to-new-tab"));
+    QVERIFY(move != nullptr);
+    QTimer::singleShot(0, [] {
+        if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
+            dialog->setTextValue(QStringLiteral("Moved selection"));
+            dialog->accept();
+        }
+    });
+    move->trigger();
+    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(model->rowCount(), 0);
+    auto* moved =
+        qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
+    QCOMPARE(moved->rowCount(), 2);
+    QCOMPARE(moved->rows()[1].raw_path, row.raw_path);
+}
+
+void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* source = qobject_cast<QTableView*>(tabs->widget(1));
+    auto* model = qobject_cast<LocalListModel*>(source->model());
+    LocalTrackRow row;
+    row.raw_path = "/unmounted/track.flac";
+    row.probed = true;
+    model->appendRows({row, row});
+    tabs->setCurrentWidget(source);
+    source->selectAll();
+    QMimeData mime;
+    // Synthetic Qt drop events have no source; supply the real source view to
+    // the handler used by the tab-bar event filter.
+    const auto send_drop = [&](QTableView* from, const QPoint position,
+                               const Qt::KeyboardModifiers modifiers, const bool commit) {
+        QDragEnterEvent enter{position, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton,
+                              modifiers};
+        window.handleTabTrackDrop(from, &enter, position);
+        if (!enter.isAccepted() || !commit)
+            return enter.isAccepted();
+        QDropEvent drop{QPointF{position}, Qt::CopyAction | Qt::MoveAction, &mime, Qt::LeftButton,
+                        modifiers};
+        window.handleTabTrackDrop(from, &drop, position);
+        return drop.isAccepted() &&
+               drop.dropAction() ==
+                   (modifiers.testFlag(Qt::ControlModifier) ? Qt::CopyAction : Qt::MoveAction);
+    };
+    const auto empty_position = [&] {
+        return QPoint{tabs->tabBar()->tabRect(tabs->count() - 1).right() + 12,
+                      tabs->tabBar()->height() / 2};
+    };
+    QVERIFY(!send_drop(source, tabs->tabBar()->tabRect(0).center(), Qt::NoModifier, true));
+    QVERIFY(!send_drop(source, tabs->tabBar()->tabRect(1).center(), Qt::NoModifier, true));
+    QVERIFY(!send_drop(qobject_cast<QTableView*>(tabs->widget(0)), empty_position(), Qt::NoModifier,
+                       true));
+    QVERIFY(!send_drop(source, QPoint{20, tabs->tabBar()->height() + 20}, Qt::NoModifier, true));
+    QVERIFY(send_drop(source, empty_position(), Qt::ControlModifier, false));
+    QCOMPARE(tabs->count(), 2);
+    QVERIFY(send_drop(source, empty_position(), Qt::ControlModifier, true));
+    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(model->rowCount(), 2);
+    auto* copied_view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* copied = qobject_cast<LocalListModel*>(copied_view->model());
+    QCOMPARE(copied->rowCount(), 2);
+    QCOMPARE(copied->rows()[0].raw_path, row.raw_path);
+    QVERIFY(send_drop(source, empty_position(), Qt::NoModifier, true));
+    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(model->rowCount(), 0);
+    auto* moved_view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QCOMPARE(moved_view->model()->rowCount(), 2);
+    moved_view->selectAll();
+    QVERIFY(send_drop(moved_view, tabs->tabBar()->tabRect(tabs->indexOf(copied_view)).center(),
+                      Qt::NoModifier, true));
+    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(copied->rowCount(), 4);
+    QCOMPARE(moved_view->model()->rowCount(), 0);
+}
+
 void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -6142,9 +6279,9 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
     QVERIFY(track_menu->actions().contains(properties));
     QVERIFY(track_menu->actions().contains(convert));
     QVERIFY(remove->isEnabled());
-    QCOMPARE(copy_menu->actions().size(), 1);
-    QCOMPARE(move_menu->actions().size(), 1);
-    copy_menu->actions().front()->trigger();
+    QCOMPARE(copy_menu->actions().size(), 3);
+    QCOMPARE(move_menu->actions().size(), 3);
+    copy_menu->actions().back()->trigger();
     QCOMPARE(destination->model()->rowCount(), 5);
 
     const auto unselected_position = source->visualRect(source->model()->index(2, 0)).center();

@@ -13,7 +13,9 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -182,16 +184,32 @@ struct Client::Impl {
         return error;
     }
 
-    [[nodiscard]] core::Result<std::vector<Pair>> receive_pairs(std::string_view stage) {
+    [[nodiscard]] core::Result<std::vector<Pair>>
+    receive_pairs(std::string_view stage,
+                  const std::size_t maximum_pairs = std::numeric_limits<std::size_t>::max(),
+                  const std::size_t maximum_bytes = std::numeric_limits<std::size_t>::max()) {
         std::vector<Pair> result;
+        std::size_t bytes = 0U;
+        bool exceeded = false;
         while (auto* pair = mpd_recv_pair(connection.get())) {
-            result.push_back({pair->name == nullptr ? std::string{} : std::string{pair->name},
-                              pair->value == nullptr ? std::string{} : std::string{pair->value}});
+            const std::string_view name = pair->name == nullptr ? "" : pair->name;
+            const std::string_view value = pair->value == nullptr ? "" : pair->value;
+            if (result.size() >= maximum_pairs ||
+                name.size() + value.size() > maximum_bytes - bytes)
+                exceeded = true;
+            if (!exceeded) {
+                bytes += name.size() + value.size();
+                result.push_back({std::string{name}, std::string{value}});
+            }
             mpd_return_pair(connection.get(), pair);
         }
         if (!mpd_response_finish(connection.get())) {
             return std::unexpected(take_error(stage));
         }
+        if (exceeded)
+            return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
+                                               .message = "MPD response exceeds the query bounds",
+                                               .context = {}});
         return result;
     }
 };
@@ -334,6 +352,66 @@ core::Result<std::vector<DatabaseEntry>> Client::browse(const std::string_view u
         return std::unexpected(std::move(pairs.error()));
     }
     return project_database_entries(*pairs);
+}
+
+core::Result<std::vector<ArtistAlbumCount>>
+Client::album_counts(const std::string_view artist_tag) {
+    const auto type = artist_tag == "AlbumArtist" ? MPD_TAG_ALBUM_ARTIST
+                      : artist_tag == "Artist"    ? MPD_TAG_ARTIST
+                                                  : MPD_TAG_UNKNOWN;
+    if (type == MPD_TAG_UNKNOWN) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Album counts require Artist or AlbumArtist",
+                                           .context = {}});
+    }
+    auto* connection = implementation_->connection.get();
+    if (!mpd_search_db_tags(connection, MPD_TAG_ALBUM) ||
+        !mpd_search_add_group_tag(connection, type) ||
+        !mpd_search_add_group_tag(connection, MPD_TAG_DATE) ||
+        !mpd_search_add_group_tag(connection, MPD_TAG_MUSICBRAINZ_ALBUMID) ||
+        !mpd_search_commit(connection)) {
+        mpd_search_cancel(connection);
+        return std::unexpected(implementation_->take_error("send artist album counts"));
+    }
+    auto pairs = implementation_->receive_pairs("receive artist album counts", 500'000U,
+                                                32U * 1024U * 1024U);
+    if (!pairs)
+        return std::unexpected(std::move(pairs.error()));
+    std::map<std::string, std::set<std::string>> albums;
+    std::string artist, date, release;
+    bool have_artist = false;
+    std::size_t count = 0U;
+    for (const auto& pair : *pairs) {
+        const auto pair_type = mpd_tag_name_iparse(pair.name.c_str());
+        if (pair_type == type) {
+            artist = pair.value;
+            have_artist = true;
+        } else if (pair_type == MPD_TAG_DATE) {
+            date = pair.value;
+        } else if (pair_type == MPD_TAG_MUSICBRAINZ_ALBUMID) {
+            release = pair.value;
+        } else if (pair_type == MPD_TAG_ALBUM) {
+            if (!have_artist) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::invalid_argument,
+                                .message = "Album count response omitted artist grouping",
+                                .context = {}});
+            }
+            auto key = release.empty() ? "album:" + pair.value + std::string(1, '\0') + date
+                                       : "mbid:" + release;
+            if (albums[artist].insert(std::move(key)).second && ++count > 100'000U) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::limit_exceeded,
+                                .message = "Album count response exceeds 100000 releases",
+                                .context = {}});
+            }
+        }
+    }
+    std::vector<ArtistAlbumCount> result;
+    result.reserve(albums.size());
+    for (const auto& [name, releases] : albums)
+        result.push_back({name, releases.size()});
+    return result;
 }
 
 core::Result<std::vector<std::string>> Client::list_tag(const std::string_view tag) {

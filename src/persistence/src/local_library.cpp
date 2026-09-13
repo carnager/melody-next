@@ -818,16 +818,16 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         std::string order;
         switch (query.kind) {
         case LibraryEntryKind::artist:
-            columns = "artist,artist,artist,'',count(*),sum(available),0";
+            columns = "artist,artist,artist,'',count(*),sum(available),0,count(DISTINCT album_key)";
             order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
-            columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0";
+            columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1";
             order = " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),min(album) "
                     "COLLATE NOCASE,album_key";
             break;
         case LibraryEntryKind::track:
-            columns = "raw_path,title,artist,album,1,available,track";
+            columns = "raw_path,title,artist,album,1,available,track,1";
             order = " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
                     "NOCASE,raw_path";
             break;
@@ -848,7 +848,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                                     statement.bytes(2), statement.bytes(3),
                                     static_cast<std::size_t>(statement.number(4)),
                                     static_cast<std::size_t>(statement.number(5)),
-                                    static_cast<int>(statement.number(6))});
+                                    static_cast<int>(statement.number(6)),
+                                    static_cast<std::size_t>(statement.number(7))});
             page.entries.back().label = format_label(page.entries.back(), !query.text.empty());
         }
         return page;

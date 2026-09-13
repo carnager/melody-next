@@ -136,6 +136,7 @@ struct Session::Impl {
     [[nodiscard]] static bool is_query(const SessionCommandKind kind) noexcept {
         return kind == SessionCommandKind::database_browse ||
                kind == SessionCommandKind::database_tag ||
+               kind == SessionCommandKind::database_album_counts ||
                kind == SessionCommandKind::database_tag_tracks ||
                kind == SessionCommandKind::artwork || kind == SessionCommandKind::database_search ||
                kind == SessionCommandKind::database_album ||
@@ -335,6 +336,12 @@ struct Session::Impl {
             }
             return SessionCommandPayload{std::move(*result)};
         }
+        case SessionCommandKind::database_album_counts: {
+            auto result = client.album_counts(command.uri);
+            if (!result)
+                return std::unexpected(std::move(result.error()));
+            return SessionCommandPayload{std::move(*result)};
+        }
         case SessionCommandKind::database_tag: {
             auto result = client.list_tag(command.uri);
             if (!result) {
@@ -455,6 +462,7 @@ struct Session::Impl {
         case SessionCommandKind::database_newest:
         case SessionCommandKind::database_browse:
         case SessionCommandKind::database_tag:
+        case SessionCommandKind::database_album_counts:
         case SessionCommandKind::database_tag_tracks:
         case SessionCommandKind::artwork:
         case SessionCommandKind::database_search:
@@ -818,6 +826,13 @@ std::uint64_t Session::browse(std::string uri) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::database_browse;
     command.uri = std::move(uri);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::album_counts(std::string artist_tag) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::database_album_counts;
+    command.uri = std::move(artist_tag);
     return implementation_->enqueue(std::move(command));
 }
 

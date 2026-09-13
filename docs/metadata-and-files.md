@@ -27,9 +27,17 @@ the review bar reports visible/changed counts. Filters only affect presentation:
 **Trackknife decision (ADR-0158):** Identify works with manually entered artist
 or album text even when files have no tags. Search no longer requires the
 selected file count to equal a release's track count. **Match this version…**
-opens local files and release tracks side by side. Select a pair and **Assign**,
-or **Sort files by name** then **Match in file order**. Occupied assignments
-swap; **Unmatch** leaves that file untouched. **Stage matches** confirms the
+opens two aligned panes: local filenames on the left and MusicBrainz tracks
+on the right (ADR-0162). Drag files within the left pane or use **Move file
+up/down** / **Alt+Up/Down**; MusicBrainz rows stay in album order. Each left
+row pairs with the right row beside it. Arrow/track-number markers, paired-row
+tint, linked selection, and synchronized scrolling make that relationship
+visible. Full local paths are available in tooltips. **Match by filename** pairs files in
+natural filename order; **Reset file order** uses original selection order.
+**Leave unmatched** moves a file below the album and leaves an empty slot.
+You can move empty slots to account for missing tracks. Extra unmatched files
+receive no tags. Suggested pairings require review, especially for untagged
+files whose remaining slots start in file order. **Stage matches** confirms the
 shown mapping and creates an undoable draft; **Apply** writes it later.
 
 Throttled MusicBrainz requests retry twice at most, honoring server cooldowns.

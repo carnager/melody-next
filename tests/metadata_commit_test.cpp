@@ -2,6 +2,7 @@
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "trackknife/formats/artwork.hpp"
 #include "trackknife/formats/cue_sheet.hpp"
 #include "trackknife/metadata/flac_writer.hpp"
 #include "trackknife/metadata/local_reader.hpp"
@@ -1465,6 +1466,172 @@ void batch_apply_cancellation_stops_new_source_admission() {
     return plan;
 }
 
+void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_directory) {
+    for (const auto& [fixture, extension] :
+         std::vector<std::pair<std::string, std::string>>{{"tagged-tone-flac.b64", ".flac"},
+                                                          {"tagged-tone-mp3.b64", ".mp3"},
+                                                          {"tagged-tone-m4a.b64", ".m4a"}}) {
+        TemporaryDirectory directory;
+        const auto path =
+            materialize(fixture_directory, fixture, directory.path() / ("album" + extension));
+        const auto jpeg =
+            materialize(fixture_directory, "external-blue-jpeg.b64", directory.path() / "blue.jpg");
+        const auto donor =
+            materialize(fixture_directory, "art-tone-flac.b64", directory.path() / "donor.flac");
+        const auto png_bytes = trackknife::formats::load_embedded_artwork(donor.native());
+        CHECK(png_bytes.has_value());
+        if (!png_bytes) {
+            continue;
+        }
+        const auto png = directory.path() / "red.png";
+        {
+            std::ofstream output{png, std::ios::binary};
+            output.write(reinterpret_cast<const char*>(png_bytes->data()),
+                         static_cast<std::streamsize>(png_bytes->size()));
+        }
+        auto journal =
+            persistence::SqliteMetadataOperationJournal::open(directory.path() / "journal.sqlite3");
+        CHECK(journal.has_value());
+        if (!journal) {
+            continue;
+        }
+        const auto commit = [&](const metadata::ArtworkWritePlanSource& source,
+                                const core::CancellationToken& cancellation) {
+            return operations::commit_artwork_source(
+                source, *journal,
+                [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; },
+                cancellation);
+        };
+        auto policy = metadata::default_artwork_inventory_policy();
+        policy.external_patterns.clear();
+        // Two different versions of the same front-cover role.
+        for (const auto& image : {jpeg, png}) {
+            const auto inventory = metadata::read_local_artwork_inventory(path.native(), policy);
+            CHECK(inventory.has_value());
+            if (!inventory) {
+                continue;
+            }
+            const metadata::ArtworkWritePlanIntent add{
+                .occurrence_index = 0,
+                .raw_media_path = path.native(),
+                .expected_media_revision = inventory->media_revision,
+                .target_ordinal = 0,
+                .expected_target_fingerprint = {},
+                .kind = metadata::ArtworkWritePlanIntentKind::add,
+                .replacement_raw_path = image.native(),
+                .added_role = metadata::ArtworkRole::front,
+                .added_description = {},
+                .replacement_embedded_source = std::nullopt};
+            const auto plan = metadata::revalidate_artwork_write_plan({add});
+            CHECK(plan && plan->ready());
+            if (plan && plan->ready()) {
+                CHECK(commit(plan->sources.front(), {}).has_value());
+            }
+        }
+        const auto before = metadata::read_local_artwork_inventory(path.native(), policy);
+        const auto tags = metadata::read_local_metadata(path.native());
+        CHECK(before && before->items.size() == 2U && tags);
+        if (!before || before->items.size() != 2U || !tags) {
+            continue;
+        }
+        std::vector<metadata::ArtworkWritePlanIntent> intents;
+        for (const auto& item : before->items) {
+            for (const auto occurrence : {0U, 7U}) {
+                intents.push_back({.occurrence_index = occurrence,
+                                   .raw_media_path = path.native(),
+                                   .expected_media_revision = before->media_revision,
+                                   .target_ordinal = item.source_ordinal,
+                                   .expected_target_fingerprint = item.content_fingerprint,
+                                   .kind = metadata::ArtworkWritePlanIntentKind::remove,
+                                   .replacement_raw_path = std::nullopt,
+                                   .added_role = metadata::ArtworkRole::front,
+                                   .added_description = {},
+                                   .replacement_embedded_source = std::nullopt});
+            }
+        }
+        // Re-adding an image being removed must be allowed.
+        auto addition = intents.front();
+        addition.kind = metadata::ArtworkWritePlanIntentKind::add;
+        addition.replacement_raw_path = jpeg.native();
+        addition.expected_target_fingerprint = {};
+        intents.push_back(addition);
+        const auto plan = metadata::revalidate_artwork_write_plan(intents);
+        CHECK(plan && plan->ready() && plan->sources.size() == 3U);
+        if (!plan || !plan->ready()) {
+            continue;
+        }
+        CHECK(plan->sources[0].change.target_ordinal == 1U);
+        CHECK(plan->sources[1].change.target_ordinal == 0U);
+        const auto result = operations::apply_artwork_write_plan(*plan, commit);
+        if (result) {
+            for (const auto& step : result->sources) {
+                if (step.issue) {
+                    std::cerr << extension << ": " << step.issue->message << '\n';
+                }
+            }
+        }
+        CHECK(result && result->committed_source_count() == 3U);
+        const auto after = metadata::read_local_artwork_inventory(path.native(), policy);
+        const auto after_tags = metadata::read_local_metadata(path.native());
+        CHECK(after && after->items.size() == 1U &&
+              after->items[0].content_fingerprint == before->items[0].content_fingerprint);
+        CHECK(after_tags && after_tags->document.fields == tags->document.fields);
+        const auto unrelated_objects = [](const metadata::MetadataDocument& document) {
+            auto objects = document.unsupported_native_objects;
+            std::erase_if(objects, [](const auto& object) {
+                return object.identity == "covr" || object.identity == "APIC" ||
+                       object.identity.starts_with("APIC:");
+            });
+            return objects;
+        };
+        CHECK(after_tags &&
+              unrelated_objects(after_tags->document) == unrelated_objects(tags->document));
+        // An old preview must fail closed after the save.
+        const auto stale = operations::apply_artwork_write_plan(*plan, commit);
+        CHECK(stale && stale->committed_source_count() == 0U && stale->failed_source_count() == 3U);
+        if (!after || after->items.size() != 1U) {
+            continue;
+        }
+        auto remove_remaining = intents.front();
+        remove_remaining.expected_media_revision = after->media_revision;
+        remove_remaining.expected_target_fingerprint = after->items.front().content_fingerprint;
+        remove_remaining.target_ordinal = 0;
+        addition.expected_media_revision = after->media_revision;
+        auto add_second = addition;
+        add_second.replacement_raw_path = png.native();
+        const auto several_adds =
+            metadata::revalidate_artwork_write_plan({remove_remaining, addition, add_second});
+        CHECK(several_adds && several_adds->ready() && several_adds->sources.size() == 3U);
+        if (!several_adds || !several_adds->ready()) {
+            continue;
+        }
+        const auto several_saved = operations::apply_artwork_write_plan(*several_adds, commit);
+        CHECK(several_saved && several_saved->committed_source_count() == 3U);
+        const auto two = metadata::read_local_artwork_inventory(path.native(), policy);
+        CHECK(two && two->items.size() == 2U);
+        if (!two || two->items.size() != 2U) {
+            continue;
+        }
+        std::vector<metadata::ArtworkWritePlanIntent> remove_all;
+        for (const auto& item : two->items) {
+            auto removal = remove_remaining;
+            removal.expected_media_revision = two->media_revision;
+            removal.target_ordinal = item.source_ordinal;
+            removal.expected_target_fingerprint = item.content_fingerprint;
+            remove_all.push_back(removal);
+        }
+        const auto empty_plan = metadata::revalidate_artwork_write_plan(remove_all);
+        CHECK(empty_plan && empty_plan->ready());
+        if (!empty_plan || !empty_plan->ready()) {
+            continue;
+        }
+        const auto emptied = operations::apply_artwork_write_plan(*empty_plan, commit);
+        CHECK(emptied && emptied->committed_source_count() == 2U);
+        const auto empty = metadata::read_local_artwork_inventory(path.native(), policy);
+        CHECK(empty && empty->items.empty());
+    }
+}
+
 void artwork_batch_apply_reports_ordered_partial_results_and_cancellation() {
     auto plan = synthetic_artwork_plan(3U);
     CHECK(plan.ready());
@@ -1500,6 +1667,34 @@ void artwork_batch_apply_reports_ordered_partial_results_and_cancellation() {
           partial->sources[2].state == operations::ArtworkApplySourceState::committed &&
           partial->committed_source_count() == 2U && partial->failed_source_count() == 1U &&
           progress.size() == 6U && progress.back().completed_sources == 3U);
+
+    auto repeated = synthetic_artwork_plan(3U);
+    for (std::size_t index = 0; index < repeated.sources.size(); ++index) {
+        repeated.sources[index].raw_media_path = repeated.sources.front().raw_media_path;
+        repeated.sources[index].change.target_ordinal = 2U - index;
+    }
+    std::size_t attempts = 0;
+    const auto interrupted = operations::apply_artwork_write_plan(
+        repeated,
+        [&](const metadata::ArtworkWritePlanSource& step,
+            const core::CancellationToken&) -> core::Result<operations::MetadataCommitResult> {
+            if (++attempts == 2U) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                                   .message = "second picture failed",
+                                                   .context = {}});
+            }
+            return operations::MetadataCommitResult{
+                .journal_id = core::StableId::random(),
+                .source_raw_path = step.raw_media_path,
+                .backup_raw_path = step.raw_media_path + ".backup",
+                .previous_revision = *step.observed_media_revision,
+                .published_revision = {},
+                .document = {},
+                .occurrence_indexes = step.occurrence_indexes};
+        });
+    CHECK(interrupted && attempts == 2U && interrupted->committed_source_count() == 1U &&
+          interrupted->failed_source_count() == 2U && interrupted->sources[2].issue &&
+          interrupted->sources[2].issue->message.find("not attempted") != std::string::npos);
 
     core::CancellationSource cancellation;
     std::atomic_size_t admitted{0U};
@@ -2452,6 +2647,7 @@ int main(const int argc, char** argv) {
         batch_apply_commits_real_sources_and_reports_partial_results(fixture_directory);
         batch_apply_cancellation_stops_new_source_admission();
         artwork_batch_apply_reports_ordered_partial_results_and_cancellation();
+        artwork_multiple_changes_per_file(fixture_directory);
         publishes_verified_native_flac_directly_at_changed_destination(fixture_directory);
         bounded_preparation_apply_combines_metadata_and_relocation_transaction(fixture_directory);
         bounded_preparation_apply_commits_metadata_when_path_is_unchanged(fixture_directory);

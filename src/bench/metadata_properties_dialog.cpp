@@ -1085,9 +1085,17 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
         metadata_sections_->addTab(artwork_section_, QStringLiteral("Artwork"));
     connect(artwork_section_, &MetadataArtworkSection::operationRunningChanged, this,
             [this](const bool running) {
-                artwork_operation_running_ = running;
+                artwork_operation_running_ = running || artwork_section_->hasPendingChanges();
+                file_list_->setEnabled(!artwork_operation_running_);
                 updateWritePlanButton();
                 updateTransformationButton();
+            });
+    connect(artwork_section_, &MetadataArtworkSection::pendingChangesChanged, this,
+            [this](const bool pending) {
+                artwork_operation_running_ = pending || artwork_section_->isBusy();
+                file_list_->setEnabled(!artwork_operation_running_);
+                updateDraftState(draft_count_, undo_button_->isEnabled(),
+                                 redo_button_->isEnabled());
             });
     connect(metadata_sections_, &QTabWidget::currentChanged, this,
             [this, artwork_page](const int index) {
@@ -1334,6 +1342,10 @@ void MetadataPropertiesDialog::updateDraftState(const int patch_count, const boo
         read_only_->setTextFormat(
             sticky_status_.contains(QStringLiteral("<a href")) ? Qt::RichText : Qt::PlainText);
         read_only_->setText(sticky_status_);
+    } else if (artwork_section_ && artwork_section_->hasPendingChanges()) {
+        read_only_->setTextFormat(Qt::PlainText);
+        read_only_->setText(QStringLiteral(
+            "Artwork changes pending · Save artwork or Discard changes in the Artwork tab"));
     } else {
         read_only_->setTextFormat(Qt::PlainText);
         read_only_->setText(
@@ -3589,7 +3601,23 @@ bool MetadataPropertiesDialog::eventFilter(QObject* watched, QEvent* event) {
     return QDialog::eventFilter(watched, event);
 }
 
+void MetadataPropertiesDialog::reject() {
+    // Escape must use the same unsaved-draft and cancellation checks as closing the tab.
+    close();
+}
+
 void MetadataPropertiesDialog::closeEvent(QCloseEvent* event) {
+    if (artwork_section_ && artwork_section_->hasPendingChanges() && !artwork_section_->isBusy()) {
+        const auto answer =
+            QMessageBox::warning(this, QStringLiteral("Discard artwork changes?"),
+                                 QStringLiteral("The pending artwork changes have not been saved."),
+                                 QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Discard) {
+            event->ignore();
+            return;
+        }
+        artwork_section_->discardPendingChanges();
+    }
     if (artwork_operation_running_) {
         artwork_section_->requestOperationCancellation();
         read_only_->setText(

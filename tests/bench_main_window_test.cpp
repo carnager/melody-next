@@ -50,6 +50,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QHash>
 #include <QHeaderView>
@@ -4284,6 +4285,9 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     QTRY_COMPARE(view->model()->rowCount(), 2);
+    auto* local_model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(local_model != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(local_model->rows()[0].probed && local_model->rows()[1].probed, 5000);
     view->selectAll();
 
     auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
@@ -4697,9 +4701,14 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 1, 5'000);
 
     // One unambiguous release across the selection enables the fetch; the
-    // whole download-and-add runs as one direct apply with no dialogs.
+    // download stages an addition; Save artwork is the explicit commit.
     QTRY_VERIFY(fetch->isEnabled());
     QTest::mouseClick(fetch, Qt::LeftButton);
+    auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
+    QVERIFY(save != nullptr);
+    QTRY_VERIFY(save->isEnabled());
+    QVERIFY(!observed.has_value());
+    QTest::mouseClick(save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
     const auto apply_issue = observed->sources.front().issue
                                  ? QString::fromStdString(observed->sources.front().issue->message)
@@ -4822,11 +4831,17 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_COMPARE_WITH_TIMEOUT(second_items->model()->rowCount(), 2, 5'000);
     QTRY_VERIFY(second_fetch->isEnabled());
     QTest::mouseClick(second_fetch, Qt::LeftButton);
+    auto* second_save =
+        second_properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
+    QVERIFY(second_save != nullptr);
+    QTRY_VERIFY(second_save->isEnabled());
+    QVERIFY(!observed.has_value());
+    QTest::mouseClick(second_save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
     const auto second_issue = observed->sources.front().issue
                                   ? QString::fromStdString(observed->sources.front().issue->message)
                                   : QStringLiteral("no per-source issue");
-    QVERIFY2(observed->committed_source_count() == 1U, qPrintable(second_issue));
+    QVERIFY2(observed->committed_source_count() == 2U, qPrintable(second_issue));
     QTRY_COMPARE_WITH_TIMEOUT(second_items->model()->rowCount(), 2, 5'000);
     const auto replaced = metadata::read_local_artwork_inventory(raw_path);
     QVERIFY(replaced.has_value());
@@ -4989,6 +5004,11 @@ void BenchMainWindowTest::artworkArchivePickerAddsChosenImageWithItsRole() {
     QTest::mouseClick(use, Qt::LeftButton);
     QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-metadata-artwork-archive")) ==
                 nullptr);
+    auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
+    QVERIFY(save != nullptr);
+    QTRY_VERIFY(save->isEnabled());
+    QVERIFY(!observed.has_value());
+    QTest::mouseClick(save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
     const auto apply_issue = observed->sources.front().issue
                                  ? QString::fromStdString(observed->sources.front().issue->message)
@@ -7088,7 +7108,10 @@ void BenchMainWindowTest::metadataPropertiesArtworkSectionShowsProvenanceAndCapa
     QVERIFY(progress != nullptr);
     QCOMPARE(items->model()->rowCount(), 0);
     QVERIFY(!progress->isVisible());
-    QCOMPARE(artwork->findChildren<QPushButton*>().size(), 8);
+    QVERIFY(artwork->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save")) !=
+            nullptr);
+    QVERIFY(artwork->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-discard")) !=
+            nullptr);
     for (auto* button : artwork->findChildren<QPushButton*>()) {
         QVERIFY(!button->isEnabled());
     }
@@ -7146,6 +7169,28 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QVERIFY(materialize_audio_fixture(QStringLiteral("external-blue-jpeg.b64"), cover_path));
     const auto encoded = QFile::encodeName(media_path);
     const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    const auto initial = metadata::read_local_artwork_inventory(raw_path);
+    QVERIFY(initial.has_value());
+    const metadata::ArtworkWritePlanIntent duplicate_role{
+        .occurrence_index = 0,
+        .raw_media_path = raw_path,
+        .expected_media_revision = initial->media_revision,
+        .target_ordinal = 0,
+        .expected_target_fingerprint = {},
+        .kind = metadata::ArtworkWritePlanIntentKind::add,
+        .replacement_raw_path = QFile::encodeName(cover_path).toStdString(),
+        .added_role = initial->items.front().role,
+        .added_description = {},
+        .replacement_embedded_source = std::nullopt};
+    const auto seed_plan = metadata::revalidate_artwork_write_plan({duplicate_role});
+    QVERIFY(seed_plan && seed_plan->ready());
+    auto seed_journal = persistence::SqliteMetadataOperationJournal::open(
+        std::filesystem::path{media.filePath(QStringLiteral("seed.sqlite3")).toStdString()});
+    QVERIFY(seed_journal.has_value());
+    QVERIFY(operations::commit_artwork_source(
+                seed_plan->sources.front(), *seed_journal,
+                [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; })
+                .has_value());
     const auto read = metadata::read_local_metadata(raw_path);
     QVERIFY(read.has_value());
     const MetadataPropertiesSource source{
@@ -7213,9 +7258,9 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QVERIFY(remove != nullptr);
     QVERIFY(add != nullptr);
     QVERIFY(copy != nullptr);
-    QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 2, 5'000);
+    QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 3, 5'000);
     QVERIFY(add->isEnabled());
-    items->selectRow(1);
+    items->selectRow(2);
     QTRY_VERIFY(!replace->isEnabled());
     QVERIFY(!remove->isEnabled());
     QVERIFY(copy->isEnabled());
@@ -7224,15 +7269,59 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QTRY_VERIFY(replace->isEnabled());
     QTRY_VERIFY(remove->isEnabled());
     QVERIFY(!copy->isEnabled());
+    items->selectAll(); // Including an external image must not block embedded removal.
+    QTRY_VERIFY(remove->isEnabled());
+    QTest::mouseClick(remove, Qt::LeftButton);
+    auto* pending =
+        properties->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-pending"));
+    auto* discard =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-discard"));
+    QVERIFY(pending != nullptr);
+    QVERIFY(discard != nullptr);
+    QCOMPARE(pending->model()->rowCount(), 2);
+    auto* undo_selected =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-undo-selected"));
+    QVERIFY(undo_selected != nullptr);
+    pending->selectRow(0);
+    QTRY_VERIFY(undo_selected->isEnabled());
+    QTest::mouseClick(undo_selected, Qt::LeftButton);
+    QCOMPARE(pending->model()->rowCount(), 1);
+    QTest::mouseClick(remove, Qt::LeftButton);
+    QCOMPARE(pending->model()->rowCount(), 2);
+    const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+    if (!screenshot_dir.isEmpty()) {
+        properties->resize(1200, 850);
+        QVERIFY(properties->grab().save(screenshot_dir + QStringLiteral("/artwork-pending.png")));
+    }
+    bool warned_about_draft = false;
+    QTimer::singleShot(0, properties, [&] {
+        if (auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            warned_about_draft = warning->windowTitle().contains(QStringLiteral("artwork"));
+            warning->done(QMessageBox::Cancel);
+        }
+    });
+    QTest::keyClick(properties, Qt::Key_Escape);
+    QVERIFY(warned_about_draft);
+    QVERIFY(properties->isVisible());
+    QCOMPARE(pending->model()->rowCount(), 2);
+    const auto before_save = metadata::read_local_artwork_inventory(raw_path);
+    QVERIFY(before_save.has_value());
+    QCOMPARE(before_save->items.size(), 3U);
+    QTest::mouseClick(discard, Qt::LeftButton);
+    QCOMPARE(pending->model()->rowCount(), 0);
     QTest::mouseClick(remove, Qt::LeftButton);
 
-    // Direct apply: the checked removal runs immediately; no review or
-    // progress dialog appears and the inventory refreshes itself.
+    // Removal is staged until Save artwork; the external cover is retained.
+    auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
+    QVERIFY(save != nullptr);
+    QTRY_VERIFY(save->isEnabled());
+    QVERIFY(!observed.has_value());
+    QTest::mouseClick(save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
     const auto apply_issue = observed->sources.front().issue
                                  ? QString::fromStdString(observed->sources.front().issue->message)
                                  : QStringLiteral("no per-source issue");
-    QVERIFY2(observed->committed_source_count() == 1U, qPrintable(apply_issue));
+    QVERIFY2(observed->committed_source_count() == 2U, qPrintable(apply_issue));
     QCOMPARE(observed->sources.front().commit->occurrence_indexes, (std::vector<std::size_t>{0U}));
     QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 1, 5'000);
     QCOMPARE(items->model()->index(0, 4).data().toString(), QStringLiteral("External"));
@@ -7242,6 +7331,54 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QVERIFY(inventory.has_value());
     QCOMPARE(inventory->items.size(), 1U);
     QCOMPARE(inventory->items.front().provenance, metadata::ArtworkProvenance::external);
+
+    // Supply a local image after removing every embedded cover.
+    observed.reset();
+    QTimer chooser;
+    chooser.setInterval(10);
+    int file_choices = 0;
+    int role_choices = 0;
+    connect(&chooser, &QTimer::timeout, properties, [&] {
+        if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            if (file_choices == 0) {
+                dialog->selectFile(cover_path);
+                ++file_choices;
+            } else {
+                QMetaObject::invokeMethod(dialog, "accept", Qt::DirectConnection);
+            }
+        } else if (auto* role = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
+            role->accept();
+            ++role_choices;
+        }
+    });
+    QTimer chooser_timeout;
+    chooser_timeout.setSingleShot(true);
+    connect(&chooser_timeout, &QTimer::timeout, properties, [] {
+        if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+            dialog->reject();
+        }
+    });
+    const auto used_native_dialogs = !QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, true);
+    chooser_timeout.start(5000);
+    chooser.start();
+    QTest::mouseClick(add, Qt::LeftButton);
+    chooser_timeout.stop();
+    chooser.stop();
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, !used_native_dialogs);
+    QCOMPARE(file_choices, 1);
+    QCOMPARE(role_choices, 1);
+    QCOMPARE(pending->model()->rowCount(), 1);
+    QVERIFY(!observed.has_value());
+    QTRY_VERIFY(save->isEnabled());
+    QTest::mouseClick(save, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
+    QCOMPARE(observed->committed_source_count(), 1U);
+    const auto supplied = metadata::read_local_artwork_inventory(raw_path);
+    QVERIFY(supplied.has_value());
+    QCOMPARE(supplied->items.size(), 2U);
+    QCOMPARE(supplied->items.front().role, metadata::ArtworkRole::front);
+    QCOMPARE(supplied->items.front().provenance, metadata::ArtworkProvenance::embedded);
 
     QPointer guard{properties};
     properties->close();

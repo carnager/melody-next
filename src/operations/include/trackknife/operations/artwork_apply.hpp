@@ -67,8 +67,11 @@ using ArtworkApplySourceCommitter = std::function<core::Result<MetadataCommitRes
 using ArtworkApplyProgressCallback = std::function<void(const ArtworkApplyProgress&)>;
 
 // Applies one entirely ready immutable artwork plan on a bounded worker pool.
-// Runtime failures are isolated per physical source and successful sources
-// remain committed. Cancellation stops admission of new work.
+// Steps in one physical file execute serially, advancing revisions only through
+// successful journaled commits; distinct files execute in parallel. Failure stops
+// remaining steps in that file; earlier steps remain committed. Results and
+// progress count changes (a file can occur more than once). Cancellation stops
+// admission of new work.
 [[nodiscard]] core::Result<ArtworkApplyResult> apply_artwork_write_plan(
     const metadata::ArtworkWritePlan& plan, const ArtworkApplySourceCommitter& committer,
     const ArtworkApplyProgressCallback& progress = {},

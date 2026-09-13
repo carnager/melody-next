@@ -10,6 +10,7 @@
 #include <mutex>
 #include <ranges>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,16 @@ core::Result<ArtworkApplyResult> apply_artwork_write_plan(
         });
     }
 
+    std::vector<std::vector<std::size_t>> groups;
+    std::unordered_map<std::string, std::size_t> positions;
+    for (std::size_t index = 0; index < plan.sources.size(); ++index) {
+        const auto [position, inserted] =
+            positions.emplace(plan.sources[index].raw_media_path, groups.size());
+        if (inserted) {
+            groups.emplace_back();
+        }
+        groups[position->second].push_back(index);
+    }
     std::atomic_size_t next_source{0U};
     std::mutex progress_mutex;
     // Guarded by progress_mutex: incrementing the completed count and
@@ -95,36 +106,64 @@ core::Result<ArtworkApplyResult> apply_artwork_write_plan(
     };
     const auto worker = [&] {
         while (!cancellation.is_cancellation_requested()) {
-            const auto index = next_source.fetch_add(1U, std::memory_order_relaxed);
-            if (index >= plan.sources.size()) {
+            const auto group_index = next_source.fetch_add(1U, std::memory_order_relaxed);
+            if (group_index >= groups.size()) {
                 return;
             }
-            auto& source_result = result.sources[index];
-            if (cancellation.is_cancellation_requested()) {
-                source_result.state = ArtworkApplySourceState::cancelled;
-                source_result.issue =
-                    apply_error(core::ErrorCode::cancelled,
-                                "artwork Apply was cancelled before this source started",
-                                source_result.raw_path);
-            } else {
-                source_result.state = ArtworkApplySourceState::running;
-                report(index, source_result.state, false);
-                auto committed = committer(plan.sources[index], cancellation);
-                if (committed) {
-                    source_result.state = ArtworkApplySourceState::committed;
-                    source_result.commit = std::move(*committed);
+            std::optional<core::LocalSourceRevision> published_revision;
+            std::size_t removed = 0;
+            bool failed = false;
+            for (const auto index : groups[group_index]) {
+                auto& source_result = result.sources[index];
+                if (cancellation.is_cancellation_requested()) {
+                    source_result.state = ArtworkApplySourceState::cancelled;
+                    source_result.issue =
+                        apply_error(core::ErrorCode::cancelled,
+                                    "artwork Apply was cancelled before this source started",
+                                    source_result.raw_path);
+                } else if (failed) {
+                    source_result.state = ArtworkApplySourceState::failed;
+                    source_result.issue = apply_error(
+                        core::ErrorCode::conflict,
+                        "not attempted because an earlier artwork change in this file failed",
+                        source_result.raw_path);
                 } else {
-                    source_result.issue = std::move(committed.error());
-                    source_result.state = source_result.issue->code == core::ErrorCode::cancelled
-                                              ? ArtworkApplySourceState::cancelled
-                                              : ArtworkApplySourceState::failed;
+                    source_result.state = ArtworkApplySourceState::running;
+                    report(index, source_result.state, false);
+                    auto step = plan.sources[index];
+                    if (published_revision) {
+                        step.expected_media_revision = published_revision;
+                        step.observed_media_revision = published_revision;
+                        if (step.change.original) {
+                            step.change.original->source_revision = *published_revision;
+                        }
+                    }
+                    if (step.change.kind == metadata::ArtworkWritePlanIntentKind::add) {
+                        step.change.target_ordinal -= removed;
+                    }
+                    auto committed = committer(step, cancellation);
+                    if (committed) {
+                        source_result.state = ArtworkApplySourceState::committed;
+                        published_revision = committed->published_revision;
+                        if (step.change.kind == metadata::ArtworkWritePlanIntentKind::remove) {
+                            ++removed;
+                        }
+                        source_result.commit = std::move(*committed);
+                    } else {
+                        failed = true;
+                        source_result.issue = std::move(committed.error());
+                        source_result.state =
+                            source_result.issue->code == core::ErrorCode::cancelled
+                                ? ArtworkApplySourceState::cancelled
+                                : ArtworkApplySourceState::failed;
+                    }
                 }
+                report(index, source_result.state, true, source_result.issue);
             }
-            report(index, source_result.state, true, source_result.issue);
         }
     };
 
-    const auto worker_count = std::min(options.maximum_parallelism, plan.sources.size());
+    const auto worker_count = std::min(options.maximum_parallelism, groups.size());
     std::vector<std::jthread> workers;
     workers.reserve(worker_count);
     for (std::size_t index = 0U; index < worker_count; ++index) {

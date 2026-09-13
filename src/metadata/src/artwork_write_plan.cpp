@@ -264,8 +264,15 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
         if (cancellation.is_cancellation_requested()) {
             return cancelled();
         }
-        const auto [position, inserted] =
-            source_positions.emplace(intent.raw_media_path, plan.sources.size());
+        const auto [position, inserted] = source_positions.emplace(
+            intent.raw_media_path + std::string(1, '\0') +
+                (intent.kind == ArtworkWritePlanIntentKind::add
+                     ? "add" + std::string(1, '\0') + *intent.replacement_raw_path +
+                           std::string(1, '\0') +
+                           std::to_string(static_cast<int>(intent.added_role)) +
+                           std::string(1, '\0') + intent.added_description
+                     : std::to_string(intent.target_ordinal)),
+            plan.sources.size());
         if (inserted) {
             plan.sources.push_back(make_source(intent));
             continue;
@@ -289,6 +296,17 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
         }
     }
 
+    std::unordered_map<std::string, core::Result<LocalArtworkInventory>> inventory_cache;
+    const auto cached_inventory = [&](const std::string& path,
+                                      const core::CancellationToken& token) {
+        const auto found = inventory_cache.find(path);
+        if (found != inventory_cache.end()) {
+            return found->second;
+        }
+        auto read = inventory_reader(path, token);
+        inventory_cache.emplace(path, read);
+        return read;
+    };
     std::unordered_map<std::string, ArtworkImageFile> replacement_cache;
     replacement_cache.reserve(plan.sources.size());
     for (auto& source : plan.sources) {
@@ -302,7 +320,7 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
                                  source.raw_media_path));
             continue;
         }
-        auto inventory = inventory_reader(source.raw_media_path, cancellation);
+        auto inventory = cached_inventory(source.raw_media_path, cancellation);
         if (!inventory) {
             if (inventory.error().code == core::ErrorCode::cancelled) {
                 return std::unexpected(std::move(inventory.error()));
@@ -369,7 +387,17 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
             source.change.replacement = cached->second;
         } else if (source.change.replacement->embedded_source_ordinal) {
             const auto expected = *source.change.replacement;
-            auto donor_inventory = inventory_reader(expected.raw_path, cancellation);
+            if (std::ranges::any_of(plan.sources, [&](const auto& other) {
+                    return other.raw_media_path == expected.raw_path;
+                })) {
+                add_issue(source, ArtworkWritePlanIssueKind::replacement_unavailable,
+                          plan_error(core::ErrorCode::conflict,
+                                     "the copied image's donor also has pending changes; export it "
+                                     "first and add the exported image",
+                                     expected.raw_path));
+                continue;
+            }
+            auto donor_inventory = cached_inventory(expected.raw_path, cancellation);
             if (!donor_inventory) {
                 if (donor_inventory.error().code == core::ErrorCode::cancelled) {
                     return std::unexpected(std::move(donor_inventory.error()));
@@ -426,7 +454,12 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
         }
         const auto duplicate = std::ranges::find_if(inventory->items, [&](const auto& item) {
             return item.provenance == ArtworkProvenance::embedded &&
-                   item.content_fingerprint == replacement.content_fingerprint;
+                   item.content_fingerprint == replacement.content_fingerprint &&
+                   !std::ranges::any_of(plan.sources, [&](const auto& removal) {
+                       return removal.raw_media_path == source.raw_media_path &&
+                              removal.change.kind == ArtworkWritePlanIntentKind::remove &&
+                              removal.change.target_ordinal == item.source_ordinal;
+                   });
         });
         if ((source.change.kind == ArtworkWritePlanIntentKind::replace && source.change.original &&
              replacement.content_fingerprint == source.change.original->content_fingerprint) ||
@@ -455,6 +488,15 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
             continue;
         }
         auto& first = plan.sources[existing->second];
+        if (first.raw_media_path == source.raw_media_path) {
+            if (first.expected_media_revision != source.expected_media_revision) {
+                add_issue(source, ArtworkWritePlanIssueKind::inconsistent_baseline_revision,
+                          plan_error(core::ErrorCode::conflict,
+                                     "artwork changes disagree on the captured revision",
+                                     source.raw_media_path));
+            }
+            continue;
+        }
         add_issue(first, ArtworkWritePlanIssueKind::physical_source_alias,
                   plan_error(core::ErrorCode::conflict,
                              "another artwork plan path addresses the same physical source",
@@ -463,6 +505,39 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
                   plan_error(core::ErrorCode::conflict,
                              "another artwork plan path addresses the same physical source",
                              source.raw_media_path));
+    }
+    // Original ordinals remain stable when edits run from the end backwards.
+    // Insertions run last, after every reviewed removal.
+    std::ranges::stable_sort(plan.sources, [](const auto& left, const auto& right) {
+        if (left.raw_media_path != right.raw_media_path) {
+            return left.raw_media_path < right.raw_media_path;
+        }
+        const auto left_add = left.change.kind == ArtworkWritePlanIntentKind::add;
+        const auto right_add = right.change.kind == ArtworkWritePlanIntentKind::add;
+        if (left_add != right_add) {
+            return !left_add;
+        }
+        return !left_add && left.change.target_ordinal > right.change.target_ordinal;
+    });
+    std::unordered_map<std::string, std::size_t> added_counts;
+    std::unordered_map<std::string, std::vector<core::ContentFingerprint>> added_images;
+    for (auto& source : plan.sources) {
+        if (source.change.kind != ArtworkWritePlanIntentKind::add) {
+            continue;
+        }
+        source.change.target_ordinal += added_counts[source.raw_media_path]++;
+        if (!source.change.replacement) {
+            continue;
+        }
+        auto& images = added_images[source.raw_media_path];
+        const auto fingerprint = source.change.replacement->content_fingerprint;
+        if (std::ranges::find(images, fingerprint) != images.end()) {
+            add_issue(source, ArtworkWritePlanIssueKind::replacement_unchanged,
+                      plan_error(core::ErrorCode::conflict,
+                                 "the same image is being added more than once",
+                                 source.raw_media_path));
+        }
+        images.push_back(fingerprint);
     }
     return plan;
 }

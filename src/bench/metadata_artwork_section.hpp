@@ -95,9 +95,15 @@ class MetadataArtworkSection final : public QWidget {
     void setCoverArtService(ArtworkCoverArtService service);
     void setCoverArtRelease(std::optional<QString> release_id);
     void requestOperationCancellation();
+    [[nodiscard]] bool hasPendingChanges() const { return !pending_intents_.empty(); }
+    void discardPendingChanges();
+    [[nodiscard]] bool isBusy() const {
+        return plan_running_ || apply_running_ || export_running_ || cover_fetch_running_;
+    }
 
   signals:
     void operationRunningChanged(bool running);
+    void pendingChangesChanged(bool pending);
 
   private:
     struct BatchResult;
@@ -134,6 +140,9 @@ class MetadataArtworkSection final : public QWidget {
                      std::string added_description = {},
                      std::optional<metadata::ArtworkInventoryItem> embedded_donor = std::nullopt);
     void finishReview();
+    void savePendingChanges();
+    void updatePendingPresentation();
+    void undoSelectedChanges();
     void startApply(std::shared_ptr<const metadata::ArtworkWritePlan> plan);
     void updateApplyProgress();
     void finishApply();
@@ -159,6 +168,13 @@ class MetadataArtworkSection final : public QWidget {
     QPushButton* export_button_{nullptr};
     QPushButton* replace_button_{nullptr};
     QPushButton* remove_button_{nullptr};
+    QPushButton* save_button_{nullptr};
+    QPushButton* discard_button_{nullptr};
+    QPushButton* undo_pending_button_{nullptr};
+    QTableView* pending_view_{nullptr};
+    QStandardItemModel* pending_model_{nullptr};
+    std::vector<metadata::ArtworkWritePlanIntent> pending_intents_;
+    std::vector<metadata::ArtworkWritePlanIntent> pending_rows_;
     QStandardItemModel* items_model_{nullptr};
     QStandardItemModel* issues_model_{nullptr};
     std::vector<MetadataArtworkScopeSource> scope_;

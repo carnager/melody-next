@@ -23,6 +23,7 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QShortcut>
 #include <QStandardItem>
 #include <QStandardItemModel>
 #include <QTableView>
@@ -38,13 +39,31 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace trackknife::bench {
 namespace {
+
+[[nodiscard]] std::string artwork_target_key(const metadata::ArtworkWritePlanIntent& intent,
+                                             const bool include_occurrence) {
+    auto key = intent.raw_media_path + std::string(1, '\0');
+    if (include_occurrence) {
+        key += std::to_string(intent.occurrence_index) + std::string(1, '\0');
+    }
+    if (intent.kind == metadata::ArtworkWritePlanIntentKind::add) {
+        key += "add" + std::string(1, '\0') + intent.replacement_raw_path.value_or("") +
+               std::string(1, '\0') + std::to_string(static_cast<int>(intent.added_role)) +
+               std::string(1, '\0') + intent.added_description;
+    } else {
+        key += std::to_string(intent.target_ordinal);
+    }
+    return key;
+}
 
 [[nodiscard]] QString display_utf8(const std::string_view text) {
     return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
@@ -290,7 +309,7 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
         QStringLiteral("Browse every Cover Art Archive image of the release — a Front choice "
                        "replaces the existing front cover, other types are added with their "
                        "role"));
-    add_button_ = new QPushButton(QStringLiteral("Add…"), this);
+    add_button_ = new QPushButton(QStringLiteral("Add image…"), this);
     add_button_->setObjectName(QStringLiteral("bench-metadata-artwork-add"));
     add_button_->setToolTip(QStringLiteral("Add one PNG or JPEG to every selected writable file"));
     copy_button_ = new QPushButton(QStringLiteral("Copy to Selection"), this);
@@ -303,11 +322,12 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
         QStringLiteral("Export selected encoded images without overwriting existing files"));
     replace_button_ = new QPushButton(QStringLiteral("Replace…"), this);
     replace_button_->setObjectName(QStringLiteral("bench-metadata-artwork-replace"));
-    replace_button_->setToolTip(
-        QStringLiteral("Replace each selected embedded FLAC picture with one PNG or JPEG"));
+    replace_button_->setToolTip(QStringLiteral(
+        "Replace selected embedded covers; external image files are kept with one PNG or JPEG"));
     remove_button_ = new QPushButton(QStringLiteral("Remove"), this);
     remove_button_->setObjectName(QStringLiteral("bench-metadata-artwork-remove"));
-    remove_button_->setToolTip(QStringLiteral("Remove each selected embedded FLAC picture"));
+    remove_button_->setToolTip(
+        QStringLiteral("Remove selected embedded covers; external image files are kept"));
     inventory_row->addWidget(fetch_cover_button_);
     inventory_row->addWidget(archive_button_);
     inventory_row->addWidget(add_button_);
@@ -316,11 +336,66 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
     inventory_row->addWidget(replace_button_);
     inventory_row->addWidget(remove_button_);
     layout->addLayout(inventory_row);
+    auto* draft_buttons = new QHBoxLayout;
+    auto* draft_help = new QLabel(
+        QStringLiteral(
+            "Select covers with Ctrl/Shift or Ctrl+A. Changes are saved only with Save artwork.\n"
+            "External images are shared files: Remove edits embedded covers and keeps external "
+            "files."),
+        this);
+    draft_help->setWordWrap(true);
+    draft_buttons->addWidget(draft_help, 1);
+    save_button_ = new QPushButton(QStringLiteral("Save artwork"), this);
+    save_button_->setObjectName(QStringLiteral("bench-metadata-artwork-save"));
+    discard_button_ = new QPushButton(QStringLiteral("Discard changes"), this);
+    discard_button_->setObjectName(QStringLiteral("bench-metadata-artwork-discard"));
+    undo_pending_button_ = new QPushButton(QStringLiteral("Undo selected"), this);
+    undo_pending_button_->setObjectName(QStringLiteral("bench-metadata-artwork-undo-selected"));
+    undo_pending_button_->setToolTip(QStringLiteral("Undo the selected pending changes"));
+    draft_buttons->addWidget(undo_pending_button_);
+    draft_buttons->addWidget(discard_button_);
+    draft_buttons->addWidget(save_button_);
+    layout->addLayout(draft_buttons);
+    pending_view_ = new QTableView(this);
+    pending_view_->setObjectName(QStringLiteral("bench-metadata-artwork-pending"));
+    configure_table(pending_view_);
+    pending_model_ = new QStandardItemModel(pending_view_);
+    pending_model_->setHorizontalHeaderLabels({QStringLiteral("File"), QStringLiteral("Change"),
+                                               QStringLiteral("Cover"),
+                                               QStringLiteral("New image")});
+    pending_view_->setModel(pending_model_);
+    pending_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    connect(pending_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            &MetadataArtworkSection::updateActionButtons);
+    connect(undo_pending_button_, &QPushButton::clicked, this,
+            &MetadataArtworkSection::undoSelectedChanges);
+    auto* undo_pending_shortcut = new QShortcut(QKeySequence::Delete, pending_view_);
+    undo_pending_shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(undo_pending_shortcut, &QShortcut::activated, this, [this] {
+        if (undo_pending_button_->isEnabled()) {
+            undoSelectedChanges();
+        }
+    });
+    pending_view_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    pending_view_->horizontalHeader()->setStretchLastSection(true);
+    pending_view_->setMaximumHeight(160);
+    pending_view_->hide();
+    layout->addWidget(pending_view_);
+    connect(save_button_, &QPushButton::clicked, this, &MetadataArtworkSection::savePendingChanges);
+    connect(discard_button_, &QPushButton::clicked, this,
+            &MetadataArtworkSection::discardPendingChanges);
     updateActionButtons();
 
     items_ = new QTableView(this);
     items_->setObjectName(QStringLiteral("bench-metadata-artwork-items"));
     items_->setAccessibleName(QStringLiteral("Artwork inventory"));
+    auto* delete_shortcut = new QShortcut(QKeySequence::Delete, items_);
+    delete_shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(delete_shortcut, &QShortcut::activated, this, [this] {
+        if (remove_button_->isEnabled()) {
+            reviewRemoval();
+        }
+    });
     configure_table(items_);
     items_model_ = new QStandardItemModel(items_);
     items_model_->setHorizontalHeaderLabels({QString{}, QStringLiteral("File"),
@@ -592,6 +667,7 @@ void MetadataArtworkSection::finishInventory() {
     }
     present(*result);
     displayed_generation_ = result->generation;
+    updateActionButtons();
 }
 
 void MetadataArtworkSection::clearPresentation() {
@@ -655,7 +731,7 @@ void MetadataArtworkSection::present(const BatchResult& result) {
                        !source.scope.captured_revision ||
                        *source.scope.captured_revision != inventory.media_revision) {
                 reason = QStringLiteral(
-                    "The file changed since Properties opened; reopen to edit artwork");
+                    "The file changed since the tag editor opened; reopen to edit artwork");
             } else {
                 reason = QStringLiteral("Artwork changes are unavailable");
             }
@@ -770,20 +846,18 @@ void MetadataArtworkSection::updateActionButtons() {
         return;
     }
     const auto selected = items_->selectionModel()->selectedRows();
-    auto actionable = !selected.empty();
-    for (const auto& row : selected) {
-        if (row.row() < 0 || static_cast<std::size_t>(row.row()) >= action_targets_.size()) {
-            actionable = false;
-            break;
-        }
-        if (!action_targets_[static_cast<std::size_t>(row.row())]) {
-            actionable = false;
-            break;
-        }
-    }
+    const auto actionable = std::ranges::any_of(selected, [this](const auto& row) {
+        return row.row() >= 0 && static_cast<std::size_t>(row.row()) < action_targets_.size() &&
+               action_targets_[static_cast<std::size_t>(row.row())].has_value();
+    });
     const auto operation_idle =
         !plan_running_ && !apply_running_ && !export_running_ && !cover_fetch_running_;
-    const auto mutation_idle = applier_factory_ && operation_idle;
+    const auto mutation_idle =
+        applier_factory_ && operation_idle && !job_running_ && displayed_generation_ == generation_;
+    save_button_->setEnabled(hasPendingChanges() && mutation_idle);
+    discard_button_->setEnabled(hasPendingChanges() && operation_idle);
+    undo_pending_button_->setEnabled(operation_idle &&
+                                     pending_view_->selectionModel()->hasSelection());
     add_button_->setEnabled(add_available_ && mutation_idle);
     const auto cover_ready =
         add_available_ && mutation_idle && coverServiceReady() && cover_release_id_.has_value();
@@ -1256,7 +1330,7 @@ void MetadataArtworkSection::showFeedback(const QString& window_title, const QSt
 }
 
 void MetadataArtworkSection::requestStop() {
-    if (stop_requested_ || (!apply_running_ && !export_running_)) {
+    if (stop_requested_ || (!plan_running_ && !apply_running_ && !export_running_)) {
         return;
     }
     stop_requested_ = true;
@@ -1339,7 +1413,7 @@ void MetadataArtworkSection::startReview(
     if (intents.empty()) {
         status_->setText(kind == metadata::ArtworkWritePlanIntentKind::add
                              ? QStringLiteral("Select at least one writable FLAC, MP3, or MP4 file")
-                             : QStringLiteral("Select at least one embedded FLAC picture"));
+                             : QStringLiteral("Select at least one writable embedded cover"));
         updateActionButtons();
         return;
     }
@@ -1351,10 +1425,103 @@ void MetadataArtworkSection::startReview(
 
 void MetadataArtworkSection::dispatchReview(std::vector<metadata::ArtworkWritePlanIntent> intents,
                                             const qsizetype change_count) {
+    Q_UNUSED(change_count);
+    std::unordered_map<std::string, std::size_t> positions;
+    positions.reserve(pending_intents_.size() + intents.size());
+    for (std::size_t index = 0; index < pending_intents_.size(); ++index) {
+        positions.emplace(artwork_target_key(pending_intents_[index], true), index);
+    }
+    for (auto& intent : intents) {
+        const auto [position, inserted] =
+            positions.emplace(artwork_target_key(intent, true), pending_intents_.size());
+        if (inserted) {
+            pending_intents_.push_back(std::move(intent));
+        } else {
+            pending_intents_[position->second] = std::move(intent);
+        }
+    }
+    updatePendingPresentation();
+}
+
+void MetadataArtworkSection::discardPendingChanges() {
+    pending_intents_.clear();
+    updatePendingPresentation();
+}
+
+void MetadataArtworkSection::undoSelectedChanges() {
+    const auto selected = pending_view_->selectionModel()->selectedRows();
+    std::set<std::string> targets;
+    for (const auto& row : selected) {
+        if (row.row() >= 0 && static_cast<std::size_t>(row.row()) < pending_rows_.size()) {
+            targets.insert(
+                artwork_target_key(pending_rows_[static_cast<std::size_t>(row.row())], false));
+        }
+    }
+    std::erase_if(pending_intents_, [&](const auto& intent) {
+        return targets.contains(artwork_target_key(intent, false));
+    });
+    updatePendingPresentation();
+}
+
+void MetadataArtworkSection::updatePendingPresentation() {
+    pending_model_->removeRows(0, pending_model_->rowCount());
+    pending_rows_.clear();
+    std::set<std::string> displayed;
+    std::set<std::pair<std::string, std::size_t>> removals;
+    for (const auto& intent : pending_intents_) {
+        if (intent.kind == metadata::ArtworkWritePlanIntentKind::remove) {
+            removals.emplace(intent.raw_media_path, intent.target_ordinal);
+        }
+        if (!displayed.insert(artwork_target_key(intent, false)).second) {
+            continue;
+        }
+        pending_rows_.push_back(intent);
+        pending_model_->appendRow(
+            {table_item(QString::fromStdString(core::escape_raw_path(
+                            std::filesystem::path{intent.raw_media_path}.filename().native())),
+                        QString::fromStdString(core::escape_raw_path(intent.raw_media_path))),
+             table_item(title_case(
+                 display_utf8(metadata::artwork_write_plan_intent_kind_name(intent.kind)))),
+             table_item(
+                 intent.kind == metadata::ArtworkWritePlanIntentKind::add
+                     ? title_case(display_utf8(metadata::artwork_role_name(intent.added_role)))
+                     : QStringLiteral("Picture %1").arg(intent.target_ordinal + 1)),
+             table_item(intent.replacement_raw_path ? QString::fromStdString(core::escape_raw_path(
+                                                          *intent.replacement_raw_path))
+                                                    : QString{})});
+    }
+    pending_view_->setVisible(hasPendingChanges());
+    for (std::size_t row = 0; row < action_targets_.size(); ++row) {
+        const auto& target = action_targets_[row];
+        const auto removed =
+            target && removals.contains({target->scope.raw_path, target->item.source_ordinal});
+        for (int col = 0; col < items_model_->columnCount(); ++col) {
+            auto* item = items_model_->item(static_cast<int>(row), col);
+            auto font = item->font();
+            font.setStrikeOut(removed);
+            item->setFont(font);
+        }
+    }
+    status_->setText(
+        hasPendingChanges()
+            ? QStringLiteral("%1 pending artwork changes · review below, then Save artwork")
+                  .arg(pending_model_->rowCount())
+            : QStringLiteral("No pending artwork changes"));
+    emit pendingChangesChanged(hasPendingChanges());
+    updateActionButtons();
+}
+
+void MetadataArtworkSection::savePendingChanges() {
+    if (!save_button_->isEnabled()) {
+        return;
+    }
+    const auto intents = pending_intents_;
+    const auto change_count = pending_model_->rowCount();
     mutation_cancellation_.request_cancellation();
     mutation_cancellation_ = core::CancellationSource{};
     const auto cancellation = mutation_cancellation_.token();
     plan_running_ = true;
+    setProgressVisible(true); // Indeterminate while the immutable plan is checked.
     emit operationRunningChanged(true);
     status_->setText(
         QStringLiteral("Checking %1 artwork %2 against fresh files…")
@@ -1375,28 +1542,38 @@ void MetadataArtworkSection::reviewFetchedCover(const std::string& replacement_r
     if (!applier_factory_ || plan_running_ || apply_running_) {
         return;
     }
+    std::erase_if(pending_intents_, [](const auto& intent) {
+        return intent.kind == metadata::ArtworkWritePlanIntentKind::add &&
+               intent.added_role == metadata::ArtworkRole::front;
+    });
     std::vector<metadata::ArtworkWritePlanIntent> intents;
     for (const auto& source : scope_) {
-        const metadata::ArtworkInventoryItem* front = nullptr;
-        for (const auto& target : action_targets_) {
-            if (target && target->scope.raw_path == source.raw_path &&
-                target->item.provenance == metadata::ArtworkProvenance::embedded &&
-                target->item.role == metadata::ArtworkRole::front) {
-                front = &target->item;
-                break;
-            }
-        }
         for (const auto occurrence_index : source.occurrence_indexes) {
+            for (const auto& target : action_targets_) {
+                if (!target || target->scope.raw_path != source.raw_path ||
+                    target->item.role != metadata::ArtworkRole::front) {
+                    continue;
+                }
+                intents.push_back(metadata::ArtworkWritePlanIntent{
+                    .occurrence_index = occurrence_index,
+                    .raw_media_path = source.raw_path,
+                    .expected_media_revision = source.captured_revision,
+                    .target_ordinal = target->item.source_ordinal,
+                    .expected_target_fingerprint = target->item.content_fingerprint,
+                    .kind = metadata::ArtworkWritePlanIntentKind::remove,
+                    .replacement_raw_path = std::nullopt,
+                    .added_role = metadata::ArtworkRole::front,
+                    .added_description = {},
+                    .replacement_embedded_source = std::nullopt,
+                });
+            }
             intents.push_back(metadata::ArtworkWritePlanIntent{
                 .occurrence_index = occurrence_index,
                 .raw_media_path = source.raw_path,
-                .expected_media_revision =
-                    source.captured_revision_consistent ? source.captured_revision : std::nullopt,
-                .target_ordinal = front != nullptr ? front->source_ordinal : 0U,
-                .expected_target_fingerprint =
-                    front != nullptr ? front->content_fingerprint : core::ContentFingerprint{},
-                .kind = front != nullptr ? metadata::ArtworkWritePlanIntentKind::replace
-                                         : metadata::ArtworkWritePlanIntentKind::add,
+                .expected_media_revision = source.captured_revision,
+                .target_ordinal = 0U,
+                .expected_target_fingerprint = {},
+                .kind = metadata::ArtworkWritePlanIntentKind::add,
                 .replacement_raw_path = replacement_raw_path,
                 .added_role = metadata::ArtworkRole::front,
                 .added_description = {},
@@ -1414,6 +1591,7 @@ void MetadataArtworkSection::reviewFetchedCover(const std::string& replacement_r
 
 void MetadataArtworkSection::finishReview() {
     plan_running_ = false;
+    setProgressVisible(false);
     emit operationRunningChanged(false);
     const auto result = plan_watcher_.result();
     if (!result || !*result) {
@@ -1524,6 +1702,7 @@ void MetadataArtworkSection::finishApply() {
     emit operationRunningChanged(false);
     const auto result = apply_watcher_.result();
     if (result && *result) {
+        discardPendingChanges();
         if (apply_observer_) {
             apply_observer_(**result);
         }
@@ -1557,9 +1736,9 @@ void MetadataArtworkSection::finishApply() {
         const auto saved = outcome.committed_source_count();
         if (saved == outcome.sources.size()) {
             status_->setText(
-                QStringLiteral("Saved artwork for %1 %2")
+                QStringLiteral("Saved %1 artwork %2")
                     .arg(saved)
-                    .arg(saved == 1U ? QStringLiteral("file") : QStringLiteral("files")));
+                    .arg(saved == 1U ? QStringLiteral("change") : QStringLiteral("changes")));
         } else {
             std::vector<PreparationFeedbackRow> rows;
             for (const auto& source_result : outcome.sources) {
@@ -1580,8 +1759,9 @@ void MetadataArtworkSection::finishApply() {
                                  .arg(outcome.cancelled_source_count()));
             showFeedback(stopped ? QStringLiteral("Artwork save stopped")
                                  : QStringLiteral("Artwork saved with problems"),
-                         QStringLiteral("%1 saved · %2 failed · %3 stopped. Saved files are "
-                                        "done; the files below were not touched.")
+                         QStringLiteral("%1 saved · %2 failed · %3 stopped. Saved changes are "
+                                        "done; some files may be partially updated. Inspect the "
+                                        "refreshed covers before retrying.")
                              .arg(saved)
                              .arg(outcome.failed_source_count())
                              .arg(outcome.cancelled_source_count()),

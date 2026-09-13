@@ -25,7 +25,8 @@ enum class ArtworkWritePlanIntentKind : std::uint8_t {
 [[nodiscard]] std::string_view artwork_write_plan_intent_kind_name(ArtworkWritePlanIntentKind kind);
 
 // One logical Properties occurrence. Equal intents for repeated occurrences
-// of one raw media path collapse into one physical source plan.
+// of one raw media path and picture collapse into one physical change.
+// Multiple pictures in a file are ordered steps: descending originals, then additions.
 struct ArtworkWritePlanIntent {
     std::size_t occurrence_index{0U};
     std::string raw_media_path;

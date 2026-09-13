@@ -176,6 +176,25 @@ persisted stream duplicates on restore. A genuinely embedded freeform `TRACK`,
 ReplayGain has its own rules in `replaygain.md`. A user must be able to inspect
 the source of an effective value and choose the write target.
 
+## Editing covers
+
+In **Edit tags… → Artwork**, select individual covers with Ctrl/Shift or all
+rows with Ctrl+A. **Remove** (or Delete) stages removal of the selected embedded
+pictures, including multiple versions of the same type in one file. External
+image files remain on disk; selecting them does not block embedded removal.
+
+Use **Add image…** for your PNG/JPEG or **Fetch cover** / **Covers…** for archive
+images. Review the pending changes, then **Save artwork**. Nothing is written
+until Save; **Undo selected** removes selected entries from the pending list,
+and **Discard changes** clears the artwork draft. Fetching a front replaces every existing front variant with one front, retaining other
+cover types. Save or discard before changing the selected files or applying tags.
+
+Artwork writes preserve pending text edits and use recoverable, verified writes.
+A failed or cancelled save may have completed earlier cover changes; feedback
+reports this and refreshes the inventory. External image deletion, artwork
+mutation in unqualified containers, and per-file atomic multi-cover publication
+remain outside this workflow (ADR-0159).
+
 ## Tag editor
 
 **Edit tags…** in the Edit menu and local-track context menu opens this

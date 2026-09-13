@@ -34,7 +34,7 @@ stored-playlist tabs returned in ADR-0129.
 
 Latest usability work (2026-09-13): ADR-0157 adds tag field review controls;
 ADR-0158 adds MusicBrainz file/track assignment for untagged albums, broader
-album search, and bounded throttle recovery. See the feature matrix and
+album search, and bounded throttle recovery. ADR-0159 adds staged bulk artwork editing with explicit Save/Discard. See the feature matrix and
 [metadata guide](metadata-and-files.md#reviewing-fields-and-identifying-untagged-albums).
 
 Current implemented workflows include:

@@ -244,6 +244,7 @@ class MetadataPropertiesDialog final : public QDialog {
     void persistLayoutState();
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    void reject() override;
 
     QFutureWatcher<std::shared_ptr<SelectionResult>> selection_watcher_;
     QFutureWatcher<std::shared_ptr<WritePlanResult>> write_plan_watcher_;

@@ -31,8 +31,11 @@ downgrade refuses to discard records using the new evidence shape.
 
 This is atomic per physical file, not across the batch: cancellation stops new
 work, while already published files remain committed. External images remain
-donors, never deletion targets. Pending-image thumbnails and a dedicated retry
-workflow remain separate improvements.
+donors, never deletion targets. The pending list displays Before/After thumbnails. Incoming images use one
+cancellable background worker, revision-checked core image reads, bounded
+decode dimensions, and generation rejection after draft changes. Only small
+thumbnail images are retained; previews do not replace commit revalidation.
+A dedicated retry workflow remains a separate improvement.
 
 ## Verification
 

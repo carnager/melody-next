@@ -8,6 +8,7 @@
 #include "trackknife/metadata/artwork_write_plan.hpp"
 
 #include <QAbstractItemView>
+#include <QBuffer>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QImage>
+#include <QImageReader>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLabel>
@@ -361,8 +363,8 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
     configure_table(pending_view_);
     pending_model_ = new QStandardItemModel(pending_view_);
     pending_model_->setHorizontalHeaderLabels({QStringLiteral("File"), QStringLiteral("Change"),
-                                               QStringLiteral("Cover"),
-                                               QStringLiteral("New image")});
+                                               QStringLiteral("Cover"), QStringLiteral("New image"),
+                                               QStringLiteral("Before"), QStringLiteral("After")});
     pending_view_->setModel(pending_model_);
     pending_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     connect(pending_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
@@ -377,8 +379,15 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
         }
     });
     pending_view_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    pending_view_->horizontalHeader()->setStretchLastSection(true);
-    pending_view_->setMaximumHeight(160);
+    pending_view_->horizontalHeader()->setStretchLastSection(false);
+    pending_view_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    pending_view_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Fixed);
+    pending_view_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Fixed);
+    pending_view_->setColumnWidth(4, thumbnail_edge + 32);
+    pending_view_->setColumnWidth(5, thumbnail_edge + 32);
+    pending_view_->setIconSize(QSize(thumbnail_edge, thumbnail_edge));
+    pending_view_->verticalHeader()->setDefaultSectionSize(thumbnail_edge + 8);
+    pending_view_->setMaximumHeight(240);
     pending_view_->hide();
     layout->addWidget(pending_view_);
     connect(save_button_, &QPushButton::clicked, this, &MetadataArtworkSection::savePendingChanges);
@@ -450,6 +459,8 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
     connect(debounce_, &QTimer::timeout, this, &MetadataArtworkSection::startInventory);
     connect(&watcher_, &QFutureWatcherBase::finished, this,
             &MetadataArtworkSection::finishInventory);
+    connect(&preview_watcher_, &QFutureWatcherBase::finished, this,
+            &MetadataArtworkSection::finishPendingPreviews);
     connect(&plan_watcher_, &QFutureWatcherBase::finished, this,
             &MetadataArtworkSection::finishReview);
     connect(&apply_watcher_, &QFutureWatcherBase::finished, this,
@@ -479,6 +490,7 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
 }
 
 MetadataArtworkSection::~MetadataArtworkSection() {
+    preview_cancellation_.request_cancellation();
     cancellation_.request_cancellation();
     mutation_cancellation_.request_cancellation();
     if (job_running_) {
@@ -1474,6 +1486,8 @@ void MetadataArtworkSection::undoSelectedChanges() {
 }
 
 void MetadataArtworkSection::updatePendingPresentation() {
+    ++preview_generation_;
+    preview_cancellation_.request_cancellation();
     pending_model_->removeRows(0, pending_model_->rowCount());
     pending_rows_.clear();
     std::set<std::string> displayed;
@@ -1498,8 +1512,33 @@ void MetadataArtworkSection::updatePendingPresentation() {
                      : QStringLiteral("Picture %1").arg(intent.target_ordinal + 1)),
              table_item(intent.replacement_raw_path ? QString::fromStdString(core::escape_raw_path(
                                                           *intent.replacement_raw_path))
-                                                    : QString{})});
+                                                    : QString{}),
+             table_item(intent.kind == metadata::ArtworkWritePlanIntentKind::add
+                            ? QStringLiteral("None")
+                            : QStringLiteral("Unavailable")),
+             table_item(intent.kind == metadata::ArtworkWritePlanIntentKind::remove
+                            ? QStringLiteral("Removed")
+                            : QStringLiteral("Loading…"))});
+        if (intent.kind != metadata::ArtworkWritePlanIntentKind::add) {
+            for (std::size_t index = 0; index < action_targets_.size(); ++index) {
+                const auto& target = action_targets_[index];
+                if (target && target->scope.raw_path == intent.raw_media_path &&
+                    target->item.provenance == metadata::ArtworkProvenance::embedded &&
+                    target->item.source_ordinal == intent.target_ordinal &&
+                    target->item.content_fingerprint == intent.expected_target_fingerprint) {
+                    auto* before = pending_model_->item(pending_model_->rowCount() - 1, 4);
+                    const auto image =
+                        items_model_->index(static_cast<int>(index), 0).data(Qt::DecorationRole);
+                    if (!image.isNull()) {
+                        before->setText({});
+                        before->setData(image, Qt::DecorationRole);
+                    }
+                    break;
+                }
+            }
+        }
     }
+    startPendingPreviews();
     pending_view_->setVisible(hasPendingChanges());
     for (std::size_t row = 0; row < action_targets_.size(); ++row) {
         const auto& target = action_targets_[row];
@@ -1522,6 +1561,91 @@ void MetadataArtworkSection::updatePendingPresentation() {
             : QStringLiteral("No pending artwork changes"));
     emit pendingChangesChanged(hasPendingChanges());
     updateActionButtons();
+}
+
+void MetadataArtworkSection::startPendingPreviews() {
+    if (preview_running_ || pending_rows_.empty()) {
+        return;
+    }
+    preview_running_ = true;
+    preview_job_generation_ = preview_generation_;
+    preview_cancellation_ = core::CancellationSource{};
+    preview_watcher_.setFuture(QtConcurrent::run([rows = pending_rows_,
+                                                  token = preview_cancellation_.token()] {
+        std::vector<QImage> images(rows.size());
+        std::unordered_map<std::string, QImage> cache;
+        for (std::size_t index = 0; index < rows.size(); ++index) {
+            if (token.is_cancellation_requested()) {
+                break;
+            }
+            const auto& intent = rows[index];
+            if (intent.kind == metadata::ArtworkWritePlanIntentKind::remove) {
+                continue;
+            }
+            const auto key =
+                intent.replacement_embedded_source
+                    ? intent.replacement_embedded_source->raw_source_path + std::string(1, '\0') +
+                          std::to_string(intent.replacement_embedded_source->source_ordinal)
+                    : intent.replacement_raw_path.value_or("");
+            if (const auto found = cache.find(key); found != cache.end()) {
+                images[index] = found->second;
+                continue;
+            }
+            auto evidence =
+                intent.replacement_embedded_source
+                    ? core::Result<metadata::ArtworkImageFile>{thumbnail_evidence(
+                          *intent.replacement_embedded_source)}
+                    : metadata::read_artwork_image_file(intent.replacement_raw_path.value_or(""),
+                                                        maximum_thumbnail_source_bytes, token);
+            QImage thumbnail;
+            if (evidence) {
+                auto bytes = metadata::read_artwork_image_bytes(
+                    *evidence, maximum_thumbnail_source_bytes, token);
+                if (bytes && !token.is_cancellation_requested()) {
+                    QByteArray encoded_image{reinterpret_cast<const char*>(bytes->data()),
+                                             static_cast<qsizetype>(bytes->size())};
+                    QBuffer buffer{&encoded_image};
+                    buffer.open(QIODevice::ReadOnly);
+                    QImageReader reader{&buffer};
+                    const auto size = reader.size();
+                    // Reject oversized decode surfaces even for small compressed inputs.
+                    if (size.isValid() &&
+                        static_cast<qint64>(size.width()) * size.height() <= 32 * 1024 * 1024) {
+                        reader.setScaledSize(
+                            size.scaled(thumbnail_edge, thumbnail_edge, Qt::KeepAspectRatio));
+                        thumbnail =
+                            reader.read().scaled(thumbnail_edge, thumbnail_edge,
+                                                 Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                    }
+                }
+            }
+            cache.emplace(key, thumbnail);
+            images[index] = std::move(thumbnail);
+        }
+        return images;
+    }));
+}
+
+void MetadataArtworkSection::finishPendingPreviews() {
+    preview_running_ = false;
+    if (preview_job_generation_ != preview_generation_) {
+        startPendingPreviews();
+        return;
+    }
+    const auto images = preview_watcher_.result();
+    for (std::size_t index = 0; index < images.size() && index < pending_rows_.size(); ++index) {
+        if (pending_rows_[index].kind == metadata::ArtworkWritePlanIntentKind::remove) {
+            continue;
+        }
+        auto* item = pending_model_->item(static_cast<int>(index), 5);
+        item->setText(images[index].isNull() ? QStringLiteral("Unavailable") : QString{});
+        item->setData(images[index], Qt::DecorationRole);
+        item->setToolTip(
+            images[index].isNull()
+                ? QStringLiteral(
+                      "Preview unavailable. Apply will validate the image before writing.")
+                : QStringLiteral("Image to embed when you Apply"));
+    }
 }
 
 void MetadataArtworkSection::savePendingChanges() {

@@ -4602,6 +4602,12 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
     covers->selectAll();
     QTRY_VERIFY(remove->isEnabled());
     remove->click();
+    auto* pending =
+        dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-pending"));
+    QVERIFY(pending != nullptr);
+    QCOMPARE(pending->model()->rowCount(), 1);
+    QVERIFY(!pending->model()->index(0, 4).data(Qt::DecorationRole).value<QImage>().isNull());
+    QCOMPARE(pending->model()->index(0, 5).data().toString(), QStringLiteral("Removed"));
     QVERIFY(!observed.has_value());
     QCOMPARE(metadata::read_local_artwork_inventory(raw)->items.size(), 1U);
     QTRY_VERIFY(apply->isEnabled());
@@ -4811,6 +4817,14 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(save != nullptr);
     QTRY_VERIFY(save->isEnabled());
+    auto* pending =
+        properties->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-pending"));
+    QVERIFY(pending != nullptr);
+    QTRY_VERIFY(!pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>().isNull());
+    const auto preview = pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>();
+    QVERIFY(preview.width() <= 60 && preview.height() <= 60);
+    QCOMPARE(preview.pixelColor(0, 0), QColor{Qt::darkCyan});
+    QCOMPARE(pending->model()->index(0, 4).data().toString(), QStringLiteral("None"));
     QVERIFY(!observed.has_value());
     QTest::mouseClick(save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);
@@ -4939,6 +4953,34 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
         second_properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(second_save != nullptr);
     QTRY_VERIFY(second_save->isEnabled());
+    auto* second_pending =
+        second_properties->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-pending"));
+    QVERIFY(second_pending != nullptr);
+    QCOMPARE(second_pending->model()->rowCount(), 2);
+    QTRY_VERIFY(
+        !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
+    QCOMPARE(second_pending->model()
+                 ->index(1, 5)
+                 .data(Qt::DecorationRole)
+                 .value<QImage>()
+                 .pixelColor(0, 0),
+             QColor{Qt::darkMagenta});
+    auto* second_discard = second_properties->findChild<QPushButton*>(
+        QStringLiteral("bench-metadata-artwork-discard"));
+    QVERIFY(second_discard != nullptr);
+    second_discard->click();
+    QCOMPARE(second_pending->model()->rowCount(), 0);
+    QTRY_VERIFY(second_fetch->isEnabled());
+    second_fetch->click();
+    QTRY_VERIFY(second_save->isEnabled());
+    QTRY_VERIFY(
+        !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
+    QCOMPARE(second_pending->model()
+                 ->index(1, 5)
+                 .data(Qt::DecorationRole)
+                 .value<QImage>()
+                 .pixelColor(0, 0),
+             QColor{Qt::darkMagenta});
     QVERIFY(!observed.has_value());
     QTest::mouseClick(second_save, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10'000);

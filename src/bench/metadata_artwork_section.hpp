@@ -11,6 +11,7 @@
 #include "trackknife/operations/artwork_export.hpp"
 
 #include <QFutureWatcher>
+#include <QImage>
 #include <QPointer>
 #include <QString>
 #include <QWidget>
@@ -147,6 +148,8 @@ class MetadataArtworkSection final : public QWidget {
     void savePendingChanges();
     void updatePendingPresentation();
     void undoSelectedChanges();
+    void startPendingPreviews();
+    void finishPendingPreviews();
     void startApply(std::shared_ptr<const metadata::ArtworkWritePlan> plan);
     void updateApplyProgress();
     void finishApply();
@@ -155,6 +158,11 @@ class MetadataArtworkSection final : public QWidget {
     QFutureWatcher<std::shared_ptr<core::Result<metadata::ArtworkWritePlan>>> plan_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<operations::ArtworkApplyResult>>> apply_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<operations::ArtworkExportResult>>> export_watcher_;
+    QFutureWatcher<std::vector<QImage>> preview_watcher_;
+    core::CancellationSource preview_cancellation_;
+    std::size_t preview_generation_{0U};
+    std::size_t preview_job_generation_{0U};
+    bool preview_running_{false};
     QTimer* debounce_{nullptr};
     QTimer* apply_progress_timer_{nullptr};
     QTimer* export_progress_timer_{nullptr};

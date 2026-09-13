@@ -186,6 +186,9 @@ image files remain on disk; selecting them does not block embedded removal.
 Use **Add image…** for your PNG/JPEG or **Fetch cover** / **Covers…** for archive
 images. Review the pending changes, then use the main **Apply** button to save
 covers and any enabled tag edits together. Nothing is written before Apply;
+The pending list shows **Before** and **After** thumbnails, with explicit
+**None** and **Removed** labels for additions and removals. Incoming previews
+load in the background; unavailable previews do not bypass Apply validation.
 **Undo selected** removes selected entries from the pending list, and
 **Discard changes** clears the artwork draft. Fetching a front replaces every
 existing front variant with one front, retaining other cover types. Apply or

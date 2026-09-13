@@ -170,6 +170,7 @@ void BenchMainWindow::initializePersistence() {
                             true);
                         destination->model->appendRows(std::move(rows));
                         markTabDirty(*destination);
+                        syncArtwork(*destination);
                     });
             refreshActiveContext();
         }
@@ -667,6 +668,7 @@ void BenchMainWindow::openSearchDialog() {
                     destination->model->appendRows(std::move(rows), insertion);
                 }
                 markTabDirty(*destination);
+                syncArtwork(*destination);
                 if (action == LocalLibraryAction::replace && destination->model->rowCount() > 0) {
                     playRow(*destination, 0);
                 }

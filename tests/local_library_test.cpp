@@ -11,6 +11,7 @@
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_table_view.hpp"
 
+#include <QAction>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QDragEnterEvent>
@@ -138,6 +139,8 @@ class LocalLibraryTest final : public QObject {
     void scansOnlyOnRefresh();
     void queryModeFiltersAndCommitsResults();
     void databaseSearchOpensCachedRowsWithoutFiles();
+    void cachedSearchTabsLoadCovers_data();
+    void cachedSearchTabsLoadCovers();
     void localViewBrowsesSearchesAndOpensFiles();
     void dragResolvesUnloadedPagesAndRawPaths();
     void trackNumbersAppearInTreeAndSearch();
@@ -710,6 +713,71 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
 // structured results in the tree, inline diagnostics for malformed
 // queries (never a silent word search), and Enter committing the
 // filtered result set through the ADR-0140 snapshot-tab path.
+void LocalLibraryTest::cachedSearchTabsLoadCovers_data() {
+    QTest::addColumn<bool>("standalone");
+    QTest::newRow("sidebar") << false;
+    QTest::newRow("standalone") << true;
+}
+
+void LocalLibraryTest::cachedSearchTabsLoadCovers() {
+    QFETCH(bool, standalone);
+    QTemporaryDir temporary;
+    const auto old_data = qgetenv("XDG_DATA_HOME");
+    qputenv("XDG_DATA_HOME", temporary.path().toUtf8());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
+    QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeLibraryTests"));
+    QCoreApplication::setApplicationName(QStringLiteral("CachedSearchCovers"));
+    QSettings{}.clear();
+    const auto root = std::filesystem::path{temporary.path().toStdString()} / "music";
+    QVERIFY(!fixture(root, "01.flac").empty());
+    QVERIFY(!fixture(root, "02.flac").empty());
+    QImage cover{64, 64, QImage::Format_RGB32};
+    cover.fill(Qt::green);
+    QVERIFY(cover.save(QString::fromStdString((root / "cover.png").native())));
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.findChild<LocalLibraryPanel*>() != nullptr);
+        auto* panel = window.findChild<LocalLibraryPanel*>();
+        panel->addRoot(root.native());
+        QTRY_COMPARE(panel->findChild<QLabel*>(QStringLiteral("local-library-status"))->text(),
+                     QStringLiteral("Folder added. Press Refresh to scan for music."));
+        panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
+        QTRY_VERIFY(!panel->property("scanning").toBool());
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs);
+        const auto count = tabs->count();
+        if (standalone) {
+            window.findChild<QAction*>(QStringLiteral("action-search-dialog"))->trigger();
+            auto* dialog = window.findChild<SearchDialog*>();
+            QVERIFY(dialog);
+            dialog->findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"))
+                ->setChecked(false);
+            dialog->findChild<QLineEdit*>(QStringLiteral("bench-search-input"))
+                ->setText(QStringLiteral("Test album"));
+            auto* open = dialog->findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+            QTRY_VERIFY(open->isEnabled());
+            open->click();
+        } else {
+            panel->findChild<QLineEdit*>(QStringLiteral("local-library-search"))
+                ->setText(QStringLiteral("Test album"));
+            panel->commitSearch();
+        }
+        QTRY_COMPARE(tabs->count(), count + 1);
+        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+        QVERIFY(view);
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        QVERIFY(model && model->rowCount() == 2);
+        QVERIFY(model->rows()[0].probed && model->rows()[0].technicals);
+        QVERIFY(!model->rows()[0].source_revision);
+        QCOMPARE(model->rows()[0].metadata.fields.front().provenance,
+                 metadata::FieldProvenance::cached_snapshot);
+        QTRY_VERIFY(model->hasArtwork(model->groupKey(0)));
+    }
+    qputenv("XDG_DATA_HOME", old_data);
+}
+
 void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     QTemporaryDir temporary;
     const std::filesystem::path base{temporary.path().toStdString()};

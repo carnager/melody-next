@@ -23,7 +23,9 @@ cached-snapshot provenance; native spellings, unsupported objects, file revision
 and absent technical properties are not fabricated. The index's existing field
 limits still apply, and these documents are presentation snapshots, never a
 complete native write baseline. Playback and Edit tags retain their existing
-on-demand file access and fresh validation boundaries.
+on-demand file access and fresh validation boundaries. Search insertion also
+schedules the existing independent artwork loader: cached covers are reused,
+and missing covers are read asynchronously once per album without tag probing.
 
 Search results remain physical-file snapshots. Chapter/subsong expansion belongs
 to explicit file intake until logical titles are indexed. Opening a search does
@@ -42,3 +44,6 @@ query sorting, metadata provenance, duration, and retained technicals. A grouped
 2,000-row view regression proves the last row remains visible after keyboard
 navigation and that disabling grouping shrinks the scrollbar range. The scrolling
 regression failed before the explicit geometry update.
+
+Sidebar and standalone search-tab regressions also verify cover loading from a
+cold artwork cache while row metadata retains cached-snapshot provenance.

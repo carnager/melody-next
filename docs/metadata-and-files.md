@@ -219,7 +219,9 @@ form where every destination field is clicked individually or selected from an
 endless fixed dropdown.
 
 The primary surface is a vertical split with a virtualized file selector above
-a field-oriented table with Field, Original, and Draft columns. Selecting one
+a field-oriented table with Field, Original, and Draft columns. The file selector
+shows each full source path, with the unabridged path also available in its
+tooltip when the column is too narrow. Selecting one
 file gives an individual view; selecting several files gives a bulk view. It
 provides:
 

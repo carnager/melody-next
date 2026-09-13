@@ -154,10 +154,7 @@ QVariant MetadataGridModel::data(const QModelIndex& index, const int role) const
     }
     const auto item_index = static_cast<std::size_t>(index.row());
     if (index.column() == 0) {
-        if (role == Qt::DisplayRole) {
-            return trackLabel(index.row());
-        }
-        if (role == Qt::ToolTipRole) {
+        if (role == Qt::DisplayRole || role == Qt::ToolTipRole) {
             return QString::fromStdString(
                 core::escape_raw_path(selection_->source(item_index).raw_path));
         }
@@ -262,7 +259,7 @@ QVariant MetadataGridModel::headerData(const int section, const Qt::Orientation 
     }
     if (section == 0) {
         if (role == Qt::DisplayRole) {
-            return QStringLiteral("Track");
+            return QStringLiteral("File path");
         }
         return {};
     }

@@ -192,6 +192,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
+    void metadataGridDisplaysUnicodePaths();
     void metadataGridReusesExactNativeFieldWithoutInvalidIndexes();
     void metadataTransformationChainPreviewsAndStagesOneUndo();
     void metadataCapturePatternSavesReloadsAndStagesAllFields();
@@ -278,6 +279,29 @@ void BenchMainWindowTest::cleanup() {
     settings.clear();
     settings.sync();
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
+}
+
+void BenchMainWindowTest::metadataGridDisplaysUnicodePaths() {
+    const std::vector<std::pair<std::string, QString>> cases{
+        {"/music/Sangue Cássia/02-Lótus.flac",
+         QStringLiteral("/music/Sangue Cássia/02-Lótus.flac")},
+        {"/music/日本語/🎵.flac", QStringLiteral("/music/日本語/🎵.flac")},
+        {"/music/Pétalas-" + std::string(1, static_cast<char>(0xFF)) + ".flac",
+         QStringLiteral("/music/Pétalas-\\xFF.flac")},
+        {"/music/\n\\xFF.flac", QStringLiteral("/music/\\x0A\\\\xFF.flac")},
+        {"/music/" + std::string{"\xE2\x82"}, QStringLiteral("/music/\\xE2\\x82")},
+        {"/music/" + std::string{"\xC0\xAF"}, QStringLiteral("/music/\\xC0\\xAF")},
+        {"/music/\u202E.flac", QStringLiteral("/music/\\xE2\\x80\\xAE.flac")},
+    };
+    for (const auto& [raw_path, expected] : cases) {
+        auto selection = metadata::StagedMetadataSelection::create({metadata::StagedMetadataSource{
+            .raw_path = raw_path, .source_revision = std::nullopt, .baseline = {}}});
+        QVERIFY(selection.has_value());
+        MetadataGridModel grid{std::move(*selection), {}};
+        QCOMPARE(grid.data(grid.index(0, 0), Qt::DisplayRole).toString(), expected);
+        QCOMPARE(grid.data(grid.index(0, 0), Qt::ToolTipRole).toString(), expected);
+        QCOMPARE(grid.trackLabel(0), expected);
+    }
 }
 
 void BenchMainWindowTest::metadataGridReusesExactNativeFieldWithoutInvalidIndexes() {

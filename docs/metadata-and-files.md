@@ -18,6 +18,10 @@ rejects unrelated file changes through fresh revision checks.
 
 ## Reviewing fields and identifying untagged albums
 
+The Edit tags file selector shows full paths with readable Unicode filenames.
+Invalid filename bytes and control characters use lossless escapes; display
+formatting never changes the raw paths used for file operations.
+
 **Trackknife decision (ADR-0157):** Properties can filter field names and show
 only fields changed in the selected files. **Show files** collapses the file
 selector while preserving its scope. Bold field names supplement draft colors;

@@ -2,7 +2,7 @@
 
 #include "bench/metadata_grid_model.hpp"
 
-#include "trackknife/core/local_sources.hpp"
+#include "bench/metadata_dialog_helpers.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 
 #include <QApplication>
@@ -27,10 +27,6 @@
 
 namespace trackknife::bench {
 namespace {
-
-[[nodiscard]] QString display_utf8(const std::string_view value) {
-    return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
-}
 
 [[nodiscard]] QString state_label(const metadata::MetadataSelectionFieldState state) {
     auto label = display_utf8(metadata::metadata_selection_field_state_name(state));
@@ -155,8 +151,7 @@ QVariant MetadataGridModel::data(const QModelIndex& index, const int role) const
     const auto item_index = static_cast<std::size_t>(index.row());
     if (index.column() == 0) {
         if (role == Qt::DisplayRole || role == Qt::ToolTipRole) {
-            return QString::fromStdString(
-                core::escape_raw_path(selection_->source(item_index).raw_path));
+            return display_raw_path(selection_->source(item_index).raw_path);
         }
         return {};
     }
@@ -379,8 +374,7 @@ QString MetadataGridModel::trackLabel(const int row) const {
     if (row < track_labels_.size() && !track_labels_[row].isEmpty()) {
         return track_labels_[row];
     }
-    return QString::fromStdString(
-        core::escape_raw_path(selection_->source(static_cast<std::size_t>(row)).raw_path));
+    return display_raw_path(selection_->source(static_cast<std::size_t>(row)).raw_path);
 }
 
 bool MetadataGridModel::undo() {

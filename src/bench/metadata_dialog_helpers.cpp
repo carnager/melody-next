@@ -2,9 +2,11 @@
 
 #include "bench/metadata_dialog_helpers.hpp"
 
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 
+#include <QByteArrayView>
 #include <QStringList>
 
 #include <algorithm>
@@ -15,6 +17,35 @@ namespace trackknife::bench {
 
 QString display_utf8(const std::string_view value) {
     return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
+}
+
+QString display_raw_path(const std::string_view value) {
+    QString result;
+    for (std::size_t offset = 0U; offset < value.size();) {
+        const auto byte = static_cast<unsigned char>(value[offset]);
+        const auto length = byte >= 0xC2U && byte <= 0xDFU   ? 2U
+                            : byte >= 0xE0U && byte <= 0xEFU ? 3U
+                            : byte >= 0xF0U && byte <= 0xF4U ? 4U
+                                                             : 1U;
+        const auto part = value.substr(offset, length);
+        if (length > 1U && part.size() == length &&
+            QByteArrayView{part.data(), static_cast<qsizetype>(part.size())}.isValidUtf8()) {
+            const auto decoded = display_utf8(part);
+            if (decoded.front().category() != QChar::Other_Control &&
+                decoded.front().category() != QChar::Other_Format &&
+                decoded.front().category() != QChar::Separator_Line &&
+                decoded.front().category() != QChar::Separator_Paragraph) {
+                result += decoded;
+            } else {
+                result += display_utf8(core::escape_raw_path(part));
+            }
+            offset += length;
+        } else {
+            result += display_utf8(core::escape_raw_path(value.substr(offset, 1U)));
+            ++offset;
+        }
+    }
+    return result;
 }
 
 std::string encode_utf8(const QString& value) {

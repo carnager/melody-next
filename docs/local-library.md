@@ -46,6 +46,20 @@ The folder list reports disconnected folders. Removing a folder forgets its
 index entries without changing files, queues, or working lists. Overlapping
 folders are rejected; add their common parent or separate non-overlapping roots.
 
+## Saved searches
+
+Open **Workspace → Search…** (**Ctrl+Shift+F**), enter a word search or enable
+**Query** for a `tkq-1` expression, choose **Library database** or **Current tab**,
+and press **Save as…**. Selecting its name in **Saved searches…** restores the
+query, mode, and scope and evaluates it again. Current tab means the local tab
+active at that moment. Library queries use the cached index without scanning.
+
+Change the query and press **Update** to replace the selected definition;
+**Rename…** changes its name and **Delete…** removes it. Names must be unique.
+Saving zero-result searches is allowed. **Open results in tab** still creates an
+ordinary snapshot; these tabs do not update automatically. Autoplaylists remain
+a subsequent feature (ADR-0163).
+
 ## Indexing and consistency
 
 Migration 28 adds library roots and file records to the existing SQLite store.
@@ -100,8 +114,9 @@ when opening a source; separate indexed searches of those logical titles and
 external cue-sheet titles are not included. Structured tkq filters (ADR-0150)
 evaluate over the migration-30 field table and technical columns; index rows
 written before that migration carry them only after their next explicit
-Refresh. Saved searches, autoplaylists,
-custom library-tree expressions, and an artwork grid remain future work.
+Refresh. Saved searches are available in the standalone Search dialog
+(ADR-0163); autoplaylists, custom library-tree expressions, and an artwork grid
+remain future work.
 Album cover thumbnails are available in the current tree and search results.
 
 Device checks protect against an unmounted volume exposing a mountpoint on a

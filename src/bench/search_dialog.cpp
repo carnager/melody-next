@@ -11,12 +11,15 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtConcurrentRun>
@@ -70,7 +73,7 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     setWindowTitle(QStringLiteral("Search"));
     setObjectName(QStringLiteral("bench-search-dialog"));
     setModal(false);
-    resize(560, 480);
+    resize(720, 480);
 
     auto* layout = new QVBoxLayout(this);
     auto* top = new QHBoxLayout;
@@ -92,6 +95,38 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     query_mode_->setChecked(QSettings{}.value(QStringLiteral("search/query-mode"), false).toBool());
     top->addWidget(query_mode_);
     layout->addLayout(top);
+
+    auto* saved = new QHBoxLayout;
+    saved_searches_ = new QComboBox(this);
+    saved_searches_->setObjectName(QStringLiteral("bench-search-saved"));
+    saved_searches_->setAccessibleName(QStringLiteral("Saved searches"));
+    saved_searches_->addItem(QStringLiteral("Saved searches…"));
+    saved->addWidget(saved_searches_, 1);
+    const auto saved_button = [this, saved](const QString& label, const QString& name) {
+        auto* button = new QPushButton(label, this);
+        button->setObjectName(name);
+        saved->addWidget(button);
+        return button;
+    };
+    save_search_ = saved_button(QStringLiteral("Save as…"), QStringLiteral("bench-search-save"));
+    update_search_ = saved_button(QStringLiteral("Update"), QStringLiteral("bench-search-update"));
+    update_search_->setToolTip(QStringLiteral(
+        "Replace the selected saved search with the current query, mode, and scope"));
+    rename_search_ = saved_button(QStringLiteral("Rename…"), QStringLiteral("bench-search-rename"));
+    delete_search_ = saved_button(QStringLiteral("Delete…"), QStringLiteral("bench-search-delete"));
+    layout->addLayout(saved);
+    saved_status_ = new QLabel(QStringLiteral("Loading saved searches…"), this);
+    saved_status_->setObjectName(QStringLiteral("bench-search-saved-status"));
+    saved_status_->setTextFormat(Qt::PlainText);
+    saved_status_->setWordWrap(true);
+    layout->addWidget(saved_status_);
+    connect(saved_searches_, &QComboBox::activated, this, &SearchDialog::useSavedSearch);
+    connect(save_search_, &QPushButton::clicked, this, [this] { saveSearch(false); });
+    connect(update_search_, &QPushButton::clicked, this, [this] { saveSearch(true); });
+    connect(rename_search_, &QPushButton::clicked, this, &SearchDialog::renameSearch);
+    connect(delete_search_, &QPushButton::clicked, this, &SearchDialog::deleteSearch);
+    connect(&catalog_watcher_, &QFutureWatcherBase::finished, this,
+            &SearchDialog::finishSavedSearches);
 
     error_ = new QLabel(this);
     error_->setObjectName(QStringLiteral("bench-search-error"));
@@ -162,6 +197,7 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     });
     connect(results_, &QListWidget::itemActivated, this,
             [this](QListWidgetItem*) { openResults(LocalLibraryAction::append, true); });
+    loadSavedSearches();
 }
 
 SearchDialog::~SearchDialog() {
@@ -171,9 +207,182 @@ SearchDialog::~SearchDialog() {
     }
 }
 
+std::optional<persistence::SavedSearch> SearchDialog::selectedSearch() const {
+    const auto index = saved_searches_->currentIndex() - 1;
+    return index < 0 || static_cast<std::size_t>(index) >= catalog_.size()
+               ? std::nullopt
+               : std::optional{catalog_[static_cast<std::size_t>(index)]};
+}
+
+void SearchDialog::updateSavedSearchButtons() {
+    const auto selected = selectedSearch();
+    const bool available = catalog_ready_ && !catalog_busy_;
+    const bool has_input = !input_->text().trimmed().isEmpty();
+    saved_searches_->setEnabled(available);
+    save_search_->setEnabled(available && has_input);
+    const bool changed =
+        selected &&
+        (selected->expression != utf8Bytes(input_->text().trimmed()) ||
+         selected->dialect != (query_mode_->isChecked() ? "tkq-1" : "words-1") ||
+         selected->scope != (databaseScope() ? persistence::SavedSearchScope::library
+                                             : persistence::SavedSearchScope::current_tab));
+    update_search_->setEnabled(available && has_input && changed);
+    rename_search_->setEnabled(available && selected.has_value());
+    delete_search_->setEnabled(available && selected.has_value());
+}
+
+void SearchDialog::loadSavedSearches(std::optional<persistence::SavedSearch> write, bool remove) {
+    if (catalog_busy_) {
+        return;
+    }
+    catalog_busy_ = true;
+    catalog_selection_ = write && !remove ? std::optional{write->id} : std::nullopt;
+    saved_status_->setText(write ? QStringLiteral("Saving search definitions…")
+                                 : QStringLiteral("Loading saved searches…"));
+    updateSavedSearchButtons();
+    catalog_watcher_.setFuture(
+        QtConcurrent::run([database = database_path_, write = std::move(write),
+                           remove]() -> core::Result<std::vector<persistence::SavedSearch>> {
+            auto repository = persistence::ListRepository::open(database);
+            if (!repository) {
+                return std::unexpected(repository.error());
+            }
+            if (write) {
+                auto result =
+                    remove ? repository->remove_search(*write) : repository->save_search(*write);
+                if (!result) {
+                    return std::unexpected(result.error());
+                }
+            }
+            return repository->load_saved_searches();
+        }));
+}
+
+void SearchDialog::finishSavedSearches() {
+    catalog_busy_ = false;
+    auto result = catalog_watcher_.result();
+    if (!result) {
+        saved_status_->setText(displayText(result.error().message));
+        updateSavedSearchButtons();
+        return;
+    }
+    catalog_ready_ = true;
+    catalog_ = std::move(*result);
+    const QSignalBlocker blocker{saved_searches_};
+    saved_searches_->clear();
+    saved_searches_->addItem(QStringLiteral("Saved searches…"));
+    int selected = 0;
+    for (const auto& search : catalog_) {
+        saved_searches_->addItem(displayText(search.name));
+        saved_searches_->setItemData(
+            saved_searches_->count() - 1,
+            QStringLiteral("%1 · %2\n%3")
+                .arg(search.scope == persistence::SavedSearchScope::library
+                         ? QStringLiteral("Library database")
+                         : QStringLiteral("Current tab"))
+                .arg(search.dialect == "tkq-1" ? QStringLiteral("Query") : QStringLiteral("Words"))
+                .arg(displayText(search.expression)),
+            Qt::ToolTipRole);
+        if (catalog_selection_ == search.id) {
+            selected = saved_searches_->count() - 1;
+        }
+    }
+    saved_searches_->setCurrentIndex(selected);
+    saved_status_->setText(QStringLiteral("%1 saved search%2 · select one to run it again")
+                               .arg(catalog_.size())
+                               .arg(catalog_.size() == 1U ? QString{} : QStringLiteral("es")));
+    updateSavedSearchButtons();
+}
+
+void SearchDialog::useSavedSearch(int index) {
+    if (index <= 0 || catalog_busy_ || static_cast<std::size_t>(index) > catalog_.size()) {
+        updateSavedSearchButtons();
+        return;
+    }
+    const auto& search = catalog_[static_cast<std::size_t>(index - 1)];
+    {
+        const QSignalBlocker input_blocker{input_};
+        const QSignalBlocker scope_blocker{scope_};
+        const QSignalBlocker mode_blocker{query_mode_};
+        input_->setText(displayText(search.expression));
+        scope_->setCurrentIndex(search.scope == persistence::SavedSearchScope::library ? 0 : 1);
+        query_mode_->setChecked(search.dialect == "tkq-1");
+    }
+    QSettings{}.setValue(QStringLiteral("search/query-mode"), query_mode_->isChecked());
+    error_->hide();
+    scheduleSearch();
+}
+
+void SearchDialog::saveSearch(bool update) {
+    if (!catalog_ready_ || catalog_busy_ || !compileInput()) {
+        return;
+    }
+    auto search = update ? selectedSearch()
+                         : std::optional{persistence::SavedSearch{
+                               .id = core::StableId::random(), .name = {}, .expression = {}}};
+    if (!search) {
+        return;
+    }
+    if (!update) {
+        bool accepted = false;
+        const auto name =
+            QInputDialog::getText(this, QStringLiteral("Save search"), QStringLiteral("Name:"),
+                                  QLineEdit::Normal, input_->text().trimmed().left(80), &accepted)
+                .trimmed();
+        if (!accepted || name.isEmpty()) {
+            return;
+        }
+        search->name = utf8Bytes(name);
+    }
+    search->expression = utf8Bytes(input_->text().trimmed());
+    search->dialect = query_mode_->isChecked() ? "tkq-1" : "words-1";
+    search->scope = databaseScope() ? persistence::SavedSearchScope::library
+                                    : persistence::SavedSearchScope::current_tab;
+    loadSavedSearches(*search);
+}
+
+void SearchDialog::renameSearch() {
+    auto search = selectedSearch();
+    if (!search || catalog_busy_) {
+        return;
+    }
+    bool accepted = false;
+    const auto name =
+        QInputDialog::getText(this, QStringLiteral("Rename search"), QStringLiteral("Name:"),
+                              QLineEdit::Normal, displayText(search->name), &accepted)
+            .trimmed();
+    if (!accepted || name.isEmpty() || utf8Bytes(name) == search->name) {
+        return;
+    }
+    search->name = utf8Bytes(name);
+    loadSavedSearches(*search);
+}
+
+void SearchDialog::deleteSearch() {
+    const auto search = selectedSearch();
+    if (!search || catalog_busy_) {
+        return;
+    }
+    if (QMessageBox::question(
+            this, QStringLiteral("Delete saved search"),
+            QStringLiteral(
+                "Delete “%1” from saved searches? Existing result tabs remain available.")
+                .arg(displayText(search->name)),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+    loadSavedSearches(*search, true);
+}
+
 bool SearchDialog::databaseScope() const { return scope_->currentIndex() == 0; }
 
 void SearchDialog::scheduleSearch() {
+    updateSavedSearchButtons();
+    debounce_->stop();
+    results_->clear();
+    result_paths_.clear();
+    result_rows_.clear();
+    open_button_->setEnabled(false);
     ++generation_;
     cancellation_.request_cancellation();
     cancellation_ = core::CancellationSource{};
@@ -209,6 +418,7 @@ void SearchDialog::startSearch() {
         debounce_->start();
         return;
     }
+    search_job_generation_ = generation_;
     auto compiled = compileInput();
     if (!compiled) {
         return;
@@ -348,6 +558,9 @@ void SearchDialog::startSearch() {
 
 void SearchDialog::finishSearch() {
     searching_ = false;
+    if (search_job_generation_ != generation_) {
+        return;
+    }
     auto outcome = watcher_.result();
     if (!outcome.error.isEmpty()) {
         status_->setText(outcome.error);

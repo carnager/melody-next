@@ -207,6 +207,7 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanUsesTruePeakWhenOptedIn();
     void replayGainScanStagesR128ForOpusTags();
     void propertiesShowTechnicalSummary();
+    void savedSearchesCanBeManagedAndReopened();
     void searchDialogFiltersTabAndOpensResults();
     void searchDialogProbesMissingTechnicalsOnDemand();
     void contextReplayGainScansAndApplies();
@@ -4261,6 +4262,123 @@ void BenchMainWindowTest::propertiesShowTechnicalSummary() {
 
 // ADR-0153: the standalone search dialog filters the current tab with
 // tkq over row metadata and technicals, and keeps results as tabs.
+void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto database =
+        std::filesystem::path{directory.filePath(QStringLiteral("searches.sqlite3")).toStdString()};
+    LocalTrackRow first{};
+    first.title = "Jazz";
+    first.raw_path = "/music/first.flac";
+    LocalTrackRow second{};
+    second.title = "Rock";
+    second.raw_path = "/music/second.flac";
+    for (auto* row : {&first, &second}) {
+        row->metadata.fields.push_back({.canonical_name = "title",
+                                        .native_name = "TITLE",
+                                        .values = {row->title},
+                                        .qualifier = {},
+                                        .provenance = metadata::FieldProvenance::embedded});
+    }
+    std::vector<LocalTrackRow> current{first, second};
+    const auto access = [&current]() -> std::optional<SearchDialog::TabSnapshot> {
+        return SearchDialog::TabSnapshot{QStringLiteral("Current"), current};
+    };
+    const auto name_dialog = [](const QString& value) {
+        QTimer::singleShot(0, [value] {
+            auto* prompt = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            if (prompt) {
+                prompt->setTextValue(value);
+                prompt->accept();
+            }
+        });
+    };
+    {
+        SearchDialog dialog{database, access, {}};
+        dialog.show();
+        auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+        auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+        auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+        auto* saved = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-saved"));
+        auto* save = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-save"));
+        auto* update = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-update"));
+        auto* rename = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-rename"));
+        auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+        QVERIFY(input && scope && mode && saved && save && update && rename && results);
+        scope->setCurrentIndex(1);
+        mode->setChecked(true);
+        input->setText(QStringLiteral("title IS Jazz"));
+        QTRY_VERIFY(save->isEnabled());
+        QTRY_COMPARE(results->count(), 1);
+        name_dialog(QStringLiteral("My jazz"));
+        save->click();
+        QTRY_COMPARE(saved->count(), 2);
+        QCOMPARE(saved->currentText(), QStringLiteral("My jazz"));
+        QVERIFY(!update->isEnabled());
+        mode->setChecked(false);
+        input->setText(QStringLiteral("Rock"));
+        QTRY_VERIFY(update->isEnabled());
+        update->click();
+        QTRY_VERIFY(saved->isEnabled());
+        QVERIFY(!update->isEnabled());
+        name_dialog(QStringLiteral("My rock"));
+        rename->click();
+        QTRY_COMPARE(saved->currentText(), QStringLiteral("My rock"));
+        QTRY_COMPARE(results->count(), 1);
+        const auto screenshot_dir = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        if (!screenshot_dir.isEmpty()) {
+            QVERIFY(dialog.grab().save(screenshot_dir + QStringLiteral("/saved-searches.png")));
+        }
+        // Invalid queries cannot replace a valid saved definition.
+        mode->setChecked(true);
+        input->setText(QStringLiteral("AND ("));
+        update->click();
+        auto repository = persistence::ListRepository::open(database);
+        QVERIFY(repository.has_value());
+        auto definitions = repository->load_saved_searches();
+        QVERIFY(definitions && definitions->size() == 1);
+        QCOMPARE(definitions->front().expression, std::string{"Rock"});
+        QCOMPARE(definitions->front().dialect, std::string{"words-1"});
+        QCOMPARE(definitions->front().scope, persistence::SavedSearchScope::current_tab);
+    }
+    // A new dialog reruns the saved definition against the current tab, not old hits.
+    current.push_back(second);
+    SearchDialog reopened{database, access, {}};
+    reopened.show();
+    auto* saved = reopened.findChild<QComboBox*>(QStringLiteral("bench-search-saved"));
+    auto* input = reopened.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* scope = reopened.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* mode = reopened.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = reopened.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* open = reopened.findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+    auto* remove = reopened.findChild<QPushButton*>(QStringLiteral("bench-search-delete"));
+    QVERIFY(saved && input && scope && mode && results && open && remove);
+    QTRY_COMPARE(saved->count(), 2);
+    saved->setCurrentIndex(1);
+    QVERIFY(QMetaObject::invokeMethod(saved, "activated", Q_ARG(int, 1)));
+    QCOMPARE(input->text(), QStringLiteral("Rock"));
+    QCOMPARE(scope->currentIndex(), 1);
+    QVERIFY(!mode->isChecked());
+    QTRY_COMPARE(results->count(), 2);
+    // Switching scope invalidates the old payload immediately.
+    scope->setCurrentIndex(0);
+    QVERIFY(!open->isEnabled());
+    QCOMPARE(results->count(), 0);
+    QTRY_VERIFY(reopened.findChild<QLabel*>(QStringLiteral("bench-search-status"))
+                    ->text()
+                    .startsWith(QStringLiteral("0 matches")));
+    QTimer::singleShot(0, [] {
+        if (auto* prompt = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            prompt->button(QMessageBox::Yes)->click();
+        }
+    });
+    remove->click();
+    QTRY_COMPARE(saved->count(), 1);
+    auto repository = persistence::ListRepository::open(database);
+    QVERIFY(repository && repository->load_saved_searches()->empty());
+    mode->setChecked(false);
+}
+
 void BenchMainWindowTest::searchDialogFiltersTabAndOpensResults() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -4341,6 +4459,11 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     LocalTrackRow row;
     row.raw_path = std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
     row.title = "Restored";
+    row.metadata.fields.push_back({.canonical_name = "title",
+                                   .native_name = "TITLE",
+                                   .values = {"Restored"},
+                                   .qualifier = {},
+                                   .provenance = metadata::FieldProvenance::embedded});
     row.probed = true;
 
     std::vector<std::pair<std::string, LocalTrackTechnicals>> reported;

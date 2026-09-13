@@ -5,6 +5,7 @@
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_model.hpp"
 #include "trackknife/core/cancellation.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <QDialog>
@@ -64,6 +65,16 @@ class SearchDialog final : public QDialog {
         std::size_t scanned{0U};
     };
 
+    void loadSavedSearches(std::optional<persistence::SavedSearch> write = std::nullopt,
+                           bool remove = false);
+    void finishSavedSearches();
+    void useSavedSearch(int index);
+    void saveSearch(bool update);
+    void renameSearch();
+    void deleteSearch();
+    void updateSavedSearchButtons();
+    [[nodiscard]] std::optional<persistence::SavedSearch> selectedSearch() const;
+
     void scheduleSearch();
     void startSearch();
     void finishSearch();
@@ -74,6 +85,18 @@ class SearchDialog final : public QDialog {
     std::filesystem::path database_path_;
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
+    QComboBox* saved_searches_{nullptr};
+    QPushButton* save_search_{nullptr};
+    QPushButton* update_search_{nullptr};
+    QPushButton* rename_search_{nullptr};
+    QPushButton* delete_search_{nullptr};
+    QLabel* saved_status_{nullptr};
+    std::vector<persistence::SavedSearch> catalog_;
+    QFutureWatcher<core::Result<std::vector<persistence::SavedSearch>>> catalog_watcher_;
+    std::optional<core::StableId> catalog_selection_;
+    bool catalog_busy_{false};
+    bool catalog_ready_{false};
+    std::size_t search_job_generation_{0U};
     QComboBox* scope_{nullptr};
     QLineEdit* input_{nullptr};
     QCheckBox* query_mode_{nullptr};

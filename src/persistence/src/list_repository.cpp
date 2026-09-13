@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/core/unicode.hpp"
 #include "trackknife/persistence/local_library.hpp"
+#include "trackknife/query/tkq.hpp"
 
 #include <sqlite3.h>
 
@@ -22,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 31U;
+constexpr unsigned current_schema_version = 32U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -977,6 +979,23 @@ INSERT INTO operation_journal_artwork
 SELECT * FROM operation_journal_artwork_v30;
 DROP TABLE operation_journal_artwork_v30;
 UPDATE schema_version SET version = 31;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 31) {
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE saved_searches (
+    id TEXT PRIMARY KEY NOT NULL,
+    name BLOB NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 256),
+    expression BLOB NOT NULL CHECK(length(expression) BETWEEN 1 AND 4096),
+    dialect TEXT NOT NULL CHECK(dialect IN ('tkq-1', 'words-1')),
+    scope INTEGER NOT NULL CHECK(scope IN (0, 1)),
+    revision INTEGER NOT NULL CHECK(revision > 0)
+);
+UPDATE schema_version SET version = 32;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();
@@ -4304,6 +4323,135 @@ core::Result<void> ListRepository::remove_encoder_preset(const core::StableId& i
     if (auto result = execute(database, "COMMIT"); !result) {
         rollback();
         return result;
+    }
+    return {};
+}
+
+namespace {
+core::Result<void> validate_search(const SavedSearch& search) {
+    if (search.id.is_nil() || search.name.empty() || search.name.size() > 256U ||
+        search.name.find('\0') != std::string::npos || search.expression.empty() ||
+        search.expression.size() > 4096U ||
+        (search.dialect != "tkq-1" && search.dialect != "words-1") ||
+        (search.scope != SavedSearchScope::library &&
+         search.scope != SavedSearchScope::current_tab) ||
+        search.revision >= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "Invalid saved search (name: 1–256 bytes; query: 1–4096 bytes)",
+                        .context = {}});
+    }
+    if (!core::unicodeCodePointCount(search.name) ||
+        search.expression.find('\0') != std::string::npos ||
+        search.name.find_first_not_of(" \t\r\n") == std::string::npos) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "Saved searches require a valid name and query",
+                        .context = {}});
+    }
+    const auto compiled = search.dialect == "tkq-1"
+                              ? query::compile_tkq(search.expression)
+                              : query::compile_tkq_word_search(search.expression);
+    if (!compiled) {
+        return std::unexpected(compiled.error());
+    }
+    return {};
+}
+} // namespace
+
+core::Result<std::vector<SavedSearch>> ListRepository::load_saved_searches() const {
+    auto* database = implementation_->database;
+    auto statement = prepare(database, "SELECT id, name, expression, dialect, scope, revision FROM "
+                                       "saved_searches ORDER BY name, id");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    std::vector<SavedSearch> searches;
+    int result;
+    while ((result = sqlite3_step(statement->get())) == SQLITE_ROW) {
+        const auto id = core::StableId::parse(column_text(statement->get(), 0));
+        const auto revision = sqlite3_column_int64(statement->get(), 5);
+        const auto scope = sqlite3_column_int(statement->get(), 4);
+        if (!id || revision < 1 || scope < 0 || scope > 1 || searches.size() >= 256U) {
+            return std::unexpected(database_error(database, "Invalid saved search record"));
+        }
+        SavedSearch search{.id = *id,
+                           .name = column_blob(statement->get(), 1),
+                           .expression = column_blob(statement->get(), 2),
+                           .dialect = column_text(statement->get(), 3),
+                           .scope = static_cast<SavedSearchScope>(scope),
+                           .revision = static_cast<std::uint64_t>(revision)};
+        if (auto valid = validate_search(search); !valid) {
+            return std::unexpected(valid.error());
+        }
+        searches.push_back(std::move(search));
+    }
+    if (result != SQLITE_DONE) {
+        return std::unexpected(database_error(database, "Could not load saved searches"));
+    }
+    return searches;
+}
+
+core::Result<void> ListRepository::save_search(const SavedSearch& search) {
+    if (auto valid = validate_search(search); !valid) {
+        return valid;
+    }
+    auto* database = implementation_->database;
+    auto statement = prepare(
+        database, search.revision == 0
+                      ? "INSERT INTO saved_searches(id,name,expression,dialect,scope,revision) "
+                        "SELECT ?1,?2,?3,?4,?5,1 WHERE (SELECT count(*) FROM saved_searches) < 256"
+                      : "UPDATE saved_searches SET name=?2, expression=?3, dialect=?4, scope=?5, "
+                        "revision=revision+1 WHERE id=?1 AND revision=?6");
+    if (!statement) {
+        return std::unexpected(statement.error());
+    }
+    auto* stmt = statement->get();
+    if (!bind_text(stmt, 1, search.id.to_string()) || !bind_blob(stmt, 2, search.name) ||
+        !bind_blob(stmt, 3, search.expression) || !bind_text(stmt, 4, search.dialect) ||
+        sqlite3_bind_int(stmt, 5, static_cast<int>(search.scope)) != SQLITE_OK ||
+        (search.revision != 0 &&
+         sqlite3_bind_int64(stmt, 6, static_cast<sqlite3_int64>(search.revision)) != SQLITE_OK)) {
+        return std::unexpected(database_error(database, "Could not bind saved search"));
+    }
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        if (sqlite3_errcode(database) == SQLITE_CONSTRAINT) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::conflict,
+                            .message = "A saved search with this name or identity already exists",
+                            .context = {}});
+        }
+        return std::unexpected(database_error(database, "Could not save search"));
+    }
+    if (sqlite3_changes(database) != 1) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::conflict,
+            .message = search.revision == 0
+                           ? "At most 256 searches can be saved"
+                           : "Saved search changed or was deleted; reopen Search to reload it",
+            .context = {}});
+    }
+    return {};
+}
+
+core::Result<void> ListRepository::remove_search(const SavedSearch& expected) {
+    auto* database = implementation_->database;
+    auto statement = prepare(database, "DELETE FROM saved_searches WHERE id=?1 AND revision=?2");
+    if (!statement || !bind_text(statement->get(), 1, expected.id.to_string()) ||
+        expected.revision == 0 ||
+        expected.revision > static_cast<std::uint64_t>(std::numeric_limits<sqlite3_int64>::max()) ||
+        sqlite3_bind_int64(statement->get(), 2, static_cast<sqlite3_int64>(expected.revision)) !=
+            SQLITE_OK) {
+        return std::unexpected(database_error(database, "Invalid saved search deletion"));
+    }
+    if (auto done = step_done(database, statement->get(), "Could not delete saved search"); !done) {
+        return done;
+    }
+    if (sqlite3_changes(database) != 1) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::conflict,
+            .message = "Saved search changed or was deleted; reopen Search to reload it",
+            .context = {}});
     }
     return {};
 }

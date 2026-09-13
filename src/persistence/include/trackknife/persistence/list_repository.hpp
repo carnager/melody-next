@@ -132,6 +132,18 @@ struct SavedEncoderPreset {
     friend bool operator==(const SavedEncoderPreset&, const SavedEncoderPreset&) = default;
 };
 
+// Versioned query definitions; result lists remain independent snapshots.
+enum class SavedSearchScope : std::uint8_t { library, current_tab };
+struct SavedSearch {
+    core::StableId id;
+    std::string name;
+    std::string expression;
+    std::string dialect{"tkq-1"};
+    SavedSearchScope scope{SavedSearchScope::library};
+    std::uint64_t revision{0U}; // zero creates; loaded revisions gate updates/deletion
+    friend bool operator==(const SavedSearch&, const SavedSearch&) = default;
+};
+
 struct LocalMetadataRefresh {
     core::StableId operation_id;
     std::string source_reference;
@@ -218,6 +230,10 @@ class ListRepository final {
     [[nodiscard]] core::Result<std::vector<SavedEncoderPreset>> load_encoder_presets() const;
     [[nodiscard]] core::Result<void> upsert_encoder_preset(const SavedEncoderPreset& saved_preset);
     [[nodiscard]] core::Result<void> remove_encoder_preset(const core::StableId& id);
+
+    [[nodiscard]] core::Result<std::vector<SavedSearch>> load_saved_searches() const;
+    [[nodiscard]] core::Result<void> save_search(const SavedSearch& search);
+    [[nodiscard]] core::Result<void> remove_search(const SavedSearch& expected);
 
   private:
     struct Impl;

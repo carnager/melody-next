@@ -18,6 +18,63 @@ void require(const bool condition, const std::string_view message) {
     }
 }
 
+void saved_searches_are_persistent_and_conflict_checked() {
+    namespace persistence = trackknife::persistence;
+    namespace core = trackknife::core;
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("trackbench-searches-" + core::StableId::random().to_string());
+    std::filesystem::create_directory(directory);
+    const auto path = directory / "state.sqlite3";
+    {
+        auto repository = persistence::ListRepository::open(path);
+        require(repository.has_value(), "saved-search database opens");
+        persistence::SavedSearch search{.id = core::StableId::random(),
+                                        .name = "FLAC ohne ReplayGain",
+                                        .expression =
+                                            "codec IS flac AND NOT replaygaintrackgain PRESENT",
+                                        .dialect = "tkq-1",
+                                        .scope = persistence::SavedSearchScope::library};
+        require(repository->save_search(search).has_value(), "valid query is saved");
+        auto loaded = repository->load_saved_searches();
+        require(loaded && loaded->size() == 1 && loaded->front().revision == 1,
+                "saved search gets a revision");
+        search.revision = 1;
+        require(loaded->front() == search, "query, name, dialect, scope, and identity round trip");
+        auto other = persistence::ListRepository::open(path);
+        require(other && other->load_saved_searches() == loaded, "definitions survive reopening");
+        auto duplicate = search;
+        duplicate.id = core::StableId::random();
+        duplicate.revision = 0;
+        require(!other->save_search(duplicate), "duplicate names cannot overwrite definitions");
+        auto updated = search;
+        updated.name = "Songs in current tab";
+        updated.expression = "Jazz";
+        updated.dialect = "words-1";
+        updated.scope = persistence::SavedSearchScope::current_tab;
+        require(other->save_search(updated).has_value(), "query and scope can be updated");
+        require(!repository->save_search(search), "stale writer cannot overwrite another update");
+        require(!repository->remove_search(search), "stale deletion cannot erase another update");
+        auto invalid = duplicate;
+        invalid.name = "Invalid";
+        invalid.expression = "AND (";
+        require(!repository->save_search(invalid), "invalid structured queries are rejected");
+        invalid.expression = "genre IS jazz";
+        invalid.dialect = "tkq-2";
+        require(!repository->save_search(invalid), "unknown dialects are rejected");
+        invalid.dialect = "tkq-1";
+        invalid.name = std::string(257, 'n');
+        require(!repository->save_search(invalid), "oversized names are rejected");
+        loaded = other->load_saved_searches();
+        require(loaded && loaded->size() == 1 && loaded->front().revision == 2 &&
+                    loaded->front().name == updated.name,
+                "failed writes preserve the winning update");
+        require(repository->remove_search(loaded->front()).has_value(),
+                "current revision can be deleted");
+        require(other->load_saved_searches()->empty(), "deletion persists across connections");
+    }
+    std::filesystem::remove_all(directory);
+}
+
 void list_documents_round_trip_transactionally() {
     namespace persistence = trackknife::persistence;
     const auto database_path = std::filesystem::temp_directory_path() /
@@ -101,7 +158,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 31U, "state repository schema must be explicit");
+        require(repository.schema_version() == 32U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -467,7 +524,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 31U,
+        require(repository.schema_version() == 32U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1184,7 +1241,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 31U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 32U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1510,6 +1567,7 @@ void legacy_logical_snapshots_block_refresh() {
 } // namespace
 
 int main() {
+    saved_searches_are_persistent_and_conflict_checked();
     list_documents_round_trip_transactionally();
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();

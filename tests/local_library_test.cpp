@@ -591,14 +591,16 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 31U);
+        QCOMPARE(*repository->schema_version(), 32U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
-    for (const auto* name : {"0030_library_query_index.down", "0028_local_library.down",
-                             "0028_local_library.up", "0030_library_query_index.up"}) {
+    for (const auto* name : {"0032_saved_searches.down", "0031_composed_metadata_artwork.down",
+                             "0030_library_query_index.down", "0028_local_library.down",
+                             "0028_local_library.up", "0030_library_query_index.up",
+                             "0031_composed_metadata_artwork.up", "0032_saved_searches.up"}) {
         QFile migration{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
@@ -612,6 +614,23 @@ void LocalLibraryTest::migrationRoundTrip() {
     QVERIFY(library);
     QVERIFY(library->roots()->empty());
     QVERIFY(library->query(tracks())->entries.empty());
+    auto repository = persistence::ListRepository::open(database);
+    QVERIFY(repository.has_value());
+    persistence::SavedSearch saved{.id = core::StableId::random(),
+                                   .name = "Keep me",
+                                   .expression = "Jazz",
+                                   .dialect = "words-1"};
+    QVERIFY(repository->save_search(saved).has_value());
+    QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+    QFile downgrade{QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0032_saved_searches.down.sql")};
+    QVERIFY(downgrade.open(QIODevice::ReadOnly));
+    QCOMPARE(sqlite3_exec(db, "BEGIN IMMEDIATE", nullptr, nullptr, nullptr), SQLITE_OK);
+    QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
+             SQLITE_CONSTRAINT);
+    QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
+    sqlite3_close(db);
+    QCOMPARE(repository->load_saved_searches()->size(), 1U);
+    QCOMPARE(*repository->schema_version(), 32U);
 }
 
 void LocalLibraryTest::scansOnlyOnRefresh_data() {

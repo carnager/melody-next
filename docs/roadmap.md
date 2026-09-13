@@ -88,7 +88,10 @@ References: [working lists and interchange](playback-library-conversion.md#worki
   behind an explicit query toggle in the library panel; committed queries
   keep their results as ADR-0140 snapshot tabs. Old index rows backfill on
   their next Refresh.
-- [ ] Saved searches, followed by query-backed autoplaylists.
+- [x] Saved searches (ADR-0163): persistent named query/word definitions with
+  scope, save/update/rename/delete, conflict detection, and explicit reevaluation
+  in the standalone Search dialog.
+- [ ] Query-backed autoplaylists that update when the cached index changes.
 - [ ] Idea: similarity-fed autoplaylists — use an online source such as
   Last.fm similar-artist/track data to queue related songs from the local
   index (network-gated, cached like the MusicBrainz client, never blocking

@@ -120,6 +120,9 @@ tiebreak.
 Recorded so the spec stays honest: time operators
 (`AFTER`/`BEFORE`/`SINCE`/`DURING`, `DURING LAST n <unit>`) until
 playback statistics exist in the index; diacritic folding; regular
-expressions; path-targeted operators; saved searches, autoplaylists,
+expressions; path-targeted operators; autoplaylists,
 and the query builder UI (separate Area 2 packages); MPD-side
 translation.
+
+Saved query/word definitions with explicit dialects and scope are implemented
+in ADR-0163; see [Saved searches](local-library.md#saved-searches).

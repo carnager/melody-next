@@ -184,16 +184,20 @@ pictures, including multiple versions of the same type in one file. External
 image files remain on disk; selecting them does not block embedded removal.
 
 Use **Add image…** for your PNG/JPEG or **Fetch cover** / **Covers…** for archive
-images. Review the pending changes, then **Save artwork**. Nothing is written
-until Save; **Undo selected** removes selected entries from the pending list,
-and **Discard changes** clears the artwork draft. Fetching a front replaces every existing front variant with one front, retaining other
-cover types. Save or discard before changing the selected files or applying tags.
+images. Review the pending changes, then use the main **Apply** button to save
+covers and any enabled tag edits together. Nothing is written before Apply;
+**Undo selected** removes selected entries from the pending list, and
+**Discard changes** clears the artwork draft. Fetching a front replaces every
+existing front variant with one front, retaining other cover types. Apply or
+discard before changing the selected files.
 
-Artwork writes preserve pending text edits and use recoverable, verified writes.
-A failed or cancelled save may have completed earlier cover changes; feedback
-reports this and refreshes the inventory. External image deletion, artwork
-mutation in unqualified containers, and per-file atomic multi-cover publication
-remain outside this workflow (ADR-0159).
+Unchecking **Save tags** leaves text edits unwritten while still applying staged
+covers. Each physical file is prepared and verified once before publication,
+with one recovery backup for all its changes. A failed replacement leaves that
+file's original tags and pictures intact; one operation undo restores both.
+Cancellation or failure can still leave earlier files committed in a multi-file
+batch. Feedback reports those outcomes. External image deletion and artwork
+mutation in unqualified containers remain outside this workflow (ADR-0160).
 
 ## Tag editor
 

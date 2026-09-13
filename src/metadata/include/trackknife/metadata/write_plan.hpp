@@ -11,12 +11,15 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace trackknife::metadata {
+
+struct ArtworkWritePlanSource;
 
 enum class MetadataWritePlanIssueKind {
     missing_baseline_revision,
@@ -84,6 +87,7 @@ struct MetadataWritePlanSource {
     std::string adapter_name;
     std::vector<MetadataWritePlanChange> changes;
     std::vector<MetadataWritePlanIssue> issues;
+    std::shared_ptr<const ArtworkWritePlanSource> artwork{};
 
     [[nodiscard]] bool ready() const noexcept;
     [[nodiscard]] std::size_t blocking_issue_count() const noexcept;

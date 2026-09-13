@@ -7,6 +7,7 @@
 #include "trackknife/metadata/flac_writer.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/loudness_sidecar.hpp"
+#include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
@@ -1556,12 +1557,98 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
         addition.expected_target_fingerprint = {};
         intents.push_back(addition);
         const auto plan = metadata::revalidate_artwork_write_plan(intents);
-        CHECK(plan && plan->ready() && plan->sources.size() == 3U);
+        CHECK(plan && plan->ready() && plan->sources.size() == 1U);
         if (!plan || !plan->ready()) {
             continue;
         }
         CHECK(plan->sources[0].change.target_ordinal == 1U);
-        CHECK(plan->sources[1].change.target_ordinal == 0U);
+        CHECK(plan->sources[0].additional_changes[0].target_ordinal == 0U);
+        const auto text_source = title_plan(path, "Atomic album title");
+        CHECK(text_source.has_value());
+        if (!text_source) {
+            continue;
+        }
+        auto combined = metadata::merge_artwork_write_plan(
+            metadata::MetadataWritePlan{.sources = {*text_source}, .patch_count = 1}, *plan);
+        CHECK(combined && combined->ready());
+        if (!combined) {
+            continue;
+        }
+        const auto original_bytes = read_bytes(path);
+        auto broken = combined->sources.front();
+        auto broken_art = std::make_shared<metadata::ArtworkWritePlanSource>(*broken.artwork);
+        broken_art->additional_changes.back().replacement->raw_path += ".missing";
+        broken.artwork = broken_art;
+        const auto failed = operations::commit_flac_metadata_source(
+            broken, *journal,
+            [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+        CHECK(!failed && read_bytes(path) == original_bytes);
+        const auto atomic = operations::commit_flac_metadata_source(
+            combined->sources.front(), *journal,
+            [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+        if (!atomic) {
+            std::cerr << extension << " atomic: " << atomic.error().message << '\n';
+        }
+        CHECK(atomic.has_value());
+        if (!atomic) {
+            continue;
+        }
+        const auto committed_tags = metadata::read_local_metadata(path.native());
+        const auto committed_covers = metadata::read_local_artwork_inventory(path.native(), policy);
+        CHECK(committed_tags && committed_tags->document.first_effective_value("title") ==
+                                    std::optional<std::string>{"Atomic album title"});
+        CHECK(committed_covers && committed_covers->items.size() == 1U);
+        const auto record = journal->load(atomic->journal_id);
+        CHECK(record && *record && (**record).artwork && !(**record).changes.empty() &&
+              (**record).artwork->kind == metadata::ArtworkWritePlanIntentKind::batch);
+        const auto undone = operations::undo_flac_metadata_operation(
+            atomic->journal_id, *journal,
+            [](const operations::MetadataCommitResult&) -> core::Result<void> { return {}; });
+        CHECK(undone && read_bytes(path) == original_bytes);
+        // Simulate a process stopping after publication but before journal completion.
+        if (record && *record) {
+            auto recovery = **record;
+            recovery.id = core::StableId::random();
+            recovery.state = operations::MetadataOperationJournalState::planned;
+            const auto recovery_stem = ".trackknife-" + recovery.id.to_string() + ".metadata-";
+            recovery.prepared_raw_path =
+                (path.parent_path() / (recovery_stem + "prepared")).native();
+            recovery.backup_raw_path = (path.parent_path() / (recovery_stem + "backup")).native();
+            recovery.prepared_revision.reset();
+            recovery.published_revision.reset();
+            recovery.failure.reset();
+            CHECK(journal->create(recovery).has_value());
+            const auto prepared = metadata::prepare_qualified_metadata_write_copy(
+                combined->sources.front(), recovery.prepared_raw_path);
+            CHECK(prepared.has_value());
+            if (prepared) {
+                CHECK(journal
+                          ->transition(
+                              recovery.id,
+                              {.expected_state = operations::MetadataOperationJournalState::planned,
+                               .state = operations::MetadataOperationJournalState::prepared,
+                               .prepared_revision = prepared->prepared_revision,
+                               .published_revision = std::nullopt,
+                               .failure = std::nullopt})
+                          .has_value());
+                CHECK(::link(path.c_str(), recovery.backup_raw_path.c_str()) == 0);
+                CHECK(::rename(recovery.prepared_raw_path.c_str(), path.c_str()) == 0);
+                const auto recovered = operations::recover_metadata_operations(
+                    *journal, [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                        return {};
+                    });
+                CHECK(recovered && std::ranges::any_of(*recovered, [](const auto& item) {
+                          return item.outcome == operations::MetadataRecoveryOutcome::completed;
+                      }));
+                CHECK(operations::undo_flac_metadata_operation(
+                          recovery.id, *journal,
+                          [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                              return {};
+                          })
+                          .has_value());
+                CHECK(read_bytes(path) == original_bytes);
+            }
+        }
         const auto result = operations::apply_artwork_write_plan(*plan, commit);
         if (result) {
             for (const auto& step : result->sources) {
@@ -1570,7 +1657,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
                 }
             }
         }
-        CHECK(result && result->committed_source_count() == 3U);
+        CHECK(result && result->committed_source_count() == 1U);
         const auto after = metadata::read_local_artwork_inventory(path.native(), policy);
         const auto after_tags = metadata::read_local_metadata(path.native());
         CHECK(after && after->items.size() == 1U &&
@@ -1588,7 +1675,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
               unrelated_objects(after_tags->document) == unrelated_objects(tags->document));
         // An old preview must fail closed after the save.
         const auto stale = operations::apply_artwork_write_plan(*plan, commit);
-        CHECK(stale && stale->committed_source_count() == 0U && stale->failed_source_count() == 3U);
+        CHECK(stale && stale->committed_source_count() == 0U && stale->failed_source_count() == 1U);
         if (!after || after->items.size() != 1U) {
             continue;
         }
@@ -1601,12 +1688,12 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
         add_second.replacement_raw_path = png.native();
         const auto several_adds =
             metadata::revalidate_artwork_write_plan({remove_remaining, addition, add_second});
-        CHECK(several_adds && several_adds->ready() && several_adds->sources.size() == 3U);
+        CHECK(several_adds && several_adds->ready() && several_adds->sources.size() == 1U);
         if (!several_adds || !several_adds->ready()) {
             continue;
         }
         const auto several_saved = operations::apply_artwork_write_plan(*several_adds, commit);
-        CHECK(several_saved && several_saved->committed_source_count() == 3U);
+        CHECK(several_saved && several_saved->committed_source_count() == 1U);
         const auto two = metadata::read_local_artwork_inventory(path.native(), policy);
         CHECK(two && two->items.size() == 2U);
         if (!two || two->items.size() != 2U) {
@@ -1626,7 +1713,7 @@ void artwork_multiple_changes_per_file(const std::filesystem::path& fixture_dire
             continue;
         }
         const auto emptied = operations::apply_artwork_write_plan(*empty_plan, commit);
-        CHECK(emptied && emptied->committed_source_count() == 2U);
+        CHECK(emptied && emptied->committed_source_count() == 1U);
         const auto empty = metadata::read_local_artwork_inventory(path.native(), policy);
         CHECK(empty && empty->items.empty());
     }
@@ -1692,9 +1779,7 @@ void artwork_batch_apply_reports_ordered_partial_results_and_cancellation() {
                 .document = {},
                 .occurrence_indexes = step.occurrence_indexes};
         });
-    CHECK(interrupted && attempts == 2U && interrupted->committed_source_count() == 1U &&
-          interrupted->failed_source_count() == 2U && interrupted->sources[2].issue &&
-          interrupted->sources[2].issue->message.find("not attempted") != std::string::npos);
+    CHECK(!interrupted && attempts == 0U);
 
     core::CancellationSource cancellation;
     std::atomic_size_t admitted{0U};
@@ -1729,7 +1814,8 @@ void artwork_batch_apply_reports_ordered_partial_results_and_cancellation() {
 void publishes_verified_native_flac_directly_at_changed_destination(
     const std::filesystem::path& fixture_directory) {
     TemporaryDirectory directory;
-    const auto source = materialize(fixture_directory, directory.path() / "combined-source.flac");
+    const auto source = materialize(fixture_directory, "art-tone-flac.b64",
+                                    directory.path() / "combined-source.flac");
     const auto target = directory.path() / "Organized" / "combined-target.flac";
     auto source_plan = title_plan(source, "Combined destination title");
     auto checked = destination_preflight(source, target);
@@ -1737,6 +1823,33 @@ void publishes_verified_native_flac_directly_at_changed_destination(
     if (!source_plan || !checked) {
         return;
     }
+    const auto inventory = metadata::read_local_artwork_inventory(source.native());
+    CHECK(inventory && !inventory->items.empty());
+    if (!inventory || inventory->items.empty()) {
+        return;
+    }
+    const auto art = metadata::revalidate_artwork_write_plan(
+        {{.occurrence_index = 0,
+          .raw_media_path = source.native(),
+          .expected_media_revision = inventory->media_revision,
+          .target_ordinal = 0,
+          .expected_target_fingerprint = inventory->items.front().content_fingerprint,
+          .kind = metadata::ArtworkWritePlanIntentKind::remove,
+          .replacement_raw_path = {},
+          .added_role = metadata::ArtworkRole::front,
+          .added_description = {},
+          .replacement_embedded_source = std::nullopt}});
+    CHECK(art && art->ready());
+    if (!art || !art->ready()) {
+        return;
+    }
+    auto merged = metadata::merge_artwork_write_plan(
+        metadata::MetadataWritePlan{.sources = {*source_plan}, .patch_count = 1}, *art);
+    CHECK(merged.has_value());
+    if (!merged) {
+        return;
+    }
+    source_plan = merged->sources.front();
     auto journal = persistence::SqliteFilePublicationJournal::open(directory.path() /
                                                                    "combined-destination.sqlite3");
     CHECK(journal.has_value());
@@ -1749,7 +1862,7 @@ void publishes_verified_native_flac_directly_at_changed_destination(
         *checked, 0U, *journal,
         [&](const std::string& prepared_raw_path, const core::CancellationToken& cancellation)
             -> core::Result<core::LocalSourceRevision> {
-            auto prepared = metadata::prepare_flac_metadata_write_copy(
+            auto prepared = metadata::prepare_qualified_metadata_write_copy(
                 *source_plan, prepared_raw_path, cancellation);
             if (!prepared) {
                 return std::unexpected(std::move(prepared.error()));
@@ -1780,6 +1893,8 @@ void publishes_verified_native_flac_directly_at_changed_destination(
     if (!committed) {
         return;
     }
+    const auto covers = metadata::read_local_artwork_inventory(target.native());
+    CHECK(covers && covers->items.empty());
     auto reread = metadata::read_local_metadata(target.native());
     auto record = journal->load(committed->journal_id);
     CHECK(reread &&

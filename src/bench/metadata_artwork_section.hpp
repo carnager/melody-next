@@ -97,6 +97,10 @@ class MetadataArtworkSection final : public QWidget {
     void requestOperationCancellation();
     [[nodiscard]] bool hasPendingChanges() const { return !pending_intents_.empty(); }
     void discardPendingChanges();
+    [[nodiscard]] std::vector<metadata::ArtworkWritePlanIntent> pendingIntents() const {
+        return pending_intents_;
+    }
+    void setUnifiedApply(bool enabled);
     [[nodiscard]] bool isBusy() const {
         return plan_running_ || apply_running_ || export_running_ || cover_fetch_running_;
     }
@@ -155,6 +159,8 @@ class MetadataArtworkSection final : public QWidget {
     QTimer* apply_progress_timer_{nullptr};
     QTimer* export_progress_timer_{nullptr};
     QLabel* status_{nullptr};
+    QLabel* draft_help_{nullptr};
+    bool unified_apply_{false};
     QLabel* empty_state_{nullptr};
     QWidget* issues_pane_{nullptr};
     QProgressBar* progress_bar_{nullptr};

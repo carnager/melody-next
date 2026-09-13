@@ -417,7 +417,7 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
     const bool artwork_record = record.content_kind == ContentKind::embedded_artwork;
     if (!valid_content_kind(static_cast<int>(record.content_kind)) ||
         (!artwork_record && (record.changes.empty() || record.artwork)) ||
-        (artwork_record && (!record.changes.empty() || !record.artwork))) {
+        (artwork_record && !record.artwork)) {
         return std::unexpected(invalid_record("Invalid metadata-operation content evidence"));
     }
     if (record.artwork) {
@@ -425,7 +425,11 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
         const bool replacing = artwork.kind == metadata::ArtworkWritePlanIntentKind::replace;
         const bool removing = artwork.kind == metadata::ArtworkWritePlanIntentKind::remove;
         const bool adding = artwork.kind == metadata::ArtworkWritePlanIntentKind::add;
-        if ((!replacing && !removing && !adding) ||
+        const bool batch = artwork.kind == metadata::ArtworkWritePlanIntentKind::batch;
+        if ((!replacing && !removing && !adding && !batch) ||
+            (batch && (artwork.target_ordinal != 0 || artwork.original_target_fingerprint ||
+                       artwork.replacement_fingerprint)) ||
+            (!batch && !record.changes.empty()) ||
             artwork.original_item_count > maximum_artwork_items ||
             artwork.planned_item_count > maximum_artwork_items ||
             ((replacing || removing) && (!artwork.original_target_fingerprint ||
@@ -731,9 +735,9 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
         auto original_inventory = read_fingerprint(artwork->get(), 6);
         auto planned_inventory = read_fingerprint(artwork->get(), 7);
         if (kind < static_cast<int>(metadata::ArtworkWritePlanIntentKind::replace) ||
-            kind > static_cast<int>(metadata::ArtworkWritePlanIntentKind::add) || !target_ordinal ||
-            !original_item_count || !planned_item_count || !original_target || !replacement ||
-            !original_inventory || !planned_inventory) {
+            kind > static_cast<int>(metadata::ArtworkWritePlanIntentKind::batch) ||
+            !target_ordinal || !original_item_count || !planned_item_count || !original_target ||
+            !replacement || !original_inventory || !planned_inventory) {
             return std::unexpected(
                 database_error(database, "Operation journal contains invalid artwork evidence"));
         }

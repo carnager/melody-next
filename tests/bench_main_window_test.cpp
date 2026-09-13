@@ -213,6 +213,8 @@ class BenchMainWindowTest final : public QObject {
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
+    void metadataApplyCombinesTagsAndArtwork_data();
+    void metadataApplyCombinesTagsAndArtwork();
     void artworkArchivePickerAddsChosenImageWithItsRole();
     void automaticScriptsStageOnOpen();
     void metadataStartupPresentsReconciliation();
@@ -4523,6 +4525,108 @@ void BenchMainWindowTest::folderBookmarksMigrateFromLibraryRoots() {
     }
 }
 
+void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork_data() {
+    QTest::addColumn<bool>("save_tags");
+    QTest::newRow("tags-and-covers") << true;
+    QTest::newRow("covers-with-tags-disabled") << false;
+}
+
+void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
+    QFETCH(bool, save_tags);
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("album.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), path));
+    const auto raw = QFile::encodeName(path).toStdString();
+    const auto before = metadata::read_local_metadata(raw);
+    QVERIFY(before.has_value());
+    const MetadataPropertiesSource source{.source = {.raw_path = raw,
+                                                     .source_revision = before->source_revision,
+                                                     .baseline = before->document},
+                                          .track_label = QStringLiteral("Combined save")};
+    const std::filesystem::path database{
+        media.filePath(QStringLiteral("journal.sqlite3")).toStdString()};
+    std::optional<operations::MetadataApplyResult> observed;
+    auto* dialog = new MetadataPropertiesDialog(
+        1, [source](std::size_t) -> std::optional<MetadataPropertiesSource> { return source; }, {},
+        [database] {
+            return MetadataWritePlanApplier{
+                [database](const metadata::MetadataWritePlan& plan,
+                           const operations::MetadataApplyProgressCallback& progress,
+                           const core::CancellationToken& cancellation)
+                    -> core::Result<operations::MetadataApplyResult> {
+                    auto journal = persistence::SqliteMetadataOperationJournal::open(database);
+                    if (!journal) {
+                        return std::unexpected(journal.error());
+                    }
+                    return operations::apply_metadata_write_plan(
+                        plan,
+                        [&journal](const metadata::MetadataWritePlanSource& item,
+                                   const core::CancellationToken& token) {
+                            return operations::commit_flac_metadata_source(
+                                item, *journal,
+                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
+                                    return {};
+                                },
+                                token);
+                        },
+                        {}, {}, progress, cancellation);
+                }};
+        },
+        [&observed](const operations::MetadataApplyResult& result) { observed = result; });
+    dialog->setArtworkMutationServices([] { return ArtworkWritePlanApplier{}; }, {});
+    dialog->show();
+    QTableView* files = nullptr;
+    QTRY_VERIFY((files = dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-files"))) !=
+                nullptr);
+    auto* grid = qobject_cast<MetadataGridModel*>(files->model());
+    QVERIFY(grid != nullptr);
+    const auto title = grid->ensureField(QStringLiteral("TITLE"));
+    QVERIFY(title.has_value());
+    const std::array items{std::size_t{0}};
+    QVERIFY(grid->replaceFieldValues(items, title->field_index, {"One apply"}));
+    auto* save_tags_box =
+        dialog->findChild<QCheckBox*>(QStringLiteral("bench-preparation-save-tags"));
+    QVERIFY(save_tags_box != nullptr);
+    save_tags_box->setChecked(save_tags);
+    auto* tabs = dialog->findChild<QTabWidget*>(QStringLiteral("bench-metadata-sections"));
+    QVERIFY(tabs != nullptr);
+    tabs->setCurrentIndex(1);
+    auto* covers = dialog->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-items"));
+    auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-remove"));
+    auto* old_save = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
+    auto* apply = dialog->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QVERIFY(covers && remove && old_save && apply);
+    QTRY_COMPARE(covers->model()->rowCount(), 1);
+    QVERIFY(!old_save->isVisible());
+    covers->selectAll();
+    QTRY_VERIFY(remove->isEnabled());
+    remove->click();
+    QVERIFY(!observed.has_value());
+    QCOMPARE(metadata::read_local_artwork_inventory(raw)->items.size(), 1U);
+    QTRY_VERIFY(apply->isEnabled());
+    QPointer guard{dialog};
+    apply->click();
+    QTRY_VERIFY_WITH_TIMEOUT(observed.has_value(), 10000);
+    QVERIFY2(observed->committed_source_count() == 1U,
+             qPrintable(observed->sources.front().issue
+                            ? QString::fromStdString(observed->sources.front().issue->message)
+                            : QString{}));
+    QTRY_VERIFY(guard.isNull());
+    const auto after = metadata::read_local_metadata(raw);
+    const auto artwork = metadata::read_local_artwork_inventory(raw);
+    QVERIFY(after && artwork);
+    QVERIFY(artwork->items.empty());
+    QCOMPARE(after->document.effective_values("title"),
+             save_tags ? std::vector<std::string>{"One apply"}
+                       : before->document.effective_values("title"));
+    auto journal = persistence::SqliteMetadataOperationJournal::open(database);
+    QVERIFY(journal.has_value());
+    const auto backups = journal->load_backups();
+    QVERIFY(backups.has_value());
+    QCOMPARE(backups->size(), 1U);
+}
+
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -4841,7 +4945,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     const auto second_issue = observed->sources.front().issue
                                   ? QString::fromStdString(observed->sources.front().issue->message)
                                   : QStringLiteral("no per-source issue");
-    QVERIFY2(observed->committed_source_count() == 2U, qPrintable(second_issue));
+    QVERIFY2(observed->committed_source_count() == 1U, qPrintable(second_issue));
     QTRY_COMPARE_WITH_TIMEOUT(second_items->model()->rowCount(), 2, 5'000);
     const auto replaced = metadata::read_local_artwork_inventory(raw_path);
     QVERIFY(replaced.has_value());
@@ -7321,7 +7425,7 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     const auto apply_issue = observed->sources.front().issue
                                  ? QString::fromStdString(observed->sources.front().issue->message)
                                  : QStringLiteral("no per-source issue");
-    QVERIFY2(observed->committed_source_count() == 2U, qPrintable(apply_issue));
+    QVERIFY2(observed->committed_source_count() == 1U, qPrintable(apply_issue));
     QCOMPARE(observed->sources.front().commit->occurrence_indexes, (std::vector<std::size_t>{0U}));
     QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 1, 5'000);
     QCOMPARE(items->model()->index(0, 4).data().toString(), QStringLiteral("External"));

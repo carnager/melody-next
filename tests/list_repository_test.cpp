@@ -101,7 +101,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 30U, "state repository schema must be explicit");
+        require(repository.schema_version() == 31U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -467,7 +467,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 30U,
+        require(repository.schema_version() == 31U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1184,7 +1184,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 30U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 31U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();

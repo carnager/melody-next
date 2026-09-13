@@ -2,6 +2,7 @@
 
 add_library(
     trackknife_metadata STATIC
+    src/artwork_composition.cpp
     src/artwork.cpp
     src/artwork_write_plan.cpp
     src/capture_pattern.cpp

@@ -163,6 +163,8 @@ std::string_view artwork_write_plan_intent_kind_name(const ArtworkWritePlanInten
         return "remove";
     case ArtworkWritePlanIntentKind::add:
         return "add";
+    case ArtworkWritePlanIntentKind::batch:
+        return "batch";
     }
     return "replace";
 }
@@ -198,16 +200,18 @@ std::string_view artwork_write_plan_issue_kind_name(const ArtworkWritePlanIssueK
 }
 
 bool ArtworkWritePlanSource::ready() const noexcept {
-    const auto complete_change =
-        (change.kind == ArtworkWritePlanIntentKind::remove && !change.replacement) ||
-        ((change.kind == ArtworkWritePlanIntentKind::replace ||
-          change.kind == ArtworkWritePlanIntentKind::add) &&
-         change.replacement);
-    const auto target_complete = change.kind == ArtworkWritePlanIntentKind::add || change.original;
+    const auto change_ready = [](const ArtworkWritePlanChange& item) {
+        const auto complete =
+            (item.kind == ArtworkWritePlanIntentKind::remove && !item.replacement) ||
+            ((item.kind == ArtworkWritePlanIntentKind::replace ||
+              item.kind == ArtworkWritePlanIntentKind::add) &&
+             item.replacement);
+        return complete && (item.kind == ArtworkWritePlanIntentKind::add || item.original);
+    };
     const auto complete = expected_media_revision && observed_media_revision &&
                           *expected_media_revision == *observed_media_revision &&
-                          is_qualified_artwork_adapter(adapter_name) && target_complete &&
-                          complete_change;
+                          is_qualified_artwork_adapter(adapter_name) && change_ready(change) &&
+                          std::ranges::all_of(additional_changes, change_ready);
     return complete &&
            std::ranges::none_of(issues, [](const auto& issue) { return issue.blocking; });
 }
@@ -539,6 +543,31 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
         }
         images.push_back(fingerprint);
     }
+    std::vector<ArtworkWritePlanSource> grouped;
+    std::size_t removed = 0;
+    for (auto& source : plan.sources) {
+        if (grouped.empty() || grouped.back().raw_media_path != source.raw_media_path) {
+            removed = source.change.kind == ArtworkWritePlanIntentKind::remove ? 1U : 0U;
+            grouped.push_back(std::move(source));
+            continue;
+        }
+        if (source.change.kind == ArtworkWritePlanIntentKind::add) {
+            source.change.target_ordinal -= removed;
+        }
+        if (source.change.kind == ArtworkWritePlanIntentKind::remove) {
+            ++removed;
+        }
+        auto& destination = grouped.back();
+        destination.additional_changes.push_back(std::move(source.change));
+        destination.issues.insert(destination.issues.end(), source.issues.begin(),
+                                  source.issues.end());
+        for (const auto occurrence : source.occurrence_indexes) {
+            if (!std::ranges::contains(destination.occurrence_indexes, occurrence)) {
+                destination.occurrence_indexes.push_back(occurrence);
+            }
+        }
+    }
+    plan.sources = std::move(grouped);
     return plan;
 }
 

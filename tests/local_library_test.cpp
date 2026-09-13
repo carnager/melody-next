@@ -591,7 +591,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 30U);
+        QCOMPARE(*repository->schema_version(), 31U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);

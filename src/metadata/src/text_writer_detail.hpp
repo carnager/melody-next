@@ -374,10 +374,11 @@ verify_plan_originals(const std::string_view format_label, const MetadataDocumen
 
 // Applies every planned change through TagLib's generic property surface on
 // an already-validated file. The caller owns construction and save().
+template <typename File>
 [[nodiscard]] inline core::Result<void> apply_text_changes_to_properties(
-    const std::string_view format_label, const MetadataWritePlanSource& source_plan,
-    TagLib::File& file, const std::string& prepared_raw_path,
-    const core::CancellationToken& cancellation, const bool paired_totals = true) {
+    const std::string_view format_label, const MetadataWritePlanSource& source_plan, File& file,
+    const std::string& prepared_raw_path, const core::CancellationToken& cancellation,
+    const bool paired_totals = true) {
     auto properties = file.properties();
     for (const auto& change : source_plan.changes) {
         if (cancellation.is_cancellation_requested()) {

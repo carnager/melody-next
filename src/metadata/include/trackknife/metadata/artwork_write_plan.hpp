@@ -5,6 +5,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/artwork.hpp"
+#include "trackknife/metadata/write_plan.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +21,7 @@ enum class ArtworkWritePlanIntentKind : std::uint8_t {
     replace = 0,
     remove = 1,
     add = 2,
+    batch = 3, // Journal summary only; never an individual edit intent.
 };
 
 [[nodiscard]] std::string_view artwork_write_plan_intent_kind_name(ArtworkWritePlanIntentKind kind);
@@ -93,6 +95,7 @@ struct ArtworkWritePlanSource {
     std::string adapter_name;
     ArtworkWritePlanChange change;
     std::vector<ArtworkWritePlanIssue> issues;
+    std::vector<ArtworkWritePlanChange> additional_changes{};
 
     [[nodiscard]] bool ready() const noexcept;
     [[nodiscard]] std::size_t blocking_issue_count() const noexcept;
@@ -130,6 +133,15 @@ build_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
 [[nodiscard]] core::Result<ArtworkWritePlan>
 revalidate_artwork_write_plan(const std::vector<ArtworkWritePlanIntent>& intents,
                               const core::CancellationToken& cancellation = {});
+
+// Atomic per-file composition, retaining independent typed tag and picture evidence.
+[[nodiscard]] std::vector<ArtworkWritePlanChange>
+artwork_changes(const ArtworkWritePlanSource& source);
+[[nodiscard]] core::Result<std::vector<ArtworkInventoryItem>>
+project_artwork_inventory(const LocalArtworkInventory& inventory,
+                          const ArtworkWritePlanSource& source);
+[[nodiscard]] core::Result<MetadataWritePlan> merge_artwork_write_plan(MetadataWritePlan metadata,
+                                                                       ArtworkWritePlan artwork);
 
 // The embedded adapters with a qualified prepared-copy artwork writer
 // (ADR-0137): native FLAC pictures, ID3v2 APIC frames, and MP4 covr entries.

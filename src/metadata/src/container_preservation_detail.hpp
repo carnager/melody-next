@@ -5,6 +5,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/artwork.hpp"
+#include "trackknife/metadata/write_plan.hpp"
 
 #include <flacpicture.h>
 
@@ -15,6 +16,11 @@
 // implementation, whichever kind of metadata was rewritten. Defined in the
 // respective writer translation units.
 namespace trackknife::metadata::preservation_detail {
+[[nodiscard]] core::Result<void> rewrite_flac_composed(const MetadataWritePlanSource&,
+                                                       const std::string&,
+                                                       const core::CancellationToken&);
+[[nodiscard]] core::Result<void> verify_flac_composed(const std::string&, const std::string&, bool,
+                                                      const core::CancellationToken&);
 
 // ADR-0103: MPEG audio region byte-identical between the leading ID3v2 tag
 // and any ID3v1/APEv2 trailers, with every APEv2 binary item preserved.

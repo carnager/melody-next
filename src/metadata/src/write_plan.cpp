@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/metadata/artwork_write_plan.hpp"
 
 #include "trackknife/metadata/flac_mapping.hpp"
 
@@ -194,6 +195,9 @@ std::string_view metadata_write_plan_issue_kind_name(const MetadataWritePlanIssu
 }
 
 bool MetadataWritePlanSource::ready() const noexcept {
+    if (artwork && !artwork->ready()) {
+        return false;
+    }
     return std::ranges::none_of(issues, [](const auto& issue) { return issue.blocking; });
 }
 

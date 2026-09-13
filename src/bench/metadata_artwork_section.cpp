@@ -337,14 +337,14 @@ MetadataArtworkSection::MetadataArtworkSection(QWidget* parent)
     inventory_row->addWidget(remove_button_);
     layout->addLayout(inventory_row);
     auto* draft_buttons = new QHBoxLayout;
-    auto* draft_help = new QLabel(
+    draft_help_ = new QLabel(
         QStringLiteral(
             "Select covers with Ctrl/Shift or Ctrl+A. Changes are saved only with Save artwork.\n"
             "External images are shared files: Remove edits embedded covers and keeps external "
             "files."),
         this);
-    draft_help->setWordWrap(true);
-    draft_buttons->addWidget(draft_help, 1);
+    draft_help_->setWordWrap(true);
+    draft_buttons->addWidget(draft_help_, 1);
     save_button_ = new QPushButton(QStringLiteral("Save artwork"), this);
     save_button_->setObjectName(QStringLiteral("bench-metadata-artwork-save"));
     discard_button_ = new QPushButton(QStringLiteral("Discard changes"), this);
@@ -1443,6 +1443,16 @@ void MetadataArtworkSection::dispatchReview(std::vector<metadata::ArtworkWritePl
     updatePendingPresentation();
 }
 
+void MetadataArtworkSection::setUnifiedApply(const bool enabled) {
+    unified_apply_ = enabled;
+    save_button_->setVisible(!enabled);
+    if (enabled) {
+        draft_help_->setText(
+            QStringLiteral("Select covers with Ctrl/Shift or Ctrl+A. Apply saves tags and artwork "
+                           "together. External image files stay on disk."));
+    }
+}
+
 void MetadataArtworkSection::discardPendingChanges() {
     pending_intents_.clear();
     updatePendingPresentation();
@@ -1504,7 +1514,10 @@ void MetadataArtworkSection::updatePendingPresentation() {
     }
     status_->setText(
         hasPendingChanges()
-            ? QStringLiteral("%1 pending artwork changes · review below, then Save artwork")
+            ? (unified_apply_
+                   ? QStringLiteral(
+                         "%1 pending artwork changes · Apply saves tags and covers together")
+                   : QStringLiteral("%1 pending artwork changes · review below, then Save artwork"))
                   .arg(pending_model_->rowCount())
             : QStringLiteral("No pending artwork changes"));
     emit pendingChangesChanged(hasPendingChanges());

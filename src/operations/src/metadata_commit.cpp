@@ -625,105 +625,11 @@ read_embedded_artwork_inventory(const std::string& raw_path,
                                                   cancellation);
 }
 
-[[nodiscard]] std::string canonical_flac_picture_type(const metadata::ArtworkRole role) {
-    switch (role) {
-    case metadata::ArtworkRole::front:
-        return "Front Cover";
-    case metadata::ArtworkRole::back:
-        return "Back Cover";
-    case metadata::ArtworkRole::artist:
-        return "Artist";
-    case metadata::ArtworkRole::disc:
-        return "Media";
-    case metadata::ArtworkRole::icon:
-        return "File Icon";
-    case metadata::ArtworkRole::other:
-        return "Other";
-    }
-    return "Other";
-}
-
-[[nodiscard]] core::Result<std::vector<metadata::ArtworkInventoryItem>>
-project_artwork_inventory(const metadata::LocalArtworkInventory& inventory,
-                          const metadata::ArtworkWritePlanSource& source_plan) {
-    auto projected = inventory.items;
-    if (source_plan.change.kind == metadata::ArtworkWritePlanIntentKind::add) {
-        if (source_plan.change.original || !source_plan.change.replacement ||
-            source_plan.change.target_ordinal != projected.size()) {
-            return std::unexpected(
-                operation_error(core::ErrorCode::conflict,
-                                "fresh embedded artwork differs from the previewed insertion point",
-                                source_plan.raw_media_path));
-        }
-        const auto& replacement = *source_plan.change.replacement;
-        if (std::ranges::any_of(projected, [&](const auto& item) {
-                return item.content_fingerprint == replacement.content_fingerprint;
-            })) {
-            return std::unexpected(operation_error(core::ErrorCode::conflict,
-                                                   "added artwork already exists in the target",
-                                                   source_plan.raw_media_path));
-        }
-        // covr entries are untyped (ADR-0137); FLAC and APIC share the
-        // canonical picture-type vocabulary.
-        const auto covr = inventory.embedded_adapter_name == "taglib-mp4-covr-v1";
-        projected.push_back(metadata::ArtworkInventoryItem{
-            .role = covr ? metadata::ArtworkRole::front : source_plan.change.added_role,
-            .native_type =
-                covr ? std::string{} : canonical_flac_picture_type(source_plan.change.added_role),
-            .mime_type = replacement.mime_type,
-            .description = covr ? std::string{} : source_plan.change.added_description,
-            .width = replacement.width,
-            .height = replacement.height,
-            .byte_size = replacement.byte_size,
-            .content_fingerprint = replacement.content_fingerprint,
-            .provenance = metadata::ArtworkProvenance::embedded,
-            .raw_source_path = source_plan.raw_media_path,
-            .source_revision = inventory.media_revision,
-            .source_ordinal = projected.size(),
-            .duplicate_of = std::nullopt,
-        });
-        return projected;
-    }
-    const auto target = std::ranges::find_if(projected, [&](const auto& item) {
-        return item.provenance == metadata::ArtworkProvenance::embedded &&
-               item.source_ordinal == source_plan.change.target_ordinal;
-    });
-    if (target == projected.end() || !source_plan.change.original ||
-        *target != *source_plan.change.original ||
-        target->content_fingerprint != source_plan.change.expected_target_fingerprint) {
-        return std::unexpected(operation_error(
-            core::ErrorCode::conflict, "fresh embedded artwork differs from the previewed target",
-            source_plan.raw_media_path));
-    }
-    if (source_plan.change.kind == metadata::ArtworkWritePlanIntentKind::replace) {
-        if (!source_plan.change.replacement) {
-            return std::unexpected(
-                operation_error(core::ErrorCode::invalid_argument,
-                                "artwork replacement plan has no verified replacement",
-                                source_plan.raw_media_path));
-        }
-        const auto& replacement = *source_plan.change.replacement;
-        target->mime_type = replacement.mime_type;
-        target->width = replacement.width;
-        target->height = replacement.height;
-        target->byte_size = replacement.byte_size;
-        target->content_fingerprint = replacement.content_fingerprint;
-        target->duplicate_of.reset();
-    } else {
-        projected.erase(target);
-        for (std::size_t index = 0U; index < projected.size(); ++index) {
-            projected[index].source_ordinal = index;
-            projected[index].duplicate_of.reset();
-        }
-    }
-    return projected;
-}
-
 [[nodiscard]] core::Result<MetadataOperationJournalRecord>
 make_artwork_journal_record(const metadata::ArtworkWritePlanSource& source_plan,
                             const metadata::LocalArtworkInventory& inventory,
                             const core::StableId& journal_id) {
-    auto projected = project_artwork_inventory(inventory, source_plan);
+    auto projected = metadata::project_artwork_inventory(inventory, source_plan);
     if (!projected) {
         return std::unexpected(std::move(projected.error()));
     }
@@ -748,16 +654,20 @@ make_artwork_journal_record(const metadata::ArtworkWritePlanSource& source_plan,
         .changes = {},
         .artwork =
             MetadataOperationJournalArtwork{
-                .kind = source_plan.change.kind,
-                .target_ordinal = source_plan.change.target_ordinal,
+                .kind = source_plan.additional_changes.empty()
+                            ? source_plan.change.kind
+                            : metadata::ArtworkWritePlanIntentKind::batch,
+                .target_ordinal =
+                    source_plan.additional_changes.empty() ? source_plan.change.target_ordinal : 0U,
                 .original_item_count = inventory.items.size(),
                 .planned_item_count = projected->size(),
                 .original_target_fingerprint =
-                    source_plan.change.kind == metadata::ArtworkWritePlanIntentKind::add
+                    (source_plan.change.kind == metadata::ArtworkWritePlanIntentKind::add ||
+                     !source_plan.additional_changes.empty())
                         ? std::nullopt
                         : std::optional{source_plan.change.expected_target_fingerprint},
                 .replacement_fingerprint =
-                    source_plan.change.replacement
+                    (source_plan.change.replacement && source_plan.additional_changes.empty())
                         ? std::optional{source_plan.change.replacement->content_fingerprint}
                         : std::nullopt,
                 .original_inventory_fingerprint = *original_fingerprint,
@@ -803,6 +713,11 @@ verify_published_content(const MetadataOperationJournalRecord& record,
                     : operation_error(core::ErrorCode::conflict,
                                       "published metadata has an unexpected revision",
                                       record.source_raw_path, record.id));
+    }
+    if (!record.changes.empty() && !planned_fields_match(reread->document, record)) {
+        return std::unexpected(operation_error(core::ErrorCode::conflict,
+                                               "published tags failed verification",
+                                               record.source_raw_path, record.id));
     }
     if (record.content_kind == MetadataOperationContentKind::text_fields) {
         if (!planned_fields_match(reread->document, record)) {
@@ -1331,6 +1246,11 @@ verify_original_content(const MetadataOperationJournalRecord& record,
                                    : operation_error(core::ErrorCode::conflict,
                                                      "restored metadata has an unexpected revision",
                                                      record.source_raw_path, record.id));
+    }
+    if (!record.changes.empty() && !original_fields_match(reread->document, record)) {
+        return std::unexpected(operation_error(core::ErrorCode::conflict,
+                                               "restored tags failed verification",
+                                               record.source_raw_path, record.id));
     }
     if (record.content_kind == MetadataOperationContentKind::text_fields) {
         if (!original_fields_match(reread->document, record)) {
@@ -1985,7 +1905,7 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
         !metadata::is_qualified_text_adapter(source_plan.adapter_name) ||
         !source_plan.expected_revision || !source_plan.observed_revision ||
         *source_plan.expected_revision != *source_plan.observed_revision ||
-        source_plan.changes.empty()) {
+        (source_plan.changes.empty() && !source_plan.artwork)) {
         return std::unexpected(
             operation_error(core::ErrorCode::invalid_argument,
                             "metadata commit requires a ready native-FLAC plan and state committer",
@@ -2028,6 +1948,32 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
 
     const auto journal_id = core::StableId::random();
     auto record = make_journal_record(source_plan, journal_id);
+    if (source_plan.artwork) {
+        auto inventory = read_embedded_artwork_inventory(source_plan.raw_path, cancellation);
+        if (!inventory) {
+            return std::unexpected(inventory.error());
+        }
+        if (inventory->media_revision != *source_plan.observed_revision) {
+            return std::unexpected(operation_error(
+                core::ErrorCode::conflict, "artwork revision changed", source_plan.raw_path));
+        }
+        if (!record) {
+            return std::unexpected(record.error());
+        }
+        auto combined = make_artwork_journal_record(*source_plan.artwork, *inventory, journal_id);
+        if (!combined) {
+            return std::unexpected(combined.error());
+        }
+        combined->changes = std::move(record->changes);
+        combined->occurrence_indexes = source_plan.occurrence_indexes;
+        if (!combined->changes.empty()) {
+            combined->artwork->kind = metadata::ArtworkWritePlanIntentKind::batch;
+            combined->artwork->target_ordinal = 0;
+            combined->artwork->original_target_fingerprint.reset();
+            combined->artwork->replacement_fingerprint.reset();
+        }
+        record = std::move(combined);
+    }
     if (!record) {
         return std::unexpected(std::move(record.error()));
     }

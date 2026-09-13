@@ -13,6 +13,7 @@
 #include <tpropertymap.h>
 #include <tstring.h>
 #include <tstringlist.h>
+#include <xiphcomment.h>
 
 #include <algorithm>
 #include <array>
@@ -194,7 +195,8 @@ compare_region(std::ifstream& source, const std::uint64_t source_offset, std::if
 
 [[nodiscard]] core::Result<void> verify_flac_binary_preservation(
     const std::string& source_raw_path, const std::string& prepared_raw_path,
-    const std::uint8_t mutable_block_type, const core::CancellationToken& cancellation) {
+    const std::uint8_t mutable_block_type, const core::CancellationToken& cancellation,
+    const bool text_changes = false) {
     auto source_layout =
         parse_flac_layout(source_raw_path, source_raw_path, prepared_raw_path, mutable_block_type);
     if (!source_layout) {
@@ -204,6 +206,13 @@ compare_region(std::ifstream& source, const std::uint64_t source_offset, std::if
                                              mutable_block_type);
     if (!prepared_layout) {
         return std::unexpected(std::move(prepared_layout.error()));
+    }
+    if (text_changes) {
+        const auto comment = [](const auto& block) {
+            return block.type == vorbis_comment_block_type;
+        };
+        std::erase_if(source_layout->preserved_blocks, comment);
+        std::erase_if(prepared_layout->preserved_blocks, comment);
     }
     if (source_layout->preserved_blocks.size() != prepared_layout->preserved_blocks.size()) {
         return std::unexpected(writer_error(core::ErrorCode::conflict,
@@ -963,6 +972,189 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
         .kind = source_plan.change.kind,
         .target_ordinal = source_plan.change.target_ordinal,
     };
+}
+
+core::Result<void>
+preservation_detail::verify_flac_composed(const std::string& source, const std::string& prepared,
+                                          const bool text_changes,
+                                          const core::CancellationToken& cancellation) {
+    return verify_flac_binary_preservation(source, prepared, picture_block_type, cancellation,
+                                           text_changes);
+}
+
+core::Result<void>
+preservation_detail::rewrite_flac_composed(const MetadataWritePlanSource& plan,
+                                           const std::string& prepared,
+                                           const core::CancellationToken& cancellation) {
+    const auto& artwork = *plan.artwork;
+    auto layout = parse_flac_layout(plan.raw_path, plan.raw_path, prepared, picture_block_type);
+    if (!layout) {
+        return std::unexpected(layout.error());
+    }
+    TagLib::FLAC::File file{plan.raw_path.c_str(), false};
+    if (!file.isValid()) {
+        return std::unexpected(
+            writer_error(core::ErrorCode::backend, "invalid FLAC source", plan.raw_path, prepared));
+    }
+    // Apply properties in memory. The native stream writer below owns serialization.
+    struct MemoryProperties {
+        TagLib::FLAC::File& file;
+        auto properties() { return file.properties(); }
+        auto setProperties(const TagLib::PropertyMap& properties) {
+            return file.setProperties(properties);
+        }
+        bool save() { return true; }
+    } memory{file};
+    if (!plan.changes.empty()) {
+        auto changed = text_writer_detail::apply_text_changes_to_properties("FLAC", plan, memory,
+                                                                            prepared, cancellation);
+        if (!changed) {
+            return changed;
+        }
+    }
+    struct Block {
+        std::uint8_t type;
+        std::uint64_t offset;
+        std::uint64_t length;
+        std::optional<TagLib::ByteVector> bytes;
+    };
+    std::vector<Block> blocks;
+    const auto changes = artwork_changes(artwork);
+    const auto pictures = file.pictureList();
+    const auto payload =
+        [&](const ArtworkWritePlanChange& change) -> core::Result<TagLib::ByteVector> {
+        if (!change.replacement || !change.replacement->width || !change.replacement->height) {
+            return std::unexpected(writer_error(core::ErrorCode::invalid_argument,
+                                                "missing replacement dimensions", plan.raw_path,
+                                                prepared));
+        }
+        auto bytes = read_artwork_image_bytes(*change.replacement, change.replacement->byte_size,
+                                              cancellation);
+        if (!bytes) {
+            return std::unexpected(bytes.error());
+        }
+        const auto add = change.kind == ArtworkWritePlanIntentKind::add;
+        const auto* original =
+            add ? nullptr : pictures[static_cast<unsigned int>(change.target_ordinal)];
+        TagLib::FLAC::Picture picture;
+        picture.setType(add ? canonical_picture_type(change.added_role) : original->type());
+        picture.setDescription(add ? TagLib::String{change.added_description, TagLib::String::UTF8}
+                                   : original->description());
+        picture.setMimeType(TagLib::String{change.replacement->mime_type, TagLib::String::UTF8});
+        picture.setWidth(static_cast<int>(*change.replacement->width));
+        picture.setHeight(static_cast<int>(*change.replacement->height));
+        picture.setData(TagLib::ByteVector{reinterpret_cast<const char*>(bytes->data()),
+                                           static_cast<unsigned int>(bytes->size())});
+        return picture.render();
+    };
+    std::size_t ordinal = 0;
+    bool comment_written = false;
+    for (const auto& block : layout->blocks) {
+        if (cancellation.is_cancellation_requested()) {
+            return std::unexpected(cancelled(plan.raw_path, prepared));
+        }
+        if (block.type == vorbis_comment_block_type && !plan.changes.empty()) {
+            if (comment_written) {
+                return std::unexpected(writer_error(core::ErrorCode::unsupported,
+                                                    "multiple FLAC comment blocks", plan.raw_path,
+                                                    prepared));
+            }
+            blocks.push_back({block.type, 0, 0, file.xiphComment()->render(false)});
+            comment_written = true;
+            continue;
+        }
+        if (block.type == picture_block_type) {
+            const auto change = std::ranges::find_if(changes, [&](const auto& candidate) {
+                return candidate.kind != ArtworkWritePlanIntentKind::add &&
+                       candidate.target_ordinal == ordinal;
+            });
+            ++ordinal;
+            if (change != changes.end()) {
+                if (change->kind == ArtworkWritePlanIntentKind::remove) {
+                    continue;
+                }
+                auto rendered = payload(*change);
+                if (!rendered) {
+                    return std::unexpected(rendered.error());
+                }
+                blocks.push_back({block.type, 0, 0, std::move(*rendered)});
+                continue;
+            }
+        }
+        blocks.push_back({block.type, block.data_offset, block.length, std::nullopt});
+    }
+    if (!plan.changes.empty() && !comment_written) {
+        blocks.push_back({vorbis_comment_block_type, 0, 0, file.xiphComment()->render(false)});
+    }
+    for (const auto& change : changes) {
+        if (change.kind != ArtworkWritePlanIntentKind::add) {
+            continue;
+        }
+        auto rendered = payload(change);
+        if (!rendered) {
+            return std::unexpected(rendered.error());
+        }
+        blocks.push_back({picture_block_type, 0, 0, std::move(*rendered)});
+    }
+    std::ifstream input{std::filesystem::path{plan.raw_path}, std::ios::binary};
+    std::ofstream output{std::filesystem::path{prepared}, std::ios::binary | std::ios::trunc};
+    if (!input || !output) {
+        return std::unexpected(writer_error(core::ErrorCode::io, "opening FLAC streams failed",
+                                            plan.raw_path, prepared));
+    }
+    output.write("fLaC", 4);
+    std::array<char, comparison_buffer_size> buffer{};
+    const auto copy = [&](std::uint64_t offset, std::uint64_t length) -> core::Result<void> {
+        input.seekg(static_cast<std::streamoff>(offset));
+        while (length > 0) {
+            if (cancellation.is_cancellation_requested()) {
+                return std::unexpected(cancelled(plan.raw_path, prepared));
+            }
+            const auto amount =
+                static_cast<std::streamsize>(std::min<std::uint64_t>(length, buffer.size()));
+            input.read(buffer.data(), amount);
+            output.write(buffer.data(), amount);
+            if (!input || !output) {
+                return std::unexpected(writer_error(core::ErrorCode::io, "copying FLAC data failed",
+                                                    plan.raw_path, prepared));
+            }
+            length -= static_cast<std::uint64_t>(amount);
+        }
+        return {};
+    };
+    for (std::size_t index = 0; index < blocks.size(); ++index) {
+        const auto& block = blocks[index];
+        const auto length =
+            block.bytes ? static_cast<std::uint64_t>(block.bytes->size()) : block.length;
+        if (length > 0xffffffU) {
+            return std::unexpected(writer_error(core::ErrorCode::limit_exceeded,
+                                                "FLAC metadata block too large", plan.raw_path,
+                                                prepared));
+        }
+        const std::array<unsigned char, 4> header{
+            static_cast<unsigned char>(block.type | (index + 1 == blocks.size() ? 0x80U : 0)),
+            static_cast<unsigned char>(length >> 16U), static_cast<unsigned char>(length >> 8U),
+            static_cast<unsigned char>(length)};
+        output.write(reinterpret_cast<const char*>(header.data()), 4);
+        if (block.bytes) {
+            output.write(block.bytes->data(), static_cast<std::streamsize>(block.bytes->size()));
+        } else {
+            auto copied = copy(block.offset, length);
+            if (!copied) {
+                return copied;
+            }
+        }
+    }
+    auto copied = copy(layout->audio_offset, layout->file_size - layout->audio_offset);
+    if (!copied) {
+        return copied;
+    }
+    output.close();
+    if (!output) {
+        return std::unexpected(writer_error(core::ErrorCode::io, "finishing FLAC output failed",
+                                            plan.raw_path, prepared));
+    }
+    return {};
 }
 
 TagLib::FLAC::Picture::Type artwork_detail::canonical_picture_type(const ArtworkRole role) {

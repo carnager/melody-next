@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/metadata/mp3_writer.hpp"
+#include "trackknife/metadata/artwork_writers.hpp"
 
 #include "apev2_trailer_detail.hpp"
 #include "container_preservation_detail.hpp"
@@ -326,6 +327,9 @@ core::Result<PreparedFlacMetadataWrite>
 prepare_qualified_metadata_write_copy(const MetadataWritePlanSource& source_plan,
                                       const std::string& prepared_raw_path,
                                       const core::CancellationToken& cancellation) {
+    if (source_plan.artwork) {
+        return prepare_composed_metadata_write_copy(source_plan, prepared_raw_path, cancellation);
+    }
     if (source_plan.adapter_name == "taglib-wavpack-v1") {
         return prepare_wavpack_metadata_write_copy(source_plan, prepared_raw_path, cancellation);
     }

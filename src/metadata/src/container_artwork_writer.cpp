@@ -102,6 +102,10 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
     const auto ordinal = source_plan.change.target_ordinal;
     const auto& change = source_plan.change;
     switch (change.kind) {
+    case ArtworkWritePlanIntentKind::batch:
+        return std::unexpected(writer_error(core::ErrorCode::invalid_argument,
+                                            "batch is not an individual picture change",
+                                            source_plan.raw_media_path, prepared_raw_path));
     case ArtworkWritePlanIntentKind::remove:
         if (ordinal >= frames.size() || frames[ordinal] == nullptr) {
             return std::unexpected(writer_error(core::ErrorCode::conflict,
@@ -162,6 +166,10 @@ apic_frames(TagLib::ID3v2::Tag* tag) {
         return TagLib::MP4::CoverArt{format, to_byte_vector(replacement)};
     };
     switch (change.kind) {
+    case ArtworkWritePlanIntentKind::batch:
+        return std::unexpected(writer_error(core::ErrorCode::invalid_argument,
+                                            "batch is not an individual picture change",
+                                            source_plan.raw_media_path, prepared_raw_path));
     case ArtworkWritePlanIntentKind::remove:
     case ArtworkWritePlanIntentKind::replace: {
         if (ordinal >= covers.size()) {
@@ -258,6 +266,10 @@ struct ExpectedItem {
     }
     const auto covr = format.artwork_adapter == "taglib-mp4-covr-v1";
     switch (change.kind) {
+    case ArtworkWritePlanIntentKind::batch:
+        return std::unexpected(writer_error(core::ErrorCode::invalid_argument,
+                                            "batch is not an individual picture change",
+                                            source_plan.raw_media_path, prepared_raw_path));
     case ArtworkWritePlanIntentKind::remove:
         expected.erase(expected.begin() + static_cast<std::ptrdiff_t>(change.target_ordinal));
         break;
@@ -505,6 +517,166 @@ struct ExpectedItem {
 
 } // namespace
 
+core::Result<PreparedFlacMetadataWrite>
+prepare_composed_metadata_write_copy(const MetadataWritePlanSource& plan,
+                                     const std::string& prepared,
+                                     const core::CancellationToken& cancellation) {
+    const auto fail = [&](const std::string& message) {
+        return std::unexpected(
+            writer_error(core::ErrorCode::conflict, message, plan.raw_path, prepared));
+    };
+    if (!plan.artwork || !plan.ready() || !plan.observed_revision ||
+        plan.expected_revision != plan.observed_revision ||
+        plan.raw_path != plan.artwork->raw_media_path ||
+        plan.observed_revision != plan.artwork->observed_media_revision || plan.raw_path.empty() ||
+        prepared.empty() || plan.raw_path == prepared || prepared.find('\0') != std::string::npos) {
+        return fail("invalid composed metadata plan");
+    }
+    auto before = read_local_metadata(plan.raw_path, cancellation);
+    auto inventory = read_embedded_inventory(plan.raw_path, cancellation);
+    if (!before || !inventory) {
+        return std::unexpected(!before ? before.error() : inventory.error());
+    }
+    if (before->source_revision != *plan.observed_revision ||
+        inventory->media_revision != *plan.observed_revision ||
+        before->adapter_name != plan.adapter_name ||
+        inventory->embedded_adapter_name != plan.artwork->adapter_name) {
+        return fail("source changed after review");
+    }
+    auto expected = project_artwork_inventory(*inventory, *plan.artwork);
+    if (!expected) {
+        return std::unexpected(expected.error());
+    }
+    auto originals =
+        text_writer_detail::verify_plan_originals("metadata", before->document, plan, prepared);
+    if (!originals) {
+        return std::unexpected(originals.error());
+    }
+    text_writer_detail::PreparedPathGuard guard{prepared};
+    const auto flac = plan.adapter_name == "taglib-flac-v1";
+    if (flac) {
+        const text_writer_detail::Descriptor descriptor{
+            ::open(prepared.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600)};
+        if (!descriptor.valid()) {
+            return fail("could not exclusively create prepared file");
+        }
+        guard.take_ownership();
+        auto rewritten = preservation_detail::rewrite_flac_composed(plan, prepared, cancellation);
+        if (!rewritten) {
+            return std::unexpected(rewritten.error());
+        }
+        struct stat status{};
+        if (::stat(plan.raw_path.c_str(), &status) != 0 ||
+            ::chmod(prepared.c_str(), status.st_mode & 07777) != 0) {
+            return fail("could not preserve file permissions");
+        }
+    } else {
+        auto copied = text_writer_detail::copy_source_exclusively(
+            "metadata", plan.raw_path, *plan.observed_revision, prepared, cancellation, guard);
+        if (!copied) {
+            return std::unexpected(copied.error());
+        }
+        for (const auto& change : artwork_changes(*plan.artwork)) {
+            if (cancellation.is_cancellation_requested()) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                                   .message = "artwork preparation cancelled",
+                                                   .context = {}});
+            }
+            auto single = *plan.artwork;
+            single.additional_changes.clear();
+            single.change = change;
+            std::vector<unsigned char> bytes;
+            if (change.replacement) {
+                auto loaded = read_artwork_image_bytes(*change.replacement,
+                                                       change.replacement->byte_size, cancellation);
+                if (!loaded) {
+                    return std::unexpected(loaded.error());
+                }
+                bytes = std::move(*loaded);
+            }
+            auto applied = plan.adapter_name == "taglib-mpeg-v1"
+                               ? apply_apic_change(single, prepared, bytes)
+                               : apply_covr_change(single, prepared, bytes);
+            if (!applied) {
+                return std::unexpected(applied.error());
+            }
+        }
+        if (!plan.changes.empty()) {
+            if (plan.adapter_name == "taglib-mpeg-v1") {
+                TagLib::MPEG::File file{prepared.c_str(), false};
+                auto applied = text_writer_detail::apply_text_changes_to_properties(
+                    "MP3", plan, file, prepared, cancellation, false);
+                if (!applied) {
+                    return std::unexpected(applied.error());
+                }
+            } else {
+                TagLib::MP4::File file{prepared.c_str(), false};
+                auto applied = text_writer_detail::apply_text_changes_to_properties(
+                    "MP4", plan, file, prepared, cancellation, false);
+                if (!applied) {
+                    return std::unexpected(applied.error());
+                }
+            }
+        }
+        if (::chmod(prepared.c_str(), *copied) != 0) {
+            return fail("could not preserve file permissions");
+        }
+    }
+    auto after = read_local_metadata(prepared, cancellation);
+    auto resulting = read_embedded_inventory(prepared, cancellation);
+    if (!after || !resulting) {
+        return std::unexpected(!after ? after.error() : resulting.error());
+    }
+    auto original_document = before->document;
+    auto resulting_document = after->document;
+    const auto remove_picture_identities = [](auto& document) {
+        std::erase_if(document.unsupported_native_objects, [](const auto& object) {
+            return object.identity == "covr" || object.identity == "APIC" ||
+                   object.identity.starts_with("APIC:");
+        });
+    };
+    remove_picture_identities(original_document);
+    remove_picture_identities(resulting_document);
+    auto text = text_writer_detail::verify_text_result("metadata", original_document,
+                                                       resulting_document, plan, prepared, flac);
+    if (!text) {
+        return std::unexpected(text.error());
+    }
+    const auto expected_hash = fingerprint_embedded_artwork_inventory(*expected);
+    const auto actual_hash = fingerprint_embedded_artwork_inventory(resulting->items);
+    if (!expected_hash || !actual_hash || *expected_hash != *actual_hash ||
+        resulting->media_revision != after->source_revision) {
+        return fail("prepared covers differ from review");
+    }
+    auto preservation =
+        flac ? preservation_detail::verify_flac_composed(plan.raw_path, prepared,
+                                                         !plan.changes.empty(), cancellation)
+        : plan.adapter_name == "taglib-mpeg-v1"
+            ? preservation_detail::verify_mp3_binary_preservation(plan.raw_path, prepared,
+                                                                  cancellation)
+            : preservation_detail::verify_mp4_box_preservation(plan.raw_path, prepared,
+                                                               cancellation);
+    if (!preservation) {
+        return std::unexpected(preservation.error());
+    }
+    auto observed = core::observe_local_source_revision(plan.raw_path);
+    if (!observed || *observed != *plan.observed_revision) {
+        return fail("source changed while preparing metadata");
+    }
+    if (cancellation.is_cancellation_requested()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                           .message = "metadata preparation cancelled",
+                                           .context = {}});
+    }
+    guard.release();
+    return PreparedFlacMetadataWrite{.source_raw_path = plan.raw_path,
+                                     .prepared_raw_path = prepared,
+                                     .source_revision = *observed,
+                                     .prepared_revision = after->source_revision,
+                                     .document = std::move(after->document),
+                                     .field_change_count = plan.changes.size()};
+}
+
 core::Result<PreparedArtworkWrite>
 prepare_mp3_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
                                const std::string& prepared_raw_path,
@@ -525,6 +697,34 @@ core::Result<PreparedArtworkWrite>
 prepare_qualified_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
                                      const std::string& prepared_raw_path,
                                      const core::CancellationToken& cancellation) {
+    if (!source_plan.additional_changes.empty()) {
+        auto merged = merge_artwork_write_plan(
+            {}, ArtworkWritePlan{.sources = {source_plan},
+                                 .logical_intent_count = source_plan.occurrence_indexes.size()});
+        if (!merged) {
+            return std::unexpected(merged.error());
+        }
+        auto prepared = prepare_composed_metadata_write_copy(merged->sources.front(),
+                                                             prepared_raw_path, cancellation);
+        if (!prepared) {
+            return std::unexpected(prepared.error());
+        }
+        PreparedPathGuard guard{prepared_raw_path};
+        guard.take_ownership();
+        auto inventory = read_embedded_inventory(prepared_raw_path, cancellation);
+        if (!inventory) {
+            return std::unexpected(inventory.error());
+        }
+        guard.release();
+        return PreparedArtworkWrite{.source_raw_path = source_plan.raw_media_path,
+                                    .prepared_raw_path = prepared_raw_path,
+                                    .source_revision = prepared->source_revision,
+                                    .prepared_revision = prepared->prepared_revision,
+                                    .document = std::move(prepared->document),
+                                    .inventory = std::move(*inventory),
+                                    .kind = source_plan.change.kind,
+                                    .target_ordinal = source_plan.change.target_ordinal};
+    }
     if (source_plan.adapter_name == "taglib-id3v2-apic-v1") {
         return prepare_mp3_artwork_write_copy(source_plan, prepared_raw_path, cancellation);
     }

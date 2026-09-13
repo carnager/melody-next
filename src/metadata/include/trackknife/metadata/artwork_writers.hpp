@@ -33,6 +33,10 @@ prepare_mp4_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
                                const std::string& prepared_raw_path,
                                const core::CancellationToken& cancellation = {});
 
+[[nodiscard]] core::Result<PreparedFlacMetadataWrite>
+prepare_composed_metadata_write_copy(const MetadataWritePlanSource&, const std::string&,
+                                     const core::CancellationToken& = {});
+
 // Dispatches one ready artwork write-plan source to its qualified writer
 // by adapter name, mirroring prepare_qualified_metadata_write_copy.
 [[nodiscard]] core::Result<PreparedArtworkWrite>

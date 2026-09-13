@@ -1,45 +1,30 @@
 # Product definition
 
-## One sentence
+The Trackknife project builds **Trackbench**, the Qt 6 application in
+`src/bench`, installed as `trackknife`. It combines an MPD/Melody client with
+local playback and file tools in one Linux window.
 
-The Trackknife project builds **Trackbench**, a fast modern Qt 6 workspace with
-separate MPD/Melody and local-file authorities: server library and queue work,
-plus foobar2000-inspired local playback, album grouping, tagging, MusicBrainz
-support, ReplayGain, conversion, and resampling.
+The active tab decides which player the controls operate. In an MPD tab, the
+server owns the queue, library, playlists, and outputs. In a local tab,
+Trackbench plays files through PipeWire and offers tagging, MusicBrainz lookup,
+ReplayGain, conversion, and file operations. Local editing commands are never
+available for server queue entries.
 
-## Product thesis
+The main references are foobar2000 for collection tools and Cantata for MPD
+browsing. The useful ideas are tabbed lists, fast keyboard access, gapless
+playback, and control over your own files. The app has its own interface and
+formatting language; it does not load foobar2000 components.
 
-Linux has mature music servers but lacks a current native desktop client with
-the speed, keyboard fluency, and dense information that made foobar2000 and
-Cantata valuable — and it equally lacks a current native workstation for
-preparing music files. These are two different jobs with different primary
-objects: server queue occurrences versus files on disk. ADR-0058 hosts both in
-one Trackbench workspace without mixing their authorities: the active primary
-tab selects the server or local controller, sidebar, transport, outputs, and
-available commands.
+A collection can be used directly from folders or added to the optional local
+index. Scanning is explicit. Searching the index, opening results, and browsing
+albums should not require rereading the collection.
 
-Trackbench's MPD authority is a joy to use every day: connect, browse, search,
-listen, choose outputs, and shape queues without friction. Its basic form was
-finished and validated against stock MPD and Melody before being merged into
-Trackbench; the standalone Trackknife executable was retired in ADR-0071.
-
-Trackbench takes new music from download or rip to a well-organized
-collection: audition it, group it by album, identify and tag it with
-MusicBrainz support, analyze ReplayGain, convert or resample it, and publish
-it into an organized destination. The key inspiration is still
-foobar2000, but with the tabbed working-list approach and a primary focus on
-performance and user experience. Direct filesystem navigation works without
-setup. ADR-0115 adds an optional local library over user-chosen folders for
-artist/album browsing and collection-wide search.
-
-Both authorities share internal libraries — the `tkfmt-1` expression engine,
-the FFmpeg decode boundary, the bounded playback core, the PipeWire adapter,
-persistence infrastructure, and reusable Widgets components — so they look and
-feel coherent while retaining separate controllers and mutation capabilities.
+The sections below describe product priorities and requirements. For what is
+currently implemented, including restrictions, see the [feature matrix](feature-matrix.md).
 
 ## Priorities
 
-### Priority 1: delightful MPD workspace (delivered baseline)
+### Priority 1: MPD playback and library browsing
 
 - Reliable profiles, authentication, reconnect, capability discovery, and
   visible connection state.
@@ -47,26 +32,20 @@ feel coherent while retaining separate controllers and mutation capabilities.
   grouping where metadata permits it.
 - Responsive transport, now playing, seek, volume, playback modes, ReplayGain
   mode, and output selection.
-- Excellent live-queue editing using stable song IDs and incremental updates.
+- Live-queue editing using stable song IDs and incremental updates.
 - Multiple queue/list tabs for scratch work, named lists, stored playlists, and
   the live server queue.
-- A polished default Qt 6 Widgets workspace equally efficient with mouse or
-  keyboard.
+- A default layout that works with mouse or keyboard without configuration.
 
-Melody-specific enhancements remain capability-driven and small. The MPD
-authority targets standard MPD behavior; Melody's streaming outputs are
-exposed through the output UI when advertised. Local playback remains owned by
-the separate Local Queue authority even though both live in Trackbench.
+Support standard MPD first. Show Melody's additional outputs and controls when
+the server advertises them. Local playback keeps its own player and outputs.
 
 ### Priority 2: local playback workspace
 
-- First-class local playback through the proven FFmpeg core and PipeWire
-  output: gapless transitions, exact seeking, per-list progression, volume,
-  and device selection.
-- Album-grouped, dense, high-performance tabbed track lists over direct
-  filesystem navigation — no import step, no library scan.
-- The same tab, shortcut, command-palette, and persistence ergonomics as the
-  MPD authority.
+- Local playback through FFmpeg and PipeWire: gapless transitions, exact seeking,
+  per-list progression, volume, and device selection.
+- Album-grouped track lists that can open files directly, without a library scan.
+- Consistent tabs, shortcuts, and command access across local and MPD views.
 
 ### Priority 3: metadata, MusicBrainz, and ReplayGain
 
@@ -93,25 +72,24 @@ the separate Local Queue authority even though both live in Trackbench.
 - Complete path/conflict preview and atomic publication, including into an
   MPD music root by plain filesystem access.
 
-### Priority 5: Melody output endpoint (MPD authority)
+### Priority 5: Melody output endpoint
 
-Trackbench can later register its MPD authority as a Melody streaming endpoint
+Trackbench can later register as a Melody streaming endpoint
 and play the server-provided stream through the shared local audio engine. This
-is deliberately after both authority backbones are proven.
+comes after the existing local and server playback paths are finished.
 
 ## Established requirements
 
-- One primary native Linux Qt 6 Widgets workspace; Wine is not part of the
-  product story. The standalone MPD executable was retired at parity
-  (ADR-0071).
+- One native Linux Qt 6 Widgets application, with no Wine dependency. The
+  separate MPD application was retired in ADR-0071.
 - Standard MPD compatibility before optional Melody extensions.
 - MPD is authoritative for its database, current queue, stored playlists,
   transport, and outputs. The MPD client is one of potentially several
-  connected clients and reconciles server truth.
-- Trackbench speaks MPD only through the MPD authority. Its optional local
-  library is a file-metadata cache and never implies MPD membership for a file.
-- Queue/list tabs remain first-class persistent work surfaces in both
-  authorities.
+  connected clients and must follow changes made by the others.
+- Only the server controls issue MPD commands. The local library caches file
+  metadata; a local index entry does not mean the file belongs to MPD's library.
+- Tabs keep queues and working lists accessible, with persistence appropriate
+  to the kind of list.
 - Local paths remain raw OS paths internally and need not be valid UTF-8.
 - MusicBrainz identifiers, artist credits, sort names, release/disc identity,
   and related metadata remain intact and influence useful default organization.
@@ -126,138 +104,123 @@ is deliberately after both authority backbones are proven.
 
 ## Product principles
 
-### Two authorities, one language
+### Keep server and local work separate
 
-Each authority does one job completely. They share visual design, interaction
-grammar, shortcuts, the expression language, and quality gates, while the
-active tab keeps transport and mutation ownership explicit.
+The two players share views, shortcuts, and formatting rules. The active tab
+must make it clear which player a command will affect. Moving a local list
+entry must not change an MPD queue or move a file on disk.
 
-### Tabs are working memory
+### Make lists useful for ongoing work
 
-Track lists share one high-performance presentation without losing their
-distinct semantics. Tabs persist and make it cheap to branch, compare,
-reorder, and act on selections — server queues and playlists in the MPD
-client, local working lists in Trackbench.
+Tabs let someone keep a playlist, review search results, or set aside an album
+for tagging. Local lists persist. The live MPD queue follows the server, and
+stored playlists remain server-owned.
 
-### Power is native
+### Include the collection tools
 
-Tagging, MusicBrainz identification, ReplayGain, conversion, file operations,
-search, verification, and artwork management are first-class capabilities of
-Trackbench. Basic competence does not depend on plugins.
+Tagging, MusicBrainz lookup, ReplayGain, conversion, artwork, and file operations
+belong in the application. They should not require a plugin installation.
 
-### Preview before mutation
+### Show changes before writing
 
-Every bulk action shows source and result values, warnings, conflicts, and the
-affected count before commit. The preview and execution share one immutable
-plan.
+Metadata and file operations must show their proposed changes, affected files,
+and conflicts before committing. Execution must use the same plan that was
+reviewed.
 
-### Work stays responsive
+### Keep the interface responsive
 
-No network, disk, decoder, tag parser, artwork load, or bulk formatting work
-blocks the UI thread. Playback controls acknowledge immediately; performance
-is a feature, measured against explicit budgets on large inputs.
+Network requests, filesystem work, decoding, tag parsing, artwork loading, and
+bulk formatting run off the UI thread. Long jobs need progress and cancellation.
+The [workspace specification](ui-workspace.md) sets the performance budgets.
 
-### User data is more important than convenience
+### Preserve the user's files
 
-Unknown tags, embedded objects, timestamps where requested, list identity, and
-file relationships survive operations. Partial failure is visible and
-recoverable.
+Rewrites must preserve unknown tags and container data. Requested timestamps,
+list references, and file relationships must survive file operations. Failures
+need a useful explanation and a recovery path.
 
-### Simple initially, deep on demand
+### Put detail where it helps
 
-The ordinary path is obvious. Advanced tools use progressive detail: the tag
-matrix can expose per-file values, a conversion preset can open its pipeline,
-and a simple sort can open its `tkfmt-1` expression.
+Common tasks should take few steps. Per-file values, transformation rules, and
+conversion settings should be available when someone needs to inspect or
+change them.
 
-### Desktop-efficient interaction
+### Use desktop-sized controls
 
-Cantata is the interaction-density reference for the everyday player
-workspace; foobar2000 is the capability reference for the local workstation.
-Neither is a visual skin or compatibility target. Common actions stay visible
-and take one click or one keystroke; popups and menus are reserved for
-genuinely infrequent or advanced choices. Use native-desktop proportions and
-information density rather than touch-sized, web-style spacing.
+Common actions should take one click or keystroke. Keep enough tracks and
+fields visible to work on an album without constant scrolling. Menus and
+popups are for less frequent choices; the layout should not need the spacing
+of a touch interface.
 
-### Automation is specified and testable
+### Specify the scripting behavior
 
-Familiar-looking syntax is not a compatibility promise. Each `tkfmt-1`
-construct has repository-owned executable cases and persisted dialect behavior
-changes only through a new version.
+Every `tkfmt-1` construct needs executable test cases. Changing the meaning of
+a saved expression requires a new dialect version. Similar syntax does not
+make it compatible with another player's scripts.
 
 ## MusicBrainz-aware organization
 
-MusicBrainz knowledge is a metadata and organization advantage in both
-authorities and a first-class identification feature in Trackbench:
+- Preserve recording, track, release, release-group, artist, work, and disc IDs.
+- Keep credited names separate from sort names and canonical identities.
+- Use release IDs for grouping when available, with predictable fallbacks for
+  files that don't have them.
+- Sort multi-disc releases by disc and track position.
+- Let artist, album, and release selections be added to lists.
+- Do not replace a user's credited display name just to normalize an identity.
 
-- retain recording, track, release, release-group, artist, work, and disc IDs;
-- retain credited names separately from sort names and canonical identities;
-- prefer release identity over album-title strings for grouping when present;
-- order multi-disc releases by medium/disc and track positions;
-- use deterministic fallbacks for ordinary files without MusicBrainz tags;
-- make album/artist/release selections useful inputs for list construction;
-- never overwrite a user's credited display text merely to normalize identity.
+MusicBrainz results enter the tag draft for review, with their source and
+matching confidence. The provider cannot write files directly. Online lookup
+and fingerprinting require an explicit request.
 
-The online provider proposes MusicBrainz metadata, identifiers, and artwork
-with provenance and confidence. Proposals enter the ordinary staged metadata
-preview and cannot write files directly. Lookup, matching, and any acoustic
-identification remain explicit network operations.
+## Interface requirements
 
-## Modern interaction requirements
+These are requirements for the finished interface; the command palette and
+job center are still on the roadmap.
 
-- Trackbench's default screen exposes both authority-bound workspaces without
-  layout construction.
-- Every important action is available through a discoverable menu/command
-  palette and a direct keyboard path.
-- Track rows support multi-selection, drag reorder, add-next/end, remove,
-  crop, copy/move between tabs, sort, reverse, randomize, and total duration.
-- The tag editor behaves like a purpose-built data grid: type a field name,
-  move by keyboard, and apply actions to a selection. It does not require
-  clicking every target cell or hunting through a giant fixed dropdown.
-- Long tasks live in a job center rather than modal progress dialogs.
-- Transient errors appear as non-blocking toasts, retain successful work, and
-  support retrying only failures.
+- The default window makes both server and local work available without
+  building a layout first.
+- Important actions have a menu or command-palette entry and a keyboard path.
+- Track lists support selection, rearrangement, add-next/end, removal, crop,
+  transfer between tabs, sort, reverse, randomize, and total duration.
+- Tag editing supports typing field names, keyboard navigation, and applying
+  changes to a selection without clicking every cell.
+- Long tasks belong in a job center, without a modal progress dialog blocking
+  the rest of the application.
+- Transient errors should leave the rest of the work usable, keep successful
+  results, and allow retrying the failed items.
 
 ## Anti-goals
 
-- Reimplementing or embedding an MPD server.
-- Mixing MPD occurrences and local files in one queue, allowing MPD rows to
-  reach local mutation services, or routing commands by guessed path identity.
-- Requiring a library scan or database before Trackbench is useful.
-- Reproducing foobar2000's Windows UI, component ABI, or scripting quirks.
-- Building a streaming-service storefront, DAW, waveform editor, or mastering
-  suite.
-- Treating metadata as a flat `string -> string` dictionary.
-- Blocking the UI during network or collection work.
-- Claiming complete file-format support because FFmpeg can decode it.
+The project is not an MPD server, a streaming-service shop, a DAW, a waveform
+editor, or a mastering suite. It does not reproduce foobar2000's interface,
+component ABI, or scripting behavior.
+
+It must not require an index before files can be used, mix server entries and
+local files in a queue, or infer permission to edit a local file from a server
+path. Metadata cannot be reduced to one string per field. Decoding a format
+does not establish support for writing it, and collection work must not block
+the UI thread.
 
 ## Primary users and jobs
 
-### MPD listener (Trackbench MPD Queue)
+An MPD listener needs to connect, browse, manage playlists and the queue, and
+choose outputs. The app must keep up when another client changes the server.
 
-Connects to a local or remote MPD/Melody server, browses and searches quickly,
-manages several working tabs and the live queue, controls outputs, and expects
-all state to remain correct when another client changes the server.
+Someone maintaining a collection needs to listen to new files, identify an
+album, edit tags and covers, scan ReplayGain, and rename or convert the files.
+Identifiers and unrelated metadata must survive that work.
 
-### Collection maintainer (Trackbench)
+Someone converting music needs reusable codec and naming presets, resampling,
+clear metadata handling, output verification, and eventually DSP and fresh
+output loudness values.
 
-Opens folders of new music, auditions album-grouped tracks, identifies them
-through MusicBrainz, edits tags in bulk, preserves identifiers, scans
-ReplayGain, manages art, and reorganizes or converts files safely into an
-organized collection.
+## First public releases
 
-### Format/transcoding user (Trackbench)
+The first releases need reliable MPD connections, browse/search, playlists,
+queue editing, transport, and output controls. Local playback must be gapless,
+and tagging, MusicBrainz matching, ReplayGain, and conversion must be dependable
+with their documented formats.
 
-Converts selected tracks with reusable codec and destination presets,
-resampling, optional DSP, predictable tag transfer, verification, and output
-loudness.
-
-## Definition of excellent first public releases
-
-Trackbench's MPD authority must be a client worth choosing: quick setup,
-reliable sessions, fast browse/search, tabbed working lists, excellent live
-queue control, transport and outputs, and polished keyboard/mouse behavior.
-Its local authority must play album-grouped music gapless and include the first
-trustworthy versions of the tag grid, MusicBrainz identification, mass
-ReplayGain scanner, and converter. A local library index, plugin ecosystem,
-Melody endpoint, and unimplemented Melody upload protocol are not release
-prerequisites.
+The local library already exists, but it was not a release prerequisite.
+Plugins, a Melody playback endpoint, and an upload protocol are also not
+prerequisites for releasing the player and file tools.

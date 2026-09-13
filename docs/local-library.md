@@ -1,15 +1,15 @@
 # Local music library
 
-**Trackknife decision (ADRs 0115–0116):** local collection browsing is optional,
-and filesystem scanning is manual.
-The Library source in local context indexes folders chosen by the user. The
-Folders source remains available without an import or scan. MPD retains its
-own library and search.
+The local library is an optional index of folders you choose. You can still
+open files through **Folders** without adding them to the library. MPD keeps
+its own library on the server.
+
+Press **Refresh** to scan for changes. Starting the app, searching, or opening
+results uses the existing index and does not start a scan.
 
 ## Using the library
 
-1. Select a local queue or list, then choose the **Library** sidebar tab
-   (ADR-0130).
+1. Select a local queue or list, then choose **Library** in the sidebar.
 2. Open **Folders…**, add one or more music folders, then press **Refresh** to
    scan them in the background. The footer shows progress; **Stop** cancels the scan.
 3. Click an artist to browse albums, and an album to browse files. Enter toggles
@@ -17,6 +17,10 @@ own library and search.
 4. Type in the search field to see separate **Albums** and **Tracks** results.
    Album matches use artist/album text; track matches also use titles. Each
    search word must match, ignoring Unicode letter case. Punctuation is literal.
+
+Artist rows show the number of albums on the second line. The counts load in
+the background, before you expand an artist. Local and MPD library trees use
+the same spacing and expansion animation.
 
 Drag artists, albums, or tracks into a local queue/list's contents to copy them
 at the insertion marker. Ctrl/Shift selects multiple entries. Right-click
@@ -52,6 +56,29 @@ The folder list reports disconnected folders. Removing a folder forgets its
 index entries without changing files, queues, or working lists. Overlapping
 folders are rejected; add their common parent or separate non-overlapping roots.
 
+## Searching by tags and audio properties
+
+Enable **Query** beside the library search field to use a structured filter.
+For example:
+
+| Find | Query |
+| --- | --- |
+| 24-bit files | `bitspersample EQUAL 24` |
+| Files missing album ReplayGain | `REPLAYGAIN_ALBUM_GAIN MISSING` |
+| Files above 48 kHz | `samplerate GREATER 48000` |
+| FLAC files without an album tag | `codec IS flac AND album MISSING` |
+
+Keywords such as `EQUAL`, `MISSING`, and `AND` must be uppercase. Technical
+values come from the last scan. If a query reports an incomplete index after
+an upgrade, press **Refresh**, wait for it to finish, then run the query again.
+
+Press **Enter** in the sidebar search to keep its results in a local tab. The
+tab uses cached metadata; cover images load separately. Right-click a result
+and choose **Edit tags…** or **ReplayGain…** when you want to work on the files.
+Those operations read the files they need before preparing changes.
+
+The [query reference](query-language.md) describes all operators and limits.
+
 ## Saved searches
 
 Open **Workspace → Search…** (**Ctrl+Shift+F**), enter a word search or enable
@@ -62,11 +89,11 @@ active at that moment. Library queries use the cached index without scanning.
 
 Change the query and press **Update** to replace the selected definition;
 **Rename…** changes its name and **Delete…** removes it. Names must be unique.
-Saving zero-result searches is allowed. **Open results in tab** still creates an
-ordinary snapshot; these tabs do not update automatically. Database-search tabs
+A search can be saved even when it has no results. **Open results in tab**
+creates a snapshot; these tabs do not update automatically. Database-search tabs
 use cached tags and technicals directly, without rereading every audio file
-(ADR-0164). The same applies to Enter in the sidebar search. Autoplaylists remain
-a subsequent feature (ADR-0163).
+(ADR-0164). The same applies to Enter in the sidebar search. Automatically
+updating playlists are not implemented yet.
 
 ## Indexing and consistency
 
@@ -81,8 +108,8 @@ separate worker serves queries and folder configuration. The scan
 compares device/inode/size/mtime revisions, prepares only changed
 files, and verifies the revision again under a short per-file database
 write transaction; commits may land in any order. The library
-connection runs WAL with synchronous=NORMAL — a power loss can cost at
-most the final commit, which the next Refresh repairs.
+connection uses WAL with synchronous=NORMAL. The database is a cache;
+Refresh can rebuild metadata lost after a power failure.
 Only plausible audio extensions are probed; directory and file symlinks are
 skipped. Scans stop after one million visited entries and report incompleteness.
 Cancellation and incomplete traversal retain previously indexed entries.
@@ -136,30 +163,13 @@ different filesystem; they cannot distinguish same-device bind-mount substitutio
 
 ## Verification
 
-ADR-0126 adds deletion cleanup, offline/changed-device retention, incomplete and
-cancelled scan protection, multi-page/raw-path cleanup, unchanged working lists,
-and cover refresh across browse/search transitions. All 58 development CTest
-targets and the build/formatting checks passed on 2026-09-06. Changed-device
-coverage simulates cached mount evidence without privileged mount operations.
+The `local-library` tests use real FLAC files to check indexing, query results,
+raw filenames, refresh, cancellation, offline folders, deletion cleanup, and
+metadata/path updates. They also cover album counts, cached search tabs,
+artwork, navigation through paged results, and keeping local actions out of the
+MPD queue. The related `bench-main-window`, `queue-table-view`, and
+`server-library-tree-model` suites check the workspace behavior.
 
-`local-library` tests use real FLAC fixtures for background indexing and query
-behavior, raw filenames, incremental refresh, offline/reconnection handling,
-cancellation, root removal, tag/move transactions, migration reversal, and
-opening UI search results in a local queue while preserving MPD separation.
-ADR-0117 adds real-file regressions for library actions and drops, captured
-destination tabs, multi-selection, unloaded pages, and raw filenames.
-Its development checks passed for local-library, queue-table-view,
-server-library-tree-model, and bench-main-window. The library and queue tests
-also passed ASan/UBSan with leak detection; formatting and SPDX checks passed.
-
-ADR-0118's track-number and cover tests passed alongside the development
-workspace and format-probe suites. Local-library and format-probe also passed
-ASan/UBSan with leak detection. Real FLAC files cover embedded/folder artwork,
-raw filenames, aspect ratio, refresh/cancellation, and corrupt/oversized images.
-
-Validated 2026-09-05: all 57 development CTest targets passed. Focused
-ASan/UBSan tests for the library, list repository, and queue view passed;
-the clang-tidy library/UI build and local-library test passed. The repository
-formatting and SPDX checks passed. The offscreen search-and-open workflow was
-also inspected visually. This does not claim a measured scan-time budget for
-large collections or slow network mounts.
+Older test runs and sanitizer results are recorded in ADRs 0115–0118 and 0126.
+These tests do not establish scan-time budgets for large collections or slow
+network mounts.

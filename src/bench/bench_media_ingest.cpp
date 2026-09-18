@@ -823,11 +823,14 @@ void BenchMainWindow::startDiscovery(std::vector<std::string> raw_paths, QString
 
 void BenchMainWindow::finishDiscovery() {
     discovery_running_ = false;
+    const auto follow_up =
+        std::exchange(discovery_dialog_follow_up_, MaterializedDialog::none);
     auto result = discovery_watcher_.result();
     auto* tab = tabForDocument(discovery_target_document_);
     if (tab == nullptr || (discovery_anchored_ && !discovery_insertion_anchor_.isValid())) {
         return;
     }
+    bool rows_landed = false;
     if (!result.rows.empty() && (!discovery_replace_and_play_ || !result.cancelled)) {
         if (discovery_replace_and_play_) {
             tab->model->replaceRows(std::move(result.rows), true);
@@ -840,6 +843,29 @@ void BenchMainWindow::finishDiscovery() {
         markTabDirty(*tab);
         enqueueUnprobedRows(*tab);
         syncArtwork(*tab);
+        rows_landed = true;
+    }
+    if (follow_up != MaterializedDialog::none) {
+        if (rows_landed) {
+            tabs_->setCurrentWidget(tab->view);
+            tab->view->selectAll();
+            switch (follow_up) {
+            case MaterializedDialog::edit_tags:
+                showMetadataProperties();
+                break;
+            case MaterializedDialog::replay_gain:
+                showReplayGainDialog();
+                break;
+            case MaterializedDialog::convert:
+                showConvertDialog();
+                break;
+            case MaterializedDialog::none:
+                break;
+            }
+        } else {
+            statusBar()->showMessage(
+                QStringLiteral("Nothing to edit — no files were opened"), 5'000);
+        }
     }
     if (!result.issues.empty()) {
         statusBar()->showMessage(

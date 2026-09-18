@@ -197,8 +197,10 @@ Export. Other container writers and configurable export naming remain open.
   folders. Structured tkq queries are decided and implemented (ADR-0150);
   saved searches, autoplaylists, and logical-track indexing remain
   future work.
-- Cross-authority conveniences: opening a mapped server item as an explicit
-  local source and offering an explicit MPD database update after publication.
+- Cross-authority conveniences are resolved: ADR-0112 shipped explicit "Load
+  as local files" and "Update this folder in MPD", and ADR-0180 added the
+  Edit tags/ReplayGain/Convert context actions that materialize mapped MPD
+  selections into a local tab automatically.
 - Autoplaylist semantics atop tkq-1 (the dialect itself is decided; ADR-0150).
 - Plugin ABI/distribution.
 - A transactional Melody import/upload protocol and destination adapter; no

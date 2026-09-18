@@ -1342,6 +1342,13 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
                 : QString{};
         mpd_load_local_action_->setEnabled(has_uris);
         track_context_menu_->addAction(mpd_load_local_action_);
+        const auto mapped_ready = has_uris && !effectiveMpdMusicRoot().isEmpty();
+        mpd_edit_tags_action_->setEnabled(mapped_ready);
+        mpd_replaygain_action_->setEnabled(mapped_ready);
+        mpd_convert_action_->setEnabled(mapped_ready);
+        track_context_menu_->addAction(mpd_edit_tags_action_);
+        track_context_menu_->addAction(mpd_replaygain_action_);
+        track_context_menu_->addAction(mpd_convert_action_);
         mpd_go_to_artist_action_->setEnabled(!go_to_artist.isEmpty());
         mpd_go_to_album_action_->setEnabled(!go_to_artist.isEmpty() && !go_to_album.isEmpty());
         track_context_menu_->addAction(mpd_go_to_artist_action_);

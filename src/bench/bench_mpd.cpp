@@ -12,6 +12,7 @@
 #include "quick/mpd_search_result_model.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/melody_agent.hpp"
+#include "trackknife/mpd/music_root.hpp"
 #include "ui/mpd_connection_dialog.hpp"
 #include "ui/server_library_tree_model.hpp"
 #include "ui/server_library_tree_view.hpp"
@@ -56,8 +57,11 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <tuple>
+#include <array>
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <ranges>
@@ -147,6 +151,23 @@ void BenchMainWindow::buildMpdStatusControls() {
     mpd_load_local_action_->setObjectName(QStringLiteral("action-mpd-load-local"));
     connect(mpd_load_local_action_, &QAction::triggered, this,
             [this] { loadMpdUrisAsLocalFiles(selectedMpdQueueUris()); });
+    // ADR-0180: file-operation sugar on mapped selections — load as local
+    // files, then open the dialog on the created tab.
+    mpd_edit_tags_action_ = new QAction(QStringLiteral("Edit tags…"), this);
+    mpd_edit_tags_action_->setObjectName(QStringLiteral("action-mpd-edit-tags"));
+    connect(mpd_edit_tags_action_, &QAction::triggered, this, [this] {
+        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::edit_tags);
+    });
+    mpd_replaygain_action_ = new QAction(QStringLiteral("ReplayGain…"), this);
+    mpd_replaygain_action_->setObjectName(QStringLiteral("action-mpd-replaygain"));
+    connect(mpd_replaygain_action_, &QAction::triggered, this, [this] {
+        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::replay_gain);
+    });
+    mpd_convert_action_ = new QAction(QStringLiteral("Convert files…"), this);
+    mpd_convert_action_->setObjectName(QStringLiteral("action-mpd-convert"));
+    connect(mpd_convert_action_, &QAction::triggered, this, [this] {
+        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::convert);
+    });
     mpd_go_to_artist_action_ = new QAction(QStringLiteral("Go to artist"), this);
     mpd_go_to_artist_action_->setObjectName(QStringLiteral("action-mpd-go-to-artist"));
     connect(mpd_go_to_artist_action_, &QAction::triggered, this, [this] {
@@ -671,7 +692,10 @@ namespace {
 
 void BenchMainWindow::activateMpdLibraryAction(const QModelIndex& index, const int action) {
     const auto local_actions = action == static_cast<int>(MpdLibraryAction::load_local) ||
-                               action == static_cast<int>(MpdLibraryAction::update_directory);
+                               action == static_cast<int>(MpdLibraryAction::update_directory) ||
+                               action == static_cast<int>(MpdLibraryAction::edit_tags) ||
+                               action == static_cast<int>(MpdLibraryAction::replay_gain) ||
+                               action == static_cast<int>(MpdLibraryAction::convert);
     if (!index.isValid() ||
         (!local_actions && (action < static_cast<int>(MpdLibraryAction::append) ||
                             action > static_cast<int>(MpdLibraryAction::replace)))) {
@@ -703,6 +727,18 @@ void BenchMainWindow::activateMpdLibraryAction(const QModelIndex& index, const i
     const auto requested = static_cast<MpdLibraryAction>(action);
     if (requested == MpdLibraryAction::load_local) {
         loadMpdUrisAsLocalFiles(uris);
+        return;
+    }
+    if (requested == MpdLibraryAction::edit_tags) {
+        materializeMpdSelectionForDialog(uris, MaterializedDialog::edit_tags);
+        return;
+    }
+    if (requested == MpdLibraryAction::replay_gain) {
+        materializeMpdSelectionForDialog(uris, MaterializedDialog::replay_gain);
+        return;
+    }
+    if (requested == MpdLibraryAction::convert) {
+        materializeMpdSelectionForDialog(uris, MaterializedDialog::convert);
         return;
     }
     if (requested == MpdLibraryAction::update_directory) {
@@ -799,6 +835,25 @@ void BenchMainWindow::showMpdLibraryContextMenu(const QPoint& position) {
             activateMpdLibraryAction(target, static_cast<int>(MpdLibraryAction::load_local));
         }
     });
+    const auto mapped_ready = command_ready && !effectiveMpdMusicRoot().isEmpty();
+    const std::array sugar{
+        std::tuple{QStringLiteral("Edit tags…"), QStringLiteral("edit-tags"),
+                   MpdLibraryAction::edit_tags},
+        std::tuple{QStringLiteral("ReplayGain…"), QStringLiteral("replaygain"),
+                   MpdLibraryAction::replay_gain},
+        std::tuple{QStringLiteral("Convert files…"), QStringLiteral("convert"),
+                   MpdLibraryAction::convert},
+    };
+    for (const auto& [label, slug, library_action] : sugar) {
+        auto* command = mpd_library_context_menu_->addAction(label);
+        command->setObjectName(QStringLiteral("action-mpd-library-%1").arg(slug));
+        command->setEnabled(mapped_ready);
+        connect(command, &QAction::triggered, this, [this, target, library_action] {
+            if (target.isValid()) {
+                activateMpdLibraryAction(target, static_cast<int>(library_action));
+            }
+        });
+    }
     if (server_library_model_->hasChildren(index)) {
         mpd_library_context_menu_->addSeparator();
         auto* expand = mpd_library_context_menu_->addAction(server_library_view_->isExpanded(index)
@@ -1193,37 +1248,66 @@ void BenchMainWindow::applyLibraryOrder(const bool persist) {
     }
 }
 
-void BenchMainWindow::loadMpdUrisAsLocalFiles(const QStringList& uris) {
-    if (uris.isEmpty()) {
-        return;
+QString BenchMainWindow::effectiveMpdMusicRoot() const {
+    if (mpd_controller_ != nullptr) {
+        const auto parsed = core::StableId::parse(mpd_controller_->profileId().toStdString());
+        const auto profile =
+            parsed ? std::ranges::find(mpd_profiles_, *parsed,
+                                       &persistence::ConnectionProfile::id)
+                   : mpd_profiles_.end();
+        if (profile != mpd_profiles_.end() && profile->local_music_root &&
+            !profile->local_music_root->empty()) {
+            return QFile::decodeName(
+                QByteArray{profile->local_music_root->data(),
+                           static_cast<qsizetype>(profile->local_music_root->size())});
+        }
     }
     const QSettings settings;
-    const auto root =
-        settings.value(QLatin1String(SettingsDialog::music_root_key)).toString().trimmed();
+    return settings.value(QLatin1String(SettingsDialog::music_root_key)).toString().trimmed();
+}
+
+void BenchMainWindow::loadMpdUrisAsLocalFiles(const QStringList& uris) {
+    materializeMpdSelectionAsLocalTab(uris);
+}
+
+BenchMainWindow::ListTab*
+BenchMainWindow::materializeMpdSelectionAsLocalTab(const QStringList& uris) {
+    if (uris.isEmpty()) {
+        return nullptr;
+    }
+    const auto root = effectiveMpdMusicRoot();
     if (root.isEmpty()) {
         statusBar()->showMessage(
-            QStringLiteral("Set the MPD music folder in Edit → Settings… first"), 5'000);
-        return;
+            QStringLiteral("Set the local music root in the MPD connection dialog or the "
+                           "MPD music folder in Edit → Settings… first"),
+            5'000);
+        return nullptr;
     }
-    const QDir root_directory{root};
+    const auto encoded_root = QFile::encodeName(root);
+    const std::filesystem::path root_path{
+        std::string{encoded_root.constData(), static_cast<std::size_t>(encoded_root.size())}};
     std::vector<std::string> paths;
     paths.reserve(static_cast<std::size_t>(uris.size()));
     int missing = 0;
     for (const auto& uri : uris) {
-        const auto local = root_directory.filePath(uri);
-        if (!QFileInfo::exists(local)) {
+        const auto uri_bytes = uri.toUtf8();
+        const auto resolved = mpd::resolve_below_music_root(
+            root_path,
+            std::string_view{uri_bytes.constData(), static_cast<std::size_t>(uri_bytes.size())});
+        if (!resolved || !QFileInfo::exists(QFile::decodeName(QByteArray::fromStdString(
+                             resolved->native())))) {
             ++missing;
             continue;
         }
-        const auto encoded = QFile::encodeName(local);
-        paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+        paths.push_back(resolved->native());
     }
     if (paths.empty()) {
         statusBar()->showMessage(
-            QStringLiteral("None of the selected tracks exist under %1").arg(root), 5'000);
-        return;
+            QStringLiteral("None of the selected tracks could be opened under %1").arg(root),
+            5'000);
+        return nullptr;
     }
-    addListTab(
+    auto* tab = addListTab(
         persistence::ListDocument{
             .id = core::StableId::random(),
             .kind = persistence::ListKind::scratch,
@@ -1235,13 +1319,29 @@ void BenchMainWindow::loadMpdUrisAsLocalFiles(const QStringList& uris) {
         true);
     openLocalPaths(std::move(paths));
     if (missing > 0) {
-        statusBar()->showMessage(QStringLiteral("%1 track%2 not found under %3")
+        statusBar()->showMessage(QStringLiteral("%1 track%2 could not be opened under %3")
                                      .arg(missing)
                                      .arg(missing == 1 ? QString{} : QStringLiteral("s"))
                                      .arg(root),
                                  5'000);
     }
     schedulePersist();
+    return tab;
+}
+
+void BenchMainWindow::materializeMpdSelectionForDialog(const QStringList& uris,
+                                                       const MaterializedDialog dialog) {
+    auto* tab = materializeMpdSelectionAsLocalTab(uris);
+    if (tab == nullptr) {
+        return;
+    }
+    // The tab fills asynchronously; the dialog opens from finishDiscovery.
+    // Arm the follow-up only when the discovery we just started targets this
+    // tab — a concurrently running scan already refused ours with a message.
+    if (discovery_running_ &&
+        discovery_target_document_ == QString::fromStdString(tab->document.id.to_string())) {
+        discovery_dialog_follow_up_ = dialog;
+    }
 }
 
 void BenchMainWindow::refreshMpdPriorityMenu() {

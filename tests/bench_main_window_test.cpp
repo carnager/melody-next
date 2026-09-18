@@ -228,6 +228,7 @@ class BenchMainWindowTest final : public QObject {
     void convertDialogPlansAndConvertsSelection();
     void convertDialogAppliesPermanentReplayGain();
     void settingsControlStartupContextAndMusicRoot();
+    void mpdSugarActionsMaterializeAndOpenDialog();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
@@ -3683,7 +3684,7 @@ void BenchMainWindowTest::settingsControlStartupContextAndMusicRoot() {
         QVERIFY(view != nullptr);
         QTRY_COMPARE(view->model()->rowCount(), 1);
         QVERIFY(window.findChild<QStatusBar*>()->currentMessage().contains(
-            QStringLiteral("1 track not found")));
+            QStringLiteral("1 track could not be opened")));
 
         // The queue and library context actions exist for discoverability.
         QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-load-local")) != nullptr);
@@ -3719,6 +3720,74 @@ void BenchMainWindowTest::settingsControlStartupContextAndMusicRoot() {
     settings.remove(QLatin1String(SettingsDialog::startup_context_key));
     settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.remove(QStringLiteral("mpd/library-order"));
+    settings.sync();
+}
+
+// ADR-0180: Edit tags / ReplayGain / Convert on a mapped MPD selection
+// materialize through the load-as-local-files bridge and open the dialog on
+// the created tab once discovery lands. Exercises the global-root fallback of
+// effectiveMpdMusicRoot; the per-profile branch reuses the melody-endpoint
+// profile lookup covered elsewhere.
+void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    QDir{media.path()}.mkpath(QStringLiteral("Artist/Album"));
+    write_sine_wav_fixture(media.filePath(QStringLiteral("Artist/Album/one.wav")), 0.5);
+    {
+        QSettings settings;
+        settings.setValue(QLatin1String(SettingsDialog::music_root_key), media.path());
+        settings.sync();
+    }
+    {
+        BenchMainWindow window;
+        window.show();
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_VERIFY(tabs->count() >= 2);
+
+        // The queue sugar actions exist for discoverability.
+        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-edit-tags")) != nullptr);
+        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-replaygain")) != nullptr);
+        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-convert")) != nullptr);
+
+        const auto tabs_before = tabs->count();
+        window.materializeMpdSelectionForDialog(
+            {QStringLiteral("Artist/Album/one.wav")},
+            BenchMainWindow::MaterializedDialog::edit_tags);
+        QTRY_COMPARE(tabs->count(), tabs_before + 2); // materialized tab + dialog tab
+        QDialog* properties = nullptr;
+        QTRY_VERIFY((properties = window.findChild<QDialog*>(
+                         QStringLiteral("bench-metadata-properties"))) != nullptr);
+        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        properties->close();
+        QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) ==
+                    nullptr);
+
+        // A second flavor proves the dispatch switch.
+        window.materializeMpdSelectionForDialog(
+            {QStringLiteral("Artist/Album/one.wav")},
+            BenchMainWindow::MaterializedDialog::convert);
+        QDialog* convert = nullptr;
+        QTRY_VERIFY((convert = window.findChild<QDialog*>(
+                         QStringLiteral("bench-convert-dialog"))) != nullptr);
+        convert->close();
+
+        // The hardened bridge rejects traversal URIs instead of joining them.
+        auto* status_bar = window.findChild<QStatusBar*>();
+        QVERIFY(status_bar != nullptr);
+        const auto tabs_before_escape = tabs->count();
+        window.loadMpdUrisAsLocalFiles(
+            {QStringLiteral("../escape.wav"), QStringLiteral("Artist/Album/one.wav")});
+        QTRY_COMPARE(tabs->count(), tabs_before_escape + 1);
+        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+        QVERIFY(view != nullptr);
+        QTRY_COMPARE(view->model()->rowCount(), 1);
+        QVERIFY(status_bar->currentMessage().contains(
+            QStringLiteral("1 track could not be opened")));
+    }
+
+    QSettings settings;
+    settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.sync();
 }
 

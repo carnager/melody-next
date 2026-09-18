@@ -27,6 +27,8 @@
 #include <QTabWidget>
 #include <QTimer>
 
+#include <tuple>
+#include <array>
 #include <algorithm>
 
 namespace trackknife::bench {
@@ -388,6 +390,36 @@ void BenchMainWindow::closeMpdSearchTab(MpdSearchTab* tab) {
     refreshTabActions();
 }
 
+
+// ADR-0180: shared "Load as local files" + file-operation sugar entries for
+// the MPD playlist and committed-search track menus. These act on mapped
+// local files only and never talk to MPD, so they ignore command readiness.
+void BenchMainWindow::addMappedLocalTrackActions(QMenu* menu, const QStringList& uris,
+                                                 const QString& object_prefix) {
+    auto* load_local = menu->addAction(QIcon::fromTheme(QStringLiteral("folder-open")),
+                                       QStringLiteral("Load as local files"));
+    load_local->setObjectName(object_prefix + QStringLiteral("load-local"));
+    load_local->setEnabled(!uris.isEmpty());
+    connect(load_local, &QAction::triggered, this,
+            [this, uris] { loadMpdUrisAsLocalFiles(uris); });
+    const auto mapped_ready = !uris.isEmpty() && !effectiveMpdMusicRoot().isEmpty();
+    const std::array sugar{
+        std::tuple{QStringLiteral("Edit tags…"), QStringLiteral("edit-tags"),
+                   MaterializedDialog::edit_tags},
+        std::tuple{QStringLiteral("ReplayGain…"), QStringLiteral("replaygain"),
+                   MaterializedDialog::replay_gain},
+        std::tuple{QStringLiteral("Convert files…"), QStringLiteral("convert"),
+                   MaterializedDialog::convert},
+    };
+    for (const auto& [label, slug, dialog] : sugar) {
+        auto* command = menu->addAction(label);
+        command->setObjectName(object_prefix + slug);
+        command->setEnabled(mapped_ready);
+        connect(command, &QAction::triggered, this,
+                [this, uris, dialog] { materializeMpdSelectionForDialog(uris, dialog); });
+    }
+}
+
 void BenchMainWindow::showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& position) {
     if (track_context_menu_ == nullptr) {
         return;
@@ -419,6 +451,8 @@ void BenchMainWindow::showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& po
     replace->setEnabled(command_ready && !uris.isEmpty());
     connect(replace, &QAction::triggered, this,
             [this, uris] { mpd_controller_->replaceQueueWithUris(uris); });
+    track_context_menu_->addSeparator();
+    addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-search-"));
     track_context_menu_->popup(tab.view->viewport()->mapToGlobal(position));
 }
 
@@ -564,6 +598,8 @@ void BenchMainWindow::showMpdPlaylistTrackMenu(MpdPlaylistTab& tab, const QPoint
     next->setEnabled(command_ready && !uris.isEmpty());
     connect(next, &QAction::triggered, this,
             [this, uris] { mpd_controller_->addUris(uris, true); });
+    track_context_menu_->addSeparator();
+    addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-playlist-"));
     track_context_menu_->addSeparator();
     auto* remove = track_context_menu_->addAction(QStringLiteral("Remove from playlist"));
     remove->setObjectName(QStringLiteral("action-mpd-playlist-remove-selection"));

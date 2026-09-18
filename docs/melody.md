@@ -124,7 +124,10 @@ Set **Local music root** in Trackknife's connection dialog to that mount.
 The relative paths must match: if Melody reports `Artist/Album/01.flac`, a
 root of `/mnt/music` must contain `/mnt/music/Artist/Album/01.flac`.
 
-You can then open mapped tracks in a local tab for tagging or conversion.
+Right-click any server selection and choose Edit tags…, ReplayGain…, or
+Convert files… — Trackknife opens the mapped files in a local tab and
+starts the dialog for you ("Load as local files" remains available to just
+open the tab). Melody's file watcher picks up the changes automatically.
 Writes need filesystem permissions; the MPD connection does not grant them.
 The mapping is separate from the optional local library and does not add
 folders to it.

@@ -1569,7 +1569,11 @@ handoff to Local Queue playback.
    prefix of the node's files. ADR-0113 added the library heading's
    A-Z / Latest toggle, ranking artists by database insertion time
    (MPD 0.24 Added, mtime approximation on older servers) through a
-   sorted MPD search.
+   sorted MPD search. ADR-0180 completed the "work directly on MPD-mode
+   selections" promise as explicit-materialization sugar: the MPD context
+   menus' Edit tags/ReplayGain/Convert actions load the mapped selection
+   as a local tab and open the dialog there, preferring the profile's
+   local music root over the global folder.
 
 ADR-0174 completes the endpoint with a capability-gated Melody v2 adapter,
 version-consistent queue synchronization, direct/stream source selection,
@@ -1634,9 +1638,8 @@ or certify an untested future package.
 ## Beyond the first releases
 
 Possible later work includes a local-tool-owned library index if direct
-filesystem navigation stops scaling, explicit cross-authority integration
-(opening a mapped server item as a local source and offering an MPD database
-update after publication), autoplaylists and deeper queries, secure CD ripping,
+filesystem navigation stops scaling, autoplaylists and deeper queries,
+secure CD ripping,
 internet radio, plugins, additional DSP, more format adapters, and a
 capability-advertised transactional Melody import/upload destination if such a
 protocol extension is actually implemented. None should bypass the shared

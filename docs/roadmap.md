@@ -192,7 +192,9 @@ next release.
   remote import, and simultaneous MPD connections. The Melody playback endpoint
   is complete in ADR-0174; its multi-machine stress campaigns belong to M10.
   Explicitly updating MPD after local file changes also remains open. Loading
-  mapped server files into a local tab is already available.
+  mapped server files into a local tab is available, and the MPD context
+  menus' Edit tags/ReplayGain/Convert actions run that materialization and
+  open the dialog directly (ADR-0180).
 
 ## Scope and maintenance
 

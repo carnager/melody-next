@@ -104,6 +104,11 @@ class BenchMainWindow final : public QMainWindow {
     void importM3u8Path(std::string raw_path);
     void openLocalPaths(std::vector<std::string> raw_paths);
     void loadMpdUrisAsLocalFiles(const QStringList& uris);
+    // ADR-0180: file-operation sugar on mapped MPD selections — materialize
+    // through the load-as-local-files bridge, then open the named dialog on
+    // the created tab once its asynchronous discovery finishes.
+    enum class MaterializedDialog : std::uint8_t { none, edit_tags, replay_gain, convert };
+    void materializeMpdSelectionForDialog(const QStringList& uris, MaterializedDialog dialog);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -216,8 +221,12 @@ class BenchMainWindow final : public QMainWindow {
     void confirmClearMpdPlaylist(const QString& name);
     void confirmDeleteMpdPlaylist(const QString& name);
     [[nodiscard]] QStringList selectedMpdViewUris(QTableView* view) const;
+    void addMappedLocalTrackActions(QMenu* menu, const QStringList& uris,
+                                    const QString& object_prefix);
 
     ListTab* addListTab(persistence::ListDocument document, bool select);
+    [[nodiscard]] QString effectiveMpdMusicRoot() const;
+    ListTab* materializeMpdSelectionAsLocalTab(const QStringList& uris);
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
@@ -406,6 +415,9 @@ class BenchMainWindow final : public QMainWindow {
         insert,
         load_local,
         update_directory,
+        edit_tags,
+        replay_gain,
+        convert,
     };
     std::optional<MpdLibraryAction> pending_mpd_library_action_;
     QPersistentModelIndex pending_mpd_library_index_;
@@ -443,6 +455,9 @@ class BenchMainWindow final : public QMainWindow {
     QAction* properties_action_{nullptr};
     QAction* convert_action_{nullptr};
     QAction* mpd_load_local_action_{nullptr};
+    QAction* mpd_edit_tags_action_{nullptr};
+    QAction* mpd_replaygain_action_{nullptr};
+    QAction* mpd_convert_action_{nullptr};
     QToolButton* library_order_az_{nullptr};
     QToolButton* library_order_latest_{nullptr};
     QAction* remove_selected_action_{nullptr};
@@ -543,6 +558,7 @@ class BenchMainWindow final : public QMainWindow {
     bool discovery_anchored_{false};
     bool discovery_replace_and_play_{false};
     bool discovery_running_{false};
+    MaterializedDialog discovery_dialog_follow_up_{MaterializedDialog::none};
 
     QFutureWatcher<std::vector<ProbeOutcome>> probe_watcher_;
     std::deque<ProbeJob> probe_queue_;

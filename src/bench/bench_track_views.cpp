@@ -319,6 +319,8 @@ void BenchMainWindow::refreshSelectionStatus() {
         return;
     }
     if (isMpdContext()) {
+        // The menubar actions stay local-only; mapped MPD selections get the
+        // context-menu sugar actions instead (ADR-0180).
         if (properties_action_ != nullptr) {
             properties_action_->setEnabled(false);
         }

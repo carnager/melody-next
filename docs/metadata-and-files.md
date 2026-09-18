@@ -388,10 +388,11 @@ reason about them as metadata. Analysis remains a separate PCM job with its own
 algorithm/provenance and cannot be faked as an ordinary text-field edit.
 
 Server items live in Trackbench's MPD Queue authority, which displays their
-metadata but offers no file-write actions. Trackbench edits only sources
-explicitly opened under its Local Queue authority; opening a mapped server item
-as a local source is a deferred cross-authority convenience (ADR-0058), not an
-eligibility rule for mutation.
+metadata but offers no in-place file-write actions. Trackbench edits only
+sources opened under its Local Queue authority; the MPD context menus' Edit
+tags/ReplayGain/Convert actions satisfy that rule by materializing the mapped
+selection into a local tab first and opening the dialog there (ADR-0180) —
+reachability through a mount is still not an eligibility rule for mutation.
 
 Edits are staged in memory. A staged document must record the source revision
 (file identity, size, mtime, and preferably tag hash). If a file changes before

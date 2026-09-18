@@ -166,12 +166,15 @@ Mapping rules:
 5. If conversion from MPD's protocol string to a local OS path is not lossless,
    report “not locally resolved” rather than inventing a path.
 
-Mapping is lexical only; Trackknife never reads or mutates the mapped file.
-Opening a mapped server item in Trackbench is deferred cross-tool work
-(ADR-0025), and any future file operation must first resolve filesystem
-identity safely and reject a symlink/mount race that escapes the root. A
-failed mapping only marks the item as not locally resolved; remote browsing
-and MPD playback continue normally.
+Mapping itself is lexical only and never reads or mutates the mapped file.
+File operations happen exclusively on materialized local rows: "Load as
+local files" resolves the selection into an ordinary local tab, and the
+MPD context menus' Edit tags…, ReplayGain…, and Convert files… actions run
+that same materialization and then open the dialog on the created tab
+(ADR-0180). The effective root prefers the connection profile's local
+music root and falls back to the global settings folder. A failed mapping
+only marks the item as not locally resolved; remote browsing and MPD
+playback continue normally.
 
 ## Live queue
 

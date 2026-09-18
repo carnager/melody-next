@@ -8,6 +8,7 @@
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/rating_identity.hpp"
 #include "trackknife/persistence/tkq_row.hpp"
 
 #include "library_query_internal.hpp"
@@ -818,16 +819,23 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         std::string order;
         switch (query.kind) {
         case LibraryEntryKind::artist:
-            columns = "artist,artist,artist,'',count(*),sum(available),0,count(DISTINCT album_key)";
+            columns = "artist,artist,artist,'',count(*),sum(available),0,"
+                      "count(DISTINCT album_key),'',0";
             order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
-            columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1";
+            // Every row of an album shares album_rating_hash, so the bare
+            // column (an arbitrary group row) is deterministic here and an
+            // aggregate would be rejected inside the correlated subquery.
+            columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1,"
+                      "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
+                      "WHERE hash=album_rating_hash),0)";
             order = " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),min(album) "
                     "COLLATE NOCASE,album_key";
             break;
         case LibraryEntryKind::track:
-            columns = "raw_path,title,artist,album,1,available,track,1";
+            columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
+                      "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0)";
             order = " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
                     "NOCASE,raw_path";
             break;
@@ -849,7 +857,9 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                                     static_cast<std::size_t>(statement.number(4)),
                                     static_cast<std::size_t>(statement.number(5)),
                                     static_cast<int>(statement.number(6)),
-                                    static_cast<std::size_t>(statement.number(7))});
+                                    static_cast<std::size_t>(statement.number(7)),
+                                    statement.bytes(8),
+                                    static_cast<unsigned>(statement.number(9))});
             page.entries.back().label = format_label(page.entries.back(), !query.text.empty());
         }
         return page;
@@ -1181,6 +1191,64 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
     });
 }
 
+core::Result<void> LocalLibrary::set_rating(const std::string& hash, const bool album,
+                                            const unsigned rating) {
+    const auto result = checked([&] {
+        if (hash.size() != 64U ||
+            hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
+            fail("Rating identity must be a 64-character content hash",
+                 core::ErrorCode::invalid_argument);
+        }
+        if (rating > 10U) {
+            fail("Track and album ratings must be between 0 and 10",
+                 core::ErrorCode::invalid_argument);
+        }
+        auto* db = implementation_->db;
+        if (rating == 0U) {
+            Statement remove{db, "DELETE FROM local_ratings WHERE hash=?"};
+            remove.text(1, hash);
+            remove.next();
+            return true;
+        }
+        Statement upsert{db, "INSERT INTO local_ratings(hash,type,rating,updated_at) "
+                             "VALUES(?,?,?,datetime('now')) ON CONFLICT(hash) DO UPDATE SET "
+                             "rating=excluded.rating,updated_at=excluded.updated_at"};
+        upsert.text(1, hash);
+        upsert.text(2, album ? "album" : "track");
+        upsert.number(3, static_cast<int>(rating));
+        upsert.next();
+        return true;
+    });
+    if (!result) {
+        return std::unexpected(result.error());
+    }
+    return {};
+}
+
+core::Result<std::vector<unsigned>>
+LocalLibrary::ratings(const std::vector<std::string>& hashes,
+                      const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        if (hashes.size() > filter_match_cap) {
+            fail("Selection exceeds 100000 files", core::ErrorCode::limit_exceeded);
+        }
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        Statement select{db, "SELECT rating FROM local_ratings WHERE hash=?"};
+        std::vector<unsigned> result;
+        result.reserve(hashes.size());
+        for (const auto& hash : hashes) {
+            if (cancellation.is_cancellation_requested()) {
+                fail("Library query cancelled", core::ErrorCode::cancelled);
+            }
+            select.reset();
+            select.text(1, hash);
+            result.push_back(select.next() ? static_cast<unsigned>(select.number(0)) : 0U);
+        }
+        return result;
+    });
+}
+
 core::Result<std::optional<std::string>>
 LocalLibrary::artwork_source(const std::string& album_key,
                              const core::CancellationToken& cancellation) const {
@@ -1453,12 +1521,14 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                     complete = false;
                     return;
                 }
+                const auto identity = rating_identity(prepared.document, prepared.raw_path);
                 Statement upsert{
                     db, "INSERT INTO "
                         "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
                         "release_id,date,disc,track,search_track,search_album,available,seen,"
-                        "codec_name,sample_rate,bits,channels,duration_ms) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?) "
+                        "codec_name,sample_rate,bits,channels,duration_ms,"
+                        "rating_hash,album_rating_hash) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?) "
                         "ON CONFLICT(raw_path) DO UPDATE SET "
                         "root=excluded.root,revision=excluded.revision,title=excluded.title,artist="
                         "excluded.artist,album=excluded.album,album_key=excluded.album_key,"
@@ -1467,7 +1537,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                         "excluded.search_album,available=1,seen=excluded.seen,"
                         "codec_name=excluded.codec_name,sample_rate=excluded.sample_rate,"
                         "bits=excluded.bits,channels=excluded.channels,"
-                        "duration_ms=excluded.duration_ms"};
+                        "duration_ms=excluded.duration_ms,rating_hash=excluded.rating_hash,"
+                        "album_rating_hash=excluded.album_rating_hash"};
                 upsert.blob(1, prepared.raw_path);
                 upsert.blob(2, prepared.root);
                 upsert.text(3, prepared.revision);
@@ -1478,6 +1549,8 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 upsert.number(17, prepared.technicals.bits);
                 upsert.number(18, prepared.technicals.channels);
                 upsert.number(19, prepared.technicals.duration_ms);
+                upsert.text(20, identity.track_hash);
+                upsert.text(21, identity.album_hash);
                 upsert.next();
                 write_field_rows(db, prepared.raw_path, prepared.document);
                 ++progress.indexed;
@@ -1678,6 +1751,15 @@ core::Result<void> refresh_library_source(sqlite3* db, const std::string& source
         update.blob(14, source);
         update.next();
         if (document != nullptr) {
+            // The rating identity follows tags; a pure move keeps it, while a
+            // committed tag change recomputes it from the fresh document.
+            const auto identity = rating_identity(*document, target);
+            Statement hashes{db, "UPDATE local_library_tracks SET rating_hash=?,"
+                                 "album_rating_hash=? WHERE raw_path=?"};
+            hashes.text(1, identity.track_hash);
+            hashes.text(2, identity.album_hash);
+            hashes.blob(3, target);
+            hashes.next();
             write_field_rows(db, target, *document);
         } else if (!retained.empty()) {
             Statement insert{db, "INSERT OR IGNORE INTO local_library_fields"

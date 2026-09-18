@@ -7,6 +7,7 @@ add_library(
     src/local_library.cpp
     src/musicbrainz_cache.cpp
     src/operation_journal.cpp
+    src/rating_identity.cpp
     src/tkq_row.cpp
     src/workspace_backup.cpp
 )

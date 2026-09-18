@@ -48,6 +48,10 @@ struct LibraryEntry {
     std::size_t available{0};
     int track_number{0};
     std::size_t albums{0};
+    // ADR-0179: the entry's content-identity rating key (track or album hash)
+    // and its stored 0-10 rating; empty/0 for artists and unrated entries.
+    std::string rating_hash{};
+    unsigned rating{0};
 };
 
 struct LibraryPage {
@@ -108,6 +112,13 @@ class LocalLibrary final {
     core::Result<std::optional<std::string>>
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const;
+    // ADR-0179: 0-10 content-identity ratings shared with Melody's scale.
+    // Rating 0 deletes the stored row; hashes come from rating_identity() or
+    // library entries, so files outside the library rate identically.
+    core::Result<void> set_rating(const std::string& hash, bool album, unsigned rating);
+    // Stored ratings for each hash in input order; 0 means unrated.
+    core::Result<std::vector<unsigned>> ratings(const std::vector<std::string>& hashes,
+                                                const core::CancellationToken& cancellation = {}) const;
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
 

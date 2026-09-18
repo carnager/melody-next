@@ -24,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 34U;
+constexpr unsigned current_schema_version = 35U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1044,6 +1044,25 @@ INSERT INTO metadata_transformation_action_values SELECT * FROM metadata_transfo
 DROP TABLE metadata_transformation_action_values_v33;
 DROP TABLE metadata_transformation_actions_v33;
 UPDATE schema_version SET version = 34;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 34) {
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE local_ratings (
+    hash TEXT PRIMARY KEY,
+    type TEXT NOT NULL CHECK(type IN ('track','album')),
+    rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 10),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+ALTER TABLE local_library_tracks ADD COLUMN rating_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE local_library_tracks ADD COLUMN album_rating_hash TEXT NOT NULL DEFAULT '';
+CREATE INDEX local_library_rating_hash ON local_library_tracks(rating_hash);
+CREATE INDEX local_library_album_rating_hash ON local_library_tracks(album_rating_hash);
+UPDATE schema_version SET version = 35;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

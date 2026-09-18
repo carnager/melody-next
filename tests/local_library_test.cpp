@@ -4,8 +4,10 @@
 #include "bench/local_library_panel.hpp"
 #include "bench/search_dialog.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/core/sha256.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
+#include "trackknife/persistence/rating_identity.hpp"
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
@@ -135,6 +137,7 @@ class LocalLibraryTest final : public QObject {
     void scanRetainsFieldRowsAndTechnicals();
     void denseMetadataDoesNotProduceFalseMissingMatches();
     void parallelScanIndexesManyFiles();
+    void ratingsFollowContentIdentity();
     void migrationRoundTrip();
     void scansOnlyOnRefresh_data();
     void scansOnlyOnRefresh();
@@ -526,11 +529,16 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     // cannot be distinguished from actual absence. No automatic scan repairs it.
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
-    QFile downgrade{
-        QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/0033_complete_library_fields.down.sql")};
-    QVERIFY(downgrade.open(QIODevice::ReadOnly));
-    QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
-             SQLITE_OK);
+    // Migrations unwind strictly in reverse order down to the truncation-era
+    // schema before the app re-migrates forward.
+    for (const auto* name : {"0035_local_ratings.down", "0034_metadata_field_filters.down",
+                             "0033_complete_library_fields.down"}) {
+        QFile downgrade{
+            QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
+        QVERIFY(downgrade.open(QIODevice::ReadOnly));
+        QCOMPARE(sqlite3_exec(db, downgrade.readAll().constData(), nullptr, nullptr, nullptr),
+                 SQLITE_OK);
+    }
     sqlite3_close(db);
     auto migrated = persistence::LocalLibrary::open(database);
     QVERIFY(migrated);
@@ -665,25 +673,93 @@ void LocalLibraryTest::parallelScanIndexesManyFiles() {
     QCOMPARE(library->query(tracks("Retitled"))->entries.size(), 1U);
 }
 
+void LocalLibraryTest::ratingsFollowContentIdentity() {
+    // ADR-0179: the identity hashes must stay byte-compatible with the Melody
+    // server (sha256 over NUL-joined normalized fields, lowercase hex).
+    QCOMPARE(persistence::track_rating_hash("Slayer", "Divine Intervention", "Killing Fields", 1),
+             std::string{"14bc899daabc68458c8d37c3ea54321e9acff3e66fddde3de11f5fd5118a3572"});
+    QCOMPARE(persistence::album_rating_hash("Slayer", "Divine Intervention", "1994"),
+             std::string{"db4f9711c1c421acbce7ffb1e9f7ceb2a8e4d33f22912dc0c7419f74403c990e"});
+    QCOMPARE(core::sha256_hex(""),
+             std::string{"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"});
+    QCOMPARE(core::sha256_hex("abc"),
+             std::string{"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
+    QCOMPARE(core::sha256_hex(std::string(56U, 'a')),
+             std::string{"b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"});
+    QCOMPARE(core::sha256_hex(std::string(200U, 'a')),
+             std::string{"c2a908d98f5df987ade41b5fce213067efbcc21ef2240212a41e54b5e7c28ae5"});
+
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto path = fixture(root, "rated.flac");
+    QVERIFY(!path.empty());
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library);
+    QVERIFY(library->add_root(root.native()));
+    persistence::LibraryScanProgress progress;
+    QVERIFY(library->scan({}, progress));
+
+    const auto track_hash =
+        persistence::track_rating_hash("Björk", "Test album", "First song", 3);
+    // The album identity carries the fixture's tagged year, matching
+    // Melody's year-only date normalization.
+    const auto album_hash = persistence::album_rating_hash("Björk", "Test album", "2026");
+    auto page = library->query(tracks());
+    QVERIFY(page);
+    QCOMPARE(page->entries.front().rating_hash, track_hash);
+    QCOMPARE(page->entries.front().rating, 0U);
+
+    const auto document = metadata::read_local_metadata(path);
+    QVERIFY(document);
+    const auto identity = persistence::rating_identity(document->document, path);
+    QCOMPARE(identity.track_hash, track_hash);
+    QCOMPARE(identity.album_hash, album_hash);
+
+    QVERIFY(library->set_rating(track_hash, false, 8U));
+    QVERIFY(library->set_rating(album_hash, true, 6U));
+    QVERIFY(!library->set_rating(track_hash, false, 11U));
+    QVERIFY(!library->set_rating("not-a-hash", false, 5U));
+    QCOMPARE(library->query(tracks())->entries.front().rating, 8U);
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    QCOMPARE(library->query(albums)->entries.front().rating_hash, album_hash);
+    QCOMPARE(library->query(albums)->entries.front().rating, 6U);
+    QCOMPARE(*library->ratings({track_hash, album_hash, std::string(64U, '0')}),
+             (std::vector<unsigned>{8U, 6U, 0U}));
+
+    // A rescan recomputes hashes from unchanged tags, so the rating stays.
+    persistence::LibraryScanProgress rescan;
+    QVERIFY(library->scan({}, rescan));
+    QCOMPARE(library->query(tracks())->entries.front().rating, 8U);
+
+    // Unrating deletes the stored row instead of keeping a zero.
+    QVERIFY(library->set_rating(track_hash, false, 0U));
+    QCOMPARE(library->query(tracks())->entries.front().rating, 0U);
+    QCOMPARE(library->ratings({track_hash})->front(), 0U);
+}
+
 void LocalLibraryTest::migrationRoundTrip() {
     QTemporaryDir temporary;
     const auto database = (std::filesystem::path{temporary.path().toStdString()} / "state.sqlite");
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 34U);
+        QCOMPARE(*repository->schema_version(), 35U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
     for (const auto* name :
-         {"0034_metadata_field_filters.down", "0033_complete_library_fields.down",
+         {"0035_local_ratings.down", "0034_metadata_field_filters.down",
+          "0033_complete_library_fields.down",
           "0032_saved_searches.down", "0031_composed_metadata_artwork.down",
           "0030_library_query_index.down", "0028_local_library.down", "0028_local_library.up",
           "0030_library_query_index.up", "0031_composed_metadata_artwork.up",
           "0032_saved_searches.up", "0033_complete_library_fields.up",
-          "0034_metadata_field_filters.up"}) {
+          "0034_metadata_field_filters.up", "0035_local_ratings.up"}) {
         QFile migration{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
@@ -713,7 +789,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 34U);
+    QCOMPARE(*repository->schema_version(), 35U);
 }
 
 void LocalLibraryTest::scansOnlyOnRefresh_data() {

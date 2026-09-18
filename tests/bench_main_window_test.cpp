@@ -4792,6 +4792,17 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     QTRY_COMPARE(results->count(), 1);
     QVERIFY(reported.empty());
     QVERIFY(!status->text().contains(QStringLiteral("scanned")));
+
+    // ADR-0179: tab rows expose their loaded content-identity ratings to
+    // rating predicates without touching the library store.
+    input->setText(QStringLiteral("rating GREATER 7"));
+    QTRY_COMPARE(results->count(), 0);
+    row.rating = 8U;
+    row.album_rating = 6U;
+    input->setText(QStringLiteral("rating GREATER 7 AND albumrating EQUAL 6"));
+    QTRY_COMPARE(results->count(), 1);
+    input->setText(QStringLiteral("rating MISSING"));
+    QTRY_COMPARE(results->count(), 0);
     mode->setChecked(false);
 }
 

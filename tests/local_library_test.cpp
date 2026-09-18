@@ -752,6 +752,27 @@ void LocalLibraryTest::ratingsFollowContentIdentity() {
     QVERIFY(library->scan({}, rescan));
     QCOMPARE(library->query(tracks())->entries.front().rating, 8U);
 
+    // An index migrated before the identity columns existed backfills the
+    // hashes from its complete field evidence on open, so stored ratings
+    // join without waiting for a Refresh.
+    {
+        sqlite3* db = nullptr;
+        QCOMPARE(sqlite3_open((base / "state.sqlite").c_str(), &db), SQLITE_OK);
+        QCOMPARE(sqlite3_exec(db,
+                              "UPDATE local_library_tracks SET rating_hash='',"
+                              "album_rating_hash=''",
+                              nullptr, nullptr, nullptr),
+                 SQLITE_OK);
+        sqlite3_close(db);
+    }
+    auto backfilled = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(backfilled);
+    QCOMPARE(backfilled->query(tracks())->entries.front().rating_hash, track_hash);
+    QCOMPARE(backfilled->query(tracks())->entries.front().rating, 8U);
+    const auto backfilled_query = query::compile_tkq("rating GREATER 7");
+    QVERIFY(backfilled_query);
+    QCOMPARE(*backfilled->filter_paths(*backfilled_query), std::vector<std::string>{path});
+
     // Unrating deletes the stored row instead of keeping a zero.
     QVERIFY(library->set_rating(track_hash, false, 0U));
     QCOMPARE(library->query(tracks())->entries.front().rating, 0U);

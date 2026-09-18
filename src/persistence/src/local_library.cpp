@@ -778,6 +778,65 @@ LocalLibrary::LocalLibrary(LocalLibrary&&) noexcept = default;
 LocalLibrary& LocalLibrary::operator=(LocalLibrary&&) noexcept = default;
 LocalLibrary::~LocalLibrary() = default;
 
+namespace {
+
+// Migration 35 added the content-identity hash columns, but the scan only
+// re-prepares changed files, so pre-existing rows would never join the
+// rating store. Rows with complete field evidence rebuild their identity
+// from the indexed values here; incomplete rows wait for their explicit
+// Refresh, exactly like field search does. Idempotent and cheap once done.
+void backfill_rating_identities(sqlite3* db) {
+    {
+        Statement pending{db, "SELECT 1 FROM local_library_tracks WHERE rating_hash='' AND "
+                              "field_index_complete=1 LIMIT 1"};
+        if (!pending.next()) {
+            return;
+        }
+    }
+    std::vector<std::string> paths;
+    {
+        Statement select{db, "SELECT raw_path FROM local_library_tracks WHERE rating_hash='' "
+                             "AND field_index_complete=1"};
+        while (select.next()) {
+            paths.push_back(select.bytes(0));
+        }
+    }
+    Transaction transaction{db};
+    Statement fields{db, "SELECT canonical_name,value FROM local_library_fields WHERE raw_path=? "
+                         "ORDER BY canonical_name,position"};
+    Statement update{db, "UPDATE local_library_tracks SET rating_hash=?,album_rating_hash=? "
+                         "WHERE raw_path=?"};
+    for (const auto& path : paths) {
+        metadata::MetadataDocument document;
+        fields.reset();
+        fields.blob(1, path);
+        while (fields.next()) {
+            auto name = fields.bytes(0);
+            auto value = fields.bytes(1);
+            if (!document.fields.empty() && document.fields.back().canonical_name == name) {
+                document.fields.back().values.push_back(std::move(value));
+            } else {
+                document.fields.push_back(metadata::MetadataField{
+                    .canonical_name = std::move(name),
+                    .native_name = {},
+                    .values = {std::move(value)},
+                    .qualifier = {},
+                    .provenance = metadata::FieldProvenance::cached_snapshot,
+                });
+            }
+        }
+        const auto identity = rating_identity(document, path);
+        update.reset();
+        update.text(1, identity.track_hash);
+        update.text(2, identity.album_hash);
+        update.blob(3, path);
+        update.next();
+    }
+    transaction.commit();
+}
+
+} // namespace
+
 core::Result<LocalLibrary> LocalLibrary::open(const std::filesystem::path& path) {
     return checked([&] {
         auto migrated = ListRepository::open(path);
@@ -795,6 +854,7 @@ core::Result<LocalLibrary> LocalLibrary::open(const std::filesystem::path& path)
         // final commit on power loss and removes the per-file fsync that
         // dominated large scans. The journals keep synchronous=FULL.
         execute(impl->db, "PRAGMA synchronous=NORMAL");
+        backfill_rating_identities(impl->db);
         return LocalLibrary{std::move(impl)};
     });
 }
@@ -1638,11 +1698,13 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 const auto revision = revision_key(*before);
                 bool unchanged = false;
                 {
-                    Statement previous{db, "SELECT revision,field_index_complete FROM "
+                    // Rows still missing their migration-35 rating identity
+                    // re-prepare even when the file itself is unchanged.
+                    Statement previous{db, "SELECT revision,field_index_complete,rating_hash FROM "
                                            "local_library_tracks WHERE raw_path=?"};
                     previous.blob(1, raw);
-                    unchanged =
-                        previous.next() && previous.bytes(0) == revision && previous.number(1) == 1;
+                    unchanged = previous.next() && previous.bytes(0) == revision &&
+                                previous.number(1) == 1 && !previous.bytes(2).empty();
                 }
                 if (unchanged) {
                     Transaction transaction{db};

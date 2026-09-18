@@ -517,7 +517,7 @@ void SearchDialog::startSearch() {
                 return outcome;
             }
             const auto& row = rows[position];
-            const auto facts = persistence::make_tkq_row_facts(
+            auto facts = persistence::make_tkq_row_facts(
                 row.metadata, row.title, row.artist, row.album, row.duration_ms,
                 row.technicals ? std::optional{persistence::TkqRowTechnicals{
                                      .codec = row.technicals->codec,
@@ -525,6 +525,14 @@ void SearchDialog::startSearch() {
                                      .bits = row.technicals->bits,
                                      .channels = row.technicals->channels}}
                                : std::nullopt);
+            // ADR-0179: tab rows carry their loaded content-identity ratings;
+            // an unrated row keeps the facts' unrated default.
+            if (row.rating > 0U) {
+                facts.rating = row.rating;
+            }
+            if (row.album_rating > 0U) {
+                facts.album_rating = row.album_rating;
+            }
             if (!persistence::tkq_matches(*shared, facts, token)) {
                 continue;
             }

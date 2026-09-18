@@ -67,6 +67,10 @@ struct LocalPlaybackSnapshot {
     std::optional<std::int64_t> end_sample;
     std::size_t buffered_frames{0U};
     std::uint64_t underrun_count{0U};
+    formats::ReplayGainInfo replay_gain_info;
+    float effective_replay_gain_multiplier{1.0F};
+    float decoded_peak_before_gain{0.0F};
+    float decoded_peak_after_gain{0.0F};
     // Gapless continuation bookkeeping: whether a queued source is waiting to
     // take over at decode end, the produced-domain sample where the active
     // source began after a swap, and whether the consumer has crossed it.
@@ -122,6 +126,7 @@ class LocalPlayback final {
     // Already buffered PCM is unchanged.
     void set_replay_gain_mode(ReplayGainMode mode) noexcept;
     void set_replay_gain_preamps(ReplayGainPreamps preamps) noexcept;
+    void set_replay_gain_info(formats::ReplayGainInfo info) noexcept;
 
     // Queues a source to continue seamlessly in the same ring the moment the
     // active source's decode ends. The queued source must match the active

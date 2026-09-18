@@ -231,6 +231,81 @@ void decodedFixtureAnalyzesAndShortMaterialIsUnmeasurable(
     std::filesystem::remove(path, remove_error);
 }
 
+// M7 exit gate: every repository audio fixture that the formats adapter
+// advertises as decodable must also traverse the bounded ReplayGain graph.
+// Short fixtures may be structurally unmeasurable, but decode/analysis itself
+// must succeed independently of whether their container has a writable tag map.
+void everyDecodableFixtureCanBeScanned(const std::filesystem::path& fixture_directory) {
+    struct Fixture {
+        std::string_view encoded;
+        std::string_view materialized;
+    };
+    constexpr std::array fixtures{
+        Fixture{"art-tone-flac.b64", "art.flac"},
+        Fixture{"container-chapters-mka.b64", "chapters.mka"},
+        Fixture{"gapless-tone-aac-m4a.b64", "gapless.m4a"},
+        Fixture{"gapless-tone-mp3.b64", "gapless.mp3"},
+        Fixture{"gapless-tone-opus.b64", "gapless.opus"},
+        Fixture{"loudness-chapters-mka.b64", "loudness.mka"},
+        Fixture{"loudness-tone-opus.b64", "loudness.opus"},
+        Fixture{"partial-chapters-mka.b64", "partial.mka"},
+        Fixture{"rf64-tone-wav.b64", "tone.rf64"},
+        Fixture{"rich-metadata-flac.b64", "rich.flac"},
+        Fixture{"tagged-tone-aiff.b64", "tagged.aiff"},
+        Fixture{"tagged-tone-flac.b64", "tagged.flac"},
+        Fixture{"tagged-tone-m4a.b64", "tagged.m4a"},
+        Fixture{"tagged-tone-mp3.b64", "tagged.mp3"},
+        Fixture{"tagged-tone-opus.b64", "tagged.opus"},
+        Fixture{"tagged-tone-vorbis.b64", "tagged.ogg"},
+        Fixture{"tagged-tone-wavpack.b64", "tagged.wv"},
+        Fixture{"two-subsongs-mod.b64", "subsongs.mod"},
+        Fixture{"vorbis-positive-start.b64", "positive-start.ogg"},
+        Fixture{"wave64-float.b64", "float.w64"},
+    };
+    const auto root =
+        std::filesystem::temp_directory_path() /
+        ("trackknife-loudness-formats-" + trackknife::core::StableId::random().to_string());
+    std::filesystem::create_directory(root);
+    std::vector<trackknife::loudness::LoudnessScanItem> items;
+    items.reserve(fixtures.size());
+    for (std::size_t index = 0U; index < fixtures.size(); ++index) {
+        const auto decoded = decode_base64_file(fixture_directory / fixtures[index].encoded);
+        CHECK(decoded.has_value());
+        if (!decoded) {
+            continue;
+        }
+        const auto path = root / fixtures[index].materialized;
+        std::ofstream output{path, std::ios::binary};
+        output.write(reinterpret_cast<const char*>(decoded->data()),
+                     static_cast<std::streamsize>(decoded->size()));
+        output.close();
+        items.push_back(trackknife::loudness::LoudnessScanItem{
+            .item_index = index,
+            .raw_path = path.native(),
+            .selection = {},
+            .range = {},
+            .album_key = std::nullopt,
+        });
+    }
+    const auto scanned = trackknife::loudness::scan_loudness(
+        items, {.measure_true_peak = true, .maximum_parallelism = 4U});
+    CHECK(scanned.has_value());
+    if (scanned) {
+        CHECK(scanned->tracks.size() == fixtures.size());
+        CHECK(scanned->analyzed_track_count() == fixtures.size());
+        for (const auto& track : scanned->tracks) {
+            if (track.state != trackknife::loudness::LoudnessScanState::analyzed && track.issue) {
+                std::cerr << track.raw_path << ": " << track.issue->message << '\n';
+            }
+            CHECK(track.state == trackknife::loudness::LoudnessScanState::analyzed);
+            CHECK(track.source_revision.has_value());
+            CHECK(track.loudness.has_value());
+        }
+    }
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
 // Minimal PCM16 WAV writer so the scan tests exercise the real decoder.
 void write_sine_wav(const std::filesystem::path& path, const double amplitude,
                     const double seconds) {
@@ -534,6 +609,7 @@ int main(const int argc, char** argv) {
     discMergedGroupingStripsDesignators();
     if (argc == 2) {
         decodedFixtureAnalyzesAndShortMaterialIsUnmeasurable(std::filesystem::path{argv[1]});
+        everyDecodableFixtureCanBeScanned(std::filesystem::path{argv[1]});
     }
     return failures == 0 ? 0 : 1;
 }

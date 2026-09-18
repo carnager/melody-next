@@ -75,7 +75,9 @@ validateSerializedTextBudget(const metadata::MetadataTransformationChain& chain)
                 const auto add = [&total](const std::string_view value) {
                     return addTextBytes(total, value);
                 };
-                if constexpr (!std::is_same_v<Action, metadata::MetadataCaptureValuesAction>) {
+                if constexpr (!std::is_same_v<Action, metadata::MetadataCaptureValuesAction> &&
+                              !std::is_same_v<Action, metadata::MetadataBlocklistFieldsAction> &&
+                              !std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
                     if (auto target = add(typed.target_field); !target) {
                         return target;
                     }
@@ -125,6 +127,15 @@ validateSerializedTextBudget(const metadata::MetadataTransformationChain& chain)
                         return source;
                     }
                     return add(typed.pattern);
+                } else if constexpr (std::is_same_v<Action,
+                                                    metadata::MetadataBlocklistFieldsAction> ||
+                                     std::is_same_v<Action,
+                                                    metadata::MetadataAllowlistFieldsAction>) {
+                    for (const auto& field : typed.fields) {
+                        if (auto item = add(field); !item) {
+                            return item;
+                        }
+                    }
                 }
                 return {};
             },
@@ -434,6 +445,12 @@ readCaptureSource(const QJsonObject& object, const std::string_view location) {
                         {QStringLiteral("pattern"), jsonString(typed.pattern)},
                         {QStringLiteral("source"), jsonString(typed.source)},
                         {QStringLiteral("source_kind"), captureSourceName(typed.source_kind)}};
+            } else if constexpr (std::is_same_v<Action, metadata::MetadataBlocklistFieldsAction>) {
+                return {{QStringLiteral("fields"), valuesToJson(typed.fields)},
+                        {QStringLiteral("kind"), QStringLiteral("blocklist_fields")}};
+            } else if constexpr (std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
+                return {{QStringLiteral("fields"), valuesToJson(typed.fields)},
+                        {QStringLiteral("kind"), QStringLiteral("allowlist_fields")}};
             }
             return {};
         },
@@ -488,6 +505,19 @@ readAction(const QJsonValue& value, const std::size_t index) {
         }
         return metadata::MetadataRemoveFieldAction{.target_field = std::move(*target),
                                                    .match_mode = *mode};
+    }
+    if (*kind == "blocklist_fields" || *kind == "allowlist_fields") {
+        if (auto keys = requireExactKeys(object, {"fields", "kind"}, location); !keys) {
+            return std::unexpected(keys.error());
+        }
+        auto fields = readValues(object, "fields", location);
+        if (!fields) {
+            return std::unexpected(fields.error());
+        }
+        if (*kind == "blocklist_fields") {
+            return metadata::MetadataBlocklistFieldsAction{.fields = std::move(*fields)};
+        }
+        return metadata::MetadataAllowlistFieldsAction{.fields = std::move(*fields)};
     }
     if (*kind == "remove_field_if") {
         if (auto keys = requireExactKeys(

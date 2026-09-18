@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "uicommon/list_persistence_service.hpp"
+#include "trackknife/persistence/workspace_backup.hpp"
 
 #include <QMetaObject>
 #include <QPointer>
@@ -206,6 +207,28 @@ void ListPersistenceService::saveProfiles(std::vector<persistence::ConnectionPro
             }
         }
         if (!callback || !self) {
+            return;
+        }
+        invokeQueued(self, [callback = std::move(callback), error]() mutable { callback(error); });
+    });
+}
+
+void ListPersistenceService::backupDatabase(std::filesystem::path destination,
+                                            CompletionCallback callback) {
+    const QPointer self{this};
+    invokeQueued(worker_, [self, state = state_, destination = std::move(destination),
+                           callback = std::move(callback)]() mutable {
+        QString error = state->initialization_error;
+        if (error.isEmpty() && !state->repository) {
+            error = QStringLiteral("List persistence is not initialized");
+        } else if (error.isEmpty()) {
+            auto backup =
+                persistence::create_workspace_database_backup(state->database_path, destination);
+            if (!backup) {
+                error = errorText(backup.error());
+            }
+        }
+        if (!self || !callback) {
             return;
         }
         invokeQueued(self, [callback = std::move(callback), error]() mutable { callback(error); });

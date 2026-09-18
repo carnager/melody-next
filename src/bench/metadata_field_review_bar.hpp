@@ -4,6 +4,8 @@
 
 #include <QWidget>
 
+#include <QStringList>
+
 class QCheckBox;
 class QLabel;
 class QLineEdit;
@@ -20,6 +22,8 @@ class MetadataFieldReviewBar final : public QWidget {
     MetadataFieldReviewBar(QTableView* fields, MetadataAggregateModel* model, QTableView* files,
                            QWidget* parent = nullptr);
     void revealField(int row);
+    void setLayoutFields(QStringList canonical_names);
+    [[nodiscard]] QStringList visibleFieldNames() const;
 
   private:
     void refresh();
@@ -30,6 +34,7 @@ class MetadataFieldReviewBar final : public QWidget {
     QCheckBox* changed_only_;
     QLabel* status_;
     QTimer* debounce_;
+    QStringList layout_fields_;
 };
 
 } // namespace trackknife::bench

@@ -55,7 +55,8 @@ class QVBoxLayout;
 
 namespace trackknife::audio {
 class LocalAuditionService;
-}
+class MelodyAgentService;
+} // namespace trackknife::audio
 
 namespace trackknife::ui {
 class ListPersistenceService;
@@ -164,6 +165,9 @@ class BenchMainWindow final : public QMainWindow {
     void restoreLists(std::vector<persistence::ListDocument> documents);
     void schedulePersist();
     void persistNow(bool wait);
+    void backupWorkspace();
+    void scheduleWorkspaceRestore();
+    void showMpdDiagnostics();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
     [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
     void openMpdConnectionDialog();
@@ -224,6 +228,17 @@ class BenchMainWindow final : public QMainWindow {
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
                               const QString& name);
+    struct CrossTabMoveEdit {
+        QString source_id;
+        QString target_id;
+        std::vector<LocalTrackRow> source_before;
+        std::vector<LocalTrackRow> source_after;
+        std::vector<LocalTrackRow> target_before;
+        std::vector<LocalTrackRow> target_after;
+        bool applied{true};
+    };
+    [[nodiscard]] bool canReplayCrossTabMove(bool undo);
+    bool replayCrossTabMove(bool undo);
     void refreshTabChrome(ListTab& tab);
     void refreshTabActions();
     void refreshListHistoryActions();
@@ -319,6 +334,7 @@ class BenchMainWindow final : public QMainWindow {
         QImage image;
     };
     void syncArtwork(ListTab& tab);
+    void invalidateArtwork(const std::string& raw_path);
     void pumpArtworkQueue();
     void finishArtworkLoad();
 
@@ -338,6 +354,7 @@ class BenchMainWindow final : public QMainWindow {
     adjacentPlaybackRow(int direction);
     void refreshTransport();
     void refreshMpdTransport();
+    void refreshMelodyEndpoint();
     void buildMprisService();
     void publishMprisState();
     void rebuildDeviceMenu();
@@ -349,6 +366,9 @@ class BenchMainWindow final : public QMainWindow {
 
     audio::LocalAuditionService* player_{nullptr};
     std::unique_ptr<audio::LocalAuditionService> player_storage_;
+    std::unique_ptr<audio::LocalAuditionService> melody_player_storage_;
+    std::unique_ptr<audio::MelodyAgentService> melody_endpoint_;
+    QString melody_endpoint_profile_;
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     LocalLibraryPanel* local_library_{nullptr};
@@ -528,7 +548,9 @@ class BenchMainWindow final : public QMainWindow {
     std::deque<ArtworkJob> artwork_queue_;
     QHash<QString, QImage> artwork_cache_;
     QSet<QString> artwork_pending_;
+    QSet<QString> artwork_invalidated_while_loading_;
     bool artwork_running_{false};
+    std::optional<CrossTabMoveEdit> cross_tab_move_edit_;
 
     QFutureWatcher<std::shared_ptr<MetadataOperationJobOutcome>> metadata_operation_watcher_;
     std::shared_ptr<MetadataOperationJobOutcome> metadata_operation_snapshot_;

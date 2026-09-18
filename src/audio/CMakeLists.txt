@@ -4,6 +4,7 @@ add_library(
     trackknife_audio STATIC
     src/local_audition.cpp
     src/local_playback.cpp
+    src/melody_agent.cpp
     src/playback_order.cpp
     src/pipewire_output.cpp
 )

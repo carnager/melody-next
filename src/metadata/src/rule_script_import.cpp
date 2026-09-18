@@ -592,12 +592,11 @@ class Translator final {
             warned_unset_ = true;
         }
         if (condition) {
-            result_.actions.push_back(MetadataRemoveFieldIfAction{
-                .target_field = std::move(*target),
-                .dialect = {},
-                .condition = *condition,
-                .match_mode = MetadataFieldMatchMode::exact_native,
-            });
+            MetadataRemoveFieldIfAction action;
+            action.target_field = std::move(*target);
+            action.condition = *condition;
+            action.match_mode = MetadataFieldMatchMode::exact_native;
+            result_.actions.push_back(std::move(action));
         } else {
             result_.actions.push_back(MetadataRemoveFieldAction{
                 .target_field = std::move(*target),
@@ -734,7 +733,9 @@ export_metadata_rule_script(const std::span<const MetadataTransformationAction> 
             [index](const auto& action) -> core::Result<std::string> {
                 using Action = std::decay_t<decltype(action)>;
                 const auto target = [&] {
-                    if constexpr (std::is_same_v<Action, MetadataCaptureValuesAction>) {
+                    if constexpr (std::is_same_v<Action, MetadataCaptureValuesAction> ||
+                                  std::is_same_v<Action, MetadataBlocklistFieldsAction> ||
+                                  std::is_same_v<Action, MetadataAllowlistFieldsAction>) {
                         return std::string{};
                     } else {
                         return escape_argument_literal(action.target_field);

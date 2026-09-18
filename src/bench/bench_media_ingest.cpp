@@ -565,6 +565,32 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     pumpArtworkQueue();
 }
 
+void BenchMainWindow::invalidateArtwork(const std::string& raw_path) {
+    QSet<QString> keys;
+    for (const auto& tab : list_tabs_) {
+        const auto& rows = tab->model->rows();
+        for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
+            if (rows[static_cast<std::size_t>(row)].raw_path == raw_path) {
+                keys.insert(tab->model->groupKey(row));
+            }
+        }
+    }
+    for (const auto& key : keys) {
+        artwork_cache_.remove(key);
+        artwork_pending_.remove(key);
+        std::erase_if(artwork_queue_, [&key](const ArtworkJob& job) { return job.key == key; });
+        if (artwork_running_ && artwork_outcome_ && artwork_outcome_->key == key) {
+            artwork_invalidated_while_loading_.insert(key);
+        }
+        for (const auto& tab : list_tabs_) {
+            tab->model->setArtwork(key, {});
+        }
+    }
+    for (const auto& tab : list_tabs_) {
+        syncArtwork(*tab);
+    }
+}
+
 void BenchMainWindow::pumpArtworkQueue() {
     if (artwork_running_ || artwork_queue_.empty()) {
         return;
@@ -596,6 +622,12 @@ void BenchMainWindow::finishArtworkLoad() {
 #if defined(TRACKKNIFE_THREAD_SANITIZER)
     __tsan_acquire(outcome.get());
 #endif
+    if (artwork_invalidated_while_loading_.remove(outcome->key)) {
+        // Invalidation already queued a fresh read and its pending marker now
+        // owns this key. Discard only the stale in-flight result.
+        pumpArtworkQueue();
+        return;
+    }
     // Failed lookups are cached as null so a missing cover is asked once, not
     // on every metadata refresh.
     artwork_cache_.insert(outcome->key, outcome->image);
@@ -798,7 +830,7 @@ void BenchMainWindow::finishDiscovery() {
     }
     if (!result.rows.empty() && (!discovery_replace_and_play_ || !result.cancelled)) {
         if (discovery_replace_and_play_) {
-            tab->model->replaceRows(std::move(result.rows));
+            tab->model->replaceRows(std::move(result.rows), true);
             playRow(*tab, 0);
         } else {
             tab->model->appendRows(std::move(result.rows), discovery_anchored_

@@ -192,6 +192,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
+    void metadataFieldLayoutsLoadFilterAndPersist();
     void metadataGridDisplaysUnicodePaths();
     void metadataGridReusesExactNativeFieldWithoutInvalidIndexes();
     void metadataTransformationChainPreviewsAndStagesOneUndo();
@@ -242,6 +243,7 @@ class BenchMainWindowTest final : public QObject {
     void localReorderPreservesVisibleRowGeometry();
     void localListUndoRestoresOccurrencesAndFreshMetadata();
     void localListHistoryBranchesAndBounds();
+    void crossTabMoveUndoIsOneTransaction();
     void localListUndoActionsRespectAuthorityAndTextEditing();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
@@ -389,6 +391,9 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QCOMPARE(device->accessibleName(), QStringLiteral("Audio output device"));
     // The regular menu bar is the application menu — no hamburger button.
     QVERIFY(window.findChild<QToolButton*>(QStringLiteral("bench-main-menu")) == nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-backup-workspace")) != nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-restore-workspace")) != nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-diagnostics")) != nullptr);
     QVERIFY(!window.menuBar()->isHidden());
     QCOMPARE(window.menuBar()->actions().size(), 4);
     QCOMPARE(device->toolButtonStyle(), Qt::ToolButtonIconOnly);
@@ -1729,6 +1734,77 @@ void BenchMainWindowTest::metadataDialogLayoutsPersistAsynchronously() {
     QVERIFY(second->close());
 }
 
+void BenchMainWindowTest::metadataFieldLayoutsLoadFilterAndPersist() {
+    const auto make_field = [](std::string name, std::string value) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = {std::move(value)},
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    const MetadataPropertiesSource source{
+        .source =
+            metadata::StagedMetadataSource{
+                .raw_path = "/music/field-layout.flac",
+                .source_revision = std::nullopt,
+                .baseline =
+                    metadata::MetadataDocument{
+                        .fields = {make_field("TITLE", "One"), make_field("ARTIST", "Artist"),
+                                   make_field("ALBUM", "Album")},
+                        .unsupported_native_objects = {},
+                    },
+            },
+        .track_label = QStringLiteral("Field layout fixture"),
+    };
+    QHash<QString, QByteArray> states;
+    states.insert(
+        QStringLiteral("workspace/metadata-field-layouts-v1"),
+        QByteArrayLiteral(
+            R"({"schema":1,"active":"compact","layouts":[{"id":"compact","name":"Compact","fields":["title","artist"]}]})"));
+    const MetadataDialogLayoutStore store{
+        .load = [&states](QString key, auto completion) { completion(states.value(key), {}); },
+        .save =
+            [&states](QString key, QByteArray value, auto completion) {
+                states.insert(std::move(key), std::move(value));
+                if (completion) {
+                    completion({});
+                }
+            },
+    };
+    auto* properties = new MetadataPropertiesDialog(
+        1U,
+        [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index == 0U ? std::optional{source} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, store);
+    properties->show();
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* combo = properties->findChild<QComboBox*>(QStringLiteral("bench-metadata-field-layout"));
+    QVERIFY(combo != nullptr);
+    QVERIFY(combo->isHidden());
+    auto* model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    QVERIFY(model != nullptr);
+    const auto title = model->fieldRow(QStringLiteral("title"));
+    const auto artist = model->fieldRow(QStringLiteral("artist"));
+    const auto album = model->fieldRow(QStringLiteral("album"));
+    QVERIFY(title && artist && album);
+    QCOMPARE(*title, 0);
+    QCOMPARE(*artist, 1);
+    QVERIFY(!fields->isRowHidden(*title));
+    QVERIFY(!fields->isRowHidden(*artist));
+    QVERIFY(!fields->isRowHidden(*album));
+    QVERIFY(!fields->isRowHidden(*album));
+    QCOMPARE(
+        states.value(QStringLiteral("workspace/metadata-field-layouts-v1")),
+        QByteArrayLiteral(
+            R"({"schema":1,"active":"compact","layouts":[{"id":"compact","name":"Compact","fields":["title","artist"]}]})"));
+    delete properties;
+}
+
 void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -1872,6 +1948,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
         QStringLiteral("bench-output-layout-directory-expression"));
     auto* layout_basename = properties->findChild<QLineEdit*>(
         QStringLiteral("bench-output-layout-basename-expression"));
+    auto* layout_sanitization =
+        properties->findChild<QComboBox*>(QStringLiteral("bench-output-layout-sanitization"));
     auto* layout_new =
         properties->findChild<QPushButton*>(QStringLiteral("bench-output-layout-new"));
     auto* layout_save =
@@ -1890,6 +1968,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QVERIFY(layout_name != nullptr);
     QVERIFY(layout_directory != nullptr);
     QVERIFY(layout_basename != nullptr);
+    QVERIFY(layout_sanitization != nullptr);
     QVERIFY(layout_new != nullptr);
     QVERIFY(layout_save != nullptr);
     QVERIFY(destination_combo != nullptr);
@@ -1900,6 +1979,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QCOMPARE(layout_combo->count(), 1);
     QCOMPARE(layout_combo->currentText(), QStringLiteral("Albums"));
     QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
+    QCOMPARE(layout_sanitization->currentData().toString(), QStringLiteral("linux"));
     QCOMPARE(destination_combo->count(), 1);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Library"));
 
@@ -1942,11 +2022,14 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     layout_name->setText(QStringLiteral("Artist folders"));
     layout_directory->setText(QStringLiteral("%artist%"));
     layout_basename->setText(QStringLiteral("%title%"));
+    layout_sanitization->setCurrentIndex(layout_sanitization->findData(QStringLiteral("portable")));
     QTRY_VERIFY(layout_save->isEnabled());
     QTest::mouseClick(layout_save, Qt::LeftButton);
     QTRY_COMPARE(layouts.size(), 2U);
     QCOMPARE(layout_combo->count(), 2);
     QCOMPARE(layout_combo->currentText(), QStringLiteral("Artist folders"));
+    QCOMPARE(layouts.back().profile.sanitization_policy,
+             (operations::PolicyVersion{"portable", 1U}));
 
     auto* destination_manage =
         properties->findChild<QPushButton*>(QStringLiteral("bench-destination-manage"));
@@ -2435,15 +2518,17 @@ void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() 
     QVERIFY(stage != nullptr);
     QVERIFY(preview_table != nullptr);
     QVERIFY(preview_summary != nullptr);
-    // 17 step kinds under 4 unselectable group headers; kinds are found by
+    // 19 step kinds under 4 unselectable group headers; kinds are found by
     // name because the row index no longer matches the action kind.
-    QCOMPARE(kind->count(), 21);
+    QCOMPARE(kind->count(), 23);
     for (const auto& kind_name : {QStringLiteral("Capitalize first character"),
                                   QStringLiteral("Remove exact matching values"),
                                   QStringLiteral("Replace exact matching values"),
                                   QStringLiteral("Number by selected-file order"),
                                   QStringLiteral("Keep first characters of each value"),
                                   QStringLiteral("Remove field when condition matches"),
+                                  QStringLiteral("Remove listed fields (blocklist)"),
+                                  QStringLiteral("Keep only listed fields (allowlist)"),
                                   QStringLiteral("Capture fields with tkcapture-1")}) {
         QVERIFY2(kind->findText(kind_name) >= 0, qPrintable(kind_name));
     }
@@ -2915,7 +3000,7 @@ void BenchMainWindowTest::metadataSuggestionsStageSelectionConsistency() {
     QVERIFY(status != nullptr);
     files->selectAll();
     QTRY_VERIFY(suggest->isEnabled());
-    QTest::mouseClick(suggest, Qt::LeftButton);
+    suggest->click();
 
     // The internal consistency provider stages album artist and total tracks
     // for every file as one ordinary colored draft transaction.
@@ -3669,8 +3754,11 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-run"));
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-status"));
     auto* problems = dialog->findChild<QPlainTextEdit*>(QStringLiteral("bench-convert-problems"));
+    auto* channels = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-channels"));
+    auto* gain_mode = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-gain"));
     QVERIFY(preset != nullptr && root != nullptr && directories != nullptr && names != nullptr);
     QVERIFY(preview != nullptr && run != nullptr && status != nullptr && problems != nullptr);
+    QVERIFY(channels != nullptr && gain_mode != nullptr);
     // Problem reports scroll inside a bounded pane instead of stretching
     // the dialog; without problems it stays hidden.
     QVERIFY(!problems->isVisible());
@@ -3699,8 +3787,11 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     // selectable profile, and deletes again; built-ins are untouched.
     const auto builtin_count = preset->count();
     auto* preset_new = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-preset-new"));
+    auto* preset_export =
+        dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-preset-export"));
     auto* preset_delete =
         dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-preset-delete"));
+    QVERIFY(preset_export != nullptr);
     QVERIFY(preset_new != nullptr && preset_delete != nullptr);
     QVERIFY(!preset_delete->isVisible());
     QTest::mouseClick(preset_new, Qt::LeftButton);
@@ -3719,6 +3810,8 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     editor_name->setText(QStringLiteral("Phone Opus"));
     editor_format->setCurrentIndex(1);
     editor_bitrate->setValue(96);
+    channels->setCurrentIndex(1);
+    gain_mode->setCurrentIndex(1);
     QVERIFY(editor_buttons->button(QDialogButtonBox::Save)->isEnabled());
     QTest::mouseClick(editor_buttons->button(QDialogButtonBox::Save), Qt::LeftButton);
     QTRY_COMPARE(preset_catalog.size(), 1U);
@@ -3728,6 +3821,14 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QTRY_COMPARE(preset->count(), builtin_count + 2);
     QCOMPARE(preset->currentText(), QStringLiteral("Phone Opus"));
     QTRY_VERIFY(preset_delete->isVisible());
+    // A saved encoder preset also snapshots the complete conversion job.
+    // Switching away, changing processing, then returning restores it.
+    preset->setCurrentIndex(0);
+    channels->setCurrentIndex(0);
+    gain_mode->setCurrentIndex(0);
+    preset->setCurrentIndex(preset->count() - 1);
+    QCOMPARE(channels->currentData().toInt(), 1);
+    QCOMPARE(gain_mode->currentData().toInt(), 1);
     QTest::mouseClick(preset_delete, Qt::LeftButton);
     QTRY_VERIFY(preset_catalog.empty());
     QTRY_COMPARE(preset->count(), builtin_count);
@@ -6677,9 +6778,20 @@ void BenchMainWindowTest::localListHistoryBranchesAndBounds() {
     QVERIFY(!model.canRedo());
     QVERIFY(model.undo());
     QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{first, third}));
-    model.appendRows({second}); // Structural operations outside this history start a new baseline.
-    QVERIFY(!model.canUndo());
+    model.appendRows({second});
+    QCOMPARE(model.undoLabel(), QStringLiteral("Add tracks"));
+    QVERIFY(model.canUndo());
     QVERIFY(!model.canRedo());
+    QVERIFY(model.undo());
+    QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{first, third}));
+    QVERIFY(model.redo());
+    QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{first, third, second}));
+    model.replaceRows({first, second}, true);
+    QCOMPARE(model.undoLabel(), QStringLiteral("Replace list contents"));
+    QVERIFY(model.undo());
+    QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{first, third, second}));
+    QVERIFY(model.redo());
+    QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{first, second}));
     model.removeRowIndexes({0});
     model.removeRowIndexes({0}, false); // Consume and cross-tab moves do not enter local history.
     QVERIFY(!model.canUndo());
@@ -6696,6 +6808,42 @@ void BenchMainWindowTest::localListHistoryBranchesAndBounds() {
     while (model.redo()) {
     }
     QCOMPARE(model.rows(), (std::vector<LocalTrackRow>{second, first}));
+}
+
+void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    tabs->setCurrentIndex(1);
+    auto* source_view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* source = qobject_cast<LocalListModel*>(source_view->model());
+    QVERIFY(source != nullptr);
+    LocalTrackRow first;
+    first.raw_path = "/music/first.flac";
+    LocalTrackRow second;
+    second.raw_path = "/music/second.flac";
+    source->replaceRows({first, second});
+    window.duplicateCurrentTab();
+    QCOMPARE(tabs->count(), 3);
+    auto* target_view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* target = qobject_cast<LocalListModel*>(target_view->model());
+    QVERIFY(target != nullptr && target != source);
+    QCOMPARE(target->rowCount(), 2);
+
+    QVERIFY(window.transferRows(source_view, {0},
+                                target_view->property("bench-document-id").toString(), true, -1));
+    QCOMPARE(source->rowCount(), 1);
+    QCOMPARE(target->rowCount(), 3);
+    QVERIFY(window.canReplayCrossTabMove(true));
+    window.replayListEdit(true);
+    QCOMPARE(source->rows(), (std::vector<LocalTrackRow>{first, second}));
+    QCOMPARE(target->rows(), (std::vector<LocalTrackRow>{first, second}));
+    QVERIFY(window.canReplayCrossTabMove(false));
+    window.replayListEdit(false);
+    QCOMPARE(source->rows(), (std::vector<LocalTrackRow>{second}));
+    QCOMPARE(target->rows(), (std::vector<LocalTrackRow>{first, second, first}));
 }
 
 void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {
@@ -8174,6 +8322,9 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     QCOMPARE(file_choices, 1);
     QCOMPARE(role_choices, 1);
     QCOMPARE(pending->model()->rowCount(), 1);
+    auto* files = properties->findChild<QTableView*>(QStringLiteral("bench-metadata-files"));
+    QVERIFY(files != nullptr);
+    QVERIFY2(files->height() >= 120, "adding an artwork draft must not collapse the file list");
     QVERIFY(!observed.has_value());
     QTRY_VERIFY(save->isEnabled());
     QTest::mouseClick(save, Qt::LeftButton);

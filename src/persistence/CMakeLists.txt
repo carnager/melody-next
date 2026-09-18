@@ -8,6 +8,7 @@ add_library(
     src/musicbrainz_cache.cpp
     src/operation_journal.cpp
     src/tkq_row.cpp
+    src/workspace_backup.cpp
 )
 add_library(Trackknife::Persistence ALIAS trackknife_persistence)
 

@@ -272,14 +272,15 @@ void MpdProbeController::probeProfile(const QString& profile_id, const QString& 
                 QMetaObject::invokeMethod(
                     self.data(),
                     [self, token, database_changed, playlists_changed] {
-                        if (!self || token != self->connection_token_) {
+                        auto* controller = self.data();
+                        if (controller == nullptr || token != controller->connection_token_) {
                             return;
                         }
                         if (database_changed) {
-                            emit self->serverDatabaseChanged();
+                            emit controller->serverDatabaseChanged();
                         }
                         if (playlists_changed) {
-                            emit self->storedPlaylistsChanged();
+                            emit controller->storedPlaylistsChanged();
                         }
                     },
                     Qt::QueuedConnection);
@@ -1352,6 +1353,12 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
                    .arg(snapshot.capabilities.tag_types.size())
                    .arg(snapshot.queue.size())
                    .arg(now_playing_);
+    auto commands = advertised_commands_.values();
+    commands.sort(Qt::CaseInsensitive);
+    auto tags = advertised_tag_types_.values();
+    tags.sort(Qt::CaseInsensitive);
+    details_ += QStringLiteral("\nCommands\n%1\n\nTag types\n%2\n")
+                    .arg(commands.join(QStringLiteral(", ")), tags.join(QStringLiteral(", ")));
     details_ += QStringLiteral("\nOutputs\n") + output_summary_;
     queue_model_.replaceTracks(std::move(snapshot.queue));
     output_model_.replaceOutputs(std::move(snapshot.outputs));

@@ -1,8 +1,9 @@
 # Using Trackknife with Melody
 
 Melody speaks MPD, so it connects like any other MPD server. Trackknife
-controls its queue and outputs; playback happens on the server or a Melody
-agent. Trackknife itself is not yet a Melody playback output.
+controls its queue and outputs and automatically registers itself as a Melody
+playback output when the server advertises `melody_version`. Stock MPD remains
+an ordinary client connection.
 
 ## Configure melodyd
 
@@ -67,7 +68,15 @@ Open **File → Connect to MPD…**:
 - **Local music root:** leave blank unless you also want to edit server files.
 
 Connect, select **MPD Queue**, and browse or search the server library. Use the
-output controls to enable the server's speakers or a connected agent.
+output controls to enable the server's speakers, **Trackknife**, or another
+connected agent. Trackknife becomes offline when this connection or the app is
+closed and reconnects with the same process identity after transient failures.
+
+If **Local music root** contains the same relative paths as Melody's library,
+Trackknife decodes those files directly. Otherwise it streams by Melody's
+stable song identity from the server HTTP endpoint on port `6701`. The endpoint
+uses the MPD queue's identity and clock in either mode; it does not transfer the
+row into a Local Queue tab.
 
 ## Play on another machine
 

@@ -1,6 +1,6 @@
 # Maintainer: Rasi <rasmus.steinke@gmail.com>
 pkgname=trackknife-git
-pkgver=r116.g9e9fdd8
+pkgver=r166.g7d0cb83
 pkgrel=1
 pkgdesc="MPD client and audio workstation: tagging, conversion, ReplayGain (built from HEAD)"
 arch=(x86_64)
@@ -48,4 +48,7 @@ package() {
   install -Dm644 packaging/arch/trackknife.desktop \
     "$pkgdir/usr/share/applications/trackknife.desktop"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD_PARTY.md "$pkgdir/usr/share/doc/$pkgname/THIRD_PARTY.md"
+  install -Dm644 docs/release-checklist.md \
+    "$pkgdir/usr/share/doc/$pkgname/release-checklist.md"
 }

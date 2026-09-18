@@ -194,8 +194,9 @@ Named and exact duration profiles configure future ring allocations
 without resizing live RT state. A persistent registry/default-metadata monitor
 publishes device generations to the same worker; explicit-target loss pauses
 without fallback and reconnects in place when the target returns. Trackbench's
-player owns it today; the client reuses it later only as the M9 Melody
-endpoint's server-controlled output.
+Trackbench's Local Queue player and the M9 Melody endpoint each own a service
+instance; the latter is a server-controlled output and never borrows Local
+Queue authority (ADR-0174).
 
 ### `preparation`
 
@@ -243,6 +244,8 @@ evidence and are reread only while preparing each destination; they never
 become temp files or SQLite blobs. The separate bounded Export service is a
 non-mutating exclusive-output boundary over the same transient image reader
 and therefore owns neither a mutation journal nor retained Undo artifacts.
+ADR-0178 adds selection-expanded field allowlist/blocklist actions to the same
+pure preview path; schema 34 and native JSON retain their bounded field lists.
 Saved definitions cross the `persistence` boundary only as validated
 declarative data. Each adapter
 publishes independent
@@ -259,15 +262,17 @@ writability.
 ADR-0124 retains immutable stream/subsong/range inputs beside Properties
 metadata rows and carries them into logical-source scans. A Qt-free staged
 source flag prevents the physical metadata planner from publishing logical
-ReplayGain/R128 values as whole-file tags; durable logical storage remains open.
+ReplayGain/R128 values as whole-file tags. ADRs 0139-0145 route those values to
+revision-gated CUE or sidecar carriers with journal and playback parity.
 
 ### `convert`
 
 Versioned encoder presets with runtime FFmpeg capability probing and the
-qualified single-file conversion primitive: decoder-fed swresample into an
-FFmpeg encoder/muxer, hidden-temporary output verified by full decode before
-an atomic no-replace rename. Qt-free; scheduling and destination planning
-layer above it.
+qualified single-file conversion primitive: optional permanent ReplayGain,
+channel/rate/depth conversion through swresample, then FFmpeg encode into a
+hidden temporary verified by full decode before atomic no-replace publication.
+The bounded scan stays Qt-free; the UI layers destination planning and complete
+saved-job snapshots over it (ADR-0173).
 
 ### `operations`
 
@@ -320,6 +325,11 @@ The operation journal also guards retained-backup state and unique reverse
 operation identities for crash-recoverable undo. Apply first persists a
 UI-captured workspace snapshot on this worker so a newly opened occurrence
 cannot race the ordinary save debounce.
+ADR-0175 adds a Qt-free online-backup boundary over that database: SQLite
+captures committed WAL state into an exclusive destination, which is reopened
+read-only for integrity and Trackknife-schema validation before success is
+reported. Restore remains a restart boundary so no live repository connection
+can observe a database being replaced underneath it.
 
 ### `ui`
 
@@ -510,8 +520,8 @@ combining their queues or controllers:
 6. Finish the Trackbench tag grid and mutation framework, including artwork
    management; then add MusicBrainz providers.
 7. Parallel ReplayGain, then converter/resampler and organized output.
-8. Melody endpoint in Trackbench's MPD authority; hardening and packaging
-   (the compatibility shell was retired in ADR-0071).
+8. ~~Melody endpoint in Trackbench's MPD authority (ADR-0174).~~ Continue with
+   hardening and packaging (the compatibility shell was retired in ADR-0071).
 
 ADR-0115 authorizes the optional local library. A plugin SDK and elaborate
 theme system remain deferred until both authority experiences are excellent.

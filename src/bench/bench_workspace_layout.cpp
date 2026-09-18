@@ -20,6 +20,8 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QDir>
+#include <QFile>
+#include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -28,6 +30,7 @@
 #include <QListWidgetItem>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QSettings>
 #include <QToolButton>
 
@@ -272,6 +275,13 @@ void BenchMainWindow::buildWorkspace() {
     open_folder->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
     connect(open_folder, &QAction::triggered, this, &BenchMainWindow::openFolderDialog);
     buildPlaylistActions(file_menu);
+    auto* backup_workspace = file_menu->addAction(QStringLiteral("Back up workspace database…"));
+    backup_workspace->setObjectName(QStringLiteral("action-backup-workspace"));
+    connect(backup_workspace, &QAction::triggered, this, &BenchMainWindow::backupWorkspace);
+    auto* restore_workspace = file_menu->addAction(QStringLiteral("Restore workspace database…"));
+    restore_workspace->setObjectName(QStringLiteral("action-restore-workspace"));
+    connect(restore_workspace, &QAction::triggered, this,
+            &BenchMainWindow::scheduleWorkspaceRestore);
     auto* add_root = file_menu->addAction(QStringLiteral("Bookmark folder…"));
     connect(add_root, &QAction::triggered, this, &BenchMainWindow::addFolderRoot);
     file_menu->addSeparator();
@@ -284,6 +294,9 @@ void BenchMainWindow::buildWorkspace() {
     disconnect_mpd_action_->setObjectName(QStringLiteral("action-disconnect-mpd"));
     connect(disconnect_mpd_action_, &QAction::triggered, mpd_controller_,
             &quick::MpdProbeController::disconnectFromServer);
+    auto* mpd_diagnostics = file_menu->addAction(QStringLiteral("MPD capability diagnostics…"));
+    mpd_diagnostics->setObjectName(QStringLiteral("action-mpd-diagnostics"));
+    connect(mpd_diagnostics, &QAction::triggered, this, &BenchMainWindow::showMpdDiagnostics);
     file_menu->addSeparator();
     auto* quit = file_menu->addAction(QStringLiteral("Quit"));
     quit->setShortcut(QKeySequence::Quit);
@@ -553,6 +566,19 @@ void BenchMainWindow::buildWorkspace() {
     refreshTabActions();
     refreshTrackViewActions();
     refreshPanelLayoutActions();
+}
+
+void BenchMainWindow::showMpdDiagnostics() {
+    QMessageBox dialog{this};
+    dialog.setWindowTitle(QStringLiteral("MPD capability diagnostics"));
+    dialog.setIcon(QMessageBox::Information);
+    dialog.setText(mpd_controller_->connected() ? mpd_controller_->status()
+                                                : QStringLiteral("MPD is not connected"));
+    dialog.setDetailedText(mpd_controller_->details().isEmpty()
+                               ? QStringLiteral("Connect to an MPD server to inspect its protocol "
+                                                "version, commands, tags, queue, and outputs.")
+                               : mpd_controller_->details());
+    dialog.exec();
 }
 
 ui::PanelLayout BenchMainWindow::defaultPanelLayout() const {

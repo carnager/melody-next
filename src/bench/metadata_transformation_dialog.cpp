@@ -191,6 +191,10 @@ class MetadataTransformationDialog final : public QDialog {
                                 "for example $not(%totaldiscs%)"));
         add_kind(QStringLiteral("Remove exact matching values"), 11);
         add_kind(QStringLiteral("Replace exact matching values"), 12);
+        add_kind(QStringLiteral("Remove listed fields (blocklist)"), 18,
+                 QStringLiteral("Remove every named field from the selected files"));
+        add_kind(QStringLiteral("Keep only listed fields (allowlist)"), 19,
+                 QStringLiteral("Remove every field except the named fields"));
         kind_->setCurrentIndex(1);
         target_label_ = new QLabel(QStringLiteral("Target field:"), this);
         target_ = new QLineEdit(this);
@@ -511,7 +515,9 @@ class MetadataTransformationDialog final : public QDialog {
             [index](const auto& typed) {
                 using Action = std::decay_t<decltype(typed)>;
                 const auto field = [&] {
-                    if constexpr (std::is_same_v<Action, metadata::MetadataCaptureValuesAction>) {
+                    if constexpr (std::is_same_v<Action, metadata::MetadataCaptureValuesAction> ||
+                                  std::is_same_v<Action, metadata::MetadataBlocklistFieldsAction> ||
+                                  std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
                         return QString{};
                     } else {
                         return display_utf8(typed.target_field);
@@ -540,6 +546,24 @@ class MetadataTransformationDialog final : public QDialog {
                                : QStringLiteral("%1. Remove %2 when %3")
                                      .arg(index + 1U)
                                      .arg(field, display_utf8(typed.condition));
+                } else if constexpr (std::is_same_v<Action,
+                                                    metadata::MetadataBlocklistFieldsAction>) {
+                    QStringList fields;
+                    for (const auto& name : typed.fields) {
+                        fields.push_back(display_utf8(name));
+                    }
+                    return QStringLiteral("%1. Remove listed fields: %2")
+                        .arg(index + 1U)
+                        .arg(fields.join(QStringLiteral(", ")));
+                } else if constexpr (std::is_same_v<Action,
+                                                    metadata::MetadataAllowlistFieldsAction>) {
+                    QStringList fields;
+                    for (const auto& name : typed.fields) {
+                        fields.push_back(display_utf8(name));
+                    }
+                    return QStringLiteral("%1. Keep only listed fields: %2")
+                        .arg(index + 1U)
+                        .arg(fields.join(QStringLiteral(", ")));
                 } else if constexpr (std::is_same_v<Action,
                                                     metadata::MetadataTransformValuesAction>) {
                     QString verb;
@@ -1127,10 +1151,11 @@ class MetadataTransformationDialog final : public QDialog {
     void updateInputForKind() {
         const auto kind = currentStepKind();
         const auto captures = kind == 16;
-        target_label_->setVisible(!captures);
-        target_->setVisible(!captures);
-        const auto has_input =
-            kind == 0 || kind == 1 || (kind >= 7 && kind <= 12) || kind == 15 || captures;
+        const auto filters_fields = kind == 18 || kind == 19;
+        target_label_->setVisible(!captures && !filters_fields);
+        target_->setVisible(!captures && !filters_fields);
+        const auto has_input = kind == 0 || kind == 1 || (kind >= 7 && kind <= 12) || kind == 15 ||
+                               captures || filters_fields;
         input_label_->setVisible(has_input);
         input_->setVisible(has_input);
         const auto has_replacement = kind == 12;
@@ -1174,6 +1199,10 @@ class MetadataTransformationDialog final : public QDialog {
             capture_argument_->setPlaceholderText(
                 from_field ? QStringLiteral("For example: Comment")
                            : QStringLiteral("For example: %artist% — %title%"));
+        } else if (filters_fields) {
+            input_label_->setText(QStringLiteral("Fields:"));
+            input_->setPlaceholderText(
+                QStringLiteral("Comma-separated, for example: Comment, Encoder"));
         } else {
             input_label_->setText(QStringLiteral("Value:"));
             input_->setPlaceholderText(QString{});
@@ -1183,7 +1212,7 @@ class MetadataTransformationDialog final : public QDialog {
     void addStep() {
         const auto kind = currentStepKind();
         const auto field = target_->text().trimmed();
-        if (kind != 16 && field.isEmpty()) {
+        if (kind != 16 && kind != 18 && kind != 19 && field.isEmpty()) {
             summary_->setText(QStringLiteral("Enter a target field before adding the step."));
             target_->setFocus(Qt::OtherFocusReason);
             return;
@@ -1311,6 +1340,29 @@ class MetadataTransformationDialog final : public QDialog {
                 .source = needs_argument ? encode_utf8(source) : std::string{},
                 .pattern = encode_utf8(input_->text()),
             });
+            break;
+        }
+        case 18:
+        case 19: {
+            std::vector<std::string> fields;
+            for (const auto& part : input_->text().split(QChar{','}, Qt::SkipEmptyParts)) {
+                const auto trimmed = part.trimmed();
+                if (!trimmed.isEmpty()) {
+                    fields.push_back(encode_utf8(trimmed));
+                }
+            }
+            if (fields.empty()) {
+                summary_->setText(QStringLiteral("Enter at least one comma-separated field name."));
+                input_->setFocus(Qt::OtherFocusReason);
+                return;
+            }
+            if (kind == 18) {
+                actions_.push_back(
+                    metadata::MetadataBlocklistFieldsAction{.fields = std::move(fields)});
+            } else {
+                actions_.push_back(
+                    metadata::MetadataAllowlistFieldsAction{.fields = std::move(fields)});
+            }
             break;
         }
         default:

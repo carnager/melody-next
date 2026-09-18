@@ -92,7 +92,10 @@ class ConvertDialog final : public QDialog {
     void reloadPresets(const QString& select_data);
     void rebuildPresetCombo(const QString& select_data);
     void openPresetEditor();
+    void exportSelectedPreset();
     void deleteSelectedPreset();
+    void saveJobSettings(const QString& preset_id) const;
+    void applyJobSettings(const QString& preset_id);
 
     std::vector<ConvertDialogItem> items_;
     std::vector<persistence::SavedOutputLayoutProfile> layout_catalog_;
@@ -102,6 +105,7 @@ class ConvertDialog final : public QDialog {
     QFormLayout* form_{nullptr};
     QComboBox* preset_{nullptr};
     QPushButton* preset_new_{nullptr};
+    QPushButton* preset_export_{nullptr};
     QPushButton* preset_delete_{nullptr};
     QComboBox* layout_choice_{nullptr};
     QComboBox* destination_choice_{nullptr};
@@ -110,6 +114,8 @@ class ConvertDialog final : public QDialog {
     QLineEdit* basename_expression_{nullptr};
     QComboBox* resample_{nullptr};
     QComboBox* bit_depth_{nullptr};
+    QComboBox* channels_{nullptr};
+    QComboBox* gain_{nullptr};
     QCheckBox* embed_artwork_{nullptr};
     QCheckBox* mirror_structure_{nullptr};
     QSpinBox* parallelism_{nullptr};

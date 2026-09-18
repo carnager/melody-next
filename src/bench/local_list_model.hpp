@@ -91,9 +91,9 @@ class LocalListModel final : public QAbstractTableModel {
   public:
     explicit LocalListModel(QObject* parent = nullptr);
 
-    void replaceRows(std::vector<LocalTrackRow> rows);
+    void replaceRows(std::vector<LocalTrackRow> rows, bool remember = false, QString label = {});
     void appendPaths(std::vector<std::string> raw_paths, int insertion_row = -1);
-    void appendRows(std::vector<LocalTrackRow> rows, int insertion_row = -1);
+    void appendRows(std::vector<LocalTrackRow> rows, int insertion_row = -1, bool remember = true);
     // ADR-0153: stores on-demand probed technicals onto every row of the
     // given physical source.
     void applyTechnicals(const std::string& raw_path, const LocalTrackTechnicals& technicals);
@@ -181,7 +181,8 @@ class LocalListModel final : public QAbstractTableModel {
 
   private:
     struct Edit {
-        bool removal{false};
+        enum class Kind : std::uint8_t { reorder, removal, addition, replacement };
+        Kind kind{Kind::reorder};
         QString label;
         std::vector<int> positions;
         std::vector<LocalTrackRow> detached;

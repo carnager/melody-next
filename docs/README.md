@@ -17,7 +17,7 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-13, through ADR-0168 and database schema 33.
+Updated on 2026-09-16, through ADR-0178 and database schema 34.
 
 The application is built as `trackknife` from `src/bench`. Older development
 documents call this workspace **Trackbench**. It combines the MPD client and
@@ -30,9 +30,9 @@ changes together. Local tracks can be copied or moved into a new tab from the
 context menu or by dropping them on the tab strip. Both libraries show artist
 album counts loaded in the background.
 
-M5, local tagging and file operations, is still the active milestone.
-MusicBrainz, ReplayGain, and conversion are usable, but that doesn't mean every
-requirement in those milestones is finished. The [feature matrix](feature-matrix.md)
+M5 local tagging/file operations, M6 MusicBrainz identification, M7 ReplayGain,
+M8 conversion, and the M9 Melody endpoint are complete. M10 hardening,
+packaging, and release work is active. The [feature matrix](feature-matrix.md)
 lists what works and its restrictions. The [roadmap](roadmap.md) lists the
 remaining work.
 
@@ -70,6 +70,12 @@ also available in [CMakePresets.json](../CMakePresets.json).
 - [Query language](query-language.md): the `tkq-1` grammar and evaluation rules.
 - [Title formatting](title-formatting.md): the `tkfmt-1` language specification.
 - [Open decisions](open-decisions.md): questions that still need a decision.
+- [Release checklist](release-checklist.md): packaging, legal, accessibility,
+  stress, backup/restore, and end-to-end acceptance gates.
+- [M10 validation](m10-validation.md): hardening evidence and the per-artifact
+  release boundary.
+- [Post-release roadmap](roadmap.md): remaining prioritized work, updated
+  through ADR-0178.
 - [Sources](sources.md): references used when designing and checking behavior.
 
 The dated milestone notes, [M3 validation](m3-validation.md), and older ADRs

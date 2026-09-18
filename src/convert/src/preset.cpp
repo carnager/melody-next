@@ -5,6 +5,8 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
+#include <libswresample/swresample.h>
 }
 
 #include <optional>
@@ -86,6 +88,13 @@ EncoderPresetAvailability probe_encoder_preset(const EncoderPreset& preset) {
                 .detail = "muxer " + preset.container_name + " is not built into this FFmpeg"};
     }
     return {.available = true, .detail = {}};
+}
+
+std::string conversion_backend_versions() {
+    return "ffmpeg=" + std::string{av_version_info()} +
+           ";libavcodec=" + std::to_string(avcodec_version()) +
+           ";libavformat=" + std::to_string(avformat_version()) +
+           ";libswresample=" + std::to_string(swresample_version());
 }
 
 } // namespace trackknife::convert

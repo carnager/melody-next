@@ -177,6 +177,43 @@ void exactAddCopySplitAndJoinPreserveOrderedState() {
           (std::optional<std::vector<std::string>>{{"Élan", "Two WORDS", ""}}));
 }
 
+void fieldListsRemoveOnlyPreviewedMetadata() {
+    using namespace trackknife::metadata;
+    const auto baseline = selection();
+    const StagedMetadataPatchSet draft;
+    const std::array items{std::size_t{0U}, std::size_t{1U}};
+
+    const MetadataTransformationChain blocklist{
+        .schema_version = 1U,
+        .name = "Remove unwanted fields",
+        .actions = {MetadataBlocklistFieldsAction{.fields = {"Comment", "Encoder"}}},
+    };
+    const auto blocked = plan_metadata_transformation(baseline, draft, items, blocklist);
+    CHECK(blocked.has_value());
+    CHECK(blocked && blocked->cells.size() == 1U);
+    CHECK(blocked && blocked->cells.front().canonical_field == "comment");
+    CHECK(blocked && blocked->cells.front().after == std::nullopt);
+
+    const MetadataTransformationChain allowlist{
+        .schema_version = 1U,
+        .name = "Keep portable fields",
+        .actions = {MetadataAllowlistFieldsAction{.fields = {"TITLE"}}},
+    };
+    const auto allowed = plan_metadata_transformation(baseline, draft, items, allowlist);
+    CHECK(allowed.has_value());
+    CHECK(allowed && allowed->changed_item_count == 2U);
+    CHECK(allowed && allowed->cells.size() == 3U);
+    CHECK(allowed && std::ranges::all_of(allowed->cells, [](const auto& cell) {
+              return cell.canonical_field != "title" && cell.after == std::nullopt;
+          }));
+
+    CHECK(!validate_metadata_transformation_chain(MetadataTransformationChain{
+        .schema_version = 1U,
+        .name = "Empty filter",
+        .actions = {MetadataBlocklistFieldsAction{}},
+    }));
+}
+
 void capitalizationNoOpCountsPresentAndMissingTargets() {
     using namespace trackknife::metadata;
     const auto baseline = selection();
@@ -891,7 +928,9 @@ void plansRejectInvalidDialectInputLimitsAndCancellation() {
             .schema_version = 1U,
             .name = "Invalid condition",
             .actions = {metadata::MetadataRemoveFieldIfAction{
-                .target_field = "Disc Number", .dialect = {}, .condition = "$unknown()"}},
+                .target_field = "Disc Number",
+                .dialect = trackknife::titleformat::DialectVersion{},
+                .condition = "$unknown()"}},
         });
     CHECK(!invalid_condition);
 
@@ -957,6 +996,7 @@ void plansRejectInvalidDialectInputLimitsAndCancellation() {
 int main() {
     orderedChainsSeeEarlierActionsAndCurrentDraft();
     exactAddCopySplitAndJoinPreserveOrderedState();
+    fieldListsRemoveOnlyPreviewedMetadata();
     capitalizationNoOpCountsPresentAndMissingTargets();
     keepFirstCharactersUsesUnicodeAndRetainsShortValues();
     pastedCleanupScriptGeneratesTypedPreviewedRules();

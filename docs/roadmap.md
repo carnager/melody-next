@@ -1,10 +1,10 @@
 # Trackbench feature roadmap
 
-Updated on 2026-09-13, through ADR-0168.
+Updated on 2026-09-16, through ADR-0178.
 
 This page lists the work still to do. The [feature matrix](feature-matrix.md)
 records what's implemented; [MILESTONES.md](../MILESTONES.md) keeps the milestone
-status and history. M5, local tagging and file operations, remains active.
+status and history. M0-M10 are complete; this roadmap tracks post-release work.
 
 **Proposal:** Keep the order below as a guide. Bugs in an existing workflow
 come before adding more features to it. An item here is not a release promise.
@@ -30,8 +30,9 @@ moved into new tabs from the menu or tab strip.
 
 Still to do:
 
-- [ ] Undo for adding and replacing list contents, and one undo operation for a
-  transfer between tabs.
+- [x] Undo for adding and replacing local-list contents (ADR-0176).
+- [x] One coordinated undo/redo operation for the latest move between tabs;
+  copies are undone in the destination list (ADR-0176).
 - [ ] Reorder multiple MPD playlist tracks at once and restore open MPD playlist
   tabs after a restart.
 - [ ] Expand album hits into complete releases inside committed MPD search tabs.
@@ -66,21 +67,22 @@ scanning files or contacting an online service.
 References: [local library](local-library.md), [query language](query-language.md),
 [saved searches](adr/0163-saved-search-definitions.md).
 
-## 3. Complete album conversion
+## 3. Extend album conversion
 
 The converter carries one cover, transfers text tags, and can mirror source
 folders or name output with `tkfmt-1`. It supports resampling, a downsample-only
-limit, and keeping the source bit depth. Stale ReplayGain tags are removed from
-converted audio.
+limit, source/16/24-bit depth, channel conversion, and permanent Track/Album
+ReplayGain. Stale ReplayGain tags are removed from converted audio.
 
 Still to do:
 
 - [ ] Carry multiple embedded images.
 - [ ] Report which selected files have no usable cover.
-- [ ] Let the user choose the root used when mirroring folders.
 - [ ] Scan converted output for fresh ReplayGain values.
-- [ ] Define channel processing and DSP/gain options, grouped output, and
-  splitting CUE tracks into separate files.
+- [ ] Design grouped chapter-container and merge-all output metadata/boundary
+  semantics; CUE tracks already split into exact per-track files.
+- [ ] Add a general ordered DSP graph if concrete non-mastering use cases
+  justify it.
 
 New options must keep the converter's output verification and collision checks.
 
@@ -100,12 +102,15 @@ Still to do:
 - [ ] Deleting external cover files through a reviewed file operation.
 - [ ] More text writers, each backed by real-file tests that check audio,
   unknown tags, and container data survive a rewrite.
+- [x] Previewed Scripts actions for a field blocklist (remove named fields) and
+  allowlist (remove every field except named fields), replacing the retired
+  display-only field-layout UI from ADR-0177.
 
 Playback support alone isn't enough evidence that a format can be edited safely.
 
 Reference: [metadata and artwork](metadata-and-files.md).
 
-## 5. Universal ReplayGain support
+## 5. Extend ReplayGain support
 
 Track and album scanning, multi-disc grouping, optional true peak, failed-item
 retry, CSV export, and a view of each value's source are implemented. Results
@@ -113,10 +118,10 @@ can be stored in supported tags, CUE sheets, or `.tkmeta` sidecars. Opus uses
 R128 gain comments. Local playback has separate preamps for files with and
 without loudness data.
 
-The remaining work is to check analysis, storage, and playback across every
-decodable format and source type. Keep those three claims separate: a file may
-be scannable without having writable tags. Output-gain editing for Opus and
-rescanning converted output remain future work.
+ADR-0172 checks analysis across every decodable repository fixture and closes
+the storage/playback coverage gate while keeping those claims separate: a file
+may be scannable without having writable tags. Output-gain editing for Opus and
+rescanning converted output remain optional future work.
 
 References: [ReplayGain](replaygain.md),
 [format coverage](feature-matrix.md#format-support-dimensions).
@@ -164,18 +169,20 @@ These are recorded requirements or proposals, not extra commitments for the
 next release.
 
 - **Workspace:** expose the command palette and shortcut editor; add custom
-  expression columns/grouping, saved tag-field layouts, and the planned job,
+  expression columns/grouping and the planned job,
   diagnostic, queue-inspector, and search-editor panels.
-- **Metadata and paths:** filename sanitization and Unicode-normalization
-  choices; richer matching; `TOTALTRACKS` when numbering; general metadata
+- **Metadata and paths:** possible new versioned sanitization/normalization
+  policies (Linux and portable policies are available); richer typed matching;
+  `TOTALTRACKS` when numbering; general metadata
   sidecars; and copying or moving companion files, including reviewed cleanup
   of empty folders.
 - **File undo:** cross-filesystem undo, changed-artifact undo, and the artwork
   undo chain on filesystems without rename-exchange support.
 - **Infrastructure:** shared job scheduling and retry, secure credential
   storage, backup/restore, and larger library/network/device test runs.
-- **Later work:** a Melody playback endpoint, a DSP graph, release packaging,
-  plugins, CD ripping, radio, remote import, and simultaneous MPD connections.
+- **Later work:** a DSP graph, release packaging, plugins, CD ripping, radio,
+  remote import, and simultaneous MPD connections. The Melody playback endpoint
+  is complete in ADR-0174; its multi-machine stress campaigns belong to M10.
   Explicitly updating MPD after local file changes also remains open. Loading
   mapped server files into a local tab is already available.
 

@@ -564,12 +564,11 @@ strip_loudness_fields(const metadata::MetadataDocument& document) {
     return {};
 }
 
-[[nodiscard]] core::Result<std::unique_ptr<EncoderPipeline>>
-open_pipeline(const EncoderPreset& preset, const formats::PcmFormat& source_format,
-              const std::optional<int>& target_sample_rate,
-              const std::optional<int>& target_bit_depth,
-              const std::optional<ConversionArtwork>& artwork, const std::string& temporary_path,
-              const std::string& destination_raw_path) {
+[[nodiscard]] core::Result<std::unique_ptr<EncoderPipeline>> open_pipeline(
+    const EncoderPreset& preset, const formats::PcmFormat& source_format,
+    const std::optional<int>& target_sample_rate, const std::optional<int>& target_bit_depth,
+    const ConversionChannelPolicy channel_policy, const std::optional<ConversionArtwork>& artwork,
+    const std::string& temporary_path, const std::string& destination_raw_path) {
     const auto* const codec = avcodec_find_encoder_by_name(preset.codec_name.c_str());
     if (codec == nullptr) {
         return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
@@ -596,7 +595,11 @@ open_pipeline(const EncoderPreset& preset, const formats::PcmFormat& source_form
     pipeline->codec->sample_rate =
         choose_sample_rate(codec, target_sample_rate.value_or(source_format.sample_rate));
     pipeline->codec->time_base = AVRational{1, pipeline->codec->sample_rate};
-    av_channel_layout_default(&pipeline->codec->ch_layout, source_format.channels);
+    const auto output_channels = channel_policy == ConversionChannelPolicy::mono ? 1
+                                 : channel_policy == ConversionChannelPolicy::stereo
+                                     ? 2
+                                     : source_format.channels;
+    av_channel_layout_default(&pipeline->codec->ch_layout, output_channels);
     if (preset.bit_rate) {
         pipeline->codec->bit_rate = *preset.bit_rate;
     }
@@ -783,14 +786,49 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
     }
 
     const auto transfer_metadata = strip_loudness_fields(request.metadata);
-    auto pipeline_result =
-        open_pipeline(request.preset, source_format, effective_sample_rate, effective_bit_depth,
-                      request.artwork, temporary.native(), request.destination_raw_path);
+    auto pipeline_result = open_pipeline(
+        request.preset, source_format, effective_sample_rate, effective_bit_depth,
+        request.channel_policy, request.artwork, temporary.native(), request.destination_raw_path);
     if (!pipeline_result) {
         return std::unexpected(pipeline_result.error());
     }
     auto& pipeline = **pipeline_result;
     const auto frame_size = pipeline.codec->frame_size > 0 ? pipeline.codec->frame_size : 4096;
+
+    float gain_multiplier = 1.0F;
+    if (request.gain_mode != ConversionGainMode::none) {
+        auto info = decoder->replay_gain();
+        const auto metadata_number = [&request](const std::string_view name) {
+            const auto value = request.metadata.first_effective_value(name);
+            if (!value) {
+                return std::optional<double>{};
+            }
+            char* end = nullptr;
+            const auto parsed = std::strtod(value->c_str(), &end);
+            return end != value->c_str() && std::isfinite(parsed) ? std::optional{parsed}
+                                                                  : std::optional<double>{};
+        };
+        info.track_gain_db =
+            metadata_number("replaygaintrackgain").or_else([&info] { return info.track_gain_db; });
+        info.track_peak =
+            metadata_number("replaygaintrackpeak").or_else([&info] { return info.track_peak; });
+        info.album_gain_db =
+            metadata_number("replaygainalbumgain").or_else([&info] { return info.album_gain_db; });
+        info.album_peak =
+            metadata_number("replaygainalbumpeak").or_else([&info] { return info.album_peak; });
+        const bool album =
+            request.gain_mode == ConversionGainMode::album && info.album_gain_db.has_value();
+        const auto gain = album ? info.album_gain_db : info.track_gain_db;
+        const auto peak = album ? info.album_peak : info.track_peak;
+        if (gain && std::isfinite(*gain) && std::isfinite(request.gain_preamp_db)) {
+            auto multiplier =
+                std::pow(10.0, (*gain + static_cast<double>(request.gain_preamp_db)) / 20.0);
+            if (peak && std::isfinite(*peak) && *peak > 0.0) {
+                multiplier = std::min(multiplier, 1.0 / *peak);
+            }
+            gain_multiplier = static_cast<float>(multiplier);
+        }
+    }
 
     std::uint64_t decoded_frames = 0U;
     while (true) {
@@ -815,8 +853,17 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
             !sized) {
             return std::unexpected(sized.error());
         }
-        const auto* input_plane =
-            reinterpret_cast<const std::uint8_t*>((*chunk)->interleaved_samples.data());
+        std::vector<float> gained_samples;
+        const auto* input_samples = (*chunk)->interleaved_samples.data();
+        if (gain_multiplier != 1.0F) {
+            gained_samples.assign((*chunk)->interleaved_samples.begin(),
+                                  (*chunk)->interleaved_samples.end());
+            std::ranges::transform(
+                gained_samples, gained_samples.begin(),
+                [gain_multiplier](const float sample) { return sample * gain_multiplier; });
+            input_samples = gained_samples.data();
+        }
+        const auto* input_plane = reinterpret_cast<const std::uint8_t*>(input_samples);
         const auto converted =
             swr_convert(pipeline.resampler, pipeline.convert_frame->data,
                         pipeline.convert_frame->nb_samples, &input_plane, frames);

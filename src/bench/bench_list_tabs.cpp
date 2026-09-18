@@ -25,6 +25,7 @@
 #include <QAction>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QItemSelectionModel>
@@ -346,6 +347,91 @@ void BenchMainWindow::persistNow(const bool wait) {
         });
 }
 
+void BenchMainWindow::backupWorkspace() {
+    if (persistence_ == nullptr) {
+        return;
+    }
+    auto* dialog = new QFileDialog(this, tr("Back up Trackknife workspace database"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setFileMode(QFileDialog::AnyFile);
+    dialog->setDefaultSuffix(QStringLiteral("sqlite"));
+    dialog->setNameFilter(tr("Trackknife workspace database (*.sqlite)"));
+    dialog->setOption(QFileDialog::DontConfirmOverwrite);
+    dialog->selectFile(QStringLiteral("trackknife-workspace.sqlite"));
+    connect(dialog, &QFileDialog::fileSelected, this, [this](const QString& path) {
+        const auto settings_path = path + QStringLiteral(".settings.ini");
+        if (QFile::exists(settings_path)) {
+            statusBar()->showMessage(
+                QStringLiteral("Workspace backup failed: %1 already exists").arg(settings_path),
+                10'000);
+            return;
+        }
+        const auto temporary_settings = settings_path + QStringLiteral(".partial");
+        if (QFile::exists(temporary_settings)) {
+            statusBar()->showMessage(
+                QStringLiteral("Workspace backup failed: stale temporary settings file exists"),
+                10'000);
+            return;
+        }
+        QSettings current;
+        QSettings settings_backup{temporary_settings, QSettings::IniFormat};
+        settings_backup.setValue(QStringLiteral("backup/format"), 1);
+        for (const auto& key : current.allKeys()) {
+            settings_backup.setValue(QStringLiteral("values/") + key, current.value(key));
+        }
+        settings_backup.sync();
+        if (settings_backup.status() != QSettings::NoError) {
+            QFile::remove(temporary_settings);
+            statusBar()->showMessage(QStringLiteral("Workspace settings backup failed"), 10'000);
+            return;
+        }
+        const auto encoded = QFile::encodeName(path);
+        const auto destination = std::filesystem::path{
+            std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
+        persistNow(false);
+        statusBar()->showMessage(QStringLiteral("Backing up workspace database…"));
+        persistence_->backupDatabase(destination, [this, path, settings_path,
+                                                   temporary_settings](QString error) {
+            if (error.isEmpty() && !QFile::rename(temporary_settings, settings_path)) {
+                error = QStringLiteral("database saved, but settings could not be published");
+            } else if (!error.isEmpty()) {
+                QFile::remove(temporary_settings);
+            }
+            statusBar()->showMessage(
+                error.isEmpty()
+                    ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
+                    : QStringLiteral("Workspace backup failed: %1").arg(error),
+                error.isEmpty() ? 7'000 : 10'000);
+        });
+    });
+    dialog->open();
+}
+
+void BenchMainWindow::scheduleWorkspaceRestore() {
+    const auto path =
+        QFileDialog::getOpenFileName(this, tr("Restore Trackknife workspace database"), {},
+                                     tr("Trackknife workspace database (*.sqlite);;All files (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    const auto answer = QMessageBox::warning(
+        this, tr("Restore workspace database"),
+        tr("Trackknife will validate and restore this database at the next start. "
+           "The current database will be retained beside it for rollback. Close Trackknife now?"),
+        QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel);
+    if (answer != QMessageBox::Close) {
+        return;
+    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("recovery/pending-workspace-restore"), path);
+    const auto settings_backup = path + QStringLiteral(".settings.ini");
+    settings.setValue(QStringLiteral("recovery/pending-settings-restore"),
+                      QFile::exists(settings_backup) ? settings_backup : QString{});
+    settings.sync();
+    close();
+}
+
 BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument document,
                                                       const bool select) {
     const auto id = QString::fromStdString(document.id.to_string());
@@ -663,7 +749,7 @@ void BenchMainWindow::openSearchDialog() {
                     return;
                 }
                 if (action == LocalLibraryAction::replace) {
-                    destination->model->replaceRows(std::move(rows));
+                    destination->model->replaceRows(std::move(rows), true);
                 } else {
                     destination->model->appendRows(std::move(rows), insertion);
                 }
@@ -780,14 +866,64 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
     if (transferred.empty()) {
         return false;
     }
-    target->model->appendRows(std::move(transferred), insertion_row);
+    CrossTabMoveEdit coordinated;
+    if (move) {
+        coordinated.source_id = source->property("bench-document-id").toString();
+        coordinated.target_id = target_id;
+        coordinated.source_before = source_tab->model->rows();
+        coordinated.target_before = target->model->rows();
+    }
+    target->model->appendRows(std::move(transferred), insertion_row, !move);
     enqueueUnprobedRows(*target);
     markTabDirty(*target);
     syncArtwork(*target);
     if (move) {
         source_tab->model->removeRowIndexes(std::move(source_rows), false);
         markTabDirty(*source_tab);
+        coordinated.source_after = source_tab->model->rows();
+        coordinated.target_after = target->model->rows();
+        cross_tab_move_edit_ = std::move(coordinated);
     }
+    refreshListHistoryActions();
+    return true;
+}
+
+bool BenchMainWindow::canReplayCrossTabMove(const bool undo) {
+    if (!cross_tab_move_edit_ || cross_tab_move_edit_->applied != undo) {
+        return false;
+    }
+    const auto* source = tabForDocument(cross_tab_move_edit_->source_id);
+    const auto* target = tabForDocument(cross_tab_move_edit_->target_id);
+    if (source == nullptr || target == nullptr) {
+        return false;
+    }
+    const auto* current = currentListTab();
+    if (current != source && current != target) {
+        return false;
+    }
+    return source->model->rows() ==
+               (undo ? cross_tab_move_edit_->source_after : cross_tab_move_edit_->source_before) &&
+           target->model->rows() ==
+               (undo ? cross_tab_move_edit_->target_after : cross_tab_move_edit_->target_before);
+}
+
+bool BenchMainWindow::replayCrossTabMove(const bool undo) {
+    if (!canReplayCrossTabMove(undo)) {
+        return false;
+    }
+    auto* source = tabForDocument(cross_tab_move_edit_->source_id);
+    auto* target = tabForDocument(cross_tab_move_edit_->target_id);
+    source->model->replaceRows(undo ? cross_tab_move_edit_->source_before
+                                    : cross_tab_move_edit_->source_after);
+    target->model->replaceRows(undo ? cross_tab_move_edit_->target_before
+                                    : cross_tab_move_edit_->target_after);
+    cross_tab_move_edit_->applied = !undo;
+    for (auto* tab : {source, target}) {
+        markTabDirty(*tab);
+        enqueueUnprobedRows(*tab);
+        syncArtwork(*tab);
+    }
+    refreshSelectionStatus();
     return true;
 }
 
@@ -1307,12 +1443,16 @@ void BenchMainWindow::refreshListHistoryActions() {
         reverse_list_action_->setEnabled(editable);
         deduplicate_list_action_->setEnabled(editable);
     }
-    undo_list_action_->setEnabled(model != nullptr && model->canUndo());
-    redo_list_action_->setEnabled(model != nullptr && model->canRedo());
-    undo_list_action_->setText(model != nullptr && model->canUndo()
+    const auto cross_tab_undo = canReplayCrossTabMove(true);
+    const auto cross_tab_redo = canReplayCrossTabMove(false);
+    undo_list_action_->setEnabled(cross_tab_undo || (model != nullptr && model->canUndo()));
+    redo_list_action_->setEnabled(cross_tab_redo || (model != nullptr && model->canRedo()));
+    undo_list_action_->setText(cross_tab_undo ? tr("Undo Move tracks between tabs")
+                               : model != nullptr && model->canUndo()
                                    ? tr("Undo %1").arg(model->undoLabel())
                                    : tr("Undo list edit"));
-    redo_list_action_->setText(model != nullptr && model->canRedo()
+    redo_list_action_->setText(cross_tab_redo ? tr("Redo Move tracks between tabs")
+                               : model != nullptr && model->canRedo()
                                    ? tr("Redo %1").arg(model->redoLabel())
                                    : tr("Redo list edit"));
 }
@@ -1321,7 +1461,7 @@ void BenchMainWindow::replayListEdit(const bool undo) {
     auto* tab = currentListTab();
     if (tab == nullptr || isMpdContext())
         return;
-    if (undo ? tab->model->undo() : tab->model->redo()) {
+    if (replayCrossTabMove(undo) || (undo ? tab->model->undo() : tab->model->redo())) {
         markTabDirty(*tab);
         enqueueUnprobedRows(*tab);
         syncArtwork(*tab);

@@ -193,6 +193,31 @@ void linuxSanitizationAndTechnicalContextAreExact() {
     CHECK(rejected && has_issue(*rejected, OutputPathPlanIssueKind::invalid_expression_output));
 }
 
+void portableSanitizationAvoidsCrossPlatformNames() {
+    using namespace trackknife::operations;
+    auto portable = layout();
+    portable.sanitization_policy = {"portable", 1U};
+    portable.relative_directory_expression = "%albumartist%/%album%";
+    portable.basename_expression = "%title%";
+    const std::array items{OutputPathPlanningItem{
+        .item_index = 0U,
+        .source_raw_path = "/incoming/Original.flac",
+        .source_revision = revision(1U),
+        .final_metadata = document("CON", "1", "Artist:Name", "Album. "),
+    }};
+    const auto planned = plan_output_paths(items, {.rename_files = true, .move_files = true},
+                                           portable, destination());
+    CHECK(planned.has_value());
+    CHECK(planned && planned->ready());
+    CHECK(planned && planned->sources[0].sanitized_relative_directory == "Album__/Artist_Name");
+    CHECK(planned && planned->sources[0].sanitized_basename == "_CON");
+    CHECK(planned &&
+          planned->sources[0].target_raw_path == "/library/Album__/Artist_Name/_CON.flac");
+
+    portable.sanitization_policy = {"portable", 2U};
+    CHECK(!validate_output_layout_profile(portable).has_value());
+}
+
 void forcedTargetExtensionRenamesAndResolvesInExpressions() {
     using namespace trackknife::operations;
     OutputLayoutProfile forced_layout;
@@ -539,6 +564,7 @@ int main() {
     independentTogglesPreserveDirectoryExtensionAndRawFilename();
     forcedTargetExtensionRenamesAndResolvesInExpressions();
     linuxSanitizationAndTechnicalContextAreExact();
+    portableSanitizationAvoidsCrossPlatformNames();
     sharedSourcesAndPathCollisionsFailClosed();
     dependenciesCaseChangesAndContainmentAreVisible();
     physicalAliasesAndInconsistentSharedRevisionsFailClosed();

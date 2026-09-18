@@ -296,6 +296,7 @@ struct ReadPicture {
 }
 
 void builtinPresetsProbeAvailable() {
+    CHECK(trackknife::convert::conversion_backend_versions().find("ffmpeg=") == 0U);
     const auto& presets = trackknife::convert::builtin_encoder_presets();
     CHECK(presets.size() == 4U);
     for (const auto& preset : presets) {
@@ -962,6 +963,73 @@ void capsRateDownOnlyAndKeepsSourceDepth() {
           0U);
 }
 
+void appliesChannelAndPermanentGainPolicies() {
+    TemporaryDirectory directory;
+    const auto source = directory.path() / "tone.wav";
+    write_sine_wav(source, 0.25, 0.5);
+    const auto preset = *trackknife::convert::find_encoder_preset("flac");
+    trackknife::metadata::MetadataDocument gain_metadata;
+    trackknife::metadata::MetadataField gain;
+    gain.canonical_name = "replaygaintrackgain";
+    gain.native_name = "REPLAYGAIN_TRACK_GAIN";
+    gain.values = {"+6.020599913 dB"};
+    gain_metadata.fields.push_back(std::move(gain));
+    trackknife::metadata::MetadataField peak_field;
+    peak_field.canonical_name = "replaygaintrackpeak";
+    peak_field.native_name = "REPLAYGAIN_TRACK_PEAK";
+    peak_field.values = {"0.25"};
+    gain_metadata.fields.push_back(std::move(peak_field));
+
+    const auto mono = trackknife::convert::convert_audio_file(
+        {.source_raw_path = source.native(),
+         .source_selection = {},
+         .source_range = {},
+         .destination_raw_path = (directory.path() / "mono.flac").native(),
+         .preset = preset,
+         .target_sample_rate = {},
+         .sample_rate_cap = {},
+         .target_bit_depth = {},
+         .keep_source_bit_depth = false,
+         .channel_policy = trackknife::convert::ConversionChannelPolicy::mono,
+         .metadata = {},
+         .artwork = {}});
+    CHECK(mono.has_value());
+    if (mono) {
+        CHECK(mono->channels == 1);
+    }
+
+    const auto gained = trackknife::convert::convert_audio_file(
+        {.source_raw_path = source.native(),
+         .source_selection = {},
+         .source_range = {},
+         .destination_raw_path = (directory.path() / "gained.flac").native(),
+         .preset = preset,
+         .target_sample_rate = {},
+         .sample_rate_cap = {},
+         .target_bit_depth = {},
+         .keep_source_bit_depth = false,
+         .gain_mode = trackknife::convert::ConversionGainMode::track,
+         .metadata = gain_metadata,
+         .artwork = {}});
+    CHECK(gained.has_value());
+    if (gained) {
+        auto decoder = trackknife::formats::AudioDecoder::open(gained->destination_raw_path);
+        CHECK(decoder.has_value());
+        float peak = 0.0F;
+        while (decoder) {
+            auto chunk = decoder->next_chunk();
+            CHECK(chunk.has_value());
+            if (!chunk || !*chunk) {
+                break;
+            }
+            for (const auto sample : (*chunk)->interleaved_samples) {
+                peak = std::max(peak, std::abs(sample));
+            }
+        }
+        CHECK(peak > 0.48F && peak < 0.52F);
+    }
+}
+
 int main(const int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: trackknife_audio_convert_tests <fixture-directory>\n";
@@ -976,6 +1044,7 @@ int main(const int argc, char** argv) {
     resamplesOnRequestWithinEncoderConstraints();
     quantizesHiResToSixteenFortyFourWithDither();
     capsRateDownOnlyAndKeepsSourceDepth();
+    appliesChannelAndPermanentGainPolicies();
     refusesExistingDestinationAndMissingDirectory();
     cancellationLeavesNoPartialOutput();
     scansItemsInParallelIsolatingFailures();

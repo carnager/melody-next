@@ -166,12 +166,35 @@ struct SanitizedComponent {
     bool changed{false};
 };
 
-[[nodiscard]] SanitizedComponent sanitize_component(std::string value,
-                                                    const bool replace_separator) {
+[[nodiscard]] bool is_portable_reserved_stem(const std::string_view value) {
+    auto stem = value.substr(0U, value.find('.'));
+    const auto lowered = ascii_lower(stem);
+    if (lowered == "con" || lowered == "prn" || lowered == "aux" || lowered == "nul") {
+        return true;
+    }
+    return lowered.size() == 4U && (lowered.starts_with("com") || lowered.starts_with("lpt")) &&
+           lowered.back() >= '1' && lowered.back() <= '9';
+}
+
+[[nodiscard]] SanitizedComponent sanitize_component(std::string value, const bool replace_separator,
+                                                    const bool portable) {
     auto changed = false;
     for (auto& character : value) {
-        if (character == '\0' || (replace_separator && character == '/')) {
+        const auto byte = static_cast<unsigned char>(character);
+        const auto portable_forbidden =
+            portable && (byte < 0x20U || character == '<' || character == '>' || character == ':' ||
+                         character == '"' || character == '\\' || character == '|' ||
+                         character == '?' || character == '*');
+        if (character == '\0' || (replace_separator && character == '/') || portable_forbidden) {
             character = '_';
+            changed = true;
+        }
+    }
+    if (portable) {
+        auto trailing = value.size();
+        while (trailing > 0U && (value[trailing - 1U] == ' ' || value[trailing - 1U] == '.')) {
+            value[trailing - 1U] = '_';
+            --trailing;
             changed = true;
         }
     }
@@ -185,6 +208,10 @@ struct SanitizedComponent {
         value = "__";
         changed = true;
     }
+    if (portable && is_portable_reserved_stem(value)) {
+        value.insert(value.begin(), '_');
+        changed = true;
+    }
     return {.value = std::move(value), .changed = changed};
 }
 
@@ -194,7 +221,8 @@ struct SanitizedDirectory {
     bool changed{false};
 };
 
-[[nodiscard]] SanitizedDirectory sanitize_directory(const std::string_view raw) {
+[[nodiscard]] SanitizedDirectory sanitize_directory(const std::string_view raw,
+                                                    const bool portable) {
     if (raw.empty()) {
         return {};
     }
@@ -205,7 +233,7 @@ struct SanitizedDirectory {
         const auto component = separator == std::string_view::npos
                                    ? raw.substr(start)
                                    : raw.substr(start, separator - start);
-        auto sanitized = sanitize_component(std::string{component}, false);
+        auto sanitized = sanitize_component(std::string{component}, false, portable);
         result.changed = result.changed || sanitized.changed;
         result.components.push_back(std::move(sanitized.value));
         if (separator == std::string_view::npos) {
@@ -335,17 +363,19 @@ bool OutputPathPlan::ready() const noexcept {
 core::Result<void> validate_output_layout_profile(const OutputLayoutProfile& profile,
                                                   const OutputPathPlanningLimits& limits) {
     const titleformat::DialectVersion current_dialect;
+    const auto known_sanitization = profile.sanitization_policy.version == 1U &&
+                                    (profile.sanitization_policy.name == "linux" ||
+                                     profile.sanitization_policy.name == "portable");
     if (profile.schema_version != 1U || profile.name.empty() ||
         profile.name.size() > limits.profile_name_bytes ||
         profile.relative_directory_expression.size() > limits.expression_bytes ||
         profile.basename_expression.empty() ||
         profile.basename_expression.size() > limits.expression_bytes ||
-        profile.dialect != current_dialect || profile.sanitization_policy.name != "linux" ||
-        profile.sanitization_policy.version != 1U) {
-        return std::unexpected(plan_error(
-            core::ErrorCode::invalid_argument,
-            "output layout requires schema 1, tkfmt-1, linux-v1 sanitization, a bounded name, "
-            "and a bounded non-empty basename expression"));
+        profile.dialect != current_dialect || !known_sanitization) {
+        return std::unexpected(plan_error(core::ErrorCode::invalid_argument,
+                                          "output layout requires schema 1, tkfmt-1, linux-v1 or "
+                                          "portable-v1 sanitization, a bounded name, "
+                                          "and a bounded non-empty basename expression"));
     }
     if (auto valid = validate_utf8(profile.name, "output layout name"); !valid) {
         return valid;
@@ -595,11 +625,13 @@ plan_output_paths(const std::span<const OutputPathPlanningItem> items,
             }
         }
 
-        const auto sanitized_directory = sanitize_directory(item.source.raw_relative_directory);
+        const auto portable = plan.layout.sanitization_policy.name == "portable";
+        const auto sanitized_directory =
+            sanitize_directory(item.source.raw_relative_directory, portable);
         item.source.sanitized_relative_directory = sanitized_directory.value;
         SanitizedComponent sanitized_basename;
         if (operations.rename_files) {
-            sanitized_basename = sanitize_component(item.source.raw_basename, true);
+            sanitized_basename = sanitize_component(item.source.raw_basename, true, portable);
             item.source.sanitized_basename = sanitized_basename.value;
         }
         item.source.sanitized = sanitized_directory.changed || sanitized_basename.changed;

@@ -46,7 +46,7 @@ class MprisRootAdaptor final : public QDBusAbstractAdaptor {
     [[nodiscard]] bool canQuit() const { return false; }
     [[nodiscard]] bool canRaise() const { return true; }
     [[nodiscard]] bool hasTrackList() const { return false; }
-    [[nodiscard]] QString identity() const { return QStringLiteral("Trackbench"); }
+    [[nodiscard]] QString identity() const { return QStringLiteral("Trackknife"); }
     [[nodiscard]] QString desktopEntry() const { return QStringLiteral("trackknife"); }
     [[nodiscard]] QStringList supportedUriSchemes() const { return {}; }
     [[nodiscard]] QStringList supportedMimeTypes() const { return {}; }

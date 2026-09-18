@@ -52,6 +52,9 @@ struct ItemOutcome {
             .sample_rate_cap = options.sample_rate_cap,
             .target_bit_depth = options.target_bit_depth,
             .keep_source_bit_depth = options.keep_source_bit_depth,
+            .channel_policy = options.channel_policy,
+            .gain_mode = options.gain_mode,
+            .gain_preamp_db = options.gain_preamp_db,
             .metadata = item.metadata,
             .artwork = options.carry_artwork
                            ? resolve_conversion_artwork(item.source_raw_path, cancellation)

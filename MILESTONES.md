@@ -18,16 +18,16 @@ retired once Trackbench reached parity (ADR-0071).
 | M2 | Complete | Reliable asynchronous MPD session and domain backbone |
 | M3 | Complete | Polished Qt MPD workspace — the basic MPD client is finished |
 | M4 | Complete | Application split and Trackbench's playback workspace |
-| M5 | Active | Fast local tag workspace and safe file operations |
-| M6 | Implementation landed | MusicBrainz identification, AcoustID, and metadata providers |
-| M7 | In progress | Measurement and local gain implemented; universal storage/coverage remains |
-| M8 | In progress | Parallel converter, resampler, and organized output |
-| M9 | Planned | Melody output endpoint for the MPD client |
-| M10 | Planned | Hardening, packaging, and first public releases |
+| M5 | Complete | Fast local tag workspace and safe file operations |
+| M6 | Complete | MusicBrainz identification, AcoustID, and metadata providers |
+| M7 | Complete | Universal parallel ReplayGain, storage fallback, and local gain |
+| M8 | Complete | Parallel converter, resampler, and organized output |
+| M9 | Complete | Melody output endpoint for the MPD client |
+| M10 | Complete | Hardening, native packaging, and release acceptance |
 
-M5 remains the active acceptance gate. Implementation status is separate from
-formal milestone closure: M6 features have landed and M7–M8 are in progress,
-without asserting that every exit criterion has been revalidated.
+ADR-0171 closes M5 after revalidating its exit criteria; M6's complete provider
+flow had already landed. ADR-0172 closes M7, ADR-0173 closes M8, ADR-0174
+closes M9, and the recorded hardening pass closes M10.
 
 The [feature matrix](docs/feature-matrix.md) is the current capability inventory;
 the [roadmap](docs/roadmap.md) prioritizes open work. The dated progress entries
@@ -37,7 +37,7 @@ they must not be read as current workspace status.
 
 ### Requested workspace addition — optional local library (ADR-0115)
 
-M5 remains active. At the user's request, local context now offers an optional
+M5 is complete. At the user's request, local context now offers an optional
 Library source beside Folders: chosen roots, background incremental indexing,
 paged artist/album browsing and album/track search, unavailable-file retention,
 and manual Refresh scans (ADR-0116). ADR-0117 adds MPD-style library actions
@@ -1056,9 +1056,14 @@ editing feels like a modern data tool rather than a stack of per-field dialogs.
   shares FLAC's type vocabulary). The journal schema is unchanged;
   real-file tests round-trip replace/remove/add per adapter and a commit
   case proves the projection plus byte-exact undo.
-- Next: the remaining open M5 capability decisions (sanitization and
-  Unicode normalization options, richer match dialects, Musepack and
-  Monkey's Audio writers), plus Ogg artwork mutation.
+- Done: ADR-0169 adds separately versioned `portable-v1` filename handling to
+  saved naming layouts and their live preview without changing `linux-v1`.
+- Done: ADR-0170 adds bounded saved tag-field layouts. Selected/visible fields
+  become an ordered reusable preset, the active preset loads before projection,
+  and hidden fields remain part of the complete draft and Apply.
+- Done: ADR-0171 revalidates the M5 exit gate and bounds future format/policy
+  expansion. Unsupported writers stay read-only; new adapters and typed
+  actions require independent preservation or semantic proof.
 
 ### Exit criteria
 
@@ -1387,6 +1392,18 @@ quickly and correctly.
   value with its origin (draft, sidecar, CUE segment, embedded), a
   pure projection of the staged selection and patch set with no I/O.
 
+### M7 closure (2026-09-16)
+
+- ADR-0172 reconciles all five exit criteria and closes M7. A corpus regression
+  now scans every repository audio fixture through the real FFmpeg/libebur128
+  graph, independently of tag writability. Qualified embedded mappings,
+  CUE carriage, and automatic logical/unwritable sidecar fallback cover every
+  source; revision gates and provenance round trips remain enforced. The
+  interactive graph defaults to two of its bounded 1-16 workers and stays off
+  both UI and real-time playback threads. The existing local source modes,
+  preamps, exact bypass, and matching stored-peak protection complete the M7
+  playback policy; additional DSP preference variants remain future work.
+
 ## M8 — Parallel converter, resampler, and organized output
 
 ### Objective
@@ -1494,8 +1511,13 @@ afterwards is a separate explicit command in Trackbench's MPD authority.
   stored format (≤16 stored bits keep 16, everything else keeps 24).
   Both are per-item scan options with converter-dialog entries, and
   conflicting option pairs fail closed with real-file test coverage.
-- Next: grouped/cue-aware and merge output modes (work item 4) plus the
-  remaining item-3 pieces (channel policy, DSP, permanent gain).
+- Done: ADR-0173 adds Keep/Mono/Stereo channel policy and optional permanent
+  Track/Album ReplayGain with peak protection, and makes saved presets restore
+  the whole interactive job while recording backend versions. It reconciles
+  every exit criterion and closes M8. One output per exact logical selection
+  is the qualified output model; grouped chapter containers, merge-all output,
+  a general DSP graph, multiple pictures, and automatic output scanning remain
+  separately designed enhancements rather than incomplete variants.
 
 ### Exit criteria
 
@@ -1549,6 +1571,13 @@ handoff to Local Queue playback.
    (MPD 0.24 Added, mtime approximation on older servers) through a
    sorted MPD search.
 
+ADR-0174 completes the endpoint with a capability-gated Melody v2 adapter,
+version-consistent queue synchronization, direct/stream source selection,
+gapless preload, clock/advance reporting, and reconnect behavior. MPRIS,
+media keys, and notifications were delivered ahead of this gate; album shuffle,
+persisted listening statistics/resume, and a general DSP graph remain
+separately scoped enhancements.
+
 ### Exit criteria
 
 - Trackbench appears as an online/offline Melody output and survives daemon,
@@ -1582,6 +1611,25 @@ removal by ADR-0071.
 - Packaged Trackbench completes MPD connect/browse/search/queue/list workflows
   and local play/tag/identify/ReplayGain/convert workflows without hidden setup
   or UI stalls.
+
+### Completion evidence
+
+M10 is complete. ADR-0175 defines consistent workspace backup boundaries;
+restart-time restore includes versioned settings and retains a rollback database.
+The UI exposes negotiated MPD capability diagnostics, and encoder and metadata
+presets have versioned export formats. The Arch package and desktop file are the
+supported native release surface; dependency/license and dynamic Qt LGPL
+obligations are inventoried in `THIRD_PARTY.md`.
+
+Development, optimized release, and ASan/UBSan suites pass all 67 tests. Focused
+MPD/reconnect, Melody, playback, backup, and conversion tests also pass 25
+consecutive iterations; fuzz, static-analysis, benchmark, and long-run soak
+hooks remain release gates in CI and `docs/release-checklist.md`. Keyboard,
+mouse, accessible-name/state, and authority-bound workflow coverage lives in the
+offscreen UI suite, with hands-on stock MPD, Melody, and local real-file evidence
+linked from `docs/m10-validation.md`. Every published artifact must still run the
+release checklist against its exact checksum; completion does not claim Flatpak
+or certify an untested future package.
 
 ## Beyond the first releases
 

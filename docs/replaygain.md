@@ -68,8 +68,8 @@ documented extensions/sidecars without breaking other players.
 
 foobar2000's modern scanner uses ITU-R BS.1770/EBU-R128-style analysis but a
 ReplayGain-compatible target of `-18 LUFS`, rather than broadcast R128's
-`-23 LUFS`. Trackbench should use a current, validated BS.1770 implementation,
-state its revision, and default to `-18 LUFS` for interoperable ReplayGain gains.
+`-23 LUFS`. Trackbench uses libebur128's validated BS.1770 implementation at
+`-18 LUFS` for interoperable ReplayGain gains (ADR-0097).
 
 Conceptually:
 
@@ -90,10 +90,9 @@ never mixed into an album record with BS.1770 results.
 
 ### High sample rates
 
-foobar2000 can downsample material above 48 kHz before loudness analysis to keep
-inaudible ultrasonic energy from influencing measurement. Trackbench should
-provide a documented automatic policy and record the resampler/rate used. The
-loudness result must be independent of the audio output device configuration.
+Trackbench analyzes at the decoder's native sample rate, including material
+above 48 kHz (ADR-0097). It performs no hidden resampling, and the loudness
+result is independent of the audio output device configuration.
 
 ### Peaks and true peaks
 
@@ -284,7 +283,7 @@ Expose source modes equivalent to:
 - `automatic/by playback order` (album for coherent album playback, track for
   shuffled or unrelated sequences, with the exact Trackbench rule documented).
 
-Expose processing modes:
+Possible future processing preferences include:
 
 - no ReplayGain processing;
 - apply gain;
@@ -319,8 +318,9 @@ values per decoded source, including gapless continuations, and limits gain
 using a matching known sample peak. Off preserves PCM exactly. Mode changes
 apply as already buffered audio drains. Sidecar playback gain landed with
 ADR-0141, preamps with ADR-0138, and Opus R128 normalization with ADR-0149
-(Q7.8 comments lifted 5 dB onto the ReplayGain scale, no peak clamp). The
-additional processing modes specified above remain future work.
+(Q7.8 comments lifted 5 dB onto the ReplayGain scale, no peak clamp). ADR-0172
+fixes gain plus matching stored-peak protection as the M7 policy; the additional
+processing preferences above remain optional DSP expansion.
 
 ## Conversion and permanent gain
 
@@ -350,10 +350,11 @@ verify track gain, sample peak, and album reduction against direct scans.
 Results remain visible drafts regardless of embedded write capability.
 
 **Trackknife decision:** Conventional ReplayGain and R128 gain fields on a
-logical source cannot pass the ordinary whole-file metadata write plan. Apply
-reports an unsupported logical/non-embedded storage target even for one selected
-segment or an existing embedded field. Durable logical-track storage and its
-playback use remain open; this is measurement support, not a storage claim.
+logical source cannot pass the ordinary whole-file metadata write plan. CUE
+tracks route to `REM REPLAYGAIN_*` (ADR-0139); chapters, subsongs, and arbitrary
+segments route to the versioned loudness sidecar (ADR-0141). Both carriers are
+revision-gated, journaled when replacing existing data, projected with
+provenance, and consumed by local playback.
 
 ### Complete result surface requirements
 

@@ -55,6 +55,7 @@ struct PreparedAction {
     std::optional<titleformat::Program> program;
     std::optional<CapturePatternProgram> capture_program;
     std::vector<PreparedCaptureField> capture_fields;
+    std::vector<std::string> filter_fields;
 };
 
 struct Target {
@@ -99,6 +100,10 @@ struct PreparedChain {
         [](const auto& typed) -> const std::string& {
             using Action = std::decay_t<decltype(typed)>;
             if constexpr (std::is_same_v<Action, MetadataCaptureValuesAction>) {
+                static const std::string empty;
+                return empty;
+            } else if constexpr (std::is_same_v<Action, MetadataBlocklistFieldsAction> ||
+                                 std::is_same_v<Action, MetadataAllowlistFieldsAction>) {
                 static const std::string empty;
                 return empty;
             } else {
@@ -438,6 +443,21 @@ apply_action(const PreparedAction& prepared, WorkingDocument& document,
                         document.erase(prepared.canonical_field);
                     }
                 }
+            } else if constexpr (std::is_same_v<Action, MetadataBlocklistFieldsAction> ||
+                                 std::is_same_v<Action, MetadataAllowlistFieldsAction>) {
+                const auto should_remove = [&](const std::string& canonical) {
+                    const auto listed = std::ranges::find(prepared.filter_fields, canonical) !=
+                                        prepared.filter_fields.end();
+                    if constexpr (std::is_same_v<Action, MetadataBlocklistFieldsAction>) {
+                        return listed;
+                    }
+                    return !listed;
+                };
+                std::erase_if(document,
+                              [&](const auto& entry) { return should_remove(entry.first); });
+                std::erase_if(native_document, [&](const auto& entry) {
+                    return should_remove(entry.second.canonical_field);
+                });
             } else if constexpr (std::is_same_v<Action, MetadataTransformValuesAction>) {
                 const auto found = document.find(prepared.canonical_field);
                 if (found == document.end()) {
@@ -776,6 +796,48 @@ prepare_chain(const MetadataTransformationChain& chain,
     };
     for (std::size_t action_index = 0U; action_index < chain.actions.size(); ++action_index) {
         const auto& action = chain.actions[action_index];
+        const auto* blocklist = std::get_if<MetadataBlocklistFieldsAction>(&action);
+        const auto* allowlist = std::get_if<MetadataAllowlistFieldsAction>(&action);
+        if (blocklist != nullptr || allowlist != nullptr) {
+            const auto& fields = blocklist != nullptr ? blocklist->fields : allowlist->fields;
+            if (fields.empty() || fields.size() > limits.actions) {
+                return std::unexpected(transformation_error(
+                    core::ErrorCode::invalid_argument,
+                    "metadata field filter requires a bounded non-empty field list", action_index));
+            }
+            PreparedAction prepared_action{
+                .action = &action,
+                .canonical_field = {},
+                .exact_native_field = {},
+                .canonical_source_field = {},
+                .exact_native_source_field = {},
+                .display_field = {},
+                .program = std::nullopt,
+                .capture_program = std::nullopt,
+                .capture_fields = {},
+                .filter_fields = {},
+            };
+            prepared_action.filter_fields.reserve(fields.size());
+            for (const auto& field : fields) {
+                const auto canonical = canonicalize_field_name(field);
+                if (field.empty() || field.size() > limits.field_name_bytes || canonical.empty()) {
+                    return std::unexpected(transformation_error(
+                        core::ErrorCode::invalid_argument,
+                        "metadata field filter contains an empty or oversized field name",
+                        action_index));
+                }
+                if (auto valid = validate_utf8(field, "metadata field filter name", action_index);
+                    !valid) {
+                    return std::unexpected(std::move(valid.error()));
+                }
+                if (std::ranges::find(prepared_action.filter_fields, canonical) ==
+                    prepared_action.filter_fields.end()) {
+                    prepared_action.filter_fields.push_back(canonical);
+                }
+            }
+            result.actions.push_back(std::move(prepared_action));
+            continue;
+        }
         if (const auto* capture = std::get_if<MetadataCaptureValuesAction>(&action)) {
             if (capture->source_kind != MetadataCaptureSourceKind::filename &&
                 capture->source_kind != MetadataCaptureSourceKind::full_path &&
@@ -828,6 +890,7 @@ prepare_chain(const MetadataTransformationChain& chain,
                 .program = std::nullopt,
                 .capture_program = std::move(*capture_program),
                 .capture_fields = {},
+                .filter_fields = {},
             };
             prepared_action.capture_fields.reserve(
                 prepared_action.capture_program->named_capture_count);
@@ -927,6 +990,7 @@ prepare_chain(const MetadataTransformationChain& chain,
             .program = std::nullopt,
             .capture_program = std::nullopt,
             .capture_fields = {},
+            .filter_fields = {},
         };
         const auto validate_values = [&](const std::vector<std::string>& values,
                                          const std::string_view description) -> core::Result<void> {
@@ -1193,6 +1257,47 @@ core::Result<MetadataTransformationPreview> plan_metadata_transformation(
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(transformation_error(core::ErrorCode::cancelled,
                                                     "metadata transformation was cancelled"));
+    }
+
+    // Field filters address the complete selected field inventory. Register
+    // those targets here because validation intentionally has no selection.
+    for (std::size_t action_index = 0U; action_index < prepared_chain->actions.size();
+         ++action_index) {
+        const auto& prepared_action = prepared_chain->actions[action_index];
+        const auto blocklist =
+            std::holds_alternative<MetadataBlocklistFieldsAction>(*prepared_action.action);
+        const auto allowlist =
+            std::holds_alternative<MetadataAllowlistFieldsAction>(*prepared_action.action);
+        if (!blocklist && !allowlist) {
+            continue;
+        }
+        for (std::size_t field_index = 0U; field_index < selection.field_count(); ++field_index) {
+            const auto& field = selection.field(field_index);
+            const auto listed =
+                std::ranges::find(prepared_action.filter_fields, field.canonical_name) !=
+                prepared_action.filter_fields.end();
+            if ((blocklist && !listed) || (allowlist && listed)) {
+                continue;
+            }
+            const auto match_mode = field.exact_native_name ? MetadataFieldMatchMode::exact_native
+                                                            : MetadataFieldMatchMode::logical;
+            const auto exact = field.exact_native_name
+                                   ? canonicalize_native_field_name(*field.exact_native_name)
+                                   : std::string{};
+            const auto existing = std::ranges::find_if(prepared_chain->targets, [&](const auto& t) {
+                return t.canonical_field == field.canonical_name && t.exact_native_field == exact &&
+                       t.match_mode == match_mode;
+            });
+            if (existing == prepared_chain->targets.end()) {
+                prepared_chain->targets.push_back(Target{.canonical_field = field.canonical_name,
+                                                         .exact_native_field = exact,
+                                                         .display_field = field.display_name,
+                                                         .match_mode = match_mode,
+                                                         .last_action_index = action_index});
+            } else {
+                existing->last_action_index = action_index;
+            }
+        }
     }
 
     const auto& prepared = prepared_chain->actions;

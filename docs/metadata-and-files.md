@@ -245,12 +245,19 @@ provides:
 - type-to-add field creation with fuzzy completion over present, conventional,
   MusicBrainz, and recently used names;
 - direct keyboard traversal, range selection, fill, clear, copy, and undo;
-- saved field layouts and task presets instead of one global enormous field list;
+- field-name and changed-only display filters plus saved cleanup scripts;
 - correct multi-value editing without semicolon-as-data ambiguity;
 - field removal and complete tag removal as distinct operations;
 - artwork and ReplayGain sections;
 - reload/discard and external-change conflict handling;
 - a complete preview before writing.
+
+**Trackbench decision (ADR-0170):** the Fields toolbar saves bounded named
+layouts from selected or currently visible fields. A chosen layout filters the
+presentation immediately and supplies preferred field order when the next tag
+selection opens. The active layout and its ordered canonical field names use a
+versioned workspace record. Layouts never remove fields from the underlying
+selection: Apply and undo still include hidden drafts.
 
 **Trackbench decision (ADR-0034, M5 read-only grid baseline):** Properties is
 now a non-modal workspace reachable from Edit, the track context menu, and
@@ -467,6 +474,7 @@ Required actions:
 - auto-number tracks;
 - guess/capture values from a filename/path or other formatted source;
 - remove every field except an allowlist;
+- remove named unwanted fields with a blocklist;
 - embed or remove a cue sheet where supported;
 - manipulate artwork through explicit actions.
 
@@ -474,6 +482,14 @@ Chains are named, reorderable, importable/exportable, and versioned. Preview
 shows the original and final document plus optionally each intermediate step.
 Do not serialize executable host-language code; persist declarative action data
 and formatting source.
+
+**Trackknife decision (ADR-0178):** the structured script editor implements
+field allowlists and blocklists as typed, reusable actions. Names are entered as
+a comma-separated list and matched through canonical logical field identity.
+The ordinary transformation preview lists every removal before **Add to draft**;
+Apply remains the only file-writing step. Database schema 34 and native JSON
+preserve these actions exactly. They are deliberately unavailable in the
+smaller raw cleanup-script syntax rather than being translated ambiguously.
 
 **Trackbench decision (ADRs 0048–0053 and 0064–0066, M5 transformation
 slices):** schema 1 chains are Qt-free ordered declarative data evaluated
@@ -704,6 +720,13 @@ revisions plus an explicit existing-path snapshot, detects device/inode aliases
 and lexical conflicts, and performs no I/O. Symlink/mount resolution,
 permissions, exact filesystem limits, and publication capability require a
 fresh later preflight and are not implied by a ready pure plan.
+
+**Trackbench decision (ADR-0169):** saved layouts may instead select
+`portable-v1`. It additionally replaces ASCII controls and Windows-forbidden
+punctuation, trailing dots/spaces, and reserved device stems. It deliberately
+does not normalize or transliterate Unicode. The choice is stored with the
+layout and shown in the live preview; persisted `linux-v1` behavior is
+unchanged.
 
 **Trackbench decision (ADR-0056):** the fresh preflight now walks every existing
 path component from `/` without following symlinks, requires an unchanged
@@ -943,9 +966,11 @@ The preview must detect:
 - companion files that would be copied twice;
 - Trackbench-list and statistics consequences.
 
-Sanitization is a named policy, not hidden string replacement. Offer Linux,
-portable, and custom profiles and show raw versus sanitized output. `$ascii()`
-remains a language function but is not a substitute for path safety.
+Sanitization is a named, versioned built-in policy, not hidden string
+replacement or user-executed code. Linux and portable policies show raw versus
+sanitized output. ADR-0171 rejects arbitrary custom sanitizers; future policies
+need a new stable identity and evidence. `$ascii()` remains a language function
+but is not a substitute for path safety.
 
 ### Execution safety
 

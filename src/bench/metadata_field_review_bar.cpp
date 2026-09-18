@@ -70,6 +70,22 @@ void MetadataFieldReviewBar::revealField(const int row) {
     refresh();
 }
 
+void MetadataFieldReviewBar::setLayoutFields(QStringList canonical_names) {
+    layout_fields_ = std::move(canonical_names);
+    refresh();
+}
+
+QStringList MetadataFieldReviewBar::visibleFieldNames() const {
+    QStringList result;
+    for (int row = 0; row < model_->rowCount(); ++row) {
+        if (!fields_->isRowHidden(row)) {
+            result.push_back(
+                model_->index(row, 0).data(metadata_field_canonical_name_role).toString());
+        }
+    }
+    return result;
+}
+
 void MetadataFieldReviewBar::refresh() {
     // Wait for the existing bounded worker projection instead of traversing tracks.
     const auto ready = model_->summaryReady() && model_->draftPreviewReady();
@@ -89,7 +105,11 @@ void MetadataFieldReviewBar::refresh() {
                              field.data(metadata_field_canonical_name_role)
                                  .toString()
                                  .contains(query, Qt::CaseInsensitive);
-        const auto hidden = !matches || (changed_only_->isChecked() && !staged);
+        const auto in_layout =
+            layout_fields_.isEmpty() ||
+            layout_fields_.contains(field.data(metadata_field_canonical_name_role).toString(),
+                                    Qt::CaseInsensitive);
+        const auto hidden = !in_layout || !matches || (changed_only_->isChecked() && !staged);
         if (fields_->isRowHidden(row) != hidden) {
             fields_->setRowHidden(row, hidden);
         }

@@ -102,6 +102,8 @@ void MetadataTransformationInterchangeTest::roundTripsEveryTypedActionExactly() 
                     .source = "COMMENT",
                     .pattern = "%artist% - %title%",
                 },
+                MetadataBlocklistFieldsAction{.fields = {"COMMENT", "ENCODER"}},
+                MetadataAllowlistFieldsAction{.fields = {"TITLE", "ARTIST", "ALBUM"}},
             },
     };
 

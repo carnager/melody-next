@@ -1,13 +1,13 @@
 # Open decisions
 
-Accepted foundations are recorded in ADRs through 0079. ADR-0058 supersedes
+Accepted foundations are recorded in ADRs through 0174. ADR-0058 supersedes
 ADR-0025's permanent process split: Trackbench is the primary workspace and
 hosts authority-bound MPD Queue and Local Queue tabs. The active primary tab
 switches the server-library/local-folders sidebar, MPD/PipeWire output selector,
 transport controller, row type, and available commands. The queues never mix,
 and local operations remain unavailable to MPD rows. The former standalone
 Trackknife executable was retired in ADR-0071; stored-playlist tabs were
-migrated in ADR-0129 and committed search tabs remain unmigrated open work.
+migrated in ADR-0129 and committed search tabs in ADR-0140.
 
 ## Resolved for M2–M3
 
@@ -49,9 +49,9 @@ transport.
 ADR-0033 fixes the Qt-free ordered metadata document, deterministic canonical
 lookup, provenance precedence, initial MusicBrainz projection, raw-path source
 revision, and conservative read-only TagLib property boundary. Trackbench list
-snapshots cache effective ordered values but are not mutation authority. Exact
-format write mappings, artwork/native-object preservation, sidecars, and
-journaling remain open M5 decisions and capability work. ADR-0034
+snapshots cache effective ordered values but are not mutation authority. At
+that point exact format mappings, artwork preservation, sidecars, and journals
+remained open. ADR-0034
 adds the bounded sparse selection union, exact definitions for common, mixed,
 missing, and partial fields, and the non-modal Properties workspace with
 per-item exact-value/provenance inspection. ADR-0035 adds bounded sparse
@@ -118,8 +118,8 @@ published-artifact startup recovery. Cross-filesystem and changed-artifact undo,
 portable/custom sanitization and Unicode normalization,
 `TOTALTRACKS` numbering totals (grouped counters landed in ADR-0104),
 richer match dialects, other exact format writers, artwork
-publication/UI, thumbnail presentation, and sidecars remain open M5 decisions and
-capability work. ADR-0068 separately fixes the `tkcapture-1` grammar, bounded
+publication/UI, thumbnail presentation, and sidecars were remaining M5 work at
+that stage. ADR-0068 separately fixes the `tkcapture-1` grammar, bounded
 ambiguity policy, four source kinds, multi-target chain behavior, and schema-20
 saved action. ADR-0072 fixes the strict native JSON interchange schema for the
 complete current typed chain while excluding catalog identity and automatic
@@ -129,6 +129,11 @@ metadata/path pairing, the combined dependent transaction, and the recovery
 reread contract without serializing metadata into the file journal. ADR-0075
 fixes reused-target cache replacement and exact executor-created directory
 evidence after a later source rollback.
+ADRs 0080–0161 subsequently qualify the current text/artwork matrix, direct
+staged Apply, retry, and recovery workflows. ADR-0169 adds portable naming;
+ADR-0170's saved field layouts were retired by ADR-0177; ADR-0178 replaces
+them with previewed field-filter scripts. ADR-0171 closes M5 and moves unadvertised
+format and policy expansion outside that gate.
 ADR-0076 separately fixes the bounded read-only native-FLAC/external artwork
 inventory, exact type/role/provenance/source-revision evidence, and content-hash
 duplicate linkage without qualifying a picture write.
@@ -156,7 +161,7 @@ Export. Other container writers and configurable export naming remain open.
 3. Resolved by ADR-0071: the compatibility shell was removed rather than
    packaged.
 
-## Needed before M5–M8
+## Remaining cross-milestone decisions
 
 1. Sidecar location/format and precedence relative to embedded metadata.
    Resolved for loudness: ADR-0139 keeps CUE ReplayGain in the sheet
@@ -165,15 +170,17 @@ Export. Other container writers and configurable export naming remain open.
    with playback precedence sidecar → CUE → embedded. Open scope shrinks
    to non-loudness sidecar payloads (typed metadata, artwork references),
    file-operation following, and the explicit unwritable-format fallback.
-2. Portable/custom filename sanitization and Unicode normalization policy;
-   `linux-v1` is fixed by ADR-0055.
+2. Resolved for the supported surface. ADR-0169 adds `portable-v1` beside
+   `linux-v1`; ADR-0171 rejects user-authored sanitizers and requires future
+   Unicode normalization to use a new evidence-backed policy identity.
 3. Resolved. The true-peak half by ADR-0148 (sample peak stays the
    default, an opt-in policy proposes the oversampled true peak in
    `REPLAYGAIN_*_PEAK`, sidecar plus CSV export record the peak kind);
    the Opus storage half by ADR-0149 (RFC 7845 Q7.8 R128 comments with
    a constant 5 dB reference shift). Only rewriting the `OpusHead`
    output gain itself remains future expert-operation work.
-4. Initial exact read/write/preservation claims per local format.
+4. Resolved for M5 by the qualified format matrix and ADR-0171. Additional
+   adapters remain independently gated expansion.
 5. Converter's shipped codec/device presets, resampler quality settings, and
    source-root inference UX.
 6. Resolved by ADR-0088: the MusicBrainz client paces one serialized request

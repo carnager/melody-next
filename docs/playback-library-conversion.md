@@ -374,8 +374,10 @@ decode exact logical range
 - verification and post-scan actions;
 - concurrency cap.
 
-Presets are declarative, versioned, human-exportable, and show missing encoders
-before starting. External command-line encoders may be supported through a safe
+Encoder presets are declarative and versioned, and show missing encoders before
+starting. ADR-0173 snapshots the complete interactive job beside each saved
+encoder preset, including backend versions; human-readable interchange remains
+future work. External command-line encoders may be supported through a safe
 argument-array template—never shell-string interpolation—and a capability probe.
 
 Per ADR-0054, one-output-per-track conversion reuses Trackbench's versioned
@@ -388,11 +390,16 @@ not necessarily preserve a one-source-item/one-relative-path relationship.
 ### Destination modes
 
 - One output per logical track.
-- Mirror source directory structure relative to an explicit source root.
+- Mirror the complete source directory structure relative to `/` (ADR-0154).
 - Generate directories and names from a useful preset or `tkfmt-1` expression.
 - Grouped multi-track output when the target container supports chapters/tracks;
   otherwise an audio file plus cue where meaningful.
 - Merge all selected audio into one continuous track.
+
+ADR-0173 qualifies the first, mirror, and expression modes for M8. Grouped
+chapter containers and merge-all output remain future features pending a typed
+metadata and boundary contract; CUE/chapter/subsong inputs already produce one
+verified file per exact logical selection.
 
 Preview every output path and conflict. Write to temporary siblings and publish
 atomically. A cancelled/failed conversion removes only Trackbench-created temp

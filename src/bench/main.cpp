@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "trackknife/persistence/workspace_backup.hpp"
 
 #include <QApplication>
 #include <QDateTime>
@@ -8,12 +9,14 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QString>
 #include <QTimer>
 
 #include <cstddef>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -111,6 +114,56 @@ int main(int argc, char** argv) {
         }
     }
 
+    QString restore_notice;
+    {
+        QSettings settings;
+        const auto pending =
+            settings.value(QStringLiteral("recovery/pending-workspace-restore")).toString();
+        const auto pending_settings =
+            settings.value(QStringLiteral("recovery/pending-settings-restore")).toString();
+        if (!pending.isEmpty()) {
+            const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+            QDir{}.mkpath(data);
+            const auto live = std::filesystem::path{
+                QFile::encodeName(data + QStringLiteral("/lists.sqlite")).toStdString()};
+            const auto rollback_name =
+                QStringLiteral("/lists-before-restore-%1.sqlite")
+                    .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss")));
+            const auto rollback =
+                std::filesystem::path{QFile::encodeName(data + rollback_name).toStdString()};
+            const auto backup = std::filesystem::path{QFile::encodeName(pending).toStdString()};
+            auto restored =
+                trackknife::persistence::restore_workspace_database_backup(backup, live, rollback);
+            if (restored) {
+                QString settings_error;
+                if (!pending_settings.isEmpty()) {
+                    QSettings imported{pending_settings, QSettings::IniFormat};
+                    if (imported.value(QStringLiteral("backup/format")).toInt() != 1 ||
+                        imported.status() != QSettings::NoError) {
+                        settings_error = QStringLiteral("; settings backup was invalid");
+                    } else {
+                        settings.clear();
+                        for (const auto& key : imported.allKeys()) {
+                            if (key.startsWith(QStringLiteral("values/"))) {
+                                settings.setValue(key.sliced(7), imported.value(key));
+                            }
+                        }
+                    }
+                }
+                settings.remove(QStringLiteral("recovery/pending-workspace-restore"));
+                settings.remove(QStringLiteral("recovery/pending-settings-restore"));
+                settings.sync();
+                restore_notice =
+                    QStringLiteral("Workspace restored. Previous database: %1%2")
+                        .arg(QFile::decodeName(QByteArray::fromStdString(rollback.native())),
+                             settings_error);
+            } else {
+                restore_notice = QStringLiteral("Workspace restore failed: %1")
+                                     .arg(QString::fromStdString(restored.error().message));
+            }
+        }
+    }
+
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
     // background probing has had a moment, and exits. It switches to the
     // test-mode settings location so real user state stays untouched.
@@ -133,6 +186,11 @@ int main(int argc, char** argv) {
     startSoakLog(&application);
     trackknife::bench::BenchMainWindow window;
     window.show();
+    if (!restore_notice.isEmpty()) {
+        QTimer::singleShot(0, &window, [&window, restore_notice] {
+            QMessageBox::information(&window, QStringLiteral("Workspace restore"), restore_notice);
+        });
+    }
     if (!raw_paths.empty()) {
         window.openLocalPaths(std::move(raw_paths));
     }

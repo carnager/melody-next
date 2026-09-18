@@ -16,6 +16,9 @@
 
 namespace trackknife::convert {
 
+enum class ConversionChannelPolicy : std::uint8_t { keep, mono, stereo };
+enum class ConversionGainMode : std::uint8_t { none, track, album };
+
 // One encoded cover image to embed into the converted output (ADR-0131).
 // Bytes are exact PNG/JPEG data; picture_type uses the shared FLAC/ID3v2
 // numbering (3 = front cover).
@@ -57,6 +60,13 @@ struct AudioConversionRequest {
     // float and unknown) keeps 24, the pipeline's maximum. Mutually
     // exclusive with target_bit_depth.
     bool keep_source_bit_depth{false};
+    // Explicit channel and permanent-gain policies (ADR-0173). FFmpeg's
+    // channel-layout-aware resampler performs mono/stereo mixing. Gain is
+    // applied to float PCM before resampling; album falls back to track and a
+    // matching peak prevents amplification above full scale.
+    ConversionChannelPolicy channel_policy{ConversionChannelPolicy::keep};
+    ConversionGainMode gain_mode{ConversionGainMode::none};
+    float gain_preamp_db{0.0F};
     // Effective text metadata to carry into the output, written at mux time
     // and verified by rereading the finished file with the project metadata
     // reader before it may become the destination. Vorbis-comment containers

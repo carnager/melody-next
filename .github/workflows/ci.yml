@@ -26,7 +26,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y
           cmake ninja-build pkg-config libutf8proc-dev qt6-base-dev clang-format
           g++-13 clang-18 nlohmann-json3-dev libavformat-dev libavcodec-dev
-          libavutil-dev libswresample-dev
+          libavutil-dev libswresample-dev libebur128-dev libmpdclient-dev
+          libopenmpt-dev libpipewire-0.3-dev libsqlite3-dev libtag1-dev
       - name: Configure
         run: >-
           cmake --preset ${{ matrix.compiler == 'clang' && 'tidy' || 'dev' }}
@@ -50,7 +51,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y
           cmake ninja-build pkg-config libutf8proc-dev qt6-base-dev clang-18
           nlohmann-json3-dev libavformat-dev libavcodec-dev libavutil-dev
-          libswresample-dev
+          libswresample-dev libebur128-dev libmpdclient-dev libopenmpt-dev
+          libpipewire-0.3-dev libsqlite3-dev libtag1-dev
       - name: Configure
         run: cmake --preset asan
       - name: Build

@@ -59,6 +59,24 @@ struct MetadataRemoveFieldIfAction {
                            const MetadataRemoveFieldIfAction&) = default;
 };
 
+// Removes every logical metadata field named in fields. This is a compact,
+// reusable cleanup action; field matching is case-insensitive and uses the
+// same canonical identities as the rest of the transformation engine.
+struct MetadataBlocklistFieldsAction {
+    std::vector<std::string> fields;
+
+    friend bool operator==(const MetadataBlocklistFieldsAction&,
+                           const MetadataBlocklistFieldsAction&) = default;
+};
+
+// Removes every logical metadata field except those named in fields.
+struct MetadataAllowlistFieldsAction {
+    std::vector<std::string> fields;
+
+    friend bool operator==(const MetadataAllowlistFieldsAction&,
+                           const MetadataAllowlistFieldsAction&) = default;
+};
+
 enum class MetadataValueTransformKind : std::uint8_t {
     trim_ascii,
     lowercase,
@@ -192,7 +210,8 @@ using MetadataTransformationAction =
                  MetadataJoinValuesAction, MetadataRemoveMatchingValuesAction,
                  MetadataReplaceMatchingValuesAction, MetadataNumberSelectedItemsAction,
                  MetadataKeepFirstCharactersAction, MetadataCaptureValuesAction,
-                 MetadataNumberGroupedItemsAction>;
+                 MetadataNumberGroupedItemsAction, MetadataBlocklistFieldsAction,
+                 MetadataAllowlistFieldsAction>;
 
 struct MetadataTransformationChain {
     std::uint32_t schema_version{1U};

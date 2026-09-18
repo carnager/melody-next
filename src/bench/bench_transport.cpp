@@ -7,6 +7,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "trackknife/audio/melody_agent.hpp"
 #include "uicommon/line_slider.hpp"
 
 #include <QAction>
@@ -548,6 +549,7 @@ void BenchMainWindow::refreshPlaybackBufferChecks() {
 
 void BenchMainWindow::rebuildDeviceMenu() {
     device_menu_->clear();
+    device_menu_->setToolTipsVisible(true);
 
     if (isMpdContext()) {
         device_group_->setExclusive(false);
@@ -558,14 +560,52 @@ void BenchMainWindow::rebuildDeviceMenu() {
             const auto name = output_model->data(index, quick::MpdOutputModel::NameRole).toString();
             const auto enabled =
                 output_model->data(index, quick::MpdOutputModel::EnabledRole).toBool();
-            auto* action = device_menu_->addAction(name);
+            auto label = name;
+            QString endpoint_detail;
+            if (name == QStringLiteral("Trackknife") && melody_endpoint_ != nullptr) {
+                const auto endpoint = melody_endpoint_->snapshot();
+                const auto mode = endpoint.replay_gain_mode == audio::ReplayGainMode::track
+                                      ? QStringLiteral("Track")
+                                  : endpoint.replay_gain_mode == audio::ReplayGainMode::album
+                                      ? QStringLiteral("Album")
+                                      : QStringLiteral("Off");
+                const auto selected_gain =
+                    endpoint.replay_gain_mode == audio::ReplayGainMode::album &&
+                            endpoint.album_gain_db
+                        ? endpoint.album_gain_db
+                        : endpoint.track_gain_db;
+                endpoint_detail = QStringLiteral("ReplayGain: %1").arg(mode);
+                if (selected_gain) {
+                    endpoint_detail += QStringLiteral(" · %1 dB · %2×")
+                                           .arg(*selected_gain, 0, 'f', 2)
+                                           .arg(endpoint.effective_gain_multiplier, 0, 'f', 3);
+                } else if (endpoint.replay_gain_mode != audio::ReplayGainMode::off) {
+                    const auto received =
+                        endpoint.replay_gain_mode == audio::ReplayGainMode::album &&
+                                endpoint.received_album_gain_db
+                            ? endpoint.received_album_gain_db
+                            : endpoint.received_track_gain_db;
+                    endpoint_detail +=
+                        received ? QStringLiteral(" · queue %1 dB, player missing")
+                                       .arg(*received, 0, 'f', 2)
+                        : std::abs(endpoint.effective_gain_multiplier - 1.0F) > 0.0001F
+                            ? QStringLiteral(" · decoder metadata · %1×")
+                                  .arg(endpoint.effective_gain_multiplier, 0, 'f', 3)
+                            : QStringLiteral(" · no gain metadata");
+                }
+                label += QStringLiteral(" — %1").arg(endpoint_detail);
+            }
+            auto* action = device_menu_->addAction(label);
             action->setObjectName(QStringLiteral("action-mpd-output-%1").arg(id));
             action->setCheckable(true);
             // MPD outputs are independent toggles; clicking one must never
             // silently disable the others.
             action->setChecked(enabled);
-            action->setToolTip(
-                output_model->data(index, quick::MpdOutputModel::DetailRole).toString());
+            auto detail = output_model->data(index, quick::MpdOutputModel::DetailRole).toString();
+            if (!endpoint_detail.isEmpty()) {
+                detail += QStringLiteral("\n") + endpoint_detail;
+            }
+            action->setToolTip(detail);
             device_group_->addAction(action);
             connect(action, &QAction::triggered, this,
                     [this, id, enabled] { mpd_controller_->setOutputEnabled(id, !enabled); });

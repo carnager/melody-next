@@ -41,10 +41,14 @@
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QItemSelectionModel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QModelIndex>
 #include <QPaintEvent>
@@ -56,6 +60,7 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStandardItemModel>
@@ -66,8 +71,10 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeView>
 #include <QTreeWidget>
+#include <QUuid>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -94,6 +101,7 @@ constexpr auto properties_content_splitter_key =
     "workspace/metadata-properties-content-splitter-v1";
 constexpr auto properties_metadata_splitter_key =
     "workspace/metadata-properties-metadata-splitter-v1";
+constexpr auto properties_field_layouts_key = "workspace/metadata-field-layouts-v1";
 
 class EmptyStateListWidget final : public QListWidget {
   public:
@@ -373,6 +381,16 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         QStringLiteral("For example: %tracknumber% - %title%"));
     output_basename_expression_->setFont(expression_font);
     layout_form->addRow(QStringLiteral("Filename:"), output_basename_expression_);
+    output_sanitization_policy_ = new QComboBox(layout_manager);
+    output_sanitization_policy_->setObjectName(QStringLiteral("bench-output-layout-sanitization"));
+    output_sanitization_policy_->addItem(QStringLiteral("Linux filenames"),
+                                         QStringLiteral("linux"));
+    output_sanitization_policy_->addItem(QStringLiteral("Portable filenames"),
+                                         QStringLiteral("portable"));
+    output_sanitization_policy_->setToolTip(
+        QStringLiteral("Portable replaces Windows-forbidden characters, trailing dots/spaces, "
+                       "and reserved device names; Unicode spelling is preserved"));
+    layout_form->addRow(QStringLiteral("Filename policy:"), output_sanitization_policy_);
     layout_manager_box->addLayout(layout_form);
     output_layout_example_ =
         new QLabel(QStringLiteral("Preview: waiting for tracks…"), layout_manager);
@@ -505,13 +523,37 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         QStringLiteral("Edit the exact ordered value list (Ctrl+Enter)"));
     edit_values_button_->setEnabled(false);
     grid_tools_layout->addWidget(edit_values_button_);
+    field_layout_label_ = new QLabel(QStringLiteral("Fields:"), grid_tools_);
+    field_layout_label_->setToolTip(
+        QStringLiteral("Choose a saved set of metadata fields to show"));
+    field_layout_label_->hide();
+    grid_tools_layout->addWidget(field_layout_label_);
+    field_layout_combo_ = new QComboBox(grid_tools_);
+    field_layout_combo_->setObjectName(QStringLiteral("bench-metadata-field-layout"));
+    field_layout_combo_->addItem(QStringLiteral("All fields"), QString{});
+    field_layout_combo_->setToolTip(
+        QStringLiteral("Show all metadata fields or a saved field set"));
+    field_layout_combo_->hide();
+    grid_tools_layout->addWidget(field_layout_combo_);
+    field_layout_save_button_ =
+        new QPushButton(QStringLiteral("Save visible fields as set…"), grid_tools_);
+    field_layout_save_button_->setObjectName(QStringLiteral("bench-metadata-field-layout-save"));
+    field_layout_save_button_->setToolTip(
+        QStringLiteral("Save the selected fields, or all currently visible fields, as a named "
+                       "field set"));
+    field_layout_save_button_->hide();
+    field_layout_remove_button_ = new QPushButton(QStringLiteral("Delete field set"), grid_tools_);
+    field_layout_remove_button_->setObjectName(
+        QStringLiteral("bench-metadata-field-layout-remove"));
+    field_layout_remove_button_->setEnabled(false);
+    field_layout_remove_button_->hide();
     suggest_button_ = new QPushButton(QStringLiteral("Suggest"), grid_tools_);
     suggest_button_->setObjectName(QStringLiteral("bench-metadata-suggest"));
     suggest_button_->setToolTip(
         QStringLiteral("Fill album artist and total tracks from agreement across the selected "
                        "files; suggestions become ordinary colored draft edits"));
     suggest_button_->setEnabled(false);
-    grid_tools_layout->addWidget(suggest_button_);
+    suggest_button_->hide();
     identify_button_ = new QPushButton(QStringLiteral("Identify…"), grid_tools_);
     identify_button_->setObjectName(QStringLiteral("bench-metadata-identify"));
     identify_button_->setToolTip(
@@ -520,6 +562,17 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
                        "draft edits"));
     identify_button_->setEnabled(false);
     grid_tools_layout->addWidget(identify_button_);
+    auto* more_button = new QToolButton(grid_tools_);
+    more_button->setObjectName(QStringLiteral("bench-metadata-more"));
+    more_button->setText(QStringLiteral("More"));
+    more_button->setPopupMode(QToolButton::InstantPopup);
+    auto* more_menu = new QMenu(more_button);
+    suggest_action_ = more_menu->addAction(QStringLiteral("Suggest album totals and artist"));
+    suggest_action_->setToolTip(suggest_button_->toolTip());
+    suggest_action_->setEnabled(false);
+    connect(suggest_action_, &QAction::triggered, suggest_button_, &QPushButton::click);
+    more_button->setMenu(more_menu);
+    grid_tools_layout->addWidget(more_button);
     grid_tools_layout->addStretch(1);
     undo_button_ = new QPushButton(QStringLiteral("Undo"), grid_tools_);
     undo_button_->setObjectName(QStringLiteral("bench-metadata-undo"));
@@ -583,6 +636,12 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             &MetadataPropertiesDialog::removeSelectedFields);
     connect(edit_values_button_, &QPushButton::clicked, this,
             &MetadataPropertiesDialog::editCurrentValues);
+    connect(field_layout_combo_, &QComboBox::currentIndexChanged, this,
+            &MetadataPropertiesDialog::applyCurrentFieldLayout);
+    connect(field_layout_save_button_, &QPushButton::clicked, this,
+            &MetadataPropertiesDialog::saveCurrentFieldLayout);
+    connect(field_layout_remove_button_, &QPushButton::clicked, this,
+            &MetadataPropertiesDialog::removeCurrentFieldLayout);
     connect(suggest_button_, &QPushButton::clicked, this,
             &MetadataPropertiesDialog::startProposals);
     connect(identify_button_, &QPushButton::clicked, this,
@@ -652,6 +711,8 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         connect(expression, &QLineEdit::textChanged, this,
                 &MetadataPropertiesDialog::scheduleOutputLayoutExample);
     }
+    connect(output_sanitization_policy_, &QComboBox::currentIndexChanged, this,
+            &MetadataPropertiesDialog::scheduleOutputLayoutExample);
     connect(destination_root_, &QLineEdit::textEdited, this, [this](const QString& text) {
         const auto encoded = QFile::encodeName(text);
         destination_root_raw_path_.assign(encoded.constData(),
@@ -813,6 +874,181 @@ void MetadataPropertiesDialog::artworkApplied(const operations::ArtworkApplyResu
     if (artwork_apply_observer_) {
         artwork_apply_observer_(result);
     }
+}
+
+void MetadataPropertiesDialog::loadFieldLayouts() {
+    const auto begin_capture = [this] {
+        if (!active_field_layout_id_.isEmpty()) {
+            const auto found =
+                std::ranges::find(field_layouts_, active_field_layout_id_, &SavedFieldLayout::id);
+            if (found != field_layouts_.end()) {
+                std::vector<std::string> ordered;
+                ordered.reserve(static_cast<std::size_t>(found->fields.size()) +
+                                preferred_fields_.size());
+                for (const auto& field : found->fields) {
+                    ordered.push_back(encode_utf8(field));
+                }
+                ordered.insert(ordered.end(), preferred_fields_.begin(), preferred_fields_.end());
+                preferred_fields_ = std::move(ordered);
+            }
+        }
+        QTimer::singleShot(0, this, &MetadataPropertiesDialog::captureSources);
+    };
+    if (!layout_store_.load) {
+        begin_capture();
+        return;
+    }
+    const QPointer self{this};
+    layout_store_.load(
+        QString::fromLatin1(properties_field_layouts_key),
+        [self, begin_capture](QByteArray state, const QString& error) mutable {
+            if (!self) {
+                return;
+            }
+            if (error.isEmpty() && !state.isEmpty()) {
+                QJsonParseError parse_error;
+                const auto document = QJsonDocument::fromJson(state, &parse_error);
+                const auto root = document.object();
+                if (parse_error.error == QJsonParseError::NoError && document.isObject() &&
+                    root.value(QStringLiteral("schema")).toInt() == 1) {
+                    self->active_field_layout_id_ = root.value(QStringLiteral("active")).toString();
+                    const auto layouts = root.value(QStringLiteral("layouts")).toArray();
+                    constexpr auto maximum_layouts = 64;
+                    constexpr auto maximum_fields = 256;
+                    for (const auto& value : layouts) {
+                        if (self->field_layouts_.size() >= maximum_layouts || !value.isObject()) {
+                            break;
+                        }
+                        const auto object = value.toObject();
+                        SavedFieldLayout layout{.id = object.value(QStringLiteral("id")).toString(),
+                                                .name =
+                                                    object.value(QStringLiteral("name")).toString(),
+                                                .fields = {}};
+                        if (layout.id.isEmpty() || layout.name.trimmed().isEmpty()) {
+                            continue;
+                        }
+                        for (const auto& field : object.value(QStringLiteral("fields")).toArray()) {
+                            if (layout.fields.size() == maximum_fields || !field.isString()) {
+                                break;
+                            }
+                            const auto name = field.toString().trimmed();
+                            if (!name.isEmpty() &&
+                                !layout.fields.contains(name, Qt::CaseInsensitive)) {
+                                layout.fields.push_back(name);
+                            }
+                        }
+                        if (!layout.fields.isEmpty()) {
+                            self->field_layouts_.push_back(std::move(layout));
+                        }
+                    }
+                }
+            }
+            {
+                const QSignalBlocker blocker{self->field_layout_combo_};
+                for (const auto& layout : self->field_layouts_) {
+                    self->field_layout_combo_->addItem(layout.name, layout.id);
+                }
+                const auto index =
+                    self->field_layout_combo_->findData(self->active_field_layout_id_);
+                self->field_layout_combo_->setCurrentIndex(std::max(0, index));
+            }
+            const auto has_sets = !self->field_layouts_.empty();
+            self->field_layout_label_->setVisible(has_sets);
+            self->field_layout_combo_->setVisible(has_sets);
+            begin_capture();
+        });
+}
+
+void MetadataPropertiesDialog::persistFieldLayouts() {
+    if (!layout_store_.save) {
+        return;
+    }
+    QJsonArray layouts;
+    for (const auto& layout : field_layouts_) {
+        QJsonArray fields;
+        for (const auto& field : layout.fields) {
+            fields.push_back(field);
+        }
+        layouts.push_back(QJsonObject{{QStringLiteral("id"), layout.id},
+                                      {QStringLiteral("name"), layout.name},
+                                      {QStringLiteral("fields"), fields}});
+    }
+    const QJsonObject root{{QStringLiteral("schema"), 1},
+                           {QStringLiteral("active"), active_field_layout_id_},
+                           {QStringLiteral("layouts"), layouts}};
+    layout_store_.save(QString::fromLatin1(properties_field_layouts_key),
+                       QJsonDocument(root).toJson(QJsonDocument::Compact), {});
+}
+
+void MetadataPropertiesDialog::applyCurrentFieldLayout() {
+    if (field_layout_combo_ == nullptr) {
+        return;
+    }
+    active_field_layout_id_ = field_layout_combo_->currentData().toString();
+    QStringList fields;
+    const auto found =
+        std::ranges::find(field_layouts_, active_field_layout_id_, &SavedFieldLayout::id);
+    if (found != field_layouts_.end()) {
+        fields = found->fields;
+    }
+    if (field_review_bar_ != nullptr) {
+        field_review_bar_->setLayoutFields(std::move(fields));
+    }
+    field_layout_remove_button_->setEnabled(found != field_layouts_.end());
+    if (field_layout_remove_action_ != nullptr) {
+        field_layout_remove_action_->setEnabled(found != field_layouts_.end());
+    }
+    persistFieldLayouts();
+}
+
+void MetadataPropertiesDialog::saveCurrentFieldLayout() {
+    if (aggregate_model_ == nullptr || fields_ == nullptr || field_review_bar_ == nullptr ||
+        field_layouts_.size() >= 64U) {
+        return;
+    }
+    bool accepted = false;
+    const auto name =
+        QInputDialog::getText(this, QStringLiteral("Save field set"),
+                              QStringLiteral("Field set name:"), QLineEdit::Normal, {}, &accepted)
+            .trimmed();
+    if (!accepted || name.isEmpty()) {
+        return;
+    }
+    QStringList field_names;
+    for (const auto& index : fields_->selectionModel()->selectedRows(0)) {
+        field_names.push_back(index.data(metadata_field_canonical_name_role).toString());
+    }
+    if (field_names.isEmpty()) {
+        field_names = field_review_bar_->visibleFieldNames();
+    }
+    field_names.removeDuplicates();
+    if (field_names.isEmpty()) {
+        return;
+    }
+    SavedFieldLayout saved{.id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                           .name = name,
+                           .fields = std::move(field_names)};
+    field_layouts_.push_back(saved);
+    field_layout_combo_->addItem(saved.name, saved.id);
+    field_layout_label_->show();
+    field_layout_combo_->show();
+    field_layout_combo_->setCurrentIndex(field_layout_combo_->count() - 1);
+    persistFieldLayouts();
+}
+
+void MetadataPropertiesDialog::removeCurrentFieldLayout() {
+    if (active_field_layout_id_.isEmpty()) {
+        return;
+    }
+    std::erase_if(field_layouts_,
+                  [this](const auto& layout) { return layout.id == active_field_layout_id_; });
+    const auto index = field_layout_combo_->currentIndex();
+    field_layout_combo_->removeItem(index);
+    field_layout_combo_->setCurrentIndex(0);
+    const auto has_sets = !field_layouts_.empty();
+    field_layout_label_->setVisible(has_sets);
+    field_layout_combo_->setVisible(has_sets);
+    persistFieldLayouts();
 }
 
 void MetadataPropertiesDialog::restoreLayoutState() {
@@ -981,6 +1217,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     file_list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     file_list_->verticalHeader()->hide();
     file_list_->verticalHeader()->setDefaultSectionSize(24);
+    file_list_->setMinimumHeight(120);
     file_list_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     for (auto column = 1; column < grid_model_->columnCount(); ++column) {
         file_list_->hideColumn(column);
@@ -1026,6 +1263,13 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     fields_pane_layout->setSpacing(4);
     field_review_bar_ =
         new MetadataFieldReviewBar(fields_, aggregate_model_, file_list_, fields_pane);
+    if (const auto layout =
+            std::ranges::find(field_layouts_, active_field_layout_id_, &SavedFieldLayout::id);
+        layout != field_layouts_.end()) {
+        field_review_bar_->setLayoutFields(layout->fields);
+        field_layout_remove_button_->setEnabled(true);
+        field_layout_remove_action_->setEnabled(true);
+    }
     fields_pane_layout->addWidget(field_review_bar_);
     grid_tools_->setParent(fields_pane);
     fields_pane_layout->addWidget(grid_tools_);
@@ -1035,6 +1279,9 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_sections_ = new QTabWidget(metadata_splitter_);
     metadata_sections_->setObjectName(QStringLiteral("bench-metadata-sections"));
     metadata_sections_->setAccessibleName(QStringLiteral("Metadata property sections"));
+    // Artwork's optional draft and problem tables must scroll inside their
+    // pane, not raise the splitter minimum and crush the selected-files list.
+    metadata_sections_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     metadata_sections_->addTab(fields_pane, QStringLiteral("Fields"));
     artwork_section_ = new MetadataArtworkSection(metadata_sections_);
     artwork_section_->setUnifiedApply(static_cast<bool>(plan_applier_factory_));
@@ -1409,6 +1656,9 @@ void MetadataPropertiesDialog::updateTransformationButton() {
     if (suggest_button_ != nullptr) {
         suggest_button_->setEnabled(enabled && !proposal_running_);
     }
+    if (suggest_action_ != nullptr) {
+        suggest_action_->setEnabled(enabled && !proposal_running_);
+    }
     if (identify_button_ != nullptr) {
         identify_button_->setEnabled(enabled && !proposal_running_ &&
                                      static_cast<bool>(musicbrainz_.fetch) &&
@@ -1624,6 +1874,7 @@ void MetadataPropertiesDialog::selectOutputLayout(const int index) {
         output_layout_name_->clear();
         output_directory_expression_->clear();
         output_basename_expression_->clear();
+        output_sanitization_policy_->setCurrentIndex(0);
         updateOutputProfileButtons();
         return;
     }
@@ -1641,6 +1892,9 @@ void MetadataPropertiesDialog::selectOutputLayout(const int index) {
     output_directory_expression_->setText(
         display_utf8(found->profile.relative_directory_expression));
     output_basename_expression_->setText(display_utf8(found->profile.basename_expression));
+    output_sanitization_policy_->setCurrentIndex(
+        std::max(0, output_sanitization_policy_->findData(
+                        display_utf8(found->profile.sanitization_policy.name))));
     updateOutputProfileButtons();
 }
 
@@ -1676,6 +1930,7 @@ void MetadataPropertiesDialog::newOutputLayout() {
     output_layout_name_->clear();
     output_directory_expression_->clear();
     output_basename_expression_->clear();
+    output_sanitization_policy_->setCurrentIndex(0);
     output_layout_name_->setFocus();
     output_profile_status_->setText(
         QStringLiteral("Define a reusable relative folder and filename convention"));
@@ -1706,7 +1961,9 @@ void MetadataPropertiesDialog::saveOutputLayout() {
                 .dialect = {},
                 .relative_directory_expression = encode_utf8(output_directory_expression_->text()),
                 .basename_expression = encode_utf8(output_basename_expression_->text()),
-                .sanitization_policy = {"linux", 1U},
+                .sanitization_policy = {encode_utf8(
+                                            output_sanitization_policy_->currentData().toString()),
+                                        1U},
             },
     };
     if (auto valid = operations::validate_output_layout_profile(saved.profile); !valid) {
@@ -1861,6 +2118,7 @@ void MetadataPropertiesDialog::updateOutputProfileButtons() {
     output_layout_name_->setEnabled(available);
     output_directory_expression_->setEnabled(available);
     output_basename_expression_->setEnabled(available);
+    output_sanitization_policy_->setEnabled(available);
     destination_name_->setEnabled(available);
     destination_root_->setEnabled(available);
     destination_browse_button_->setEnabled(available && output_profile_store_.save_destination);
@@ -1961,7 +2219,8 @@ void MetadataPropertiesDialog::startOutputLayoutExample() {
         .dialect = {},
         .relative_directory_expression = encode_utf8(output_directory_expression_->text()),
         .basename_expression = encode_utf8(output_basename_expression_->text()),
-        .sanitization_policy = {"linux", 1U},
+        .sanitization_policy = {encode_utf8(output_sanitization_policy_->currentData().toString()),
+                                1U},
     };
     output_example_job_generation_ = output_example_generation_;
     output_example_cancellation_ = core::CancellationSource{};

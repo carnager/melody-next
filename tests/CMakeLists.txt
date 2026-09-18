@@ -192,6 +192,13 @@ target_link_libraries(
 )
 add_test(NAME musicbrainz-cache COMMAND trackknife_musicbrainz_cache_tests)
 
+add_executable(trackknife_workspace_backup_tests workspace_backup_test.cpp)
+target_link_libraries(
+    trackknife_workspace_backup_tests
+    PRIVATE Trackknife::Persistence trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME workspace-backup COMMAND trackknife_workspace_backup_tests)
+
 add_executable(trackknife_operation_journal_tests operation_journal_test.cpp)
 target_link_libraries(
     trackknife_operation_journal_tests
@@ -313,13 +320,22 @@ target_link_libraries(
             trackknife_project_warnings
 )
 add_test(NAME local-audition COMMAND trackknife_local_audition_tests)
+
+add_executable(trackknife_melody_agent_tests melody_agent_test.cpp)
+target_link_libraries(
+    trackknife_melody_agent_tests
+    PRIVATE Trackknife::Audio Trackknife::Core trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME melody-agent COMMAND trackknife_melody_agent_tests)
 set_tests_properties(
-    local-audition
+    local-audition melody-agent
     PROPERTIES
         SKIP_RETURN_CODE 77
         TIMEOUT 15
         ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
 )
+# Exercise Melody's dot-decimal wire values under a comma-decimal GUI locale.
+set_property(TEST melody-agent APPEND PROPERTY ENVIRONMENT "LC_ALL=de_DE.utf8")
 
 add_executable(trackknife_pipewire_output_tests pipewire_output_test.cpp)
 target_link_libraries(

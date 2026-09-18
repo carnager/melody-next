@@ -46,6 +46,8 @@ class QLineEdit;
 class QListWidget;
 class QProgressBar;
 class QPushButton;
+class QAction;
+class QToolButton;
 class QSplitter;
 class QTabWidget;
 class QTemporaryDir;
@@ -242,6 +244,11 @@ class MetadataPropertiesDialog final : public QDialog {
                               bool preview_initially_selected = false);
     void restoreLayoutState();
     void persistLayoutState();
+    void loadFieldLayouts();
+    void saveCurrentFieldLayout();
+    void removeCurrentFieldLayout();
+    void applyCurrentFieldLayout();
+    void persistFieldLayouts();
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     void reject() override;
@@ -279,6 +286,13 @@ class MetadataPropertiesDialog final : public QDialog {
         std::make_shared<std::vector<MetadataPropertiesAudioSource>>()};
     std::vector<std::string> preferred_fields_;
     std::vector<std::string> recent_field_names_;
+    struct SavedFieldLayout {
+        QString id;
+        QString name;
+        QStringList fields;
+    };
+    std::vector<SavedFieldLayout> field_layouts_;
+    QString active_field_layout_id_;
     QStringList track_labels_;
     std::size_t requested_item_count_{0U};
     std::size_t capture_index_{0U};
@@ -293,6 +307,12 @@ class MetadataPropertiesDialog final : public QDialog {
     QPushButton* add_field_button_{nullptr};
     QPushButton* remove_field_button_{nullptr};
     QPushButton* edit_values_button_{nullptr};
+    QComboBox* field_layout_combo_{nullptr};
+    QLabel* field_layout_label_{nullptr};
+    QPushButton* field_layout_save_button_{nullptr};
+    QPushButton* field_layout_remove_button_{nullptr};
+    QAction* field_layout_remove_action_{nullptr};
+    QAction* suggest_action_{nullptr};
     QPushButton* suggest_button_{nullptr};
     QPushButton* identify_button_{nullptr};
     QPushButton* transform_button_{nullptr};
@@ -315,6 +335,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QLineEdit* output_layout_name_{nullptr};
     QLineEdit* output_directory_expression_{nullptr};
     QLineEdit* output_basename_expression_{nullptr};
+    QComboBox* output_sanitization_policy_{nullptr};
     QPushButton* output_layout_new_button_{nullptr};
     QPushButton* output_layout_save_button_{nullptr};
     QPushButton* output_layout_remove_button_{nullptr};

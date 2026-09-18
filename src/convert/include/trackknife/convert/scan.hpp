@@ -48,6 +48,9 @@ struct ConversionScanOptions {
     // Keeps each source's stored depth (ADR-0134); mutually exclusive with
     // target_bit_depth.
     bool keep_source_bit_depth{false};
+    ConversionChannelPolicy channel_policy{ConversionChannelPolicy::keep};
+    ConversionGainMode gain_mode{ConversionGainMode::none};
+    float gain_preamp_db{0.0F};
     // Resolves each item's cover image (ADR-0131) and embeds it into the
     // output; a source without usable artwork converts without one.
     bool carry_artwork{false};

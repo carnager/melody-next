@@ -51,4 +51,7 @@ struct EncoderPresetAvailability {
 
 [[nodiscard]] EncoderPresetAvailability probe_encoder_preset(const EncoderPreset& preset);
 
+// Exact runtime backend identity recorded with reusable whole-job settings.
+[[nodiscard]] std::string conversion_backend_versions();
+
 } // namespace trackknife::convert

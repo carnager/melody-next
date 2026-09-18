@@ -964,6 +964,9 @@ void BenchMainWindow::startMetadataOperationRecovery() {
 }
 
 void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitResult& result) {
+    // The same commit boundary carries text-only and embedded-artwork writes.
+    // Cached misses and previous covers must not survive either path.
+    invalidateArtwork(result.source_raw_path);
     if (local_library_ != nullptr) {
         local_library_->refreshLibrary();
     }
@@ -1162,20 +1165,25 @@ void BenchMainWindow::presentInterruptedOperations() {
     if (!metadata_operation_snapshot_) {
         return;
     }
-    constexpr auto acknowledged_key = "workspace/acknowledged-interrupted-operations-v1";
+    constexpr auto acknowledged_key = "workspace/acknowledged-interrupted-operations-v2";
+    constexpr auto legacy_acknowledged_key = "workspace/acknowledged-interrupted-operations-v1";
     QSettings settings;
-    const auto acknowledged_list = settings.value(QLatin1String{acknowledged_key}).toStringList();
-    const QSet<QString> acknowledged{acknowledged_list.begin(), acknowledged_list.end()};
-    QStringList current;
+    const auto legacy_acknowledgement_exists =
+        settings.contains(QLatin1String{legacy_acknowledged_key});
+    auto acknowledged_list = settings.value(QLatin1String{acknowledged_key})
+                                 .toString()
+                                 .split(QChar{','}, Qt::SkipEmptyParts);
+    QSet<QString> acknowledged{acknowledged_list.begin(), acknowledged_list.end()};
     std::vector<PreparationFeedbackRow> rows;
-    const auto collect = [&acknowledged, &current, &rows](const core::StableId& id,
-                                                          const std::string& raw_path,
-                                                          QString detail) {
+    const auto collect = [&acknowledged, &rows, legacy_acknowledgement_exists](
+                             const core::StableId& id, const std::string& raw_path,
+                             QString detail) {
         const auto key = QString::fromStdString(id.to_string());
-        current.push_back(key);
-        if (acknowledged.contains(key)) {
+        if (acknowledged.contains(key) || legacy_acknowledgement_exists) {
+            acknowledged.insert(key);
             return;
         }
+        acknowledged.insert(key);
         rows.push_back(PreparationFeedbackRow{
             .file = QString::fromStdString(core::escape_raw_path(raw_path)),
             .detail = std::move(detail),
@@ -1200,7 +1208,17 @@ void BenchMainWindow::presentInterruptedOperations() {
                       .arg(QString::fromStdString(core::escape_raw_path(record.target_raw_path)));
         collect(record.id, record.source_raw_path, std::move(detail));
     }
-    settings.setValue(QLatin1String{acknowledged_key}, current);
+    // Keep acknowledgements even when a transient database/open error omits an
+    // incident from one startup scan. Replacing the list with only the current
+    // scan made old terminal journal entries reappear later. Sync before the
+    // dialog is shown so even a forced shutdown after Close cannot lose it.
+    acknowledged_list = acknowledged.values();
+    acknowledged_list.sort(Qt::CaseInsensitive);
+    settings.setValue(QLatin1String{acknowledged_key}, acknowledged_list.join(QChar{','}));
+    if (legacy_acknowledgement_exists) {
+        settings.remove(QLatin1String{legacy_acknowledged_key});
+    }
+    settings.sync();
     if (rows.empty()) {
         return;
     }

@@ -7,6 +7,7 @@
 #include "bench/local_library_panel.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "trackknife/audio/melody_agent.hpp"
 
 #include <QCloseEvent>
 #include <QDragEnterEvent>

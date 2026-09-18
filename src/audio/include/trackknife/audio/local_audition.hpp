@@ -82,6 +82,10 @@ struct LocalAuditionSnapshot {
     std::optional<std::int64_t> end_sample;
     std::size_t buffered_frames{0U};
     std::uint64_t underrun_count{0U};
+    formats::ReplayGainInfo effective_replay_gain_info;
+    float effective_replay_gain_multiplier{1.0F};
+    float decoded_peak_before_gain{0.0F};
+    float decoded_peak_after_gain{0.0F};
     PlaybackBufferDurationConfig configured_buffer;
     // The ring cannot be resized while its real-time consumer is attached.
     // A differing active value means the configured value applies on the
@@ -146,6 +150,11 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void>
     load_selected_and_play(std::string raw_path, formats::AudioSourceSelection selection,
                            std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+    // Network media is deliberately explicit: unlike local sources it has no
+    // inode revision to observe/revalidate around decoder open.
+    [[nodiscard]] core::Result<void>
+    load_network_stream_and_play(std::string url,
+                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {});
     [[nodiscard]] core::Result<void> load_segment_and_play(std::string raw_path,
                                                            formats::SampleRange segment);
     [[nodiscard]] core::Result<void> load_selected_segment_and_play(
@@ -159,6 +168,9 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void>
     queue_gapless_next_selected(std::string raw_path, formats::AudioSourceSelection selection,
                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+    [[nodiscard]] core::Result<void>
+    queue_gapless_network_stream(std::string url,
+                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {});
     [[nodiscard]] core::Result<void> queue_gapless_next_segment(std::string raw_path,
                                                                 formats::SampleRange segment);
     [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(
@@ -169,10 +181,14 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void> pause();
     [[nodiscard]] core::Result<void> stop();
     [[nodiscard]] core::Result<void> seek_to_sample(std::int64_t target_sample);
+    // Queued time-domain seek for protocol adapters that do not know the
+    // source rate when they enqueue a load followed by a seek.
+    [[nodiscard]] core::Result<void> seek_to_seconds(double target_seconds);
     // Perceptual volume in percent [0, 100]; mapped cubically onto PipeWire's
     // linear stream mixer and reapplied when a new source connects.
     [[nodiscard]] core::Result<void> set_volume_percent(int percent);
     [[nodiscard]] core::Result<void> set_replay_gain_mode(ReplayGainMode mode);
+    [[nodiscard]] core::Result<void> set_replay_gain_info(formats::ReplayGainInfo info);
     [[nodiscard]] core::Result<void> set_replay_gain_preamps(ReplayGainPreamps preamps);
     // Selects the decoded-PCM ring policy for the next source load. If a
     // source is active, its immutable ring remains attached and any prepared

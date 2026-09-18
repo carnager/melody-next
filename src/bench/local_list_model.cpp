@@ -84,12 +84,25 @@ void project_display_metadata(LocalTrackRow& row) {
 
 LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {}
 
-void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows) {
-    clearHistory();
+void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows, const bool remember,
+                                 QString label) {
+    Edit edit;
+    if (remember) {
+        edit.kind = Edit::Kind::replacement;
+        edit.label = label.isEmpty() ? tr("Replace list contents") : std::move(label);
+    } else {
+        clearHistory();
+    }
     beginResetModel();
+    if (remember) {
+        edit.detached = std::move(rows_);
+    }
     rows_ = std::move(rows);
     endResetModel();
     refreshCurrentRow();
+    if (remember) {
+        rememberEdit(std::move(edit));
+    }
 }
 
 void LocalListModel::appendPaths(std::vector<std::string> raw_paths, const int insertion_row) {
@@ -112,18 +125,30 @@ void LocalListModel::applyTechnicals(const std::string& raw_path,
     }
 }
 
-void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row) {
+void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row,
+                                const bool remember) {
     if (rows.empty()) {
         return;
     }
-    clearHistory();
     const auto row_count = static_cast<int>(rows_.size());
     const auto target = insertion_row < 0 || insertion_row > row_count ? row_count : insertion_row;
+    const auto count = static_cast<int>(rows.size());
+    if (!remember) {
+        clearHistory();
+    }
     beginInsertRows({}, target, target + static_cast<int>(rows.size()) - 1);
     rows_.insert(rows_.begin() + target, std::make_move_iterator(rows.begin()),
                  std::make_move_iterator(rows.end()));
     endInsertRows();
     refreshCurrentRow();
+    if (remember) {
+        Edit edit;
+        edit.kind = Edit::Kind::addition;
+        edit.label = tr("Add tracks");
+        edit.positions.resize(static_cast<std::size_t>(count));
+        std::iota(edit.positions.begin(), edit.positions.end(), target);
+        rememberEdit(std::move(edit));
+    }
 }
 
 void LocalListModel::removeRowIndexes(std::vector<int> rows, const bool remember, QString label) {
@@ -133,7 +158,7 @@ void LocalListModel::removeRowIndexes(std::vector<int> rows, const bool remember
     if (!remember)
         clearHistory();
     Edit edit;
-    edit.removal = true;
+    edit.kind = Edit::Kind::removal;
     edit.label = std::move(label);
     edit.positions = rows;
     removePositions(rows, remember ? &edit.detached : nullptr);
@@ -254,15 +279,17 @@ void LocalListModel::applyOrder(const std::vector<int>& order) {
 QString LocalListModel::undoLabel() const {
     if (canUndo() && !history_[history_cursor_ - 1].label.isEmpty())
         return history_[history_cursor_ - 1].label;
-    return canUndo() ? (history_[history_cursor_ - 1].removal ? tr("Remove tracks")
-                                                              : tr("Reorder tracks"))
-                     : QString{};
+    return canUndo()
+               ? (history_[history_cursor_ - 1].kind == Edit::Kind::removal ? tr("Remove tracks")
+                                                                            : tr("Reorder tracks"))
+               : QString{};
 }
 QString LocalListModel::redoLabel() const {
     if (canRedo() && !history_[history_cursor_].label.isEmpty())
         return history_[history_cursor_].label;
     return canRedo()
-               ? (history_[history_cursor_].removal ? tr("Remove tracks") : tr("Reorder tracks"))
+               ? (history_[history_cursor_].kind == Edit::Kind::removal ? tr("Remove tracks")
+                                                                        : tr("Reorder tracks"))
                : QString{};
 }
 void LocalListModel::clearHistory() {
@@ -358,13 +385,19 @@ void LocalListModel::removePositions(const std::vector<int>& positions,
 }
 
 void LocalListModel::replayEdit(Edit& edit, const bool undoing) {
-    if (!edit.removal) {
+    if (edit.kind == Edit::Kind::reorder) {
         std::vector<int> inverse(edit.order.size());
         for (std::size_t row = 0; row < edit.order.size(); ++row)
             inverse[static_cast<std::size_t>(edit.order[row])] = static_cast<int>(row);
         applyOrder(edit.order);
         edit.order = std::move(inverse);
-    } else if (undoing) {
+    } else if (edit.kind == Edit::Kind::replacement) {
+        beginResetModel();
+        rows_.swap(edit.detached);
+        endResetModel();
+        refreshCurrentRow();
+    } else if ((edit.kind == Edit::Kind::removal && undoing) ||
+               (edit.kind == Edit::Kind::addition && !undoing)) {
         for (std::size_t begin = 0; begin < edit.positions.size();) {
             auto end = begin + 1;
             while (end < edit.positions.size() &&
@@ -394,7 +427,7 @@ bool LocalListModel::undo() {
     if (!canUndo())
         return false;
     replayEdit(history_[--history_cursor_], true);
-    if (history_[history_cursor_].removal) {
+    if (history_[history_cursor_].kind == Edit::Kind::removal) {
         const auto& positions = history_[history_cursor_].positions;
         emit historyRowsRestored(QList<int>(positions.begin(), positions.end()));
     }

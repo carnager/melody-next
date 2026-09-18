@@ -51,7 +51,7 @@ the server advertises them. Local playback keeps its own player and outputs.
 
 - A non-modal, spreadsheet-like tag workspace built for many tracks and fields.
 - Type-to-add fields, fast fuzzy field lookup, direct keyboard navigation,
-  saved field layouts, and bulk transformations.
+  focused display filters, and previewed bulk transformations.
 - Arbitrary ordered multi-value metadata and complete MusicBrainz identifier/
   sort metadata preservation.
 - Online MusicBrainz identification and metadata proposals with provenance and

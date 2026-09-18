@@ -158,7 +158,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 33U, "state repository schema must be explicit");
+        require(repository.schema_version() == 34U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -327,6 +327,9 @@ void metadata_transformation_chains_round_trip_transactionally() {
                             .start = 1U,
                             .padding = 2U,
                         },
+                        metadata::MetadataBlocklistFieldsAction{.fields = {"COMMENT", "ENCODER"}},
+                        metadata::MetadataAllowlistFieldsAction{
+                            .fields = {"TITLE", "ARTIST", "ALBUM"}},
                     },
             },
         .automatic = true,
@@ -336,8 +339,10 @@ void metadata_transformation_chains_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "transformation repository must open");
         auto repository = std::move(*opened);
-        require(repository.upsert_metadata_transformation_chain(expected).has_value(),
-                "a validated transformation chain must persist atomically");
+        const auto stored_chain = repository.upsert_metadata_transformation_chain(expected);
+        require(stored_chain.has_value(),
+                stored_chain ? "a validated transformation chain must persist atomically"
+                             : stored_chain.error().message);
         const auto loaded = repository.load_metadata_transformation_chains();
         require(loaded.has_value() && loaded->size() == 1U && loaded->front().id == chain_id &&
                     loaded->front().chain.schema_version == 1U &&
@@ -423,7 +428,15 @@ void metadata_transformation_chains_round_trip_transactionally() {
                 require_action<metadata::MetadataNumberGroupedItemsAction>(
                     chain, 20U, "grouped numbering action") ==
                     require_action<metadata::MetadataNumberGroupedItemsAction>(
-                        expected.chain, 20U, "expected grouped numbering action"),
+                        expected.chain, 20U, "expected grouped numbering action") &&
+                require_action<metadata::MetadataBlocklistFieldsAction>(chain, 21U,
+                                                                        "blocklist action") ==
+                    require_action<metadata::MetadataBlocklistFieldsAction>(
+                        expected.chain, 21U, "expected blocklist action") &&
+                require_action<metadata::MetadataAllowlistFieldsAction>(chain, 22U,
+                                                                        "allowlist action") ==
+                    require_action<metadata::MetadataAllowlistFieldsAction>(
+                        expected.chain, 22U, "expected allowlist action"),
             "explicit action kinds and exact ordered payloads must round trip");
 
         auto conflicting = expected;
@@ -524,7 +537,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 33U,
+        require(repository.schema_version() == 34U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1241,7 +1254,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 33U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 34U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();

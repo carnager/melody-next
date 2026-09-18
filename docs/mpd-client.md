@@ -267,6 +267,15 @@ persists enabled outputs while an agent is disconnected. Additive enable/
 disable remains the default interaction; “switch exclusively” is offered only
 when the command is advertised.
 
+When `melody_version` is advertised, Trackbench also starts its protocol-v2
+playback endpoint for the active profile (ADR-0174). Melody accepts
+`agent_register` as a special connection takeover but does not list it in the
+ordinary MPD `commands` response. A secondary connection
+fetches a playlist-version-consistent queue; the server remains authoritative
+for transport, current/next positions, and the shared clock. The endpoint uses
+the profile's contained local-root mapping when possible and otherwise streams
+by stable Melody song ID. It is not started for stock MPD.
+
 ## Tests
 
 The MPD test suite needs:
@@ -279,7 +288,8 @@ The MPD test suite needs:
 - URI-to-local-root traversal, URL, and non-lossless mapping tests;
 - stock MPD integration tests for every advertised first-slice command;
 - Melody integration tests for its shared command surface and output extension
-  fields.
+  fields, plus endpoint registration, queue synchronization, source selection,
+  clock/advance, preload, and reconnect fixtures derived from `../melody`.
 
 No test may require a developer's personal music library or a live network
 service.

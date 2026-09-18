@@ -12,6 +12,8 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -19,6 +21,7 @@
 #include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardItemModel>
@@ -202,6 +205,11 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         QStringLiteral("Save a new encoder preset starting from the selected one"));
     connect(preset_new_, &QPushButton::clicked, this, &ConvertDialog::openPresetEditor);
     preset_row->addWidget(preset_new_);
+    preset_export_ = new QPushButton(QStringLiteral("Export…"), this);
+    preset_export_->setObjectName(QStringLiteral("bench-convert-preset-export"));
+    preset_export_->setToolTip(QStringLiteral("Export the selected encoder preset as JSON"));
+    connect(preset_export_, &QPushButton::clicked, this, &ConvertDialog::exportSelectedPreset);
+    preset_row->addWidget(preset_export_);
     preset_delete_ = new QPushButton(QStringLiteral("Delete"), this);
     preset_delete_->setObjectName(QStringLiteral("bench-convert-preset-delete"));
     preset_delete_->setVisible(false);
@@ -301,6 +309,30 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
                        "encoders have no stored depth and ignore this"));
     form->addRow(QStringLiteral("Bit depth:"), bit_depth_);
 
+    channels_ = new QComboBox(this);
+    channels_->setObjectName(QStringLiteral("bench-convert-channels"));
+    channels_->addItem(QStringLiteral("Keep source channels"), 0);
+    channels_->addItem(QStringLiteral("Mono"), 1);
+    channels_->addItem(QStringLiteral("Stereo"), 2);
+    const auto saved_channels = settings.value(QStringLiteral("convert/channels"), 0).toInt();
+    if (const auto position = channels_->findData(saved_channels); position >= 0) {
+        channels_->setCurrentIndex(position);
+    }
+    form->addRow(QStringLiteral("Channels:"), channels_);
+
+    gain_ = new QComboBox(this);
+    gain_->setObjectName(QStringLiteral("bench-convert-gain"));
+    gain_->addItem(QStringLiteral("Do not apply gain"), 0);
+    gain_->addItem(QStringLiteral("Apply track ReplayGain"), 1);
+    gain_->addItem(QStringLiteral("Apply album ReplayGain"), 2);
+    const auto saved_gain = settings.value(QStringLiteral("convert/gain"), 0).toInt();
+    if (const auto position = gain_->findData(saved_gain); position >= 0) {
+        gain_->setCurrentIndex(position);
+    }
+    gain_->setToolTip(QStringLiteral(
+        "Permanently changes PCM before encoding; stale ReplayGain tags are removed"));
+    form->addRow(QStringLiteral("Gain:"), gain_);
+
     embed_artwork_ = new QCheckBox(QStringLiteral("Embed cover art"), this);
     embed_artwork_->setObjectName(QStringLiteral("bench-convert-artwork"));
     embed_artwork_->setChecked(
@@ -385,6 +417,9 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         const auto saved = std::ranges::any_of(
             saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
         preset_delete_->setVisible(saved && preset_store_.remove != nullptr);
+        if (saved) {
+            applyJobSettings(preset_->currentData().toString());
+        }
     });
     // Hand-editing an expression or the root leaves the saved choice.
     connect(directory_expression_, &QLineEdit::textEdited, this,
@@ -497,10 +532,98 @@ void ConvertDialog::openPresetEditor() {
                 self->status_->setText(error);
                 return;
             }
+            self->saveJobSettings(select);
             self->reloadPresets(select);
         });
     });
     editor->open();
+}
+
+void ConvertDialog::exportSelectedPreset() {
+    const auto selected = selectedPreset();
+    if (!selected) {
+        status_->setText(QStringLiteral("Select an encoder preset to export."));
+        return;
+    }
+    const auto suggested = displayText(selected->id) + QStringLiteral(".trackknife-preset.json");
+    const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Export encoder preset"),
+                                                   suggested, QStringLiteral("JSON (*.json)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QJsonObject preset{
+        {QStringLiteral("id"), displayText(selected->id)},
+        {QStringLiteral("version"), static_cast<int>(selected->version)},
+        {QStringLiteral("display_name"), displayText(selected->display_name)},
+        {QStringLiteral("codec"), displayText(selected->codec_name)},
+        {QStringLiteral("container"), displayText(selected->container_name)},
+        {QStringLiteral("extension"), displayText(selected->file_extension)},
+        {QStringLiteral("lossless"), selected->lossless},
+        {QStringLiteral("sample_format"), displayText(selected->sample_format_hint)}};
+    if (selected->bit_rate) {
+        preset.insert(QStringLiteral("bit_rate"), static_cast<qint64>(*selected->bit_rate));
+    }
+    if (selected->vbr_quality) {
+        preset.insert(QStringLiteral("vbr_quality"), *selected->vbr_quality);
+    }
+    const QJsonObject document{
+        {QStringLiteral("format"), QStringLiteral("trackknife-encoder-preset-1")},
+        {QStringLiteral("preset"), preset}};
+    QSaveFile output{path};
+    if (!output.open(QIODevice::WriteOnly) ||
+        output.write(QJsonDocument{document}.toJson(QJsonDocument::Indented)) < 0 ||
+        !output.commit()) {
+        status_->setText(
+            QStringLiteral("Could not export encoder preset: %1").arg(output.errorString()));
+        return;
+    }
+    status_->setText(QStringLiteral("Exported encoder preset to %1").arg(path));
+}
+
+void ConvertDialog::saveJobSettings(const QString& preset_id) const {
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("convert/job-presets/") + preset_id);
+    settings.setValue(QStringLiteral("schema"), 1);
+    settings.setValue(QStringLiteral("backend-versions"),
+                      displayText(convert::conversion_backend_versions()));
+    settings.setValue(QStringLiteral("destination-root"), destination_->text());
+    settings.setValue(QStringLiteral("directory-expression"), directory_expression_->text());
+    settings.setValue(QStringLiteral("basename-expression"), basename_expression_->text());
+    settings.setValue(QStringLiteral("mirror"), mirror_structure_->isChecked());
+    settings.setValue(QStringLiteral("resample"), resample_->currentData());
+    settings.setValue(QStringLiteral("bit-depth"), bit_depth_->currentData());
+    settings.setValue(QStringLiteral("channels"), channels_->currentData());
+    settings.setValue(QStringLiteral("gain"), gain_->currentData());
+    settings.setValue(QStringLiteral("artwork"), embed_artwork_->isChecked());
+    settings.setValue(QStringLiteral("parallelism"), parallelism_->value());
+    settings.endGroup();
+}
+
+void ConvertDialog::applyJobSettings(const QString& preset_id) {
+    QSettings settings;
+    settings.beginGroup(QStringLiteral("convert/job-presets/") + preset_id);
+    if (settings.value(QStringLiteral("schema")).toInt() != 1) {
+        settings.endGroup();
+        return;
+    }
+    destination_->setText(settings.value(QStringLiteral("destination-root")).toString());
+    directory_expression_->setText(
+        settings.value(QStringLiteral("directory-expression")).toString());
+    basename_expression_->setText(settings.value(QStringLiteral("basename-expression")).toString());
+    mirror_structure_->setChecked(settings.value(QStringLiteral("mirror")).toBool());
+    const auto select = [&settings](QComboBox* combo, const char* key) {
+        if (const auto position = combo->findData(settings.value(QLatin1String(key)));
+            position >= 0) {
+            combo->setCurrentIndex(position);
+        }
+    };
+    select(resample_, "resample");
+    select(bit_depth_, "bit-depth");
+    select(channels_, "channels");
+    select(gain_, "gain");
+    embed_artwork_->setChecked(settings.value(QStringLiteral("artwork"), true).toBool());
+    parallelism_->setValue(settings.value(QStringLiteral("parallelism"), 2).toInt());
+    settings.endGroup();
 }
 
 void ConvertDialog::deleteSelectedPreset() {
@@ -511,7 +634,8 @@ void ConvertDialog::deleteSelectedPreset() {
         return;
     }
     const QPointer self{this};
-    preset_store_.remove(found->id, [self](const QString& error) {
+    const auto settings_id = displayText(found->preset.id);
+    preset_store_.remove(found->id, [self, settings_id](const QString& error) {
         if (self == nullptr) {
             return;
         }
@@ -519,6 +643,8 @@ void ConvertDialog::deleteSelectedPreset() {
             self->status_->setText(error);
             return;
         }
+        QSettings settings;
+        settings.remove(QStringLiteral("convert/job-presets/") + settings_id);
         self->reloadPresets({});
     });
 }
@@ -700,6 +826,8 @@ void ConvertDialog::startConversion() {
     settings.setValue(QStringLiteral("convert/parallelism"), parallelism_->value());
     settings.setValue(QStringLiteral("convert/resample-rate"), resample_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/bit-depth"), bit_depth_->currentData().toInt());
+    settings.setValue(QStringLiteral("convert/channels"), channels_->currentData().toInt());
+    settings.setValue(QStringLiteral("convert/gain"), gain_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/embed-artwork"), embed_artwork_->isChecked());
     settings.setValue(QStringLiteral("convert/mirror-structure"), mirror_structure_->isChecked());
 
@@ -749,11 +877,18 @@ void ConvertDialog::startConversion() {
     const auto depth_choice = bit_depth_->currentData().toInt();
     const auto target_bit_depth = depth_choice > 0 ? std::optional{depth_choice} : std::nullopt;
     const auto keep_source_depth = depth_choice < 0;
+    const auto channel_policy =
+        channels_->currentData().toInt() == 1   ? convert::ConversionChannelPolicy::mono
+        : channels_->currentData().toInt() == 2 ? convert::ConversionChannelPolicy::stereo
+                                                : convert::ConversionChannelPolicy::keep;
+    const auto gain_mode = gain_->currentData().toInt() == 1   ? convert::ConversionGainMode::track
+                           : gain_->currentData().toInt() == 2 ? convert::ConversionGainMode::album
+                                                               : convert::ConversionGainMode::none;
     const auto carry_artwork = embed_artwork_->isChecked();
-    watcher_.setFuture(
-        QtConcurrent::run([scan_items = std::move(scan_items), preset = *preset, parallelism,
-                           target_sample_rate, sample_rate_cap, target_bit_depth, keep_source_depth,
-                           carry_artwork, completed = completed_, cancellation] {
+    watcher_.setFuture(QtConcurrent::run(
+        [scan_items = std::move(scan_items), preset = *preset, parallelism, target_sample_rate,
+         sample_rate_cap, target_bit_depth, keep_source_depth, channel_policy, gain_mode,
+         carry_artwork, completed = completed_, cancellation] {
             // The conversion core requires existing target directories; create
             // them up front so parallel workers never race directory creation.
             for (const auto& item : scan_items) {
@@ -769,6 +904,8 @@ void ConvertDialog::startConversion() {
                  .sample_rate_cap = sample_rate_cap,
                  .target_bit_depth = target_bit_depth,
                  .keep_source_bit_depth = keep_source_depth,
+                 .channel_policy = channel_policy,
+                 .gain_mode = gain_mode,
                  .carry_artwork = carry_artwork},
                 [completed](const convert::ConversionScanProgress& update) {
                     completed->store(update.completed_items);

@@ -19,18 +19,22 @@ namespace {
 
 enum class CommandKind {
     load_and_play,
+    load_network_stream_and_play,
     play,
     pause,
     stop,
     seek,
+    seek_seconds,
     set_volume,
     set_replay_gain,
+    set_replay_gain_info,
     set_replay_gain_preamps,
     set_buffer,
     refresh_devices,
     set_target,
     clear,
     queue_next,
+    queue_network_stream,
     clear_next,
     relocate_source,
 };
@@ -157,16 +161,20 @@ struct LocalAuditionService::Impl {
                 return pending.kind != CommandKind::set_volume &&
                        pending.kind != CommandKind::set_buffer &&
                        pending.kind != CommandKind::set_replay_gain &&
+                       pending.kind != CommandKind::set_replay_gain_info &&
                        pending.kind != CommandKind::set_replay_gain_preamps &&
                        pending.kind != CommandKind::set_target &&
                        pending.kind != CommandKind::relocate_source;
             });
-        } else if (command.kind == CommandKind::seek) {
-            std::erase_if(commands,
-                          [](const Command& pending) { return pending.kind == CommandKind::seek; });
+        } else if (command.kind == CommandKind::seek || command.kind == CommandKind::seek_seconds) {
+            std::erase_if(commands, [](const Command& pending) {
+                return pending.kind == CommandKind::seek ||
+                       pending.kind == CommandKind::seek_seconds;
+            });
         } else if (command.kind == CommandKind::set_volume ||
                    command.kind == CommandKind::set_buffer ||
                    command.kind == CommandKind::set_replay_gain ||
+                   command.kind == CommandKind::set_replay_gain_info ||
                    command.kind == CommandKind::set_replay_gain_preamps ||
                    command.kind == CommandKind::refresh_devices ||
                    command.kind == CommandKind::set_target) {
@@ -337,6 +345,10 @@ struct LocalAuditionService::Impl {
             next.end_sample = current_duration_samples;
             next.buffered_frames = playback.buffered_frames;
             next.underrun_count = playback.underrun_count;
+            next.effective_replay_gain_info = playback.replay_gain_info;
+            next.effective_replay_gain_multiplier = playback.effective_replay_gain_multiplier;
+            next.decoded_peak_before_gain = playback.decoded_peak_before_gain;
+            next.decoded_peak_after_gain = playback.decoded_peak_after_gain;
         }
         next.volume_percent = volume_percent;
         next.configured_buffer = config.buffer;
@@ -502,6 +514,7 @@ struct LocalAuditionService::Impl {
     }
 
     void load(Command command) {
+        const auto local_source = command.kind == CommandKind::load_and_play;
         if (output) {
             const auto quiet = output->quiesce();
             if (!quiet) {
@@ -523,12 +536,16 @@ struct LocalAuditionService::Impl {
         current_selection = command.selection;
         current_segment = command.segment;
         current_replay_gain_override = command.replay_gain_override;
-        auto observed_revision = core::observe_local_source_revision(current_path);
-        if (!observed_revision) {
-            fail(std::move(observed_revision.error()));
-            return;
+        std::optional<core::LocalSourceRevision> observed_revision;
+        if (local_source) {
+            auto observed = core::observe_local_source_revision(current_path);
+            if (!observed) {
+                fail(std::move(observed.error()));
+                return;
+            }
+            observed_revision = *observed;
         }
-        if (command.relocation.target_raw_path == current_path &&
+        if (local_source && command.relocation.target_raw_path == current_path &&
             *observed_revision != command.relocation.target_revision) {
             fail(core::Error{
                 .code = core::ErrorCode::conflict,
@@ -561,25 +578,28 @@ struct LocalAuditionService::Impl {
             fail(std::move(opened.error()));
             return;
         }
-        auto confirmed_revision = core::observe_local_source_revision(current_path);
-        if (confirmed_revision && *confirmed_revision != *observed_revision) {
-            clear_open_cancellation();
-            fail(core::Error{
-                .code = core::ErrorCode::conflict,
-                .message = "local audition source changed while its decoder was opening",
-                .context = {{.key = "path", .value = core::escape_raw_path(current_path)}},
-            });
-            return;
-        }
-        if (!confirmed_revision && confirmed_revision.error().code != core::ErrorCode::not_found) {
-            clear_open_cancellation();
-            fail(std::move(confirmed_revision.error()));
-            return;
+        if (local_source) {
+            auto confirmed_revision = core::observe_local_source_revision(current_path);
+            if (confirmed_revision && *confirmed_revision != *observed_revision) {
+                clear_open_cancellation();
+                fail(core::Error{
+                    .code = core::ErrorCode::conflict,
+                    .message = "local audition source changed while its decoder was opening",
+                    .context = {{.key = "path", .value = core::escape_raw_path(current_path)}},
+                });
+                return;
+            }
+            if (!confirmed_revision &&
+                confirmed_revision.error().code != core::ErrorCode::not_found) {
+                clear_open_cancellation();
+                fail(std::move(confirmed_revision.error()));
+                return;
+            }
         }
         source.emplace(std::move(*opened));
         source->set_replay_gain_mode(config.replay_gain_mode);
         source->set_replay_gain_preamps(config.replay_gain_preamps);
-        current_revision = *observed_revision;
+        current_revision = observed_revision;
         active_buffer = config.buffer;
         const auto opened_snapshot = source->snapshot();
         track_base = source->sample_range().start_sample;
@@ -720,6 +740,7 @@ struct LocalAuditionService::Impl {
     }
 
     void queue_next_source(Command command) {
+        const auto local_source = command.kind == CommandKind::queue_next;
         if (!source) {
             publish(no_source_error("queue a gapless continuation for"));
             return;
@@ -739,14 +760,18 @@ struct LocalAuditionService::Impl {
             return;
         }
         auto path = std::move(command.raw_path);
-        auto observed_revision = core::observe_local_source_revision(path);
-        if (!observed_revision) {
-            source->clear_next();
-            clear_pending_next();
-            publish();
-            return;
+        std::optional<core::LocalSourceRevision> observed_revision;
+        if (local_source) {
+            auto observed = core::observe_local_source_revision(path);
+            if (!observed) {
+                source->clear_next();
+                clear_pending_next();
+                publish();
+                return;
+            }
+            observed_revision = *observed;
         }
-        if (command.relocation.target_raw_path == path &&
+        if (local_source && command.relocation.target_raw_path == path &&
             *observed_revision != command.relocation.target_revision) {
             source->clear_next();
             clear_pending_next();
@@ -767,12 +792,17 @@ struct LocalAuditionService::Impl {
                 : source->queue_next_selected(path, command.selection, {},
                                               command.replay_gain_override);
         if (queued) {
-            auto confirmed_revision = core::observe_local_source_revision(path);
-            if ((confirmed_revision && *confirmed_revision == *observed_revision) ||
-                (!confirmed_revision &&
-                 confirmed_revision.error().code == core::ErrorCode::not_found)) {
+            bool revision_matches = !local_source;
+            if (local_source) {
+                auto confirmed_revision = core::observe_local_source_revision(path);
+                revision_matches =
+                    (confirmed_revision && *confirmed_revision == *observed_revision) ||
+                    (!confirmed_revision &&
+                     confirmed_revision.error().code == core::ErrorCode::not_found);
+            }
+            if (revision_matches) {
                 pending_next_path = std::move(path);
-                pending_next_revision = *observed_revision;
+                pending_next_revision = observed_revision;
                 pending_next_selection = command.selection;
                 pending_next_segment = command.segment;
                 pending_next_replay_gain_override = command.replay_gain_override;
@@ -989,6 +1019,7 @@ struct LocalAuditionService::Impl {
     void execute(Command command) {
         switch (command.kind) {
         case CommandKind::load_and_play:
+        case CommandKind::load_network_stream_and_play:
             load(std::move(command));
             break;
         case CommandKind::play:
@@ -1003,10 +1034,27 @@ struct LocalAuditionService::Impl {
         case CommandKind::seek:
             seek(command.target_sample);
             break;
+        case CommandKind::seek_seconds:
+            if (source) {
+                const auto samples = static_cast<long double>(command.target_sample) *
+                                     source->output_format().sample_rate / 1'000.0L;
+                seek(static_cast<std::int64_t>(std::min<long double>(
+                    samples, static_cast<long double>(std::numeric_limits<std::int64_t>::max()))));
+            } else {
+                seek(0);
+            }
+            break;
         case CommandKind::set_replay_gain:
             config.replay_gain_mode = command.replay_gain_mode;
             if (source) {
                 source->set_replay_gain_mode(config.replay_gain_mode);
+            }
+            publish();
+            break;
+        case CommandKind::set_replay_gain_info:
+            current_replay_gain_override = command.replay_gain_override;
+            if (source && command.replay_gain_override) {
+                source->set_replay_gain_info(*command.replay_gain_override);
             }
             publish();
             break;
@@ -1033,6 +1081,7 @@ struct LocalAuditionService::Impl {
             clear_source();
             break;
         case CommandKind::queue_next:
+        case CommandKind::queue_network_stream:
             queue_next_source(std::move(command));
             break;
         case CommandKind::clear_next:
@@ -1232,6 +1281,27 @@ core::Result<void> LocalAuditionService::load_selected_and_play(
                                             .relocation_completion = {}});
 }
 
+core::Result<void> LocalAuditionService::load_network_stream_and_play(
+    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    if (!url.starts_with("http://") && !url.starts_with("https://")) {
+        return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
+    }
+    return implementation_->enqueue(Command{
+        .kind = CommandKind::load_network_stream_and_play,
+        .raw_path = std::move(url),
+        .selection = {},
+        .segment = std::nullopt,
+        .target_sample = 0,
+        .volume_percent = 100,
+        .target = {},
+        .buffer = {},
+        .relocation = {},
+        .relocated_pending_commands = 0U,
+        .replay_gain_override = replay_gain_override,
+        .relocation_completion = {},
+    });
+}
+
 core::Result<void> LocalAuditionService::load_segment_and_play(std::string raw_path,
                                                                const formats::SampleRange segment) {
     return load_selected_segment_and_play(std::move(raw_path), {}, segment);
@@ -1280,6 +1350,27 @@ core::Result<void> LocalAuditionService::queue_gapless_next_selected(
                                             .relocated_pending_commands = 0U,
                                             .replay_gain_override = replay_gain_override,
                                             .relocation_completion = {}});
+}
+
+core::Result<void> LocalAuditionService::queue_gapless_network_stream(
+    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    if (!url.starts_with("http://") && !url.starts_with("https://")) {
+        return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
+    }
+    return implementation_->enqueue(Command{
+        .kind = CommandKind::queue_network_stream,
+        .raw_path = std::move(url),
+        .selection = {},
+        .segment = std::nullopt,
+        .target_sample = 0,
+        .volume_percent = 100,
+        .target = {},
+        .buffer = {},
+        .relocation = {},
+        .relocated_pending_commands = 0U,
+        .replay_gain_override = replay_gain_override,
+        .relocation_completion = {},
+    });
 }
 
 core::Result<void>
@@ -1387,6 +1478,19 @@ core::Result<void> LocalAuditionService::seek_to_sample(const std::int64_t targe
                                             .relocation_completion = {}});
 }
 
+core::Result<void> LocalAuditionService::seek_to_seconds(const double target_seconds) {
+    constexpr auto maximum_seconds =
+        static_cast<double>(std::numeric_limits<std::int64_t>::max()) / 1'000.0;
+    if (!std::isfinite(target_seconds) || target_seconds < 0.0 ||
+        target_seconds > maximum_seconds) {
+        return std::unexpected(invalid_config("local audition seek time is outside its range"));
+    }
+    Command command;
+    command.kind = CommandKind::seek_seconds;
+    command.target_sample = static_cast<std::int64_t>(std::llround(target_seconds * 1'000.0));
+    return implementation_->enqueue(std::move(command));
+}
+
 core::Result<void> LocalAuditionService::set_replay_gain_mode(const ReplayGainMode mode) {
     if (mode != ReplayGainMode::off && mode != ReplayGainMode::track &&
         mode != ReplayGainMode::album) {
@@ -1395,6 +1499,13 @@ core::Result<void> LocalAuditionService::set_replay_gain_mode(const ReplayGainMo
     Command command;
     command.kind = CommandKind::set_replay_gain;
     command.replay_gain_mode = mode;
+    return implementation_->enqueue(std::move(command));
+}
+
+core::Result<void> LocalAuditionService::set_replay_gain_info(formats::ReplayGainInfo info) {
+    Command command;
+    command.kind = CommandKind::set_replay_gain_info;
+    command.replay_gain_override = std::move(info);
     return implementation_->enqueue(std::move(command));
 }
 

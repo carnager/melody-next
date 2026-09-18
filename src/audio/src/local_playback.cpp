@@ -200,6 +200,8 @@ struct LocalPlayback::Impl {
     std::int64_t next_decode_sample{0};
     std::atomic<std::int64_t> position_sample{0};
     std::atomic_uint64_t underrun_count{0U};
+    std::atomic<float> decoded_peak_before_gain{0.0F};
+    std::atomic<float> decoded_peak_after_gain{0.0F};
     PlaybackBufferConfig config;
     formats::SampleRange range;
     std::vector<float> pending_samples;
@@ -408,6 +410,10 @@ void LocalPlayback::set_replay_gain_preamps(const ReplayGainPreamps preamps) noe
     implementation_->replay_gain_preamps = preamps;
 }
 
+void LocalPlayback::set_replay_gain_info(formats::ReplayGainInfo info) noexcept {
+    implementation_->replay_gain = std::move(info);
+}
+
 const formats::PcmFormat& LocalPlayback::output_format() const noexcept {
     return implementation_->output;
 }
@@ -425,6 +431,12 @@ LocalPlaybackSnapshot LocalPlayback::snapshot() const noexcept {
         .end_sample = playback.end_sample(),
         .buffered_frames = playback.ring.size_frames(),
         .underrun_count = playback.underrun_count.load(std::memory_order_acquire),
+        .replay_gain_info = playback.replay_gain,
+        .effective_replay_gain_multiplier = replay_gain_multiplier(
+            playback.replay_gain, playback.replay_gain_mode, playback.replay_gain_preamps),
+        .decoded_peak_before_gain =
+            playback.decoded_peak_before_gain.load(std::memory_order_acquire),
+        .decoded_peak_after_gain = playback.decoded_peak_after_gain.load(std::memory_order_acquire),
         .next_queued = playback.next_decoder.has_value(),
         .chain_boundary_sample = boundary >= 0 ? std::optional{boundary} : std::nullopt,
         .chain_crossed = playback.chain_crossed.load(std::memory_order_acquire),
@@ -680,6 +692,10 @@ core::Result<void> LocalPlayback::fill_buffer() {
         playback.next_decode_sample += chunk_frames;
         playback.pending_samples = std::move((*chunk)->interleaved_samples);
         playback.pending_frame_offset = 0U;
+        float before_peak = 0.0F;
+        for (const auto sample : playback.pending_samples) {
+            before_peak = std::max(before_peak, std::abs(sample));
+        }
         const auto gain = replay_gain_multiplier(playback.replay_gain, playback.replay_gain_mode,
                                                  playback.replay_gain_preamps);
         if (gain != 1.0F) {
@@ -687,6 +703,12 @@ core::Result<void> LocalPlayback::fill_buffer() {
                 sample *= gain;
             }
         }
+        float after_peak = 0.0F;
+        for (const auto sample : playback.pending_samples) {
+            after_peak = std::max(after_peak, std::abs(sample));
+        }
+        playback.decoded_peak_before_gain.store(before_peak, std::memory_order_release);
+        playback.decoded_peak_after_gain.store(after_peak, std::memory_order_release);
     }
 
     auto current = playback.state.load(std::memory_order_acquire);

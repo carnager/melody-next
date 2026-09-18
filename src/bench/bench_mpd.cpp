@@ -10,6 +10,8 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "quick/mpd_search_result_model.hpp"
+#include "trackknife/audio/local_audition.hpp"
+#include "trackknife/audio/melody_agent.hpp"
 #include "ui/mpd_connection_dialog.hpp"
 #include "ui/server_library_tree_model.hpp"
 #include "ui/server_library_tree_view.hpp"
@@ -289,6 +291,9 @@ void BenchMainWindow::refreshMpdStatusControls() {
     mpd_replaygain_button_->setAccessibleDescription(
         QStringLiteral("Current ReplayGain mode is %1; activate to choose another mode")
             .arg(replaygain_label));
+    if (visible && device_menu_ != nullptr && !device_menu_->isVisible()) {
+        rebuildDeviceMenu();
+    }
 
     if (mpd_search_field_ != nullptr) {
         mpd_search_field_->setVisible(visible);
@@ -585,6 +590,9 @@ void BenchMainWindow::buildMpdWorkspace() {
         if (!connected && was_connected) {
             acceptMpdStoredPlaylistNames({});
         }
+        // The Melody endpoint belongs to the MPD session, not to whichever
+        // authority tab happens to be visible when auto-connect completes.
+        refreshMelodyEndpoint();
         refreshActiveContext();
         refreshTransport();
         refreshSelectionStatus();
@@ -1288,10 +1296,89 @@ void BenchMainWindow::refreshMpdTransport() {
         volume_->setValue(mpd_controller_->volume());
     }
     device_button_->setEnabled(connected);
-    device_button_->setToolTip(
-        QStringLiteral("MPD output: %1").arg(mpd_controller_->activeOutputName()));
+    auto output_tooltip = QStringLiteral("MPD output: %1").arg(mpd_controller_->activeOutputName());
+    if (melody_endpoint_ != nullptr) {
+        const auto endpoint = melody_endpoint_->snapshot();
+        const auto mode =
+            endpoint.replay_gain_mode == audio::ReplayGainMode::track   ? QStringLiteral("Track")
+            : endpoint.replay_gain_mode == audio::ReplayGainMode::album ? QStringLiteral("Album")
+                                                                        : QStringLiteral("Off");
+        const auto selected_gain =
+            endpoint.replay_gain_mode == audio::ReplayGainMode::album && endpoint.album_gain_db
+                ? endpoint.album_gain_db
+                : endpoint.track_gain_db;
+        output_tooltip += QStringLiteral("\nMelody ReplayGain: %1").arg(mode);
+        if (selected_gain) {
+            output_tooltip += QStringLiteral(" · %1 dB · %2×")
+                                  .arg(*selected_gain, 0, 'f', 2)
+                                  .arg(endpoint.effective_gain_multiplier, 0, 'f', 3);
+        } else if (endpoint.replay_gain_mode != audio::ReplayGainMode::off) {
+            const auto received = endpoint.replay_gain_mode == audio::ReplayGainMode::album &&
+                                          endpoint.received_album_gain_db
+                                      ? endpoint.received_album_gain_db
+                                      : endpoint.received_track_gain_db;
+            output_tooltip +=
+                received
+                    ? QStringLiteral(" · queue %1 dB, player missing").arg(*received, 0, 'f', 2)
+                : std::abs(endpoint.effective_gain_multiplier - 1.0F) > 0.0001F
+                    ? QStringLiteral(" · decoder metadata · %1×")
+                          .arg(endpoint.effective_gain_multiplier, 0, 'f', 3)
+                    : QStringLiteral(" · no gain metadata");
+        }
+    }
+    device_button_->setToolTip(output_tooltip);
     device_button_->setAccessibleDescription(mpd_controller_->activeOutputName());
     publishMprisState();
+}
+
+void BenchMainWindow::refreshMelodyEndpoint() {
+    const auto profile_id = mpd_controller_->profileId();
+    const auto eligible = mpd_controller_->connected() &&
+                          mpd_controller_->supportsCommand(QStringLiteral("melody_version"));
+    if (!eligible || profile_id.isEmpty()) {
+        melody_endpoint_.reset();
+        melody_player_storage_.reset();
+        melody_endpoint_profile_.clear();
+        return;
+    }
+    if (melody_endpoint_ != nullptr && melody_endpoint_profile_ == profile_id) {
+        return;
+    }
+    const auto parsed = core::StableId::parse(profile_id.toStdString());
+    const auto profile =
+        parsed ? std::ranges::find(mpd_profiles_, *parsed, &persistence::ConnectionProfile::id)
+               : mpd_profiles_.end();
+    if (profile == mpd_profiles_.end()) {
+        return;
+    }
+    melody_endpoint_.reset();
+    melody_player_storage_.reset();
+    auto player = audio::LocalAuditionService::create();
+    if (!player) {
+        statusBar()->showMessage(QStringLiteral("Melody output audio worker failed to start"),
+                                 5'000);
+        return;
+    }
+    melody_player_storage_ = std::move(*player);
+    audio::MelodyAgentConfig config{
+        .name = "Trackknife",
+        .host = profile->host,
+        .port = profile->port,
+        .local_music_root = profile->local_music_root,
+        .stream_base_url = std::nullopt,
+        .stream_format = {},
+        .maximum_bit_rate = std::nullopt,
+        .reconnect_delay = std::chrono::milliseconds{2'000},
+        .report_period = std::chrono::milliseconds{2'000},
+    };
+    auto endpoint = audio::MelodyAgentService::create(std::move(config), *melody_player_storage_);
+    if (!endpoint) {
+        melody_player_storage_.reset();
+        statusBar()->showMessage(displayText(endpoint.error().message), 5'000);
+        return;
+    }
+    melody_endpoint_ = std::move(*endpoint);
+    melody_endpoint_profile_ = profile_id;
 }
 
 // "Go to Artist/Album": reveal the queue row's artist (and optionally its

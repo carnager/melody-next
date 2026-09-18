@@ -66,6 +66,7 @@ class ListPersistenceService final : public QObject {
     void removeEncoderPreset(core::StableId id, CompletionCallback callback = {});
     void loadUiState(QString key, UiStateCallback callback);
     void saveUiState(QString key, QByteArray value, CompletionCallback callback = {});
+    void backupDatabase(std::filesystem::path destination, CompletionCallback callback);
 
     // Window shutdown is the only blocking persistence boundary. Database work
     // still runs on the service thread and the call guarantees durable edits.

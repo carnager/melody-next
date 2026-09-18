@@ -1028,6 +1028,64 @@ void appliesChannelAndPermanentGainPolicies() {
         }
         CHECK(peak > 0.48F && peak < 0.52F);
     }
+
+    // A requested gain without any usable loudness value fails closed
+    // instead of silently converting at unity.
+    const auto ungained = trackknife::convert::convert_audio_file(
+        {.source_raw_path = source.native(),
+         .source_selection = {},
+         .source_range = {},
+         .destination_raw_path = (directory.path() / "ungained.flac").native(),
+         .preset = preset,
+         .target_sample_rate = {},
+         .sample_rate_cap = {},
+         .target_bit_depth = {},
+         .keep_source_bit_depth = false,
+         .gain_mode = trackknife::convert::ConversionGainMode::track,
+         .metadata = {},
+         .artwork = {}});
+    CHECK(!ungained.has_value() &&
+          ungained.error().code == trackknife::core::ErrorCode::invalid_argument);
+    CHECK(!std::filesystem::exists(directory.path() / "ungained.flac"));
+
+    // Document R128 comments apply with the Opus reference shift:
+    // -2560/256 = -10 dB at -23 LUFS becomes -5 dB at the RG reference.
+    trackknife::metadata::MetadataDocument r128_metadata;
+    trackknife::metadata::MetadataField r128;
+    r128.canonical_name = "r128trackgain";
+    r128.native_name = "R128_TRACK_GAIN";
+    r128.values = {"-2560"};
+    r128_metadata.fields.push_back(std::move(r128));
+    const auto r128_gained = trackknife::convert::convert_audio_file(
+        {.source_raw_path = source.native(),
+         .source_selection = {},
+         .source_range = {},
+         .destination_raw_path = (directory.path() / "r128.flac").native(),
+         .preset = preset,
+         .target_sample_rate = {},
+         .sample_rate_cap = {},
+         .target_bit_depth = {},
+         .keep_source_bit_depth = false,
+         .gain_mode = trackknife::convert::ConversionGainMode::track,
+         .metadata = r128_metadata,
+         .artwork = {}});
+    CHECK(r128_gained.has_value());
+    if (r128_gained) {
+        auto decoder = trackknife::formats::AudioDecoder::open(r128_gained->destination_raw_path);
+        CHECK(decoder.has_value());
+        float peak = 0.0F;
+        while (decoder) {
+            auto chunk = decoder->next_chunk();
+            CHECK(chunk.has_value());
+            if (!chunk || !*chunk) {
+                break;
+            }
+            for (const auto sample : (*chunk)->interleaved_samples) {
+                peak = std::max(peak, std::abs(sample));
+            }
+        }
+        CHECK(peak > 0.12F && peak < 0.16F);
+    }
 }
 
 int main(const int argc, char** argv) {

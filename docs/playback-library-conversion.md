@@ -369,6 +369,11 @@ decode exact logical range
   -> publish destination atomically
 ```
 
+Permanent gain reads the item's ReplayGain fields (including sidecar-projected
+values and R128 comments with the Opus reference shift), falling back to what
+the decoder exposes. A gain request with no usable value fails that file with
+an explicit problem instead of silently converting at unity loudness.
+
 ### Preset data
 
 - output container and codec;

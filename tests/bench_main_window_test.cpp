@@ -222,6 +222,7 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanPreservesLogicalSources_data();
     void replayGainScanPreservesLogicalSources();
     void convertDialogPlansAndConvertsSelection();
+    void convertDialogAppliesPermanentReplayGain();
     void settingsControlStartupContextAndMusicRoot();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3955,6 +3956,96 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QTRY_VERIFY(preview->count() >= 2 && preview->item(1)->text() == media_relative);
     mirror->setChecked(false);
     QVERIFY(directory_field->isEnabled());
+    delete dialog;
+}
+
+// ADR-0173: the dialog's Gain choice permanently applies the item's
+// ReplayGain metadata to the encoded PCM, exactly like the core path.
+void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
+    QTemporaryDir media;
+    QTemporaryDir destination;
+    QVERIFY(media.isValid());
+    QVERIFY(destination.isValid());
+    const auto source_path = media.filePath(QStringLiteral("gained.wav"));
+    write_sine_wav_fixture(source_path, 0.8);
+
+    const auto field = [](std::string name, std::vector<std::string> values) {
+        return metadata::MetadataField{
+            .canonical_name = metadata::canonicalize_field_name(name),
+            .native_name = std::move(name),
+            .values = std::move(values),
+            .qualifier = {},
+            .provenance = metadata::FieldProvenance::embedded,
+        };
+    };
+    const auto encoded_source = QFile::encodeName(source_path);
+    ConvertDialogItem item{
+        .raw_path = std::string{encoded_source.constData(),
+                                static_cast<std::size_t>(encoded_source.size())},
+        .selection = {},
+        .segment = {},
+        .source_revision = {},
+        .metadata =
+            metadata::MetadataDocument{
+                .fields = {field("TITLE", {"Gained"}),
+                           field("REPLAYGAIN_TRACK_GAIN", {"-12.04 dB"}),
+                           field("REPLAYGAIN_TRACK_PEAK", {"0.8"})},
+                .unsupported_native_objects = {},
+            },
+        .label = QStringLiteral("Gained"),
+    };
+    ConvertPresetStore preset_store{
+        .load = [](ConvertPresetStore::LoadCompletion completion) { completion({}, QString{}); },
+        .save = [](persistence::SavedEncoderPreset,
+                   ConvertPresetStore::Completion completion) { completion(QString{}); },
+        .remove = [](core::StableId,
+                     ConvertPresetStore::Completion completion) { completion(QString{}); },
+    };
+    auto* dialog = new ConvertDialog(
+        {std::move(item)}, [](auto completion) { completion({}, {}, QString{}); }, preset_store);
+    dialog->show();
+    auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
+    auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-destination"));
+    auto* directories =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-directory-expression"));
+    auto* names =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-basename-expression"));
+    auto* gain_mode = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-gain"));
+    auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-run"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-status"));
+    auto* mirror = dialog->findChild<QCheckBox*>(QStringLiteral("bench-convert-mirror"));
+    QVERIFY(preset != nullptr && root != nullptr && names != nullptr && gain_mode != nullptr);
+    QVERIFY(run != nullptr && status != nullptr && directories != nullptr && mirror != nullptr);
+    mirror->setChecked(false);
+    preset->setCurrentIndex(preset->findData(QStringLiteral("flac")));
+    root->setText(destination.path());
+    directories->setText(QString{});
+    names->setText(QStringLiteral("%title%"));
+    gain_mode->setCurrentIndex(gain_mode->findData(1));
+    QTRY_VERIFY(run->isEnabled());
+    QTest::mouseClick(run, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Converted 1 of 1 files.")),
+                             15'000);
+
+    const auto converted = QFile::encodeName(
+        QDir{destination.path()}.filePath(QStringLiteral("Gained.flac")));
+    auto decoder = formats::AudioDecoder::open(
+        std::string{converted.constData(), static_cast<std::size_t>(converted.size())});
+    QVERIFY(decoder.has_value());
+    float peak = 0.0F;
+    while (true) {
+        auto chunk = decoder->next_chunk();
+        QVERIFY(chunk.has_value());
+        if (!*chunk) {
+            break;
+        }
+        for (const auto sample : (*chunk)->interleaved_samples) {
+            peak = std::max(peak, std::abs(sample));
+        }
+    }
+    // -12.04 dB over a 0.8 peak must land near 0.2; an untouched copy at
+    // 0.8 means the dialog's gain option silently did nothing.
+    QVERIFY2(peak > 0.17F && peak < 0.23F, qPrintable(QString::number(peak)));
     delete dialog;
 }
 

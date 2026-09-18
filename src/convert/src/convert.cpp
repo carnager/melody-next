@@ -5,6 +5,7 @@
 #include "trackknife/core/atomic_rename.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/formats/artwork.hpp"
+#include "trackknife/formats/decoder.hpp"
 #include "trackknife/formats/probe.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 
@@ -808,26 +809,51 @@ core::Result<ConvertedAudioFile> convert_audio_file(const AudioConversionRequest
             return end != value->c_str() && std::isfinite(parsed) ? std::optional{parsed}
                                                                   : std::optional<double>{};
         };
+        // Document R128 comments carry Q7.8 text at the -23 LUFS reference;
+        // shift them exactly like the decoder's native Opus path.
+        const auto metadata_r128 = [&request](const std::string_view name) {
+            const auto value = request.metadata.first_effective_value(name);
+            if (!value) {
+                return std::optional<double>{};
+            }
+            const auto parsed = formats::parse_r128_gain_decibels(*value);
+            if (!parsed) {
+                return std::optional<double>{};
+            }
+            return std::optional{*parsed + formats::opus_r128_reference_shift_db};
+        };
         info.track_gain_db =
-            metadata_number("replaygaintrackgain").or_else([&info] { return info.track_gain_db; });
+            metadata_number("replaygaintrackgain")
+                .or_else([&metadata_r128] { return metadata_r128("r128trackgain"); })
+                .or_else([&info] { return info.track_gain_db; });
         info.track_peak =
             metadata_number("replaygaintrackpeak").or_else([&info] { return info.track_peak; });
         info.album_gain_db =
-            metadata_number("replaygainalbumgain").or_else([&info] { return info.album_gain_db; });
+            metadata_number("replaygainalbumgain")
+                .or_else([&metadata_r128] { return metadata_r128("r128albumgain"); })
+                .or_else([&info] { return info.album_gain_db; });
         info.album_peak =
             metadata_number("replaygainalbumpeak").or_else([&info] { return info.album_peak; });
         const bool album =
             request.gain_mode == ConversionGainMode::album && info.album_gain_db.has_value();
         const auto gain = album ? info.album_gain_db : info.track_gain_db;
         const auto peak = album ? info.album_peak : info.track_peak;
-        if (gain && std::isfinite(*gain) && std::isfinite(request.gain_preamp_db)) {
-            auto multiplier =
-                std::pow(10.0, (*gain + static_cast<double>(request.gain_preamp_db)) / 20.0);
-            if (peak && std::isfinite(*peak) && *peak > 0.0) {
-                multiplier = std::min(multiplier, 1.0 / *peak);
-            }
-            gain_multiplier = static_cast<float>(multiplier);
+        if (!gain || !std::isfinite(*gain) || !std::isfinite(request.gain_preamp_db)) {
+            // Silently converting at unity would misreport the requested
+            // loudness change; fail closed so the missing scan is visible.
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = "the source has no ReplayGain value the converter can apply — "
+                           "scan loudness first, or set Gain to “Do not apply gain”",
+                .context = {{.key = "path", .value = request.source_raw_path}},
+            });
         }
+        auto multiplier =
+            std::pow(10.0, (*gain + static_cast<double>(request.gain_preamp_db)) / 20.0);
+        if (peak && std::isfinite(*peak) && *peak > 0.0) {
+            multiplier = std::min(multiplier, 1.0 / *peak);
+        }
+        gain_multiplier = static_cast<float>(multiplier);
     }
 
     std::uint64_t decoded_frames = 0U;

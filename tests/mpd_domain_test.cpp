@@ -288,6 +288,11 @@ void local_root_mapping_is_literal_and_contained() {
     require(percent == std::filesystem::path{"/srv/music/100%25/Track.flac"},
             "MPD file URIs must not be URL-percent-decoded");
 
+    const auto trailing =
+        trackknife::mpd::resolve_below_music_root("/srv/music/", "Artist/Track.flac");
+    require(trailing == std::filesystem::path{"/srv/music/Artist/Track.flac"},
+            "a root spelled with a trailing separator must map identically");
+
     require(!trackknife::mpd::resolve_below_music_root(root, "../outside.flac"),
             "parent traversal must fail");
     require(!trackknife::mpd::resolve_below_music_root(root, "Artist//Track.flac"),

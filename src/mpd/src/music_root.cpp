@@ -83,7 +83,13 @@ resolve_below_music_root(const std::filesystem::path& music_root, std::string_vi
         offset = separator + 1U;
     }
 
-    const auto normalized_root = music_root.lexically_normal();
+    // A trailing separator normalizes to an empty final component, which
+    // would fail the component-wise prefix check against real filenames —
+    // "/mnt/music/" and "/mnt/music" name the same root.
+    auto normalized_root = music_root.lexically_normal();
+    if (!normalized_root.has_filename() && normalized_root.has_relative_path()) {
+        normalized_root = normalized_root.parent_path();
+    }
     const auto candidate = (normalized_root / relative).lexically_normal();
     if (!path_has_prefix(candidate, normalized_root) || candidate == normalized_root) {
         return std::unexpected(invalid_uri("the resolved path escapes the configured music root"));

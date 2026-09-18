@@ -4,6 +4,7 @@
 #include "uicommon/local_files_mime_data.hpp"
 
 #include "uicommon/queue_item_delegate.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractItemModel>
@@ -175,17 +176,20 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
         }
         const QRect target{available.left(), available.top(), extent, extent};
         const auto cover = model->index(row, column).data(track_album_artwork_role).value<QImage>();
+        const auto album_rating = model->index(row, column).data(track_album_rating_role).toUInt();
         if (!cover.isNull()) {
             const auto fitted = cover.size().scaled(target.size(), Qt::KeepAspectRatio);
             const QRect centered{target.center().x() - fitted.width() / 2,
                                  target.center().y() - fitted.height() / 2, fitted.width(),
                                  fitted.height()};
             painter->drawImage(centered, cover);
+            paintRatingOverlay(painter, centered, album_rating);
         } else {
             const auto icon =
                 QIcon::fromTheme(QStringLiteral("media-optical-audio"),
                                  QApplication::style()->standardIcon(QStyle::SP_FileIcon));
             icon.paint(painter, target, Qt::AlignCenter, QIcon::Disabled);
+            paintRatingOverlay(painter, target, album_rating);
         }
     }
 }

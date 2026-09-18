@@ -74,6 +74,7 @@ struct LocalTrackRow {
     std::string rating_hash{};
     std::string album_rating_hash{};
     unsigned rating{0U};
+    unsigned album_rating{0U};
     // True once a probe ran or persisted metadata was restored; unprobed rows
     // fall back to their file name and are queued for enrichment.
     bool probed{false};

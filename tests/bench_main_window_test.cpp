@@ -8830,6 +8830,11 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
                           [&stored](std::vector<unsigned> values) { stored = std::move(values); });
     QTRY_VERIFY(stored.has_value());
     QCOMPARE(*stored, (std::vector<unsigned>{8U, 6U}));
+    // The store notification reloads rows, filling the album rating painted
+    // over the group's cover artwork.
+    QTRY_COMPARE(model->rows().front().album_rating, 6U);
+    QCOMPARE(model->index(0, local_artwork_column).data(ui::track_album_rating_role).toUInt(),
+             6U);
 
     // Unrating deletes the stored value and clears the stars immediately.
     QVERIFY(QMetaObject::invokeMethod(

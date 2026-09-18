@@ -71,6 +71,8 @@ class ServerLibraryTreeDelegate final : public QStyledItemDelegate {
         bool album{false};
         bool root{false};
         QString secondary;
+        // ADR-0179: painted as stars over the album cover when non-zero.
+        unsigned album_rating{0U};
     };
     ServerLibraryTreeDelegate(ServerLibraryTreeView* view, std::array<QIcon, 3> action_icons,
                               std::function<Presentation(const QModelIndex&)> presentation = {});

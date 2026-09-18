@@ -40,7 +40,8 @@ enum TrackRowRole : int {
     // Optional fast path: bool, true only for the first row of a group with
     // at least two members. Views fall back to adjacent group-key comparison.
     track_album_group_start_role,
-    track_rating_role, // uint 0-10 track rating (ADR-0179); 0/absent unrated
+    track_rating_role,       // uint 0-10 track rating (ADR-0179); 0/absent unrated
+    track_album_rating_role, // uint 0-10 album rating painted over covers
 };
 
 // Complete physical column layout used by both authority-bound queues:

@@ -612,6 +612,41 @@ void MpdProbeController::setTrackRating(const QVariantList& rows, const int rati
     emit stateChanged();
 }
 
+void MpdProbeController::requestMelodyAlbumRatings(const std::vector<mpd::Track>& queue) {
+    if (!session_ || !supportsAlbumRatings()) {
+        return;
+    }
+    constexpr qsizetype maximum_album_queries = 128;
+    QSet<QString> in_flight;
+    for (const auto& key : pending_album_rating_queries_) {
+        in_flight.insert(key);
+    }
+    QSet<QString> seen;
+    for (const auto& track : queue) {
+        const auto group_key = MpdQueueModel::albumGroupKey(track);
+        if (seen.contains(group_key) || in_flight.contains(group_key) ||
+            melody_album_ratings_.contains(group_key)) {
+            continue;
+        }
+        const std::string album_artist{
+            track.metadata.first("AlbumArtist")
+                .value_or(track.metadata.first("Artist").value_or(std::string_view{}))};
+        const std::string album{track.metadata.first("Album").value_or(std::string_view{})};
+        const std::string date{track.metadata.first("Date").value_or(std::string_view{})};
+        if (album_artist.empty() || album.empty()) {
+            continue;
+        }
+        seen.insert(group_key);
+        if (seen.size() > maximum_album_queries) {
+            break;
+        }
+        const auto id = session_->melody_album_rating(mpd::MelodyAlbumKey{
+            .album_artist = album_artist, .album = album, .date = date});
+        pending_commands_.insert(id);
+        pending_album_rating_queries_.insert(id, group_key);
+    }
+}
+
 void MpdProbeController::setMelodyAlbumRating(const QString& album_artist, const QString& album,
                                               const QString& date, const int rating) {
     if (!session_ || !connected_ || !supportsAlbumRatings() || rating < 0 || rating > 10 ||
@@ -1416,7 +1451,9 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     details_ += QStringLiteral("\nCommands\n%1\n\nTag types\n%2\n")
                     .arg(commands.join(QStringLiteral(", ")), tags.join(QStringLiteral(", ")));
     details_ += QStringLiteral("\nOutputs\n") + output_summary_;
+    requestMelodyAlbumRatings(snapshot.queue);
     queue_model_.replaceTracks(std::move(snapshot.queue));
+    queue_model_.setAlbumRatings(melody_album_ratings_);
     QHash<QString, unsigned> sticker_ratings;
     sticker_ratings.reserve(static_cast<qsizetype>(snapshot.sticker_ratings.size()));
     for (const auto& rating : snapshot.sticker_ratings) {
@@ -1433,6 +1470,30 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         return;
     }
     pending_commands_.remove(result.id);
+    if (result.kind == mpd::SessionCommandKind::melody_album_rating) {
+        const auto group_key = pending_album_rating_queries_.take(result.id);
+        if (!group_key.isEmpty() && !result.error) {
+            if (const auto* rating = std::get_if<mpd::MelodyAlbumRating>(&result.payload)) {
+                // Show the user-set album rating; fall back to the server's
+                // computed track-rating mean when nothing was set explicitly.
+                const auto computed =
+                    std::min(10U, static_cast<unsigned>(std::lround(rating->computed)));
+                melody_album_ratings_.insert(group_key,
+                                             rating->rating != 0U ? rating->rating : computed);
+                melody_album_stored_ratings_.insert(group_key, rating->rating);
+                queue_model_.setAlbumRatings(melody_album_ratings_);
+            }
+        }
+        emit stateChanged();
+        return;
+    }
+    if (!result.error && (result.kind == mpd::SessionCommandKind::melody_rating ||
+                          result.kind == mpd::SessionCommandKind::melody_album_rate)) {
+        // The stored or computed album aggregates changed server-side; the
+        // rating-forced snapshot that follows refetches them.
+        melody_album_ratings_.clear();
+        melody_album_stored_ratings_.clear();
+    }
     if (result.kind == mpd::SessionCommandKind::database_browse) {
         if (!pending_browser_query_ || *pending_browser_query_ != result.id) {
             emit stateChanged();
@@ -2005,6 +2066,11 @@ void MpdProbeController::clearSessionState() {
     queue_model_.setCurrentSongId(std::nullopt);
     pending_commands_.clear();
     pending_album_adds_.clear();
+    melody_album_ratings_.clear();
+    melody_album_stored_ratings_.clear();
+    pending_album_rating_queries_.clear();
+    queue_model_.setStickerRatings({});
+    queue_model_.setAlbumRatings({});
     const auto pending_albums = std::exchange(pending_search_albums_, {});
     for (const auto token : pending_albums) {
         emit searchAlbumLoaded(token, {}, QStringLiteral("Disconnected"));

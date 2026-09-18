@@ -70,6 +70,10 @@ class MpdQueueModel final : public QAbstractTableModel {
     // own Melody X-Rating line wins over the sticker map.
     void setStickerRatings(QHash<QString, unsigned> ratings);
     [[nodiscard]] unsigned ratingAt(int row) const;
+    // Melody album ratings keyed by the delegate's album group identity;
+    // painted over the group's cover artwork.
+    void setAlbumRatings(QHash<QString, unsigned> ratings);
+    [[nodiscard]] static QString albumGroupKey(const mpd::Track& track);
 
   public slots:
     void acceptArtwork(quint64 token, const QImage& image);
@@ -90,6 +94,7 @@ class MpdQueueModel final : public QAbstractTableModel {
 
     std::vector<mpd::Track> tracks_;
     QHash<QString, unsigned> sticker_ratings_;
+    QHash<QString, unsigned> album_ratings_;
     std::optional<std::uint32_t> current_song_id_;
     QHash<QString, AlbumArtwork> album_artwork_;
     std::optional<quint64> active_artwork_token_;

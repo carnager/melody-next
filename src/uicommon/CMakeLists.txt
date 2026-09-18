@@ -21,6 +21,8 @@ qt_add_library(
     queue_item_delegate.hpp
     queue_table_view.cpp
     queue_table_view.hpp
+    rating_stars.cpp
+    rating_stars.hpp
     track_row_roles.hpp
     track_view_layout.cpp
     track_view_layout.hpp

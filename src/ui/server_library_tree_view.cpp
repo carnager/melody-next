@@ -3,6 +3,7 @@
 #include "ui/server_library_tree_view.hpp"
 
 #include "ui/server_library_tree_model.hpp"
+#include "uicommon/rating_stars.hpp"
 
 #include <QApplication>
 #include <QFontMetrics>
@@ -280,6 +281,9 @@ void ServerLibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewI
         const auto mode =
             item.state.testFlag(QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled;
         icon.paint(painter, icon_rect, Qt::AlignCenter, mode);
+        if (row.album) {
+            paintRatingOverlay(painter, icon_rect, row.album_rating);
+        }
     }
     content.setLeft(icon_rect.right() + (is_track ? 6 : 8));
     if (show_actions) {

@@ -5,7 +5,9 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "quick/mpd_search_result_model.hpp"
+#include "uicommon/rating_stars.hpp"
 
+#include <QBrush>
 #include <QItemSelectionModel>
 #include <QMetaProperty>
 #include <QSignalSpy>
@@ -146,6 +148,10 @@ void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
     QCOMPARE(model.data(model.index(0, ui::track_rating_column)).toString(),
              QStringLiteral("★★★½"));
     QCOMPARE(model.ratingAt(0), 7U);
+    QCOMPARE(model.data(model.index(0, ui::track_rating_column), Qt::ForegroundRole)
+                 .value<QBrush>()
+                 .color(),
+             ui::ratingStarColor());
     mpd::Track melody_rated = *model.trackAt(0);
     melody_rated.rating = 4U;
     melody_rated.melody_song_id = 9'001U;
@@ -153,6 +159,14 @@ void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
     melody_model.replaceTracks({melody_rated});
     melody_model.setStickerRatings({{QStringLiteral("Slayer/Divine Intervention/01.flac"), 7U}});
     QCOMPARE(melody_model.data(melody_model.index(0, 0), MpdQueueModel::RatingRole).toUInt(), 4U);
+    // Album ratings key on the delegate's group identity and paint over the
+    // group's cover from the artwork column.
+    melody_model.setAlbumRatings(
+        {{MpdQueueModel::albumGroupKey(melody_rated), 9U}});
+    QCOMPARE(melody_model.data(melody_model.index(0, ui::track_artwork_column),
+                               ui::track_album_rating_role)
+                 .toUInt(),
+             9U);
     QCOMPARE(model.totalDurationMs(), 220'900);
     QVERIFY(!model.data(model.index(0, 0), MpdQueueModel::CurrentRole).toBool());
     QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::AlbumArtistRole).toString(),

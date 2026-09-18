@@ -18,6 +18,7 @@
 #include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include "uicommon/track_view_layout.hpp"
 
@@ -1303,12 +1304,21 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
                 album_rate_menu->setObjectName(QStringLiteral("bench-mpd-album-rate-menu"));
                 album_rate_menu->setEnabled(command_ready && !album_artist.empty() &&
                                             !album.empty());
+                const auto current_album_rating = mpd_controller_->melodyStoredAlbumRating(
+                    quick::MpdQueueModel::albumGroupKey(*track));
                 for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
-                    auto* choice = album_rate_menu->addAction(
-                        rating == 0U ? QStringLiteral("Unrate")
-                                     : QString{}.fill(QChar{0x2605}, rating / 2U));
+                    QAction* choice = nullptr;
+                    if (rating == 0U) {
+                        choice = album_rate_menu->addAction(ui::ratingMenuLabel(rating));
+                        choice->setCheckable(true);
+                    } else {
+                        auto* stars = new ui::RatingMenuAction(rating, album_rate_menu);
+                        album_rate_menu->addAction(stars);
+                        choice = stars;
+                    }
                     choice->setObjectName(
                         QStringLiteral("action-mpd-album-rate-%1").arg(rating));
+                    choice->setChecked(current_album_rating == rating);
                     connect(choice, &QAction::triggered, this,
                             [this, album_artist = QString::fromStdString(album_artist),
                              album = QString::fromStdString(album),
@@ -1483,6 +1493,8 @@ void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
     QSet<QString> unique_albums;
     std::optional<unsigned> common_rating;
     bool ratings_match = true;
+    std::optional<unsigned> common_album_rating;
+    bool album_ratings_match = true;
     for (const auto& index : view->selectionModel()->selectedRows()) {
         if (index.row() < 0 || index.row() >= static_cast<int>(rows.size())) {
             continue;
@@ -1492,6 +1504,11 @@ void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
             common_rating = row.rating;
         } else if (*common_rating != row.rating) {
             ratings_match = false;
+        }
+        if (!common_album_rating) {
+            common_album_rating = row.album_rating;
+        } else if (*common_album_rating != row.album_rating) {
+            album_ratings_match = false;
         }
         const auto track_hash = QString::fromStdString(row.rating_hash);
         if (!track_hash.isEmpty() && !unique_tracks.contains(track_hash)) {
@@ -1515,12 +1532,19 @@ void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
     auto* album_rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate album"));
     album_rate_menu->setObjectName(QStringLiteral("bench-local-album-rate-menu"));
     album_rate_menu->setEnabled(store_ready && !album_hashes.isEmpty());
+    const auto make_rating_action = [](QMenu* menu, const unsigned rating) -> QAction* {
+        if (rating == 0U) {
+            auto* unrate = menu->addAction(ui::ratingMenuLabel(rating));
+            unrate->setCheckable(true);
+            return unrate;
+        }
+        auto* stars = new ui::RatingMenuAction(rating, menu);
+        menu->addAction(stars);
+        return stars;
+    };
     for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
-        const auto label = rating == 0U ? QStringLiteral("Unrate")
-                                        : QString{}.fill(QChar{0x2605}, rating / 2U);
-        auto* rate = rate_menu->addAction(label);
+        auto* rate = make_rating_action(rate_menu, rating);
         rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
-        rate->setCheckable(true);
         rate->setChecked(ratings_match && common_rating == rating);
         connect(rate, &QAction::triggered, this, [this, track_hashes, rating] {
             if (local_library_ == nullptr) {
@@ -1535,8 +1559,9 @@ void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
                 tab->model->applyRatings(applied);
             }
         });
-        auto* album_rate = album_rate_menu->addAction(label);
+        auto* album_rate = make_rating_action(album_rate_menu, rating);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
+        album_rate->setChecked(album_ratings_match && common_album_rating == rating);
         connect(album_rate, &QAction::triggered, this, [this, album_hashes, rating] {
             if (local_library_ == nullptr) {
                 return;

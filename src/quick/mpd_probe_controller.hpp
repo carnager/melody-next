@@ -173,6 +173,11 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void setTrackRating(const QVariantList& rows, int rating);
     Q_INVOKABLE void setMelodyAlbumRating(const QString& album_artist, const QString& album,
                                           const QString& date, int rating);
+    // The explicitly stored Melody album rating for a queue album group;
+    // 0 when unrated or not yet loaded.
+    [[nodiscard]] unsigned melodyStoredAlbumRating(const QString& group_key) const {
+        return melody_album_stored_ratings_.value(group_key, 0U);
+    }
     Q_INVOKABLE void searchLibrary(const QString& query);
     Q_INVOKABLE void continueSearch();
     Q_INVOKABLE void addLibraryItem(int row);
@@ -247,6 +252,7 @@ class MpdProbeController final : public QObject {
     void applySnapshot(std::uint64_t token, mpd::SessionSnapshot snapshot);
     void applyCommandResult(std::uint64_t token, mpd::SessionCommandResult result);
     void submitTransport(mpd::TransportAction action);
+    void requestMelodyAlbumRatings(const std::vector<mpd::Track>& queue);
     void beginOptimisticPlayback(std::uint64_t command_id, mpd::PlaybackState state);
     void enqueueUri(std::string uri, bool next);
     void enqueueUris(std::vector<std::string> uris, bool next);
@@ -294,6 +300,13 @@ class MpdProbeController final : public QObject {
     std::optional<std::uint32_t> current_song_id_;
     std::optional<std::uint64_t> pending_library_query_;
     QHash<quint64, QueueAddMode> pending_album_adds_;
+    // ADR-0179: Melody album ratings cached per album group identity and
+    // invalidated when a rating mutation succeeds. The display map falls
+    // back to the server's computed mean; the stored map holds only the
+    // explicit album rating that Rate menus check against.
+    QHash<QString, unsigned> melody_album_ratings_;
+    QHash<QString, unsigned> melody_album_stored_ratings_;
+    QHash<std::uint64_t, QString> pending_album_rating_queries_;
     QHash<quint64, quint64> pending_search_albums_;
     QString pending_library_query_text_;
     QString last_library_query_;

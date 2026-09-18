@@ -17,6 +17,7 @@
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/queue_table_view.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractItemView>
@@ -202,10 +203,16 @@ void BenchMainWindow::buildMpdStatusControls() {
     auto* rate_group = new QActionGroup(mpd_rate_menu_);
     rate_group->setExclusive(true);
     for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
-        auto* action = mpd_rate_menu_->addAction(
-            rating == 0U ? QStringLiteral("Unrate") : QString{}.fill(QChar{0x2605}, rating / 2U));
+        QAction* action = nullptr;
+        if (rating == 0U) {
+            action = mpd_rate_menu_->addAction(ui::ratingMenuLabel(rating));
+            action->setCheckable(true);
+        } else {
+            auto* stars = new ui::RatingMenuAction(rating, mpd_rate_menu_);
+            mpd_rate_menu_->addAction(stars);
+            action = stars;
+        }
         action->setObjectName(QStringLiteral("action-mpd-queue-rate-%1").arg(rating));
-        action->setCheckable(true);
         action->setData(rating);
         rate_group->addAction(action);
         connect(action, &QAction::triggered, this, [this, rating] {

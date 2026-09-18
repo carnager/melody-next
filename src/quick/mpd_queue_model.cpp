@@ -2,6 +2,9 @@
 
 #include "quick/mpd_queue_model.hpp"
 
+#include "uicommon/rating_stars.hpp"
+
+#include <QBrush>
 #include <QStringList>
 
 #include <algorithm>
@@ -202,6 +205,12 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
             return ui::track_rating_stars(effective_rating(track, sticker_ratings_));
         }
         return display_value(track, index.column());
+    case Qt::ForegroundRole:
+        if (index.column() == ui::track_rating_column &&
+            effective_rating(track, sticker_ratings_) > 0U) {
+            return QBrush{ui::ratingStarColor()};
+        }
+        return {};
     case Qt::TextAlignmentRole:
         return index.column() == ui::track_length_column
                    ? QVariant::fromValue(Qt::Alignment{Qt::AlignRight | Qt::AlignVCenter})
@@ -224,6 +233,8 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
         return track.priority ? QVariant::fromValue(*track.priority) : QVariant{};
     case RatingRole:
         return QVariant::fromValue(effective_rating(track, sticker_ratings_));
+    case ui::track_album_rating_role:
+        return QVariant::fromValue(album_ratings_.value(album_group_key(track), 0U));
     case AlbumArtworkRole: {
         const auto artwork = album_artwork_.constFind(album_group_key(track));
         return artwork == album_artwork_.cend() || artwork->image.isNull()
@@ -299,6 +310,20 @@ unsigned MpdQueueModel::ratingAt(const int row) const {
     }
     return effective_rating(tracks_.at(static_cast<std::size_t>(row)), sticker_ratings_);
 }
+
+void MpdQueueModel::setAlbumRatings(QHash<QString, unsigned> ratings) {
+    if (album_ratings_ == ratings) {
+        return;
+    }
+    album_ratings_ = std::move(ratings);
+    if (!tracks_.empty()) {
+        emit dataChanged(index(0, ui::track_artwork_column),
+                         index(static_cast<int>(tracks_.size()) - 1, ui::track_artwork_column),
+                         {ui::track_album_rating_role});
+    }
+}
+
+QString MpdQueueModel::albumGroupKey(const mpd::Track& track) { return album_group_key(track); }
 
 std::optional<std::uint32_t> MpdQueueModel::queueIdAt(const int row) const {
     if (row < 0 || static_cast<std::size_t>(row) >= tracks_.size()) {

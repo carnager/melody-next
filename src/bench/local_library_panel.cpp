@@ -5,6 +5,7 @@
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
+#include "uicommon/rating_stars.hpp"
 
 #include <QCheckBox>
 #include <QDialog>
@@ -253,7 +254,8 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
                 .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
                 .root = !index.parent().isValid(),
                 .secondary =
-                    index.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString()};
+                    index.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString(),
+                .album_rating = value.isValid() ? entry.rating : 0U};
         }));
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -808,11 +810,17 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
         rate_menu->setObjectName(QStringLiteral("local-library-rate-menu"));
         const QPersistentModelIndex target{index};
         for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
-            auto* choice = rate_menu->addAction(
-                rating == 0U ? tr("Unrate") : QString{}.fill(QChar{0x2605}, rating / 2U));
+            QAction* choice = nullptr;
+            if (rating == 0U) {
+                choice = rate_menu->addAction(ui::ratingMenuLabel(rating));
+                choice->setCheckable(true);
+            } else {
+                auto* stars = new ui::RatingMenuAction(rating, rate_menu);
+                rate_menu->addAction(stars);
+                choice = stars;
+            }
             choice->setObjectName(
                 QStringLiteral("action-local-library-rate-%1").arg(rating));
-            choice->setCheckable(true);
             choice->setChecked(target_entry.rating == rating);
             connect(choice, &QAction::triggered, this, [this, target, target_entry, rating] {
                 storeRating(target_entry.rating_hash,

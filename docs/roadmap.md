@@ -142,6 +142,9 @@ Reference: [desktop integration](feature-matrix.md).
   MPD rating stickers, Melody's native rating commands, and a local
   content-identity store that survives rescans and moves.
 - [ ] Play counts and last-played timestamps.
+- [ ] Ratings as a search target: a `rating` predicate in local tkq queries
+  and saved searches (the store is already indexed by content identity), and
+  Melody's `rating`/`albumrating` filter terms in server search.
 - [ ] Optional opt-in writing of ratings into file tags (POPM, `RATING`)
   through the previewed metadata write workflow.
 - [ ] Restore playback position without automatically starting playback.

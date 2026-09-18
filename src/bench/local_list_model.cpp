@@ -3,8 +3,10 @@
 #include "bench/local_list_model.hpp"
 
 #include "trackknife/core/local_sources.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 
+#include <QBrush>
 #include <QImage>
 #include <QSet>
 
@@ -129,17 +131,29 @@ void LocalListModel::applyTechnicals(const std::string& raw_path,
 void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
     bool changed = false;
     for (auto& row : rows_) {
-        const auto hash = QString::fromStdString(row.rating_hash);
-        if (hash.isEmpty() || !ratings.contains(hash)) {
-            continue;
+        const auto track_hash = QString::fromStdString(row.rating_hash);
+        if (!track_hash.isEmpty() && ratings.contains(track_hash)) {
+            const auto rating = ratings.value(track_hash);
+            if (row.rating != rating) {
+                row.rating = rating;
+                changed = true;
+            }
         }
-        const auto rating = ratings.value(hash);
-        if (row.rating != rating) {
-            row.rating = rating;
-            changed = true;
+        const auto album_hash = QString::fromStdString(row.album_rating_hash);
+        if (!album_hash.isEmpty() && ratings.contains(album_hash)) {
+            const auto rating = ratings.value(album_hash);
+            if (row.album_rating != rating) {
+                row.album_rating = rating;
+                changed = true;
+            }
         }
     }
     if (changed && !rows_.empty()) {
+        // Album ratings paint over the artwork gutter, so both ends of the
+        // shared column contract refresh.
+        emit dataChanged(index(0, local_artwork_column),
+                         index(static_cast<int>(rows_.size()) - 1, local_artwork_column),
+                         {ui::track_album_rating_role});
         emit dataChanged(index(0, local_rating_column),
                          index(static_cast<int>(rows_.size()) - 1, local_rating_column),
                          {Qt::DisplayRole, ui::track_rating_role});
@@ -149,15 +163,19 @@ void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
 QStringList LocalListModel::ratingHashes() const {
     QStringList hashes;
     QSet<QString> unique;
-    for (const auto& row : rows_) {
-        if (row.rating_hash.empty()) {
-            continue;
+    const auto append = [&](const std::string& value) {
+        if (value.empty()) {
+            return;
         }
-        const auto hash = QString::fromStdString(row.rating_hash);
+        const auto hash = QString::fromStdString(value);
         if (!unique.contains(hash)) {
             unique.insert(hash);
             hashes.push_back(hash);
         }
+    };
+    for (const auto& row : rows_) {
+        append(row.rating_hash);
+        append(row.album_rating_hash);
     }
     return hashes;
 }
@@ -864,6 +882,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return {};
     case ui::track_rating_role:
         return QVariant::fromValue(row.rating);
+    case ui::track_album_rating_role:
+        return QVariant::fromValue(row.album_rating);
     case ui::track_album_artwork_role:
         return QVariant::fromValue(artwork_.value(groupKey(index.row())));
     case ui::track_album_artwork_key_role:
@@ -900,6 +920,9 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         default:
             return {};
         }
+    }
+    if (role == Qt::ForegroundRole && index.column() == local_rating_column && row.rating > 0U) {
+        return QBrush{ui::ratingStarColor()};
     }
     if (role == Qt::ToolTipRole) {
         return escaped(row.raw_path);

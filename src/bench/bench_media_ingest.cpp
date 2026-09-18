@@ -539,7 +539,44 @@ void BenchMainWindow::finishProbeBatch() {
             syncArtwork(*tab);
         }
     }
+    maybeOpenMaterializedDialog();
     pumpProbeQueue();
+}
+
+// ADR-0180: opens the armed dialog on a materialized MPD selection once its
+// tab exists and every row has been probed.
+void BenchMainWindow::maybeOpenMaterializedDialog() {
+    if (pending_dialog_kind_ == MaterializedDialog::none) {
+        return;
+    }
+    auto* tab = tabForDocument(pending_dialog_document_);
+    if (tab == nullptr) {
+        pending_dialog_kind_ = MaterializedDialog::none;
+        pending_dialog_document_.clear();
+        return;
+    }
+    const auto& rows = tab->model->rows();
+    if (rows.empty() ||
+        !std::ranges::all_of(rows, [](const auto& row) { return row.probed; })) {
+        return;
+    }
+    const auto kind = std::exchange(pending_dialog_kind_, MaterializedDialog::none);
+    pending_dialog_document_.clear();
+    tabs_->setCurrentWidget(tab->view);
+    tab->view->selectAll();
+    switch (kind) {
+    case MaterializedDialog::edit_tags:
+        showMetadataProperties();
+        break;
+    case MaterializedDialog::replay_gain:
+        showReplayGainDialog();
+        break;
+    case MaterializedDialog::convert:
+        showConvertDialog();
+        break;
+    case MaterializedDialog::none:
+        break;
+    }
 }
 
 void BenchMainWindow::syncArtwork(ListTab& tab) {
@@ -847,21 +884,13 @@ void BenchMainWindow::finishDiscovery() {
     }
     if (follow_up != MaterializedDialog::none) {
         if (rows_landed) {
-            tabs_->setCurrentWidget(tab->view);
-            tab->view->selectAll();
-            switch (follow_up) {
-            case MaterializedDialog::edit_tags:
-                showMetadataProperties();
-                break;
-            case MaterializedDialog::replay_gain:
-                showReplayGainDialog();
-                break;
-            case MaterializedDialog::convert:
-                showConvertDialog();
-                break;
-            case MaterializedDialog::none:
-                break;
-            }
+            // The rows still lack probed metadata; the dialog opens from
+            // finishProbeBatch once every row carries its real tags —
+            // otherwise Properties would show an empty baseline and
+            // Convert would name outputs from empty fields.
+            pending_dialog_document_ = discovery_target_document_;
+            pending_dialog_kind_ = follow_up;
+            maybeOpenMaterializedDialog();
         } else {
             statusBar()->showMessage(
                 QStringLiteral("Nothing to edit — no files were opened"), 5'000);

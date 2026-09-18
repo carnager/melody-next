@@ -227,6 +227,7 @@ class BenchMainWindow final : public QMainWindow {
     ListTab* addListTab(persistence::ListDocument document, bool select);
     [[nodiscard]] QString effectiveMpdMusicRoot() const;
     ListTab* materializeMpdSelectionAsLocalTab(const QStringList& uris);
+    void maybeOpenMaterializedDialog();
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
@@ -559,6 +560,8 @@ class BenchMainWindow final : public QMainWindow {
     bool discovery_replace_and_play_{false};
     bool discovery_running_{false};
     MaterializedDialog discovery_dialog_follow_up_{MaterializedDialog::none};
+    MaterializedDialog pending_dialog_kind_{MaterializedDialog::none};
+    QString pending_dialog_document_;
 
     QFutureWatcher<std::vector<ProbeOutcome>> probe_watcher_;
     std::deque<ProbeJob> probe_queue_;

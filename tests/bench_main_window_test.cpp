@@ -3732,6 +3732,8 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
     QDir{media.path()}.mkpath(QStringLiteral("Artist/Album"));
+    const auto flac = media.filePath(QStringLiteral("Artist/Album/one.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), flac));
     write_sine_wav_fixture(media.filePath(QStringLiteral("Artist/Album/one.wav")), 0.5);
     {
         QSettings settings;
@@ -3752,20 +3754,30 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
 
         const auto tabs_before = tabs->count();
         window.materializeMpdSelectionForDialog(
-            {QStringLiteral("Artist/Album/one.wav")},
+            {QStringLiteral("Artist/Album/one.flac")},
             BenchMainWindow::MaterializedDialog::edit_tags);
         QTRY_COMPARE(tabs->count(), tabs_before + 2); // materialized tab + dialog tab
         QDialog* properties = nullptr;
         QTRY_VERIFY((properties = window.findChild<QDialog*>(
                          QStringLiteral("bench-metadata-properties"))) != nullptr);
         QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        // The dialog must wait for the probe: its baseline carries the
+        // file's real tags, never an empty unprobed snapshot.
+        auto* materialized_view =
+            qobject_cast<QTableView*>(tabs->widget(tabs_before));
+        QVERIFY(materialized_view != nullptr);
+        auto* materialized_model = qobject_cast<LocalListModel*>(materialized_view->model());
+        QVERIFY(materialized_model != nullptr);
+        QCOMPARE(materialized_model->rowCount(), 1);
+        QVERIFY(materialized_model->rows().front().probed);
+        QVERIFY(!materialized_model->rows().front().artist.empty());
         properties->close();
         QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) ==
                     nullptr);
 
         // A second flavor proves the dispatch switch.
         window.materializeMpdSelectionForDialog(
-            {QStringLiteral("Artist/Album/one.wav")},
+            {QStringLiteral("Artist/Album/one.flac")},
             BenchMainWindow::MaterializedDialog::convert);
         QDialog* convert = nullptr;
         QTRY_VERIFY((convert = window.findChild<QDialog*>(

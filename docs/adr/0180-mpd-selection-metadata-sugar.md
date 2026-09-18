@@ -40,11 +40,12 @@ playlist tabs, committed search tabs) gain **Edit tags…**, **ReplayGain…**,
 and **Convert files…**, enabled when the selection has URIs and a music
 root is configured. Invoking one is sugar over the shipped bridge: the
 selection materializes through "Load as local files" into a local scratch
-tab, and when that tab's asynchronous discovery finishes, the corresponding
-dialog opens on it with all rows selected. The write pipeline, journaling,
-and authority model are untouched — the mutation still happens on rows of a
-persisted local list document, exactly as if the user had run the two steps
-by hand.
+tab, and once that tab's asynchronous discovery and metadata probing have
+finished — so the dialog sees real tags, not an empty unprobed baseline —
+the corresponding dialog opens on it with all rows selected. The write
+pipeline, journaling, and authority model are untouched — the mutation
+still happens on rows of a persisted local list document, exactly as if the
+user had run the two steps by hand.
 
 Supporting decisions:
 

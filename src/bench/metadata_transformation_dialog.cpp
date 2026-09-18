@@ -224,6 +224,27 @@ class MetadataTransformationDialog final : public QDialog {
         input_label_ = new QLabel(QStringLiteral("Value:"), this);
         input_ = new QLineEdit(this);
         input_->setObjectName(QStringLiteral("bench-metadata-transformation-input"));
+        // ADR-0178 field filters complete each comma-separated name from the
+        // selection's present fields plus the standard conventional and
+        // MusicBrainz catalog; any custom name stays freely typable.
+        fields_candidates_ = target_field_candidates_;
+        for (const auto& candidate : metadata::metadata_field_suggestion_catalog()) {
+            fields_candidates_.push_back(candidate);
+        }
+        fields_completion_model_ = new QStringListModel(this);
+        fields_completion_model_->setObjectName(
+            QStringLiteral("bench-metadata-transformation-fields-completions"));
+        fields_completer_ = new QCompleter(fields_completion_model_, this);
+        fields_completer_->setObjectName(
+            QStringLiteral("bench-metadata-transformation-fields-completer"));
+        fields_completer_->setCaseSensitivity(Qt::CaseInsensitive);
+        fields_completer_->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+        fields_completer_->setMaxVisibleItems(12);
+        fields_completer_->setWidget(input_);
+        connect(fields_completer_, QOverload<const QString&>::of(&QCompleter::activated), this,
+                [this](const QString& name) { insertFieldsSuggestion(name); });
+        connect(input_, &QLineEdit::textEdited, this,
+                [this] { refreshFieldsCompleter(true); });
         replacement_label_ = new QLabel(QStringLiteral("Replacement:"), this);
         replacement_ = new QLineEdit(this);
         replacement_->setObjectName(QStringLiteral("bench-metadata-transformation-replacement"));
@@ -494,6 +515,42 @@ class MetadataTransformationDialog final : public QDialog {
         layout_store_.save(QString::fromLatin1(transformation_geometry_key), saveGeometry(), {});
         layout_store_.save(QString::fromLatin1(transformation_splitter_key),
                            content_splitter_->saveState(), {});
+    }
+
+    void refreshFieldsCompleter(const bool popup) {
+        const auto kind = currentStepKind();
+        if (kind != 18 && kind != 19) {
+            return;
+        }
+        const auto text = input_->text();
+        const auto separator = text.lastIndexOf(QLatin1Char(','));
+        const auto token = text.mid(separator + 1).trimmed();
+        const auto encoded = token.toUtf8();
+        const auto suggestions = metadata::suggest_metadata_field_names(
+            std::string_view{encoded.constData(), static_cast<std::size_t>(encoded.size())},
+            fields_candidates_);
+        QStringList names;
+        names.reserve(static_cast<qsizetype>(suggestions.size()));
+        for (const auto& suggestion : suggestions) {
+            names.push_back(display_utf8(suggestion.display_name));
+        }
+        fields_completion_model_->setStringList(names);
+        if (popup && !names.isEmpty()) {
+            QTimer::singleShot(0, this, [this] {
+                if (isVisible() && input_->hasFocus()) {
+                    fields_completer_->complete();
+                }
+            });
+        }
+    }
+
+    void insertFieldsSuggestion(const QString& name) {
+        const auto text = input_->text();
+        const auto separator = text.lastIndexOf(QLatin1Char(','));
+        auto prefix = separator < 0 ? QString{} : text.left(separator + 1) + QLatin1Char(' ');
+        prefix.replace(QStringLiteral(",  "), QStringLiteral(", "));
+        input_->setText(prefix + name);
+        input_->setFocus(Qt::OtherFocusReason);
     }
 
     [[nodiscard]] QStringList targetFieldSuggestions(const QString& query) const {
@@ -1632,6 +1689,9 @@ class MetadataTransformationDialog final : public QDialog {
     std::vector<metadata::MetadataFieldSuggestionCandidate> target_field_candidates_;
     QStringListModel* target_completion_model_{nullptr};
     QCompleter* target_completer_{nullptr};
+    std::vector<metadata::MetadataFieldSuggestionCandidate> fields_candidates_;
+    QStringListModel* fields_completion_model_{nullptr};
+    QCompleter* fields_completer_{nullptr};
     QLabel* input_label_{nullptr};
     QLineEdit* input_{nullptr};
     QLabel* replacement_label_{nullptr};

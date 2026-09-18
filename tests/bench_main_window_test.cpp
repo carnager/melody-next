@@ -51,6 +51,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCompleter>
+#include <QStringListModel>
 #include <QDataStream>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -2568,6 +2569,31 @@ void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() 
         QVERIFY2(kind->findText(kind_name) >= 0, qPrintable(kind_name));
     }
     QVERIFY(!kind->model()->flags(kind->model()->index(0, 0)).testFlag(Qt::ItemIsSelectable));
+
+    // The field-filter Fields box completes each comma-separated name from
+    // the present fields plus the standard conventional and MusicBrainz
+    // catalog, while custom names stay freely typable.
+    auto* fields_completions = dialog->findChild<QStringListModel*>(
+        QStringLiteral("bench-metadata-transformation-fields-completions"));
+    QVERIFY(fields_completions != nullptr);
+    kind->setCurrentIndex(kind->findText(QStringLiteral("Remove listed fields (blocklist)")));
+    input->setFocus(Qt::OtherFocusReason);
+    input->clear();
+    QTest::keyClicks(input, QStringLiteral("musicb"));
+    // The selection's present spelling deduplicates the catalog entry and
+    // wins the suggestion, so the box reflects the files being edited.
+    QVERIFY2(fields_completions->stringList().contains(QStringLiteral("MUSICBRAINZ_TRACKID")),
+             qPrintable(fields_completions->stringList().join(QStringLiteral(" | "))));
+    input->clear();
+    QTest::keyClicks(input, QStringLiteral("Custom Field, gen"));
+    QVERIFY(fields_completions->stringList().contains(QStringLiteral("Genre")));
+    QMetaObject::invokeMethod(
+        dialog->findChild<QCompleter*>(
+            QStringLiteral("bench-metadata-transformation-fields-completer")),
+        "activated", Qt::DirectConnection, Q_ARG(QString, QStringLiteral("Genre")));
+    QCOMPARE(input->text(), QStringLiteral("Custom Field, Genre"));
+    input->clear();
+    kind->setCurrentIndex(kind->findText(QStringLiteral("Capitalize first character")));
 
     QTimer::singleShot(0, dialog, [dialog] {
         auto* importer =

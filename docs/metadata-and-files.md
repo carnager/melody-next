@@ -486,6 +486,9 @@ and formatting source.
 **Trackknife decision (ADR-0178):** the structured script editor implements
 field allowlists and blocklists as typed, reusable actions. Names are entered as
 a comma-separated list and matched through canonical logical field identity.
+Each name completes from the selection's present fields plus the standard
+conventional and MusicBrainz catalog, with the present spelling winning
+duplicates; any custom name remains freely typable.
 The ordinary transformation preview lists every removal before **Add to draft**;
 Apply remains the only file-writing step. Database schema 34 and native JSON
 preserve these actions exactly. They are deliberately unavailable in the

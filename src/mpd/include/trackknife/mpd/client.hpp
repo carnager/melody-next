@@ -99,6 +99,12 @@ class Client final {
     search_library(std::string_view query, unsigned track_limit = 200U,
                    unsigned album_limit = 1'000U, unsigned offset = 0U,
                    MelodySearchFeatures melody = {});
+    // Raw filter-expression search for server-translated structured queries
+    // (ADR-0150 via tkq_melody.hpp): sort is a Melody sort argument like
+    // "-date"; limit bounds the window. Callers gate on server capability.
+    [[nodiscard]] core::Result<std::vector<Track>>
+    search_expression(std::string_view filter_expression, std::string_view sort = {},
+                      unsigned limit = 0U);
     // Raw Melody album search with an already-built filter expression
     // (docs in the melody repo: docs/protocol.md). Callers gate on the
     // advertised `searchalbums` command.

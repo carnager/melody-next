@@ -164,6 +164,17 @@ class FakeMpdServer final {
                       "Date: 2023\nAlbumArtist: B\nAlbum: Alternate title\nOK\n");
         } else if (command.starts_with("list ")) {
             write_all(client, "AlbumArtist: Credited Artist\nAlbumArtist: Various Artists\nOK\n");
+        } else if (command.starts_with("search ") &&
+                   command.find("genre contains") != std::string_view::npos) {
+            // Server-translated structured queries arrive as one expression
+            // with the requested sort and window.
+            if (command.find("sort -date") == std::string_view::npos ||
+                command.find("window 0:500") == std::string_view::npos) {
+                write_all(client, "ACK [2@0] {search} expected sorted windowed expression\n");
+                return;
+            }
+            write_all(client, "file: Jazz/A/01.flac\nArtist: Jazz Artist\n"
+                              "Title: Structured hit\nOK\n");
         } else if (command.starts_with("searchalbums ")) {
             if (command.find("albumrating >= 8") == std::string_view::npos) {
                 write_all(client, "ACK [2@0] {searchalbums} expected album rating filter\n");
@@ -559,6 +570,12 @@ void client_negotiates_and_preserves_extensions() {
     require(album_search->albums.back().date.empty() &&
                 !album_search->albums.back().filter.date.has_value(),
             "the 0000 identity placeholder must not surface as a display date");
+
+    const auto expression_search =
+        client.search_expression("(genre contains \"jazz\")", "-date", 500U);
+    require(expression_search.has_value() && expression_search->size() == 1U &&
+                expression_search->front().metadata.first("Title") == "Structured hit",
+            "expression search must send the filter with sort and window");
 
     require(client.set_sticker_rating("Artist/Release/01.flac", 8U).has_value(),
             "track rating must store the interoperable rating sticker");

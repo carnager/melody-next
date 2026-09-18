@@ -67,9 +67,10 @@ constexpr int result_display_limit = 500;
 } // namespace
 
 SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
-                           TechnicalsSink technicals_sink, QWidget* parent)
+                           TechnicalsSink technicals_sink, ServerScope server_scope,
+                           QWidget* parent)
     : QDialog(parent), database_path_(std::move(database_path)), tab_access_(std::move(tab_access)),
-      technicals_sink_(std::move(technicals_sink)) {
+      technicals_sink_(std::move(technicals_sink)), server_scope_(std::move(server_scope)) {
     setWindowTitle(QStringLiteral("Search"));
     setObjectName(QStringLiteral("bench-search-dialog"));
     setModal(false);
@@ -81,6 +82,9 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     scope_->setObjectName(QStringLiteral("bench-search-scope"));
     scope_->addItem(QStringLiteral("Library database"));
     scope_->addItem(QStringLiteral("Current tab"));
+    if (server_scope_.run) {
+        scope_->addItem(QStringLiteral("Server library"));
+    }
     top->addWidget(scope_);
     input_ = new QLineEdit(this);
     input_->setObjectName(QStringLiteral("bench-search-input"));
@@ -174,7 +178,7 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
 
     // The standard destinations, selection-scoped (ADR-0153).
     connect(results_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& point) {
-        if (results_->selectedItems().isEmpty()) {
+        if (results_->selectedItems().isEmpty() || serverScope()) {
             return;
         }
         QMenu menu{this};
@@ -195,8 +199,10 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
             LocalLibraryAction::new_list);
         menu.exec(results_->mapToGlobal(point));
     });
-    connect(results_, &QListWidget::itemActivated, this,
-            [this](QListWidgetItem*) { openResults(LocalLibraryAction::append, true); });
+    connect(results_, &QListWidget::itemActivated, this, [this](QListWidgetItem*) {
+        openResults(serverScope() ? LocalLibraryAction::new_list : LocalLibraryAction::append,
+                    !serverScope());
+    });
     loadSavedSearches();
 }
 
@@ -224,7 +230,8 @@ void SearchDialog::updateSavedSearchButtons() {
         selected &&
         (selected->expression != utf8Bytes(input_->text().trimmed()) ||
          selected->dialect != (query_mode_->isChecked() ? "tkq-1" : "words-1") ||
-         selected->scope != (databaseScope() ? persistence::SavedSearchScope::library
+         selected->scope != (databaseScope()  ? persistence::SavedSearchScope::library
+                             : serverScope() ? persistence::SavedSearchScope::server
                                              : persistence::SavedSearchScope::current_tab));
     update_search_->setEnabled(available && has_input && changed);
     rename_search_->setEnabled(available && selected.has_value());
@@ -279,6 +286,8 @@ void SearchDialog::finishSavedSearches() {
             QStringLiteral("%1 · %2\n%3")
                 .arg(search.scope == persistence::SavedSearchScope::library
                          ? QStringLiteral("Library database")
+                     : search.scope == persistence::SavedSearchScope::server
+                         ? QStringLiteral("Server library")
                          : QStringLiteral("Current tab"))
                 .arg(search.dialect == "tkq-1" ? QStringLiteral("Query") : QStringLiteral("Words"))
                 .arg(displayText(search.expression)),
@@ -305,7 +314,11 @@ void SearchDialog::useSavedSearch(int index) {
         const QSignalBlocker scope_blocker{scope_};
         const QSignalBlocker mode_blocker{query_mode_};
         input_->setText(displayText(search.expression));
-        scope_->setCurrentIndex(search.scope == persistence::SavedSearchScope::library ? 0 : 1);
+        scope_->setCurrentIndex(search.scope == persistence::SavedSearchScope::library ? 0
+                                : search.scope == persistence::SavedSearchScope::server &&
+                                        scope_->count() > 2
+                                    ? 2
+                                    : 1);
         query_mode_->setChecked(search.dialect == "tkq-1");
     }
     QSettings{}.setValue(QStringLiteral("search/query-mode"), query_mode_->isChecked());
@@ -336,7 +349,8 @@ void SearchDialog::saveSearch(bool update) {
     }
     search->expression = utf8Bytes(input_->text().trimmed());
     search->dialect = query_mode_->isChecked() ? "tkq-1" : "words-1";
-    search->scope = databaseScope() ? persistence::SavedSearchScope::library
+    search->scope = databaseScope()  ? persistence::SavedSearchScope::library
+                    : serverScope() ? persistence::SavedSearchScope::server
                                     : persistence::SavedSearchScope::current_tab;
     loadSavedSearches(*search);
 }
@@ -376,6 +390,8 @@ void SearchDialog::deleteSearch() {
 
 bool SearchDialog::databaseScope() const { return scope_->currentIndex() == 0; }
 
+bool SearchDialog::serverScope() const { return scope_->currentIndex() == 2; }
+
 void SearchDialog::scheduleSearch() {
     updateSavedSearchButtons();
     debounce_->stop();
@@ -392,6 +408,48 @@ void SearchDialog::scheduleSearch() {
     }
     status_->setText(QStringLiteral("Searching…"));
     debounce_->start();
+}
+
+void SearchDialog::startServerSearch(query::CompiledTkq compiled) {
+    server_result_query_.reset();
+    if (!server_scope_.run || (server_scope_.available && !server_scope_.available())) {
+        status_->setText(
+            QStringLiteral("No connected server supports structured queries; connect to a "
+                           "current Melody server."));
+        return;
+    }
+    searching_ = true;
+    status_->setText(QStringLiteral("Searching the server library…"));
+    const auto generation = generation_;
+    server_scope_.run(
+        compiled, [this, generation, compiled](const QStringList& labels, const int total,
+                                               const QString& error) {
+            searching_ = false;
+            if (generation != generation_ || !serverScope()) {
+                return;
+            }
+            results_->clear();
+            result_rows_.clear();
+            if (!error.isEmpty()) {
+                error_->setText(error);
+                error_->show();
+                status_->setText(QStringLiteral("The server cannot run this query"));
+                open_button_->setEnabled(false);
+                return;
+            }
+            error_->hide();
+            for (const auto& label : labels) {
+                results_->addItem(label);
+            }
+            server_result_query_ = compiled;
+            status_->setText(total == 1
+                                 ? QStringLiteral("1 match")
+                                 : QStringLiteral("%1 matches%2")
+                                       .arg(total)
+                                       .arg(total >= 500 ? QStringLiteral(" · first 500 shown")
+                                                         : QString{}));
+            open_button_->setEnabled(total > 0);
+        });
 }
 
 std::optional<query::CompiledTkq> SearchDialog::compileInput() {
@@ -419,6 +477,10 @@ void SearchDialog::startSearch() {
         return;
     }
     result_query_ = input_->text().trimmed();
+    if (serverScope()) {
+        startServerSearch(std::move(*compiled));
+        return;
+    }
     if (databaseScope()) {
         searching_ = true;
         watcher_.setFuture(
@@ -599,6 +661,14 @@ void SearchDialog::finishSearch() {
 }
 
 void SearchDialog::openResults(const LocalLibraryAction action, const bool selection_only) {
+    if (serverScope()) {
+        // Server results live in the MPD authority; the window opens them as
+        // a committed server search tab.
+        if (server_result_query_ && server_scope_.open) {
+            server_scope_.open(*server_result_query_, result_query_);
+        }
+        return;
+    }
     const auto name = QStringLiteral("Search: %1").arg(result_query_);
     std::vector<int> positions;
     if (selection_only) {

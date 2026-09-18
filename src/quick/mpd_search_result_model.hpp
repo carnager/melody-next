@@ -82,9 +82,13 @@ class MpdSearchResultModel final : public QAbstractTableModel {
         bool artwork_requested{false};
         quint64 artwork_token{0U};
         QString track_number{};
+        // ADR-0179: the album's 0-10 rating (stored, else the server's
+        // computed mean rounded); painted over the cover and shown as stars.
+        unsigned rating{0U};
     };
 
     void requestNextArtwork();
+    [[nodiscard]] QVariant foregroundFor(const QModelIndex& index) const;
     std::vector<Row> rows_;
     bool compact_{false};
     QIcon album_placeholder_;

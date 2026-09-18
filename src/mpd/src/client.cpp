@@ -670,6 +670,43 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
     return project_tracks(*pairs);
 }
 
+core::Result<std::vector<Track>> Client::search_expression(
+    const std::string_view filter_expression, const std::string_view sort, const unsigned limit) {
+    constexpr unsigned maximum_page_size = 500U;
+    const std::string expression{filter_expression};
+    if (expression.empty() || expression.contains('\0') || limit > maximum_page_size) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "expression search needs a filter and a "
+                                                      "page size of at most 500",
+                                           .context = {}});
+    }
+    auto* connection = implementation_->connection.get();
+    if (!mpd_search_db_songs(connection, false)) {
+        return std::unexpected(implementation_->take_error("begin expression search"));
+    }
+    auto built = mpd_search_add_expression(connection, expression.c_str());
+    if (built && !sort.empty()) {
+        const auto descending = sort.front() == '-';
+        const std::string name{descending ? sort.substr(1) : sort};
+        built = mpd_search_add_sort_name(connection, name.c_str(), descending);
+    }
+    if (built && limit > 0U) {
+        built = mpd_search_add_window(connection, 0U, limit);
+    }
+    if (!built) {
+        mpd_search_cancel(connection);
+        return std::unexpected(implementation_->take_error("build expression search"));
+    }
+    if (!mpd_search_commit(connection)) {
+        return std::unexpected(implementation_->take_error("send expression search"));
+    }
+    auto pairs = implementation_->receive_pairs("receive expression search");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    return project_tracks(*pairs);
+}
+
 core::Result<std::vector<MelodyAlbum>>
 Client::search_melody_albums(const std::string_view filter_expression,
                              const std::string_view sort, const unsigned limit) {

@@ -103,6 +103,20 @@ the technical pseudo-fields, they shadow same-named file tags; a
 fields and technicals; the resulting text is lowercased and compared
 per the operator (`MISSING` means the expression produced empty text).
 
+## Server library scope
+
+The Search dialog runs the same dialect against a connected Melody server
+that advertises `searchalbums`: supported queries translate mechanically to
+the server's filter grammar (word search, tag HAS/IS terms, numeric
+comparisons on `rating`, `albumrating`, `samplerate`, `bitspersample`,
+`channels`, and `length_ms` in whole seconds, `rating PRESENT`, and simple
+single-`%field%` sorts). The server grammar joins terms with AND only, so
+`OR`, `NOT`, `MISSING`, tkfmt expression predicates, and numeric
+comparisons on ordinary tags report "not supported by this server" instead
+of running with changed meaning. Results open as a committed MPD search
+tab; MusicBrainz field names translate to the server's underscore
+spellings automatically.
+
 ## Bounds
 
 Source ≤ 4096 bytes, ≤ 256 AST nodes, ≤ 64 words per string. Embedded
@@ -128,8 +142,7 @@ Recorded so the spec stays honest: time operators
 (`AFTER`/`BEFORE`/`SINCE`/`DURING`, `DURING LAST n <unit>`) until
 playback statistics exist in the index; diacritic folding; regular
 expressions; path-targeted operators; autoplaylists,
-and the query builder UI (separate Area 2 packages); MPD-side
-translation.
+and the query builder UI (separate Area 2 packages).
 
 Saved query/word definitions with explicit dialects and scope are implemented
 in ADR-0163; see [Saved searches](local-library.md#saved-searches).

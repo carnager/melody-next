@@ -83,6 +83,7 @@ enum class SessionCommandKind {
     melody_rating,
     melody_album_rate,
     melody_album_rating,
+    database_expression_search,
 };
 
 using SessionCommandPayload =
@@ -145,6 +146,10 @@ class Session final {
                                                          unsigned rating);
     [[nodiscard]] std::uint64_t set_melody_album_rating(MelodyAlbumKey key, unsigned rating);
     [[nodiscard]] std::uint64_t melody_album_rating(MelodyAlbumKey key);
+    // Server-translated structured query: a raw filter expression plus an
+    // optional Melody sort argument; the payload is the bounded track list.
+    [[nodiscard]] std::uint64_t search_expression(std::string filter_expression, std::string sort,
+                                                  unsigned limit = 500U);
     [[nodiscard]] std::uint64_t update_database(std::string uri);
     [[nodiscard]] std::uint64_t newest_root_values(std::string tag, unsigned track_limit);
     [[nodiscard]] std::uint64_t browse(std::string uri = {});

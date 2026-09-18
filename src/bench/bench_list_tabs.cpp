@@ -18,6 +18,7 @@
 #include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
+#include "trackknife/query/tkq_melody.hpp"
 #include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include "uicommon/track_view_layout.hpp"
@@ -729,6 +730,68 @@ void BenchMainWindow::openSearchDialog() {
             for (const auto& tab : list_tabs_) {
                 tab->model->applyTechnicals(raw_path, technicals);
             }
+        },
+        SearchDialog::ServerScope{
+            .available = [this] { return mpd_controller_->supportsServerQueries(); },
+            .run =
+                [this](const query::CompiledTkq& compiled,
+                       std::function<void(QStringList, int, QString)> completion) {
+                    auto translated = query::translate_tkq_to_melody(compiled);
+                    if (!translated) {
+                        completion({}, 0, displayText(translated.error().message));
+                        return;
+                    }
+                    mpd_controller_->searchServerExpression(
+                        QString::fromStdString(translated->filter_expression),
+                        QString::fromStdString(translated->sort),
+                        [completion = std::move(completion)](
+                            core::Result<std::vector<mpd::Track>> result) {
+                            if (!result) {
+                                completion({}, 0, displayText(result.error().message));
+                                return;
+                            }
+                            QStringList labels;
+                            const auto shown = std::min<std::size_t>(result->size(), 200U);
+                            for (std::size_t index = 0U; index < shown; ++index) {
+                                const auto& track = (*result)[index];
+                                const auto artist = track.metadata.first("Artist");
+                                const auto title = track.metadata.first("Title");
+                                auto label =
+                                    title ? QString::fromUtf8(title->data(),
+                                                              static_cast<qsizetype>(
+                                                                  title->size()))
+                                          : QString::fromStdString(track.uri);
+                                if (artist && !artist->empty()) {
+                                    label = QString::fromUtf8(artist->data(),
+                                                              static_cast<qsizetype>(
+                                                                  artist->size())) +
+                                            QStringLiteral(" — ") + label;
+                                }
+                                labels.push_back(std::move(label));
+                            }
+                            completion(labels, static_cast<int>(result->size()), {});
+                        });
+                },
+            .open =
+                [this](const query::CompiledTkq& compiled, const QString& query_text) {
+                    auto translated = query::translate_tkq_to_melody(compiled);
+                    if (!translated) {
+                        return;
+                    }
+                    mpd_controller_->searchServerExpression(
+                        QString::fromStdString(translated->filter_expression),
+                        QString::fromStdString(translated->sort),
+                        [this, query_text](core::Result<std::vector<mpd::Track>> result) {
+                            if (!result || result->empty()) {
+                                statusBar()->showMessage(
+                                    QStringLiteral("The server search returned nothing to open"),
+                                    5'000);
+                                return;
+                            }
+                            openMpdSearchTab(QStringLiteral("tkq: %1").arg(query_text),
+                                             std::move(*result), true);
+                        });
+                },
         },
         this);
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);

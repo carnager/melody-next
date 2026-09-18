@@ -612,6 +612,25 @@ void MpdProbeController::setTrackRating(const QVariantList& rows, const int rati
     emit stateChanged();
 }
 
+void MpdProbeController::searchServerExpression(const QString& expression, const QString& sort,
+                                                ServerQueryCompletion completion) {
+    if (!completion) {
+        return;
+    }
+    if (!session_ || !supportsServerQueries()) {
+        completion(std::unexpected(core::Error{
+            .code = core::ErrorCode::unsupported,
+            .message = "the connected server does not support structured queries",
+            .context = {}}));
+        return;
+    }
+    const auto id = session_->search_expression(expression.toUtf8().toStdString(),
+                                                sort.toUtf8().toStdString());
+    pending_commands_.insert(id);
+    pending_expression_searches_.insert(id, std::move(completion));
+    emit stateChanged();
+}
+
 void MpdProbeController::requestMelodyAlbumRatings(const std::vector<mpd::Track>& queue) {
     if (!session_ || !supportsAlbumRatings()) {
         return;
@@ -1470,6 +1489,23 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         return;
     }
     pending_commands_.remove(result.id);
+    if (result.kind == mpd::SessionCommandKind::database_expression_search) {
+        if (auto completion = pending_expression_searches_.take(result.id)) {
+            if (result.error) {
+                completion(std::unexpected(*result.error));
+            } else if (const auto* tracks =
+                           std::get_if<std::vector<mpd::Track>>(&result.payload)) {
+                completion(*tracks);
+            } else {
+                completion(std::unexpected(
+                    core::Error{.code = core::ErrorCode::backend,
+                                .message = "the server returned an invalid search response",
+                                .context = {}}));
+            }
+        }
+        emit stateChanged();
+        return;
+    }
     if (result.kind == mpd::SessionCommandKind::melody_album_rating) {
         const auto group_key = pending_album_rating_queries_.take(result.id);
         if (!group_key.isEmpty() && !result.error) {
@@ -2069,6 +2105,12 @@ void MpdProbeController::clearSessionState() {
     melody_album_ratings_.clear();
     melody_album_stored_ratings_.clear();
     pending_album_rating_queries_.clear();
+    const auto orphaned = std::exchange(pending_expression_searches_, {});
+    for (const auto& completion : orphaned) {
+        completion(std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                               .message = "the server connection was closed",
+                                               .context = {}}));
+    }
     queue_model_.setStickerRatings({});
     queue_model_.setAlbumRatings({});
     const auto pending_albums = std::exchange(pending_search_albums_, {});

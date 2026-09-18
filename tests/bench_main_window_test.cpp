@@ -11,7 +11,9 @@
 #include "bench/mpd_library_search_model.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/bench_main_window_helpers.hpp"
 #include "bench/search_dialog.hpp"
+#include "trackknife/query/tkq_melody.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -215,6 +217,7 @@ class BenchMainWindowTest final : public QObject {
     void savedSearchesCanBeManagedAndReopened();
     void searchDialogFiltersTabAndOpensResults();
     void searchDialogProbesMissingTechnicalsOnDemand();
+    void searchDialogServerScopeRunsTranslatedQueries();
     void musicBrainzStagesFromCachedSearchMetadata();
     void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
@@ -4804,6 +4807,68 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     input->setText(QStringLiteral("rating MISSING"));
     QTRY_COMPARE(results->count(), 0);
     mode->setChecked(false);
+}
+
+// The Server library scope translates tkq for the connected server,
+// previews the result labels, refuses untranslatable queries with the
+// translator's message, and opens results through the window callback.
+void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
+    QString ran_expression;
+    QString ran_sort;
+    QString opened_query;
+    SearchDialog dialog{
+        std::filesystem::path{},
+        {},
+        {},
+        SearchDialog::ServerScope{
+            .available = [] { return true; },
+            .run =
+                [&](const query::CompiledTkq& compiled,
+                    std::function<void(QStringList, int, QString)> completion) {
+                    auto translated = query::translate_tkq_to_melody(compiled);
+                    if (!translated) {
+                        completion({}, 0, displayText(translated.error().message));
+                        return;
+                    }
+                    ran_expression = QString::fromStdString(translated->filter_expression);
+                    ran_sort = QString::fromStdString(translated->sort);
+                    completion({QStringLiteral("Artist — Structured hit")}, 1, {});
+                },
+            .open = [&](const query::CompiledTkq&,
+                        const QString& query_text) { opened_query = query_text; },
+        }};
+    dialog.show();
+    auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* open_button = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+    auto* status = dialog.findChild<QLabel*>(QStringLiteral("bench-search-status"));
+    auto* error = dialog.findChild<QLabel*>(QStringLiteral("bench-search-error"));
+    QVERIFY(scope && input && mode && results && open_button && status && error);
+    QCOMPARE(scope->count(), 3);
+    scope->setCurrentIndex(2);
+    mode->setChecked(true);
+    input->setText(QStringLiteral("rating GREATER 7 SORT DESCENDING BY %date%"));
+    QTRY_COMPARE(results->count(), 1);
+    QCOMPARE(ran_expression, QStringLiteral("(rating > 7)"));
+    QCOMPARE(ran_sort, QStringLiteral("-date"));
+    QVERIFY(status->text().startsWith(QStringLiteral("1 match")));
+    QVERIFY(open_button->isEnabled());
+    QTest::mouseClick(open_button, Qt::LeftButton);
+    QCOMPARE(opened_query, QStringLiteral("rating GREATER 7 SORT DESCENDING BY %date%"));
+
+    // Untranslatable constructs surface the translator's refusal.
+    input->setText(QStringLiteral("genre HAS jazz OR genre HAS blues"));
+    QTRY_VERIFY(error->isVisible());
+    QVERIFY(error->text().contains(QStringLiteral("OR")));
+    QVERIFY(!open_button->isEnabled());
+
+    // Without a server scope the combo keeps its two local scopes.
+    SearchDialog local_only{std::filesystem::path{}, {}, {}};
+    auto* local_scope = local_only.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    QVERIFY(local_scope != nullptr);
+    QCOMPARE(local_scope->count(), 2);
 }
 
 // ADR-0156: the context-menu ReplayGain dialog scans the selection and

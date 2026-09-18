@@ -105,6 +105,15 @@ Melody's native rating extension instead; `albumrate` additionally enables
 album ratings. The queue's Rate menu and the optional Rating column stay
 hidden or disabled when neither backend is advertised.
 
+Against a Melody server advertising `searchalbums`, the search results'
+album section comes from the server's album records — exact identity,
+track count, duration, stored and computed ratings painted as yellow stars
+over the covers — instead of being derived from returned songs. The Search
+dialog additionally gains a **Server library** scope that translates tkq
+queries to the server's filter grammar (see
+[query-language.md](query-language.md)), with saved searches and committed
+`tkq:` result tabs.
+
 Against a Melody server, the library search box also accepts rating terms:
 `rating>=8`, `rating==10`, or `albumrating>=6` tokens (operators `>`, `>=`,
 `<`, `<=`, `=`) combine with the remaining words into one server-side filter

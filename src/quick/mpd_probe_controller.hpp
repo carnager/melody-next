@@ -178,6 +178,16 @@ class MpdProbeController final : public QObject {
     [[nodiscard]] unsigned melodyStoredAlbumRating(const QString& group_key) const {
         return melody_album_stored_ratings_.value(group_key, 0U);
     }
+    // Server-translated structured queries (tkq_melody.hpp) need the newer
+    // Melody filter vocabulary, advertised alongside searchalbums.
+    [[nodiscard]] bool supportsServerQueries() const {
+        return connected_ && supportsCommand(QStringLiteral("searchalbums"));
+    }
+    using ServerQueryCompletion = std::function<void(core::Result<std::vector<mpd::Track>>)>;
+    // Runs a raw filter expression; the completion fires on the UI thread
+    // with the bounded track list or the failure.
+    void searchServerExpression(const QString& expression, const QString& sort,
+                                ServerQueryCompletion completion);
     Q_INVOKABLE void searchLibrary(const QString& query);
     Q_INVOKABLE void continueSearch();
     Q_INVOKABLE void addLibraryItem(int row);
@@ -307,6 +317,7 @@ class MpdProbeController final : public QObject {
     QHash<QString, unsigned> melody_album_ratings_;
     QHash<QString, unsigned> melody_album_stored_ratings_;
     QHash<std::uint64_t, QString> pending_album_rating_queries_;
+    QHash<std::uint64_t, ServerQueryCompletion> pending_expression_searches_;
     QHash<quint64, quint64> pending_search_albums_;
     QString pending_library_query_text_;
     QString last_library_query_;

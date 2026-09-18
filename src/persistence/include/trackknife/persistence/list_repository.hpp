@@ -133,7 +133,7 @@ struct SavedEncoderPreset {
 };
 
 // Versioned query definitions; result lists remain independent snapshots.
-enum class SavedSearchScope : std::uint8_t { library, current_tab };
+enum class SavedSearchScope : std::uint8_t { library, current_tab, server };
 struct SavedSearch {
     core::StableId id;
     std::string name;

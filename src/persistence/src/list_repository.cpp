@@ -24,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 35U;
+constexpr unsigned current_schema_version = 36U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1063,6 +1063,26 @@ ALTER TABLE local_library_tracks ADD COLUMN album_rating_hash TEXT NOT NULL DEFA
 CREATE INDEX local_library_rating_hash ON local_library_tracks(rating_hash);
 CREATE INDEX local_library_album_rating_hash ON local_library_tracks(album_rating_hash);
 UPDATE schema_version SET version = 35;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 35) {
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE saved_searches RENAME TO saved_searches_v35;
+CREATE TABLE saved_searches (
+    id TEXT PRIMARY KEY NOT NULL,
+    name BLOB NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 256),
+    expression BLOB NOT NULL CHECK(length(expression) BETWEEN 1 AND 4096),
+    dialect TEXT NOT NULL CHECK(dialect IN ('tkq-1', 'words-1')),
+    scope INTEGER NOT NULL CHECK(scope IN (0, 1, 2)),
+    revision INTEGER NOT NULL CHECK(revision > 0)
+);
+INSERT INTO saved_searches SELECT * FROM saved_searches_v35;
+DROP TABLE saved_searches_v35;
+UPDATE schema_version SET version = 36;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();
@@ -4434,7 +4454,8 @@ core::Result<void> validate_search(const SavedSearch& search) {
         search.expression.size() > 4096U ||
         (search.dialect != "tkq-1" && search.dialect != "words-1") ||
         (search.scope != SavedSearchScope::library &&
-         search.scope != SavedSearchScope::current_tab) ||
+         search.scope != SavedSearchScope::current_tab &&
+         search.scope != SavedSearchScope::server) ||
         search.revision >= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::invalid_argument,

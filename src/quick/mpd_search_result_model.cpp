@@ -2,7 +2,14 @@
 
 #include "quick/mpd_search_result_model.hpp"
 
+#include "uicommon/rating_stars.hpp"
+#include "uicommon/track_row_roles.hpp"
+
+#include <QBrush>
+#include <QPainter>
 #include <QStringList>
+
+#include <cmath>
 
 #include <algorithm>
 #include <array>
@@ -155,6 +162,12 @@ QVariant MpdSearchResultModel::data(const QModelIndex& index, const int role) co
                    ? QStringList{label, row.context, row.detail}.join(QLatin1Char('\n'))
                    : label;
     }
+    if (role == Qt::ForegroundRole) {
+        return foregroundFor(index);
+    }
+    if (role == ui::track_rating_role) {
+        return QVariant::fromValue(row.rating);
+    }
     if (role != Qt::DisplayRole) {
         return {};
     }
@@ -173,6 +186,14 @@ QVariant MpdSearchResultModel::data(const QModelIndex& index, const int role) co
     default:
         return {};
     }
+}
+
+QVariant MpdSearchResultModel::foregroundFor(const QModelIndex& index) const {
+    const auto& row = rows_.at(static_cast<std::size_t>(index.row()));
+    if (row.kind == ResultKind::album && index.column() == 3 && row.rating > 0U) {
+        return QBrush{ui::ratingStarColor()};
+    }
+    return {};
 }
 
 QVariant MpdSearchResultModel::headerData(const int section, const Qt::Orientation orientation,
@@ -221,6 +242,7 @@ void MpdSearchResultModel::replace(std::optional<std::vector<mpd::AlbumSummary>>
         qint64 duration_ms{0};
         mpd::AlbumFilter filter;
         QString artwork_uri;
+        unsigned rating{0U};
     };
     std::vector<Album> albums;
     if (album_summaries) {
@@ -236,6 +258,10 @@ void MpdSearchResultModel::replace(std::optional<std::vector<mpd::AlbumSummary>>
                 .duration_ms = 0,
                 .filter = std::move(summary.filter),
                 .artwork_uri = from_utf8(summary.artwork_uri),
+                .rating = summary.rating != 0U
+                              ? summary.rating
+                              : std::min(10U, static_cast<unsigned>(
+                                                  std::lround(summary.computed_rating))),
             });
         }
     } else {
@@ -324,13 +350,14 @@ void MpdSearchResultModel::replace(std::optional<std::vector<mpd::AlbumSummary>>
                                .artist = std::move(album.artist),
                                .result = std::move(album.title),
                                .context = std::move(album.date),
-                               .detail = {},
+                               .detail = ui::track_rating_stars(album.rating),
                                .uris = std::move(album.uris),
                                .album_filter = std::move(album.filter),
                                .artwork_uri = std::move(album.artwork_uri),
                                .artwork = {},
                                .artwork_requested = false,
-                               .artwork_token = 0U});
+                               .artwork_token = 0U,
+                               .rating = album.rating});
         }
     }
     if (!tracks.empty()) {
@@ -422,6 +449,12 @@ void MpdSearchResultModel::acceptArtwork(const quint64 token, const QImage& imag
         artwork_request_in_flight_ = false;
         if (!image.isNull()) {
             row.artwork = image;
+            if (row.rating > 0U) {
+                // Composited once here so painting stays a plain image draw.
+                row.artwork = image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+                QPainter painter{&row.artwork};
+                ui::paintRatingOverlay(&painter, row.artwork.rect(), row.rating);
+            }
             emit dataChanged(index(row_number, 0), index(row_number, 0), {Qt::DecorationRole});
         }
         requestNextArtwork();

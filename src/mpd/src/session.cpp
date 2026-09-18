@@ -148,7 +148,8 @@ struct Session::Impl {
                kind == SessionCommandKind::database_album ||
                kind == SessionCommandKind::stored_playlists ||
                kind == SessionCommandKind::stored_playlist ||
-               kind == SessionCommandKind::melody_album_rating;
+               kind == SessionCommandKind::melody_album_rating ||
+               kind == SessionCommandKind::database_expression_search;
     }
 
     Profile profile;
@@ -463,6 +464,14 @@ struct Session::Impl {
             }
             return SessionCommandPayload{*result};
         }
+        case SessionCommandKind::database_expression_search: {
+            auto result = client.search_expression(command.uri, command.secondary_uri,
+                                                   command.query_limit);
+            if (!result) {
+                return std::unexpected(std::move(result.error()));
+            }
+            return SessionCommandPayload{std::move(*result)};
+        }
         }
         return std::unexpected(core::Error{.code = core::ErrorCode::backend,
                                            .message = "Unknown MPD session command",
@@ -526,6 +535,7 @@ struct Session::Impl {
         case SessionCommandKind::melody_album_rate:
             return rating_refresh;
         case SessionCommandKind::melody_album_rating:
+        case SessionCommandKind::database_expression_search:
             return 0U;
         }
         return full_refresh;
@@ -897,6 +907,16 @@ std::uint64_t Session::set_melody_album_rating(MelodyAlbumKey key, const unsigne
     command.kind = SessionCommandKind::melody_album_rate;
     command.album_rating_key = std::move(key);
     command.rating = rating;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::search_expression(std::string filter_expression, std::string sort,
+                                         const unsigned limit) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::database_expression_search;
+    command.uri = std::move(filter_expression);
+    command.secondary_uri = std::move(sort);
+    command.query_limit = limit;
     return implementation_->enqueue(std::move(command));
 }
 

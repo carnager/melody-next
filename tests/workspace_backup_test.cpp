@@ -45,7 +45,7 @@ int main() {
 
     const auto created = persistence::create_workspace_database_backup(source, backup);
     require(created.has_value(), "consistent backup is created while source remains open");
-    require(created->schema_version == 35U && created->size_bytes > 0U,
+    require(created->schema_version == 36U && created->size_bytes > 0U,
             "backup reports schema and size evidence");
     require(!persistence::create_workspace_database_backup(source, backup),
             "an existing backup is never replaced");

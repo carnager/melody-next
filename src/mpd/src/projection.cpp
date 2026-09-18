@@ -176,6 +176,66 @@ core::Result<std::vector<Track>> project_tracks(std::span<const Pair> pairs) {
     return tracks;
 }
 
+core::Result<std::vector<MelodyAlbum>> project_melody_albums(std::span<const Pair> pairs) {
+    std::vector<MelodyAlbum> albums;
+    bool has_current = false;
+    MelodyAlbum current;
+    const auto finish = [&] {
+        if (has_current) {
+            albums.push_back(std::move(current));
+            current = MelodyAlbum{};
+        }
+    };
+    for (const auto& pair : pairs) {
+        if (ascii_case_equal(pair.name, "AlbumArtist")) {
+            finish();
+            current.album_artist = pair.value;
+            has_current = true;
+            continue;
+        }
+        if (!has_current) {
+            return std::unexpected(
+                malformed("Melody album response did not begin with an AlbumArtist pair"));
+        }
+        if (ascii_case_equal(pair.name, "Album")) {
+            current.album = pair.value;
+        } else if (ascii_case_equal(pair.name, "Date")) {
+            current.date = pair.value;
+        } else if (ascii_case_equal(pair.name, "X-AlbumId")) {
+            const auto id = parse_unsigned<std::uint64_t>(pair.value);
+            if (!id) {
+                return std::unexpected(malformed("Melody returned an invalid album ID"));
+            }
+            current.album_id = *id;
+        } else if (ascii_case_equal(pair.name, "X-TrackCount")) {
+            current.track_count = parse_unsigned<unsigned>(pair.value).value_or(0U);
+        } else if (ascii_case_equal(pair.name, "X-Duration")) {
+            current.duration_seconds = parse_unsigned<std::uint64_t>(pair.value).value_or(0U);
+        } else if (ascii_case_equal(pair.name, "X-Rating")) {
+            const auto rating = parse_unsigned<unsigned>(pair.value);
+            if (!rating || *rating > 10U) {
+                return std::unexpected(malformed("Melody returned an invalid album rating"));
+            }
+            current.rating = *rating;
+        } else if (ascii_case_equal(pair.name, "X-ComputedRating")) {
+            double value = 0.0;
+            const auto* begin = pair.value.data();
+            const auto* end = begin + pair.value.size();
+            const auto [parsed, error] = std::from_chars(begin, end, value);
+            if (error != std::errc{} || parsed != end || value < 0.0 || value > 10.0) {
+                return std::unexpected(
+                    malformed("Melody returned an invalid computed album rating"));
+            }
+            current.computed_rating = value;
+        } else if (ascii_case_equal(pair.name, "X-ArtworkUri")) {
+            current.artwork_uri = pair.value;
+        }
+        // Unknown pairs are future extension lines; skip them.
+    }
+    finish();
+    return albums;
+}
+
 core::Result<std::vector<TrackRating>> project_sticker_ratings(std::span<const Pair> pairs) {
     std::vector<TrackRating> ratings;
     std::string current_uri;

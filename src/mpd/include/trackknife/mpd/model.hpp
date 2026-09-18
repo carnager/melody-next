@@ -52,6 +52,22 @@ struct MelodyAlbumRating {
     friend bool operator==(const MelodyAlbumRating&, const MelodyAlbumRating&) = default;
 };
 
+// One record of Melody's album-shaped search (searchalbums). The date is the
+// server's stored identity including its 0000 placeholder.
+struct MelodyAlbum {
+    std::string album_artist;
+    std::string album;
+    std::string date;
+    std::uint64_t album_id{0U};
+    unsigned track_count{0U};
+    std::uint64_t duration_seconds{0U};
+    unsigned rating{0U};
+    double computed_rating{0.0};
+    std::string artwork_uri;
+
+    friend bool operator==(const MelodyAlbum&, const MelodyAlbum&) = default;
+};
+
 struct Pair {
     std::string name;
     std::string value;
@@ -155,6 +171,12 @@ struct AlbumSummary {
     std::string album;
     std::string date;
     std::string artwork_uri;
+    // Melody searchalbums enrichment (ADR-0179): zero when the server only
+    // returned songs and the summary was derived client-side.
+    unsigned rating{0U};
+    double computed_rating{0.0};
+    unsigned track_count{0U};
+    std::uint64_t duration_seconds{0U};
 
     friend bool operator==(const AlbumSummary&, const AlbumSummary&) = default;
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/query/tkq.hpp"
+#include "trackknife/query/tkq_melody.hpp"
 
 #include <iostream>
 #include <string>
@@ -166,8 +167,61 @@ void boundsFailClosed() {
 
 } // namespace
 
+void melodyTranslationCoversTheSupportedSubset() {
+    using trackknife::query::translate_tkq_to_melody;
+    const auto translate = [](const std::string_view source) {
+        const auto compiled = compile_tkq(source);
+        CHECK(compiled.has_value());
+        return translate_tkq_to_melody(*compiled);
+    };
+
+    // Word searches, tag terms, and pseudo-fields join with AND.
+    auto translated = translate("miles davis");
+    CHECK(translated.has_value() &&
+          translated->filter_expression ==
+              "((any contains \"miles\") AND (any contains \"davis\"))");
+    translated = translate("genre HAS jazz AND rating GREATER 7");
+    CHECK(translated.has_value() &&
+          translated->filter_expression == "((genre contains \"jazz\") AND (rating > 7))");
+    translated = translate("albumartist IS \"Bohren & der Club of Gore\"");
+    CHECK(translated.has_value() &&
+          translated->filter_expression ==
+              "(albumartist == \"Bohren & der Club of Gore\")");
+    translated = translate("samplerate GREATER 48000 AND bitspersample EQUAL 24");
+    CHECK(translated.has_value() &&
+          translated->filter_expression ==
+              "((samplerate > 48000) AND (bitspersample == 24))");
+    translated = translate("length_ms GREATER 600000");
+    CHECK(translated.has_value() && translated->filter_expression == "(length > 600)");
+    translated = translate("rating PRESENT");
+    CHECK(translated.has_value() && translated->filter_expression == "(rating >= 1)");
+    translated = translate("musicbrainz_albumid IS abc");
+    CHECK(translated.has_value() &&
+          translated->filter_expression == "(musicbrainz_albumid == \"abc\")");
+    translated = translate("ALL");
+    CHECK(translated.has_value() && translated->filter_expression == "(base \"\")");
+    translated = translate("albumrating GREATER 7 SORT DESCENDING BY %date%");
+    CHECK(translated.has_value() && translated->filter_expression == "(albumrating > 7)" &&
+          translated->sort == "-date");
+    translated = translate("artist HAS nick SORT BY %tracknumber%");
+    CHECK(translated.has_value() && translated->sort == "track");
+
+    // Untranslatable constructs are typed errors, never broadened queries.
+    for (const auto* source :
+         {"genre HAS jazz OR genre HAS blues", "NOT genre HAS jazz", "rating MISSING",
+          "date GREATER 1990", "genre GREATER 5", "\"%artist% x\" HAS y",
+          "genre HAS jazz SORT BY $lower(%artist%)"}) {
+        const auto rejected = translate(source);
+        CHECK(!rejected.has_value());
+        if (!rejected.has_value()) {
+            CHECK(rejected.error().code == trackknife::core::ErrorCode::unsupported);
+        }
+    }
+}
+
 int main() {
     simpleWordsBecomeAnAllWordSearch();
+    melodyTranslationCoversTheSupportedSubset();
     structuredQueriesParseWithPrecedence();
     quotingEscapesAndKeywordsInsideStrings();
     expressionOperandsCompileAsFormatPredicates();

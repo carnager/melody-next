@@ -41,6 +41,16 @@ struct IdleEvents {
 
 enum class TransportAction { play, pause, resume, stop, next, previous };
 
+// ADR-0179: with rating_filters, `rating>=8` / `albumrating==10` words in a
+// search become Melody filter conditions and the remaining words stay an
+// any-contains constraint; off, they search as plain text. With
+// album_search, the album section of a library search comes from the
+// server's searchalbums records instead of being derived from songs.
+struct MelodySearchFeatures {
+    bool rating_filters{false};
+    bool album_search{false};
+};
+
 struct QueueAddition {
     std::string uri;
     std::optional<unsigned> position;
@@ -82,16 +92,19 @@ class Client final {
     [[nodiscard]] core::Result<std::vector<Track>>
     find_tag_tracks(std::string_view tag, std::string_view value, unsigned limit = 10'000U);
     [[nodiscard]] core::Result<std::vector<std::byte>> artwork(std::string_view uri, bool embedded);
-    // ADR-0179: with melody_rating_filters, `rating>=8` / `albumrating==10`
-    // words in the query become Melody filter conditions and the remaining
-    // words stay an any-contains constraint; off, they search as plain text.
     [[nodiscard]] core::Result<std::vector<Track>>
     search_any(std::string_view query, unsigned offset = 0U, unsigned limit = 200U,
                bool melody_rating_filters = false);
     [[nodiscard]] core::Result<LibrarySearchResult>
     search_library(std::string_view query, unsigned track_limit = 200U,
                    unsigned album_limit = 1'000U, unsigned offset = 0U,
-                   bool melody_rating_filters = false);
+                   MelodySearchFeatures melody = {});
+    // Raw Melody album search with an already-built filter expression
+    // (docs in the melody repo: docs/protocol.md). Callers gate on the
+    // advertised `searchalbums` command.
+    [[nodiscard]] core::Result<std::vector<MelodyAlbum>>
+    search_melody_albums(std::string_view filter_expression, std::string_view sort = {},
+                         unsigned limit = 0U);
     [[nodiscard]] core::Result<std::vector<Track>> find_album(const AlbumFilter& album);
     [[nodiscard]] core::Result<std::vector<StoredPlaylist>> stored_playlists();
     [[nodiscard]] core::Result<std::vector<Track>> stored_playlist(std::string_view name);

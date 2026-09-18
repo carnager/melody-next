@@ -3,6 +3,7 @@
 add_library(
     trackknife_query STATIC
     src/tkq_lexer.cpp
+    src/tkq_melody.cpp
     src/tkq_parser.cpp
 )
 add_library(Trackknife::Query ALIAS trackknife_query)

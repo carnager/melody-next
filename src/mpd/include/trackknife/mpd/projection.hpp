@@ -26,6 +26,11 @@ project_database_entries(std::span<const Pair> pairs);
                                                                    std::span<const Track> changed,
                                                                    std::size_t new_length);
 
+// Parses Melody `searchalbums` responses: an AlbumArtist pair starts each
+// album record; unknown pairs are ignored so the response can grow.
+[[nodiscard]] core::Result<std::vector<MelodyAlbum>>
+project_melody_albums(std::span<const Pair> pairs);
+
 // Parses `sticker find song "" rating` responses into per-URI ratings.
 // Stickers written by other clients with values outside the interoperable
 // 0-10 integer scale are skipped, never treated as a protocol error.

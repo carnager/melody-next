@@ -670,11 +670,47 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
     return project_tracks(*pairs);
 }
 
+core::Result<std::vector<MelodyAlbum>>
+Client::search_melody_albums(const std::string_view filter_expression,
+                             const std::string_view sort, const unsigned limit) {
+    const std::string expression{filter_expression};
+    if (expression.empty() || expression.contains('\0')) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Melody album search needs a filter "
+                                                      "expression",
+                                           .context = {}});
+    }
+    auto* connection = implementation_->connection.get();
+    bool sent = false;
+    const std::string sort_text{sort};
+    const auto window = "0:" + std::to_string(limit);
+    if (!sort.empty() && limit > 0U) {
+        sent = mpd_send_command(connection, "searchalbums", expression.c_str(), "sort",
+                                sort_text.c_str(), "window", window.c_str(), nullptr);
+    } else if (!sort.empty()) {
+        sent = mpd_send_command(connection, "searchalbums", expression.c_str(), "sort",
+                                sort_text.c_str(), nullptr);
+    } else if (limit > 0U) {
+        sent = mpd_send_command(connection, "searchalbums", expression.c_str(), "window",
+                                window.c_str(), nullptr);
+    } else {
+        sent = mpd_send_command(connection, "searchalbums", expression.c_str(), nullptr);
+    }
+    if (!sent) {
+        return std::unexpected(implementation_->take_error("send searchalbums"));
+    }
+    auto pairs = implementation_->receive_pairs("receive searchalbums");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    return project_melody_albums(*pairs);
+}
+
 core::Result<LibrarySearchResult> Client::search_library(const std::string_view query,
                                                          const unsigned track_limit,
                                                          const unsigned album_limit,
                                                          const unsigned offset,
-                                                         const bool melody_rating_filters) {
+                                                         const MelodySearchFeatures melody) {
     constexpr unsigned maximum_track_results = 500U;
     constexpr unsigned maximum_album_results = 2'000U;
     if (query.empty() || query.contains('\0') || track_limit == 0U ||
@@ -689,7 +725,7 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
     }
 
     if (offset > 0U) {
-        auto tracks = search_any(query, offset, track_limit, melody_rating_filters);
+        auto tracks = search_any(query, offset, track_limit, melody.rating_filters);
         if (!tracks) {
             return std::unexpected(std::move(tracks.error()));
         }
@@ -697,8 +733,9 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
     }
 
     const std::string query_text{query};
-    const auto parsed = melody_rating_filters ? parse_melody_rating_search(query_text)
-                                              : MelodyRatingSearch{.words = query_text, .conditions = {}};
+    const auto parsed = melody.rating_filters
+                            ? parse_melody_rating_search(query_text)
+                            : MelodyRatingSearch{.words = query_text, .conditions = {}};
     auto* connection = implementation_->connection.get();
     if (!mpd_search_db_songs(connection, false)) {
         return std::unexpected(implementation_->take_error("begin library search"));
@@ -722,6 +759,44 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
     auto tracks = project_tracks(*pairs);
     if (!tracks) {
         return std::unexpected(std::move(tracks.error()));
+    }
+
+    // The server's album records carry ratings, counts, and artwork
+    // identities that derived summaries cannot; songs-only servers (or a
+    // failed album search) keep the client-side derivation below.
+    if (melody.album_search) {
+        auto melody_albums =
+            search_melody_albums(melody_filter_expression(parsed), {}, album_limit);
+        if (melody_albums) {
+            std::vector<AlbumSummary> albums;
+            albums.reserve(melody_albums->size());
+            for (auto& record : *melody_albums) {
+                const auto dated = record.date != "0000" && !record.date.empty();
+                albums.push_back(AlbumSummary{
+                    .filter =
+                        AlbumFilter{
+                            .release_id = std::nullopt,
+                            .artist = record.album_artist,
+                            .album = record.album,
+                            .date = dated ? std::optional{record.date} : std::nullopt,
+                            .artist_is_album_artist = true,
+                        },
+                    .artist = std::move(record.album_artist),
+                    .album = std::move(record.album),
+                    .date = dated ? record.date : std::string{},
+                    .artwork_uri = std::move(record.artwork_uri),
+                    .rating = record.rating,
+                    .computed_rating = record.computed_rating,
+                    .track_count = record.track_count,
+                    .duration_seconds = record.duration_seconds,
+                });
+            }
+            if (tracks->size() > static_cast<std::size_t>(track_limit)) {
+                tracks->resize(static_cast<std::size_t>(track_limit));
+            }
+            return LibrarySearchResult{.albums = std::move(albums),
+                                       .tracks = std::move(*tracks)};
+        }
     }
 
     std::vector<AlbumSummary> albums;

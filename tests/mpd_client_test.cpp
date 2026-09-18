@@ -164,6 +164,20 @@ class FakeMpdServer final {
                       "Date: 2023\nAlbumArtist: B\nAlbum: Alternate title\nOK\n");
         } else if (command.starts_with("list ")) {
             write_all(client, "AlbumArtist: Credited Artist\nAlbumArtist: Various Artists\nOK\n");
+        } else if (command.starts_with("searchalbums ")) {
+            if (command.find("albumrating >= 8") == std::string_view::npos) {
+                write_all(client, "ACK [2@0] {searchalbums} expected album rating filter\n");
+                return;
+            }
+            write_all(client, "AlbumArtist: Rated Artist\nAlbum: Rated Release\nDate: 1994\n"
+                              "X-AlbumId: 12\nX-TrackCount: 10\nX-Duration: 2400\nX-Rating: 8\n"
+                              "X-ComputedRating: 7.5\nX-ArtworkUri: Rated/A/01.flac\n"
+                              "AlbumArtist: Sparse Artist\nAlbum: Undated\nDate: 0000\n"
+                              "X-AlbumId: 13\nX-TrackCount: 1\nX-Duration: 60\nOK\n");
+        } else if (command.starts_with("search ") &&
+                   command.find("albumrating >= 8") != std::string_view::npos) {
+            write_all(client, "file: Rated/A/01.flac\nAlbumArtist: Rated Artist\n"
+                              "Album: Rated Release\nTitle: Rated track\nOK\n");
         } else if (command.starts_with("search ") &&
                    command.find("rating >= 8") != std::string_view::npos) {
             // ADR-0179: rating search terms must arrive as a Melody filter
@@ -522,13 +536,29 @@ void client_negotiates_and_preserves_extensions() {
     require(!client.add_id(""), "an empty queue URI must fail before protocol I/O");
     require(!client.set_volume(101U), "out-of-range volume must fail before protocol I/O");
 
-    const auto rating_search = client.search_library("beatles rating>=8", 200U, 1'000U, 0U, true);
+    const auto rating_search = client.search_library("beatles rating>=8", 200U, 1'000U, 0U,
+                                              {.rating_filters = true, .album_search = false});
     require(rating_search.has_value() && rating_search->tracks.size() == 1U &&
                 rating_search->tracks.front().rating == 9U,
             "rating search terms must become a Melody filter expression");
     const auto plain_rating_search = client.search_library("beatles rating>=8");
     require(plain_rating_search.has_value() && plain_rating_search->tracks.size() == 3U,
             "without the Melody gate, rating words stay ordinary search text");
+    const auto album_search =
+        client.search_library("albumrating>=8", 200U, 1'000U, 0U,
+                              {.rating_filters = true, .album_search = true});
+    require(album_search.has_value() && album_search->albums.size() == 2U,
+            "album search must take the album section from searchalbums records");
+    const auto& rated_album = album_search->albums.front();
+    require(rated_album.artist == "Rated Artist" && rated_album.album == "Rated Release" &&
+                rated_album.date == "1994" && rated_album.rating == 8U &&
+                rated_album.computed_rating == 7.5 && rated_album.track_count == 10U &&
+                rated_album.duration_seconds == 2'400U &&
+                rated_album.artwork_uri == "Rated/A/01.flac",
+            "searchalbums records must project with their rating and identity data");
+    require(album_search->albums.back().date.empty() &&
+                !album_search->albums.back().filter.date.has_value(),
+            "the 0000 identity placeholder must not surface as a display date");
 
     require(client.set_sticker_rating("Artist/Release/01.flac", 8U).has_value(),
             "track rating must store the interoperable rating sticker");

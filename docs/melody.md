@@ -10,7 +10,10 @@ an ordinary client connection.
 Install `melodyd` following the [Melody build instructions](https://github.com/carnager/melody-music#getting-started).
 Install `mpv` on machines that will play audio.
 
-Create `~/.config/melody/melodyd.toml` (or
+Run `melodyd setup` — it asks for your music folder, ports, and an optional
+web password and writes the config for you. Starting `melodyd` in a terminal
+without a configuration runs the same questions automatically. If you prefer
+to write it by hand, create `~/.config/melody/melodyd.toml` (or
 `$XDG_CONFIG_HOME/melody/melodyd.toml` if you use a custom config directory):
 
 ```toml

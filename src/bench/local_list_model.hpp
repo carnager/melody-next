@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace trackknife::bench {
@@ -29,6 +30,7 @@ enum LocalTrackColumn : int {
     local_album_column = ui::track_album_column,
     local_date_column = ui::track_date_column,
     local_length_column = ui::track_length_column,
+    local_rating_column = ui::track_rating_column,
     local_column_count = ui::track_column_count,
 };
 
@@ -65,11 +67,26 @@ struct LocalTrackRow {
     metadata::MetadataDocument metadata;
     std::optional<core::LocalSourceRevision> source_revision;
     std::optional<LocalTrackTechnicals> technicals{};
+    // ADR-0179: Melody-compatible content-identity rating keys derived from
+    // the display document, and the stored 0-10 rating loaded by hash. Like
+    // artwork, this is display-cache state: it is recomputed/reloaded rather
+    // than owned by the row, so equality deliberately ignores it.
+    std::string rating_hash{};
+    std::string album_rating_hash{};
+    unsigned rating{0U};
     // True once a probe ran or persisted metadata was restored; unprobed rows
     // fall back to their file name and are queued for enrichment.
     bool probed{false};
 
-    friend bool operator==(const LocalTrackRow&, const LocalTrackRow&) = default;
+    friend bool operator==(const LocalTrackRow& left, const LocalTrackRow& right) {
+        const auto salient = [](const LocalTrackRow& row) {
+            return std::tie(row.raw_path, row.logical_reference, row.selection, row.segment,
+                            row.title, row.artist, row.album, row.album_artist, row.date,
+                            row.track_number, row.duration_ms, row.metadata, row.source_revision,
+                            row.technicals, row.probed);
+        };
+        return salient(left) == salient(right);
+    }
 };
 
 struct LocalTrackSource {
@@ -97,6 +114,11 @@ class LocalListModel final : public QAbstractTableModel {
     // ADR-0153: stores on-demand probed technicals onto every row of the
     // given physical source.
     void applyTechnicals(const std::string& raw_path, const LocalTrackTechnicals& technicals);
+    // ADR-0179: applies stored ratings by content-identity hash to every row
+    // whose track hash appears in the map.
+    void applyRatings(const QHash<QString, unsigned>& ratings);
+    // Distinct track rating hashes across all rows, for a bulk store lookup.
+    [[nodiscard]] QStringList ratingHashes() const;
     void removeRowIndexes(std::vector<int> rows, bool remember = true, QString label = {});
     bool applyPermutation(const std::vector<int>& order, QString label);
     [[nodiscard]] bool canUndo() const noexcept { return history_cursor_ > 0; }

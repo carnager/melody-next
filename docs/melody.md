@@ -72,6 +72,13 @@ output controls to enable the server's speakers, **Trackknife**, or another
 connected agent. Trackknife becomes offline when this connection or the app is
 closed and reconnects with the same process identity after transient failures.
 
+Melody servers advertise their native rating extension, so the queue's Rate
+menu writes 0-10 track ratings with Melody's `rate` command (keyed by the
+server's stable song identity, never the queue id) and **Rate album** writes
+album ratings with `albumrate`. Ratings other clients set appear whenever a
+listing reloads; Melody's custom rating idle subsystem is not observable
+through libmpdclient, so a live cross-client refresh is a recorded limit.
+
 If **Local music root** contains the same relative paths as Melody's library,
 Trackknife decodes those files directly. Otherwise it streams by Melody's
 stable song identity from the server HTTP endpoint on port `6701`. The endpoint

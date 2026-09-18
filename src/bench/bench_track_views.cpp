@@ -32,7 +32,9 @@ BenchMainWindow::defaultTrackViewLayout(const ui::TrackViewPresentation presenta
     columns.reserve(track_column_specs.size());
     for (const auto& spec : track_column_specs) {
         auto width = spec.default_width;
-        bool visible = true;
+        // Ratings stay one click away in the Columns menu rather than
+        // claiming space in every default view.
+        bool visible = spec.logical != local_rating_column;
         if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
             spec.logical == local_artwork_column) {
             width = 42;

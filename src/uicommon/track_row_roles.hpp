@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <QString>
 #include <Qt>
 
 #include <array>
@@ -39,10 +40,11 @@ enum TrackRowRole : int {
     // Optional fast path: bool, true only for the first row of a group with
     // at least two members. Views fall back to adjacent group-key comparison.
     track_album_group_start_role,
+    track_rating_role, // uint 0-10 track rating (ADR-0179); 0/absent unrated
 };
 
 // Complete physical column layout used by both authority-bound queues:
-// artwork/status, artist, track number, title, album, date, duration.
+// artwork/status, artist, track number, title, album, date, duration, rating.
 enum TrackRowColumn : int {
     track_artwork_column = 0,
     track_marker_column = track_artwork_column,
@@ -52,12 +54,29 @@ enum TrackRowColumn : int {
     track_album_column = 4,
     track_date_column = 5,
     track_length_column = 6,
-    track_column_count = 7,
+    track_rating_column = 7,
+    track_column_count = 8,
 };
 
 // Column labels are part of the same shared contract as their positions. Keep
 // authority-specific models from drifting into near-equivalent names.
 inline constexpr std::array<const char*, track_column_count> track_column_headers{
-    "", "Artist", "#", "Title", "Album", "Date", "Length"};
+    "", "Artist", "#", "Title", "Album", "Date", "Length", "Rating"};
+
+// The shared 0-10 rating rendered as star text: full stars in half-star
+// steps, nothing for unrated so the column stays quiet.
+[[nodiscard]] inline QString track_rating_stars(const unsigned rating) {
+    if (rating == 0U || rating > 10U) {
+        return {};
+    }
+    QString stars;
+    for (unsigned star = 0U; star < rating / 2U; ++star) {
+        stars += QChar{0x2605}; // BLACK STAR
+    }
+    if (rating % 2U != 0U) {
+        stars += QChar{0x00BD}; // VULGAR FRACTION ONE HALF
+    }
+    return stars;
+}
 
 } // namespace trackknife::ui

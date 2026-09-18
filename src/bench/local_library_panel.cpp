@@ -797,6 +797,34 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
             emit actionRequested(entries, static_cast<LocalLibraryAction>(action));
         });
     }
+    // ADR-0179: rate the targeted track or album entry by content identity.
+    const auto target_entry = index.data(entry_role).value<persistence::LibraryEntry>();
+    if (target_entry.kind != persistence::LibraryEntryKind::artist &&
+        !target_entry.rating_hash.empty()) {
+        menu->addSeparator();
+        auto* rate_menu = menu->addMenu(target_entry.kind == persistence::LibraryEntryKind::album
+                                            ? tr("Rate album")
+                                            : tr("Rate track"));
+        rate_menu->setObjectName(QStringLiteral("local-library-rate-menu"));
+        const QPersistentModelIndex target{index};
+        for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
+            auto* choice = rate_menu->addAction(
+                rating == 0U ? tr("Unrate") : QString{}.fill(QChar{0x2605}, rating / 2U));
+            choice->setObjectName(
+                QStringLiteral("action-local-library-rate-%1").arg(rating));
+            choice->setCheckable(true);
+            choice->setChecked(target_entry.rating == rating);
+            connect(choice, &QAction::triggered, this, [this, target, target_entry, rating] {
+                storeRating(target_entry.rating_hash,
+                            target_entry.kind == persistence::LibraryEntryKind::album, rating);
+                if (target.isValid()) {
+                    auto updated = target_entry;
+                    updated.rating = rating;
+                    model_->setData(target, QVariant::fromValue(updated), entry_role);
+                }
+            });
+        }
+    }
     if (model_->hasChildren(index)) {
         menu->addSeparator();
         const QPersistentModelIndex target{index};
@@ -808,6 +836,54 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                         });
     }
     menu->popup(tree_->viewport()->mapToGlobal(position));
+}
+
+void LocalLibraryPanel::requestRatings(std::vector<std::string> hashes,
+                                       std::function<void(std::vector<unsigned>)> ready) {
+    if (hashes.empty() || !ready) {
+        return;
+    }
+    enqueue({.work =
+                 [hashes = std::move(hashes)](persistence::LocalLibrary& library) {
+                     Outcome outcome;
+                     auto ratings = library.ratings(hashes);
+                     if (!ratings) {
+                         outcome.error = text(ratings.error().message);
+                     } else {
+                         outcome.ratings = std::move(*ratings);
+                     }
+                     return outcome;
+                 },
+             .done =
+                 [ready = std::move(ready)](Outcome outcome) {
+                     if (outcome.error.isEmpty()) {
+                         ready(std::move(outcome.ratings));
+                     }
+                 },
+             .view_query = false});
+}
+
+void LocalLibraryPanel::storeRating(std::string hash, const bool album, const unsigned rating) {
+    if (hash.empty()) {
+        return;
+    }
+    enqueue({.work =
+                 [hash = std::move(hash), album, rating](persistence::LocalLibrary& library) {
+                     Outcome outcome;
+                     if (auto stored = library.set_rating(hash, album, rating); !stored) {
+                         outcome.error = text(stored.error().message);
+                     }
+                     return outcome;
+                 },
+             .done =
+                 [this](const Outcome& outcome) {
+                     if (!outcome.error.isEmpty()) {
+                         status_->setText(outcome.error);
+                         return;
+                     }
+                     emit ratingsChanged();
+                 },
+             .view_query = false});
 }
 
 void LocalLibraryPanel::resolveEntries(std::vector<persistence::LibraryEntry> entries,

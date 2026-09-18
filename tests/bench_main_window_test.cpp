@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/convert_dialog.hpp"
 #include "bench/desktop_notifier.hpp"
+#include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/metadata_grid_model.hpp"
@@ -262,6 +263,7 @@ class BenchMainWindowTest final : public QObject {
     void localPlaybackModesPersistAndStayLocal();
     void localPlaybackModesAdvance_data();
     void localPlaybackModesAdvance();
+    void localTrackRatingsPersistByContentIdentity();
 
   private:
     QTemporaryDir settings_directory_;
@@ -934,6 +936,22 @@ void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
     QVERIFY(high != nullptr);
     QVERIFY(high->isChecked());
     QVERIFY(!priority_menu->isEnabled()); // Disconnected capability gate.
+    auto* rate_menu = window.findChild<QMenu*>(QStringLiteral("bench-mpd-rate-menu"));
+    QVERIFY(rate_menu != nullptr);
+    QVERIFY(track_menu->actions().contains(rate_menu->menuAction()));
+    QVERIFY(!rate_menu->isEnabled()); // Disconnected capability gate.
+    track_menu->close();
+
+    // ADR-0179: sticker ratings render as stars and drive the checked state.
+    queue_model->setStickerRatings({{QStringLiteral("queue/prioritized.flac"), 8U}});
+    QCOMPARE(queue_model->index(0, ui::track_rating_column).data().toString(),
+             QStringLiteral("★★★★"));
+    QVERIFY(QMetaObject::invokeMethod(queue, "customContextMenuRequested", Qt::DirectConnection,
+                                      Q_ARG(QPoint, queue_position)));
+    auto* four_stars = window.findChild<QAction*>(QStringLiteral("action-mpd-queue-rate-8"));
+    QVERIFY(four_stars != nullptr);
+    QVERIFY(four_stars->isChecked());
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-queue-rate-0")) != nullptr);
     track_menu->close();
 
     QCOMPARE(replaygain->popupMode(), QToolButton::InstantPopup);
@@ -8749,6 +8767,85 @@ void BenchMainWindowTest::localPlaybackModesAdvance() {
     }
     QVERIFY(QFile::exists(first));
     QVERIFY(QFile::exists(last));
+}
+
+void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("rated.wav"));
+    write_wave(path, wave_sample_rate / 2U);
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({QFile::encodeName(path).toStdString()});
+    QTableView* view = nullptr;
+    const auto find_view = [&] {
+        for (auto* candidate : window.findChildren<QTableView*>()) {
+            if (qobject_cast<LocalListModel*>(candidate->model()) &&
+                candidate->model()->rowCount() == 1) {
+                view = candidate;
+                return true;
+            }
+        }
+        return false;
+    };
+    QTRY_VERIFY(find_view());
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    // The probe projection derives the Melody-compatible content identity.
+    QTRY_VERIFY(!model->rows().front().rating_hash.empty());
+    QCOMPARE(model->headerData(local_rating_column, Qt::Horizontal, Qt::DisplayRole).toString(),
+             QStringLiteral("Rating"));
+    const auto track_hash = model->rows().front().rating_hash;
+    const auto album_hash = model->rows().front().album_rating_hash;
+    QVERIFY(!album_hash.empty());
+
+    auto* panel = window.findChild<LocalLibraryPanel*>();
+    QVERIFY(panel != nullptr);
+    auto* track_menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
+    QVERIFY(track_menu != nullptr);
+    view->selectionModel()->select(model->index(0, 0), QItemSelectionModel::ClearAndSelect |
+                                                           QItemSelectionModel::Rows);
+    QVERIFY(QMetaObject::invokeMethod(
+        view, "customContextMenuRequested", Qt::DirectConnection,
+        Q_ARG(QPoint, view->visualRect(model->index(0, local_title_column)).center())));
+    auto* rate_menu = window.findChild<QMenu*>(QStringLiteral("bench-local-rate-menu"));
+    auto* album_rate_menu = window.findChild<QMenu*>(QStringLiteral("bench-local-album-rate-menu"));
+    QVERIFY(rate_menu != nullptr);
+    QVERIFY(album_rate_menu != nullptr);
+    QVERIFY(rate_menu->isEnabled());
+    QVERIFY(album_rate_menu->isEnabled());
+    auto* four_stars = window.findChild<QAction*>(QStringLiteral("action-local-rate-8"));
+    auto* album_three = window.findChild<QAction*>(QStringLiteral("action-local-album-rate-6"));
+    QVERIFY(four_stars != nullptr);
+    QVERIFY(album_three != nullptr);
+    four_stars->trigger();
+    album_three->trigger();
+    track_menu->close();
+    QCOMPARE(model->rows().front().rating, 8U);
+    QCOMPARE(model->index(0, local_rating_column).data().toString(), QStringLiteral("★★★★"));
+
+    // The serialized library queue proves both identities reached the store.
+    std::optional<std::vector<unsigned>> stored;
+    panel->requestRatings({track_hash, album_hash},
+                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
+    QTRY_VERIFY(stored.has_value());
+    QCOMPARE(*stored, (std::vector<unsigned>{8U, 6U}));
+
+    // Unrating deletes the stored value and clears the stars immediately.
+    QVERIFY(QMetaObject::invokeMethod(
+        view, "customContextMenuRequested", Qt::DirectConnection,
+        Q_ARG(QPoint, view->visualRect(model->index(0, local_title_column)).center())));
+    auto* unrate = window.findChild<QAction*>(QStringLiteral("action-local-rate-0"));
+    QVERIFY(unrate != nullptr);
+    unrate->trigger();
+    track_menu->close();
+    QCOMPARE(model->rows().front().rating, 0U);
+    QCOMPARE(model->index(0, local_rating_column).data().toString(), QString{});
+    stored.reset();
+    panel->requestRatings({track_hash},
+                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
+    QTRY_VERIFY(stored.has_value());
+    QCOMPARE(*stored, (std::vector<unsigned>{0U}));
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {

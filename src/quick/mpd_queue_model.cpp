@@ -77,6 +77,14 @@ constexpr quint64 artwork_token_namespace = quint64{1} << 62U;
     }
 }
 
+[[nodiscard]] unsigned effective_rating(const mpd::Track& track,
+                                        const QHash<QString, unsigned>& sticker_ratings) {
+    if (track.rating) {
+        return *track.rating;
+    }
+    return sticker_ratings.value(from_utf8(track.uri), 0U);
+}
+
 [[nodiscard]] std::optional<std::vector<std::uint32_t>>
 queue_ids(const std::vector<mpd::Track>& tracks) {
     std::vector<std::uint32_t> ids;
@@ -190,6 +198,9 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
     const auto& track = tracks_.at(static_cast<std::size_t>(index.row()));
     switch (role) {
     case Qt::DisplayRole:
+        if (index.column() == ui::track_rating_column) {
+            return ui::track_rating_stars(effective_rating(track, sticker_ratings_));
+        }
         return display_value(track, index.column());
     case Qt::TextAlignmentRole:
         return index.column() == ui::track_length_column
@@ -211,6 +222,8 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
     }
     case PriorityRole:
         return track.priority ? QVariant::fromValue(*track.priority) : QVariant{};
+    case RatingRole:
+        return QVariant::fromValue(effective_rating(track, sticker_ratings_));
     case AlbumArtworkRole: {
         const auto artwork = album_artwork_.constFind(album_group_key(track));
         return artwork == album_artwork_.cend() || artwork->image.isNull()
@@ -264,7 +277,27 @@ QHash<int, QByteArray> MpdQueueModel::roleNames() const {
     roles.insert(PriorityRole, QByteArrayLiteral("priority"));
     roles.insert(AlbumArtworkRole, QByteArrayLiteral("albumArtwork"));
     roles.insert(AlbumArtworkUriRole, QByteArrayLiteral("albumArtworkUri"));
+    roles.insert(RatingRole, QByteArrayLiteral("rating"));
     return roles;
+}
+
+void MpdQueueModel::setStickerRatings(QHash<QString, unsigned> ratings) {
+    if (sticker_ratings_ == ratings) {
+        return;
+    }
+    sticker_ratings_ = std::move(ratings);
+    if (!tracks_.empty()) {
+        emit dataChanged(index(0, ui::track_rating_column),
+                         index(static_cast<int>(tracks_.size()) - 1, ui::track_rating_column),
+                         {Qt::DisplayRole, RatingRole});
+    }
+}
+
+unsigned MpdQueueModel::ratingAt(const int row) const {
+    if (row < 0 || static_cast<std::size_t>(row) >= tracks_.size()) {
+        return 0U;
+    }
+    return effective_rating(tracks_.at(static_cast<std::size_t>(row)), sticker_ratings_);
 }
 
 std::optional<std::uint32_t> MpdQueueModel::queueIdAt(const int row) const {

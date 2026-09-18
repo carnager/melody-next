@@ -100,7 +100,7 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
         return fail(QStringLiteral("Track-view columns are malformed"));
     }
     const auto array = column_values.toArray();
-    if (array.size() != registered.size()) {
+    if (array.size() > registered.size()) {
         return fail(QStringLiteral("Track-view layout does not place every registered column"));
     }
 
@@ -133,9 +133,16 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
         used.insert(id);
         columns.push_back(TrackViewColumnLayout{.id = id, .width = width, .visible = visible});
     }
-    if (used != registered || !any_visible) {
+    if (!any_visible) {
         return fail(
             QStringLiteral("Track-view layout must place every column and show at least one"));
+    }
+    // Columns registered after the layout was saved migrate by appending
+    // hidden at the end instead of rejecting the whole saved layout.
+    for (const auto& id : registered_column_ids) {
+        if (!used.contains(id)) {
+            columns.push_back(TrackViewColumnLayout{.id = id, .width = 100, .visible = false});
+        }
     }
     return TrackViewLayout{
         .schema_version = schema, .presentation = *presentation, .columns = std::move(columns)};

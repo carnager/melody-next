@@ -137,6 +137,22 @@ void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
     QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::QueuePositionRole).toUInt(), 0U);
     QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::DurationMsRole).toLongLong(), 220'900);
     QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::PriorityRole).toUInt(), 192U);
+    // ADR-0179: no Melody line and no sticker means unrated; a sticker map
+    // fills the value, and a track's own X-Rating projection wins over it.
+    QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::RatingRole).toUInt(), 0U);
+    QCOMPARE(model.data(model.index(0, ui::track_rating_column)).toString(), QString{});
+    model.setStickerRatings({{QStringLiteral("Slayer/Divine Intervention/01.flac"), 7U}});
+    QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::RatingRole).toUInt(), 7U);
+    QCOMPARE(model.data(model.index(0, ui::track_rating_column)).toString(),
+             QStringLiteral("★★★½"));
+    QCOMPARE(model.ratingAt(0), 7U);
+    mpd::Track melody_rated = *model.trackAt(0);
+    melody_rated.rating = 4U;
+    melody_rated.melody_song_id = 9'001U;
+    MpdQueueModel melody_model;
+    melody_model.replaceTracks({melody_rated});
+    melody_model.setStickerRatings({{QStringLiteral("Slayer/Divine Intervention/01.flac"), 7U}});
+    QCOMPARE(melody_model.data(melody_model.index(0, 0), MpdQueueModel::RatingRole).toUInt(), 4U);
     QCOMPARE(model.totalDurationMs(), 220'900);
     QVERIFY(!model.data(model.index(0, 0), MpdQueueModel::CurrentRole).toBool());
     QCOMPARE(model.data(model.index(0, 0), MpdQueueModel::AlbumArtistRole).toString(),

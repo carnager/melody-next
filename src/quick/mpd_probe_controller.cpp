@@ -570,6 +570,62 @@ void MpdProbeController::setQueuePriority(const QVariantList& rows, const int pr
     emit stateChanged();
 }
 
+void MpdProbeController::setTrackRating(const QVariantList& rows, const int rating) {
+    if (!session_ || !connected_ || !supportsRatings() || rating < 0 || rating > 10) {
+        return;
+    }
+    const auto melody = supportsCommand(QStringLiteral("getrating"));
+    std::vector<std::uint64_t> song_ids;
+    std::vector<std::string> uris;
+    QSet<QString> unique_uris;
+    QSet<quint64> unique_ids;
+    for (const auto& value : rows) {
+        bool valid = false;
+        const auto row = value.toInt(&valid);
+        if (!valid) {
+            continue;
+        }
+        if (melody) {
+            const auto* track = queue_model_.trackAt(row);
+            if (track != nullptr && track->melody_song_id &&
+                !unique_ids.contains(*track->melody_song_id)) {
+                unique_ids.insert(*track->melody_song_id);
+                song_ids.push_back(*track->melody_song_id);
+            }
+        } else if (const auto uri = queue_model_.uriAt(row)) {
+            const auto key = from_utf8(*uri);
+            if (!unique_uris.contains(key)) {
+                unique_uris.insert(key);
+                uris.push_back(*uri);
+            }
+        }
+    }
+    if (melody && !song_ids.empty()) {
+        pending_commands_.insert(
+            session_->set_melody_track_ratings(std::move(song_ids), static_cast<unsigned>(rating)));
+    } else if (!melody && !uris.empty()) {
+        pending_commands_.insert(
+            session_->set_sticker_ratings(std::move(uris), static_cast<unsigned>(rating)));
+    } else {
+        return;
+    }
+    emit stateChanged();
+}
+
+void MpdProbeController::setMelodyAlbumRating(const QString& album_artist, const QString& album,
+                                              const QString& date, const int rating) {
+    if (!session_ || !connected_ || !supportsAlbumRatings() || rating < 0 || rating > 10 ||
+        album_artist.isEmpty() || album.isEmpty()) {
+        return;
+    }
+    pending_commands_.insert(session_->set_melody_album_rating(
+        mpd::MelodyAlbumKey{.album_artist = album_artist.toStdString(),
+                            .album = album.toStdString(),
+                            .date = date.toStdString()},
+        static_cast<unsigned>(rating)));
+    emit stateChanged();
+}
+
 void MpdProbeController::searchLibrary(const QString& query) {
     const auto normalized = query.trimmed();
     if (normalized.isEmpty()) {
@@ -1361,6 +1417,12 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
                     .arg(commands.join(QStringLiteral(", ")), tags.join(QStringLiteral(", ")));
     details_ += QStringLiteral("\nOutputs\n") + output_summary_;
     queue_model_.replaceTracks(std::move(snapshot.queue));
+    QHash<QString, unsigned> sticker_ratings;
+    sticker_ratings.reserve(static_cast<qsizetype>(snapshot.sticker_ratings.size()));
+    for (const auto& rating : snapshot.sticker_ratings) {
+        sticker_ratings.insert(from_utf8(rating.uri), rating.rating);
+    }
+    queue_model_.setStickerRatings(std::move(sticker_ratings));
     output_model_.replaceOutputs(std::move(snapshot.outputs));
     emit stateChanged();
 }

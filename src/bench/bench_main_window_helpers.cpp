@@ -2,6 +2,8 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 
+#include "trackknife/persistence/rating_identity.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <ranges>
@@ -107,6 +109,11 @@ void project_display_metadata(LocalTrackRow& row) {
     row.album_artist = metadata_value(row.metadata, {"albumartist"});
     row.date = metadata_value(row.metadata, {"date", "year"});
     row.track_number = metadata_value(row.metadata, {"tracknumber", "track"});
+    if (!row.raw_path.empty()) {
+        auto identity = persistence::rating_identity(row.metadata, row.raw_path);
+        row.rating_hash = std::move(identity.track_hash);
+        row.album_rating_hash = std::move(identity.album_hash);
+    }
 }
 
 LocalTrackRow cached_library_row(persistence::LibraryTrackSnapshot snapshot) {

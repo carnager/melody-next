@@ -114,6 +114,17 @@ Only plausible audio extensions are probed; directory and file symlinks are
 skipped. Scans stop after one million visited entries and report incompleteness.
 Cancellation and incomplete traversal retain previously indexed entries.
 
+Migration 35 adds track and album ratings (ADR-0179): the `local_ratings`
+table stores an integer 0-10 keyed by sha256 content-identity hashes that are
+byte-compatible with the Melody server, and each track row carries its
+precomputed track and album hash so queries join stored ratings into track
+rows and album aggregates. Because identity follows tags rather than paths,
+ratings survive rescans, renames, and moves without relocation bookkeeping; a
+committed tag change to the identity fields recomputes the row's hashes and
+detaches the old rating. Rate a track or album from its tree context menu, or
+from a list row's Rate menus; the optional Rating column shows stars. Ratings
+never touch file tags.
+
 A separate artwork worker shares the local-list thumbnail reader, with a
 256-entry cache of 128-pixel thumbnails and missing-image results. Artwork reads
 are cancelled on view changes and bounded to 16 MiB encoded input, 16 million

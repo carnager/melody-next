@@ -68,7 +68,10 @@ void BenchMainWindow::initializePersistence() {
     persistence_timer_ = new QTimer(this);
     persistence_timer_->setSingleShot(true);
     persistence_timer_->setInterval(persist_debounce_ms);
-    connect(persistence_timer_, &QTimer::timeout, this, [this] { persistNow(false); });
+    connect(persistence_timer_, &QTimer::timeout, this, [this] {
+        persistNow(false);
+        refreshLocalRatings();
+    });
     persistence_->initialize([this](ui::PersistedWorkspace workspace, QString error) {
         if (!error.isEmpty()) {
             statusBar()->showMessage(QStringLiteral("List restore failed: %1").arg(error), 5'000);
@@ -155,6 +158,11 @@ void BenchMainWindow::initializePersistence() {
                                 action == LocalLibraryAction::replace);
                         });
                 });
+            connect(local_library_, &LocalLibraryPanel::ratingsChanged, this,
+                    &BenchMainWindow::refreshLocalRatings);
+            // Restored rows carry their identity hashes; load stored values
+            // once the rating store is reachable.
+            refreshLocalRatings();
             // ADR-0140: Enter in the library search keeps the full result
             // set as an ordinary scratch list tab.
             connect(local_library_, &LocalLibraryPanel::searchCommitted, this,
@@ -1275,6 +1283,42 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         track_context_menu_->addAction(mpd_crop_selection_action_);
         refreshMpdPriorityMenu();
         track_context_menu_->addMenu(mpd_priority_menu_);
+        refreshMpdRateMenu();
+        track_context_menu_->addMenu(mpd_rate_menu_);
+        if (mpd_controller_->supportsAlbumRatings()) {
+            const auto* queue_model =
+                qobject_cast<quick::MpdQueueModel*>(mpd_controller_->queueModel());
+            const auto* track =
+                queue_model != nullptr ? queue_model->trackAt(view->currentIndex().row()) : nullptr;
+            if (track != nullptr) {
+                const std::string album_artist{track->metadata.first("AlbumArtist")
+                                                   .value_or(track->metadata.first("Artist")
+                                                                 .value_or(std::string_view{}))};
+                const std::string album{
+                    track->metadata.first("Album").value_or(std::string_view{})};
+                const std::string date{
+                    track->metadata.first("Date").value_or(std::string_view{})};
+                auto* album_rate_menu =
+                    track_context_menu_->addMenu(QStringLiteral("Rate album"));
+                album_rate_menu->setObjectName(QStringLiteral("bench-mpd-album-rate-menu"));
+                album_rate_menu->setEnabled(command_ready && !album_artist.empty() &&
+                                            !album.empty());
+                for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
+                    auto* choice = album_rate_menu->addAction(
+                        rating == 0U ? QStringLiteral("Unrate")
+                                     : QString{}.fill(QChar{0x2605}, rating / 2U));
+                    choice->setObjectName(
+                        QStringLiteral("action-mpd-album-rate-%1").arg(rating));
+                    connect(choice, &QAction::triggered, this,
+                            [this, album_artist = QString::fromStdString(album_artist),
+                             album = QString::fromStdString(album),
+                             date = QString::fromStdString(date), rating] {
+                                mpd_controller_->setMelodyAlbumRating(album_artist, album, date,
+                                                                      static_cast<int>(rating));
+                            });
+                }
+            }
+        }
         track_context_menu_->addSeparator();
         const auto queue_uris = selectedMpdQueueUris();
         if (mpd_playlists_list_ != nullptr && mpd_playlists_list_->count() > 0) {
@@ -1326,6 +1370,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
             });
         }
     }
+    addLocalRateMenus(view, source_tab);
     track_context_menu_->addSeparator();
     if (source_tab != nullptr) {
         auto* copy_menu = track_context_menu_->addMenu(QStringLiteral("Copy to list"));
@@ -1385,6 +1430,122 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addAction(undo_list_action_);
     track_context_menu_->addAction(redo_list_action_);
     track_context_menu_->popup(view->viewport()->mapToGlobal(position));
+}
+
+void BenchMainWindow::refreshLocalRatings() {
+    if (local_library_ == nullptr) {
+        return;
+    }
+    QStringList hashes;
+    QSet<QString> unique;
+    for (const auto& tab : list_tabs_) {
+        for (const auto& hash : tab->model->ratingHashes()) {
+            if (!unique.contains(hash)) {
+                unique.insert(hash);
+                hashes.push_back(hash);
+            }
+        }
+    }
+    if (hashes.isEmpty()) {
+        return;
+    }
+    std::vector<std::string> keys;
+    keys.reserve(static_cast<std::size_t>(hashes.size()));
+    for (const auto& hash : hashes) {
+        keys.push_back(hash.toStdString());
+    }
+    local_library_->requestRatings(std::move(keys),
+                                   [this, hashes](std::vector<unsigned> values) {
+                                       if (values.size() != static_cast<std::size_t>(hashes.size())) {
+                                           return;
+                                       }
+                                       QHash<QString, unsigned> ratings;
+                                       ratings.reserve(hashes.size());
+                                       for (qsizetype index = 0; index < hashes.size(); ++index) {
+                                           ratings.insert(hashes.at(index),
+                                                          values[static_cast<std::size_t>(index)]);
+                                       }
+                                       for (const auto& tab : list_tabs_) {
+                                           tab->model->applyRatings(ratings);
+                                       }
+                                   });
+}
+
+void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
+    if (view == nullptr || view->selectionModel() == nullptr || source_tab == nullptr ||
+        track_context_menu_ == nullptr) {
+        return;
+    }
+    const auto& rows = source_tab->model->rows();
+    QStringList track_hashes;
+    QStringList album_hashes;
+    QSet<QString> unique_tracks;
+    QSet<QString> unique_albums;
+    std::optional<unsigned> common_rating;
+    bool ratings_match = true;
+    for (const auto& index : view->selectionModel()->selectedRows()) {
+        if (index.row() < 0 || index.row() >= static_cast<int>(rows.size())) {
+            continue;
+        }
+        const auto& row = rows[static_cast<std::size_t>(index.row())];
+        if (!common_rating) {
+            common_rating = row.rating;
+        } else if (*common_rating != row.rating) {
+            ratings_match = false;
+        }
+        const auto track_hash = QString::fromStdString(row.rating_hash);
+        if (!track_hash.isEmpty() && !unique_tracks.contains(track_hash)) {
+            unique_tracks.insert(track_hash);
+            track_hashes.push_back(track_hash);
+        }
+        const auto album_hash = QString::fromStdString(row.album_rating_hash);
+        if (!album_hash.isEmpty() && !unique_albums.contains(album_hash)) {
+            unique_albums.insert(album_hash);
+            album_hashes.push_back(album_hash);
+        }
+    }
+    if (track_hashes.isEmpty()) {
+        return;
+    }
+    const auto store_ready = local_library_ != nullptr;
+    track_context_menu_->addSeparator();
+    auto* rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate"));
+    rate_menu->setObjectName(QStringLiteral("bench-local-rate-menu"));
+    rate_menu->setEnabled(store_ready);
+    auto* album_rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate album"));
+    album_rate_menu->setObjectName(QStringLiteral("bench-local-album-rate-menu"));
+    album_rate_menu->setEnabled(store_ready && !album_hashes.isEmpty());
+    for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
+        const auto label = rating == 0U ? QStringLiteral("Unrate")
+                                        : QString{}.fill(QChar{0x2605}, rating / 2U);
+        auto* rate = rate_menu->addAction(label);
+        rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
+        rate->setCheckable(true);
+        rate->setChecked(ratings_match && common_rating == rating);
+        connect(rate, &QAction::triggered, this, [this, track_hashes, rating] {
+            if (local_library_ == nullptr) {
+                return;
+            }
+            QHash<QString, unsigned> applied;
+            for (const auto& hash : track_hashes) {
+                local_library_->storeRating(hash.toStdString(), false, rating);
+                applied.insert(hash, rating);
+            }
+            for (const auto& tab : list_tabs_) {
+                tab->model->applyRatings(applied);
+            }
+        });
+        auto* album_rate = album_rate_menu->addAction(label);
+        album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
+        connect(album_rate, &QAction::triggered, this, [this, album_hashes, rating] {
+            if (local_library_ == nullptr) {
+                return;
+            }
+            for (const auto& hash : album_hashes) {
+                local_library_->storeRating(hash.toStdString(), true, rating);
+            }
+        });
+    }
 }
 
 void BenchMainWindow::showFolderContextMenu(const QPoint& position) {

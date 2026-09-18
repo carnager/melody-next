@@ -32,6 +32,7 @@ inline constexpr std::array<TrackColumnSpec, local_column_count> track_column_sp
     {local_album_column, "album", "Album", 160, 72},
     {local_date_column, "date", "Date", 64, 52},
     {local_length_column, "length", "Length", 68, 56},
+    {local_rating_column, "rating", "Rating", 84, 56},
 }};
 
 [[nodiscard]] QString trackColumnId(int logical);

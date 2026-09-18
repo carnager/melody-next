@@ -6,6 +6,7 @@
 #include "uicommon/track_row_roles.hpp"
 
 #include <QImage>
+#include <QSet>
 
 #include <algorithm>
 #include <cstddef>
@@ -123,6 +124,42 @@ void LocalListModel::applyTechnicals(const std::string& raw_path,
             row.technicals = technicals;
         }
     }
+}
+
+void LocalListModel::applyRatings(const QHash<QString, unsigned>& ratings) {
+    bool changed = false;
+    for (auto& row : rows_) {
+        const auto hash = QString::fromStdString(row.rating_hash);
+        if (hash.isEmpty() || !ratings.contains(hash)) {
+            continue;
+        }
+        const auto rating = ratings.value(hash);
+        if (row.rating != rating) {
+            row.rating = rating;
+            changed = true;
+        }
+    }
+    if (changed && !rows_.empty()) {
+        emit dataChanged(index(0, local_rating_column),
+                         index(static_cast<int>(rows_.size()) - 1, local_rating_column),
+                         {Qt::DisplayRole, ui::track_rating_role});
+    }
+}
+
+QStringList LocalListModel::ratingHashes() const {
+    QStringList hashes;
+    QSet<QString> unique;
+    for (const auto& row : rows_) {
+        if (row.rating_hash.empty()) {
+            continue;
+        }
+        const auto hash = QString::fromStdString(row.rating_hash);
+        if (!unique.contains(hash)) {
+            unique.insert(hash);
+            hashes.push_back(hash);
+        }
+    }
+    return hashes;
 }
 
 void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row,
@@ -825,6 +862,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return display_utf8(row.album_artist.empty() ? row.artist : row.album_artist);
     case ui::track_priority_role:
         return {};
+    case ui::track_rating_role:
+        return QVariant::fromValue(row.rating);
     case ui::track_album_artwork_role:
         return QVariant::fromValue(artwork_.value(groupKey(index.row())));
     case ui::track_album_artwork_key_role:
@@ -856,6 +895,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
             return display_utf8(row.date);
         case local_length_column:
             return row.duration_ms ? format_duration(*row.duration_ms) : QString{};
+        case local_rating_column:
+            return ui::track_rating_stars(row.rating);
         default:
             return {};
         }

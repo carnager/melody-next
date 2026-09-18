@@ -160,6 +160,19 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void moveQueueItem(int row, int target_row);
     Q_INVOKABLE void moveQueueItems(const QVariantList& rows, int insertion_row);
     Q_INVOKABLE void setQueuePriority(const QVariantList& rows, int priority);
+    // ADR-0179: 0-10 track/album ratings. The backend is picked from the
+    // advertised commands: Melody's native rate extension when getrating is
+    // advertised, the interoperable rating sticker otherwise.
+    [[nodiscard]] bool supportsRatings() const {
+        return supportsCommand(QStringLiteral("getrating")) ||
+               supportsCommand(QStringLiteral("sticker"));
+    }
+    [[nodiscard]] bool supportsAlbumRatings() const {
+        return supportsCommand(QStringLiteral("albumrate"));
+    }
+    Q_INVOKABLE void setTrackRating(const QVariantList& rows, int rating);
+    Q_INVOKABLE void setMelodyAlbumRating(const QString& album_artist, const QString& album,
+                                          const QString& date, int rating);
     Q_INVOKABLE void searchLibrary(const QString& query);
     Q_INVOKABLE void continueSearch();
     Q_INVOKABLE void addLibraryItem(int row);

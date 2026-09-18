@@ -185,6 +185,11 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] QVariantList selectedMpdQueueRows() const;
     [[nodiscard]] QStringList selectedMpdQueueUris() const;
     void refreshMpdPriorityMenu();
+    // ADR-0179: shared star-rating submenus for both authorities, and the
+    // debounced local rating reload from the content-identity store.
+    void refreshMpdRateMenu();
+    void addLocalRateMenus(QTableView* view, ListTab* source_tab);
+    void refreshLocalRatings();
 
     void buildMpdPlaylists();
     [[nodiscard]] MpdPlaylistTab* mpdPlaylistTabForWidget(QWidget* widget) const;
@@ -488,6 +493,7 @@ class BenchMainWindow final : public QMainWindow {
     QToolButton* mpd_replaygain_button_{nullptr};
     QActionGroup* mpd_replaygain_group_{nullptr};
     QMenu* mpd_priority_menu_{nullptr};
+    QMenu* mpd_rate_menu_{nullptr};
     QSlider* volume_{nullptr};
     QToolButton* device_button_{nullptr};
     QMenu* device_menu_{nullptr};

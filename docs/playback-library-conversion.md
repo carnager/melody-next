@@ -343,6 +343,17 @@ than path alone, survive Trackbench file operations, and are importable/
 exportable. Define when a “play” counts (time/percentage thresholds) and when a
 skip counts. Never write statistics into audio tags without explicit opt-in.
 
+Ratings are implemented (ADR-0179): an integer 0-10 shown as five stars in
+half-star steps. Local track and album ratings live in the `local_ratings`
+table keyed by sha256 content-identity hashes byte-compatible with the Melody
+server, so they survive rescans, renames, and moves, and a future server
+synchronization is a pure key join. Retagging the identity fields (album
+artist, album, title, track number, date) detaches a rating, exactly as it
+does in Melody. Ratings are never read from or written to file tags today;
+the recorded future path is an explicit opt-in write through the previewed
+metadata plan workflow using the established per-container conventions
+(ID3v2 `POPM`, Vorbis-family `RATING`).
+
 ## Converter
 
 Trackbench's converter accepts selected logical tracks and a named preset:

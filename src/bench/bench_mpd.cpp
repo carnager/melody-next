@@ -196,6 +196,23 @@ void BenchMainWindow::buildMpdStatusControls() {
         });
     }
 
+    mpd_rate_menu_ = new QMenu(QStringLiteral("Rate"), this);
+    mpd_rate_menu_->setObjectName(QStringLiteral("bench-mpd-rate-menu"));
+    mpd_rate_menu_->menuAction()->setObjectName(QStringLiteral("action-mpd-queue-rate"));
+    auto* rate_group = new QActionGroup(mpd_rate_menu_);
+    rate_group->setExclusive(true);
+    for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
+        auto* action = mpd_rate_menu_->addAction(
+            rating == 0U ? QStringLiteral("Unrate") : QString{}.fill(QChar{0x2605}, rating / 2U));
+        action->setObjectName(QStringLiteral("action-mpd-queue-rate-%1").arg(rating));
+        action->setCheckable(true);
+        action->setData(rating);
+        rate_group->addAction(action);
+        connect(action, &QAction::triggered, this, [this, rating] {
+            mpd_controller_->setTrackRating(selectedMpdQueueRows(), static_cast<int>(rating));
+        });
+    }
+
     mpd_replaygain_button_ = new QToolButton(statusBar());
     mpd_replaygain_button_->setObjectName(QStringLiteral("bench-mpd-replaygain"));
     mpd_replaygain_button_->setIcon(QIcon::fromTheme(
@@ -1247,6 +1264,35 @@ void BenchMainWindow::refreshMpdPriorityMenu() {
         const QSignalBlocker blocker{action};
         action->setChecked(priorities_match && selected_priority &&
                            action->data().toUInt() == *selected_priority);
+    }
+}
+
+void BenchMainWindow::refreshMpdRateMenu() {
+    if (mpd_rate_menu_ == nullptr) {
+        return;
+    }
+    const auto rows = selectedMpdQueueRows();
+    const auto ready = !rows.isEmpty() && mpd_controller_->connected() &&
+                       !mpd_controller_->commandBusy() && mpd_controller_->supportsRatings();
+    mpd_rate_menu_->setEnabled(ready);
+    std::optional<unsigned> selected_rating;
+    bool ratings_match = !rows.isEmpty();
+    for (const auto& value : rows) {
+        const auto rating = mpd_queue_view_->model()
+                                ->index(value.toInt(), 0)
+                                .data(quick::MpdQueueModel::RatingRole)
+                                .toUInt();
+        if (!selected_rating) {
+            selected_rating = rating;
+        } else if (*selected_rating != rating) {
+            ratings_match = false;
+            break;
+        }
+    }
+    for (auto* action : mpd_rate_menu_->actions()) {
+        const QSignalBlocker blocker{action};
+        action->setChecked(ratings_match && selected_rating &&
+                           action->data().toUInt() == *selected_rating);
     }
 }
 

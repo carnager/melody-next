@@ -138,7 +138,12 @@ Reference: [desktop integration](feature-matrix.md).
 
 ## 7. Listening history and album-oriented playback
 
-- [ ] Play counts, last-played timestamps, and ratings.
+- [x] Track and album ratings on the shared 0-10 star scale (ADR-0179):
+  MPD rating stickers, Melody's native rating commands, and a local
+  content-identity store that survives rescans and moves.
+- [ ] Play counts and last-played timestamps.
+- [ ] Optional opt-in writing of ratings into file tags (POPM, `RATING`)
+  through the previewed metadata write workflow.
 - [ ] Restore playback position without automatically starting playback.
 - [ ] Shuffle albums while keeping each album's tracks in order.
 - [ ] Use listening statistics in queries, such as finding unplayed albums.

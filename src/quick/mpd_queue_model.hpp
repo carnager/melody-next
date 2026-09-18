@@ -35,6 +35,7 @@ class MpdQueueModel final : public QAbstractTableModel {
         PriorityRole = ui::track_priority_role,
         AlbumArtworkRole = ui::track_album_artwork_role,
         AlbumArtworkUriRole = ui::track_album_artwork_key_role,
+        RatingRole = ui::track_rating_role,
     };
     static_assert(column_count == ui::track_column_count);
 
@@ -65,6 +66,10 @@ class MpdQueueModel final : public QAbstractTableModel {
     void replaceTracks(std::vector<mpd::Track> tracks);
     void setCurrentSongId(std::optional<std::uint32_t> song_id);
     void setArtworkEnabled(bool enabled);
+    // ADR-0179: per-URI sticker ratings from the session snapshot. A track's
+    // own Melody X-Rating line wins over the sticker map.
+    void setStickerRatings(QHash<QString, unsigned> ratings);
+    [[nodiscard]] unsigned ratingAt(int row) const;
 
   public slots:
     void acceptArtwork(quint64 token, const QImage& image);
@@ -84,6 +89,7 @@ class MpdQueueModel final : public QAbstractTableModel {
     void requestNextArtwork();
 
     std::vector<mpd::Track> tracks_;
+    QHash<QString, unsigned> sticker_ratings_;
     std::optional<std::uint32_t> current_song_id_;
     QHash<QString, AlbumArtwork> album_artwork_;
     std::optional<quint64> active_artwork_token_;

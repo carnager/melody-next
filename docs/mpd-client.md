@@ -97,6 +97,14 @@ feature flags. UI actions are shown or enabled from capabilities, not from a
 hard-coded server version. An `ACK` for an advertised optional command becomes
 a visible server/protocol error and may downgrade that session capability.
 
+Track ratings (ADR-0179) follow the same rule: an advertised `sticker`
+command enables the interoperable 0-10 `rating` song sticker used by other
+MPD clients, loaded in bulk with `sticker find song "" rating` and refreshed
+on the sticker idle event. An advertised `getrating` switches the backend to
+Melody's native rating extension instead; `albumrate` additionally enables
+album ratings. The queue's Rate menu and the optional Rating column stay
+hidden or disabled when neither backend is advertised.
+
 ## Remote track projection
 
 ```text

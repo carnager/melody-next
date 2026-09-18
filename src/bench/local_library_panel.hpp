@@ -50,10 +50,16 @@ class LocalLibraryPanel final : public QWidget {
     // deduplicated by path) and emits searchCommitted. Enter triggers it.
     void commitSearch();
     void locatePath(std::string raw_path, bool album);
+    // ADR-0179: content-identity rating I/O on the library's worker queue.
+    // ready receives one 0-10 value per requested hash, in order.
+    void requestRatings(std::vector<std::string> hashes,
+                        std::function<void(std::vector<unsigned>)> ready);
+    void storeRating(std::string hash, bool album, unsigned rating);
 
   signals:
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
+    void ratingsChanged();
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -64,6 +70,7 @@ class LocalLibraryPanel final : public QWidget {
         std::vector<persistence::LibraryRoot> roots;
         std::vector<std::string> paths;
         std::vector<LocalTrackRow> rows;
+        std::vector<unsigned> ratings;
         QString error;
         std::size_t unavailable{0};
     };

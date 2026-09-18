@@ -9,6 +9,7 @@
 #include <poll.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <functional>
@@ -1291,6 +1292,267 @@ core::Result<void> Client::set_priority_ids(const std::span<const std::uint32_t>
         return std::unexpected(implementation_->take_error("finish prioid command list"));
     }
     return {};
+}
+
+namespace {
+
+[[nodiscard]] std::optional<core::Error> invalid_rating(const unsigned rating) {
+    if (rating > maximum_rating) {
+        return core::Error{.code = core::ErrorCode::invalid_argument,
+                           .message = "track and album ratings must be between 0 and 10",
+                           .context = {}};
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+core::Result<void> Client::set_sticker_rating(const std::string_view uri, const unsigned rating) {
+    if (auto error = invalid_rating(rating)) {
+        return std::unexpected(std::move(*error));
+    }
+    if (uri.empty() || uri.contains('\0')) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "MPD sticker URI cannot be empty or "
+                                                      "contain NUL",
+                                           .context = {}});
+    }
+    const std::string uri_text{uri};
+    auto* connection = implementation_->connection.get();
+    if (rating == 0U) {
+        if (!mpd_run_sticker_delete(connection, "song", uri_text.c_str(), "rating")) {
+            auto error = implementation_->take_error("sticker delete");
+            // Deleting a sticker that never existed is already the requested
+            // outcome, not a failure.
+            if (error.code == core::ErrorCode::not_found) {
+                return {};
+            }
+            return std::unexpected(std::move(error));
+        }
+        return {};
+    }
+    const auto value = std::to_string(rating);
+    if (!mpd_run_sticker_set(connection, "song", uri_text.c_str(), "rating", value.c_str())) {
+        return std::unexpected(implementation_->take_error("sticker set"));
+    }
+    return {};
+}
+
+core::Result<void> Client::set_sticker_ratings(const std::span<const std::string> uris,
+                                               const unsigned rating) {
+    constexpr std::size_t maximum_batch_size = 4'096U;
+    if (uris.empty() || uris.size() > maximum_batch_size) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::limit_exceeded,
+            .message = "MPD sticker rating batches must contain between 1 and 4096 items",
+            .context = {},
+        });
+    }
+    if (auto error = invalid_rating(rating)) {
+        return std::unexpected(std::move(*error));
+    }
+    std::unordered_set<std::string_view> unique_uris;
+    unique_uris.reserve(uris.size());
+    for (const auto& uri : uris) {
+        if (uri.empty() || uri.contains('\0')) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                               .message = "MPD sticker URIs cannot be empty or "
+                                                          "contain NUL",
+                                               .context = {}});
+        }
+        if (!unique_uris.insert(uri).second) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = "MPD sticker rating batches must address each URI at most once",
+                .context = {},
+            });
+        }
+    }
+    if (rating == 0U) {
+        // A command list would abort at the first song that has no sticker,
+        // leaving the rest rated; unrate one by one and tolerate not-found.
+        for (const auto& uri : uris) {
+            if (auto result = set_sticker_rating(uri, 0U); !result) {
+                return result;
+            }
+        }
+        return {};
+    }
+    if (uris.size() == 1U) {
+        return set_sticker_rating(uris.front(), rating);
+    }
+
+    const auto value = std::to_string(rating);
+    auto* connection = implementation_->connection.get();
+    if (!mpd_command_list_begin(connection, false)) {
+        return std::unexpected(implementation_->take_error("begin sticker command list"));
+    }
+    for (const auto& uri : uris) {
+        if (!mpd_send_sticker_set(connection, "song", uri.c_str(), "rating", value.c_str())) {
+            return std::unexpected(implementation_->take_error("send sticker command list"));
+        }
+    }
+    if (!mpd_command_list_end(connection) || !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("finish sticker command list"));
+    }
+    return {};
+}
+
+core::Result<std::vector<TrackRating>> Client::sticker_ratings() {
+    if (!mpd_send_command(implementation_->connection.get(), "sticker", "find", "song", "",
+                          "rating", nullptr)) {
+        return std::unexpected(implementation_->take_error("send sticker find"));
+    }
+    auto pairs = implementation_->receive_pairs("receive sticker find");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    return project_sticker_ratings(*pairs);
+}
+
+core::Result<void> Client::set_melody_track_rating(const std::uint64_t song_id,
+                                                   const unsigned rating) {
+    if (auto error = invalid_rating(rating)) {
+        return std::unexpected(std::move(*error));
+    }
+    auto* connection = implementation_->connection.get();
+    const auto id_text = std::to_string(song_id);
+    const auto rating_text = std::to_string(rating);
+    if (!mpd_send_command(connection, "rate", id_text.c_str(), rating_text.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("rate"));
+    }
+    return {};
+}
+
+core::Result<void> Client::set_melody_track_ratings(const std::span<const std::uint64_t> song_ids,
+                                                    const unsigned rating) {
+    constexpr std::size_t maximum_batch_size = 4'096U;
+    if (song_ids.empty() || song_ids.size() > maximum_batch_size) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::limit_exceeded,
+            .message = "Melody rating batches must contain between 1 and 4096 items",
+            .context = {},
+        });
+    }
+    if (auto error = invalid_rating(rating)) {
+        return std::unexpected(std::move(*error));
+    }
+    std::unordered_set<std::uint64_t> unique_ids;
+    unique_ids.reserve(song_ids.size());
+    for (const auto song_id : song_ids) {
+        if (!unique_ids.insert(song_id).second) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = "Melody rating batches must address each song ID at most once",
+                .context = {},
+            });
+        }
+    }
+    if (song_ids.size() == 1U) {
+        return set_melody_track_rating(song_ids.front(), rating);
+    }
+
+    auto* connection = implementation_->connection.get();
+    const auto rating_text = std::to_string(rating);
+    if (!mpd_command_list_begin(connection, false)) {
+        return std::unexpected(implementation_->take_error("begin rate command list"));
+    }
+    for (const auto song_id : song_ids) {
+        const auto id_text = std::to_string(song_id);
+        if (!mpd_send_command(connection, "rate", id_text.c_str(), rating_text.c_str(),
+                              nullptr)) {
+            return std::unexpected(implementation_->take_error("send rate command list"));
+        }
+    }
+    if (!mpd_command_list_end(connection) || !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("finish rate command list"));
+    }
+    return {};
+}
+
+namespace {
+
+[[nodiscard]] std::optional<core::Error> invalid_album_key(const MelodyAlbumKey& key) {
+    if (key.album_artist.empty() || key.album.empty()) {
+        return core::Error{.code = core::ErrorCode::invalid_argument,
+                           .message = "Melody album ratings need a non-empty album artist "
+                                      "and album",
+                           .context = {}};
+    }
+    for (const auto* part : {&key.album_artist, &key.album, &key.date}) {
+        if (part->contains('\0')) {
+            return core::Error{.code = core::ErrorCode::invalid_argument,
+                               .message = "Melody album identity cannot contain NUL",
+                               .context = {}};
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+core::Result<void> Client::set_melody_album_rating(const MelodyAlbumKey& key,
+                                                   const unsigned rating) {
+    if (auto error = invalid_rating(rating)) {
+        return std::unexpected(std::move(*error));
+    }
+    if (auto error = invalid_album_key(key)) {
+        return std::unexpected(std::move(*error));
+    }
+    auto* connection = implementation_->connection.get();
+    const auto rating_text = std::to_string(rating);
+    if (!mpd_send_command(connection, "albumrate", key.album_artist.c_str(), key.album.c_str(),
+                          key.date.c_str(), rating_text.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("albumrate"));
+    }
+    return {};
+}
+
+core::Result<MelodyAlbumRating> Client::melody_album_rating(const MelodyAlbumKey& key) {
+    if (auto error = invalid_album_key(key)) {
+        return std::unexpected(std::move(*error));
+    }
+    if (!mpd_send_command(implementation_->connection.get(), "getalbumrating",
+                          key.album_artist.c_str(), key.album.c_str(), key.date.c_str(),
+                          nullptr)) {
+        return std::unexpected(implementation_->take_error("send getalbumrating"));
+    }
+    auto pairs = implementation_->receive_pairs("receive getalbumrating");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    MelodyAlbumRating result;
+    for (const auto& pair : *pairs) {
+        if (ascii_case_equal(pair.name, "rating")) {
+            unsigned value = 0U;
+            const auto* begin = pair.value.data();
+            const auto* end = begin + pair.value.size();
+            const auto [parsed, error] = std::from_chars(begin, end, value);
+            if (error != std::errc{} || parsed != end || value > maximum_rating) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::backend,
+                                .message = "Melody returned an invalid album rating",
+                                .context = {}});
+            }
+            result.rating = value;
+        } else if (ascii_case_equal(pair.name, "computed")) {
+            double value = 0.0;
+            const auto* begin = pair.value.data();
+            const auto* end = begin + pair.value.size();
+            const auto [parsed, error] = std::from_chars(begin, end, value);
+            if (error != std::errc{} || parsed != end || value < 0.0 ||
+                value > static_cast<double>(maximum_rating)) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::backend,
+                                .message = "Melody returned an invalid computed album rating",
+                                .context = {}});
+            }
+            result.computed = value;
+        }
+    }
+    return result;
 }
 
 core::Result<void> Client::seek_id(const std::uint32_t song_id,

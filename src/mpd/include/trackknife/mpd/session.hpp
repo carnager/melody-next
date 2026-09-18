@@ -34,6 +34,9 @@ struct SessionSnapshot {
     std::vector<Track> current_song;
     std::vector<Track> queue;
     std::vector<Output> outputs;
+    // Per-URI 0-10 track ratings from the server's sticker database; empty
+    // when the server does not advertise the sticker command.
+    std::vector<TrackRating> sticker_ratings;
 };
 
 enum class SessionCommandKind {
@@ -76,12 +79,16 @@ enum class SessionCommandKind {
     seek,
     volume,
     output_enabled,
+    sticker_rating,
+    melody_rating,
+    melody_album_rate,
+    melody_album_rating,
 };
 
 using SessionCommandPayload =
     std::variant<std::monostate, std::vector<DatabaseEntry>, std::vector<Track>,
                  std::vector<StoredPlaylist>, std::vector<std::string>, std::vector<std::byte>,
-                 LibrarySearchResult, std::vector<ArtistAlbumCount>>;
+                 LibrarySearchResult, std::vector<ArtistAlbumCount>, MelodyAlbumRating>;
 
 struct SessionCommandResult {
     std::uint64_t id{0U};
@@ -129,6 +136,15 @@ class Session final {
     [[nodiscard]] std::uint64_t move_queue_ids(std::vector<QueueMove> moves);
     [[nodiscard]] std::uint64_t set_queue_priority(std::vector<std::uint32_t> song_ids,
                                                    unsigned priority);
+    // Ratings on the interoperable 0-10 scale (ADR-0179). The adapter picks
+    // the backend from advertised capabilities: sticker for stock MPD,
+    // Melody's native commands when `getrating` is advertised.
+    [[nodiscard]] std::uint64_t set_sticker_ratings(std::vector<std::string> uris,
+                                                    unsigned rating);
+    [[nodiscard]] std::uint64_t set_melody_track_ratings(std::vector<std::uint64_t> song_ids,
+                                                         unsigned rating);
+    [[nodiscard]] std::uint64_t set_melody_album_rating(MelodyAlbumKey key, unsigned rating);
+    [[nodiscard]] std::uint64_t melody_album_rating(MelodyAlbumKey key);
     [[nodiscard]] std::uint64_t update_database(std::string uri);
     [[nodiscard]] std::uint64_t newest_root_values(std::string tag, unsigned track_limit);
     [[nodiscard]] std::uint64_t browse(std::string uri = {});

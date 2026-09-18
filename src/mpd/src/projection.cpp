@@ -153,6 +153,16 @@ core::Result<std::vector<Track>> project_tracks(std::span<const Pair> pairs) {
             if (!current.priority || *current.priority > 255U) {
                 return std::unexpected(malformed("MPD returned an invalid queue priority"));
             }
+        } else if (ascii_case_equal(pair.name, "X-Rating")) {
+            current.rating = parse_unsigned<unsigned>(pair.value);
+            if (!current.rating || *current.rating > 10U) {
+                return std::unexpected(malformed("Melody returned an invalid track rating"));
+            }
+        } else if (ascii_case_equal(pair.name, "X-SongId")) {
+            current.melody_song_id = parse_unsigned<std::uint64_t>(pair.value);
+            if (!current.melody_song_id) {
+                return std::unexpected(malformed("Melody returned an invalid database song ID"));
+            }
         } else if (ascii_case_equal(pair.name, "Range") || ascii_case_equal(pair.name, "Added")) {
             current.unknown_structural_pairs.push_back(pair);
         } else {
@@ -164,6 +174,40 @@ core::Result<std::vector<Track>> project_tracks(std::span<const Pair> pairs) {
         finish_track(current, metadata, tracks);
     }
     return tracks;
+}
+
+core::Result<std::vector<TrackRating>> project_sticker_ratings(std::span<const Pair> pairs) {
+    std::vector<TrackRating> ratings;
+    std::string current_uri;
+    for (const auto& pair : pairs) {
+        if (ascii_case_equal(pair.name, "file")) {
+            if (pair.value.empty()) {
+                return std::unexpected(
+                    malformed("MPD returned a sticker entry with an empty file URI"));
+            }
+            current_uri = pair.value;
+            continue;
+        }
+        if (!ascii_case_equal(pair.name, "sticker")) {
+            continue;
+        }
+        if (current_uri.empty()) {
+            return std::unexpected(
+                malformed("MPD sticker response did not begin with a file pair"));
+        }
+        const std::string_view value = pair.value;
+        constexpr std::string_view prefix = "rating=";
+        if (!value.starts_with(prefix)) {
+            continue;
+        }
+        // Foreign clients own their sticker values; anything outside the
+        // interoperable 0-10 integer scale is skipped, not a failure.
+        const auto rating = parse_unsigned<unsigned>(value.substr(prefix.size()));
+        if (rating && *rating >= 1U && *rating <= 10U) {
+            ratings.push_back({.uri = current_uri, .rating = *rating});
+        }
+    }
+    return ratings;
 }
 
 core::Result<std::vector<DatabaseEntry>>

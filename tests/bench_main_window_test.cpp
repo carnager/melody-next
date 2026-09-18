@@ -592,6 +592,8 @@ void BenchMainWindowTest::mpdSearchProjectsControllerResults() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     field->setText(QStringLiteral("S"));
@@ -650,6 +652,8 @@ void BenchMainWindowTest::mpdSearchProjectsControllerResults() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     QTRY_VERIFY(!artwork_requests.isEmpty());
@@ -911,6 +915,8 @@ void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = 192U,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     queue->scrollTo(queue_model->index(0, 0));
@@ -970,6 +976,8 @@ void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
                                     .last_modified = std::nullopt,
                                     .audio_format = std::nullopt,
                                     .priority = std::nullopt,
+                                    .rating = std::nullopt,
+                                    .melody_song_id = std::nullopt,
                                     .unknown_structural_pairs = {},
                                 }},
                                 {});
@@ -1032,6 +1040,8 @@ void BenchMainWindowTest::mpdGoToArtistAlbumNavigatesLibrary() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     queue->setCurrentIndex(queue_model->index(0, 0));
@@ -1064,6 +1074,8 @@ void BenchMainWindowTest::mpdGoToArtistAlbumNavigatesLibrary() {
                                     .last_modified = std::nullopt,
                                     .audio_format = std::nullopt,
                                     .priority = std::nullopt,
+                                    .rating = std::nullopt,
+                                    .melody_song_id = std::nullopt,
                                     .unknown_structural_pairs = {},
                                 }},
                                 {});
@@ -1099,6 +1111,8 @@ void BenchMainWindowTest::mpdGoToArtistAlbumNavigatesLibrary() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     queue->setCurrentIndex(queue_model->index(0, 0));
@@ -1167,6 +1181,8 @@ void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     }});
     emit controller->storedPlaylistLoaded(QStringLiteral("Road mix"));

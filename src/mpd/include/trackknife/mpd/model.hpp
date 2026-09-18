@@ -21,6 +21,37 @@ struct ArtistAlbumCount {
     std::size_t albums{0};
 };
 
+// Interoperable rating vocabulary (ADR-0179): an integer 0-10 shows as five
+// stars in half-star steps; 0 means unrated and deletes the stored value.
+inline constexpr unsigned maximum_rating = 10U;
+
+struct TrackRating {
+    std::string uri;
+    unsigned rating{0U};
+
+    friend bool operator==(const TrackRating&, const TrackRating&) = default;
+};
+
+// Melody album rating identity: the literal AlbumArtist/Album/Date strings.
+// An empty date is part of the identity and must be sent verbatim.
+struct MelodyAlbumKey {
+    std::string album_artist;
+    std::string album;
+    std::string date;
+
+    friend bool operator==(const MelodyAlbumKey&, const MelodyAlbumKey&) = default;
+};
+
+struct MelodyAlbumRating {
+    // The user-set album rating; 0 when unset.
+    unsigned rating{0U};
+    // Mean of the album's track ratings, reported only once the server's
+    // rated-track threshold is met; 0.0 otherwise.
+    double computed{0.0};
+
+    friend bool operator==(const MelodyAlbumRating&, const MelodyAlbumRating&) = default;
+};
+
 struct Pair {
     std::string name;
     std::string value;
@@ -99,6 +130,10 @@ struct Track {
     std::optional<std::string> last_modified;
     std::optional<std::string> audio_format;
     std::optional<unsigned> priority;
+    // Melody extension projection: the 0-10 track rating and the server
+    // database song id that the rate command addresses. Absent on stock MPD.
+    std::optional<unsigned> rating;
+    std::optional<std::uint64_t> melody_song_id;
     std::vector<Pair> unknown_structural_pairs;
 
     friend bool operator==(const Track&, const Track&) = default;

@@ -34,6 +34,8 @@ namespace {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     };
 }
@@ -60,6 +62,8 @@ namespace {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     };
 }
@@ -103,6 +107,8 @@ void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = 192U,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     };
     model.replaceTracks({std::move(track)});
@@ -159,6 +165,8 @@ void MpdQueueModelTest::avoidsResetForAnUnchangedSnapshot() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     });
     model.replaceTracks(tracks);

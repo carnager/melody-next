@@ -129,6 +129,22 @@ class Client final {
     [[nodiscard]] core::Result<void> set_priority_id(std::uint32_t song_id, unsigned priority);
     [[nodiscard]] core::Result<void> set_priority_ids(std::span<const std::uint32_t> song_ids,
                                                       unsigned priority);
+    // Track ratings on the interoperable 0-10 scale (ADR-0179). Stock MPD
+    // stores the "rating" song sticker; 0 deletes it and unrating an unrated
+    // song succeeds. Callers gate on the advertised `sticker` command.
+    [[nodiscard]] core::Result<void> set_sticker_rating(std::string_view uri, unsigned rating);
+    [[nodiscard]] core::Result<void> set_sticker_ratings(std::span<const std::string> uris,
+                                                         unsigned rating);
+    [[nodiscard]] core::Result<std::vector<TrackRating>> sticker_ratings();
+    // Melody's native rating extension, gated on the advertised `getrating`
+    // command. Track identity is the X-SongId database id, never the queue id.
+    [[nodiscard]] core::Result<void> set_melody_track_rating(std::uint64_t song_id,
+                                                             unsigned rating);
+    [[nodiscard]] core::Result<void>
+    set_melody_track_ratings(std::span<const std::uint64_t> song_ids, unsigned rating);
+    [[nodiscard]] core::Result<void> set_melody_album_rating(const MelodyAlbumKey& key,
+                                                             unsigned rating);
+    [[nodiscard]] core::Result<MelodyAlbumRating> melody_album_rating(const MelodyAlbumKey& key);
     [[nodiscard]] core::Result<void> seek_id(std::uint32_t song_id,
                                              std::chrono::milliseconds position);
     [[nodiscard]] core::Result<void> set_volume(unsigned volume);

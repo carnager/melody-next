@@ -150,6 +150,8 @@ void search_results_sort_by_release_track_order() {
             .last_modified = std::nullopt,
             .audio_format = std::nullopt,
             .priority = std::nullopt,
+            .rating = std::nullopt,
+            .melody_song_id = std::nullopt,
             .unknown_structural_pairs = {},
         };
     };
@@ -302,6 +304,44 @@ void local_root_mapping_is_literal_and_contained() {
             "invalid protocol UTF-8 must not become a guessed local path");
 }
 
+void ratings_project_from_melody_lines_and_sticker_entries() {
+    using trackknife::mpd::Pair;
+    const std::vector<Pair> song_pairs{
+        {"file", "Artist/Album/01 - Song.flac"},
+        {"Title", "Song"},
+        {"X-Rating", "8"},
+        {"X-SongId", "4711"},
+        {"X-AlbumId", "12"},
+        {"file", "Artist/Album/02 - Other.flac"},
+        {"Title", "Other"},
+    };
+    const auto songs = trackknife::mpd::project_tracks(song_pairs);
+    require(songs.has_value() && songs->size() == 2U, "Melody song lines must project");
+    require(songs->front().rating == 8U && songs->front().melody_song_id == 4711U,
+            "Melody rating and database song id must be typed");
+    require(!songs->back().rating && !songs->back().melody_song_id,
+            "unrated songs must stay unrated");
+    require(songs->front().metadata.first("X-Rating") == std::nullopt,
+            "projected extension lines must not leak into tag metadata");
+    require(!trackknife::mpd::project_tracks(
+                std::vector<Pair>{{"file", "a.flac"}, {"X-Rating", "11"}}),
+            "a rating outside 0-10 must fail projection");
+
+    const std::vector<Pair> sticker_pairs{
+        {"file", "a.flac"},          {"sticker", "rating=10"}, {"file", "b.flac"},
+        {"sticker", "rating=text"},  {"file", "c.flac"},       {"sticker", "rating=99"},
+        {"file", "d.flac"},          {"sticker", "playcount=4"},
+    };
+    const auto ratings = trackknife::mpd::project_sticker_ratings(sticker_pairs);
+    require(ratings.has_value() && ratings->size() == 1U,
+            "only interoperable rating stickers may project");
+    require(ratings->front().uri == "a.flac" && ratings->front().rating == 10U,
+            "sticker ratings must keep their URI and value");
+    require(!trackknife::mpd::project_sticker_ratings(
+                std::vector<Pair>{{"sticker", "rating=5"}}),
+            "sticker entries without a file identity must fail");
+}
+
 void malformed_responses_fail() {
     using trackknife::mpd::Pair;
     require(!trackknife::mpd::project_tracks(std::vector<Pair>{{"Artist", "orphan"}}),
@@ -328,6 +368,7 @@ int main() {
     queue_changes_reconstruct_or_reject_the_new_shape();
     output_pairs_keep_stock_and_melody_state();
     local_root_mapping_is_literal_and_contained();
+    ratings_project_from_melody_lines_and_sticker_entries();
     malformed_responses_fail();
     return EXIT_SUCCESS;
 }

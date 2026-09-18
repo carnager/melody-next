@@ -23,6 +23,9 @@ namespace trackknife::mpd {
 namespace {
 
 constexpr std::uint32_t full_refresh = 1U << 31U;
+// Melody rating mutations change listing contents without bumping the queue
+// version, so their refresh must bypass the version-compatible shortcut.
+constexpr std::uint32_t rating_refresh = 1U << 30U;
 
 void invoke_safely(const std::function<void(const SessionState&)>& callback,
                    const SessionState& value) noexcept {
@@ -129,6 +132,9 @@ struct Session::Impl {
         std::optional<unsigned> queue_position;
         unsigned query_offset{0U};
         unsigned query_limit{200U};
+        unsigned rating{0U};
+        std::vector<std::uint64_t> melody_song_ids;
+        MelodyAlbumKey album_rating_key;
     };
 
     static constexpr std::size_t maximum_pending_commands = 64U;
@@ -141,7 +147,8 @@ struct Session::Impl {
                kind == SessionCommandKind::artwork || kind == SessionCommandKind::database_search ||
                kind == SessionCommandKind::database_album ||
                kind == SessionCommandKind::stored_playlists ||
-               kind == SessionCommandKind::stored_playlist;
+               kind == SessionCommandKind::stored_playlist ||
+               kind == SessionCommandKind::melody_album_rating;
     }
 
     Profile profile;
@@ -435,6 +442,21 @@ struct Session::Impl {
             return without_payload(client.set_volume(command.volume));
         case SessionCommandKind::output_enabled:
             return without_payload(client.set_output_enabled(command.object_id, command.enabled));
+        case SessionCommandKind::sticker_rating:
+            return without_payload(client.set_sticker_ratings(command.uris, command.rating));
+        case SessionCommandKind::melody_rating:
+            return without_payload(
+                client.set_melody_track_ratings(command.melody_song_ids, command.rating));
+        case SessionCommandKind::melody_album_rate:
+            return without_payload(
+                client.set_melody_album_rating(command.album_rating_key, command.rating));
+        case SessionCommandKind::melody_album_rating: {
+            auto result = client.melody_album_rating(command.album_rating_key);
+            if (!result) {
+                return std::unexpected(std::move(result.error()));
+            }
+            return SessionCommandPayload{*result};
+        }
         }
         return std::unexpected(core::Error{.code = core::ErrorCode::backend,
                                            .message = "Unknown MPD session command",
@@ -492,6 +514,13 @@ struct Session::Impl {
             return static_cast<std::uint32_t>(IdleEvent::mixer);
         case SessionCommandKind::output_enabled:
             return static_cast<std::uint32_t>(IdleEvent::output);
+        case SessionCommandKind::sticker_rating:
+            return static_cast<std::uint32_t>(IdleEvent::sticker);
+        case SessionCommandKind::melody_rating:
+        case SessionCommandKind::melody_album_rate:
+            return rating_refresh;
+        case SessionCommandKind::melody_album_rating:
+            return 0U;
         }
         return full_refresh;
     }
@@ -526,16 +555,21 @@ struct Session::Impl {
             }
             snapshot.current_song = std::move(*current);
         }
-        if (all || (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U) {
+        // Melody ratings ride on listing lines without bumping the queue
+        // version, so a rating refresh must bypass the reconcile shortcuts.
+        const bool rating_forced = (requested & rating_refresh) != 0U &&
+                                   snapshot.capabilities.supports_command("getrating");
+        if (all || rating_forced ||
+            (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U) {
             std::optional<std::vector<Track>> reconciled;
             const auto current_queue_version = snapshot.status.queue_version;
             const auto current_queue_length = snapshot.status.queue_length;
             const bool same_compatible_version =
-                !all && previous_queue_version && current_queue_version && current_queue_length &&
-                *previous_queue_version == *current_queue_version &&
+                !all && !rating_forced && previous_queue_version && current_queue_version &&
+                current_queue_length && *previous_queue_version == *current_queue_version &&
                 snapshot.queue.size() == *current_queue_length;
-            const bool can_diff = !all && previous_queue_version && current_queue_version &&
-                                  current_queue_length &&
+            const bool can_diff = !all && !rating_forced && previous_queue_version &&
+                                  current_queue_version && current_queue_length &&
                                   *current_queue_version > *previous_queue_version &&
                                   snapshot.capabilities.supports_command("plchanges");
             if (can_diff) {
@@ -565,6 +599,15 @@ struct Session::Impl {
                 return std::unexpected(std::move(outputs.error()));
             }
             snapshot.outputs = std::move(*outputs);
+        }
+        if ((all || rating_forced ||
+             (requested & static_cast<std::uint32_t>(IdleEvent::sticker)) != 0U) &&
+            snapshot.capabilities.supports_command("sticker")) {
+            auto ratings = client.sticker_ratings();
+            if (!ratings) {
+                return std::unexpected(std::move(ratings.error()));
+            }
+            snapshot.sticker_ratings = std::move(*ratings);
         }
         if ((all || (requested & static_cast<std::uint32_t>(IdleEvent::options)) != 0U) &&
             snapshot.capabilities.supports_command("replay_gain_status")) {
@@ -819,6 +862,38 @@ std::uint64_t Session::set_queue_priority(std::vector<std::uint32_t> song_ids,
     command.kind = SessionCommandKind::queue_priority;
     command.object_ids = std::move(song_ids);
     command.priority = priority;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::set_sticker_ratings(std::vector<std::string> uris, const unsigned rating) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::sticker_rating;
+    command.uris = std::move(uris);
+    command.rating = rating;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::set_melody_track_ratings(std::vector<std::uint64_t> song_ids,
+                                                const unsigned rating) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_rating;
+    command.melody_song_ids = std::move(song_ids);
+    command.rating = rating;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::set_melody_album_rating(MelodyAlbumKey key, const unsigned rating) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_album_rate;
+    command.album_rating_key = std::move(key);
+    command.rating = rating;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_album_rating(MelodyAlbumKey key) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_album_rating;
+    command.album_rating_key = std::move(key);
     return implementation_->enqueue(std::move(command));
 }
 

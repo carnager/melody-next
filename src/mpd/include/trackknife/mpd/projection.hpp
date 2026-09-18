@@ -26,6 +26,12 @@ project_database_entries(std::span<const Pair> pairs);
                                                                    std::span<const Track> changed,
                                                                    std::size_t new_length);
 
+// Parses `sticker find song "" rating` responses into per-URI ratings.
+// Stickers written by other clients with values outside the interoperable
+// 0-10 integer scale are skipped, never treated as a protocol error.
+[[nodiscard]] core::Result<std::vector<TrackRating>>
+project_sticker_ratings(std::span<const Pair> pairs);
+
 // Parses MPD's status response without discarding fields added by a newer
 // server. Unknown pairs remain available to future capability adapters.
 [[nodiscard]] core::Result<PlaybackStatus> project_status(std::span<const Pair> pairs);

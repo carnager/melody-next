@@ -124,6 +124,8 @@ class FakeMpdServer final {
             write_all(client, "command: status\ncommand: currentsong\ncommand: playlistinfo\n"
                               "command: plchanges\ncommand: outputs\ncommand: switchoutput\n"
                               "command: prioid\n"
+                              "command: sticker\ncommand: rate\ncommand: getrating\n"
+                              "command: albumrate\ncommand: getalbumrating\n"
                               "command: lsinfo\ncommand: search\ncommand: listplaylists\n"
                               "command: listplaylistinfo\ncommand: replay_gain_status\n"
                               "command: replay_gain_mode\ncommand: ping\nOK\n");
@@ -252,6 +254,22 @@ class FakeMpdServer final {
                    command.starts_with("playlistclear ") || command.starts_with("rename ") ||
                    command.starts_with("rm ") || command == "clear") {
             write_all(client, "OK\n");
+        } else if (command == "sticker \"delete\" \"song\" \"unrated.flac\" \"rating\"") {
+            write_all(client, "ACK [50@0] {sticker} no such sticker\n");
+        } else if (command.starts_with("sticker \"set\" \"song\" ") && command_list) {
+            return;
+        } else if (command.starts_with("sticker \"set\" \"song\" ") ||
+                   command.starts_with("sticker \"delete\" \"song\" ")) {
+            write_all(client, "OK\n");
+        } else if (command == "sticker \"find\" \"song\" \"\" \"rating\"") {
+            write_all(client, "file: Artist/Release/01.flac\nsticker: rating=8\n"
+                              "file: foreign.flac\nsticker: rating=4.5\nOK\n");
+        } else if (command.starts_with("rate ") && command_list) {
+            return;
+        } else if (command.starts_with("rate ") || command.starts_with("albumrate ")) {
+            write_all(client, "OK\n");
+        } else if (command.starts_with("getalbumrating ")) {
+            write_all(client, "rating: 8\ncomputed: 7.5\nOK\n");
         } else if (command.starts_with("update")) {
             write_all(client, "updating_db: 7\nOK\n");
         } else if (command == "ping") {
@@ -492,6 +510,42 @@ void client_negotiates_and_preserves_extensions() {
             "invalid queue priority requests must fail before protocol I/O");
     require(!client.add_id(""), "an empty queue URI must fail before protocol I/O");
     require(!client.set_volume(101U), "out-of-range volume must fail before protocol I/O");
+
+    require(client.set_sticker_rating("Artist/Release/01.flac", 8U).has_value(),
+            "track rating must store the interoperable rating sticker");
+    require(client.set_sticker_rating("unrated.flac", 0U).has_value(),
+            "unrating an unrated song must succeed instead of surfacing no-exist");
+    const std::array rating_uris{std::string{"Artist/Release/01.flac"},
+                                 std::string{"Artist/Release/02.flac"}};
+    require(client.set_sticker_ratings(rating_uris, 10U).has_value(),
+            "multi-selection rating must use one sticker command list");
+    require(!client.set_sticker_rating("Artist/Release/01.flac", 11U),
+            "a rating above 10 must fail before protocol I/O");
+    require(!client.set_sticker_ratings(std::array{std::string{"a.flac"}, std::string{"a.flac"}},
+                                        5U),
+            "rating batches must reject duplicate URIs before protocol I/O");
+    const auto sticker_map = client.sticker_ratings();
+    require(sticker_map.has_value() && sticker_map->size() == 1U &&
+                sticker_map->front().uri == "Artist/Release/01.flac" &&
+                sticker_map->front().rating == 8U,
+            "bulk rating load must project interoperable stickers and skip foreign values");
+    require(client.set_melody_track_rating(4'711U, 8U).has_value(),
+            "Melody track rating must use the database song id");
+    require(client.set_melody_track_ratings(std::array{std::uint64_t{4'711U}, std::uint64_t{4'712U}},
+                                            6U)
+                .has_value(),
+            "multi-selection Melody rating must use one command list");
+    const trackknife::mpd::MelodyAlbumKey album_key{
+        .album_artist = "Credited Artist", .album = "Early Release", .date = "1998"};
+    require(client.set_melody_album_rating(album_key, 8U).has_value(),
+            "Melody album rating must send the literal album identity");
+    const auto album_rating = client.melody_album_rating(album_key);
+    require(album_rating.has_value() && album_rating->rating == 8U &&
+                album_rating->computed == 7.5,
+            "Melody album rating reads must project both stored and computed values");
+    require(!client.set_melody_album_rating(
+                trackknife::mpd::MelodyAlbumKey{.album_artist = "", .album = "X", .date = ""}, 5U),
+            "Melody album ratings must fail without an album artist before protocol I/O");
     require(client.ping().has_value(), "connection must remain usable after all responses");
 
     const trackknife::core::CancellationSource idle_cancellation;

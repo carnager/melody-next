@@ -121,6 +121,12 @@ class SessionServer final {
     [[nodiscard]] std::size_t storedPlaylistMutationCount() const noexcept {
         return stored_playlist_mutations_.load(std::memory_order_acquire);
     }
+    [[nodiscard]] std::size_t stickerSetCommandCount() const noexcept {
+        return sticker_set_commands_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] std::size_t melodyRateCommandCount() const noexcept {
+        return rate_commands_.load(std::memory_order_acquire);
+    }
     void dropNextQueueAddResponse() {
         drop_next_queue_add_response_.store(true, std::memory_order_release);
     }
@@ -221,6 +227,8 @@ class SessionServer final {
                               "command: listplaylists\ncommand: listplaylistinfo\n"
                               "command: replay_gain_status\ncommand: replay_gain_mode\n"
                               "command: prioid\n"
+                              "command: sticker\ncommand: rate\ncommand: getrating\n"
+                              "command: albumrate\ncommand: getalbumrating\n"
                               "command: idle\ncommand: noidle\nOK\n");
         } else if (command == "tagtypes") {
             write_all(client, "tagtype: Artist\ntagtype: MusicBrainzTrackId\nOK\n");
@@ -240,8 +248,10 @@ class SessionServer final {
         } else if (command == "playlistinfo") {
             queue_snapshot_commands_.fetch_add(1U, std::memory_order_release);
             write_all(client, "file: Slayer/Divine Intervention/01.flac\nTitle: Killing Fields\n"
-                              "Pos: 0\nId: 7\nfile: Slayer/Divine Intervention/02.flac\n"
-                              "Title: Sex. Murder. Art.\nPos: 1\nId: 9\n");
+                              "Pos: 0\nId: 7\nX-SongId: 501\nX-Rating: " +
+                                  std::to_string(melody_rating_.load(std::memory_order_acquire)) +
+                                  "\nfile: Slayer/Divine Intervention/02.flac\n"
+                                  "Title: Sex. Murder. Art.\nPos: 1\nId: 9\n");
             if (queue_version_.load(std::memory_order_acquire) >= 3U) {
                 write_all(client, "file: Slayer/Divine Intervention/03.flac\n"
                                   "Title: Fictional Reality\nPos: 2\nId: 11\n"
@@ -321,6 +331,37 @@ class SessionServer final {
             if (!command_list) {
                 write_all(client, "OK\n");
             }
+        } else if (command.starts_with("sticker \"set\" \"song\" ")) {
+            sticker_set_commands_.fetch_add(1U, std::memory_order_release);
+            const auto args = quoted_args(command);
+            if (args.size() == 5U) {
+                sticker_rating_.store(
+                    static_cast<unsigned>(std::strtoul(args.back().c_str(), nullptr, 10)),
+                    std::memory_order_release);
+            }
+            if (!command_list) {
+                write_all(client, "OK\n");
+            }
+        } else if (command == "sticker \"find\" \"song\" \"\" \"rating\"") {
+            write_all(client,
+                      "file: Slayer/Divine Intervention/01.flac\nsticker: rating=" +
+                          std::to_string(sticker_rating_.load(std::memory_order_acquire)) +
+                          "\nOK\n");
+        } else if (command.starts_with("rate ")) {
+            rate_commands_.fetch_add(1U, std::memory_order_release);
+            const auto args = quoted_args(command);
+            if (args.size() == 2U && args.front() == "501") {
+                melody_rating_.store(
+                    static_cast<unsigned>(std::strtoul(args.back().c_str(), nullptr, 10)),
+                    std::memory_order_release);
+            }
+            if (!command_list) {
+                write_all(client, "OK\n");
+            }
+        } else if (command.starts_with("albumrate ")) {
+            write_all(client, "OK\n");
+        } else if (command.starts_with("getalbumrating ")) {
+            write_all(client, "rating: 8\ncomputed: 7.5\nOK\n");
         } else if (command.starts_with("save ") || command.starts_with("load ") ||
                    command.starts_with("playlistadd ") || command.starts_with("playlistdelete ") ||
                    command.starts_with("playlistmove ") || command.starts_with("playlistclear ") ||
@@ -332,6 +373,20 @@ class SessionServer final {
         } else {
             write_all(client, "ACK [5@0] {} unsupported fixture command\n");
         }
+    }
+
+    [[nodiscard]] static std::vector<std::string> quoted_args(std::string_view command) {
+        std::vector<std::string> args;
+        std::size_t position = 0U;
+        while ((position = command.find('"', position)) != std::string_view::npos) {
+            const auto end = command.find('"', position + 1U);
+            if (end == std::string_view::npos) {
+                break;
+            }
+            args.emplace_back(command.substr(position + 1U, end - position - 1U));
+            position = end + 1U;
+        }
+        return args;
     }
 
     int listen_socket_{-1};
@@ -352,6 +407,10 @@ class SessionServer final {
     std::atomic_size_t option_commands_{0U};
     std::atomic_size_t search_commands_{0U};
     std::atomic_size_t stored_playlist_mutations_{0U};
+    std::atomic_size_t sticker_set_commands_{0U};
+    std::atomic_size_t rate_commands_{0U};
+    std::atomic_uint sticker_rating_{6U};
+    std::atomic_uint melody_rating_{4U};
     std::atomic_bool drop_next_queue_add_response_{false};
     std::mutex sockets_mutex_;
     std::vector<int> sockets_;
@@ -394,6 +453,10 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
     bool queue_move_batch_finished = false;
     bool queue_priority_finished = false;
     bool queue_conflict_finished = false;
+    bool sticker_rating_finished = false;
+    bool melody_rating_finished = false;
+    bool melody_album_rate_finished = false;
+    std::optional<trackknife::mpd::MelodyAlbumRating> melody_album_rating_payload;
     bool browse_finished = false;
     bool search_finished = false;
     bool invalid_search_failed = false;
@@ -475,6 +538,23 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
                         } else if (result.kind ==
                                    trackknife::mpd::SessionCommandKind::queue_priority) {
                             queue_priority_finished = !result.error;
+                        } else if (result.kind ==
+                                   trackknife::mpd::SessionCommandKind::sticker_rating) {
+                            sticker_rating_finished = !result.error;
+                        } else if (result.kind ==
+                                   trackknife::mpd::SessionCommandKind::melody_rating) {
+                            melody_rating_finished = !result.error;
+                        } else if (result.kind ==
+                                   trackknife::mpd::SessionCommandKind::melody_album_rate) {
+                            melody_album_rate_finished = !result.error;
+                        } else if (result.kind ==
+                                   trackknife::mpd::SessionCommandKind::melody_album_rating) {
+                            if (const auto* rating =
+                                    std::get_if<trackknife::mpd::MelodyAlbumRating>(
+                                        &result.payload);
+                                rating != nullptr && !result.error) {
+                                melody_album_rating_payload = *rating;
+                            }
                         } else if (result.kind ==
                                    trackknife::mpd::SessionCommandKind::database_browse) {
                             const auto* entries =
@@ -650,6 +730,48 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
         });
         require(queue_priority_set,
                 "multi-selection priority must serialize one stable-ID command list exactly once");
+        require(latest.sticker_ratings ==
+                    std::vector<trackknife::mpd::TrackRating>{
+                        {.uri = "Slayer/Divine Intervention/01.flac", .rating = 6U}},
+                "a sticker-capable snapshot must include the bulk rating load");
+        require(latest.queue.front().rating == 4U && latest.queue.front().melody_song_id == 501U,
+                "queue snapshots must retain Melody rating lines");
+        lock.unlock();
+
+        static_cast<void>(
+            session.set_sticker_ratings({"Slayer/Divine Intervention/01.flac"}, 9U));
+        lock.lock();
+        const auto sticker_rated = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
+            return sticker_rating_finished && server.stickerSetCommandCount() == 1U &&
+                   !latest.sticker_ratings.empty() && latest.sticker_ratings.front().rating == 9U;
+        });
+        require(sticker_rated,
+                "a sticker rating must serialize once and refresh the bulk rating snapshot");
+        lock.unlock();
+
+        static_cast<void>(session.set_melody_track_ratings({501U}, 7U));
+        lock.lock();
+        const auto melody_rated = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
+            return melody_rating_finished && server.melodyRateCommandCount() == 1U &&
+                   latest.queue.front().rating == 7U;
+        });
+        require(melody_rated, "a Melody rating must bypass the queue-version shortcut so the "
+                              "snapshot reflects the new listing rating");
+        lock.unlock();
+
+        static_cast<void>(session.set_melody_album_rating(
+            trackknife::mpd::MelodyAlbumKey{
+                .album_artist = "Slayer", .album = "Divine Intervention", .date = "1994"},
+            8U));
+        static_cast<void>(session.melody_album_rating(trackknife::mpd::MelodyAlbumKey{
+            .album_artist = "Slayer", .album = "Divine Intervention", .date = "1994"}));
+        lock.lock();
+        const auto album_rated = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
+            return melody_album_rate_finished && melody_album_rating_payload.has_value();
+        });
+        require(album_rated && melody_album_rating_payload->rating == 8U &&
+                    melody_album_rating_payload->computed == 7.5,
+                "Melody album ratings must round-trip stored and computed values");
         lock.unlock();
 
         static_cast<void>(session.add_queue_uris({

@@ -36,6 +36,8 @@ namespace {
             .last_modified = std::nullopt,
             .audio_format = std::nullopt,
             .priority = std::nullopt,
+            .rating = std::nullopt,
+            .melody_song_id = std::nullopt,
             .unknown_structural_pairs = {}};
 }
 
@@ -294,6 +296,8 @@ void ServerLibraryTreeModelTest::expandsMultiValueGrouping() {
         .last_modified = std::nullopt,
         .audio_format = std::nullopt,
         .priority = std::nullopt,
+        .rating = std::nullopt,
+        .melody_song_id = std::nullopt,
         .unknown_structural_pairs = {},
     };
     model.acceptBranch(branches.front().front().toULongLong(), {track}, {});

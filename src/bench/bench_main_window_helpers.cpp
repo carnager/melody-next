@@ -148,6 +148,12 @@ LocalTrackRow cached_library_row(persistence::LibraryTrackSnapshot snapshot) {
                                  .bits = static_cast<int>(snapshot.facts.bits),
                                  .channels = static_cast<int>(snapshot.facts.channels)};
     }
+    if (snapshot.facts.rating >= 0) {
+        row.rating = static_cast<unsigned>(snapshot.facts.rating);
+    }
+    if (snapshot.facts.album_rating >= 0) {
+        row.album_rating = static_cast<unsigned>(snapshot.facts.album_rating);
+    }
     row.probed = true;
     return row;
 }

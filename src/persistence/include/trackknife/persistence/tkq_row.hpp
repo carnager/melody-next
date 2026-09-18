@@ -37,6 +37,11 @@ struct TkqRowFacts {
     std::int64_t bits{0};
     std::int64_t channels{0};
     std::int64_t duration_ms{-1};
+    // ADR-0179: stored 0-10 ratings joined by content identity; -1 when
+    // unrated. Like the technicals, the `rating`/`albumrating` pseudo-fields
+    // shadow same-named file tags.
+    std::int64_t rating{-1};
+    std::int64_t album_rating{-1};
 };
 
 struct TkqRowTechnicals {

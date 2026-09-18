@@ -729,6 +729,24 @@ void LocalLibraryTest::ratingsFollowContentIdentity() {
     QCOMPARE(*library->ratings({track_hash, album_hash, std::string(64U, '0')}),
              (std::vector<unsigned>{8U, 6U, 0U}));
 
+    // ADR-0179: ratings are query targets. The pseudo-fields push into SQL,
+    // evaluate in expression predicates, and shadow same-named tags.
+    const auto filtered_paths = [&](const char* source) {
+        const auto compiled = query::compile_tkq(source);
+        if (!compiled) {
+            return std::vector<std::string>{};
+        }
+        auto paths = library->filter_paths(*compiled);
+        return paths ? *paths : std::vector<std::string>{};
+    };
+    QCOMPARE(filtered_paths("rating GREATER 7"), std::vector<std::string>{path});
+    QCOMPARE(filtered_paths("rating EQUAL 8"), std::vector<std::string>{path});
+    QCOMPARE(filtered_paths("rating LESS 8"), std::vector<std::string>{});
+    QCOMPARE(filtered_paths("rating PRESENT"), std::vector<std::string>{path});
+    QCOMPARE(filtered_paths("albumrating EQUAL 6"), std::vector<std::string>{path});
+    QCOMPARE(filtered_paths("albumrating GREATER 6"), std::vector<std::string>{});
+    QCOMPARE(filtered_paths("\"$info(rating)\" EQUAL 8"), std::vector<std::string>{path});
+
     // A rescan recomputes hashes from unchanged tags, so the rating stays.
     persistence::LibraryScanProgress rescan;
     QVERIFY(library->scan({}, rescan));
@@ -738,6 +756,8 @@ void LocalLibraryTest::ratingsFollowContentIdentity() {
     QVERIFY(library->set_rating(track_hash, false, 0U));
     QCOMPARE(library->query(tracks())->entries.front().rating, 0U);
     QCOMPARE(library->ratings({track_hash})->front(), 0U);
+    QCOMPARE(filtered_paths("rating MISSING"), std::vector<std::string>{path});
+    QCOMPARE(filtered_paths("rating PRESENT"), std::vector<std::string>{});
 }
 
 void LocalLibraryTest::migrationRoundTrip() {

@@ -155,6 +155,9 @@ struct Session::Impl {
     SessionCallbacks callbacks;
     core::CancellationSource cancellation;
     std::atomic_bool stopping{false};
+    // Set from the advertised commands on each full refresh; read by the
+    // command worker when it builds search constraints.
+    std::atomic_bool melody_rating_search{false};
     std::atomic_uint32_t pending_refresh{full_refresh};
     std::atomic_uint64_t next_command_id{1U};
     std::atomic_uint64_t active_generation{0U};
@@ -372,8 +375,10 @@ struct Session::Impl {
             return SessionCommandPayload{std::move(*result)};
         }
         case SessionCommandKind::database_search: {
-            auto result = client.search_library(command.uri, command.query_limit, 1'000U,
-                                                command.query_offset);
+            auto result =
+                client.search_library(command.uri, command.query_limit, 1'000U,
+                                      command.query_offset,
+                                      melody_rating_search.load(std::memory_order_acquire));
             if (!result) {
                 return std::unexpected(std::move(result.error()));
             }
@@ -535,6 +540,8 @@ struct Session::Impl {
                 return std::unexpected(std::move(capabilities.error()));
             }
             snapshot.capabilities = std::move(*capabilities);
+            melody_rating_search.store(snapshot.capabilities.supports_command("getrating"),
+                                       std::memory_order_release);
         }
         constexpr auto status_events = static_cast<std::uint32_t>(IdleEvent::player) |
                                        static_cast<std::uint32_t>(IdleEvent::queue) |

@@ -92,6 +92,13 @@ the scan's probe: `codec` (text operators), `samplerate`,
 `bitspersample`, `channels`, `length_ms` (numeric operators;
 `PRESENT`/`MISSING` test whether the probe knew the value).
 
+`rating` and `albumrating` (ADR-0179) resolve to the stored 0-10
+content-identity ratings — `rating GREATER 7`, `albumrating EQUAL 10`,
+`rating PRESENT`/`MISSING` for rated/unrated. Both are also available
+to embedded expressions as `$info(rating)`/`$info(albumrating)`. Like
+the technical pseudo-fields, they shadow same-named file tags; a
+`RATING` file tag is not reachable by name from a query.
+
 `tkfmt-1` expression predicates evaluate against the row's indexed
 fields and technicals; the resulting text is lowercased and compared
 per the operator (`MISSING` means the expression produced empty text).

@@ -118,6 +118,9 @@ class SessionServer final {
     [[nodiscard]] std::size_t searchCommandCount() const noexcept {
         return search_commands_.load(std::memory_order_acquire);
     }
+    [[nodiscard]] std::size_t ratingExpressionSearchCount() const noexcept {
+        return rating_expression_searches_.load(std::memory_order_acquire);
+    }
     [[nodiscard]] std::size_t storedPlaylistMutationCount() const noexcept {
         return stored_playlist_mutations_.load(std::memory_order_acquire);
     }
@@ -278,6 +281,9 @@ class SessionServer final {
                               "playlist: Road mix\nOK\n");
         } else if (command.starts_with("search ")) {
             search_commands_.fetch_add(1U, std::memory_order_release);
+            if (command.find("(rating >= 8)") != std::string_view::npos) {
+                rating_expression_searches_.fetch_add(1U, std::memory_order_release);
+            }
             write_all(client, "file: Slayer/Divine Intervention/01.flac\nArtist: Slayer\n"
                               "AlbumArtist: Slayer\nAlbum: Divine Intervention\nDate: 1994\n"
                               "MusicBrainzAlbumId: release-divine-intervention\n"
@@ -406,6 +412,7 @@ class SessionServer final {
     std::atomic_size_t queue_snapshot_commands_{0U};
     std::atomic_size_t option_commands_{0U};
     std::atomic_size_t search_commands_{0U};
+    std::atomic_size_t rating_expression_searches_{0U};
     std::atomic_size_t stored_playlist_mutations_{0U};
     std::atomic_size_t sticker_set_commands_{0U};
     std::atomic_size_t rate_commands_{0U};
@@ -867,6 +874,15 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
         const auto invalid_query_rejected =
             changed.wait_for(lock, std::chrono::seconds{2}, [&] { return invalid_search_failed; });
         require(invalid_query_rejected, "invalid asynchronous queries must report typed errors");
+        lock.unlock();
+
+        static_cast<void>(session.search_any("Slayer rating>=8", 0U, 50U));
+        lock.lock();
+        const auto rating_searched = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
+            return server.ratingExpressionSearchCount() == 1U;
+        });
+        require(rating_searched, "a server advertising Melody ratings must receive rating "
+                                 "search terms as a filter expression");
         lock.unlock();
 
         static_cast<void>(session.run_transport(trackknife::mpd::TransportAction::next));

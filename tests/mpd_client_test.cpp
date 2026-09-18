@@ -164,6 +164,17 @@ class FakeMpdServer final {
                       "Date: 2023\nAlbumArtist: B\nAlbum: Alternate title\nOK\n");
         } else if (command.starts_with("list ")) {
             write_all(client, "AlbumArtist: Credited Artist\nAlbumArtist: Various Artists\nOK\n");
+        } else if (command.starts_with("search ") &&
+                   command.find("rating >= 8") != std::string_view::npos) {
+            // ADR-0179: rating search terms must arrive as a Melody filter
+            // expression combined with the residual free-text words.
+            if (command.find("any contains") == std::string_view::npos ||
+                command.find("beatles") == std::string_view::npos) {
+                write_all(client, "ACK [2@0] {search} expected combined rating filter\n");
+                return;
+            }
+            write_all(client, "file: Rated/A/01.flac\nAlbumArtist: Rated Artist\n"
+                              "Album: Rated Release\nTitle: Rated track\nX-Rating: 9\nOK\n");
         } else if (command.starts_with("search ")) {
             if (command.find("sort") != std::string_view::npos) {
                 // The banner advertises MPD 0.24, so the newest lookup must
@@ -510,6 +521,14 @@ void client_negotiates_and_preserves_extensions() {
             "invalid queue priority requests must fail before protocol I/O");
     require(!client.add_id(""), "an empty queue URI must fail before protocol I/O");
     require(!client.set_volume(101U), "out-of-range volume must fail before protocol I/O");
+
+    const auto rating_search = client.search_library("beatles rating>=8", 200U, 1'000U, 0U, true);
+    require(rating_search.has_value() && rating_search->tracks.size() == 1U &&
+                rating_search->tracks.front().rating == 9U,
+            "rating search terms must become a Melody filter expression");
+    const auto plain_rating_search = client.search_library("beatles rating>=8");
+    require(plain_rating_search.has_value() && plain_rating_search->tracks.size() == 3U,
+            "without the Melody gate, rating words stay ordinary search text");
 
     require(client.set_sticker_rating("Artist/Release/01.flac", 8U).has_value(),
             "track rating must store the interoperable rating sticker");

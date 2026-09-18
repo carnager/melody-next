@@ -105,6 +105,12 @@ Melody's native rating extension instead; `albumrate` additionally enables
 album ratings. The queue's Rate menu and the optional Rating column stay
 hidden or disabled when neither backend is advertised.
 
+Against a Melody server, the library search box also accepts rating terms:
+`rating>=8`, `rating==10`, or `albumrating>=6` tokens (operators `>`, `>=`,
+`<`, `<=`, `=`) combine with the remaining words into one server-side filter
+expression. Without the Melody capability the same tokens search as ordinary
+text, so queries degrade instead of failing on stock MPD.
+
 ## Remote track projection
 
 ```text

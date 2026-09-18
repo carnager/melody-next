@@ -101,6 +101,12 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         if (canonical == "lengthms" && row_.duration_ms >= 0) {
             return std::to_string(row_.duration_ms);
         }
+        if (canonical == "rating" && row_.rating >= 0) {
+            return std::to_string(row_.rating);
+        }
+        if (canonical == "albumrating" && row_.album_rating >= 0) {
+            return std::to_string(row_.album_rating);
+        }
         return std::nullopt;
     }
 
@@ -188,6 +194,23 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         });
     }
     const auto canonical = internal::tkq_canonical_field(predicate.field);
+    if (canonical == "rating" || canonical == "albumrating") {
+        // ADR-0179: the rating store shadows same-named tags, exactly like
+        // the technical pseudo-fields shadow theirs.
+        const auto value = canonical == "rating" ? row.rating : row.album_rating;
+        const auto present = value >= 0;
+        switch (predicate.comparison) {
+        case TkqComparison::present:
+            return present;
+        case TkqComparison::missing:
+            return !present;
+        case TkqComparison::is:
+        case TkqComparison::has:
+            return present && evaluate_text_comparison(std::to_string(value), predicate);
+        default:
+            return present && compare_number(value, predicate.comparison, predicate.number);
+        }
+    }
     if (internal::tkq_technical_column(canonical) != nullptr) {
         if (canonical == "codec") {
             return evaluate_text_comparison(row.codec, predicate);

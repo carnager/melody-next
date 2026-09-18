@@ -82,12 +82,16 @@ class Client final {
     [[nodiscard]] core::Result<std::vector<Track>>
     find_tag_tracks(std::string_view tag, std::string_view value, unsigned limit = 10'000U);
     [[nodiscard]] core::Result<std::vector<std::byte>> artwork(std::string_view uri, bool embedded);
+    // ADR-0179: with melody_rating_filters, `rating>=8` / `albumrating==10`
+    // words in the query become Melody filter conditions and the remaining
+    // words stay an any-contains constraint; off, they search as plain text.
     [[nodiscard]] core::Result<std::vector<Track>>
-    search_any(std::string_view query, unsigned offset = 0U, unsigned limit = 200U);
-    [[nodiscard]] core::Result<LibrarySearchResult> search_library(std::string_view query,
-                                                                   unsigned track_limit = 200U,
-                                                                   unsigned album_limit = 1'000U,
-                                                                   unsigned offset = 0U);
+    search_any(std::string_view query, unsigned offset = 0U, unsigned limit = 200U,
+               bool melody_rating_filters = false);
+    [[nodiscard]] core::Result<LibrarySearchResult>
+    search_library(std::string_view query, unsigned track_limit = 200U,
+                   unsigned album_limit = 1'000U, unsigned offset = 0U,
+                   bool melody_rating_filters = false);
     [[nodiscard]] core::Result<std::vector<Track>> find_album(const AlbumFilter& album);
     [[nodiscard]] core::Result<std::vector<StoredPlaylist>> stored_playlists();
     [[nodiscard]] core::Result<std::vector<Track>> stored_playlist(std::string_view name);

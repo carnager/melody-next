@@ -524,8 +524,117 @@ core::Result<std::vector<std::byte>> Client::artwork(const std::string_view uri,
     return result;
 }
 
+namespace {
+
+// ADR-0179: search-box rating terms for Melody's filter dialect. A term is
+// one token — rating/albumrating, an operator, and a 0-10 integer; every
+// other token stays ordinary search text.
+struct MelodyRatingSearch {
+    std::string words;
+    std::vector<std::string> conditions;
+};
+
+[[nodiscard]] std::optional<std::string> melody_rating_condition(const std::string_view token) {
+    static constexpr std::string_view track_name = "rating";
+    static constexpr std::string_view album_name = "albumrating";
+    std::string lowered;
+    lowered.reserve(token.size());
+    for (const auto character : token) {
+        lowered.push_back(character >= 'A' && character <= 'Z'
+                              ? static_cast<char>(character - 'A' + 'a')
+                              : character);
+    }
+    const std::string_view text = lowered;
+    std::string_view name;
+    if (text.starts_with(album_name)) {
+        name = album_name;
+    } else if (text.starts_with(track_name)) {
+        name = track_name;
+    } else {
+        return std::nullopt;
+    }
+    auto rest = text.substr(name.size());
+    std::string_view comparator;
+    for (const std::string_view candidate : {">=", "<=", "==", "=", ">", "<"}) {
+        if (rest.starts_with(candidate)) {
+            comparator = candidate == "=" ? "==" : candidate;
+            rest = rest.substr(candidate.size());
+            break;
+        }
+    }
+    if (comparator.empty() || rest.empty()) {
+        return std::nullopt;
+    }
+    unsigned value = 0U;
+    const auto parsed = std::from_chars(rest.data(), rest.data() + rest.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != rest.data() + rest.size() ||
+        value > maximum_rating) {
+        return std::nullopt;
+    }
+    return "(" + std::string{name} + " " + std::string{comparator} + " " +
+           std::to_string(value) + ")";
+}
+
+[[nodiscard]] MelodyRatingSearch parse_melody_rating_search(const std::string_view query) {
+    MelodyRatingSearch parsed;
+    std::size_t position = 0U;
+    while (position < query.size()) {
+        while (position < query.size() && query[position] == ' ') {
+            ++position;
+        }
+        auto end = query.find(' ', position);
+        if (end == std::string_view::npos) {
+            end = query.size();
+        }
+        const auto token = query.substr(position, end - position);
+        position = end;
+        if (token.empty()) {
+            continue;
+        }
+        if (auto condition = melody_rating_condition(token)) {
+            parsed.conditions.push_back(std::move(*condition));
+            continue;
+        }
+        if (!parsed.words.empty()) {
+            parsed.words += ' ';
+        }
+        parsed.words += token;
+    }
+    return parsed;
+}
+
+[[nodiscard]] std::string melody_filter_expression(const MelodyRatingSearch& parsed) {
+    std::vector<std::string> parts;
+    if (!parsed.words.empty()) {
+        std::string escaped;
+        escaped.reserve(parsed.words.size());
+        for (const auto character : parsed.words) {
+            if (character == '"' || character == '\\') {
+                escaped.push_back('\\');
+            }
+            escaped.push_back(character);
+        }
+        parts.push_back("(any contains \"" + escaped + "\")");
+    }
+    parts.insert(parts.end(), parsed.conditions.begin(), parsed.conditions.end());
+    if (parts.size() == 1U) {
+        return parts.front();
+    }
+    std::string joined;
+    for (const auto& part : parts) {
+        if (!joined.empty()) {
+            joined += " AND ";
+        }
+        joined += part;
+    }
+    return "(" + joined + ")";
+}
+
+} // namespace
+
 core::Result<std::vector<Track>> Client::search_any(const std::string_view query,
-                                                    const unsigned offset, const unsigned limit) {
+                                                    const unsigned offset, const unsigned limit,
+                                                    const bool melody_rating_filters) {
     constexpr unsigned maximum_page_size = 500U;
     if (query.empty() || query.contains('\0') || limit == 0U || limit > maximum_page_size ||
         offset > std::numeric_limits<unsigned>::max() - limit) {
@@ -536,12 +645,18 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
         });
     }
     const std::string query_text{query};
+    const auto parsed = melody_rating_filters ? parse_melody_rating_search(query_text)
+                                              : MelodyRatingSearch{.words = query_text, .conditions = {}};
     auto* connection = implementation_->connection.get();
     if (!mpd_search_db_songs(connection, false)) {
         return std::unexpected(implementation_->take_error("begin search"));
     }
-    if (!mpd_search_add_any_tag_constraint(connection, MPD_OPERATOR_DEFAULT, query_text.c_str()) ||
-        !mpd_search_add_window(connection, offset, offset + limit)) {
+    const auto constrained =
+        parsed.conditions.empty()
+            ? mpd_search_add_any_tag_constraint(connection, MPD_OPERATOR_DEFAULT,
+                                                query_text.c_str())
+            : mpd_search_add_expression(connection, melody_filter_expression(parsed).c_str());
+    if (!constrained || !mpd_search_add_window(connection, offset, offset + limit)) {
         mpd_search_cancel(connection);
         return std::unexpected(implementation_->take_error("build search"));
     }
@@ -558,7 +673,8 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
 core::Result<LibrarySearchResult> Client::search_library(const std::string_view query,
                                                          const unsigned track_limit,
                                                          const unsigned album_limit,
-                                                         const unsigned offset) {
+                                                         const unsigned offset,
+                                                         const bool melody_rating_filters) {
     constexpr unsigned maximum_track_results = 500U;
     constexpr unsigned maximum_album_results = 2'000U;
     if (query.empty() || query.contains('\0') || track_limit == 0U ||
@@ -573,7 +689,7 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
     }
 
     if (offset > 0U) {
-        auto tracks = search_any(query, offset, track_limit);
+        auto tracks = search_any(query, offset, track_limit, melody_rating_filters);
         if (!tracks) {
             return std::unexpected(std::move(tracks.error()));
         }
@@ -581,11 +697,18 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
     }
 
     const std::string query_text{query};
+    const auto parsed = melody_rating_filters ? parse_melody_rating_search(query_text)
+                                              : MelodyRatingSearch{.words = query_text, .conditions = {}};
     auto* connection = implementation_->connection.get();
     if (!mpd_search_db_songs(connection, false)) {
         return std::unexpected(implementation_->take_error("begin library search"));
     }
-    if (!mpd_search_add_any_tag_constraint(connection, MPD_OPERATOR_DEFAULT, query_text.c_str())) {
+    const auto constrained =
+        parsed.conditions.empty()
+            ? mpd_search_add_any_tag_constraint(connection, MPD_OPERATOR_DEFAULT,
+                                                query_text.c_str())
+            : mpd_search_add_expression(connection, melody_filter_expression(parsed).c_str());
+    if (!constrained) {
         mpd_search_cancel(connection);
         return std::unexpected(implementation_->take_error("build library search"));
     }

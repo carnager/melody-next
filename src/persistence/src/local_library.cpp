@@ -523,6 +523,48 @@ translate_predicate(const query::TkqPredicate& predicate) {
         return clause;
     }
     const auto canonical = internal::tkq_canonical_field(predicate.field);
+    if (canonical == "rating" || canonical == "albumrating") {
+        // ADR-0179: the stored rating joined by content identity; NULL means
+        // unrated (a zero rating deletes the row, so no value is 0).
+        const std::string value =
+            canonical == "rating"
+                ? "(SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash)"
+                : "(SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash)";
+        switch (predicate.comparison) {
+        case TkqComparison::is:
+            clause.sql = "(CAST(" + value + " AS TEXT)=?)";
+            clause.bindings.push_back({FilterBinding::Kind::text, predicate.normalized});
+            return clause;
+        case TkqComparison::has: {
+            std::string sql;
+            for (const auto& word : predicate.words) {
+                if (!sql.empty()) {
+                    sql += " AND ";
+                }
+                sql += "instr(CAST(" + value + " AS TEXT),?)>0";
+                clause.bindings.push_back({FilterBinding::Kind::text, word});
+            }
+            clause.sql = "(" + sql + ")";
+            return clause;
+        }
+        case TkqComparison::greater:
+        case TkqComparison::less:
+        case TkqComparison::equal: {
+            const auto* comparator = predicate.comparison == TkqComparison::greater ? ">"
+                                     : predicate.comparison == TkqComparison::less  ? "<"
+                                                                                    : "=";
+            clause.sql = "(" + value + comparator + std::to_string(predicate.number) + ")";
+            return clause;
+        }
+        case TkqComparison::present:
+            clause.sql = "(" + value + " IS NOT NULL)";
+            return clause;
+        case TkqComparison::missing:
+            clause.sql = "(" + value + " IS NULL)";
+            return clause;
+        }
+        return std::nullopt;
+    }
     if (const auto* column = internal::tkq_technical_column(canonical)) {
         const auto qualified = std::string{"t."} + column;
         switch (predicate.comparison) {
@@ -892,7 +934,9 @@ namespace {
 
 constexpr auto filter_columns =
     "t.raw_path,t.title,t.artist,t.album,t.album_key,t.date,t.search_track,t.disc,t.track,"
-    "t.codec_name,t.sample_rate,t.bits,t.channels,t.duration_ms";
+    "t.codec_name,t.sample_rate,t.bits,t.channels,t.duration_ms,"
+    "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash),-1),"
+    "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1)";
 constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,t.album_key,t.disc,t.track,"
                               "t.title COLLATE NOCASE,t.raw_path";
 constexpr std::size_t filter_match_cap = 100'000U;
@@ -1008,6 +1052,8 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
         row.facts.bits = select.number(11);
         row.facts.channels = select.number(12);
         row.facts.duration_ms = select.number(13);
+        row.facts.rating = select.number(14);
+        row.facts.album_rating = select.number(15);
         if (need_rows) {
             load_field_rows(fields, row.raw_path, row);
         }
@@ -1183,6 +1229,8 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
             row.facts.bits = select.number(11);
             row.facts.channels = select.number(12);
             row.facts.duration_ms = select.number(13);
+            row.facts.rating = select.number(14);
+            row.facts.album_rating = select.number(15);
             load_field_rows(fields, path, row);
             result.push_back({path, std::move(row.facts)});
         }

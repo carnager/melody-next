@@ -20,11 +20,16 @@ struct MelodyTranslatedQuery {
 
 // Translates the supported tkq subset one-to-one: field HAS/IS terms, the
 // `*` word search, numeric comparisons on the rating and technical
-// pseudo-fields, rating PRESENT, and simple single-field sorts. Everything
-// the server's grammar cannot express — OR/NOT trees, tkfmt expression
-// predicates, MISSING, numeric comparisons on ordinary tags — is a typed
-// error naming the unsupported construct, never a silently broadened query.
+// pseudo-fields, rating PRESENT, and simple single-field sorts.
+//
+// When the server advertises the `filtergrammar` command (grammar level 2,
+// melody repo docs/protocol.md), pass full_grammar = true: OR and NOT
+// trees, PRESENT/MISSING on ordinary tags (the MPD empty-value forms), and
+// numeric comparisons on ordinary tags then translate too. Everything the
+// target grammar cannot express — always including tkfmt expression
+// predicates — is a typed error naming the unsupported construct, never a
+// silently broadened query.
 [[nodiscard]] core::Result<MelodyTranslatedQuery>
-translate_tkq_to_melody(const CompiledTkq& compiled);
+translate_tkq_to_melody(const CompiledTkq& compiled, bool full_grammar = false);
 
 } // namespace trackknife::query

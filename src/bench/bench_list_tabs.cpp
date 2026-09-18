@@ -736,7 +736,9 @@ void BenchMainWindow::openSearchDialog() {
             .run =
                 [this](const query::CompiledTkq& compiled,
                        std::function<void(QStringList, int, QString)> completion) {
-                    auto translated = query::translate_tkq_to_melody(compiled);
+                    auto translated = query::translate_tkq_to_melody(
+                        compiled,
+                        mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")));
                     if (!translated) {
                         completion({}, 0, displayText(translated.error().message));
                         return;
@@ -774,7 +776,9 @@ void BenchMainWindow::openSearchDialog() {
                 },
             .open =
                 [this](const query::CompiledTkq& compiled, const QString& query_text) {
-                    auto translated = query::translate_tkq_to_melody(compiled);
+                    auto translated = query::translate_tkq_to_melody(
+                        compiled,
+                        mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")));
                     if (!translated) {
                         return;
                     }

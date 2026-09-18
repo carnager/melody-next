@@ -4864,6 +4864,45 @@ void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
     QVERIFY(error->text().contains(QStringLiteral("OR")));
     QVERIFY(!open_button->isEnabled());
 
+    // A server advertising filtergrammar takes the same query structured.
+    QString structured_expression;
+    SearchDialog structured{
+        std::filesystem::path{},
+        {},
+        {},
+        SearchDialog::ServerScope{
+            .available = [] { return true; },
+            .run =
+                [&](const query::CompiledTkq& compiled,
+                    std::function<void(QStringList, int, QString)> completion) {
+                    auto translated = query::translate_tkq_to_melody(compiled, true);
+                    if (!translated) {
+                        completion({}, 0, displayText(translated.error().message));
+                        return;
+                    }
+                    structured_expression =
+                        QString::fromStdString(translated->filter_expression);
+                    completion({QStringLiteral("Artist — Either genre")}, 1, {});
+                },
+            .open = [](const query::CompiledTkq&, const QString&) {},
+        }};
+    structured.show();
+    auto* structured_scope =
+        structured.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* structured_input =
+        structured.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* structured_mode =
+        structured.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* structured_results =
+        structured.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    QVERIFY(structured_scope && structured_input && structured_mode && structured_results);
+    structured_scope->setCurrentIndex(2);
+    structured_mode->setChecked(true);
+    structured_input->setText(QStringLiteral("genre HAS jazz OR genre HAS blues"));
+    QTRY_COMPARE(structured_results->count(), 1);
+    QCOMPARE(structured_expression,
+             QStringLiteral("((genre contains \"jazz\") OR (genre contains \"blues\"))"));
+
     // Without a server scope the combo keeps its two local scopes.
     SearchDialog local_only{std::filesystem::path{}, {}, {}};
     auto* local_scope = local_only.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));

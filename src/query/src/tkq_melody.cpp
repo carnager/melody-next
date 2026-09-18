@@ -45,9 +45,17 @@ namespace {
     return found == renames.end() ? canonical : std::string{found->second};
 }
 
+[[nodiscard]] bool rating_field(const std::string& canonical) {
+    return canonical == "rating" || canonical == "albumrating";
+}
+
+[[nodiscard]] bool technical_field(const std::string& canonical) {
+    return canonical == "samplerate" || canonical == "bitspersample" ||
+           canonical == "channels" || canonical == "lengthms";
+}
+
 [[nodiscard]] bool numeric_server_field(const std::string& canonical) {
-    return canonical == "rating" || canonical == "albumrating" || canonical == "samplerate" ||
-           canonical == "bitspersample" || canonical == "channels" || canonical == "lengthms";
+    return rating_field(canonical) || technical_field(canonical);
 }
 
 [[nodiscard]] std::string escaped(const std::string& value) {
@@ -62,8 +70,27 @@ namespace {
     return result;
 }
 
-[[nodiscard]] core::Result<void> translate_predicate(const TkqPredicate& predicate,
-                                                     std::vector<std::string>& parts) {
+// Joins already-parenthesized expressions with a connector, adding the
+// grouping parentheses the server grammar requires for more than one.
+[[nodiscard]] std::string joined_group(const std::vector<std::string>& expressions,
+                                       const std::string_view connector) {
+    if (expressions.size() == 1U) {
+        return expressions.front();
+    }
+    std::string joined;
+    for (const auto& expression : expressions) {
+        if (!joined.empty()) {
+            joined += " ";
+            joined += connector;
+            joined += " ";
+        }
+        joined += expression;
+    }
+    return "(" + joined + ")";
+}
+
+[[nodiscard]] core::Result<std::string> translate_predicate(const TkqPredicate& predicate,
+                                                            const bool full_grammar) {
     if (predicate.operand == TkqOperandKind::expression) {
         return std::unexpected(unsupported(
             "tkfmt expression predicates evaluate locally and cannot run on the server"));
@@ -72,10 +99,12 @@ namespace {
         if (predicate.comparison != TkqComparison::has) {
             return std::unexpected(unsupported("`*` only supports HAS on the server"));
         }
+        std::vector<std::string> words;
+        words.reserve(predicate.words.size());
         for (const auto& word : predicate.words) {
-            parts.push_back("(any contains \"" + escaped(word) + "\")");
+            words.push_back("(any contains \"" + escaped(word) + "\")");
         }
-        return {};
+        return joined_group(words, "AND");
     }
 
     const auto canonical = canonical_field(predicate.field);
@@ -83,7 +112,7 @@ namespace {
     const auto tag =
         canonical == "lengthms" ? std::string{"length"} : melody_condition_tag(canonical);
     switch (predicate.comparison) {
-    case TkqComparison::has:
+    case TkqComparison::has: {
         if (server_numeric) {
             return std::unexpected(
                 unsupported("`" + predicate.field + "` only supports number comparisons"));
@@ -93,23 +122,24 @@ namespace {
                 unsupported("the server matches date exactly; use IS or a year comparison "
                             "locally"));
         }
+        std::vector<std::string> words;
+        words.reserve(predicate.words.size());
         for (const auto& word : predicate.words) {
-            parts.push_back("(" + tag + " contains \"" + escaped(word) + "\")");
+            words.push_back("(" + tag + " contains \"" + escaped(word) + "\")");
         }
-        return {};
+        return joined_group(words, "AND");
+    }
     case TkqComparison::is:
         if (server_numeric) {
-            parts.push_back("(" + tag + " == " + escaped(predicate.normalized) + ")");
-            return {};
+            return "(" + tag + " == " + escaped(predicate.normalized) + ")";
         }
-        parts.push_back("(" + tag + " == \"" + escaped(predicate.text) + "\")");
-        return {};
+        return "(" + tag + " == \"" + escaped(predicate.text) + "\")";
     case TkqComparison::greater:
     case TkqComparison::less:
     case TkqComparison::equal: {
-        if (!server_numeric) {
+        if (!server_numeric && !full_grammar) {
             return std::unexpected(unsupported(
-                "the server compares numbers only on rating, albumrating, samplerate, "
+                "this server compares numbers only on rating, albumrating, samplerate, "
                 "bitspersample, channels, and length_ms"));
         }
         auto number = predicate.number;
@@ -117,45 +147,81 @@ namespace {
             // The server stores whole seconds.
             number /= 1'000;
         }
+        const auto rendered = std::to_string(number);
+        if (predicate.comparison == TkqComparison::equal && !server_numeric) {
+            // The server's == is string equality on ordinary tags; the
+            // range pair reproduces tkq's leading-integer EQUAL.
+            return "((" + tag + " >= " + rendered + ") AND (" + tag + " <= " + rendered +
+                   "))";
+        }
         const auto* comparator = predicate.comparison == TkqComparison::greater ? ">"
                                  : predicate.comparison == TkqComparison::less  ? "<"
                                                                                 : "==";
-        parts.push_back("(" + tag + " " + comparator + " " + std::to_string(number) + ")");
-        return {};
+        return "(" + tag + " " + comparator + " " + rendered + ")";
     }
     case TkqComparison::present:
-        if (canonical == "rating" || canonical == "albumrating") {
-            parts.push_back("(" + tag + " >= 1)");
-            return {};
+        if (rating_field(canonical)) {
+            return "(" + tag + " >= 1)";
         }
-        return std::unexpected(
-            unsupported("PRESENT only translates for rating and albumrating on the server"));
+        if (full_grammar && !technical_field(canonical) && canonical != "codec") {
+            return "(" + tag + " != \"\")";
+        }
+        return std::unexpected(unsupported(
+            full_grammar
+                ? "PRESENT cannot run on the server for probe-derived technical fields"
+                : "PRESENT only translates for rating and albumrating on this server"));
     case TkqComparison::missing:
-        return std::unexpected(
-            unsupported("MISSING cannot run on the server; its filter grammar has no NOT"));
+        if (!full_grammar) {
+            return std::unexpected(
+                unsupported("MISSING cannot run on this server; its filter grammar has no "
+                            "negation"));
+        }
+        if (rating_field(canonical)) {
+            return "(!(" + tag + " >= 1))";
+        }
+        if (technical_field(canonical) || canonical == "codec") {
+            return std::unexpected(unsupported(
+                "MISSING cannot run on the server for probe-derived technical fields"));
+        }
+        return "(" + tag + " == \"\")";
     }
     return std::unexpected(unsupported("unsupported comparison"));
 }
 
-[[nodiscard]] core::Result<void> translate_node(const CompiledTkq& compiled, std::size_t index,
-                                                std::vector<std::string>& parts) {
+[[nodiscard]] core::Result<std::string>
+translate_node(const CompiledTkq& compiled, std::size_t index, const bool full_grammar) {
     const auto& node = compiled.nodes[index];
     switch (node.kind) {
     case TkqNodeKind::predicate:
-        return translate_predicate(compiled.predicates[node.predicate_index], parts);
+        return translate_predicate(compiled.predicates[node.predicate_index], full_grammar);
     case TkqNodeKind::and_node:
+    case TkqNodeKind::or_node: {
+        if (node.kind == TkqNodeKind::or_node && !full_grammar) {
+            return std::unexpected(unsupported(
+                "OR cannot run on this server; its filter grammar joins with AND only"));
+        }
+        std::vector<std::string> children;
+        children.reserve(node.children.size());
         for (const auto child : node.children) {
-            if (auto translated = translate_node(compiled, child, parts); !translated) {
+            auto translated = translate_node(compiled, child, full_grammar);
+            if (!translated) {
                 return translated;
             }
+            children.push_back(std::move(*translated));
         }
-        return {};
-    case TkqNodeKind::or_node:
-        return std::unexpected(
-            unsupported("OR cannot run on the server; its filter grammar joins with AND only"));
-    case TkqNodeKind::not_node:
-        return std::unexpected(
-            unsupported("NOT cannot run on the server; its filter grammar has no negation"));
+        return joined_group(children, node.kind == TkqNodeKind::or_node ? "OR" : "AND");
+    }
+    case TkqNodeKind::not_node: {
+        if (!full_grammar) {
+            return std::unexpected(unsupported(
+                "NOT cannot run on this server; its filter grammar has no negation"));
+        }
+        auto child = translate_node(compiled, node.children.front(), full_grammar);
+        if (!child) {
+            return child;
+        }
+        return "(!" + *child + ")";
+    }
     }
     return std::unexpected(unsupported("unsupported query shape"));
 }
@@ -196,30 +262,17 @@ namespace {
 
 } // namespace
 
-core::Result<MelodyTranslatedQuery> translate_tkq_to_melody(const CompiledTkq& compiled) {
+core::Result<MelodyTranslatedQuery> translate_tkq_to_melody(const CompiledTkq& compiled,
+                                                            const bool full_grammar) {
     MelodyTranslatedQuery translated;
     if (compiled.match_all) {
         translated.filter_expression = "(base \"\")";
     } else {
-        std::vector<std::string> parts;
-        if (auto result = translate_node(compiled, compiled.root, parts); !result) {
-            return std::unexpected(std::move(result.error()));
+        auto expression = translate_node(compiled, compiled.root, full_grammar);
+        if (!expression) {
+            return std::unexpected(std::move(expression.error()));
         }
-        if (parts.empty()) {
-            return std::unexpected(unsupported("the query has no server-translatable terms"));
-        }
-        if (parts.size() == 1U) {
-            translated.filter_expression = parts.front();
-        } else {
-            std::string joined;
-            for (const auto& part : parts) {
-                if (!joined.empty()) {
-                    joined += " AND ";
-                }
-                joined += part;
-            }
-            translated.filter_expression = "(" + joined + ")";
-        }
+        translated.filter_expression = std::move(*expression);
     }
     if (compiled.sort) {
         auto sort = translate_sort(*compiled.sort);

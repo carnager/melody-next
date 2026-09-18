@@ -112,7 +112,11 @@ over the covers — instead of being derived from returned songs. The Search
 dialog additionally gains a **Server library** scope that translates tkq
 queries to the server's filter grammar (see
 [query-language.md](query-language.md)), with saved searches and committed
-`tkq:` result tabs.
+`tkq:` result tabs. When the server also advertises `filtergrammar`
+(Melody grammar level 2), the translator emits the full structured
+grammar — `OR`/`NOT` trees, `PRESENT`/`MISSING` via the MPD empty-value
+forms, and numeric comparisons on ordinary tags; without it, those
+constructs report a clear "not supported by this server" error.
 
 Against a Melody server, the library search box also accepts rating terms:
 `rating>=8`, `rating==10`, or `albumrating>=6` tokens (operators `>`, `>=`,

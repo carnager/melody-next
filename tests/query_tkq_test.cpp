@@ -219,9 +219,59 @@ void melodyTranslationCoversTheSupportedSubset() {
     }
 }
 
+void melodyFullGrammarTranslatesStructuredQueries() {
+    using trackknife::query::translate_tkq_to_melody;
+    const auto translate = [](const std::string_view source) {
+        const auto compiled = compile_tkq(source);
+        CHECK(compiled.has_value());
+        return translate_tkq_to_melody(*compiled, true);
+    };
+
+    // OR, NOT, and nesting render the server's parenthesized grammar.
+    auto translated = translate("genre HAS jazz OR genre HAS blues");
+    CHECK(translated.has_value() &&
+          translated->filter_expression ==
+              "((genre contains \"jazz\") OR (genre contains \"blues\"))");
+    translated = translate("NOT genre HAS jazz");
+    CHECK(translated.has_value() &&
+          translated->filter_expression == "(!(genre contains \"jazz\"))");
+    translated = translate("(artist IS a AND genre HAS jazz) OR title IS b");
+    CHECK(translated.has_value() &&
+          translated->filter_expression ==
+              "(((artist == \"a\") AND (genre contains \"jazz\")) OR (title == \"b\"))");
+
+    // MPD's empty-value forms carry PRESENT and MISSING; ratings negate
+    // their numeric form because 0 means unrated.
+    translated = translate("genre MISSING");
+    CHECK(translated.has_value() && translated->filter_expression == "(genre == \"\")");
+    translated = translate("genre PRESENT");
+    CHECK(translated.has_value() && translated->filter_expression == "(genre != \"\")");
+    translated = translate("rating MISSING");
+    CHECK(translated.has_value() && translated->filter_expression == "(!(rating >= 1))");
+
+    // Numeric comparisons reach ordinary tags; EQUAL becomes the range
+    // pair because the server's == is string equality there.
+    translated = translate("date GREATER 1990 AND date LESS 2000");
+    CHECK(translated.has_value() &&
+          translated->filter_expression == "((date > 1990) AND (date < 2000))");
+    translated = translate("date EQUAL 1994");
+    CHECK(translated.has_value() &&
+          translated->filter_expression == "((date >= 1994) AND (date <= 1994))");
+
+    // Still impossible even at grammar level 2.
+    for (const auto* source : {"\"%artist% x\" HAS y", "samplerate MISSING"}) {
+        const auto rejected = translate(source);
+        CHECK(!rejected.has_value());
+        if (!rejected.has_value()) {
+            CHECK(rejected.error().code == trackknife::core::ErrorCode::unsupported);
+        }
+    }
+}
+
 int main() {
     simpleWordsBecomeAnAllWordSearch();
     melodyTranslationCoversTheSupportedSubset();
+    melodyFullGrammarTranslatesStructuredQueries();
     structuredQueriesParseWithPrecedence();
     quotingEscapesAndKeywordsInsideStrings();
     expressionOperandsCompileAsFormatPredicates();

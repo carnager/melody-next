@@ -110,12 +110,19 @@ that advertises `searchalbums`: supported queries translate mechanically to
 the server's filter grammar (word search, tag HAS/IS terms, numeric
 comparisons on `rating`, `albumrating`, `samplerate`, `bitspersample`,
 `channels`, and `length_ms` in whole seconds, `rating PRESENT`, and simple
-single-`%field%` sorts). The server grammar joins terms with AND only, so
-`OR`, `NOT`, `MISSING`, tkfmt expression predicates, and numeric
-comparisons on ordinary tags report "not supported by this server" instead
-of running with changed meaning. Results open as a committed MPD search
-tab; MusicBrainz field names translate to the server's underscore
-spellings automatically.
+single-`%field%` sorts). Results open as a committed MPD search tab;
+MusicBrainz field names translate to the server's underscore spellings
+automatically.
+
+Against a server that also advertises `filtergrammar` (Melody grammar
+level 2), the whole boolean surface translates: `OR` and `NOT` trees,
+`PRESENT`/`MISSING` on ordinary tags (the MPD empty-value forms; rating
+fields negate their numeric form), and `GREATER`/`LESS`/`EQUAL` on
+ordinary tags including `date` by leading integer. Older servers join
+terms with AND only, so those constructs report "not supported by this
+server" there instead of running with changed meaning. tkfmt expression
+predicates never run server-side, and `PRESENT`/`MISSING` on the
+probe-derived technical pseudo-fields stays local-only.
 
 ## Bounds
 

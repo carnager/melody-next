@@ -3794,6 +3794,10 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QVERIFY(preset != nullptr && root != nullptr && directories != nullptr && names != nullptr);
     QVERIFY(preview != nullptr && run != nullptr && status != nullptr && problems != nullptr);
     QVERIFY(channels != nullptr && gain_mode != nullptr);
+    // Processing choices restore from persisted settings; this test's items
+    // carry no ReplayGain, so pin the gain policy off explicitly.
+    channels->setCurrentIndex(channels->findData(0));
+    gain_mode->setCurrentIndex(gain_mode->findData(0));
     // Problem reports scroll inside a bounded pane instead of stretching
     // the dialog; without problems it stays hidden.
     QVERIFY(!problems->isVisible());
@@ -3870,6 +3874,10 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QTRY_VERIFY(!preset_delete->isVisible());
 
     preset->setCurrentIndex(preset->findData(QStringLiteral("opus-192")));
+    // The deleted preset's restored job left permanent gain enabled; these
+    // items carry no ReplayGain, and a gain request without a value now
+    // fails closed instead of converting silently at unity.
+    gain_mode->setCurrentIndex(gain_mode->findData(0));
     root->setText(destination.path());
     directories->setText(QStringLiteral("%album%"));
     names->setText(QStringLiteral("%tracknumber% - %title%"));

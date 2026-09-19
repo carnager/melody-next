@@ -169,6 +169,8 @@ struct Session::Impl {
     std::atomic_bool melody_rating_search{false};
     std::atomic_bool melody_album_search{false};
     std::atomic_bool melody_contexts{false};
+    // Melody takes a whole batch of playlist additions as one write.
+    std::atomic_bool melody_playlist_batch{false};
     std::atomic_uint32_t pending_refresh{full_refresh};
     std::atomic_uint64_t next_command_id{1U};
     std::atomic_uint64_t active_generation{0U};
@@ -450,8 +452,9 @@ struct Session::Impl {
             return without_payload(client.add_to_stored_playlist(command.uri, command.secondary_uri,
                                                                  command.queue_position));
         case SessionCommandKind::stored_playlist_add_batch:
-            return without_payload(
-                client.add_to_stored_playlist(command.uri, command.uris, command.queue_position));
+            return without_payload(client.add_to_stored_playlist(
+                command.uri, command.uris, command.queue_position,
+                melody_playlist_batch.load(std::memory_order_acquire)));
         case SessionCommandKind::stored_playlist_delete_item:
             return without_payload(
                 client.delete_from_stored_playlist(command.uri, command.object_id));
@@ -600,6 +603,9 @@ struct Session::Impl {
             snapshot.capabilities = std::move(*capabilities);
             melody_rating_search.store(snapshot.capabilities.supports_command("getrating"),
                                        std::memory_order_release);
+            melody_playlist_batch.store(
+                snapshot.capabilities.supports_command("melody_playlistadd"),
+                std::memory_order_release);
             melody_contexts.store(snapshot.capabilities.supports_command("melody_context"),
                                   std::memory_order_release);
             melody_album_search.store(snapshot.capabilities.supports_command("searchalbums"),

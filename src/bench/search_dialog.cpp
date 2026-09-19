@@ -33,7 +33,11 @@
 namespace trackknife::bench {
 namespace {
 
-constexpr int result_display_limit = 500;
+// Results are listed in full up to this bound, which exists only so a
+// query matching most of the library cannot make the dialog crawl. The
+// list is uniform-height and filled in one batch, so it stays responsive
+// well past the few thousand a real search returns.
+constexpr int result_display_limit = 20'000;
 
 // The dialog's technical-need test mirrors the planner's pseudo-field
 // vocabulary without depending on persistence internals.
@@ -141,6 +145,8 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     results_ = new QListWidget(this);
     results_->setObjectName(QStringLiteral("bench-search-results"));
     results_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    results_->setUniformItemSizes(true);
+    results_->setLayoutMode(QListView::Batched);
     results_->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(results_, 1);
 
@@ -444,16 +450,15 @@ void SearchDialog::startServerSearch(query::CompiledTkq compiled) {
                 return;
             }
             error_->hide();
-            for (const auto& label : labels) {
-                results_->addItem(label);
-            }
+            results_->addItems(labels);
             server_result_query_ = compiled;
-            status_->setText(total == 1
-                                 ? QStringLiteral("1 match")
-                                 : QStringLiteral("%1 matches%2")
-                                       .arg(total)
-                                       .arg(total >= 500 ? QStringLiteral(" · first 500 shown")
-                                                         : QString{}));
+            status_->setText(
+                total == 1 ? QStringLiteral("1 match")
+                           : QStringLiteral("%1 matches%2")
+                                 .arg(total)
+                                 .arg(total > labels.size()
+                                          ? QStringLiteral(" · showing first %1").arg(labels.size())
+                                          : QString{}));
             open_button_->setEnabled(total > 0);
         });
 }
@@ -649,9 +654,12 @@ void SearchDialog::finishSearch() {
     const auto total = result_rows_.size();
     const auto shown = std::min<std::size_t>(outcome.labels.size(),
                                              static_cast<std::size_t>(result_display_limit));
+    QStringList labels;
+    labels.reserve(static_cast<qsizetype>(shown));
     for (std::size_t index = 0U; index < shown; ++index) {
-        results_->addItem(displayText(outcome.labels[index]));
+        labels.push_back(displayText(outcome.labels[index]));
     }
+    results_->addItems(labels);
     open_button_->setEnabled(total > 0U);
     QString text =
         QStringLiteral("%1 match%2").arg(total).arg(total == 1U ? QString{} : QStringLiteral("es"));

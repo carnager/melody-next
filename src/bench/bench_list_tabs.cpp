@@ -772,7 +772,9 @@ void BenchMainWindow::openSearchDialog() {
                                 return;
                             }
                             QStringList labels;
-                            const auto shown = std::min<std::size_t>(result->size(), 200U);
+                            // The dialog decides what it can show; handing it
+                            // 200 of several thousand hits was its own limit.
+                            const auto shown = std::min<std::size_t>(result->size(), 20'000U);
                             for (std::size_t index = 0U; index < shown; ++index) {
                                 const auto& track = (*result)[index];
                                 const auto artist = track.metadata.first("Artist");

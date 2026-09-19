@@ -23,6 +23,20 @@
 
 namespace trackknife::mpd {
 namespace {
+// libmpdclient's send_command takes a fixed variadic argument list, so every
+// list-carrying melody_context subcommand composes its own quoted line.
+std::string quoted_argument(const std::string& value) {
+    std::string quoted = "\"";
+    for (const auto character : value) {
+        if (character == '"' || character == '\\') {
+            quoted.push_back('\\');
+        }
+        quoted.push_back(character);
+    }
+    quoted.push_back('"');
+    return quoted;
+}
+
 
 struct ConnectionDeleter {
     void operator()(mpd_connection* connection) const noexcept {
@@ -1052,7 +1066,8 @@ core::Result<void> Client::add_to_stored_playlist(const std::string_view name,
 
 core::Result<void> Client::add_to_stored_playlist(const std::string_view name,
                                                   const std::span<const std::string> uris,
-                                                  const std::optional<unsigned> first_position) {
+                                                  const std::optional<unsigned> first_position,
+                                                  const bool allow_melody_batch) {
     constexpr std::size_t maximum_batch_size = 4'096U;
     if (name.empty() || name.contains('\0') || uris.empty() || uris.size() > maximum_batch_size) {
         return std::unexpected(core::Error{
@@ -1075,6 +1090,15 @@ core::Result<void> Client::add_to_stored_playlist(const std::string_view name,
     }
 
     const std::string name_text{name};
+    // Melody can take the whole batch as one write; plain MPD needs one
+    // playlistadd per track, which costs a commit each on the server.
+    if (!first_position && allow_melody_batch) {
+        if (auto staged = stage_context_uris({uris.begin(), uris.end()}); !staged) {
+            return staged;
+        }
+        return implementation_->run_composed("melody_playlistadd " + quoted_argument(name_text),
+                                             "melody_playlistadd");
+    }
     auto* connection = implementation_->connection.get();
     if (!mpd_command_list_begin(connection, false)) {
         return std::unexpected(
@@ -1774,19 +1798,6 @@ namespace {
 // URIs. This bound leaves room for the verb and quoting.
 constexpr std::size_t maximum_command_line = 3'000U;
 
-// libmpdclient's send_command takes a fixed variadic argument list, so every
-// list-carrying melody_context subcommand composes its own quoted line.
-std::string quoted_argument(const std::string& value) {
-    std::string quoted = "\"";
-    for (const auto character : value) {
-        if (character == '"' || character == '\\') {
-            quoted.push_back('\\');
-        }
-        quoted.push_back(character);
-    }
-    quoted.push_back('"');
-    return quoted;
-}
 } // namespace
 
 // Stages a track list across as many lines as it takes. The leading bare

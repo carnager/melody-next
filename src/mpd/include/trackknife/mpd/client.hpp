@@ -121,7 +121,8 @@ class Client final {
                            std::optional<unsigned> position = std::nullopt);
     [[nodiscard]] core::Result<void>
     add_to_stored_playlist(std::string_view name, std::span<const std::string> uris,
-                           std::optional<unsigned> first_position = std::nullopt);
+                           std::optional<unsigned> first_position = std::nullopt,
+                           bool allow_melody_batch = false);
     [[nodiscard]] core::Result<void> delete_from_stored_playlist(std::string_view name,
                                                                  unsigned position);
     [[nodiscard]] core::Result<void>

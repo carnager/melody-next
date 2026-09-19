@@ -14,6 +14,7 @@
 
 #include <QAbstractItemView>
 #include <QHeaderView>
+#include <QIcon>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QListWidget>
@@ -48,6 +49,27 @@ namespace {
 }
 
 } // namespace
+
+// mpdTabInsertionIndex keeps every server-side tab grouped directly after
+// the MPD Queue: new MPD tabs insert after the last existing one instead of
+// trailing the local lists.
+int BenchMainWindow::mpdTabInsertionIndex() {
+    auto index = mpd_queue_view_ != nullptr ? tabs_->indexOf(mpd_queue_view_) : -1;
+    if (index < 0) {
+        return tabs_->count();
+    }
+    ++index;
+    while (index < tabs_->count()) {
+        auto* widget = tabs_->widget(index);
+        if (mpdPlaylistTabForWidget(qobject_cast<QTableView*>(widget)) == nullptr &&
+            mpdSearchTabForWidget(qobject_cast<QTableView*>(widget)) == nullptr &&
+            mpdListTabForWidget(widget) == nullptr) {
+            break;
+        }
+        ++index;
+    }
+    return index;
+}
 
 BenchMainWindow::MpdListTab* BenchMainWindow::mpdListTabForWidget(QWidget* widget) {
     const auto found =
@@ -168,7 +190,9 @@ BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDoc
     }
     tab->model->replaceTracks(std::move(tracks));
 
-    const auto index = tabs_->addTab(view, displayText(tab->document.name));
+    const auto index = tabs_->insertTab(mpdTabInsertionIndex(),
+                                        view, QIcon::fromTheme(QStringLiteral("network-server")),
+                                        displayText(tab->document.name));
     mpd_list_tabs_.push_back(std::move(tab));
     auto* stored = mpd_list_tabs_.back().get();
     refreshMpdListTabChrome(*stored);

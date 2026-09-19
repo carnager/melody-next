@@ -503,7 +503,8 @@ void BenchMainWindow::buildMpdWorkspace() {
                 preserved_mpd_view_layout_.clear();
                 schedulePersist();
             });
-    const auto queue_index = tabs_->addTab(view, QStringLiteral("MPD Queue"));
+    const auto queue_index = tabs_->addTab(
+        view, QIcon::fromTheme(QStringLiteral("network-server")), QStringLiteral("MPD Queue"));
     tabs_->setTabToolTip(queue_index,
                          QStringLiteral("Authoritative queue on the connected MPD server"));
     if (auto* close = tabs_->tabBar()->tabButton(queue_index, QTabBar::RightSide)) {

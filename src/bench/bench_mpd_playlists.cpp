@@ -14,6 +14,7 @@
 #include "uicommon/queue_table_view.hpp"
 
 #include <QHeaderView>
+#include <QIcon>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLineEdit>
@@ -230,7 +231,8 @@ void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select)
     tab->view_layout = mpd_view_layout_;
     applyTrackViewLayout(view, tab->view_layout, mpd_view_layout_);
 
-    const auto index = tabs_->addTab(view, name);
+    const auto index = tabs_->insertTab(
+        mpdTabInsertionIndex(), view, QIcon::fromTheme(QStringLiteral("network-server")), name);
     tabs_->setTabToolTip(index, QStringLiteral("Stored playlist on the connected MPD server"));
     mpd_playlist_tabs_.push_back(std::move(tab));
     if (select) {
@@ -364,7 +366,10 @@ void BenchMainWindow::openMpdSearchTab(const QString& query, std::vector<mpd::Tr
     applyTrackViewLayout(view, tab->view_layout, mpd_view_layout_);
     tab->model->replaceTracks(std::move(tracks));
 
-    const auto index = tabs_->addTab(view, QStringLiteral("Search: %1").arg(query));
+    const auto index =
+        tabs_->insertTab(mpdTabInsertionIndex(), view,
+                         QIcon::fromTheme(QStringLiteral("network-server")),
+                         QStringLiteral("Search: %1").arg(query));
     tabs_->setTabToolTip(index,
                          QStringLiteral("Committed MPD search results (snapshot of the query)"));
     mpd_search_tabs_.push_back(std::move(tab));

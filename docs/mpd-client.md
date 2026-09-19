@@ -237,7 +237,10 @@ Server list tabs (ADR-0181) are persistent client-owned working lists of
 server tracks: created by "Copy to server list" from the queue, committed
 searches, or stored playlist tabs; reordered, trimmed, and renamed purely
 client-side; restored across restarts from their metadata snapshots so
-they stay legible while disconnected. Activation appends to the live
+they stay legible while disconnected. Every server-side tab — the MPD
+Queue, stored playlists, committed searches, and server lists — carries a
+server icon and groups directly after the MPD Queue in the tab strip, so
+MPD and local tabs read apart at a glance. Activation appends to the live
 queue; "Replace queue and play" is the explicit playback gesture. Snapshot
 metadata is fallback display data, not canonical server or file metadata.
 

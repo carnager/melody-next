@@ -440,6 +440,7 @@ class BenchMainWindow final : public QMainWindow {
         ui::TrackViewLayout view_layout;
     };
     std::vector<std::unique_ptr<MpdListTab>> mpd_list_tabs_;
+    [[nodiscard]] int mpdTabInsertionIndex();
     MpdListTab* addMpdListTab(persistence::ListDocument document, bool select);
     MpdListTab* mpdListTabForWidget(QWidget* widget);
     MpdListTab* currentMpdListTab();

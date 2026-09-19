@@ -208,6 +208,8 @@ class BenchMainWindow final : public QMainWindow {
     void acceptMpdStoredPlaylistContents(const QString& name);
     void renameMpdPlaylistTab(const QString& from, const QString& to);
     void refreshMpdPlaylistContextMarkers();
+    void persistOpenPlaylistTabs();
+    void restoreOpenPlaylistTabs(const QStringList& available);
     void closeMpdPlaylistTab(const QString& name);
     void refreshMpdPlaylistsSoon();
     void showMpdPlaylistSidebarMenu(const QPoint& position);

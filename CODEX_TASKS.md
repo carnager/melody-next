@@ -3,9 +3,11 @@
 Active handoff task below. (The former M5-era backlog this file carried is
 complete — see MILESTONES.md and ADRs 0169-0175.)
 
-This plan spans TWO repositories: Part A lives in ../melody (see its copy at
-docs/playback-contexts-plan.md there) and MUST ship and deploy first; Part B
-is this repository. Keep each repo green independently.
+STATUS: Part A (melodyd playback contexts) is implemented and deployed.
+Part B's core is implemented too: stored playlists are now the one kind of
+server list, played as contexts (ADR-0187). What remains from the plan
+below is the queue tab showing the stashed queue while a playlist plays
+(T4), and the client-side tests for the context commands (T7).
 
 ---
 

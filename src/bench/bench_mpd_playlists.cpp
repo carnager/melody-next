@@ -20,6 +20,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QSettings>
 #include <QMessageBox>
 #include <QSet>
 #include <QStackedWidget>
@@ -268,6 +269,7 @@ void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select)
         mpdTabInsertionIndex(), view, QIcon::fromTheme(QStringLiteral("network-server")), name);
     tabs_->setTabToolTip(index, QStringLiteral("Stored playlist on the connected MPD server"));
     mpd_playlist_tabs_.push_back(std::move(tab));
+    persistOpenPlaylistTabs();
     if (select) {
         tabs_->setCurrentIndex(index);
         view->setFocus(Qt::ShortcutFocusReason);
@@ -510,6 +512,7 @@ void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {
             mpd_playlists_list_->setCurrentItem(matches.front());
         }
     }
+    restoreOpenPlaylistTabs(names);
 }
 
 // ADR-0187: the playlist tab whose list is the active context marks the
@@ -545,6 +548,27 @@ void BenchMainWindow::renameMpdPlaylistTab(const QString& from, const QString& t
     if (index >= 0) {
         tabs_->setTabText(index, to);
     }
+    persistOpenPlaylistTabs();
+}
+
+// ADR-0187: server list tabs survive restarts like local list tabs. Only
+// the names persist; contents always come from the authoritative re-read.
+void BenchMainWindow::persistOpenPlaylistTabs() {
+    QStringList names;
+    names.reserve(static_cast<qsizetype>(mpd_playlist_tabs_.size()));
+    for (const auto& tab : mpd_playlist_tabs_) {
+        names.push_back(tab->name);
+    }
+    QSettings{}.setValue(QStringLiteral("mpd/open-playlist-tabs"), names);
+}
+
+void BenchMainWindow::restoreOpenPlaylistTabs(const QStringList& available) {
+    const auto names = QSettings{}.value(QStringLiteral("mpd/open-playlist-tabs")).toStringList();
+    for (const auto& name : names) {
+        if (available.contains(name) && mpdPlaylistTabNamed(name) == nullptr) {
+            openMpdPlaylistTab(name, false);
+        }
+    }
 }
 
 void BenchMainWindow::closeMpdPlaylistTab(const QString& name) {
@@ -562,6 +586,7 @@ void BenchMainWindow::closeMpdPlaylistTab(const QString& name) {
         return owned.get() == tab;
     });
     refreshTabActions();
+    persistOpenPlaylistTabs();
 }
 
 void BenchMainWindow::refreshMpdPlaylistsSoon() {

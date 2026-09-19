@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, 2026-09-19. Extends ADR-0058; realizes the mixed-working-memory
+Accepted, 2026-09-19.
+
+Superseded by ADR-0187: server lists are MPD stored playlists, played as
+Melody playback contexts. Extends ADR-0058; realizes the mixed-working-memory
 half of ADR-0020 and ADR-0010 that ADR-0025's process split had shelved.
 
 ## Context

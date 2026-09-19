@@ -965,7 +965,8 @@ void MpdProbeController::playStoredPlaylistContext(const QString& name, const in
     emit stateChanged();
 }
 
-void MpdProbeController::playTrackListContext(const QStringList& uris, const int row) {
+void MpdProbeController::playTrackListContext(const QStringList& uris, const int row,
+                                              const QString& label) {
     if (!session_ || !connected_ || uris.isEmpty()) {
         return;
     }
@@ -975,7 +976,8 @@ void MpdProbeController::playTrackListContext(const QStringList& uris, const int
         encoded.push_back(uri.toUtf8().toStdString());
     }
     const auto position = static_cast<unsigned>(std::max(row, 0));
-    const auto command_id = session_->melody_context_tracks(std::move(encoded), position);
+    const auto command_id = session_->melody_context_tracks(std::move(encoded), position,
+                                                            label.toStdString());
     pending_commands_.insert(command_id);
     beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
     emit stateChanged();
@@ -995,6 +997,21 @@ void MpdProbeController::removeQueueContextRows(const std::vector<int>& rows) {
         return;
     }
     pending_commands_.insert(session_->melody_context_queue_delete(std::move(positions)));
+    emit stateChanged();
+}
+
+// Re-materializes the client's active list after it was edited, keeping the
+// playing track playing.
+void MpdProbeController::resyncTrackListContext(const QStringList& uris) {
+    if (!session_ || !connected_ || uris.isEmpty()) {
+        return;
+    }
+    std::vector<std::string> encoded;
+    encoded.reserve(static_cast<std::size_t>(uris.size()));
+    for (const auto& uri : uris) {
+        encoded.push_back(uri.toUtf8().toStdString());
+    }
+    pending_commands_.insert(session_->melody_context_resync(std::move(encoded)));
     emit stateChanged();
 }
 
@@ -1680,6 +1697,12 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     // ADR-0188: the Queue tab shows the queue context's own list. While
     // another tab is the active queue, the server holds this list stashed —
     // it must keep showing unchanged rather than the other tab's tracks.
+    // While a list of the client's own is the live queue, its rows are kept
+    // here: that list's tab shows the queue, so whatever another client adds
+    // to the queue shows up where the user is looking.
+    context_label_ = snapshot.context ? QString::fromStdString(snapshot.context->label)
+                                      : QString{};
+    live_queue_tracks_ = queue_stashed_ ? snapshot.queue : std::vector<mpd::Track>{};
     auto queue_rows = queue_stashed_ ? std::move(snapshot.queue_context_tracks)
                                      : std::move(snapshot.queue);
     requestMelodyAlbumRatings(queue_rows);

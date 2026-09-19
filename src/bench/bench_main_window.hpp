@@ -468,6 +468,9 @@ class BenchMainWindow final : public QMainWindow {
     void closeMpdListTab(MpdListTab* tab);
     void refreshMpdListTabChrome(MpdListTab& tab);
     void markMpdListTabDirty(MpdListTab& tab);
+    [[nodiscard]] static QString mpdListTabLabel(const MpdListTab& tab);
+    [[nodiscard]] bool isActiveMpdListTab(const MpdListTab& tab) const;
+    void refreshActiveMpdListTab();
     void showMpdListTrackMenu(MpdListTab& tab, const QPoint& position);
     // ADR-0190: every MPD-side tab is a destination for a selection of
     // server tracks — the visible one by default, any other by name.

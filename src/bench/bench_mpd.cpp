@@ -660,6 +660,7 @@ void BenchMainWindow::buildMpdWorkspace() {
         refreshSelectionStatus();
         refreshMpdStatusControls();
         refreshMpdPlaylistContextMarkers();
+        refreshActiveMpdListTab();
     });
     auto* output_model = mpd_controller_->outputModel();
     const auto refresh_outputs = [this] {

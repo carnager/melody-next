@@ -318,8 +318,10 @@ struct Session::Impl {
         case SessionCommandKind::melody_context_queue:
             return without_payload(client.melody_context_queue(command.queue_position));
         case SessionCommandKind::melody_context_tracks:
-            return without_payload(
-                client.melody_context_tracks(command.uris, command.queue_position.value_or(0U)));
+            return without_payload(client.melody_context_tracks(
+                command.uris, command.queue_position.value_or(0U), command.secondary_uri));
+        case SessionCommandKind::melody_context_resync:
+            return without_payload(client.melody_context_resync(command.uris));
         case SessionCommandKind::melody_context_queue_add:
             return without_payload(client.melody_context_queue_write(
                 false, command.uris, static_cast<int>(command.object_id) - 1));
@@ -515,6 +517,7 @@ struct Session::Impl {
         case SessionCommandKind::melody_context_play:
         case SessionCommandKind::melody_context_queue:
         case SessionCommandKind::melody_context_tracks:
+        case SessionCommandKind::melody_context_resync:
         case SessionCommandKind::melody_context_queue_add:
         case SessionCommandKind::melody_context_queue_replace:
         case SessionCommandKind::melody_context_queue_delete:
@@ -879,11 +882,20 @@ std::uint64_t Session::melody_context_play(std::string name,
     return implementation_->enqueue(std::move(command));
 }
 
-std::uint64_t Session::melody_context_tracks(std::vector<std::string> uris, const unsigned row) {
+std::uint64_t Session::melody_context_tracks(std::vector<std::string> uris, const unsigned row,
+                                             std::string label) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::melody_context_tracks;
     command.uris = std::move(uris);
     command.queue_position = row;
+    command.secondary_uri = std::move(label);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_resync(std::vector<std::string> uris) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_resync;
+    command.uris = std::move(uris);
     return implementation_->enqueue(std::move(command));
 }
 

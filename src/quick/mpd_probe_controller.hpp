@@ -211,9 +211,17 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void playQueueContext(int row);
     // Queue-context row removal, shared by delete/crop/clear while stashed.
     void removeQueueContextRows(const std::vector<int>& rows);
+    Q_INVOKABLE void resyncTrackListContext(const QStringList& uris);
+    // The client's own tag for the list that is the live queue, and that
+    // queue's rows — empty unless one of the client's lists is active.
+    [[nodiscard]] QString contextLabel() const { return context_label_; }
+    [[nodiscard]] const std::vector<mpd::Track>& liveQueueTracks() const noexcept {
+        return live_queue_tracks_;
+    }
     // ADR-0188: play a working tab's tracks as a context — the queue is
     // stashed rather than replaced.
-    Q_INVOKABLE void playTrackListContext(const QStringList& uris, int row);
+    Q_INVOKABLE void playTrackListContext(const QStringList& uris, int row,
+                                          const QString& label = {});
     void addAlbum(mpd::AlbumFilter album, QueueAddMode mode);
     void loadSearchAlbum(quint64 token, const mpd::AlbumFilter& album);
     Q_INVOKABLE void browseDirectory(const QString& uri);
@@ -317,6 +325,8 @@ class MpdProbeController final : public QObject {
     mpd::PlaybackModeState consume_mode_{mpd::PlaybackModeState::unknown};
     mpd::ReplayGainMode replay_gain_mode_{mpd::ReplayGainMode::unknown};
     QString active_context_;
+    QString context_label_;
+    std::vector<mpd::Track> live_queue_tracks_;
     int song_position_{-1};
     bool queue_stashed_{false};
     std::optional<bool> optimistic_repeat_;

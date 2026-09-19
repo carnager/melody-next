@@ -109,10 +109,65 @@ void BenchMainWindow::refreshMpdListTabChrome(MpdListTab& tab) {
     }
 }
 
+// The label a working tab claims its context with: its own document id, so
+// the claim survives restarts and never collides with a playlist name.
+QString BenchMainWindow::mpdListTabLabel(const MpdListTab& tab) {
+    return QStringLiteral("tab:") + QString::fromStdString(tab.document.id.to_string());
+}
+
+// True while this tab's list is the live queue on the server.
+bool BenchMainWindow::isActiveMpdListTab(const MpdListTab& tab) const {
+    return mpd_controller_ != nullptr && mpd_controller_->queueStashed() &&
+           mpd_controller_->contextLabel() == mpdListTabLabel(tab);
+}
+
 void BenchMainWindow::markMpdListTabDirty(MpdListTab& tab) {
     tab.document.dirty = true;
     refreshMpdListTabChrome(tab);
     schedulePersist();
+    // Editing the list you are listening to is a live edit: the server
+    // re-materializes it without interrupting the playing track.
+    if (isActiveMpdListTab(tab)) {
+        QStringList uris;
+        for (const auto& track : tab.model->tracksSnapshot()) {
+            uris.push_back(displayText(track.uri));
+        }
+        if (!uris.isEmpty()) {
+            mpd_controller_->resyncTrackListContext(uris);
+        }
+    }
+}
+
+// A stock MPD client adds to the queue, which is whichever list is active —
+// so the tab that owns the active queue shows the server's copy of it.
+void BenchMainWindow::refreshActiveMpdListTab() {
+    if (mpd_controller_ == nullptr || !mpd_controller_->queueStashed()) {
+        return;
+    }
+    const auto label = mpd_controller_->contextLabel();
+    if (label.isEmpty()) {
+        return;
+    }
+    for (const auto& tab : mpd_list_tabs_) {
+        if (mpdListTabLabel(*tab) != label) {
+            continue;
+        }
+        const auto& live = mpd_controller_->liveQueueTracks();
+        auto current = tab->model->tracksSnapshot();
+        const auto same = current.size() == live.size() &&
+                          std::ranges::equal(current, live, {}, &mpd::Track::uri,
+                                             &mpd::Track::uri);
+        if (!same) {
+            // Server truth, without looping back into a resync.
+            tab->model->replaceTracks(live);
+            tab->document.dirty = true;
+            schedulePersist();
+        }
+        tab->model->setCurrentRow(mpd_controller_->songPosition() >= 0
+                                      ? std::optional{mpd_controller_->songPosition()}
+                                      : std::nullopt);
+        return;
+    }
 }
 
 BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDocument document,
@@ -173,7 +228,11 @@ BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDoc
         // ADR-0188: playing a working tab stashes the queue instead of
         // destroying it, so the tab behaves like any other playable list.
         if (mpd_controller_->supportsPlaybackContexts()) {
-            mpd_controller_->playTrackListContext(uris, index.row());
+            // The label lets the server hand this list back as the live
+            // queue, so the tab keeps showing it — including what other
+            // clients add to it.
+            mpd_controller_->playTrackListContext(uris, index.row(),
+                                                  mpdListTabLabel(*raw_tab));
             return;
         }
         mpd_controller_->replaceQueueWithUrisAndPlayAt(uris, index.row());

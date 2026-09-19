@@ -1786,8 +1786,15 @@ core::Result<void> Client::melody_context_play(const std::string_view name,
     return {};
 }
 
+core::Result<void> Client::melody_context_resync(const std::vector<std::string>& uris) {
+    if (auto staged = stage_context_uris(uris); !staged) {
+        return staged;
+    }
+    return implementation_->run_composed("melody_context resync", "melody_context resync");
+}
+
 core::Result<void> Client::melody_context_tracks(const std::vector<std::string>& uris,
-                                                 const unsigned row) {
+                                                 const unsigned row, const std::string& label) {
     if (uris.empty()) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
                                            .message = "A context needs at least one track",
@@ -1796,8 +1803,14 @@ core::Result<void> Client::melody_context_tracks(const std::vector<std::string>&
     if (auto staged = stage_context_uris(uris); !staged) {
         return staged;
     }
-    return implementation_->run_composed("melody_context tracks " + std::to_string(row),
-                                         "melody_context tracks");
+    if (auto played = implementation_->run_composed("melody_context tracks " + std::to_string(row),
+                                                    "melody_context tracks");
+        !played) {
+        return played;
+    }
+    // The label goes with the list it names, so the client can recognize its
+    // own list as the live queue afterwards.
+    return melody_context_label(label);
 }
 
 namespace {
@@ -1889,6 +1902,13 @@ core::Result<void> Client::melody_context_queue_delete(const std::vector<unsigne
     return implementation_->run_composed(line, "melody_context queuedelete");
 }
 
+core::Result<void> Client::melody_context_label(const std::string& label) {
+    return implementation_->run_composed(
+        label.empty() ? std::string{"melody_context label"}
+                      : "melody_context label " + quoted_argument(label),
+        "melody_context label");
+}
+
 core::Result<void> Client::melody_context_queue_move(const unsigned from, const unsigned to) {
     return implementation_->run_composed(
         "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to),
@@ -1931,6 +1951,8 @@ core::Result<MelodyContextState> Client::melody_active_context() {
     for (const auto& pair : *pairs) {
         if (ascii_case_equal(pair.name, "context")) {
             state.name = pair.value;
+        } else if (ascii_case_equal(pair.name, "label")) {
+            state.label = pair.value;
         } else if (ascii_case_equal(pair.name, "stashed")) {
             state.queue_stashed = pair.value != "0";
         }

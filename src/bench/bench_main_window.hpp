@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/local_list_model.hpp"
+#include "bench/settings_dialog.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "trackknife/audio/playback_order.hpp"
@@ -283,7 +284,8 @@ class BenchMainWindow final : public QMainWindow {
     void playCurrentRow();
     void showMetadataProperties();
     void showConvertDialog();
-    void showSettingsDialog();
+    void showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
+    [[nodiscard]] OutputProfileStore buildOutputProfileStore();
     void applyLibraryOrder(bool persist);
     void startMetadataOperationRecovery();
     [[nodiscard]] MusicBrainzLookupService musicBrainzLookupService();

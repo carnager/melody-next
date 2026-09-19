@@ -6,6 +6,7 @@
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_exact_value_dialog.hpp"
 #include "bench/metadata_field_review_bar.hpp"
+#include "bench/settings_dialog.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_rule_script_import_dialog.hpp"
 #include "bench/metadata_scalar_delegate.hpp"
@@ -138,7 +139,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     FilePublicationApplyObserver file_apply_observer, QWidget* parent,
     MetadataDialogLayoutStore layout_store, MusicBrainzLookupService musicbrainz)
     : QDialog(parent), selection_watcher_(this), write_plan_watcher_(this),
-      metadata_apply_watcher_(this), file_apply_watcher_(this), output_example_watcher_(this),
+      metadata_apply_watcher_(this), file_apply_watcher_(this),
       source_reader_(std::move(source_reader)),
       plan_applier_factory_(std::move(plan_applier_factory)),
       apply_observer_(std::move(apply_observer)),
@@ -280,32 +281,6 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     side_layout->addWidget(replaygain_expression_);
     // ADR-0146: the "never modify audio files" policy. CUE tracks keep
     // their sheet either way.
-    replaygain_sidecar_only_ = new QCheckBox(QStringLiteral("Store in sidecar only"), side_panel);
-    replaygain_sidecar_only_->setObjectName(QStringLiteral("bench-replaygain-sidecar-only"));
-    replaygain_sidecar_only_->setToolTip(
-        QStringLiteral("Write loudness into .tkmeta sidecars instead of audio-file tags, even "
-                       "for writable formats; CUE tracks keep their sheet"));
-    replaygain_sidecar_only_->setChecked(
-        QSettings{}.value(QStringLiteral("replaygain/sidecar-only"), false).toBool());
-    connect(replaygain_sidecar_only_, &QCheckBox::toggled, this, [](const bool enabled) {
-        QSettings{}.setValue(QStringLiteral("replaygain/sidecar-only"), enabled);
-    });
-    side_layout->addWidget(replaygain_sidecar_only_);
-    // ADR-0148: default stays the ReplayGain 2.0 sample peak; opting in
-    // stores the oversampled true peak in the same REPLAYGAIN_*_PEAK
-    // fields, the way foobar2000 and loudgain do.
-    replaygain_true_peak_ =
-        new QCheckBox(QStringLiteral("True peak as ReplayGain peak"), side_panel);
-    replaygain_true_peak_->setObjectName(QStringLiteral("bench-replaygain-true-peak"));
-    replaygain_true_peak_->setToolTip(
-        QStringLiteral("Propose the oversampled inter-sample peak instead of the sample peak in "
-                       "REPLAYGAIN_TRACK_PEAK and REPLAYGAIN_ALBUM_PEAK"));
-    replaygain_true_peak_->setChecked(
-        QSettings{}.value(QStringLiteral("replaygain/true-peak"), false).toBool());
-    connect(replaygain_true_peak_, &QCheckBox::toggled, this, [](const bool enabled) {
-        QSettings{}.setValue(QStringLiteral("replaygain/true-peak"), enabled);
-    });
-    side_layout->addWidget(replaygain_true_peak_);
     // ADR-0147: per-track view of where each effective loudness value
     // comes from — draft, sidecar, CUE segment, or embedded tags.
     replaygain_provenance_button_ =
@@ -349,153 +324,11 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     transform_button_->setEnabled(false);
     side_layout->addWidget(transform_button_);
 
-    auto* layout_manager = new QDialog(this);
-    layout_manager->setObjectName(QStringLiteral("bench-output-layout-manager"));
-    layout_manager->setWindowTitle(QStringLiteral("Naming layouts"));
-    layout_manager->setModal(false);
-    layout_manager->setMinimumSize(560, 380);
-    layout_manager->resize(820, 540);
-    auto* layout_manager_box = new QVBoxLayout(layout_manager);
-    auto* layout_manager_hint =
-        new QLabel(QStringLiteral("Changes the layout currently selected in the tag editor. "
-                                  "“New” starts a blank layout."),
-                   layout_manager);
-    layout_manager_hint->setWordWrap(true);
-    layout_manager_box->addWidget(layout_manager_hint);
-    auto* layout_form = new QFormLayout;
-    layout_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    output_layout_name_ = new QLineEdit(layout_manager);
-    output_layout_name_->setObjectName(QStringLiteral("bench-output-layout-name"));
-    output_layout_name_->setPlaceholderText(QStringLiteral("For example: Album folders"));
-    layout_form->addRow(QStringLiteral("Name:"), output_layout_name_);
-    const auto expression_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    output_directory_expression_ = new QLineEdit(layout_manager);
-    output_directory_expression_->setObjectName(
-        QStringLiteral("bench-output-layout-directory-expression"));
-    output_directory_expression_->setPlaceholderText(
-        QStringLiteral("For example: %album artist%/%album%"));
-    output_directory_expression_->setFont(expression_font);
-    layout_form->addRow(QStringLiteral("Folders:"), output_directory_expression_);
-    output_basename_expression_ = new QLineEdit(layout_manager);
-    output_basename_expression_->setObjectName(
-        QStringLiteral("bench-output-layout-basename-expression"));
-    output_basename_expression_->setPlaceholderText(
-        QStringLiteral("For example: %tracknumber% - %title%"));
-    output_basename_expression_->setFont(expression_font);
-    layout_form->addRow(QStringLiteral("Filename:"), output_basename_expression_);
-    output_sanitization_policy_ = new QComboBox(layout_manager);
-    output_sanitization_policy_->setObjectName(QStringLiteral("bench-output-layout-sanitization"));
-    output_sanitization_policy_->addItem(QStringLiteral("Linux filenames"),
-                                         QStringLiteral("linux"));
-    output_sanitization_policy_->addItem(QStringLiteral("Portable filenames"),
-                                         QStringLiteral("portable"));
-    output_sanitization_policy_->setToolTip(
-        QStringLiteral("Portable replaces Windows-forbidden characters, trailing dots/spaces, "
-                       "and reserved device names; Unicode spelling is preserved"));
-    layout_form->addRow(QStringLiteral("Filename policy:"), output_sanitization_policy_);
-    layout_manager_box->addLayout(layout_form);
-    output_layout_example_ =
-        new QLabel(QStringLiteral("Preview: waiting for tracks…"), layout_manager);
-    output_layout_example_->setObjectName(QStringLiteral("bench-output-layout-example"));
-    output_layout_example_->setAccessibleName(QStringLiteral("Naming layout preview status"));
-    output_layout_example_->setTextFormat(Qt::PlainText);
-    output_layout_example_->setWordWrap(true);
-    layout_manager_box->addWidget(output_layout_example_);
-    output_layout_preview_ = new QTreeWidget(layout_manager);
-    output_layout_preview_->setObjectName(QStringLiteral("bench-output-layout-preview"));
-    output_layout_preview_->setAccessibleName(QStringLiteral("Naming layout live preview"));
-    output_layout_preview_->setColumnCount(2);
-    output_layout_preview_->setHeaderLabels(
-        {QStringLiteral("Current name"), QStringLiteral("New path")});
-    output_layout_preview_->setRootIsDecorated(false);
-    output_layout_preview_->setAlternatingRowColors(true);
-    output_layout_preview_->setUniformRowHeights(true);
-    output_layout_preview_->setTextElideMode(Qt::ElideMiddle);
-    output_layout_preview_->setSelectionMode(QAbstractItemView::NoSelection);
-    output_layout_preview_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    output_layout_preview_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    output_layout_preview_->header()->setStretchLastSection(true);
-    layout_manager_box->addWidget(output_layout_preview_, 1);
-    auto* layout_buttons = new QHBoxLayout;
-    output_layout_new_button_ = new QPushButton(QStringLiteral("New"), layout_manager);
-    output_layout_new_button_->setObjectName(QStringLiteral("bench-output-layout-new"));
-    output_layout_new_button_->setAutoDefault(false);
-    output_layout_save_button_ = new QPushButton(QStringLiteral("Save"), layout_manager);
-    output_layout_save_button_->setObjectName(QStringLiteral("bench-output-layout-save"));
-    output_layout_save_button_->setAutoDefault(false);
-    output_layout_remove_button_ = new QPushButton(QStringLiteral("Remove"), layout_manager);
-    output_layout_remove_button_->setObjectName(QStringLiteral("bench-output-layout-remove"));
-    output_layout_remove_button_->setAutoDefault(false);
-    layout_buttons->addWidget(output_layout_new_button_);
-    layout_buttons->addWidget(output_layout_save_button_);
-    layout_buttons->addWidget(output_layout_remove_button_);
-    layout_buttons->addStretch(1);
-    auto* layout_manager_close = new QPushButton(QStringLiteral("Close"), layout_manager);
-    layout_manager_close->setObjectName(QStringLiteral("bench-output-layout-manager-close"));
-    layout_manager_close->setAutoDefault(false);
-    layout_buttons->addWidget(layout_manager_close);
-    layout_manager_box->addLayout(layout_buttons);
-    connect(layout_manager_close, &QPushButton::clicked, layout_manager, &QDialog::close);
-    connect(manage_layouts_button, &QPushButton::clicked, this, [this, layout_manager] {
-        layout_manager->show();
-        layout_manager->raise();
-        layout_manager->activateWindow();
-        scheduleOutputLayoutExample();
-    });
-
-    auto* destination_manager = new QDialog(this);
-    destination_manager->setObjectName(QStringLiteral("bench-destination-manager"));
-    destination_manager->setWindowTitle(QStringLiteral("Move destinations"));
-    destination_manager->setModal(false);
-    destination_manager->setMinimumWidth(460);
-    auto* destination_manager_box = new QVBoxLayout(destination_manager);
-    auto* destination_manager_hint =
-        new QLabel(QStringLiteral("Changes the destination currently selected in the tag editor. "
-                                  "“New” starts a blank destination."),
-                   destination_manager);
-    destination_manager_hint->setWordWrap(true);
-    destination_manager_box->addWidget(destination_manager_hint);
-    auto* destination_form = new QFormLayout;
-    destination_name_ = new QLineEdit(destination_manager);
-    destination_name_->setObjectName(QStringLiteral("bench-destination-name"));
-    destination_name_->setPlaceholderText(QStringLiteral("For example: Music library"));
-    destination_form->addRow(QStringLiteral("Name:"), destination_name_);
-    auto* root_row = new QHBoxLayout;
-    destination_root_ = new QLineEdit(destination_manager);
-    destination_root_->setObjectName(QStringLiteral("bench-destination-root"));
-    destination_root_->setPlaceholderText(QStringLiteral("Choose an absolute folder"));
-    destination_browse_button_ = new QPushButton(QStringLiteral("Browse…"), destination_manager);
-    destination_browse_button_->setObjectName(QStringLiteral("bench-destination-browse"));
-    root_row->addWidget(destination_root_, 1);
-    root_row->addWidget(destination_browse_button_);
-    destination_form->addRow(QStringLiteral("Root:"), root_row);
-    destination_manager_box->addLayout(destination_form);
-    auto* destination_buttons = new QHBoxLayout;
-    destination_new_button_ = new QPushButton(QStringLiteral("New"), destination_manager);
-    destination_new_button_->setObjectName(QStringLiteral("bench-destination-new"));
-    destination_new_button_->setAutoDefault(false);
-    destination_save_button_ = new QPushButton(QStringLiteral("Save"), destination_manager);
-    destination_save_button_->setObjectName(QStringLiteral("bench-destination-save"));
-    destination_save_button_->setAutoDefault(false);
-    destination_remove_button_ = new QPushButton(QStringLiteral("Remove"), destination_manager);
-    destination_remove_button_->setObjectName(QStringLiteral("bench-destination-remove"));
-    destination_remove_button_->setAutoDefault(false);
-    destination_buttons->addWidget(destination_new_button_);
-    destination_buttons->addWidget(destination_save_button_);
-    destination_buttons->addWidget(destination_remove_button_);
-    destination_buttons->addStretch(1);
-    auto* destination_manager_close = new QPushButton(QStringLiteral("Close"), destination_manager);
-    destination_manager_close->setObjectName(QStringLiteral("bench-destination-manager-close"));
-    destination_manager_close->setAutoDefault(false);
-    destination_buttons->addWidget(destination_manager_close);
-    destination_manager_box->addLayout(destination_buttons);
-    connect(destination_manager_close, &QPushButton::clicked, destination_manager, &QDialog::close);
-    connect(manage_destinations_button, &QPushButton::clicked, destination_manager,
-            [destination_manager] {
-                destination_manager->show();
-                destination_manager->raise();
-                destination_manager->activateWindow();
-            });
+    // ADR-0185: profile management lives in Settings; these open it.
+    connect(manage_layouts_button, &QPushButton::clicked, this,
+            [this] { emit manageOutputProfilesRequested(); });
+    connect(manage_destinations_button, &QPushButton::clicked, this,
+            [this] { emit manageOutputProfilesRequested(); });
 
     loading_ = new QLabel(QStringLiteral("Preparing metadata grid…"), this);
     loading_->setObjectName(QStringLiteral("bench-metadata-loading"));
@@ -694,57 +527,9 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         selectDestination(index);
         invalidateWritePlan();
     });
-    connect(output_layout_new_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::newOutputLayout);
-    connect(destination_new_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::newDestination);
-    connect(output_layout_save_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::saveOutputLayout);
-    connect(destination_save_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::saveDestination);
-    connect(output_layout_remove_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::removeOutputLayout);
-    connect(destination_remove_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::removeDestination);
-    for (auto* editor : {output_layout_name_, output_directory_expression_,
-                         output_basename_expression_, destination_name_, destination_root_}) {
-        connect(editor, &QLineEdit::textChanged, this,
-                &MetadataPropertiesDialog::updateOutputProfileButtons);
-    }
-    for (auto* expression : {output_directory_expression_, output_basename_expression_}) {
-        connect(expression, &QLineEdit::textChanged, this,
-                &MetadataPropertiesDialog::scheduleOutputLayoutExample);
-    }
-    connect(output_sanitization_policy_, &QComboBox::currentIndexChanged, this,
-            &MetadataPropertiesDialog::scheduleOutputLayoutExample);
-    connect(destination_root_, &QLineEdit::textEdited, this, [this](const QString& text) {
-        const auto encoded = QFile::encodeName(text);
-        destination_root_raw_path_.assign(encoded.constData(),
-                                          static_cast<std::size_t>(encoded.size()));
-    });
-    connect(destination_browse_button_, &QPushButton::clicked, this, [this] {
-        const auto initial = destination_root_raw_path_.empty()
-                                 ? QString{}
-                                 : QFile::decodeName(QByteArray{
-                                       destination_root_raw_path_.data(),
-                                       static_cast<qsizetype>(destination_root_raw_path_.size())});
-        const auto selected = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Choose move destination"), initial,
-            QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-        if (selected.isEmpty()) {
-            return;
-        }
-        const auto encoded = QFile::encodeName(selected);
-        destination_root_raw_path_.assign(encoded.constData(),
-                                          static_cast<std::size_t>(encoded.size()));
-        destination_root_->setText(
-            QString::fromStdString(core::escape_raw_path(destination_root_raw_path_)));
-        updateOutputProfileButtons();
-    });
     connect(save_tags_check_, &QCheckBox::toggled, this, [this] {
         invalidateWritePlan();
         updateDraftState(draft_count_, undo_button_->isEnabled(), redo_button_->isEnabled());
-        scheduleOutputLayoutExample();
     });
     for (auto* path_choice : {rename_files_check_, move_files_check_}) {
         connect(path_choice, &QCheckBox::toggled, this, [this] {
@@ -760,14 +545,6 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             &MetadataPropertiesDialog::finishMetadataApply);
     connect(&file_apply_watcher_, &QFutureWatcherBase::finished, this,
             &MetadataPropertiesDialog::finishFileApply);
-    connect(&output_example_watcher_, &QFutureWatcherBase::finished, this,
-            &MetadataPropertiesDialog::finishOutputLayoutExample);
-    output_example_debounce_ = new QTimer(this);
-    output_example_debounce_->setObjectName(QStringLiteral("bench-output-layout-example-timer"));
-    output_example_debounce_->setSingleShot(true);
-    output_example_debounce_->setInterval(250);
-    connect(output_example_debounce_, &QTimer::timeout, this,
-            &MetadataPropertiesDialog::startOutputLayoutExample);
     apply_progress_timer_ = new QTimer(this);
     apply_progress_timer_->setInterval(50);
     connect(apply_progress_timer_, &QTimer::timeout, this,
@@ -836,7 +613,6 @@ MetadataPropertiesDialog::~MetadataPropertiesDialog() {
         file_apply_watcher_.waitForFinished();
     }
     if (output_example_running_) {
-        output_example_watcher_.waitForFinished();
     }
     if (proposal_running_) {
         proposal_watcher_.waitForFinished();
@@ -1376,7 +1152,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
             &MetadataPropertiesDialog::updateSelectionProjection);
     connect(file_list_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
         scheduleSelectionProjection();
-        scheduleOutputLayoutExample();
         updateTechnicalSummary();
     });
     connect(&technical_watcher_, &QFutureWatcherBase::finished, this, [this] {
@@ -1398,7 +1173,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                 sticky_status_.clear();
                 invalidateWritePlan();
                 updateDraftState(patch_count, can_undo, can_redo);
-                scheduleOutputLayoutExample();
             });
     connect(grid_model_, &MetadataGridModel::editRejected, this, [this](const QString& message) {
         read_only_->setText(QStringLiteral("Draft edit rejected · %1").arg(message));
@@ -1422,7 +1196,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                 updateEditValuesButton();
                 updateTransformationButton();
             });
-    scheduleOutputLayoutExample();
     if (grid_model_->rowCount() > 0) {
         file_list_->selectionModel()->setCurrentIndex(grid_model_->index(0, 0),
                                                       QItemSelectionModel::NoUpdate);
@@ -1468,7 +1241,6 @@ void MetadataPropertiesDialog::updateSelectionProjection() {
     updateArtworkScope(selected_items);
     aggregate_model_->setSelectedItems(std::move(selected_items));
     updateTransformationButton();
-    scheduleOutputLayoutExample();
 }
 
 void MetadataPropertiesDialog::updateArtworkScope(
@@ -1862,10 +1634,6 @@ void MetadataPropertiesDialog::rebuildOutputProfileControls(
 void MetadataPropertiesDialog::selectOutputLayout(const int index) {
     if (index < 0 || index >= output_layout_combo_->count()) {
         editing_output_layout_id_.reset();
-        output_layout_name_->clear();
-        output_directory_expression_->clear();
-        output_basename_expression_->clear();
-        output_sanitization_policy_->setCurrentIndex(0);
         updateOutputProfileButtons();
         return;
     }
@@ -1875,26 +1643,17 @@ void MetadataPropertiesDialog::selectOutputLayout(const int index) {
                                               &persistence::SavedOutputLayoutProfile::id)
                           : output_layout_catalog_.end();
     if (found == output_layout_catalog_.end()) {
-        newOutputLayout();
+        editing_output_layout_id_.reset();
+        updateOutputProfileButtons();
         return;
     }
     editing_output_layout_id_ = found->id;
-    output_layout_name_->setText(display_utf8(found->profile.name));
-    output_directory_expression_->setText(
-        display_utf8(found->profile.relative_directory_expression));
-    output_basename_expression_->setText(display_utf8(found->profile.basename_expression));
-    output_sanitization_policy_->setCurrentIndex(
-        std::max(0, output_sanitization_policy_->findData(
-                        display_utf8(found->profile.sanitization_policy.name))));
     updateOutputProfileButtons();
 }
 
 void MetadataPropertiesDialog::selectDestination(const int index) {
     if (index < 0 || index >= destination_combo_->count()) {
         editing_destination_id_.reset();
-        destination_root_raw_path_.clear();
-        destination_name_->clear();
-        destination_root_->clear();
         updateOutputProfileButtons();
         return;
     }
@@ -1904,227 +1663,21 @@ void MetadataPropertiesDialog::selectDestination(const int index) {
         id ? std::ranges::find(destination_catalog_, *id, &persistence::SavedDestinationProfile::id)
            : destination_catalog_.end();
     if (found == destination_catalog_.end()) {
-        newDestination();
+        editing_destination_id_.reset();
+        updateOutputProfileButtons();
         return;
     }
     editing_destination_id_ = found->id;
-    destination_root_raw_path_ = found->profile.root_raw_path;
-    destination_name_->setText(display_utf8(found->profile.name));
-    destination_root_->setText(
-        QString::fromStdString(core::escape_raw_path(destination_root_raw_path_)));
     updateOutputProfileButtons();
-}
-
-void MetadataPropertiesDialog::newOutputLayout() {
-    editing_output_layout_id_.reset();
-    output_layout_combo_->setCurrentIndex(-1);
-    output_layout_name_->clear();
-    output_directory_expression_->clear();
-    output_basename_expression_->clear();
-    output_sanitization_policy_->setCurrentIndex(0);
-    output_layout_name_->setFocus();
-    output_profile_status_->setText(
-        QStringLiteral("Define a reusable relative folder and filename convention"));
-    updateOutputProfileButtons();
-}
-
-void MetadataPropertiesDialog::newDestination() {
-    editing_destination_id_.reset();
-    destination_root_raw_path_.clear();
-    destination_combo_->setCurrentIndex(-1);
-    destination_name_->clear();
-    destination_root_->clear();
-    destination_name_->setFocus();
-    output_profile_status_->setText(QStringLiteral("Define a named absolute root for Move files"));
-    updateOutputProfileButtons();
-}
-
-void MetadataPropertiesDialog::saveOutputLayout() {
-    if (!output_profile_store_.save_layout || output_profile_mutation_running_) {
-        return;
-    }
-    persistence::SavedOutputLayoutProfile saved{
-        .id = editing_output_layout_id_.value_or(core::StableId::random()),
-        .profile =
-            operations::OutputLayoutProfile{
-                .schema_version = 1U,
-                .name = encode_utf8(output_layout_name_->text()),
-                .dialect = {},
-                .relative_directory_expression = encode_utf8(output_directory_expression_->text()),
-                .basename_expression = encode_utf8(output_basename_expression_->text()),
-                .sanitization_policy = {encode_utf8(
-                                            output_sanitization_policy_->currentData().toString()),
-                                        1U},
-            },
-    };
-    if (auto valid = operations::validate_output_layout_profile(saved.profile); !valid) {
-        output_profile_status_->setText(QStringLiteral("Naming layout is not valid · %1")
-                                            .arg(display_utf8(valid.error().message)));
-        return;
-    }
-    output_profile_mutation_running_ = true;
-    updateOutputProfileButtons();
-    const QPointer self{this};
-    auto retained_saved = saved;
-    output_profile_store_.save_layout(
-        std::move(saved), [self, saved = std::move(retained_saved)](QString error) mutable {
-            if (!self) {
-                return;
-            }
-            self->output_profile_mutation_running_ = false;
-            if (!error.isEmpty()) {
-                self->output_profile_status_->setText(
-                    QStringLiteral("Could not save naming layout · %1").arg(error));
-                self->updateOutputProfileButtons();
-                return;
-            }
-            const auto found = std::ranges::find(self->output_layout_catalog_, saved.id,
-                                                 &persistence::SavedOutputLayoutProfile::id);
-            if (found == self->output_layout_catalog_.end()) {
-                self->output_layout_catalog_.push_back(saved);
-            } else {
-                *found = saved;
-            }
-            std::ranges::sort(self->output_layout_catalog_, {},
-                              [](const auto& profile) { return profile.profile.name; });
-            self->editing_output_layout_id_ = saved.id;
-            self->rebuildOutputProfileControls(saved.id, self->editing_destination_id_);
-            self->output_profile_status_->setText(QStringLiteral("Naming layout saved"));
-        });
-}
-
-void MetadataPropertiesDialog::saveDestination() {
-    if (!output_profile_store_.save_destination || output_profile_mutation_running_) {
-        return;
-    }
-    persistence::SavedDestinationProfile saved{
-        .id = editing_destination_id_.value_or(core::StableId::random()),
-        .profile =
-            operations::DestinationProfile{
-                .schema_version = 1U,
-                .name = encode_utf8(destination_name_->text()),
-                .root_raw_path = destination_root_raw_path_,
-                .containment_policy = {"lexical-beneath-root", 1U},
-            },
-    };
-    if (auto valid = operations::validate_destination_profile(saved.profile); !valid) {
-        output_profile_status_->setText(QStringLiteral("Move destination is not valid · %1")
-                                            .arg(display_utf8(valid.error().message)));
-        return;
-    }
-    output_profile_mutation_running_ = true;
-    updateOutputProfileButtons();
-    const QPointer self{this};
-    auto retained_saved = saved;
-    output_profile_store_.save_destination(
-        std::move(saved), [self, saved = std::move(retained_saved)](QString error) mutable {
-            if (!self) {
-                return;
-            }
-            self->output_profile_mutation_running_ = false;
-            if (!error.isEmpty()) {
-                self->output_profile_status_->setText(
-                    QStringLiteral("Could not save move destination · %1").arg(error));
-                self->updateOutputProfileButtons();
-                return;
-            }
-            const auto found = std::ranges::find(self->destination_catalog_, saved.id,
-                                                 &persistence::SavedDestinationProfile::id);
-            if (found == self->destination_catalog_.end()) {
-                self->destination_catalog_.push_back(saved);
-            } else {
-                *found = saved;
-            }
-            std::ranges::sort(self->destination_catalog_, {},
-                              [](const auto& profile) { return profile.profile.name; });
-            self->editing_destination_id_ = saved.id;
-            self->rebuildOutputProfileControls(self->editing_output_layout_id_, saved.id);
-            self->output_profile_status_->setText(QStringLiteral("Move destination saved"));
-        });
-}
-
-void MetadataPropertiesDialog::removeOutputLayout() {
-    if (!editing_output_layout_id_ || !output_profile_store_.remove_layout ||
-        output_profile_mutation_running_) {
-        return;
-    }
-    const auto id = *editing_output_layout_id_;
-    output_profile_mutation_running_ = true;
-    updateOutputProfileButtons();
-    const QPointer self{this};
-    output_profile_store_.remove_layout(id, [self, id](QString error) {
-        if (!self) {
-            return;
-        }
-        self->output_profile_mutation_running_ = false;
-        if (!error.isEmpty()) {
-            self->output_profile_status_->setText(
-                QStringLiteral("Could not remove naming layout · %1").arg(error));
-            self->updateOutputProfileButtons();
-            return;
-        }
-        std::erase_if(self->output_layout_catalog_,
-                      [id](const auto& saved) { return saved.id == id; });
-        self->editing_output_layout_id_.reset();
-        self->rebuildOutputProfileControls({}, self->editing_destination_id_);
-        self->output_profile_status_->setText(QStringLiteral("Naming layout removed"));
-    });
-}
-
-void MetadataPropertiesDialog::removeDestination() {
-    if (!editing_destination_id_ || !output_profile_store_.remove_destination ||
-        output_profile_mutation_running_) {
-        return;
-    }
-    const auto id = *editing_destination_id_;
-    output_profile_mutation_running_ = true;
-    updateOutputProfileButtons();
-    const QPointer self{this};
-    output_profile_store_.remove_destination(id, [self, id](QString error) {
-        if (!self) {
-            return;
-        }
-        self->output_profile_mutation_running_ = false;
-        if (!error.isEmpty()) {
-            self->output_profile_status_->setText(
-                QStringLiteral("Could not remove move destination · %1").arg(error));
-            self->updateOutputProfileButtons();
-            return;
-        }
-        std::erase_if(self->destination_catalog_,
-                      [id](const auto& saved) { return saved.id == id; });
-        self->editing_destination_id_.reset();
-        self->rebuildOutputProfileControls(self->editing_output_layout_id_, {});
-        self->output_profile_status_->setText(QStringLiteral("Move destination removed"));
-    });
 }
 
 void MetadataPropertiesDialog::updateOutputProfileButtons() {
-    if (output_layout_save_button_ == nullptr) {
+    if (output_layout_combo_ == nullptr) {
         return;
     }
     const auto available = !output_profiles_loading_ && !output_profile_mutation_running_;
     output_layout_combo_->setEnabled(available && !output_layout_catalog_.empty());
     destination_combo_->setEnabled(available && !destination_catalog_.empty());
-    output_layout_name_->setEnabled(available);
-    output_directory_expression_->setEnabled(available);
-    output_basename_expression_->setEnabled(available);
-    output_sanitization_policy_->setEnabled(available);
-    destination_name_->setEnabled(available);
-    destination_root_->setEnabled(available);
-    destination_browse_button_->setEnabled(available && output_profile_store_.save_destination);
-    output_layout_new_button_->setEnabled(available && output_profile_store_.save_layout);
-    destination_new_button_->setEnabled(available && output_profile_store_.save_destination);
-    output_layout_save_button_->setEnabled(available && output_profile_store_.save_layout &&
-                                           !output_layout_name_->text().isEmpty() &&
-                                           !output_basename_expression_->text().isEmpty());
-    destination_save_button_->setEnabled(available && output_profile_store_.save_destination &&
-                                         !destination_name_->text().isEmpty() &&
-                                         !destination_root_raw_path_.empty());
-    output_layout_remove_button_->setEnabled(available && output_profile_store_.remove_layout &&
-                                             editing_output_layout_id_.has_value());
-    destination_remove_button_->setEnabled(available && output_profile_store_.remove_destination &&
-                                           editing_destination_id_.has_value());
     const auto layout_ready =
         editing_output_layout_id_.has_value() &&
         std::ranges::any_of(output_layout_catalog_, [this](const auto& entry) {
@@ -2158,182 +1711,6 @@ void MetadataPropertiesDialog::updateOutputProfileButtons() {
     }
 }
 
-void MetadataPropertiesDialog::scheduleOutputLayoutExample() {
-    if (output_example_debounce_ == nullptr || output_layout_example_ == nullptr) {
-        return;
-    }
-    ++output_example_generation_;
-    output_example_cancellation_.request_cancellation();
-    output_example_pending_ = false;
-    output_example_debounce_->start();
-}
-
-void MetadataPropertiesDialog::startOutputLayoutExample() {
-    if (output_example_running_) {
-        output_example_pending_ = true;
-        output_example_cancellation_.request_cancellation();
-        return;
-    }
-    if (grid_model_ == nullptr) {
-        output_layout_example_->setText(QStringLiteral("Preview: waiting for tracks…"));
-        output_layout_preview_->clear();
-        return;
-    }
-    // Selected tracks drive the preview; with no selection every track is
-    // previewed so the layout can be judged before anything is applied.
-    auto items = selectedItemIndexes();
-    if (items.empty()) {
-        items.reserve(grid_model_->selection().item_count());
-        for (std::size_t item_index = 0U; item_index < grid_model_->selection().item_count();
-             ++item_index) {
-            items.push_back(item_index);
-        }
-    }
-    if (items.empty()) {
-        output_layout_example_->setText(QStringLiteral("Preview: waiting for tracks…"));
-        output_layout_preview_->clear();
-        return;
-    }
-    constexpr auto maximum_preview_items = std::size_t{100U};
-    const auto item_count = items.size();
-    const auto truncated = item_count > maximum_preview_items;
-    if (truncated) {
-        items.resize(maximum_preview_items);
-    }
-
-    auto selection = grid_model_->sharedSelection();
-    auto draft =
-        save_tags_check_->isChecked() ? grid_model_->patches() : metadata::StagedMetadataPatchSet{};
-    auto layout = operations::OutputLayoutProfile{
-        .schema_version = 1U,
-        .name = "Live example",
-        .dialect = {},
-        .relative_directory_expression = encode_utf8(output_directory_expression_->text()),
-        .basename_expression = encode_utf8(output_basename_expression_->text()),
-        .sanitization_policy = {encode_utf8(output_sanitization_policy_->currentData().toString()),
-                                1U},
-    };
-    output_example_job_generation_ = output_example_generation_;
-    output_example_cancellation_ = core::CancellationSource{};
-    const auto cancellation = output_example_cancellation_.token();
-    output_example_running_ = true;
-    output_layout_example_->setText(QStringLiteral("Preview: updating…"));
-
-    output_example_watcher_.setFuture(QtConcurrent::run(
-        [selection = std::move(selection), draft = std::move(draft), items = std::move(items),
-         item_count, truncated, layout = std::move(layout), cancellation]() mutable {
-            auto documents =
-                metadata::materialize_metadata_draft(*selection, draft, items, cancellation);
-            if (!documents) {
-                return std::make_shared<OutputLayoutExampleResult>(
-                    std::unexpected(std::move(documents.error())));
-            }
-            constexpr auto preview_root = "/trackknife-layout-example";
-            std::vector<operations::OutputPathPlanningItem> planning_items;
-            planning_items.reserve(items.size());
-            for (std::size_t position = 0U; position < items.size(); ++position) {
-                const auto item_index = items[position];
-                const auto& source = selection->source(item_index);
-                const auto revision = source.source_revision.value_or(core::LocalSourceRevision{
-                    .device = 1U,
-                    .inode = 1U,
-                    .size = 1U,
-                    .modification_time_seconds = 0,
-                    .modification_time_nanoseconds = 0,
-                });
-                planning_items.push_back(operations::OutputPathPlanningItem{
-                    .item_index = item_index,
-                    .source_raw_path = source.raw_path,
-                    .source_revision = revision,
-                    .final_metadata = std::move((*documents)[position]),
-                });
-            }
-            auto planned = operations::plan_output_paths(
-                planning_items, {.rename_files = true, .move_files = true}, std::move(layout),
-                operations::DestinationProfile{
-                    .schema_version = 1U,
-                    .name = "Live example",
-                    .root_raw_path = preview_root,
-                    .containment_policy = {"lexical-beneath-root", 1U},
-                },
-                {}, cancellation);
-            if (!planned) {
-                return std::make_shared<OutputLayoutExampleResult>(
-                    std::unexpected(std::move(planned.error())));
-            }
-            const auto blocking = std::ranges::find_if(
-                planned->issues, [](const auto& issue) { return issue.blocking; });
-            if (blocking != planned->issues.end()) {
-                return std::make_shared<OutputLayoutExampleResult>(std::unexpected(core::Error{
-                    .code = core::ErrorCode::invalid_argument,
-                    .message = blocking->message,
-                    .context = {},
-                }));
-            }
-            OutputLayoutPreview preview{
-                .rows = {},
-                .item_count = item_count,
-                .truncated = truncated,
-            };
-            preview.rows.reserve(planned->sources.size());
-            constexpr std::string_view prefix = "/trackknife-layout-example/";
-            for (const auto& planned_source : planned->sources) {
-                auto relative_path = planned_source.target_raw_path;
-                if (!relative_path.starts_with(prefix)) {
-                    return std::make_shared<OutputLayoutExampleResult>(std::unexpected(core::Error{
-                        .code = core::ErrorCode::invariant,
-                        .message = "Naming layout preview escaped its preview root",
-                        .context = {},
-                    }));
-                }
-                relative_path.erase(0U, prefix.size());
-                preview.rows.push_back(OutputLayoutPreviewRow{
-                    .source_raw_path = planned_source.source_raw_path,
-                    .target_relative_path = std::move(relative_path),
-                });
-            }
-            return std::make_shared<OutputLayoutExampleResult>(std::move(preview));
-        }));
-}
-
-void MetadataPropertiesDialog::finishOutputLayoutExample() {
-    output_example_running_ = false;
-    const auto result = output_example_watcher_.result();
-    if (output_example_job_generation_ == output_example_generation_ && result) {
-        if (*result) {
-            const auto& preview = **result;
-            output_layout_preview_->clear();
-            for (const auto& row : preview.rows) {
-                const auto source =
-                    QString::fromStdString(core::escape_raw_path(row.source_raw_path));
-                const auto target =
-                    QString::fromStdString(core::escape_raw_path(row.target_relative_path));
-                auto* item = new QTreeWidgetItem(output_layout_preview_,
-                                                 {source.section(QChar{'/'}, -1), target});
-                item->setToolTip(0, source);
-                item->setToolTip(1, target);
-            }
-            output_layout_example_->setText(
-                preview.truncated
-                    ? QStringLiteral("Preview: first %1 of %2 tracks")
-                          .arg(preview.rows.size())
-                          .arg(preview.item_count)
-                    : QStringLiteral("Preview: %1 %2")
-                          .arg(preview.rows.size())
-                          .arg(pluralized(preview.rows.size(), QStringLiteral("track"),
-                                          QStringLiteral("tracks"))));
-        } else if (result->error().code != core::ErrorCode::cancelled) {
-            output_layout_preview_->clear();
-            output_layout_example_->setText(
-                QStringLiteral("Preview error: %1").arg(display_utf8(result->error().message)));
-        }
-    }
-    if (output_example_pending_) {
-        output_example_pending_ = false;
-        startOutputLayoutExample();
-    }
-}
-
 void MetadataPropertiesDialog::updateWritePlanButton() {
     if (apply_plan_button_ == nullptr) {
         return;
@@ -2347,6 +1724,10 @@ void MetadataPropertiesDialog::updateWritePlanButton() {
                                    !apply_running_ && !artwork_operation_running_);
     updateTransformationButton();
     updateApplySummary();
+}
+
+void MetadataPropertiesDialog::reloadOutputProfiles() {
+    loadOutputProfiles();
 }
 
 QTableView* MetadataPropertiesDialog::fileListView() {
@@ -2801,9 +2182,12 @@ void MetadataPropertiesDialog::startReplayGainScan(std::vector<std::size_t> forc
         audio_sources_};
     // ADR-0148/0149: captured before the worker starts; widgets stay on
     // the UI thread.
-    const bool true_peak = replaygain_true_peak_ != nullptr && replaygain_true_peak_->isChecked();
+    const bool true_peak =
+        QSettings{}.value(QLatin1String(SettingsDialog::replaygain_true_peak_key), false).toBool();
     const bool sidecar_only =
-        replaygain_sidecar_only_ != nullptr && replaygain_sidecar_only_->isChecked();
+        QSettings{}
+            .value(QLatin1String(SettingsDialog::replaygain_sidecar_only_key), false)
+            .toBool();
     ReplayGainScanSettings settings;
     settings.grouping = std::move(grouping);
     settings.true_peak = true_peak;
@@ -3057,9 +2441,13 @@ void MetadataPropertiesDialog::startWritePlan() {
     const auto cancellation = write_plan_cancellation_.token();
     const metadata::MetadataWritePlanOptions plan_options{
         .sidecar_loudness =
-            replaygain_sidecar_only_ != nullptr && replaygain_sidecar_only_->isChecked(),
+            QSettings{}
+                .value(QLatin1String(SettingsDialog::replaygain_sidecar_only_key), false)
+                .toBool(),
         .true_peak_loudness =
-            replaygain_true_peak_ != nullptr && replaygain_true_peak_->isChecked()};
+            QSettings{}
+                .value(QLatin1String(SettingsDialog::replaygain_true_peak_key), false)
+                .toBool()};
     write_plan_running_ = true;
     if (artwork_section_) {
         artwork_section_->setEnabled(false);

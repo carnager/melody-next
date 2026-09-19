@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/metadata_artwork_section.hpp"
+#include "bench/output_profiles_widget.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/replaygain_scan.hpp"
@@ -93,19 +94,6 @@ struct MetadataTransformationStore {
     std::function<void(core::StableId, Completion)> remove;
 };
 
-struct OutputProfileStore {
-    using LoadCompletion =
-        std::function<void(std::vector<persistence::SavedOutputLayoutProfile>,
-                           std::vector<persistence::SavedDestinationProfile>, QString)>;
-    using Completion = std::function<void(QString)>;
-
-    std::function<void(LoadCompletion)> load;
-    std::function<void(persistence::SavedOutputLayoutProfile, Completion)> save_layout;
-    std::function<void(core::StableId, Completion)> remove_layout;
-    std::function<void(persistence::SavedDestinationProfile, Completion)> save_destination;
-    std::function<void(core::StableId, Completion)> remove_destination;
-};
-
 struct MetadataDialogLayoutStore {
     using LoadCompletion = std::function<void(QByteArray, QString)>;
     using Completion = std::function<void(QString)>;
@@ -137,6 +125,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0183 addendum: the file list exists only after the asynchronous
     // grid build; sidebar hosting waits for this.
     void fileListConstructed();
+    // ADR-0185: profile management moved to Settings; the Edit buttons ask
+    // the bench window to open it on the Naming page.
+    void manageOutputProfilesRequested();
 
   public:
     MetadataPropertiesDialog(std::size_t requested_item_count,
@@ -158,16 +149,6 @@ class MetadataPropertiesDialog final : public QDialog {
   private:
     using SelectionResult = core::Result<metadata::StagedMetadataSelection>;
     using WritePlanResult = core::Result<operations::PreparationPlan>;
-    struct OutputLayoutPreviewRow {
-        std::string source_raw_path;
-        std::string target_relative_path;
-    };
-    struct OutputLayoutPreview {
-        std::vector<OutputLayoutPreviewRow> rows;
-        std::size_t item_count{0U};
-        bool truncated{false};
-    };
-    using OutputLayoutExampleResult = core::Result<OutputLayoutPreview>;
 
     void captureSources();
     void startSelection();
@@ -193,16 +174,7 @@ class MetadataPropertiesDialog final : public QDialog {
                                  std::optional<core::StableId> selected_destination = std::nullopt);
     void selectOutputLayout(int index);
     void selectDestination(int index);
-    void newOutputLayout();
-    void newDestination();
-    void saveOutputLayout();
-    void saveDestination();
-    void removeOutputLayout();
-    void removeDestination();
     void updateOutputProfileButtons();
-    void scheduleOutputLayoutExample();
-    void startOutputLayoutExample();
-    void finishOutputLayoutExample();
     void updateWritePlanButton();
     void updateApplySummary();
 
@@ -211,6 +183,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // window; the dialog reclaims the widget on close.
     [[nodiscard]] QTableView* fileListView();
     void setFileListHosted(bool hosted);
+    // ADR-0185: refreshes the layout/destination selectors after Settings
+    // edits profiles.
+    void reloadOutputProfiles();
 
   private:
     bool file_list_hosted_{false};
@@ -274,7 +249,6 @@ class MetadataPropertiesDialog final : public QDialog {
         metadata_apply_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<operations::FilePublicationApplyResult>>>
         file_apply_watcher_;
-    QFutureWatcher<std::shared_ptr<OutputLayoutExampleResult>> output_example_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<metadata::MetadataTransformationPreview>>>
         proposal_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<metadata::MetadataTransformationPreview>>>
@@ -341,29 +315,12 @@ class MetadataPropertiesDialog final : public QDialog {
     QPushButton* replaygain_scan_button_{nullptr};
     QComboBox* replaygain_grouping_{nullptr};
     QLineEdit* replaygain_expression_{nullptr};
-    QCheckBox* replaygain_sidecar_only_{nullptr};
-    QCheckBox* replaygain_true_peak_{nullptr};
     QPushButton* replaygain_provenance_button_{nullptr};
     std::vector<std::size_t> replaygain_retry_items_;
     QStringList replaygain_export_rows_;
     QComboBox* output_layout_combo_{nullptr};
-    QLineEdit* output_layout_name_{nullptr};
-    QLineEdit* output_directory_expression_{nullptr};
-    QLineEdit* output_basename_expression_{nullptr};
-    QComboBox* output_sanitization_policy_{nullptr};
-    QPushButton* output_layout_new_button_{nullptr};
-    QPushButton* output_layout_save_button_{nullptr};
-    QPushButton* output_layout_remove_button_{nullptr};
     QComboBox* destination_combo_{nullptr};
-    QLineEdit* destination_name_{nullptr};
-    QLineEdit* destination_root_{nullptr};
-    QPushButton* destination_browse_button_{nullptr};
-    QPushButton* destination_new_button_{nullptr};
-    QPushButton* destination_save_button_{nullptr};
-    QPushButton* destination_remove_button_{nullptr};
     QLabel* output_profile_status_{nullptr};
-    QLabel* output_layout_example_{nullptr};
-    QTreeWidget* output_layout_preview_{nullptr};
     QPushButton* apply_plan_button_{nullptr};
     QProgressBar* apply_progress_bar_{nullptr};
     QPushButton* apply_stop_button_{nullptr};
@@ -398,7 +355,6 @@ class MetadataPropertiesDialog final : public QDialog {
     QSplitter* metadata_splitter_{nullptr};
     QTimer* selection_debounce_{nullptr};
     QTimer* apply_progress_timer_{nullptr};
-    QTimer* output_example_debounce_{nullptr};
     QPointer<QDialog> exact_values_dialog_;
     QPointer<QInputDialog> field_name_dialog_;
     QPointer<QDialog> transformation_dialog_;
@@ -417,7 +373,6 @@ class MetadataPropertiesDialog final : public QDialog {
     std::size_t selected_item_count_{0U};
     std::size_t write_plan_generation_{0U};
     std::size_t write_plan_job_generation_{0U};
-    std::size_t output_example_generation_{0U};
     std::size_t output_example_job_generation_{0U};
     core::CancellationSource write_plan_cancellation_;
     core::CancellationSource replaygain_cancellation_;
@@ -429,7 +384,6 @@ class MetadataPropertiesDialog final : public QDialog {
     bool output_profile_mutation_running_{false};
     std::optional<core::StableId> editing_output_layout_id_;
     std::optional<core::StableId> editing_destination_id_;
-    std::string destination_root_raw_path_;
     bool write_plan_running_{false};
     bool proposal_running_{false};
     bool automatic_stage_running_{false};

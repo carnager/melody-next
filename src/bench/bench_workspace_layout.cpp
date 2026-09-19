@@ -457,7 +457,8 @@ void BenchMainWindow::buildWorkspace() {
     auto* settings_action = edit_menu->addAction(QStringLiteral("Settings…"));
     settings_action->setObjectName(QStringLiteral("action-settings"));
     settings_action->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
-    connect(settings_action, &QAction::triggered, this, &BenchMainWindow::showSettingsDialog);
+    connect(settings_action, &QAction::triggered, this,
+            [this] { showSettingsDialog(); });
     edit_menu->addSeparator();
     remove_selected_action_ = edit_menu->addAction(QStringLiteral("Remove selected"));
     remove_selected_action_->setObjectName(QStringLiteral("action-remove-selected-tracks"));
@@ -1059,7 +1060,19 @@ void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index
 
 } // namespace trackknife::bench
 
-void trackknife::bench::BenchMainWindow::showSettingsDialog() {
-    auto* dialog = new SettingsDialog(this);
+void trackknife::bench::BenchMainWindow::showSettingsDialog(
+    const SettingsDialog::Page page) {
+    auto* dialog = new SettingsDialog(this, buildOutputProfileStore());
+    // ADR-0185: profile edits in Settings refresh every open tag editor's
+    // selectors immediately.
+    connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {
+        for (int index = 0; index < tabs_->count(); ++index) {
+            if (auto* properties =
+                    qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
+                properties->reloadOutputProfiles();
+            }
+        }
+    });
+    dialog->showPage(page);
     dialog->open();
 }

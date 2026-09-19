@@ -561,6 +561,58 @@ void BenchMainWindow::showReplayGainDialog() {
     dialog->show();
 }
 
+OutputProfileStore BenchMainWindow::buildOutputProfileStore() {
+    auto* const persistence_service = persistence_;
+    return OutputProfileStore{
+            .load =
+                [persistence_service](OutputProfileStore::LoadCompletion completion) {
+                    if (!persistence_service) {
+                        completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
+                        return;
+                    }
+                    persistence_service->loadOutputProfiles(std::move(completion));
+                },
+            .save_layout =
+                [persistence_service](persistence::SavedOutputLayoutProfile profile,
+                                      OutputProfileStore::Completion completion) {
+                    if (!persistence_service) {
+                        completion(QStringLiteral("Trackknife persistence is unavailable"));
+                        return;
+                    }
+                    persistence_service->saveOutputLayoutProfile(std::move(profile),
+                                                                 std::move(completion));
+                },
+            .remove_layout =
+                [persistence_service](core::StableId id,
+                                      OutputProfileStore::Completion completion) {
+                    if (!persistence_service) {
+                        completion(QStringLiteral("Trackknife persistence is unavailable"));
+                        return;
+                    }
+                    persistence_service->removeOutputLayoutProfile(id, std::move(completion));
+                },
+            .save_destination =
+                [persistence_service](persistence::SavedDestinationProfile profile,
+                                      OutputProfileStore::Completion completion) {
+                    if (!persistence_service) {
+                        completion(QStringLiteral("Trackknife persistence is unavailable"));
+                        return;
+                    }
+                    persistence_service->saveDestinationProfile(std::move(profile),
+                                                                std::move(completion));
+                },
+            .remove_destination =
+                [persistence_service](core::StableId id,
+                                      OutputProfileStore::Completion completion) {
+                    if (!persistence_service) {
+                        completion(QStringLiteral("Trackknife persistence is unavailable"));
+                        return;
+                    }
+                    persistence_service->removeDestinationProfile(id, std::move(completion));
+                },
+        };
+}
+
 void BenchMainWindow::showMetadataProperties() {
     auto* tab = currentListTab();
     if (tab == nullptr || tab->view->selectionModel() == nullptr) {
@@ -613,54 +665,7 @@ void BenchMainWindow::showMetadataProperties() {
                                                                            std::move(completion));
                 },
         },
-        OutputProfileStore{
-            .load =
-                [persistence_service](OutputProfileStore::LoadCompletion completion) {
-                    if (!persistence_service) {
-                        completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->loadOutputProfiles(std::move(completion));
-                },
-            .save_layout =
-                [persistence_service](persistence::SavedOutputLayoutProfile profile,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->saveOutputLayoutProfile(std::move(profile),
-                                                                 std::move(completion));
-                },
-            .remove_layout =
-                [persistence_service](core::StableId id,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->removeOutputLayoutProfile(id, std::move(completion));
-                },
-            .save_destination =
-                [persistence_service](persistence::SavedDestinationProfile profile,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->saveDestinationProfile(std::move(profile),
-                                                                std::move(completion));
-                },
-            .remove_destination =
-                [persistence_service](core::StableId id,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->removeDestinationProfile(id, std::move(completion));
-                },
-        },
+        buildOutputProfileStore(),
         [this, database_path, persistence_service] {
             auto documents = collectDocuments();
             auto view_layouts = collectTrackViewLayouts();
@@ -902,6 +907,8 @@ void BenchMainWindow::showMetadataProperties() {
                 schedulePersist();
             }
         });
+    connect(properties, &MetadataPropertiesDialog::manageOutputProfilesRequested, this,
+            [this] { showSettingsDialog(SettingsDialog::Page::naming); });
     properties->setWindowFlags(Qt::Widget);
     properties->setProperty("bench-special-tab", QStringLiteral("metadata-properties"));
     const auto tab_title =

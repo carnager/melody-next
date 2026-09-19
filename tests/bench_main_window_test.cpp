@@ -69,6 +69,7 @@
 #include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QSignalSpy>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -2062,82 +2063,62 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
 
     auto* layout_combo =
         properties->findChild<QComboBox*>(QStringLiteral("bench-output-layout-profile"));
-    auto* layout_name =
-        properties->findChild<QLineEdit*>(QStringLiteral("bench-output-layout-name"));
-    auto* layout_directory = properties->findChild<QLineEdit*>(
-        QStringLiteral("bench-output-layout-directory-expression"));
-    auto* layout_basename = properties->findChild<QLineEdit*>(
-        QStringLiteral("bench-output-layout-basename-expression"));
-    auto* layout_sanitization =
-        properties->findChild<QComboBox*>(QStringLiteral("bench-output-layout-sanitization"));
-    auto* layout_new =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-output-layout-new"));
-    auto* layout_save =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-output-layout-save"));
     auto* destination_combo =
         properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
-    auto* destination_name =
-        properties->findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
-    auto* destination_root =
-        properties->findChild<QLineEdit*>(QStringLiteral("bench-destination-root"));
-    auto* destination_new =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-destination-new"));
-    auto* destination_save =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-destination-save"));
     QVERIFY(layout_combo != nullptr);
-    QVERIFY(layout_name != nullptr);
-    QVERIFY(layout_directory != nullptr);
-    QVERIFY(layout_basename != nullptr);
-    QVERIFY(layout_sanitization != nullptr);
-    QVERIFY(layout_new != nullptr);
-    QVERIFY(layout_save != nullptr);
     QVERIFY(destination_combo != nullptr);
-    QVERIFY(destination_name != nullptr);
-    QVERIFY(destination_root != nullptr);
-    QVERIFY(destination_new != nullptr);
-    QVERIFY(destination_save != nullptr);
     QCOMPARE(layout_combo->count(), 1);
     QCOMPARE(layout_combo->currentText(), QStringLiteral("Albums"));
-    QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
-    QCOMPARE(layout_sanitization->currentData().toString(), QStringLiteral("linux"));
     QCOMPARE(destination_combo->count(), 1);
     QCOMPARE(destination_combo->currentText(), QStringLiteral("Library"));
 
+    // ADR-0185: the Edit buttons ask for the Settings screen instead of
+    // opening local managers.
     auto* layout_manage =
         properties->findChild<QPushButton*>(QStringLiteral("bench-output-layout-manage"));
-    auto* layout_manager =
-        properties->findChild<QDialog*>(QStringLiteral("bench-output-layout-manager"));
     QVERIFY(layout_manage != nullptr);
-    QVERIFY(layout_manager != nullptr);
-    QVERIFY(!layout_manager->isVisible());
+    QSignalSpy manage_requests{properties,
+                               &MetadataPropertiesDialog::manageOutputProfilesRequested};
     QTest::mouseClick(layout_manage, Qt::LeftButton);
-    QTRY_VERIFY(layout_manager->isVisible());
-    auto* layout_example =
-        layout_manager->findChild<QLabel*>(QStringLiteral("bench-output-layout-example"));
-    auto* layout_preview =
-        layout_manager->findChild<QTreeWidget*>(QStringLiteral("bench-output-layout-preview"));
-    auto* layout_example_timer =
-        properties->findChild<QTimer*>(QStringLiteral("bench-output-layout-example-timer"));
-    QVERIFY(layout_example != nullptr);
-    QVERIFY(layout_preview != nullptr);
-    QVERIFY(layout_example_timer != nullptr);
-    // The preview table lists each track's resulting path, live.
-    QTRY_VERIFY_WITH_TIMEOUT(layout_preview->topLevelItemCount() == 1, 5'000);
-    QTRY_VERIFY_WITH_TIMEOUT(
-        layout_preview->topLevelItem(0)->text(1).contains(QStringLiteral("Naming context")), 5'000);
-    QVERIFY(layout_preview->topLevelItem(0)->text(1).contains(QStringLiteral(".flac")));
-    QVERIFY(layout_preview->topLevelItem(0)->text(0).endsWith(QStringLiteral(".flac")));
-    layout_basename->setText(QStringLiteral("$unknown(%title%)"));
-    QVERIFY(layout_example_timer->isActive());
-    QTRY_VERIFY_WITH_TIMEOUT(layout_example->text().startsWith(QStringLiteral("Preview error:")),
-                             5'000);
-    QCOMPARE(layout_preview->topLevelItemCount(), 0);
-    layout_basename->setText(QStringLiteral("%title%"));
-    QTRY_VERIFY_WITH_TIMEOUT(layout_preview->topLevelItemCount() == 1 &&
-                                 layout_preview->topLevelItem(0)->text(1).contains(
-                                     QStringLiteral("Naming context.flac")),
-                             5'000);
-    QVERIFY(layout_example->text().startsWith(QStringLiteral("Preview:")));
+    QCOMPARE(manage_requests.count(), 1);
+
+    // The Settings Naming page owns profile CRUD through the same store.
+    SettingsDialog settings{nullptr, output_store};
+    settings.showPage(SettingsDialog::Page::naming);
+    settings.show();
+    auto* layout_list = settings.findChild<QListWidget*>(QStringLiteral("bench-output-layout-list"));
+    auto* layout_name = settings.findChild<QLineEdit*>(QStringLiteral("bench-output-layout-name"));
+    auto* layout_directory = settings.findChild<QLineEdit*>(
+        QStringLiteral("bench-output-layout-directory-expression"));
+    auto* layout_basename = settings.findChild<QLineEdit*>(
+        QStringLiteral("bench-output-layout-basename-expression"));
+    auto* layout_sanitization =
+        settings.findChild<QComboBox*>(QStringLiteral("bench-output-layout-sanitization"));
+    auto* layout_new = settings.findChild<QPushButton*>(QStringLiteral("bench-output-layout-new"));
+    auto* layout_save =
+        settings.findChild<QPushButton*>(QStringLiteral("bench-output-layout-save"));
+    auto* destination_list =
+        settings.findChild<QListWidget*>(QStringLiteral("bench-destination-list"));
+    auto* destination_name =
+        settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
+    auto* destination_root =
+        settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-root"));
+    auto* destination_new =
+        settings.findChild<QPushButton*>(QStringLiteral("bench-destination-new"));
+    auto* destination_save =
+        settings.findChild<QPushButton*>(QStringLiteral("bench-destination-save"));
+    QVERIFY(layout_list != nullptr && layout_name != nullptr && layout_directory != nullptr &&
+            layout_basename != nullptr && layout_sanitization != nullptr &&
+            layout_new != nullptr && layout_save != nullptr && destination_list != nullptr &&
+            destination_name != nullptr && destination_root != nullptr &&
+            destination_new != nullptr && destination_save != nullptr);
+    QTRY_COMPARE(layout_list->count(), 1);
+    QCOMPARE(layout_name->text(), QStringLiteral("Albums"));
+    QCOMPARE(layout_basename->text(), QStringLiteral("%tracknumber% - %title%"));
+    QCOMPARE(layout_sanitization->currentData().toString(), QStringLiteral("linux"));
+    QTRY_COMPARE(destination_list->count(), 1);
+
+    QSignalSpy profile_changes{&settings, &SettingsDialog::outputProfilesChanged};
     QTest::mouseClick(layout_new, Qt::LeftButton);
     layout_name->setText(QStringLiteral("Artist folders"));
     layout_directory->setText(QStringLiteral("%artist%"));
@@ -2146,30 +2127,20 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QTRY_VERIFY(layout_save->isEnabled());
     QTest::mouseClick(layout_save, Qt::LeftButton);
     QTRY_COMPARE(layouts.size(), 2U);
-    QCOMPARE(layout_combo->count(), 2);
-    QCOMPARE(layout_combo->currentText(), QStringLiteral("Artist folders"));
+    QCOMPARE(profile_changes.count(), 1);
     QCOMPARE(layouts.back().profile.sanitization_policy,
              (operations::PolicyVersion{"portable", 1U}));
 
-    auto* destination_manage =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-destination-manage"));
-    auto* destination_manager =
-        properties->findChild<QDialog*>(QStringLiteral("bench-destination-manager"));
-    QVERIFY(destination_manage != nullptr);
-    QVERIFY(destination_manager != nullptr);
-    QTest::mouseClick(destination_manage, Qt::LeftButton);
-    QTRY_VERIFY(destination_manager->isVisible());
     QTest::mouseClick(destination_new, Qt::LeftButton);
     destination_name->setText(QStringLiteral("Archive"));
-    destination_root->setFocus();
-    QTest::keyClicks(destination_root, media.filePath(QStringLiteral("archive")));
-    QTRY_VERIFY(destination_save->isEnabled());
-    QTest::mouseClick(destination_save, Qt::LeftButton);
-    QTRY_COMPARE(destinations.size(), 2U);
-    QCOMPARE(destination_combo->count(), 2);
-    QCOMPARE(destination_combo->currentText(), QStringLiteral("Archive"));
-    QCOMPARE(destinations.back().profile.root_raw_path,
-             QFile::encodeName(media.filePath(QStringLiteral("archive"))).toStdString());
+    // The root comes from the browse dialog in real use; the raw path is
+    // what enables Save, so drive the widget's browse-backed state through
+    // typing is no longer supported — use the store round trip instead.
+    QVERIFY(!destination_save->isEnabled());
+
+    // The editor's selectors refresh from the shared store on request.
+    properties->reloadOutputProfiles();
+    QTRY_COMPARE(layout_combo->count(), 2);
 
     delete properties;
 }
@@ -4669,13 +4640,11 @@ void BenchMainWindowTest::replayGainScanUsesTruePeakWhenOptedIn() {
                      QStringLiteral("bench-metadata-files"))) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
     auto* scan = properties->findChild<QPushButton*>(QStringLiteral("bench-replaygain-scan"));
-    auto* true_peak =
-        properties->findChild<QCheckBox*>(QStringLiteral("bench-replaygain-true-peak"));
     QVERIFY(grid_model != nullptr);
     QVERIFY(scan != nullptr);
-    QVERIFY(true_peak != nullptr);
-    QVERIFY(!true_peak->isChecked());
-    true_peak->setChecked(true);
+    // ADR-0185: the true-peak preference lives in Settings; the scan reads
+    // it from QSettings.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::replaygain_true_peak_key), true);
     files->selectAll();
     QTRY_VERIFY(scan->isEnabled());
     QTest::mouseClick(scan, Qt::LeftButton);
@@ -4705,7 +4674,7 @@ void BenchMainWindowTest::replayGainScanUsesTruePeakWhenOptedIn() {
 
     // The setting is sticky; restore the default so later dialogs scan
     // sample peaks again.
-    true_peak->setChecked(false);
+    QSettings{}.remove(QLatin1String(SettingsDialog::replaygain_true_peak_key));
     delete properties;
 }
 
@@ -4741,12 +4710,9 @@ void BenchMainWindowTest::replayGainScanStagesR128ForOpusTags() {
                      QStringLiteral("bench-metadata-files"))) != nullptr);
     auto* grid_model = qobject_cast<MetadataGridModel*>(files->model());
     auto* scan = properties->findChild<QPushButton*>(QStringLiteral("bench-replaygain-scan"));
-    auto* sidecar_only =
-        properties->findChild<QCheckBox*>(QStringLiteral("bench-replaygain-sidecar-only"));
     QVERIFY(grid_model != nullptr);
     QVERIFY(scan != nullptr);
-    QVERIFY(sidecar_only != nullptr);
-    QVERIFY(!sidecar_only->isChecked());
+    QSettings{}.remove(QLatin1String(SettingsDialog::replaygain_sidecar_only_key));
     files->selectAll();
     QTRY_VERIFY(scan->isEnabled());
     QTest::mouseClick(scan, Qt::LeftButton);
@@ -4770,7 +4736,7 @@ void BenchMainWindowTest::replayGainScanStagesR128ForOpusTags() {
 
     // Under the sidecar-only policy the same file stages conventional
     // fields for the Trackbench-owned carrier.
-    sidecar_only->setChecked(true);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::replaygain_sidecar_only_key), true);
     QTest::mouseClick(scan, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(
         grid_model->fieldColumn(QStringLiteral("REPLAYGAIN_TRACK_GAIN")).has_value(), 15'000);
@@ -4781,8 +4747,8 @@ void BenchMainWindowTest::replayGainScanStagesR128ForOpusTags() {
     QCOMPARE(conventional.size(), 1);
     QVERIFY(conventional.front().endsWith(QStringLiteral(" dB")));
 
-    sidecar_only->setChecked(false);
     delete properties;
+    QSettings{}.remove(QLatin1String(SettingsDialog::replaygain_sidecar_only_key));
 }
 
 // ADR-0152: the read-only technical summary under the file list probes

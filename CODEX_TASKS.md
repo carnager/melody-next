@@ -75,38 +75,14 @@ row). These two waves remain. They are independent of Task 1 above except
 for shared wiring in src/bench/bench_metadata_operations.cpp — coordinate if
 both run concurrently.
 
-## Wave 2 — proper settings screen
+## Wave 2 — proper settings screen: DONE
 
-Rebuild SettingsDialog (src/bench/settings_dialog.{hpp,cpp}; today a 2-row
-form opened via Edit → Settings…, Ctrl+,) as a paged dialog (QListWidget
-page selector + QStackedWidget):
-
-- **General**: existing startup-context combo + MPD music folder (QSettings
-  keys `startup/context`, `mpd/music-root` — keep keys and the
-  `bench-settings-*` object names).
-- **Naming**: move the two profile managers out of MetadataPropertiesDialog
-  (metadata_properties_dialog.cpp:350-442 `bench-output-layout-manager`
-  naming layouts — name + folders/filename tkfmt expressions + filename
-  policy + preview; :444-496 `bench-destination-manager` move
-  destinations). Persistence is already abstracted: reuse the injected
-  `OutputProfileStore` struct (metadata_properties_dialog.hpp:95-106,
-  filled from ui::ListPersistenceService in
-  bench_metadata_operations.cpp:616-662) — pass the same store into
-  SettingsDialog; zero repository changes. The live path preview needs
-  static example rows or a placeholder (no selected tracks in settings).
-  The tag editor keeps its selector combos; its two inline "Edit…" buttons
-  become one "Manage in Settings…" opener. Audit tests referencing
-  `bench-output-layout-*` / `bench-destination-*` and update where they
-  drive the managers through the tag editor.
-- **ReplayGain**: move the set-once sidecar-only and true-peak checkboxes
-  here (QSettings keys unchanged, `replaygain/*`); the editor reads the
-  keys at apply time. Update the enablement expectations around
-  tests/bench_main_window_test.cpp:2740-2745.
-- **Covers** (policy consumed by Wave 3): QSettings keys `artwork/embed`
-  (bool, default true), `artwork/write-folder-image` (bool, default
-  false), `artwork/folder-image-name` (cover.jpg | folder.jpg | custom),
-  `artwork/fetch-source` (Cover Art Archive front — the existing fetch
-  path). This page is UI + keys only; enforcement lands in Wave 3.
+Shipped as ADR-0185: paged SettingsDialog (General / Naming / ReplayGain /
+Covers), profile managers relocated as the reusable
+OutputProfilesManagerWidget over the same OutputProfileStore, tag editor
+opens Settings via manageOutputProfilesRequested and refreshes selectors on
+outputProfilesChanged, ReplayGain prefs read from QSettings at scan time,
+and the Covers page records the artwork/* policy keys for Wave 3.
 
 ## Wave 3 — Picard-style covers
 

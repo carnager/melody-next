@@ -1503,11 +1503,11 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     song_position_ = snapshot.status.song_position
                          ? static_cast<int>(*snapshot.status.song_position)
                          : -1;
-    active_context_ = snapshot.active_context
-                          ? QString::fromStdString(*snapshot.active_context)
-                          : QString{};
+    active_context_ = snapshot.context ? QString::fromStdString(snapshot.context->name)
+                                      : QString{};
+    queue_stashed_ = snapshot.context && snapshot.context->queue_stashed;
     current_song_id_ = snapshot.status.song_id;
-    queue_model_.setCurrentSongId(current_song_id_);
+    queue_model_.setCurrentSongId(queue_stashed_ ? std::nullopt : current_song_id_);
     repeat_enabled_ = snapshot.status.repeat;
     random_enabled_ = snapshot.status.random;
     single_mode_ = snapshot.status.single;
@@ -1549,8 +1549,13 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     details_ += QStringLiteral("\nCommands\n%1\n\nTag types\n%2\n")
                     .arg(commands.join(QStringLiteral(", ")), tags.join(QStringLiteral(", ")));
     details_ += QStringLiteral("\nOutputs\n") + output_summary_;
-    requestMelodyAlbumRatings(snapshot.queue);
-    queue_model_.replaceTracks(std::move(snapshot.queue));
+    // ADR-0188: the Queue tab shows the queue context's own list. While
+    // another tab is the active queue, the server holds this list stashed —
+    // it must keep showing unchanged rather than the other tab's tracks.
+    auto queue_rows = queue_stashed_ ? std::move(snapshot.queue_context_tracks)
+                                     : std::move(snapshot.queue);
+    requestMelodyAlbumRatings(queue_rows);
+    queue_model_.replaceTracks(std::move(queue_rows));
     queue_model_.setAlbumRatings(melody_album_ratings_);
     QHash<QString, unsigned> sticker_ratings;
     sticker_ratings.reserve(static_cast<qsizetype>(snapshot.sticker_ratings.size()));

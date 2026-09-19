@@ -155,6 +155,15 @@ struct Track {
     friend bool operator==(const Track&, const Track&) = default;
 };
 
+// ADR-0188: which list is materialized as the playback context, and
+// whether a displaced queue is waiting to be restored.
+struct MelodyContextState {
+    std::string name;
+    bool queue_stashed{false};
+
+    friend bool operator==(const MelodyContextState&, const MelodyContextState&) = default;
+};
+
 struct AlbumFilter {
     std::optional<std::string> release_id;
     std::string artist;

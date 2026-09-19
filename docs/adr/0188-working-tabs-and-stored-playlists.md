@@ -41,6 +41,16 @@ into a working tab or a stored playlist, and dropping rows on the tab strip
 builds a working tab from them (dropping onto an existing working tab
 appends).
 
+## Every tab is a list; one of them is the active queue
+
+The MPD Queue tab is not special beyond being the default list. Playing
+from any tab makes that tab the active queue, and **no tab's contents are
+ever replaced by another tab's playback**. Server-side the one MPD queue
+holds whatever is playing; the queue tab's own list is stashed while
+another list plays, and the client shows that stashed list — so the tab
+keeps showing what the user put in it. Playing a row in the Queue tab
+while it waits restores it as the active queue.
+
 ## Consequences
 
 - Three list concepts exist, but each answers a different question: local

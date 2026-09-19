@@ -40,7 +40,10 @@ struct SessionSnapshot {
     // ADR-0187: the stored playlist currently materialized as the playback
     // context, empty for the live queue. Absent when the server does not
     // advertise melody_context.
-    std::optional<std::string> active_context;
+    std::optional<MelodyContextState> context;
+    // The queue context's own contents: the stashed queue while another
+    // list is materialized, so the Queue tab keeps showing its own list.
+    std::vector<Track> queue_context_tracks;
 };
 
 enum class SessionCommandKind {

@@ -600,7 +600,16 @@ struct Session::Impl {
             if (!context) {
                 return std::unexpected(std::move(context.error()));
             }
-            snapshot.active_context = std::move(*context);
+            snapshot.context = *context;
+            if (context->queue_stashed) {
+                auto stashed = client.melody_context_queue_tracks();
+                if (!stashed) {
+                    return std::unexpected(std::move(stashed.error()));
+                }
+                snapshot.queue_context_tracks = std::move(*stashed);
+            } else {
+                snapshot.queue_context_tracks.clear();
+            }
         }
         // Melody ratings ride on listing lines without bumping the queue
         // version, so a rating refresh must bypass the reconcile shortcuts.

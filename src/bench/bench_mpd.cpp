@@ -467,9 +467,17 @@ void BenchMainWindow::buildMpdWorkspace() {
     });
     connect(view, &QTableView::doubleClicked, this,
             [controller = mpd_controller_](const QModelIndex& index) {
-                if (index.isValid()) {
-                    controller->playQueueItem(index.row());
+                if (!index.isValid()) {
+                    return;
                 }
+                // ADR-0188: while another list is the active queue, this tab
+                // shows its own stashed list — playing a row brings it back
+                // rather than addressing the other list's queue ids.
+                if (controller->queueStashed()) {
+                    controller->playQueueContext(index.row());
+                    return;
+                }
+                controller->playQueueItem(index.row());
             });
     connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this] { refreshSelectionStatus(); });
@@ -585,6 +593,9 @@ void BenchMainWindow::buildMpdWorkspace() {
                             for (const auto& search_tab : mpd_search_tabs_) {
                                 search_tab->model->acceptArtwork(token, image);
                             }
+                            for (const auto& list_tab : mpd_list_tabs_) {
+                                list_tab->model->acceptArtwork(token, image);
+                            }
                         });
                 watcher->setFuture(QtConcurrent::run([bytes] {
                     auto image = QImage::fromData(bytes);
@@ -631,6 +642,11 @@ void BenchMainWindow::buildMpdWorkspace() {
             server_library_model_->reload();
             if (mpd_controller_->supportsCommand(QStringLiteral("listplaylists"))) {
                 mpd_controller_->browseStoredPlaylists();
+            }
+            // Working tabs restored before the connection asked for covers
+            // into the void; ask again now that the server answers.
+            for (const auto& list_tab : mpd_list_tabs_) {
+                list_tab->model->retryMissingArtwork();
             }
         }
         if (!connected && was_connected) {

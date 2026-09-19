@@ -171,7 +171,8 @@ class Client final {
     [[nodiscard]] core::Result<void> melody_context_tracks(const std::vector<std::string>& uris,
                                                            unsigned row);
     [[nodiscard]] core::Result<void> melody_context_queue(std::optional<unsigned> row);
-    [[nodiscard]] core::Result<std::string> melody_active_context();
+    [[nodiscard]] core::Result<MelodyContextState> melody_active_context();
+    [[nodiscard]] core::Result<std::vector<Track>> melody_context_queue_tracks();
     [[nodiscard]] core::Result<void> set_melody_album_rating(const MelodyAlbumKey& key,
                                                              unsigned rating);
     [[nodiscard]] core::Result<MelodyAlbumRating> melody_album_rating(const MelodyAlbumKey& key);

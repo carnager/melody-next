@@ -1810,7 +1810,19 @@ core::Result<void> Client::melody_context_queue(const std::optional<unsigned> ro
     return {};
 }
 
-core::Result<std::string> Client::melody_active_context() {
+core::Result<std::vector<Track>> Client::melody_context_queue_tracks() {
+    if (!mpd_send_command(implementation_->connection.get(), "melody_context", "queueinfo",
+                          nullptr)) {
+        return std::unexpected(implementation_->take_error("melody_context queueinfo"));
+    }
+    auto pairs = implementation_->receive_pairs("receive melody_context queueinfo");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    return project_tracks(*pairs);
+}
+
+core::Result<MelodyContextState> Client::melody_active_context() {
     if (!mpd_send_command(implementation_->connection.get(), "melody_context", nullptr)) {
         return std::unexpected(implementation_->take_error("melody_context"));
     }
@@ -1818,12 +1830,15 @@ core::Result<std::string> Client::melody_active_context() {
     if (!pairs) {
         return std::unexpected(std::move(pairs.error()));
     }
+    MelodyContextState state;
     for (const auto& pair : *pairs) {
         if (ascii_case_equal(pair.name, "context")) {
-            return pair.value;
+            state.name = pair.value;
+        } else if (ascii_case_equal(pair.name, "stashed")) {
+            state.queue_stashed = pair.value != "0";
         }
     }
-    return std::string{};
+    return state;
 }
 
 core::Result<MelodyAlbumRating> Client::melody_album_rating(const MelodyAlbumKey& key) {

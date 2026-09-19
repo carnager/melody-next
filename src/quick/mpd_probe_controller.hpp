@@ -187,6 +187,8 @@ class MpdProbeController final : public QObject {
     [[nodiscard]] QString activeContextName() const { return active_context_; }
     // Queue position of the playing song, -1 when nothing plays.
     [[nodiscard]] int songPosition() const { return song_position_; }
+    // True while another list is the active queue and this one waits.
+    [[nodiscard]] bool queueStashed() const { return queue_stashed_; }
     [[nodiscard]] bool supportsServerQueries() const {
         return connected_ && supportsCommand(QStringLiteral("searchalbums"));
     }
@@ -314,6 +316,7 @@ class MpdProbeController final : public QObject {
     mpd::ReplayGainMode replay_gain_mode_{mpd::ReplayGainMode::unknown};
     QString active_context_;
     int song_position_{-1};
+    bool queue_stashed_{false};
     std::optional<bool> optimistic_repeat_;
     std::optional<bool> optimistic_random_;
     std::optional<mpd::PlaybackModeState> optimistic_single_;

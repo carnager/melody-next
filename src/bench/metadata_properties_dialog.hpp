@@ -4,6 +4,7 @@
 
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/output_profiles_widget.hpp"
+#include "bench/settings_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/replaygain_scan.hpp"
@@ -125,9 +126,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0183 addendum: the file list exists only after the asynchronous
     // grid build; sidebar hosting waits for this.
     void fileListConstructed();
-    // ADR-0185: profile management moved to Settings; the Edit buttons ask
-    // the bench window to open it on the Naming page.
-    void manageOutputProfilesRequested();
+    // ADR-0185/0186: the Actions menu and Edit buttons ask the bench
+    // window to open Settings on a specific page.
+    void openSettingsRequested(SettingsDialog::Page page);
 
   public:
     MetadataPropertiesDialog(std::size_t requested_item_count,
@@ -177,6 +178,7 @@ class MetadataPropertiesDialog final : public QDialog {
     void updateOutputProfileButtons();
     void updateWritePlanButton();
     void updateApplySummary();
+    void rebuildActionsMenu();
 
   public:
     // ADR-0183 addendum: sidebar hosting of the file list by the bench
@@ -289,6 +291,8 @@ class MetadataPropertiesDialog final : public QDialog {
     QLabel* summary_{nullptr};
     QLabel* read_only_{nullptr};
     QLabel* apply_summary_{nullptr};
+    QToolButton* actions_button_{nullptr};
+    QMenu* actions_menu_{nullptr};
     QLabel* loading_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* undo_button_{nullptr};

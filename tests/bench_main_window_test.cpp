@@ -2019,12 +2019,37 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QTabWidget* sections = nullptr;
     QTRY_VERIFY((sections = properties->findChild<QTabWidget*>(
                      QStringLiteral("bench-metadata-sections"))) != nullptr);
-    QTRY_COMPARE(sections->count(), 3);
-    QCOMPARE(sections->tabText(2), QStringLiteral("Apply && Scripts"));
+    QTRY_COMPARE(sections->count(), 2);
     QVERIFY(properties->findChild<QLabel*>(QStringLiteral("bench-metadata-apply-summary")) !=
             nullptr);
+
+    // ADR-0186: the footer Actions menu is the apply-options surface,
+    // proxying the hidden state controls and the preset selectors.
+    auto* actions_button =
+        properties->findChild<QToolButton*>(QStringLiteral("bench-metadata-actions"));
+    QVERIFY(actions_button != nullptr);
+    auto* actions_menu = actions_button->menu();
+    QVERIFY(actions_menu != nullptr);
+    emit actions_menu->aboutToShow();
+    auto* save_tags_action =
+        properties->findChild<QAction*>(QStringLiteral("action-metadata-save-tags"));
+    auto* rename_action =
+        properties->findChild<QAction*>(QStringLiteral("action-metadata-rename-files"));
+    auto* manage_layouts_action =
+        properties->findChild<QAction*>(QStringLiteral("action-metadata-manage-layouts"));
+    QVERIFY(save_tags_action != nullptr && rename_action != nullptr &&
+            manage_layouts_action != nullptr);
+    QVERIFY(save_tags_action->isChecked());
+    QVERIFY(!rename_action->isEnabled());
+    QSignalSpy settings_requests{properties, &MetadataPropertiesDialog::openSettingsRequested};
+    manage_layouts_action->trigger();
+    QCOMPARE(settings_requests.count(), 1);
+    save_tags_action->setChecked(false);
     auto* save_tags =
         properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-save-tags"));
+    QVERIFY(save_tags != nullptr);
+    QVERIFY(!save_tags->isChecked());
+    save_tags_action->setChecked(true);
     auto* rename_files =
         properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-rename-files"));
     auto* move_files =
@@ -2077,8 +2102,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     auto* layout_manage =
         properties->findChild<QPushButton*>(QStringLiteral("bench-output-layout-manage"));
     QVERIFY(layout_manage != nullptr);
-    QSignalSpy manage_requests{properties,
-                               &MetadataPropertiesDialog::manageOutputProfilesRequested};
+    QSignalSpy manage_requests{properties, &MetadataPropertiesDialog::openSettingsRequested};
     QTest::mouseClick(layout_manage, Qt::LeftButton);
     QCOMPARE(manage_requests.count(), 1);
 

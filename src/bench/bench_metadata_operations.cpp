@@ -907,8 +907,8 @@ void BenchMainWindow::showMetadataProperties() {
                 schedulePersist();
             }
         });
-    connect(properties, &MetadataPropertiesDialog::manageOutputProfilesRequested, this,
-            [this] { showSettingsDialog(SettingsDialog::Page::naming); });
+    connect(properties, &MetadataPropertiesDialog::openSettingsRequested, this,
+            [this](const SettingsDialog::Page page) { showSettingsDialog(page); });
     properties->setWindowFlags(Qt::Widget);
     properties->setProperty("bench-special-tab", QStringLiteral("metadata-properties"));
     const auto tab_title =

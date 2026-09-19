@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted, 2026-09-19.
+Accepted, 2026-09-19. The Apply & Scripts tab introduced here was
+superseded by the footer Actions menu (ADR-0186); the header, footer
+summary, and sidebar-hosted file list stand.
 
 ## Context
 

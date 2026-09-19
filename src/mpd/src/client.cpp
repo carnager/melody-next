@@ -158,6 +158,15 @@ to_mpd_replay_gain_mode(const ReplayGainMode mode) noexcept {
 struct Client::Impl {
     ConnectionPtr connection;
 
+    // Sends a caller-composed command line and drains its response.
+    [[nodiscard]] core::Result<void> run_composed(const std::string& line, const char* stage) {
+        if (!mpd_send_command(connection.get(), line.c_str(), nullptr) ||
+            !mpd_response_finish(connection.get())) {
+            return std::unexpected(take_error(stage));
+        }
+        return {};
+    }
+
     [[nodiscard]] core::Error take_error(std::string_view stage) {
         const auto backend_error = mpd_connection_get_error(connection.get());
         const auto server_error = backend_error == MPD_ERROR_SERVER
@@ -176,6 +185,13 @@ struct Client::Impl {
         };
         if (backend_error == MPD_ERROR_SERVER) {
             error.context.push_back({"mpd_server_error", std::to_string(server_error)});
+        }
+        // A failure raised by libmpdclient itself rather than by the server
+        // leaves the connection object in a state we did not choose — the
+        // command may have been rejected before or after bytes went out. The
+        // session reconnects on these; a plain server ACK stays cheap.
+        if (backend_error != MPD_ERROR_SUCCESS && backend_error != MPD_ERROR_SERVER) {
+            error.context.push_back({"local_protocol_error", "true"});
         }
         // Server ACK/argument failures do not necessarily poison the socket.
         // Expose libmpdclient's recovery verdict so the session does not turn a
@@ -1777,28 +1793,20 @@ core::Result<void> Client::melody_context_tracks(const std::vector<std::string>&
                                            .message = "A context needs at least one track",
                                            .context = {}});
     }
-    // libmpdclient's send_command is variadic with a fixed argument list, so
-    // the track list is composed into one quoted command line.
-    auto* connection = implementation_->connection.get();
-    std::string line = "melody_context tracks " + std::to_string(row);
-    for (const auto& uri : uris) {
-        line += " \"";
-        for (const auto character : uri) {
-            if (character == '"' || character == '\\') {
-                line.push_back('\\');
-            }
-            line.push_back(character);
-        }
-        line += '"';
+    if (auto staged = stage_context_uris(uris); !staged) {
+        return staged;
     }
-    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
-        !mpd_response_finish(connection)) {
-        return std::unexpected(implementation_->take_error("melody_context tracks"));
-    }
-    return {};
+    return implementation_->run_composed("melody_context tracks " + std::to_string(row),
+                                         "melody_context tracks");
 }
 
 namespace {
+// libmpdclient writes a command through a fixed 4 KiB buffer, so a list of
+// any real size cannot travel on one line: it is staged across several
+// "melody_context stage" lines and the command that consumes it carries no
+// URIs. This bound leaves room for the verb and quoting.
+constexpr std::size_t maximum_command_line = 3'000U;
+
 // libmpdclient's send_command takes a fixed variadic argument list, so every
 // list-carrying melody_context subcommand composes its own quoted line.
 std::string quoted_argument(const std::string& value) {
@@ -1814,6 +1822,30 @@ std::string quoted_argument(const std::string& value) {
 }
 } // namespace
 
+// Stages a track list across as many lines as it takes. The leading bare
+// "stage" discards anything a failed earlier command left behind, so a list
+// is never silently prefixed with someone else's tracks.
+core::Result<void> Client::stage_context_uris(const std::vector<std::string>& uris) {
+    if (auto cleared = implementation_->run_composed("melody_context stage",
+                                                     "melody_context stage");
+        !cleared) {
+        return cleared;
+    }
+    std::string line = "melody_context stage";
+    for (const auto& uri : uris) {
+        auto argument = quoted_argument(uri);
+        if (line.size() + argument.size() + 1U > maximum_command_line) {
+            if (auto sent = implementation_->run_composed(line, "melody_context stage"); !sent) {
+                return sent;
+            }
+            line = "melody_context stage";
+        }
+        line += ' ';
+        line += argument;
+    }
+    return implementation_->run_composed(line, "melody_context stage");
+}
+
 // Queue-context edits (docs/protocol.md). While another list is the active
 // queue the queue context is the server's stash — the list the Queue tab is
 // showing — so edits aimed at that tab have to address it there.
@@ -1825,45 +1857,42 @@ core::Result<void> Client::melody_context_queue_write(const bool replace,
                                            .message = "A queue edit needs at least one track",
                                            .context = {}});
     }
-    auto* connection = implementation_->connection.get();
-    std::string line = replace ? "melody_context queuereplace " : "melody_context queueadd ";
-    line += std::to_string(position);
-    for (const auto& uri : uris) {
-        line += ' ';
-        line += quoted_argument(uri);
+    if (auto staged = stage_context_uris(uris); !staged) {
+        return staged;
     }
-    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
-        !mpd_response_finish(connection)) {
-        return std::unexpected(implementation_->take_error("melody_context queue write"));
-    }
-    return {};
+    const std::string line = (replace ? std::string{"melody_context queuereplace "}
+                                      : std::string{"melody_context queueadd "}) +
+                             std::to_string(position);
+    return implementation_->run_composed(line, "melody_context queue write");
 }
 
 core::Result<void> Client::melody_context_queue_delete(const std::vector<unsigned>& rows) {
     if (rows.empty()) {
         return {};
     }
-    auto* connection = implementation_->connection.get();
+    // Rows shift as earlier ones go, so a chunked delete walks from the back.
+    std::vector<unsigned> descending{rows};
+    std::ranges::sort(descending, std::greater{});
     std::string line = "melody_context queuedelete";
-    for (const auto row : rows) {
+    for (const auto row : descending) {
+        const auto argument = std::to_string(row);
+        if (line.size() + argument.size() + 1U > maximum_command_line) {
+            if (auto sent = implementation_->run_composed(line, "melody_context queuedelete");
+                !sent) {
+                return sent;
+            }
+            line = "melody_context queuedelete";
+        }
         line += ' ';
-        line += std::to_string(row);
+        line += argument;
     }
-    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
-        !mpd_response_finish(connection)) {
-        return std::unexpected(implementation_->take_error("melody_context queuedelete"));
-    }
-    return {};
+    return implementation_->run_composed(line, "melody_context queuedelete");
 }
 
 core::Result<void> Client::melody_context_queue_move(const unsigned from, const unsigned to) {
-    auto* connection = implementation_->connection.get();
-    const auto line = "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to);
-    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
-        !mpd_response_finish(connection)) {
-        return std::unexpected(implementation_->take_error("melody_context queuemove"));
-    }
-    return {};
+    return implementation_->run_composed(
+        "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to),
+        "melody_context queuemove");
 }
 
 core::Result<void> Client::melody_context_queue(const std::optional<unsigned> row) {

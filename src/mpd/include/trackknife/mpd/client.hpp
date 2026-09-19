@@ -176,6 +176,9 @@ class Client final {
                                                                 int position);
     [[nodiscard]] core::Result<void> melody_context_queue_delete(const std::vector<unsigned>& rows);
     [[nodiscard]] core::Result<void> melody_context_queue_move(unsigned from, unsigned to);
+    // Stages a track list across as many protocol lines as it takes; the
+    // command that consumes it then carries no URIs.
+    [[nodiscard]] core::Result<void> stage_context_uris(const std::vector<std::string>& uris);
     [[nodiscard]] core::Result<MelodyContextState> melody_active_context();
     [[nodiscard]] core::Result<std::vector<Track>> melody_context_queue_tracks();
     [[nodiscard]] core::Result<void> set_melody_album_rating(const MelodyAlbumKey& key,

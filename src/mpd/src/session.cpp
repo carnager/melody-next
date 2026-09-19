@@ -72,6 +72,14 @@ void invoke_safely(const std::function<void(const SessionCommandResult&)>& callb
 }
 
 [[nodiscard]] bool requires_reconnect(const core::Error& error) {
+    // A client-side protocol failure is not a definitive server rejection:
+    // reconnect rather than keep talking over a connection whose state we no
+    // longer know.
+    if (std::ranges::any_of(error.context, [](const core::ErrorContext& context) {
+            return context.key == "local_protocol_error" && context.value == "true";
+        })) {
+        return true;
+    }
     switch (error.code) {
     case core::ErrorCode::invalid_argument:
     case core::ErrorCode::not_found:

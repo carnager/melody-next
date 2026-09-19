@@ -199,6 +199,7 @@ class MetadataPropertiesDialog final : public QDialog {
     void startOutputLayoutExample();
     void finishOutputLayoutExample();
     void updateWritePlanButton();
+    void updateApplySummary();
     void invalidateWritePlan();
     void startProposals();
     void finishProposals();
@@ -299,6 +300,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QVBoxLayout* root_layout_{nullptr};
     QLabel* summary_{nullptr};
     QLabel* read_only_{nullptr};
+    QLabel* apply_summary_{nullptr};
     QLabel* loading_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* undo_button_{nullptr};
@@ -309,8 +311,7 @@ class MetadataPropertiesDialog final : public QDialog {
     QPushButton* edit_values_button_{nullptr};
     QComboBox* field_layout_combo_{nullptr};
     QLabel* field_layout_label_{nullptr};
-    QPushButton* field_layout_save_button_{nullptr};
-    QPushButton* field_layout_remove_button_{nullptr};
+    QAction* field_layout_save_action_{nullptr};
     QAction* field_layout_remove_action_{nullptr};
     QAction* suggest_action_{nullptr};
     QPushButton* suggest_button_{nullptr};
@@ -380,7 +381,6 @@ class MetadataPropertiesDialog final : public QDialog {
     core::CancellationSource technical_cancellation_;
     QTabWidget* metadata_sections_{nullptr};
     MetadataArtworkSection* artwork_section_{nullptr};
-    QSplitter* content_splitter_{nullptr};
     QSplitter* metadata_splitter_{nullptr};
     QTimer* selection_debounce_{nullptr};
     QTimer* apply_progress_timer_{nullptr};
@@ -396,7 +396,6 @@ class MetadataPropertiesDialog final : public QDialog {
     std::shared_ptr<FilePublicationApplyProgressState> file_apply_progress_state_;
     QString selection_summary_;
     QString revision_summary_;
-    QByteArray pending_content_splitter_state_;
     QByteArray pending_metadata_splitter_state_;
     std::size_t loaded_item_count_{0U};
     std::size_t loaded_source_count_{0U};

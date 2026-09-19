@@ -1714,14 +1714,10 @@ void BenchMainWindowTest::metadataDialogLayoutsPersistAsynchronously() {
 
     auto* first = create_properties();
     first->show();
-    QSplitter* first_content = nullptr;
     QSplitter* first_metadata = nullptr;
-    QTRY_VERIFY((first_content = first->findChild<QSplitter*>(
-                     QStringLiteral("bench-metadata-content-splitter"))) != nullptr);
     QTRY_VERIFY((first_metadata = first->findChild<QSplitter*>(
                      QStringLiteral("bench-metadata-splitter"))) != nullptr);
     first->resize(930, 640);
-    first_content->setSizes({610, 300});
     first_metadata->setSizes({125, 405});
 
     auto* transform = first->findChild<QPushButton*>(QStringLiteral("bench-metadata-transform"));
@@ -1740,20 +1736,14 @@ void BenchMainWindowTest::metadataDialogLayoutsPersistAsynchronously() {
     QTRY_VERIFY(first->findChild<QDialog*>(QStringLiteral("bench-metadata-transformation")) ==
                 nullptr);
     QVERIFY(first->close());
-    QTRY_COMPARE(saved_states.size(), 5);
+    QTRY_COMPARE(saved_states.size(), 4);
 
     auto* second = create_properties();
     second->show();
-    QSplitter* second_content = nullptr;
     QSplitter* second_metadata = nullptr;
-    QTRY_VERIFY((second_content = second->findChild<QSplitter*>(
-                     QStringLiteral("bench-metadata-content-splitter"))) != nullptr);
     QTRY_VERIFY((second_metadata = second->findChild<QSplitter*>(
                      QStringLiteral("bench-metadata-splitter"))) != nullptr);
     QTRY_COMPARE(second->height(), 640);
-    QTRY_COMPARE(
-        second_content->saveState(),
-        saved_states.value(QStringLiteral("workspace/metadata-properties-content-splitter-v1")));
     QTRY_COMPARE(
         second_metadata->saveState(),
         saved_states.value(QStringLiteral("workspace/metadata-properties-metadata-splitter-v1")));
@@ -1944,6 +1934,15 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QWidget* side_panel = nullptr;
     QTRY_VERIFY((side_panel = properties->findChild<QWidget*>(
                      QStringLiteral("bench-metadata-side-panel"))) != nullptr);
+    // ADR-0183: the apply options live in the third sections tab and the
+    // footer carries the plan summary label.
+    QTabWidget* sections = nullptr;
+    QTRY_VERIFY((sections = properties->findChild<QTabWidget*>(
+                     QStringLiteral("bench-metadata-sections"))) != nullptr);
+    QTRY_COMPARE(sections->count(), 3);
+    QCOMPARE(sections->tabText(2), QStringLiteral("Apply && Scripts"));
+    QVERIFY(properties->findChild<QLabel*>(QStringLiteral("bench-metadata-apply-summary")) !=
+            nullptr);
     auto* save_tags =
         properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-save-tags"));
     auto* rename_files =

@@ -517,7 +517,7 @@ format capability checks, and Apply remain mandatory. Reversible SQLite
 migrations 9–11 store at most 256 non-empty, exact-name chains in normalized
 ordered action/value rows with stable schema codes. Properties loads, saves,
 updates, saves-as-new, and deletes them through the serialized persistence
-worker. Its **Tagging scripts** side panel lists every definition with a
+worker. Its **Apply & Scripts** tab (ADR-0183) lists every definition with a
 persistent checkbox and opens the selected row in the editor. Checked chains
 run in displayed name/stable-ID order after manual draft edits and before fresh
 write-plan revalidation. Their results are applied to a temporary draft copy,

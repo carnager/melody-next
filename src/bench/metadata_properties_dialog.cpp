@@ -62,6 +62,7 @@
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QStandardItemModel>
 #include <QStringListModel>
@@ -97,8 +98,6 @@ namespace trackknife::bench {
 namespace {
 
 constexpr auto properties_geometry_key = "workspace/metadata-properties-geometry-v1";
-constexpr auto properties_content_splitter_key =
-    "workspace/metadata-properties-content-splitter-v1";
 constexpr auto properties_metadata_splitter_key =
     "workspace/metadata-properties-metadata-splitter-v1";
 constexpr auto properties_field_layouts_key = "workspace/metadata-field-layouts-v1";
@@ -165,14 +164,20 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
                                               QStringLiteral("tracks"))),
                           this);
     summary_->setObjectName(QStringLiteral("bench-metadata-summary"));
-    root_layout_->addWidget(summary_);
-    // ADR-0152: read-only technical summary for the selected files, fed
-    // by the bounded background prober; sits under the selection summary.
+    // ADR-0152/0183: selection summary and the read-only technical summary
+    // share one header row; the technical text clips instead of wrapping
+    // (full text in the tooltip) so it never adds rows or width.
     technical_status_ = new QLabel(this);
     technical_status_->setObjectName(QStringLiteral("bench-metadata-technical"));
-    technical_status_->setWordWrap(true);
     technical_status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    root_layout_->addWidget(technical_status_);
+    technical_status_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    technical_status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    auto* header_row = new QHBoxLayout;
+    header_row->setContentsMargins(0, 0, 0, 0);
+    header_row->setSpacing(12);
+    header_row->addWidget(summary_);
+    header_row->addWidget(technical_status_, 1);
+    root_layout_->addLayout(header_row);
 
     read_only_ =
         new QLabel(QStringLiteral("Read-only metadata preview · preparing selection"), this);
@@ -184,13 +189,10 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     auto* side_panel = new QWidget(this);
     side_panel->setObjectName(QStringLiteral("bench-metadata-side-panel"));
     side_panel->setMinimumWidth(260);
-    side_panel->setMaximumWidth(380);
     transformation_panel_ = side_panel;
     transformation_panel_->hide();
     auto* side_layout = new QVBoxLayout(side_panel);
-    // Only the splitter-facing edge is inset so the panel's right edge lines
-    // up with the footer buttons below it.
-    side_layout->setContentsMargins(8, 0, 0, 0);
+    side_layout->setContentsMargins(8, 6, 8, 6);
     side_layout->setSpacing(6);
 
     const auto section_heading = [side_panel](const QString& text, const QString& object_name,
@@ -535,18 +537,6 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         QStringLiteral("Show all metadata fields or a saved field set"));
     field_layout_combo_->hide();
     grid_tools_layout->addWidget(field_layout_combo_);
-    field_layout_save_button_ =
-        new QPushButton(QStringLiteral("Save visible fields as set…"), grid_tools_);
-    field_layout_save_button_->setObjectName(QStringLiteral("bench-metadata-field-layout-save"));
-    field_layout_save_button_->setToolTip(
-        QStringLiteral("Save the selected fields, or all currently visible fields, as a named "
-                       "field set"));
-    field_layout_save_button_->hide();
-    field_layout_remove_button_ = new QPushButton(QStringLiteral("Delete field set"), grid_tools_);
-    field_layout_remove_button_->setObjectName(
-        QStringLiteral("bench-metadata-field-layout-remove"));
-    field_layout_remove_button_->setEnabled(false);
-    field_layout_remove_button_->hide();
     suggest_button_ = new QPushButton(QStringLiteral("Suggest"), grid_tools_);
     suggest_button_->setObjectName(QStringLiteral("bench-metadata-suggest"));
     suggest_button_->setToolTip(
@@ -571,23 +561,41 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     suggest_action_->setToolTip(suggest_button_->toolTip());
     suggest_action_->setEnabled(false);
     connect(suggest_action_, &QAction::triggered, suggest_button_, &QPushButton::click);
+    // ADR-0183: the field-set save/delete entries live here — their former
+    // hidden-button triggers were reachable from nowhere.
+    field_layout_save_action_ = more_menu->addAction(QStringLiteral("Save visible fields as set…"));
+    field_layout_save_action_->setToolTip(
+        QStringLiteral("Save the selected fields, or all currently visible fields, as a named "
+                       "field set"));
+    connect(field_layout_save_action_, &QAction::triggered, this,
+            &MetadataPropertiesDialog::saveCurrentFieldLayout);
+    field_layout_remove_action_ = more_menu->addAction(QStringLiteral("Delete current field set"));
+    field_layout_remove_action_->setEnabled(false);
+    connect(field_layout_remove_action_, &QAction::triggered, this,
+            &MetadataPropertiesDialog::removeCurrentFieldLayout);
     more_button->setMenu(more_menu);
     grid_tools_layout->addWidget(more_button);
     grid_tools_layout->addStretch(1);
-    undo_button_ = new QPushButton(QStringLiteral("Undo"), grid_tools_);
+    undo_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-undo")), QString{},
+                                   grid_tools_);
     undo_button_->setObjectName(QStringLiteral("bench-metadata-undo"));
+    undo_button_->setAccessibleName(QStringLiteral("Undo"));
     undo_button_->setToolTip(QStringLiteral("Undo the last draft edit (Ctrl+Z)"));
     undo_button_->setShortcut(QKeySequence::Undo);
     undo_button_->setEnabled(false);
     grid_tools_layout->addWidget(undo_button_);
-    redo_button_ = new QPushButton(QStringLiteral("Redo"), grid_tools_);
+    redo_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-redo")), QString{},
+                                   grid_tools_);
     redo_button_->setObjectName(QStringLiteral("bench-metadata-redo"));
+    redo_button_->setAccessibleName(QStringLiteral("Redo"));
     redo_button_->setToolTip(QStringLiteral("Redo the last undone draft edit (Ctrl+Shift+Z)"));
     redo_button_->setShortcut(QKeySequence::Redo);
     redo_button_->setEnabled(false);
     grid_tools_layout->addWidget(redo_button_);
-    discard_button_ = new QPushButton(QStringLiteral("Discard"), grid_tools_);
+    discard_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear")),
+                                      QString{}, grid_tools_);
     discard_button_->setObjectName(QStringLiteral("bench-metadata-discard"));
+    discard_button_->setAccessibleName(QStringLiteral("Discard drafts"));
     discard_button_->setToolTip(QStringLiteral("Throw away every pending draft edit"));
     discard_button_->setEnabled(false);
     grid_tools_layout->addWidget(discard_button_);
@@ -638,10 +646,6 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             &MetadataPropertiesDialog::editCurrentValues);
     connect(field_layout_combo_, &QComboBox::currentIndexChanged, this,
             &MetadataPropertiesDialog::applyCurrentFieldLayout);
-    connect(field_layout_save_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::saveCurrentFieldLayout);
-    connect(field_layout_remove_button_, &QPushButton::clicked, this,
-            &MetadataPropertiesDialog::removeCurrentFieldLayout);
     connect(suggest_button_, &QPushButton::clicked, this,
             &MetadataPropertiesDialog::startProposals);
     connect(identify_button_, &QPushButton::clicked, this,
@@ -773,6 +777,10 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     auto* footer_layout = new QHBoxLayout(footer);
     footer_layout->setContentsMargins(0, 0, 0, 0);
     footer_layout->setSpacing(8);
+    apply_summary_ = new QLabel(footer);
+    apply_summary_->setObjectName(QStringLiteral("bench-metadata-apply-summary"));
+    apply_summary_->setTextFormat(Qt::PlainText);
+    footer_layout->addWidget(apply_summary_);
     footer_layout->addWidget(read_only_, 1);
     apply_progress_bar_ = new QProgressBar(footer);
     apply_progress_bar_->setObjectName(QStringLiteral("bench-metadata-apply-progress"));
@@ -994,7 +1002,6 @@ void MetadataPropertiesDialog::applyCurrentFieldLayout() {
     if (field_review_bar_ != nullptr) {
         field_review_bar_->setLayoutFields(std::move(fields));
     }
-    field_layout_remove_button_->setEnabled(found != field_layouts_.end());
     if (field_layout_remove_action_ != nullptr) {
         field_layout_remove_action_->setEnabled(found != field_layouts_.end());
     }
@@ -1062,17 +1069,6 @@ void MetadataPropertiesDialog::restoreLayoutState() {
                                static_cast<void>(self->restoreGeometry(state));
                            }
                        });
-    layout_store_.load(QString::fromLatin1(properties_content_splitter_key),
-                       [self](QByteArray state, const QString& error) {
-                           if (!self || !error.isEmpty() || state.isEmpty()) {
-                               return;
-                           }
-                           self->pending_content_splitter_state_ = std::move(state);
-                           if (self->content_splitter_ != nullptr) {
-                               static_cast<void>(self->content_splitter_->restoreState(
-                                   self->pending_content_splitter_state_));
-                           }
-                       });
     layout_store_.load(QString::fromLatin1(properties_metadata_splitter_key),
                        [self](QByteArray state, const QString& error) {
                            if (!self || !error.isEmpty() || state.isEmpty()) {
@@ -1092,10 +1088,6 @@ void MetadataPropertiesDialog::persistLayoutState() {
     }
     layout_state_saved_ = true;
     layout_store_.save(QString::fromLatin1(properties_geometry_key), saveGeometry(), {});
-    if (content_splitter_ != nullptr) {
-        layout_store_.save(QString::fromLatin1(properties_content_splitter_key),
-                           content_splitter_->saveState(), {});
-    }
     if (metadata_splitter_ != nullptr) {
         layout_store_.save(QString::fromLatin1(properties_metadata_splitter_key),
                            metadata_splitter_->saveState(), {});
@@ -1194,10 +1186,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                                   .arg(item_count - revision_count);
     updateDraftState(0, false, false);
 
-    content_splitter_ = new QSplitter(Qt::Horizontal, this);
-    content_splitter_->setObjectName(QStringLiteral("bench-metadata-content-splitter"));
-    content_splitter_->setChildrenCollapsible(false);
-    metadata_splitter_ = new QSplitter(Qt::Vertical, content_splitter_);
+    metadata_splitter_ = new QSplitter(Qt::Vertical, this);
     metadata_splitter_->setObjectName(QStringLiteral("bench-metadata-splitter"));
     metadata_splitter_->setChildrenCollapsible(false);
 
@@ -1267,7 +1256,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
             std::ranges::find(field_layouts_, active_field_layout_id_, &SavedFieldLayout::id);
         layout != field_layouts_.end()) {
         field_review_bar_->setLayoutFields(layout->fields);
-        field_layout_remove_button_->setEnabled(true);
         field_layout_remove_action_->setEnabled(true);
     }
     fields_pane_layout->addWidget(field_review_bar_);
@@ -1367,16 +1355,18 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     if (!pending_metadata_splitter_state_.isEmpty()) {
         static_cast<void>(metadata_splitter_->restoreState(pending_metadata_splitter_state_));
     }
-    content_splitter_->addWidget(metadata_splitter_);
-    content_splitter_->addWidget(transformation_panel_);
+    // ADR-0183: the apply/scripts panel is a sections tab instead of a
+    // permanent splitter pane, so the field table gets the full width on
+    // small screens; the scroll area keeps the panel's height out of the
+    // dialog minimum.
+    auto* panel_scroll = new QScrollArea(this);
+    panel_scroll->setObjectName(QStringLiteral("bench-metadata-side-panel-scroll"));
+    panel_scroll->setWidgetResizable(true);
+    panel_scroll->setFrameShape(QFrame::NoFrame);
+    panel_scroll->setWidget(transformation_panel_);
+    metadata_sections_->addTab(panel_scroll, QStringLiteral("Apply && Scripts"));
     transformation_panel_->show();
-    content_splitter_->setStretchFactor(0, 1);
-    content_splitter_->setStretchFactor(1, 0);
-    content_splitter_->setSizes({760, 260});
-    if (!pending_content_splitter_state_.isEmpty()) {
-        static_cast<void>(content_splitter_->restoreState(pending_content_splitter_state_));
-    }
-    root_layout_->insertWidget(root_layout_->count() - 1, content_splitter_, 1);
+    root_layout_->insertWidget(root_layout_->count() - 1, metadata_splitter_, 1);
 
     selection_debounce_ = new QTimer(this);
     selection_debounce_->setSingleShot(true);
@@ -2355,6 +2345,31 @@ void MetadataPropertiesDialog::updateWritePlanButton() {
                                    !transformation_catalog_loading_ && !write_plan_running_ &&
                                    !apply_running_ && !artwork_operation_running_);
     updateTransformationButton();
+    updateApplySummary();
+}
+
+// ADR-0183: with the apply options folded into the Apply & Scripts tab,
+// this footer line keeps the plan visible at a glance.
+void MetadataPropertiesDialog::updateApplySummary() {
+    if (apply_summary_ == nullptr) {
+        return;
+    }
+    QStringList parts;
+    if (save_tags_check_ != nullptr && save_tags_check_->isChecked() && draft_count_ > 0) {
+        parts << QStringLiteral("tags");
+    }
+    if (artwork_section_ && artwork_section_->hasPendingChanges()) {
+        parts << QStringLiteral("covers");
+    }
+    if (rename_files_check_ != nullptr && rename_files_check_->isChecked()) {
+        parts << QStringLiteral("rename");
+    }
+    if (move_files_check_ != nullptr && move_files_check_->isChecked()) {
+        parts << QStringLiteral("move");
+    }
+    apply_summary_->setText(parts.isEmpty()
+                                ? QString{}
+                                : QStringLiteral("Apply: %1").arg(parts.join(QStringLiteral(" · "))));
 }
 
 void MetadataPropertiesDialog::invalidateWritePlan() {
@@ -4211,7 +4226,9 @@ void MetadataPropertiesDialog::updateTechnicalSummary() {
     if (technical_truncated_) {
         parts << tr("first %1 files").arg(maximum_probes);
     }
-    technical_status_->setText(parts.join(QStringLiteral(" · ")));
+    const auto technical_text = parts.join(QStringLiteral(" · "));
+    technical_status_->setText(technical_text);
+    technical_status_->setToolTip(technical_text);
 }
 
 } // namespace trackknife::bench

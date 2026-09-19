@@ -63,3 +63,75 @@ Lock ordering (elapsed capture before mutex — cmdStatus model); elapsed-seek b
 - Melody: gofmt/go vet/`go test ./...`; live smoke against gemenon after deploy (play context, switch back, restart daemon mid-context, stock client `ncmpcpp`-style probe via nc: status/playlistinfo consistency).
 - Trackknife: full dev build; ctest mpd-client/mpd-session/bench-main-window/list-repository (known flakes: localPlaybackModesAdvance, metadataPropertiesArtworkRemove under load); manual: double-click rows across two playlist tabs + queue tab, verify resume + highlight + nothing destroyed.
 - Commits: melody first (branch off main, merge+push, deploy), then trackknife on main, push.
+
+
+---
+
+# Task 2: Settings-driven cover policy and proper settings screen
+
+Wave 1 of the tag-editor compacting is DONE (ADR-0183: side panel became the
+"Apply & Scripts" sections tab, footer apply summary, compact header/tool
+row). These two waves remain. They are independent of Task 1 above except
+for shared wiring in src/bench/bench_metadata_operations.cpp — coordinate if
+both run concurrently.
+
+## Wave 2 — proper settings screen
+
+Rebuild SettingsDialog (src/bench/settings_dialog.{hpp,cpp}; today a 2-row
+form opened via Edit → Settings…, Ctrl+,) as a paged dialog (QListWidget
+page selector + QStackedWidget):
+
+- **General**: existing startup-context combo + MPD music folder (QSettings
+  keys `startup/context`, `mpd/music-root` — keep keys and the
+  `bench-settings-*` object names).
+- **Naming**: move the two profile managers out of MetadataPropertiesDialog
+  (metadata_properties_dialog.cpp:350-442 `bench-output-layout-manager`
+  naming layouts — name + folders/filename tkfmt expressions + filename
+  policy + preview; :444-496 `bench-destination-manager` move
+  destinations). Persistence is already abstracted: reuse the injected
+  `OutputProfileStore` struct (metadata_properties_dialog.hpp:95-106,
+  filled from ui::ListPersistenceService in
+  bench_metadata_operations.cpp:616-662) — pass the same store into
+  SettingsDialog; zero repository changes. The live path preview needs
+  static example rows or a placeholder (no selected tracks in settings).
+  The tag editor keeps its selector combos; its two inline "Edit…" buttons
+  become one "Manage in Settings…" opener. Audit tests referencing
+  `bench-output-layout-*` / `bench-destination-*` and update where they
+  drive the managers through the tag editor.
+- **ReplayGain**: move the set-once sidecar-only and true-peak checkboxes
+  here (QSettings keys unchanged, `replaygain/*`); the editor reads the
+  keys at apply time. Update the enablement expectations around
+  tests/bench_main_window_test.cpp:2740-2745.
+- **Covers** (policy consumed by Wave 3): QSettings keys `artwork/embed`
+  (bool, default true), `artwork/write-folder-image` (bool, default
+  false), `artwork/folder-image-name` (cover.jpg | folder.jpg | custom),
+  `artwork/fetch-source` (Cover Art Archive front — the existing fetch
+  path). This page is UI + keys only; enforcement lands in Wave 3.
+
+## Wave 3 — Picard-style covers
+
+1. **Folder-cover write capability (new; the biggest chunk).** Artwork
+   writes are embedded-only today by design (container_artwork_writer.cpp
+   clears external patterns; ADR-0160: external images are never
+   modified). Add a journaled "publish folder image" operation: write the
+   policy-named image into the track's directory (create or replace),
+   integrated into the artwork apply pipeline
+   (operations/src/artwork_apply.cpp + a commit path beside
+   operations::commit_artwork_source; the container writer stays
+   embedded-only). Needs ADR-0184 superseding ADR-0160's boundary for
+   exactly this policy-driven file, following the journaled same-filesystem
+   publication rules (ADR-0056/0057 family). Update
+   docs/metadata-and-files.md:218-220 and :676-684. Prefer deriving the
+   folder write from policy at commit time so ArtworkWritePlanIntent stays
+   unchanged.
+2. **Editor thumbnail.** Small cover widget (~96-128 px) on the Fields
+   pane showing the selection's front cover (reuse MetadataArtworkSection
+   inventory plumbing). Drop/paste an image or click Fetch → stages
+   add/replace-front intents automatically per policy (embed and/or folder
+   image). Context menu: Fetch cover, Choose file…, Remove, Open Artwork
+   tab, Cover settings… (opens the SettingsDialog Covers page).
+3. **Artwork tab stays** as the advanced surface (roles, per-file rows,
+   CAA browser, problems), also honoring the folder-image policy on apply.
+4. Tests: policy round trip; thumbnail staging produces expected intents;
+   folder-image journaled write/replace/failure recovery; the convert
+   dialog's separate `convert/embed-artwork` carry stays untouched.

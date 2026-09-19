@@ -51,6 +51,15 @@ another list plays, and the client shows that stashed list — so the tab
 keeps showing what the user put in it. Playing a row in the Queue tab
 while it waits restores it as the active queue.
 
+## Sidebar presentation
+
+The Playlists sidebar is a tree rather than a list of names: a playlist
+expands to its tracks, fetched once on first expand through the same
+re-read that fills an open tab, so the two never disagree and expansion
+survives the periodic refresh. Track rows carry the usual queue gestures
+(append, insert next, replace and play); activating a playlist still
+opens its tab.
+
 ## Consequences
 
 - Three list concepts exist, but each answers a different question: local

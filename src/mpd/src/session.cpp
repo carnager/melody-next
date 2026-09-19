@@ -312,6 +312,17 @@ struct Session::Impl {
         case SessionCommandKind::melody_context_tracks:
             return without_payload(
                 client.melody_context_tracks(command.uris, command.queue_position.value_or(0U)));
+        case SessionCommandKind::melody_context_queue_add:
+            return without_payload(client.melody_context_queue_write(
+                false, command.uris, static_cast<int>(command.object_id) - 1));
+        case SessionCommandKind::melody_context_queue_replace:
+            return without_payload(client.melody_context_queue_write(
+                true, command.uris, static_cast<int>(command.queue_position.value_or(0U))));
+        case SessionCommandKind::melody_context_queue_delete:
+            return without_payload(client.melody_context_queue_delete(command.positions));
+        case SessionCommandKind::melody_context_queue_move:
+            return without_payload(client.melody_context_queue_move(
+                command.object_id, command.queue_position.value_or(0U)));
         case SessionCommandKind::queue_play:
             return without_payload(command.queue_position
                                        ? client.play_position(*command.queue_position)
@@ -496,6 +507,10 @@ struct Session::Impl {
         case SessionCommandKind::melody_context_play:
         case SessionCommandKind::melody_context_queue:
         case SessionCommandKind::melody_context_tracks:
+        case SessionCommandKind::melody_context_queue_add:
+        case SessionCommandKind::melody_context_queue_replace:
+        case SessionCommandKind::melody_context_queue_delete:
+        case SessionCommandKind::melody_context_queue_move:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::queue_play:
@@ -862,6 +877,41 @@ std::uint64_t Session::melody_context_tracks(std::vector<std::string> uris, cons
     command.uris = std::move(uris);
     command.queue_position = row;
     return implementation_->enqueue(std::move(command));
+}
+
+// The insert position rides in object_id biased by one, so -1 (append) stays
+// representable in the unsigned field every command shares.
+std::uint64_t Session::melody_context_queue_add(std::vector<std::string> uris,
+                                                const int position) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_queue_add;
+    command.uris = std::move(uris);
+    command.object_id = static_cast<std::uint32_t>(position + 1);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_queue_replace(std::vector<std::string> uris,
+                                                    const unsigned position) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_queue_replace;
+    command.uris = std::move(uris);
+    command.queue_position = position;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_queue_delete(std::vector<unsigned> rows) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_queue_delete;
+    command.positions = std::move(rows);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_queue_move(const unsigned from, const unsigned to) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_queue_move;
+    command.object_id = from;
+    command.queue_position = to;
+    return implementation_->enqueue(command);
 }
 
 std::uint64_t Session::melody_context_queue(const std::optional<unsigned> row) {

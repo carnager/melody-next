@@ -768,11 +768,37 @@ void BenchMainWindow::activateMpdLibraryAction(const QModelIndex& index, const i
             5'000);
         return;
     }
+    // ADR-0190: library actions land in the tab the user is looking at.
+    auto mode = MpdSendMode::append;
     if (requested == MpdLibraryAction::replace) {
-        mpd_controller_->replaceQueueWithUris(uris);
-    } else {
-        mpd_controller_->addUris(uris, requested == MpdLibraryAction::next);
+        mode = MpdSendMode::replace;
+    } else if (requested == MpdLibraryAction::next) {
+        mode = MpdSendMode::insert_next;
     }
+    sendTracksToMpdTab(visibleMpdTabTarget().value_or(
+                           MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
+                                        .label = QStringLiteral("MPD Queue"),
+                                        .working = nullptr,
+                                        .playlist = {}}),
+                       tracks, mode);
+}
+
+// The menu's direct actions run through the same lazy-fetch path as the
+// delegate's inline buttons, so an unexpanded folder still answers.
+void BenchMainWindow::sendMpdLibraryEntryToTab(const QModelIndex& index, const MpdSendMode mode) {
+    auto action = MpdLibraryAction::append;
+    switch (mode) {
+    case MpdSendMode::append:
+        action = MpdLibraryAction::append;
+        break;
+    case MpdSendMode::insert_next:
+        action = MpdLibraryAction::next;
+        break;
+    case MpdSendMode::replace:
+        action = MpdLibraryAction::replace;
+        break;
+    }
+    activateMpdLibraryAction(index, static_cast<int>(action));
 }
 
 void BenchMainWindow::completePendingMpdLibraryAction() {
@@ -817,22 +843,32 @@ void BenchMainWindow::showMpdLibraryContextMenu(const QPoint& position) {
     const auto target = QPersistentModelIndex{index};
     const auto command_ready = mpd_controller_->connected() && !mpd_controller_->commandBusy();
     mpd_library_context_menu_->clear();
+    // ADR-0190: the two direct actions act on the tab you are looking at —
+    // every MPD-side tab is a list, and the visible one is the obvious
+    // destination. "Send to tab" below aims anywhere else.
+    const auto visible = visibleMpdTabTarget();
+    const auto visible_label = visible ? visible->label : QStringLiteral("MPD Queue");
     const std::array actions{
-        std::pair{QStringLiteral("Append to live queue"), QStringLiteral("list-add")},
-        std::pair{QStringLiteral("Insert next in live queue"), QStringLiteral("go-next")},
-        std::pair{QStringLiteral("Replace queue and play"), QStringLiteral("media-playback-start")},
+        std::tuple{QStringLiteral("Add to %1").arg(visible_label), QStringLiteral("list-add"),
+                   MpdSendMode::append},
+        std::tuple{QStringLiteral("Replace %1").arg(visible_label),
+                   QStringLiteral("media-playback-start"), MpdSendMode::replace},
     };
-    for (int action = 0; action < static_cast<int>(actions.size()); ++action) {
-        const auto& [label, icon] = actions[static_cast<std::size_t>(action)];
+    for (const auto& [label, icon, mode] : actions) {
         auto* command = mpd_library_context_menu_->addAction(QIcon::fromTheme(icon), label);
-        command->setObjectName(QStringLiteral("action-mpd-library-%1").arg(action));
+        command->setObjectName(QStringLiteral("action-mpd-library-%1")
+                                   .arg(mode == MpdSendMode::append ? 0 : 2));
         command->setEnabled(command_ready);
-        connect(command, &QAction::triggered, this, [this, target, action] {
+        connect(command, &QAction::triggered, this, [this, target, mode] {
             if (target.isValid()) {
-                activateMpdLibraryAction(target, action);
+                sendMpdLibraryEntryToTab(target, mode);
             }
         });
     }
+    addSendToTabMenu(mpd_library_context_menu_, [this, target] {
+        return target.isValid() ? server_library_model_->tracks(QModelIndex{target})
+                                : std::vector<mpd::Track>{};
+    });
     mpd_library_context_menu_->addSeparator();
     auto* update_directory =
         mpd_library_context_menu_->addAction(QIcon::fromTheme(QStringLiteral("view-refresh")),

@@ -5,6 +5,7 @@
 // round trip; rows change only when the post-mutation re-read arrives.
 
 #include "bench/bench_main_window.hpp"
+#include "uicommon/debug_log.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -585,13 +586,13 @@ void BenchMainWindow::refreshMpdPlaylistContextMarkers() {
 }
 
 void BenchMainWindow::acceptMpdStoredPlaylistContents(const QString& name) {
-    auto* tab = mpdPlaylistTabNamed(name);
-    if (tab == nullptr) {
-        return;
+    // A re-read serves both surfaces: an open tab, an expanded sidebar row,
+    // or both. Either may be absent, so neither gates the other.
+    if (auto* tab = mpdPlaylistTabNamed(name); tab != nullptr) {
+        tab->model->replaceTracks(mpd_controller_->browserPlaylistTracksSnapshot());
+        refreshSelectionStatus();
+        refreshMpdPlaylistContextMarkers();
     }
-    tab->model->replaceTracks(mpd_controller_->browserPlaylistTracksSnapshot());
-    refreshSelectionStatus();
-    refreshMpdPlaylistContextMarkers();
     // ADR-0189: fill the sidebar's expanded playlist with its tracks.
     if (mpd_playlists_list_ != nullptr) {
         for (int index = 0; index < mpd_playlists_list_->topLevelItemCount(); ++index) {
@@ -650,6 +651,7 @@ void BenchMainWindow::persistOpenPlaylistTabs() {
 
 void BenchMainWindow::restoreOpenPlaylistTabs(const QStringList& available) {
     const auto names = QSettings{}.value(QStringLiteral("mpd/open-playlist-tabs")).toStringList();
+    qCDebug(tkDebug) << "restoring playlist tabs" << names << "available on the server" << available;
     for (const auto& name : names) {
         if (available.contains(name) && mpdPlaylistTabNamed(name) == nullptr) {
             openMpdPlaylistTab(name, false);

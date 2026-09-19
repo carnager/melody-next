@@ -1798,6 +1798,74 @@ core::Result<void> Client::melody_context_tracks(const std::vector<std::string>&
     return {};
 }
 
+namespace {
+// libmpdclient's send_command takes a fixed variadic argument list, so every
+// list-carrying melody_context subcommand composes its own quoted line.
+std::string quoted_argument(const std::string& value) {
+    std::string quoted = "\"";
+    for (const auto character : value) {
+        if (character == '"' || character == '\\') {
+            quoted.push_back('\\');
+        }
+        quoted.push_back(character);
+    }
+    quoted.push_back('"');
+    return quoted;
+}
+} // namespace
+
+// Queue-context edits (docs/protocol.md). While another list is the active
+// queue the queue context is the server's stash — the list the Queue tab is
+// showing — so edits aimed at that tab have to address it there.
+core::Result<void> Client::melody_context_queue_write(const bool replace,
+                                                     const std::vector<std::string>& uris,
+                                                     const int position) {
+    if (uris.empty()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "A queue edit needs at least one track",
+                                           .context = {}});
+    }
+    auto* connection = implementation_->connection.get();
+    std::string line = replace ? "melody_context queuereplace " : "melody_context queueadd ";
+    line += std::to_string(position);
+    for (const auto& uri : uris) {
+        line += ' ';
+        line += quoted_argument(uri);
+    }
+    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context queue write"));
+    }
+    return {};
+}
+
+core::Result<void> Client::melody_context_queue_delete(const std::vector<unsigned>& rows) {
+    if (rows.empty()) {
+        return {};
+    }
+    auto* connection = implementation_->connection.get();
+    std::string line = "melody_context queuedelete";
+    for (const auto row : rows) {
+        line += ' ';
+        line += std::to_string(row);
+    }
+    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context queuedelete"));
+    }
+    return {};
+}
+
+core::Result<void> Client::melody_context_queue_move(const unsigned from, const unsigned to) {
+    auto* connection = implementation_->connection.get();
+    const auto line = "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to);
+    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context queuemove"));
+    }
+    return {};
+}
+
 core::Result<void> Client::melody_context_queue(const std::optional<unsigned> row) {
     auto* connection = implementation_->connection.get();
     const auto row_text = row ? std::to_string(*row) : std::string{};

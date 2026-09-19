@@ -19,6 +19,8 @@ qt_add_library(
     panel_layout.hpp
     queue_item_delegate.cpp
     queue_item_delegate.hpp
+    debug_log.cpp
+    debug_log.hpp
     queue_table_view.cpp
     queue_table_view.hpp
     rating_stars.cpp

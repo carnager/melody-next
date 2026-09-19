@@ -418,6 +418,24 @@ void MpdQueueModel::appendTracks(std::vector<mpd::Track> tracks) {
     requestNextArtwork();
 }
 
+void MpdQueueModel::insertTracks(const int insertion_row, std::vector<mpd::Track> tracks) {
+    if (tracks.empty() ||
+        tracks_.size() + tracks.size() >
+            static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return;
+    }
+    if (insertion_row < 0 || insertion_row >= static_cast<int>(tracks_.size())) {
+        appendTracks(std::move(tracks));
+        return;
+    }
+    beginInsertRows({}, insertion_row, insertion_row + static_cast<int>(tracks.size()) - 1);
+    tracks_.insert(tracks_.begin() + static_cast<std::ptrdiff_t>(insertion_row),
+                   std::make_move_iterator(tracks.begin()), std::make_move_iterator(tracks.end()));
+    endInsertRows();
+    synchronizeArtwork();
+    requestNextArtwork();
+}
+
 void MpdQueueModel::removeTrackRows(QList<int> rows) {
     std::sort(rows.begin(), rows.end(), std::greater<>{});
     rows.erase(std::unique(rows.begin(), rows.end()), rows.end());

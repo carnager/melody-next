@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "uicommon/debug_log.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 
 #include <QApplication>
@@ -174,6 +175,13 @@ int main(int argc, char** argv) {
     for (qsizetype index = 1; index < arguments.size(); ++index) {
         if (arguments.at(index) == QStringLiteral("--screenshot") && index + 1 < arguments.size()) {
             screenshot_path = arguments.at(++index);
+            continue;
+        }
+        // --debug traces server commands, context switches and what the
+        // workspace restored, on stderr. Run it from a terminal when
+        // something looks wrong after a restart.
+        if (arguments.at(index) == QStringLiteral("--debug")) {
+            trackknife::ui::enableDebugLogging();
             continue;
         }
         const auto encoded = QFile::encodeName(arguments.at(index));

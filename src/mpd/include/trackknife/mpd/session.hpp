@@ -93,6 +93,10 @@ enum class SessionCommandKind {
     melody_context_play,
     melody_context_queue,
     melody_context_tracks,
+    melody_context_queue_add,
+    melody_context_queue_replace,
+    melody_context_queue_delete,
+    melody_context_queue_move,
     database_expression_search,
 };
 
@@ -162,6 +166,14 @@ class Session final {
     [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_tracks(std::vector<std::string> uris, unsigned row);
+    // Queue-context edits: the Queue tab's list is the server's stash while
+    // another list is the active queue, so its edits go there.
+    [[nodiscard]] std::uint64_t melody_context_queue_add(std::vector<std::string> uris,
+                                                         int position);
+    [[nodiscard]] std::uint64_t melody_context_queue_replace(std::vector<std::string> uris,
+                                                             unsigned position);
+    [[nodiscard]] std::uint64_t melody_context_queue_delete(std::vector<unsigned> rows);
+    [[nodiscard]] std::uint64_t melody_context_queue_move(unsigned from, unsigned to);
     // Server-translated structured query: a raw filter expression plus an
     // optional Melody sort argument; the payload is the bounded track list.
     [[nodiscard]] std::uint64_t search_expression(std::string filter_expression, std::string sort,

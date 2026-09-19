@@ -1027,9 +1027,18 @@ void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
     const auto library_position = library->visualRect(root).center();
     QVERIFY(QMetaObject::invokeMethod(library, "customContextMenuRequested", Qt::DirectConnection,
                                       Q_ARG(QPoint, library_position)));
-    QCOMPARE(library_menu->actions().at(0)->text(), QStringLiteral("Append to live queue"));
-    QCOMPARE(library_menu->actions().at(1)->text(), QStringLiteral("Insert next in live queue"));
-    QCOMPARE(library_menu->actions().at(2)->text(), QStringLiteral("Replace queue and play"));
+    // ADR-0190: the direct actions name the visible tab; everything else is
+    // reachable through "Send to tab".
+    QCOMPARE(library_menu->actions().at(0)->text(), QStringLiteral("Add to MPD Queue"));
+    QCOMPARE(library_menu->actions().at(1)->text(), QStringLiteral("Replace MPD Queue"));
+    auto* send_to = window.findChild<QMenu*>(QStringLiteral("bench-send-to-tab-menu"));
+    QVERIFY(send_to != nullptr);
+    QVERIFY(!send_to->actions().isEmpty());
+    QCOMPARE(send_to->actions().at(0)->text(), QStringLiteral("MPD Queue"));
+    auto* queue_placements = send_to->actions().at(0)->menu();
+    QVERIFY(queue_placements != nullptr);
+    QCOMPARE(queue_placements->actions().size(), 3);
+    QCOMPARE(queue_placements->actions().at(1)->text(), QStringLiteral("Insert next"));
     library_menu->close();
 }
 

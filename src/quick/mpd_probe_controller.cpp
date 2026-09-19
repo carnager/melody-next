@@ -2,6 +2,8 @@
 
 #include "quick/mpd_probe_controller.hpp"
 
+#include "uicommon/debug_log.hpp"
+
 #include "quick/mpd_search_result_model.hpp"
 
 #include "trackknife/core/stable_id.hpp"
@@ -15,6 +17,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -345,6 +348,10 @@ void MpdProbeController::removeQueueItem(const int row) {
     if (!session_ || !connected_) {
         return;
     }
+    if (queue_stashed_) {
+        removeQueueContextRows({row});
+        return;
+    }
     const auto song_id = queue_model_.queueIdAt(row);
     if (!song_id) {
         return;
@@ -355,6 +362,19 @@ void MpdProbeController::removeQueueItem(const int row) {
 
 void MpdProbeController::removeQueueItems(const QVariantList& rows) {
     if (!session_ || !connected_) {
+        return;
+    }
+    if (queue_stashed_) {
+        std::vector<int> stash_rows;
+        stash_rows.reserve(static_cast<std::size_t>(rows.size()));
+        for (const auto& value : rows) {
+            bool valid = false;
+            const auto row = value.toInt(&valid);
+            if (valid) {
+                stash_rows.push_back(row);
+            }
+        }
+        removeQueueContextRows(stash_rows);
         return;
     }
     std::vector<std::uint32_t> song_ids;
@@ -402,6 +422,16 @@ void MpdProbeController::cropQueueToItems(const QVariantList& rows) {
     if (kept_rows.isEmpty()) {
         return;
     }
+    if (queue_stashed_) {
+        std::vector<int> dropped;
+        for (int row = 0; row < queue_model_.rowCount(); ++row) {
+            if (!kept_rows.contains(row)) {
+                dropped.push_back(row);
+            }
+        }
+        removeQueueContextRows(dropped);
+        return;
+    }
     std::vector<std::uint32_t> removed_ids;
     removed_ids.reserve(static_cast<std::size_t>(queue_model_.rowCount() - kept_rows.size()));
     for (int row = 0; row < queue_model_.rowCount(); ++row) {
@@ -445,6 +475,12 @@ void MpdProbeController::clearQueue() {
     if (!session_ || !connected_ || queue_model_.rowCount() == 0) {
         return;
     }
+    if (queue_stashed_) {
+        std::vector<int> all_rows(static_cast<std::size_t>(queue_model_.rowCount()));
+        std::iota(all_rows.begin(), all_rows.end(), 0);
+        removeQueueContextRows(all_rows);
+        return;
+    }
     pending_commands_.insert(session_->clear_queue());
     emit stateChanged();
 }
@@ -452,6 +488,14 @@ void MpdProbeController::clearQueue() {
 void MpdProbeController::moveQueueItem(const int row, const int target_row) {
     if (!session_ || !connected_ || row == target_row || target_row < 0 ||
         target_row >= queue_model_.rowCount()) {
+        return;
+    }
+    if (queue_stashed_) {
+        if (row >= 0 && row < queue_model_.rowCount()) {
+            pending_commands_.insert(session_->melody_context_queue_move(
+                static_cast<unsigned>(row), static_cast<unsigned>(target_row)));
+            emit stateChanged();
+        }
         return;
     }
     const auto song_id = queue_model_.queueIdAt(row);
@@ -466,6 +510,48 @@ void MpdProbeController::moveQueueItems(const QVariantList& rows, const int inse
     constexpr std::size_t maximum_batch_size = 4'096U;
     if (!session_ || !connected_ || rows.isEmpty() || insertion_row < 0 ||
         insertion_row > queue_model_.rowCount()) {
+        return;
+    }
+    if (queue_stashed_) {
+        // The stash reorders by row, as a sequence of single moves: each one
+        // shifts the indices the next addresses, so the block is walked in
+        // order with the running offset applied.
+        std::vector<int> sources;
+        sources.reserve(static_cast<std::size_t>(rows.size()));
+        for (const auto& value : rows) {
+            bool valid = false;
+            const auto row = value.toInt(&valid);
+            if (valid && row >= 0 && row < queue_model_.rowCount()) {
+                sources.push_back(row);
+            }
+        }
+        std::ranges::sort(sources);
+        sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+        if (sources.empty()) {
+            return;
+        }
+        auto target = insertion_row;
+        for (const auto source : sources) {
+            if (source < target) {
+                --target;
+            }
+        }
+        target = std::clamp(target, 0, queue_model_.rowCount() - 1);
+        for (std::size_t index = 0U; index < sources.size(); ++index) {
+            auto from = sources[index];
+            for (std::size_t seen = 0U; seen < index; ++seen) {
+                if (sources[seen] < sources[index]) {
+                    --from;
+                }
+            }
+            const auto to = std::min(target + static_cast<int>(index),
+                                     queue_model_.rowCount() - 1);
+            if (from != to) {
+                pending_commands_.insert(session_->melody_context_queue_move(
+                    static_cast<unsigned>(from), static_cast<unsigned>(to)));
+            }
+        }
+        emit stateChanged();
         return;
     }
     const auto tracks = queue_model_.tracksSnapshot();
@@ -813,6 +899,15 @@ void MpdProbeController::replaceQueueWithUris(const QStringList& uris) {
         encoded.push_back(uri.toUtf8().toStdString());
     }
 
+    if (queue_stashed_) {
+        // Replacing the queue means the queue is this list now, so the
+        // server also switches back to it and plays.
+        const auto command_id = session_->melody_context_queue_replace(std::move(encoded), 0U);
+        pending_commands_.insert(command_id);
+        beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+        emit stateChanged();
+        return;
+    }
     pending_commands_.insert(session_->clear_queue());
     enqueueUris(std::move(encoded), false);
     submitTransport(mpd::TransportAction::play);
@@ -837,6 +932,15 @@ void MpdProbeController::replaceQueueWithUrisAndPlayAt(const QStringList& uris, 
         encoded.push_back(uri.toUtf8().toStdString());
     }
 
+    const auto start_row = std::clamp(row, 0, static_cast<int>(uris.size()) - 1);
+    if (queue_stashed_) {
+        const auto replace_id = session_->melody_context_queue_replace(
+            std::move(encoded), static_cast<unsigned>(start_row));
+        pending_commands_.insert(replace_id);
+        beginOptimisticPlayback(replace_id, mpd::PlaybackState::playing);
+        emit stateChanged();
+        return;
+    }
     pending_commands_.insert(session_->clear_queue());
     enqueueUris(std::move(encoded), false);
     const auto position = std::clamp(row, 0, static_cast<int>(uris.size()) - 1);
@@ -874,6 +978,23 @@ void MpdProbeController::playTrackListContext(const QStringList& uris, const int
     const auto command_id = session_->melody_context_tracks(std::move(encoded), position);
     pending_commands_.insert(command_id);
     beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+    emit stateChanged();
+}
+
+// Deleting from the queue context addresses rows, not song ids: the stash is
+// a list the server holds, not the queue whose ids the model carries.
+void MpdProbeController::removeQueueContextRows(const std::vector<int>& rows) {
+    std::vector<unsigned> positions;
+    positions.reserve(rows.size());
+    for (const auto row : rows) {
+        if (row >= 0 && row < queue_model_.rowCount()) {
+            positions.push_back(static_cast<unsigned>(row));
+        }
+    }
+    if (positions.empty()) {
+        return;
+    }
+    pending_commands_.insert(session_->melody_context_queue_delete(std::move(positions)));
     emit stateChanged();
 }
 
@@ -1506,6 +1627,13 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     active_context_ = snapshot.context ? QString::fromStdString(snapshot.context->name)
                                       : QString{};
     queue_stashed_ = snapshot.context && snapshot.context->queue_stashed;
+    qCDebug(tkDebug) << "snapshot: context" << (active_context_.isEmpty()
+                                                    ? QStringLiteral("(queue)")
+                                                    : active_context_)
+                     << "stashed" << queue_stashed_ << "queue rows"
+                     << static_cast<int>(snapshot.queue.size()) << "queue-context rows"
+                     << static_cast<int>(snapshot.queue_context_tracks.size()) << "song pos"
+                     << song_position_;
     current_song_id_ = snapshot.status.song_id;
     queue_model_.setCurrentSongId(queue_stashed_ ? std::nullopt : current_song_id_);
     repeat_enabled_ = snapshot.status.repeat;
@@ -1573,6 +1701,9 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         return;
     }
     pending_commands_.remove(result.id);
+    qCDebug(tkDebug) << "command" << static_cast<int>(result.kind) << "id" << result.id
+                     << (result.error ? QString::fromStdString(result.error->message)
+                                      : QStringLiteral("ok"));
     if (result.kind == mpd::SessionCommandKind::database_expression_search) {
         if (auto completion = pending_expression_searches_.take(result.id)) {
             if (result.error) {
@@ -2075,6 +2206,15 @@ void MpdProbeController::enqueueUrisAt(std::vector<std::string> uris,
                                        const std::optional<unsigned> first_position) {
     constexpr std::size_t maximum_batch_size = 4'096U;
     if (!session_ || uris.empty()) {
+        return;
+    }
+    // ADR-0188: while another list is the active queue, the Queue tab shows
+    // the server's stash. An add aimed at that tab has to land there — a
+    // plain add would go to the materialized list nothing is displaying.
+    if (queue_stashed_) {
+        pending_commands_.insert(session_->melody_context_queue_add(
+            std::move(uris), first_position ? static_cast<int>(*first_position) : -1));
+        emit stateChanged();
         return;
     }
     if (uris.size() > maximum_batch_size) {

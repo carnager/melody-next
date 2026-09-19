@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "uicommon/debug_log.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/search_dialog.hpp"
@@ -193,7 +194,11 @@ void BenchMainWindow::initializePersistence() {
 
 void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> documents) {
     lists_restored_ = true;
+    qCDebug(tkDebug) << "restoring" << static_cast<int>(documents.size()) << "list documents";
     for (auto& document : documents) {
+        qCDebug(tkDebug) << "  list" << displayText(document.name) << "kind"
+                         << static_cast<int>(document.kind) << "items"
+                         << static_cast<int>(document.items.size());
         if (document.kind == persistence::ListKind::mpd) {
             addMpdListTab(std::move(document), false);
             continue;

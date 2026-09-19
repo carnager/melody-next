@@ -68,6 +68,8 @@ class MpdQueueModel final : public QAbstractTableModel {
     // live-queue instance never calls these; server reconciliation stays in
     // replaceTracks.
     void appendTracks(std::vector<mpd::Track> tracks);
+    // Inserts in front of insertion_row; past the end it appends.
+    void insertTracks(int insertion_row, std::vector<mpd::Track> tracks);
     void removeTrackRows(QList<int> rows);
     // Moves the given rows in front of insertion_row (rows-count semantics of
     // QueueTableView's reorder callback); returns the moved block's first

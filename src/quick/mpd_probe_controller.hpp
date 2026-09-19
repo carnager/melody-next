@@ -209,6 +209,8 @@ class MpdProbeController final : public QObject {
     // row < 0 resumes where the list was left.
     Q_INVOKABLE void playStoredPlaylistContext(const QString& name, int row);
     Q_INVOKABLE void playQueueContext(int row);
+    // Queue-context row removal, shared by delete/crop/clear while stashed.
+    void removeQueueContextRows(const std::vector<int>& rows);
     // ADR-0188: play a working tab's tracks as a context — the queue is
     // stashed rather than replaced.
     Q_INVOKABLE void playTrackListContext(const QStringList& uris, int row);

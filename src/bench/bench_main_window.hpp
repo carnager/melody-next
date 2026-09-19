@@ -49,6 +49,7 @@ class QSplitter;
 class QStackedWidget;
 class QTabBar;
 class QTabWidget;
+class QAbstractItemView;
 class QTableView;
 class QTreeWidget;
 class QTimer;
@@ -466,6 +467,23 @@ class BenchMainWindow final : public QMainWindow {
     void refreshMpdListTabChrome(MpdListTab& tab);
     void markMpdListTabDirty(MpdListTab& tab);
     void showMpdListTrackMenu(MpdListTab& tab, const QPoint& position);
+    // ADR-0190: every MPD-side tab is a destination for a selection of
+    // server tracks — the visible one by default, any other by name.
+    struct MpdTabTarget {
+        enum class Kind { queue, working, playlist };
+        Kind kind{Kind::queue};
+        QString label;
+        MpdListTab* working{nullptr};
+        QString playlist;
+    };
+    enum class MpdSendMode { append, insert_next, replace };
+    [[nodiscard]] std::vector<mpd::Track> mpdTracksFromSourceView(QAbstractItemView* source) const;
+    [[nodiscard]] std::vector<MpdTabTarget> mpdTabTargets() const;
+    [[nodiscard]] std::optional<MpdTabTarget> visibleMpdTabTarget() const;
+    void sendTracksToMpdTab(const MpdTabTarget& target, std::vector<mpd::Track> tracks,
+                            MpdSendMode mode);
+    void sendMpdLibraryEntryToTab(const QModelIndex& index, MpdSendMode mode);
+    void addSendToTabMenu(QMenu* menu, const std::function<std::vector<mpd::Track>()>& selection);
     void addCopyToServerListMenu(QMenu* menu, QTableView* source_view);
     void addCopyToWorkingTabMenu(QMenu* menu, QTableView* source_view);
     [[nodiscard]] std::vector<mpd::Track> selectedMpdViewTracks(QTableView* view) const;

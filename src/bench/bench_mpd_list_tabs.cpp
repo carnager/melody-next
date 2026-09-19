@@ -10,6 +10,8 @@
 #include "bench/bench_main_window_helpers.hpp"
 
 #include "quick/mpd_probe_controller.hpp"
+#include "ui/server_library_tree_model.hpp"
+#include "ui/server_library_tree_view.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "uicommon/queue_table_view.hpp"
 
@@ -189,6 +191,23 @@ BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDoc
             markMpdListTabDirty(*raw_tab);
             raw_tab->view->selectRow(first);
         }
+    });
+    // ADR-0190: a working tab takes drops from every server-track surface —
+    // the library tree, the queue, playlists, searches and other tabs.
+    view->setExternalDropCallback([this, raw_tab](QAbstractItemView* source, const QVariantList&,
+                                                  const int insertion_row,
+                                                  const Qt::DropAction) {
+        if (!std::ranges::any_of(mpd_list_tabs_,
+                                 [raw_tab](const auto& owned) { return owned.get() == raw_tab; })) {
+            return false;
+        }
+        auto tracks = mpdTracksFromSourceView(source);
+        if (tracks.empty()) {
+            return false;
+        }
+        raw_tab->model->insertTracks(insertion_row, std::move(tracks));
+        markMpdListTabDirty(*raw_tab);
+        return true;
     });
     connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this] { refreshSelectionStatus(); });
@@ -431,4 +450,195 @@ void BenchMainWindow::showMpdListTrackMenu(MpdListTab& tab, const QPoint& positi
 }
 
 
+
+// ADR-0190: the tabs a selection of server tracks can be sent to. The queue
+// tab is always one of them; working tabs and open stored playlist tabs join
+// it, so "send this somewhere" needs no special case per surface.
+std::vector<BenchMainWindow::MpdTabTarget> BenchMainWindow::mpdTabTargets() const {
+    std::vector<MpdTabTarget> targets;
+    targets.push_back(MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
+                                   .label = QStringLiteral("MPD Queue"),
+                                   .working = nullptr,
+                                   .playlist = {}});
+    for (const auto& tab : mpd_list_tabs_) {
+        targets.push_back(MpdTabTarget{.kind = MpdTabTarget::Kind::working,
+                                       .label = displayText(tab->document.name),
+                                       .working = tab.get(),
+                                       .playlist = {}});
+    }
+    for (const auto& tab : mpd_playlist_tabs_) {
+        targets.push_back(MpdTabTarget{.kind = MpdTabTarget::Kind::playlist,
+                                       .label = tab->name,
+                                       .working = nullptr,
+                                       .playlist = tab->name});
+    }
+    return targets;
+}
+
+// The tab the user is looking at, when it can hold server tracks. A local
+// list tab cannot (ADR-0058), so there the queue stays the default target.
+std::optional<BenchMainWindow::MpdTabTarget> BenchMainWindow::visibleMpdTabTarget() const {
+    auto* current = tabs_ == nullptr ? nullptr : tabs_->currentWidget();
+    if (current == nullptr) {
+        return std::nullopt;
+    }
+    if (current == mpd_queue_view_) {
+        return MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
+                            .label = QStringLiteral("MPD Queue"),
+                            .working = nullptr,
+                            .playlist = {}};
+    }
+    for (const auto& tab : mpd_list_tabs_) {
+        if (tab->view == current) {
+            return MpdTabTarget{.kind = MpdTabTarget::Kind::working,
+                                .label = displayText(tab->document.name),
+                                .working = tab.get(),
+                                .playlist = {}};
+        }
+    }
+    for (const auto& tab : mpd_playlist_tabs_) {
+        if (tab->view == current) {
+            return MpdTabTarget{.kind = MpdTabTarget::Kind::playlist,
+                                .label = tab->name,
+                                .working = nullptr,
+                                .playlist = tab->name};
+        }
+    }
+    return std::nullopt;
+}
+
+void BenchMainWindow::sendTracksToMpdTab(const MpdTabTarget& target,
+                                         std::vector<mpd::Track> tracks, const MpdSendMode mode) {
+    if (tracks.empty()) {
+        return;
+    }
+    QStringList uris;
+    uris.reserve(static_cast<qsizetype>(tracks.size()));
+    for (const auto& track : tracks) {
+        uris.push_back(displayText(track.uri));
+    }
+    switch (target.kind) {
+    case MpdTabTarget::Kind::queue:
+        // The controller routes these to the queue context, which is the
+        // server's stash while another list is the active queue.
+        switch (mode) {
+        case MpdSendMode::append:
+            mpd_controller_->addUris(uris, false);
+            break;
+        case MpdSendMode::insert_next:
+            mpd_controller_->addUris(uris, true);
+            break;
+        case MpdSendMode::replace:
+            mpd_controller_->replaceQueueWithUris(uris);
+            break;
+        }
+        return;
+    case MpdTabTarget::Kind::working: {
+        auto* tab = target.working;
+        if (tab == nullptr || !std::ranges::any_of(mpd_list_tabs_, [tab](const auto& owned) {
+                return owned.get() == tab;
+            })) {
+            return;
+        }
+        switch (mode) {
+        case MpdSendMode::append:
+            tab->model->appendTracks(std::move(tracks));
+            break;
+        case MpdSendMode::insert_next: {
+            const auto current = tab->view != nullptr && tab->view->currentIndex().isValid()
+                                     ? tab->view->currentIndex().row() + 1
+                                     : 0;
+            tab->model->insertTracks(current, std::move(tracks));
+            break;
+        }
+        case MpdSendMode::replace:
+            tab->model->replaceTracks(std::move(tracks));
+            break;
+        }
+        markMpdListTabDirty(*tab);
+        statusBar()->showMessage(
+            QStringLiteral("%1 %2 in %3")
+                .arg(uris.size())
+                .arg(uris.size() == 1 ? QStringLiteral("track") : QStringLiteral("tracks"),
+                     target.label),
+            4'000);
+        return;
+    }
+    case MpdTabTarget::Kind::playlist:
+        switch (mode) {
+        case MpdSendMode::append:
+            mpd_controller_->addToStoredPlaylist(target.playlist, uris, -1);
+            break;
+        case MpdSendMode::insert_next: {
+            auto* tab = mpdPlaylistTabNamed(target.playlist);
+            const auto row = tab != nullptr && tab->view != nullptr &&
+                                     tab->view->currentIndex().isValid()
+                                 ? tab->view->currentIndex().row() + 1
+                                 : 0;
+            mpd_controller_->addToStoredPlaylist(target.playlist, uris, row);
+            break;
+        }
+        case MpdSendMode::replace:
+            mpd_controller_->clearStoredPlaylist(target.playlist);
+            mpd_controller_->addToStoredPlaylist(target.playlist, uris, -1);
+            break;
+        }
+        return;
+    }
+}
+
+// "Send to" lists every tab, each with the three placements. The two direct
+// actions above it already cover the common case — the visible tab — so this
+// is for aiming somewhere else without switching tabs first.
+void BenchMainWindow::addSendToTabMenu(QMenu* menu,
+                                       const std::function<std::vector<mpd::Track>()>& selection) {
+    auto* submenu = menu->addMenu(QStringLiteral("Send to tab"));
+    submenu->setObjectName(QStringLiteral("bench-send-to-tab-menu"));
+    const auto targets = mpdTabTargets();
+    const auto connected = mpd_controller_->connected();
+    for (std::size_t index = 0U; index < targets.size(); ++index) {
+        const auto target = targets[index];
+        auto* tab_menu = submenu->addMenu(target.label);
+        tab_menu->setObjectName(QStringLiteral("bench-send-to-tab-%1").arg(index));
+        const std::array modes{
+            std::pair{QStringLiteral("Add"), MpdSendMode::append},
+            std::pair{QStringLiteral("Insert next"), MpdSendMode::insert_next},
+            std::pair{QStringLiteral("Replace"), MpdSendMode::replace},
+        };
+        for (const auto& [label, mode] : modes) {
+            auto* action = tab_menu->addAction(label);
+            action->setEnabled(connected || target.kind == MpdTabTarget::Kind::working);
+            connect(action, &QAction::triggered, this, [this, target, mode, selection] {
+                auto tracks = selection();
+                if (!tracks.empty()) {
+                    sendTracksToMpdTab(target, std::move(tracks), mode);
+                }
+            });
+        }
+    }
+}
+
+// The tracks a drag carries, whichever server-track surface it started from:
+// the library tree answers with the whole selected branch, a track table with
+// its selected rows.
+std::vector<mpd::Track> BenchMainWindow::mpdTracksFromSourceView(QAbstractItemView* source) const {
+    if (source == nullptr || source->selectionModel() == nullptr) {
+        return {};
+    }
+    if (source == static_cast<QAbstractItemView*>(server_library_view_)) {
+        std::vector<mpd::Track> tracks;
+        QSet<QString> seen;
+        for (const auto& index : source->selectionModel()->selectedRows(0)) {
+            for (const auto& track : server_library_model_->tracks(index)) {
+                const auto uri = displayText(track.uri);
+                if (!seen.contains(uri)) {
+                    seen.insert(uri);
+                    tracks.push_back(track);
+                }
+            }
+        }
+        return tracks;
+    }
+    return selectedMpdViewTracks(qobject_cast<QTableView*>(source));
+}
 } // namespace trackknife::bench

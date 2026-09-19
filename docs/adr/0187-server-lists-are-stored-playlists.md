@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, 2026-09-19. Supersedes ADR-0181 (client-owned server list tabs);
+Accepted, 2026-09-19. Corrected by ADR-0188, which restores client-owned
+working tabs alongside stored playlists — the two have different jobs.
+Everything below about stored playlists as playable contexts stands.
+Supersedes ADR-0181 (client-owned server list tabs);
 extends ADR-0129 (stored playlist tabs) and ADR-0058.
 
 ## Context

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "quick/mpd_queue_model.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playlist_transfer_bar.hpp"
 
@@ -113,6 +114,37 @@ bool BenchMainWindow::handleTabTrackDrop(QTableView* source, QDropEvent* drop,
     // The QTabWidget receives drops in the unused strip beyond the bar's width.
     if (position.y() < 0 || position.y() >= tabs_->tabBar()->height()) {
         drop->ignore();
+        return true;
+    }
+    // ADR-0188: dropping server rows on the tab strip builds a working tab
+    // from them — the drag equivalent of "Copy to tab > New tab…".
+    if (source != nullptr && tabForDocument(source->property("bench-document-id").toString()) ==
+                                 nullptr &&
+        qobject_cast<quick::MpdQueueModel*>(source->model()) != nullptr) {
+        const auto tab_index = tabs_->tabBar()->tabAt(position);
+        auto* target_view = tab_index < 0 ? nullptr : qobject_cast<QTableView*>(
+                                                          tabs_->widget(tab_index));
+        auto* target_list = target_view == nullptr ? nullptr : mpdListTabForWidget(target_view);
+        if (tab_index >= 0 && target_list == nullptr) {
+            drop->ignore();
+            return true;
+        }
+        if (drop->type() == QEvent::Drop) {
+            auto tracks = selectedMpdViewTracks(source);
+            if (tracks.empty()) {
+                drop->ignore();
+                return true;
+            }
+            if (target_list != nullptr) {
+                target_list->model->appendTracks(std::move(tracks));
+                markMpdListTabDirty(*target_list);
+                tabs_->setCurrentWidget(target_list->view);
+            } else {
+                createServerListTab(tr("Server tracks"), std::move(tracks));
+            }
+        }
+        drop->setDropAction(Qt::CopyAction);
+        drop->accept();
         return true;
     }
     auto* source_tab = source == nullptr

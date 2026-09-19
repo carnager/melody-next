@@ -232,6 +232,7 @@ class BenchMainWindowTest final : public QObject {
     void mpdSugarActionsMaterializeAndOpenDialog();
     void propertiesFileListHostsInSidebar();
     void serverListTabsPersistAndRenderOffline();
+    void serverWorkingTabCreationGestures();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3878,10 +3879,53 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     settings.sync();
 }
 
-// ADR-0187: server lists are stored playlists now. A client-owned list
-// left over from ADR-0181 waits until a server can host it, and the tab
-// strip offers the creation gesture in the MPD surfaces.
+// ADR-0188: working tabs are client-owned temporary lists of server
+// tracks: they persist, render offline from their snapshots, and are
+// edited freely without touching any stored playlist.
 void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
+    const auto make_track = [](const char* uri, const char* artist, const char* title) {
+        trackknife::mpd::Track track;
+        track.uri = uri;
+        track.metadata = trackknife::mpd::Metadata{{{"Artist", artist}, {"Title", title}}};
+        return track;
+    };
+    {
+        BenchMainWindow first;
+        first.show();
+        auto* tabs = first.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_VERIFY(tabs->count() >= 2);
+        auto* tab = first.createServerListTab(
+            QStringLiteral("Road trip"),
+            {make_track("a/1.flac", "First", "One"), make_track("a/2.flac", "First", "Two")});
+        QVERIFY(tab != nullptr);
+        QCOMPARE(tab->model->rowCount(), 2);
+        tab->model->removeTrackRows({0});
+        first.markMpdListTabDirty(*tab);
+        QCOMPARE(tab->model->rowCount(), 1);
+        first.close();
+    }
+    BenchMainWindow reopened;
+    reopened.show();
+    auto* tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    BenchMainWindow::MpdListTab* restored = nullptr;
+    QTRY_VERIFY([&] {
+        for (int index = 0; index < tabs->count(); ++index) {
+            if (auto* found = reopened.mpdListTabForWidget(tabs->widget(index))) {
+                restored = found;
+                return true;
+            }
+        }
+        return false;
+    }());
+    QCOMPARE(displayText(restored->document.name), QStringLiteral("Road trip"));
+    QCOMPARE(restored->model->rowCount(), 1);
+    QCOMPARE(restored->model->trackAt(0)->metadata.first("Title"),
+             std::optional<std::string_view>{"Two"});
+}
+
+void BenchMainWindowTest::serverWorkingTabCreationGestures() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));

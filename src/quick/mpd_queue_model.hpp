@@ -77,6 +77,7 @@ class MpdQueueModel final : public QAbstractTableModel {
     // connection was down) and pumps the request cycle again.
     void retryMissingArtwork();
     void setCurrentSongId(std::optional<std::uint32_t> song_id);
+    void setCurrentRow(std::optional<int> row);
     void setArtworkEnabled(bool enabled);
     // ADR-0179: per-URI sticker ratings from the session snapshot. A track's
     // own Melody X-Rating line wins over the sticker map.
@@ -113,6 +114,7 @@ class MpdQueueModel final : public QAbstractTableModel {
     QHash<QString, unsigned> album_ratings_;
     std::optional<std::uint32_t> current_song_id_;
     QHash<QString, AlbumArtwork> album_artwork_;
+    std::optional<int> current_row_;
     std::optional<quint64> active_artwork_token_;
     bool artwork_enabled_{false};
 };

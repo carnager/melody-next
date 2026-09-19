@@ -1752,6 +1752,52 @@ core::Result<void> Client::set_melody_album_rating(const MelodyAlbumKey& key,
     return {};
 }
 
+// Playback contexts (melody docs/protocol.md): play a stored playlist as
+// the active context, optionally starting at a row, and read which context
+// is active ("" = the live queue).
+core::Result<void> Client::melody_context_play(const std::string_view name,
+                                               const std::optional<unsigned> row) {
+    auto* connection = implementation_->connection.get();
+    const std::string playlist{name};
+    const auto row_text = row ? std::to_string(*row) : std::string{};
+    const auto sent =
+        row ? mpd_send_command(connection, "melody_context", "play", playlist.c_str(),
+                               row_text.c_str(), nullptr)
+            : mpd_send_command(connection, "melody_context", "play", playlist.c_str(), nullptr);
+    if (!sent || !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context play"));
+    }
+    return {};
+}
+
+core::Result<void> Client::melody_context_queue(const std::optional<unsigned> row) {
+    auto* connection = implementation_->connection.get();
+    const auto row_text = row ? std::to_string(*row) : std::string{};
+    const auto sent = row ? mpd_send_command(connection, "melody_context", "queue",
+                                             row_text.c_str(), nullptr)
+                          : mpd_send_command(connection, "melody_context", "queue", nullptr);
+    if (!sent || !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context queue"));
+    }
+    return {};
+}
+
+core::Result<std::string> Client::melody_active_context() {
+    if (!mpd_send_command(implementation_->connection.get(), "melody_context", nullptr)) {
+        return std::unexpected(implementation_->take_error("melody_context"));
+    }
+    auto pairs = implementation_->receive_pairs("receive melody_context");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    for (const auto& pair : *pairs) {
+        if (ascii_case_equal(pair.name, "context")) {
+            return pair.value;
+        }
+    }
+    return std::string{};
+}
+
 core::Result<MelodyAlbumRating> Client::melody_album_rating(const MelodyAlbumKey& key) {
     if (auto error = invalid_album_key(key)) {
         return std::unexpected(std::move(*error));

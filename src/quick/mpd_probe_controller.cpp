@@ -846,6 +846,35 @@ void MpdProbeController::replaceQueueWithUrisAndPlayAt(const QStringList& uris, 
     emit stateChanged();
 }
 
+// ADR-0187: play a stored playlist as the active context. The server
+// stashes the queue it displaces and remembers where each list was left, so
+// switching between lists resumes rather than destroys.
+void MpdProbeController::playStoredPlaylistContext(const QString& name, const int row) {
+    if (!session_ || !connected_ || name.isEmpty()) {
+        return;
+    }
+    const auto position =
+        row >= 0 ? std::optional<unsigned>{static_cast<unsigned>(row)} : std::nullopt;
+    const auto command_id = session_->melody_context_play(name.toStdString(), position);
+    pending_commands_.insert(command_id);
+    beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+    emit stateChanged();
+}
+
+void MpdProbeController::playQueueContext(const int row) {
+    if (!session_ || !connected_) {
+        return;
+    }
+    const auto position =
+        row >= 0 ? std::optional<unsigned>{static_cast<unsigned>(row)} : std::nullopt;
+    const auto command_id = session_->melody_context_queue(position);
+    pending_commands_.insert(command_id);
+    if (position) {
+        beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+    }
+    emit stateChanged();
+}
+
 void MpdProbeController::addAlbum(mpd::AlbumFilter album, const QueueAddMode mode) {
     if (!session_ || !connected_) {
         emit notificationRequested(QStringLiteral("Connect to add an album"));
@@ -1455,6 +1484,12 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     elapsed_ms_ = snapshot.status.elapsed ? snapshot.status.elapsed->count() : 0;
     duration_ms_ = snapshot.status.duration ? snapshot.status.duration->count() : 0;
     volume_ = snapshot.status.volume ? static_cast<int>(*snapshot.status.volume) : -1;
+    song_position_ = snapshot.status.song_position
+                         ? static_cast<int>(*snapshot.status.song_position)
+                         : -1;
+    active_context_ = snapshot.active_context
+                          ? QString::fromStdString(*snapshot.active_context)
+                          : QString{};
     current_song_id_ = snapshot.status.song_id;
     queue_model_.setCurrentSongId(current_song_id_);
     repeat_enabled_ = snapshot.status.repeat;

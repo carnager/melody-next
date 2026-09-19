@@ -180,6 +180,13 @@ class MpdProbeController final : public QObject {
     }
     // Server-translated structured queries (tkq_melody.hpp) need the newer
     // Melody filter vocabulary, advertised alongside searchalbums.
+    // ADR-0187: stored playlists are independently playable contexts.
+    [[nodiscard]] bool supportsPlaybackContexts() const {
+        return connected_ && supportsCommand(QStringLiteral("melody_context"));
+    }
+    [[nodiscard]] QString activeContextName() const { return active_context_; }
+    // Queue position of the playing song, -1 when nothing plays.
+    [[nodiscard]] int songPosition() const { return song_position_; }
     [[nodiscard]] bool supportsServerQueries() const {
         return connected_ && supportsCommand(QStringLiteral("searchalbums"));
     }
@@ -197,6 +204,9 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void addUrisAt(const QStringList& uris, int position);
     Q_INVOKABLE void replaceQueueWithUris(const QStringList& uris);
     Q_INVOKABLE void replaceQueueWithUrisAndPlayAt(const QStringList& uris, int row);
+    // row < 0 resumes where the list was left.
+    Q_INVOKABLE void playStoredPlaylistContext(const QString& name, int row);
+    Q_INVOKABLE void playQueueContext(int row);
     void addAlbum(mpd::AlbumFilter album, QueueAddMode mode);
     void loadSearchAlbum(quint64 token, const mpd::AlbumFilter& album);
     Q_INVOKABLE void browseDirectory(const QString& uri);
@@ -299,6 +309,8 @@ class MpdProbeController final : public QObject {
     mpd::PlaybackModeState single_mode_{mpd::PlaybackModeState::unknown};
     mpd::PlaybackModeState consume_mode_{mpd::PlaybackModeState::unknown};
     mpd::ReplayGainMode replay_gain_mode_{mpd::ReplayGainMode::unknown};
+    QString active_context_;
+    int song_position_{-1};
     std::optional<bool> optimistic_repeat_;
     std::optional<bool> optimistic_random_;
     std::optional<mpd::PlaybackModeState> optimistic_single_;

@@ -167,34 +167,67 @@ void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select)
     auto* raw_tab = tab.get();
     connect(view, &QWidget::customContextMenuRequested, this,
             [this, view](const QPoint& position) { showTrackContextMenu(view, position); });
-    // Enter and double-click append the selected playlist rows to the live
-    // queue, matching the library search contract.
-    view->setActivateCallback([this, raw_tab](const QModelIndex& index) {
-        if (index.isValid()) {
-            const auto uris = selectedMpdViewUris(raw_tab->view);
-            if (!uris.isEmpty()) {
-                mpd_controller_->addUris(uris, false);
-            }
+    // ADR-0187: Enter and double-click play the list from that row, the way
+    // a local list plays. Against a server without playback contexts the
+    // list replaces the queue and starts there instead, so the gesture
+    // means the same thing everywhere.
+    const auto play_from_row = [this, raw_tab](const QModelIndex& index) {
+        if (!index.isValid()) {
+            return;
         }
-    });
-    connect(view, &QTableView::doubleClicked, this, [this, raw_tab](const QModelIndex& index) {
-        if (index.isValid()) {
-            const auto uris = selectedMpdViewUris(raw_tab->view);
-            if (!uris.isEmpty()) {
-                mpd_controller_->addUris(uris, false);
-            }
+        if (mpd_controller_->supportsPlaybackContexts()) {
+            mpd_controller_->playStoredPlaylistContext(raw_tab->name, index.row());
+            return;
         }
-    });
+        QStringList uris;
+        const auto tracks = raw_tab->model->tracksSnapshot();
+        uris.reserve(static_cast<qsizetype>(tracks.size()));
+        for (const auto& track : tracks) {
+            uris.push_back(displayText(track.uri));
+        }
+        if (!uris.isEmpty()) {
+            mpd_controller_->replaceQueueWithUrisAndPlayAt(uris, index.row());
+        }
+    };
+    view->setActivateCallback(play_from_row);
+    connect(view, &QTableView::doubleClicked, this, play_from_row);
     view->setReorderCallback([this, raw_tab](const QVariantList& rows, const int insertion_row) {
-        if (rows.size() != 1) {
-            statusBar()->showMessage(QStringLiteral("Stored playlists reorder one row at a time"),
-                                     3'000);
+        if (rows.isEmpty() || insertion_row < 0) {
             return;
         }
-        const auto from = rows.front().toInt();
-        if (from < 0 || insertion_row < 0) {
+        // ADR-0187: a multi-row drag is a sequence of single moves; each one
+        // shifts the indices the next one addresses, so the block is walked
+        // in order with the running offset applied.
+        std::vector<int> sources;
+        sources.reserve(static_cast<std::size_t>(rows.size()));
+        for (const auto& value : rows) {
+            if (const auto row = value.toInt(); row >= 0) {
+                sources.push_back(row);
+            }
+        }
+        std::ranges::sort(sources);
+        if (sources.size() > 1U) {
+            auto target = insertion_row;
+            for (const auto source : sources) {
+                if (source < target) {
+                    --target;
+                }
+            }
+            for (std::size_t index = 0U; index < sources.size(); ++index) {
+                auto from = sources[index];
+                for (std::size_t seen = 0U; seen < index; ++seen) {
+                    if (sources[seen] < sources[index]) {
+                        --from;
+                    }
+                }
+                const auto to = target + static_cast<int>(index);
+                if (from != to) {
+                    mpd_controller_->moveStoredPlaylistItem(raw_tab->name, from, to);
+                }
+            }
             return;
         }
+        const auto from = sources.front();
         const auto target = insertion_row > from ? insertion_row - 1 : insertion_row;
         if (target != from) {
             mpd_controller_->moveStoredPlaylistItem(raw_tab->name, from, target);
@@ -479,6 +512,17 @@ void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {
     }
 }
 
+// ADR-0187: the playlist tab whose list is the active context marks the
+// playing row; every other tab clears its marker.
+void BenchMainWindow::refreshMpdPlaylistContextMarkers() {
+    const auto active = mpd_controller_->activeContextName();
+    const auto position = mpd_controller_->songPosition();
+    for (const auto& tab : mpd_playlist_tabs_) {
+        const auto playing = !active.isEmpty() && tab->name == active && position >= 0;
+        tab->model->setCurrentRow(playing ? std::optional{position} : std::nullopt);
+    }
+}
+
 void BenchMainWindow::acceptMpdStoredPlaylistContents(const QString& name) {
     auto* tab = mpdPlaylistTabNamed(name);
     if (tab == nullptr) {
@@ -486,6 +530,7 @@ void BenchMainWindow::acceptMpdStoredPlaylistContents(const QString& name) {
     }
     tab->model->replaceTracks(mpd_controller_->browserPlaylistTracksSnapshot());
     refreshSelectionStatus();
+    refreshMpdPlaylistContextMarkers();
 }
 
 void BenchMainWindow::renameMpdPlaylistTab(const QString& from, const QString& to) {

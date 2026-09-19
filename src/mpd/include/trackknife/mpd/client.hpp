@@ -166,6 +166,10 @@ class Client final {
                                                              unsigned rating);
     [[nodiscard]] core::Result<void>
     set_melody_track_ratings(std::span<const std::uint64_t> song_ids, unsigned rating);
+    [[nodiscard]] core::Result<void> melody_context_play(std::string_view name,
+                                                         std::optional<unsigned> row);
+    [[nodiscard]] core::Result<void> melody_context_queue(std::optional<unsigned> row);
+    [[nodiscard]] core::Result<std::string> melody_active_context();
     [[nodiscard]] core::Result<void> set_melody_album_rating(const MelodyAlbumKey& key,
                                                              unsigned rating);
     [[nodiscard]] core::Result<MelodyAlbumRating> melody_album_rating(const MelodyAlbumKey& key);

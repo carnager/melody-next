@@ -37,6 +37,10 @@ struct SessionSnapshot {
     // Per-URI 0-10 track ratings from the server's sticker database; empty
     // when the server does not advertise the sticker command.
     std::vector<TrackRating> sticker_ratings;
+    // ADR-0187: the stored playlist currently materialized as the playback
+    // context, empty for the live queue. Absent when the server does not
+    // advertise melody_context.
+    std::optional<std::string> active_context;
 };
 
 enum class SessionCommandKind {
@@ -83,6 +87,8 @@ enum class SessionCommandKind {
     melody_rating,
     melody_album_rate,
     melody_album_rating,
+    melody_context_play,
+    melody_context_queue,
     database_expression_search,
 };
 
@@ -147,6 +153,10 @@ class Session final {
                                                          unsigned rating);
     [[nodiscard]] std::uint64_t set_melody_album_rating(MelodyAlbumKey key, unsigned rating);
     [[nodiscard]] std::uint64_t melody_album_rating(MelodyAlbumKey key);
+    // ADR-0187: play a stored playlist as the active playback context, or
+    // switch back to the stashed queue. row = std::nullopt resumes.
+    [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
+    [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
     // Server-translated structured query: a raw filter expression plus an
     // optional Melody sort argument; the payload is the bounded track list.
     [[nodiscard]] std::uint64_t search_expression(std::string filter_expression, std::string sort,

@@ -232,6 +232,11 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
     case DurationMsRole:
         return track.duration ? QVariant::fromValue(track.duration->count()) : QVariant{};
     case CurrentRole:
+        // ADR-0187: playlist rows carry no queue id, so a context tab marks
+        // its playing row by position instead.
+        if (current_row_) {
+            return index.row() == *current_row_;
+        }
         return track.queue_id && current_song_id_ == track.queue_id;
     case AlbumArtistRole: {
         const auto album_artist = metadata_values(track.metadata, "AlbumArtist");
@@ -364,6 +369,23 @@ qint64 MpdQueueModel::totalDurationMs() const noexcept {
         }
     }
     return total;
+}
+
+// ADR-0187: mark the playing row by position, for playlist tabs whose list
+// is the active playback context. std::nullopt restores id-based marking.
+void MpdQueueModel::setCurrentRow(const std::optional<int> row) {
+    if (current_row_ == row) {
+        return;
+    }
+    const auto previous = current_row_;
+    current_row_ = row;
+    const auto refresh = [this](const std::optional<int>& target) {
+        if (target && *target >= 0 && *target < rowCount()) {
+            emit dataChanged(index(*target, 0), index(*target, column_count - 1), {CurrentRole});
+        }
+    };
+    refresh(previous);
+    refresh(current_row_);
 }
 
 void MpdQueueModel::setCurrentSongId(const std::optional<std::uint32_t> song_id) {

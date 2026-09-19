@@ -160,6 +160,7 @@ struct Session::Impl {
     // command worker when it builds search constraints.
     std::atomic_bool melody_rating_search{false};
     std::atomic_bool melody_album_search{false};
+    std::atomic_bool melody_contexts{false};
     std::atomic_uint32_t pending_refresh{full_refresh};
     std::atomic_uint64_t next_command_id{1U};
     std::atomic_uint64_t active_generation{0U};
@@ -304,6 +305,10 @@ struct Session::Impl {
         switch (command.kind) {
         case SessionCommandKind::transport:
             return without_payload(client.run_transport(command.action));
+        case SessionCommandKind::melody_context_play:
+            return without_payload(client.melody_context_play(command.uri, command.queue_position));
+        case SessionCommandKind::melody_context_queue:
+            return without_payload(client.melody_context_queue(command.queue_position));
         case SessionCommandKind::queue_play:
             return without_payload(command.queue_position
                                        ? client.play_position(*command.queue_position)
@@ -485,6 +490,10 @@ struct Session::Impl {
         case SessionCommandKind::transport:
         case SessionCommandKind::seek:
             return static_cast<std::uint32_t>(IdleEvent::player);
+        case SessionCommandKind::melody_context_play:
+        case SessionCommandKind::melody_context_queue:
+            return static_cast<std::uint32_t>(IdleEvent::queue) |
+                   static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::queue_play:
             return static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::queue_delete:
@@ -555,6 +564,8 @@ struct Session::Impl {
             snapshot.capabilities = std::move(*capabilities);
             melody_rating_search.store(snapshot.capabilities.supports_command("getrating"),
                                        std::memory_order_release);
+            melody_contexts.store(snapshot.capabilities.supports_command("melody_context"),
+                                  std::memory_order_release);
             melody_album_search.store(snapshot.capabilities.supports_command("searchalbums"),
                                       std::memory_order_release);
         }
@@ -576,6 +587,16 @@ struct Session::Impl {
                 return std::unexpected(std::move(current.error()));
             }
             snapshot.current_song = std::move(*current);
+        }
+        // ADR-0187: which stored playlist is materialized as the playback
+        // context. Refreshed with the queue, since a switch replaces it.
+        if (snapshot.capabilities.supports_command("melody_context") &&
+            (all || (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U)) {
+            auto context = client.melody_active_context();
+            if (!context) {
+                return std::unexpected(std::move(context.error()));
+            }
+            snapshot.active_context = std::move(*context);
         }
         // Melody ratings ride on listing lines without bumping the queue
         // version, so a rating refresh must bypass the reconcile shortcuts.
@@ -810,6 +831,22 @@ std::uint64_t Session::play_queue_id(const std::uint32_t song_id) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::queue_play;
     command.object_id = song_id;
+    return implementation_->enqueue(command);
+}
+
+std::uint64_t Session::melody_context_play(std::string name,
+                                          const std::optional<unsigned> row) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_play;
+    command.uri = std::move(name);
+    command.queue_position = row;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_queue(const std::optional<unsigned> row) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_queue;
+    command.queue_position = row;
     return implementation_->enqueue(command);
 }
 

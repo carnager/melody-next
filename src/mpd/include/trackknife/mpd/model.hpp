@@ -220,6 +220,9 @@ struct PlaybackStatus {
     std::optional<std::uint32_t> queue_version;
     std::optional<std::uint32_t> queue_length;
     std::optional<std::uint32_t> song_id;
+    // Queue position of the playing song (MPD's "song"), for surfaces that
+    // mark rows by position rather than queue id (ADR-0187).
+    std::optional<std::uint32_t> song_position;
     std::optional<std::uint32_t> next_song_id;
     bool repeat{false};
     bool random{false};

@@ -329,14 +329,11 @@ void BenchMainWindow::refreshSelectionStatus() {
         }
         auto* playlist_tab = currentMpdPlaylistTab();
         auto* search_tab = currentMpdSearchTab();
-        auto* list_tab = currentMpdListTab();
         auto* view = playlist_tab   ? playlist_tab->view
                      : search_tab   ? search_tab->view
-                     : list_tab     ? list_tab->view
                                     : mpd_queue_view_;
         const auto label = playlist_tab ? playlist_tab->name
                            : search_tab ? QStringLiteral("Search: %1").arg(search_tab->query)
-                           : list_tab   ? displayText(list_tab->document.name)
                                         : QStringLiteral("MPD Queue");
         if (view->selectionModel() == nullptr) {
             selection_status_->setText(label);

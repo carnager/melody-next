@@ -585,9 +585,6 @@ void BenchMainWindow::buildMpdWorkspace() {
                             for (const auto& search_tab : mpd_search_tabs_) {
                                 search_tab->model->acceptArtwork(token, image);
                             }
-                            for (const auto& list_tab : mpd_list_tabs_) {
-                                list_tab->model->acceptArtwork(token, image);
-                            }
                         });
                 watcher->setFuture(QtConcurrent::run([bytes] {
                     auto image = QImage::fromData(bytes);
@@ -635,11 +632,9 @@ void BenchMainWindow::buildMpdWorkspace() {
             if (mpd_controller_->supportsCommand(QStringLiteral("listplaylists"))) {
                 mpd_controller_->browseStoredPlaylists();
             }
-            // Server list tabs restored before the connection asked for
-            // covers into the void; ask again now that the server answers.
-            for (const auto& list_tab : mpd_list_tabs_) {
-                list_tab->model->retryMissingArtwork();
-            }
+            // ADR-0187: hand any retired client-owned list to the
+            // server now that one is available.
+            migrateServerListDocuments();
         }
         if (!connected && was_connected) {
             acceptMpdStoredPlaylistNames({});
@@ -651,6 +646,7 @@ void BenchMainWindow::buildMpdWorkspace() {
         refreshTransport();
         refreshSelectionStatus();
         refreshMpdStatusControls();
+        refreshMpdPlaylistContextMarkers();
     });
     auto* output_model = mpd_controller_->outputModel();
     const auto refresh_outputs = [this] {

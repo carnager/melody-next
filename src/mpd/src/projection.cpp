@@ -380,6 +380,11 @@ core::Result<PlaybackStatus> project_status(std::span<const Pair> pairs) {
             if (!status.queue_length) {
                 return std::unexpected(malformed("MPD returned an invalid queue length"));
             }
+        } else if (ascii_case_equal(pair.name, "song")) {
+            status.song_position = parse_unsigned<std::uint32_t>(pair.value);
+            if (!status.song_position) {
+                return std::unexpected(malformed("MPD returned an invalid current song position"));
+            }
         } else if (ascii_case_equal(pair.name, "songid")) {
             status.song_id = parse_unsigned<std::uint32_t>(pair.value);
             if (!status.song_id) {

@@ -1472,6 +1472,16 @@ void BenchMainWindow::refreshMpdTransport() {
     }
     device_button_->setEnabled(connected);
     auto output_tooltip = QStringLiteral("MPD output: %1").arg(mpd_controller_->activeOutputName());
+    if (mpd_controller_->supportsReplayGain()) {
+        // The server's mode is the one the ReplayGain menu sets and every
+        // output obeys; the endpoint line below only describes what this
+        // machine's decoder did with it, and reads Off until the server
+        // pushes the mode to an enabled Trackknife output.
+        const auto server_mode = mpd_controller_->replayGainMode();
+        output_tooltip += QStringLiteral("\nServer ReplayGain: %1")
+                              .arg(server_mode.isEmpty() ? QStringLiteral("unknown")
+                                                         : server_mode);
+    }
     if (melody_endpoint_ != nullptr) {
         const auto endpoint = melody_endpoint_->snapshot();
         const auto mode =
@@ -1482,7 +1492,7 @@ void BenchMainWindow::refreshMpdTransport() {
             endpoint.replay_gain_mode == audio::ReplayGainMode::album && endpoint.album_gain_db
                 ? endpoint.album_gain_db
                 : endpoint.track_gain_db;
-        output_tooltip += QStringLiteral("\nMelody ReplayGain: %1").arg(mode);
+        output_tooltip += QStringLiteral("\nThis machine's playback: %1").arg(mode);
         if (selected_gain) {
             output_tooltip += QStringLiteral(" · %1 dB · %2×")
                                   .arg(*selected_gain, 0, 'f', 2)

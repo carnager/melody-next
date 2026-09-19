@@ -818,6 +818,34 @@ void MpdProbeController::replaceQueueWithUris(const QStringList& uris) {
     submitTransport(mpd::TransportAction::play);
 }
 
+// ADR-0181: the server list tabs' play gesture — the whole list becomes the
+// queue and playback starts at the activated row, mirroring how a local
+// list plays from the clicked track.
+void MpdProbeController::replaceQueueWithUrisAndPlayAt(const QStringList& uris, const int row) {
+    constexpr qsizetype maximum_batch_size = 4'096;
+    if (!session_ || !connected_ || uris.isEmpty()) {
+        return;
+    }
+    if (uris.size() > maximum_batch_size) {
+        emit notificationRequested(QStringLiteral("At most 4096 tracks can replace the queue"));
+        emit stateChanged();
+        return;
+    }
+    std::vector<std::string> encoded;
+    encoded.reserve(static_cast<std::size_t>(uris.size()));
+    for (const auto& uri : uris) {
+        encoded.push_back(uri.toUtf8().toStdString());
+    }
+
+    pending_commands_.insert(session_->clear_queue());
+    enqueueUris(std::move(encoded), false);
+    const auto position = std::clamp(row, 0, static_cast<int>(uris.size()) - 1);
+    const auto command_id = session_->play_queue_position(static_cast<unsigned>(position));
+    pending_commands_.insert(command_id);
+    beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+    emit stateChanged();
+}
+
 void MpdProbeController::addAlbum(mpd::AlbumFilter album, const QueueAddMode mode) {
     if (!session_ || !connected_) {
         emit notificationRequested(QStringLiteral("Connect to add an album"));

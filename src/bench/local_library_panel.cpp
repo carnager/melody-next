@@ -555,6 +555,11 @@ void LocalLibraryPanel::reloadTree() {
 
 void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                                      persistence::LibraryQuery query) {
+    // Browsing shows the complete level in one load, like the MPD server
+    // library tree — the default 200-row page left the list cut off behind
+    // a manual "Show more…" row. The bound matches the tkq result cap and
+    // keeps the more-row as a never-expected safety valve.
+    query.limit = 100'000U;
     const auto generation = generation_;
     const auto root = !parent.isValid();
     enqueue(

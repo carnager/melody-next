@@ -305,7 +305,9 @@ struct Session::Impl {
         case SessionCommandKind::transport:
             return without_payload(client.run_transport(command.action));
         case SessionCommandKind::queue_play:
-            return without_payload(client.play_id(command.object_id));
+            return without_payload(command.queue_position
+                                       ? client.play_position(*command.queue_position)
+                                       : client.play_id(command.object_id));
         case SessionCommandKind::queue_add: {
             auto added = client.add_id(command.uri, command.queue_position);
             if (!added) {
@@ -808,6 +810,13 @@ std::uint64_t Session::play_queue_id(const std::uint32_t song_id) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::queue_play;
     command.object_id = song_id;
+    return implementation_->enqueue(command);
+}
+
+std::uint64_t Session::play_queue_position(const unsigned position) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::queue_play;
+    command.queue_position = position;
     return implementation_->enqueue(command);
 }
 

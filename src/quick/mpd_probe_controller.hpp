@@ -196,6 +196,7 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void addUris(const QStringList& uris, bool next);
     Q_INVOKABLE void addUrisAt(const QStringList& uris, int position);
     Q_INVOKABLE void replaceQueueWithUris(const QStringList& uris);
+    Q_INVOKABLE void replaceQueueWithUrisAndPlayAt(const QStringList& uris, int row);
     void addAlbum(mpd::AlbumFilter album, QueueAddMode mode);
     void loadSearchAlbum(quint64 token, const mpd::AlbumFilter& album);
     Q_INVOKABLE void browseDirectory(const QString& uri);

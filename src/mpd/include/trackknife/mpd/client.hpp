@@ -135,6 +135,7 @@ class Client final {
     [[nodiscard]] core::Result<std::vector<Output>> outputs();
     [[nodiscard]] core::Result<void> run_transport(TransportAction action);
     [[nodiscard]] core::Result<void> play_id(std::uint32_t song_id);
+    [[nodiscard]] core::Result<void> play_position(unsigned position);
     [[nodiscard]] core::Result<std::uint32_t>
     add_id(std::string_view uri, std::optional<unsigned> position = std::nullopt);
     [[nodiscard]] core::Result<void> add_ids(std::span<const QueueAddition> additions);

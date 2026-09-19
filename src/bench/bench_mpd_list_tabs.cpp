@@ -144,18 +144,25 @@ BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDoc
     auto* raw_tab = tab.get();
     connect(view, &QWidget::customContextMenuRequested, this,
             [this, view](const QPoint& position) { showTrackContextMenu(view, position); });
-    // Enter and double-click append to the live queue, matching the other
-    // MPD-context tabs; the explicit queue rewrite lives in the menu.
-    const auto append_selection = [this, raw_tab](const QModelIndex& index) {
-        if (index.isValid()) {
-            const auto uris = selectedMpdViewUris(raw_tab->view);
-            if (!uris.isEmpty()) {
-                mpd_controller_->addUris(uris, false);
-            }
+    // Enter and double-click play like a local list: the whole list replaces
+    // the queue and playback starts at the activated row. Appending stays a
+    // menu action.
+    const auto play_from_row = [this, raw_tab](const QModelIndex& index) {
+        if (!index.isValid() || !mpd_controller_->connected()) {
+            return;
+        }
+        QStringList uris;
+        const auto tracks = raw_tab->model->tracksSnapshot();
+        uris.reserve(static_cast<qsizetype>(tracks.size()));
+        for (const auto& track : tracks) {
+            uris.push_back(displayText(track.uri));
+        }
+        if (!uris.isEmpty()) {
+            mpd_controller_->replaceQueueWithUrisAndPlayAt(uris, index.row());
         }
     };
-    view->setActivateCallback(append_selection);
-    connect(view, &QTableView::doubleClicked, this, append_selection);
+    view->setActivateCallback(play_from_row);
+    connect(view, &QTableView::doubleClicked, this, play_from_row);
     view->setReorderCallback([this, raw_tab](const QVariantList& rows, int insertion_row) {
         QList<int> moved;
         moved.reserve(rows.size());

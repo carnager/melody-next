@@ -127,6 +127,7 @@ class Session final {
     void cancel_pending(std::uint64_t command_id);
     [[nodiscard]] std::uint64_t run_transport(TransportAction action);
     [[nodiscard]] std::uint64_t play_queue_id(std::uint32_t song_id);
+    [[nodiscard]] std::uint64_t play_queue_position(unsigned position);
     [[nodiscard]] std::uint64_t add_queue_uri(std::string uri,
                                               std::optional<unsigned> position = std::nullopt);
     [[nodiscard]] std::uint64_t add_queue_uris(std::vector<QueueAddition> additions);

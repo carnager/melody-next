@@ -278,7 +278,8 @@ class FakeMpdServer final {
             return;
         } else if (command.starts_with("playlistadd ") && command_list) {
             return;
-        } else if (command.starts_with("playid ") || command.starts_with("deleteid ") ||
+        } else if (command.starts_with("play ") || command.starts_with("playid ") ||
+                   command.starts_with("deleteid ") ||
                    command.starts_with("moveid ") || command.starts_with("seekid ") ||
                    command.starts_with("prioid ") || command.starts_with("setvol ") ||
                    command.starts_with("enableoutput ") || command.starts_with("switchoutput ") ||
@@ -489,6 +490,8 @@ void client_negotiates_and_preserves_extensions() {
     require(client.set_output_enabled(0U, true).has_value(),
             "additive MPD output enable must use the command connection");
     require(client.play_id(9U).has_value(), "queue playback must address the stable song ID");
+    require(client.play_position(3U).has_value(),
+            "queue playback must also address a plain position for freshly replaced queues");
     const auto appended = client.add_id("Artist/Release/03.flac");
     require(appended == 11U, "queue append must return the server-assigned stable song ID");
     const auto inserted = client.add_id("Artist/Release/03.flac", 1U);

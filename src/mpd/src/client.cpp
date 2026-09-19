@@ -1254,6 +1254,13 @@ core::Result<void> Client::play_id(const std::uint32_t song_id) {
     return {};
 }
 
+core::Result<void> Client::play_position(const unsigned position) {
+    if (!mpd_run_play_pos(implementation_->connection.get(), position)) {
+        return std::unexpected(implementation_->take_error("play"));
+    }
+    return {};
+}
+
 core::Result<std::uint32_t> Client::add_id(const std::string_view uri,
                                            const std::optional<unsigned> position) {
     if (uri.empty() || uri.contains('\0')) {

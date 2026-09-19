@@ -320,6 +320,8 @@ class BenchMainWindow final : public QMainWindow {
     void refreshTrackViewActions();
     void stopBackgroundWork();
     void refreshSelectionStatus();
+    void refreshSelectionActions();
+    [[nodiscard]] QTableView* activeTrackView();
     void showTrackViewHeaderMenu(QTableView* view, const QPoint& position);
 
     void openFilesDialog();

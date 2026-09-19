@@ -314,8 +314,62 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
     menu.exec(view->horizontalHeader()->mapToGlobal(position));
 }
 
+// The table the tab strip is currently showing, whichever kind of list it
+// holds. Selection-driven actions ask this rather than each surface.
+QTableView* BenchMainWindow::activeTrackView() {
+    if (auto* list_tab = currentMpdListTab()) {
+        return list_tab->view;
+    }
+    if (auto* playlist_tab = currentMpdPlaylistTab()) {
+        return playlist_tab->view;
+    }
+    if (auto* search_tab = currentMpdSearchTab()) {
+        return search_tab->view;
+    }
+    if (isMpdContext()) {
+        return mpd_queue_view_;
+    }
+    if (auto* tab = currentListTab()) {
+        return tab->view;
+    }
+    return nullptr;
+}
+
+// Delete and Play are menubar actions, so their enabled state has to follow
+// the selection continuously — not only when a context menu happens to open.
+void BenchMainWindow::refreshSelectionActions() {
+    auto* view = activeTrackView();
+    const auto has_selection = view != nullptr && view->selectionModel() != nullptr &&
+                               !view->selectionModel()->selectedRows().isEmpty();
+    const auto server_ready = view != mpd_queue_view_ ||
+                              (mpd_controller_ != nullptr && mpd_controller_->connected() &&
+                               !mpd_controller_->commandBusy());
+    // A committed search is a result listing, not a list you edit.
+    const auto removable = currentMpdSearchTab() == nullptr;
+    if (remove_selected_action_ != nullptr) {
+        remove_selected_action_->setEnabled(has_selection && server_ready && removable);
+    }
+    if (play_selected_action_ != nullptr) {
+        play_selected_action_->setEnabled(view != nullptr && view->currentIndex().isValid() &&
+                                          server_ready);
+    }
+}
+
 void BenchMainWindow::refreshSelectionStatus() {
+    refreshSelectionActions();
     if (selection_status_ == nullptr) {
+        return;
+    }
+    if (auto* list_tab = currentMpdListTab()) {
+        if (list_tab->view->selectionModel() != nullptr) {
+            const auto selected = list_tab->view->selectionModel()->selectedRows().size();
+            const auto label = displayText(list_tab->document.name);
+            selection_status_->setText(
+                selected > 0 ? QStringLiteral("%1 · %2 selected").arg(label).arg(selected)
+                             : QStringLiteral("%1 · %2 tracks")
+                                   .arg(label)
+                                   .arg(list_tab->model->rowCount()));
+        }
         return;
     }
     if (isMpdContext()) {

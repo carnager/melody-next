@@ -1897,6 +1897,22 @@ void BenchMainWindow::replayListEdit(const bool undo) {
 }
 
 void BenchMainWindow::removeSelectedRows() {
+    // ADR-0188: a working tab edits in client memory, so Delete removes
+    // there rather than from whatever the server is playing.
+    if (auto* list_tab = currentMpdListTab()) {
+        if (list_tab->view->selectionModel() == nullptr) {
+            return;
+        }
+        QList<int> rows;
+        for (const auto& index : list_tab->view->selectionModel()->selectedRows()) {
+            rows.push_back(index.row());
+        }
+        if (!rows.isEmpty()) {
+            list_tab->model->removeTrackRows(std::move(rows));
+            markMpdListTabDirty(*list_tab);
+        }
+        return;
+    }
     if (auto* playlist_tab = currentMpdPlaylistTab()) {
         if (playlist_tab->view->selectionModel() == nullptr) {
             return;

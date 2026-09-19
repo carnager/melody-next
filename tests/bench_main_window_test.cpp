@@ -232,6 +232,7 @@ class BenchMainWindowTest final : public QObject {
     void mpdSugarActionsMaterializeAndOpenDialog();
     void propertiesFileListHostsInSidebar();
     void serverListTabsPersistAndRenderOffline();
+    void workingTabDeleteRemovesSelectedRows();
     void serverWorkingTabCreationGestures();
     void serverWorkingTabCreationGesturesLegacy();
     void localArtworkSurvivesInvalidation();
@@ -3892,6 +3893,39 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
 // ADR-0188: working tabs are client-owned temporary lists of server
 // tracks: they persist, render offline from their snapshots, and are
 // edited freely without touching any stored playlist.
+void BenchMainWindowTest::workingTabDeleteRemovesSelectedRows() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* remove = window.findChild<QAction*>(QStringLiteral("action-remove-selected-tracks"));
+    QVERIFY(tabs != nullptr);
+    QVERIFY(remove != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+
+    const auto make_track = [](const std::string& uri, const std::string& title) {
+        mpd::Track track;
+        track.uri = uri;
+        track.metadata = mpd::Metadata{{{"Title", title}, {"Artist", "Working"}}};
+        return track;
+    };
+    auto* tab = window.createServerListTab(
+        QStringLiteral("Scratch"),
+        {make_track("w/1.flac", "One"), make_track("w/2.flac", "Two"),
+         make_track("w/3.flac", "Three")});
+    QVERIFY(tab != nullptr);
+    tabs->setCurrentWidget(tab->view);
+    QCOMPARE(tab->model->rowCount(), 3);
+
+    tab->view->selectRow(1);
+    // The shortcut only fires when the action is enabled, so the selection
+    // has to keep it enabled on its own — no context menu in between.
+    QTRY_VERIFY(remove->isEnabled());
+    remove->trigger();
+    QCOMPARE(tab->model->rowCount(), 2);
+    QCOMPARE(tab->model->index(1, 0).data(ui::track_source_role).toString(),
+             QStringLiteral("w/3.flac"));
+}
+
 void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
     const auto make_track = [](const char* uri, const char* artist, const char* title) {
         trackknife::mpd::Track track;

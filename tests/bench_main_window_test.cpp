@@ -1159,7 +1159,7 @@ void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     auto* controller = window.findChild<quick::MpdProbeController*>();
-    auto* playlists = window.findChild<QListWidget*>(QStringLiteral("bench-mpd-playlists"));
+    auto* playlists = window.findChild<QTreeWidget*>(QStringLiteral("bench-mpd-playlists"));
     auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-mpd-source-tabs"));
     auto* source_pages =
         window.findChild<QStackedWidget*>(QStringLiteral("bench-mpd-source-pages"));
@@ -1181,21 +1181,21 @@ void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
 
     emit controller->storedPlaylistListLoaded(
         {QStringLiteral("Quiet mix"), QStringLiteral("Road mix")});
-    QCOMPARE(playlists->count(), 2);
+    QCOMPARE(playlists->topLevelItemCount(), 2);
     // The ADR-0130 sidebar tab bar switches to the full-height Playlists page.
     source_tabs->setCurrentIndex(1);
     QTRY_VERIFY(playlists->isVisible());
     QCOMPARE(source_pages->currentWidget(), playlists);
 
     // Activating a sidebar entry opens exactly one tab keyed by the name.
-    emit playlists->itemActivated(playlists->item(1));
+    emit playlists->itemActivated(playlists->topLevelItem(1), 0);
     QTRY_COMPARE(tabs->count(), 3);
     auto* view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-playlist-view"));
     QVERIFY(view != nullptr);
     QCOMPARE(view->property("bench-mpd-playlist-name").toString(), QStringLiteral("Road mix"));
     QCOMPARE(tabs->currentWidget(), view);
     QCOMPARE(tabs->tabText(tabs->indexOf(view)), QStringLiteral("Road mix"));
-    emit playlists->itemActivated(playlists->item(1));
+    emit playlists->itemActivated(playlists->topLevelItem(1), 0);
     QCOMPARE(tabs->count(), 3); // Reopening refreshes instead of duplicating.
 
     // Contents arrive only through the authoritative playlist re-read.
@@ -1238,7 +1238,7 @@ void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
 
     // Disconnect clears the sidebar list.
     emit controller->storedPlaylistListLoaded({});
-    QCOMPARE(playlists->count(), 0);
+    QCOMPARE(playlists->topLevelItemCount(), 0);
 }
 
 void BenchMainWindowTest::playbackBufferProfilesPersistAndExposeDiagnostics() {

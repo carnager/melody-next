@@ -50,6 +50,7 @@ class QStackedWidget;
 class QTabBar;
 class QTabWidget;
 class QTableView;
+class QTreeWidget;
 class QTimer;
 class QToolButton;
 class QTreeView;
@@ -472,7 +473,10 @@ class BenchMainWindow final : public QMainWindow {
     // Enter pressed before the debounced search finished: commit this
     // query as soon as its results arrive (ADR-0140).
     QString pending_mpd_search_commit_;
-    QListWidget* mpd_playlists_list_{nullptr};
+    // ADR-0189: the Playlists sidebar is a tree — playlists expand to their
+    // tracks, like albums in the library.
+    QTreeWidget* mpd_playlists_list_{nullptr};
+    [[nodiscard]] QStringList mpdPlaylistNames() const;
     QMenu* mpd_playlists_menu_{nullptr};
     QTimer* mpd_playlists_refresh_timer_{nullptr};
 

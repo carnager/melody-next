@@ -357,10 +357,10 @@ void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_vi
         mpd_controller_->addToStoredPlaylist(name, uris, -1);
         openMpdPlaylistTab(name, true);
     });
-    if (mpd_playlists_list_ != nullptr && mpd_playlists_list_->count() > 0) {
+    const auto playlist_names = mpdPlaylistNames();
+    if (!playlist_names.isEmpty()) {
         submenu->addSeparator();
-        for (int row = 0; row < mpd_playlists_list_->count(); ++row) {
-            const auto name = mpd_playlists_list_->item(row)->text();
+        for (const auto& name : playlist_names) {
             auto* action = submenu->addAction(name);
             action->setEnabled(ready);
             connect(action, &QAction::triggered, this,

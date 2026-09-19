@@ -233,6 +233,7 @@ class BenchMainWindowTest final : public QObject {
     void propertiesFileListHostsInSidebar();
     void serverWorkingTabCreationGestures();
     void libraryDragResolvesUnexpandedBranch();
+    void selectionActionsFollowTheActiveTab();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3888,6 +3889,37 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QSettings settings;
     settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.sync();
+}
+
+// Delete and Play act on the tab you are looking at. The regression twice
+// over: the active view fell back to the MPD queue for every server-side
+// tab, so a list tab's own selection was never the one being acted on.
+void BenchMainWindowTest::selectionActionsFollowTheActiveTab() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    QVERIFY(tabs != nullptr && queue_view != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+    tabs->setCurrentWidget(queue_view);
+    QCOMPARE(window.activeTrackView(), queue_view);
+
+    auto* playlist_tab = window.openMpdPlaylistTab(QStringLiteral("Working"), true);
+    QVERIFY(playlist_tab != nullptr);
+    QCOMPARE(tabs->currentWidget(), playlist_tab->view);
+    QCOMPARE(window.activeTrackView(), playlist_tab->view);
+
+    // A selection there is the one Delete would remove.
+    mpd::Track track;
+    track.uri = "w/1.flac";
+    track.metadata = mpd::Metadata{{{"Title", "One"}}};
+    playlist_tab->model->replaceTracks({track});
+    playlist_tab->view->selectRow(0);
+    QVERIFY(!playlist_tab->view->selectionModel()->selectedRows().isEmpty());
+    QVERIFY(queue_view->selectionModel()->selectedRows().isEmpty());
+
+    tabs->setCurrentWidget(queue_view);
+    QCOMPARE(window.activeTrackView(), queue_view);
 }
 
 // A library branch loads on demand, so dropping an artist that was never

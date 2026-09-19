@@ -317,6 +317,14 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
 // The table the tab strip is currently showing, whichever kind of list it
 // holds. Selection-driven actions ask this rather than each surface.
 QTableView* BenchMainWindow::activeTrackView() {
+    // Playlist and working tabs first: they are MPD context too, but the
+    // selection that matters is theirs, not the queue's.
+    if (auto* playlist_tab = currentMpdPlaylistTab()) {
+        return playlist_tab->view;
+    }
+    if (auto* search_tab = currentMpdSearchTab()) {
+        return search_tab->view;
+    }
     if (isMpdContext()) {
         return mpd_queue_view_;
     }
@@ -332,7 +340,9 @@ void BenchMainWindow::refreshSelectionActions() {
     auto* view = activeTrackView();
     const auto has_selection = view != nullptr && view->selectionModel() != nullptr &&
                                !view->selectionModel()->selectedRows().isEmpty();
-    const auto server_ready = view != mpd_queue_view_ ||
+    // Every MPD-side list is edited on the server, so all of them need a
+    // connection that is not mid-command; local lists never do.
+    const auto server_ready = !isMpdContext() ||
                               (mpd_controller_ != nullptr && mpd_controller_->connected() &&
                                !mpd_controller_->commandBusy());
     // A committed search is a result listing, not a list you edit.

@@ -718,8 +718,16 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
 }
 
 void BenchMainWindow::openSearchDialog() {
+    // Search where you are: a server-side tab means the server library.
+    const auto server_context = isMpdContext();
     if (search_dialog_ != nullptr) {
-        search_dialog_->show();
+        if (server_context) {
+            search_dialog_->preferServerScope();
+        }
+        if (server_context) {
+        search_dialog_->preferServerScope();
+    }
+    search_dialog_->show();
         search_dialog_->raise();
         search_dialog_->activateWindow();
         return;
@@ -846,6 +854,9 @@ void BenchMainWindow::openSearchDialog() {
                     playRow(*destination, 0);
                 }
             });
+    if (server_context) {
+        search_dialog_->preferServerScope();
+    }
     search_dialog_->show();
 }
 
@@ -1206,7 +1217,51 @@ void BenchMainWindow::refreshTabActions() {
     }
 }
 
+// Closing returns you to the tab you were on before this one, not to
+// whichever tab happens to sit next to it — the neighbour is rarely where
+// you came from.
+void BenchMainWindow::rememberTabVisit(QWidget* tab) {
+    if (tab == nullptr) {
+        return;
+    }
+    tab_visit_history_.removeIf(
+        [tab](const QPointer<QWidget>& seen) { return seen == nullptr || seen == tab; });
+    tab_visit_history_.push_front(tab);
+    constexpr qsizetype remembered_tabs = 32;
+    while (tab_visit_history_.size() > remembered_tabs) {
+        tab_visit_history_.pop_back();
+    }
+}
+
+// The tab to fall back to when `closed` goes away: the most recent visit
+// that is not it. Removing a tab makes Qt select a neighbour, which pushes
+// that neighbour onto the history — so the answer is computed first, before
+// the close runs.
+QPointer<QWidget> BenchMainWindow::previouslyVisitedTab(QWidget* closed) const {
+    for (const auto& candidate : tab_visit_history_) {
+        if (candidate != nullptr && candidate != closed && tabs_->indexOf(candidate) >= 0) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
 void BenchMainWindow::closeTabAt(const int index) {
+    // The tab being closed may not be the current one, and the close path
+    // runs asynchronously for some kinds, so the restore happens after.
+    auto* closing = tabs_->widget(index);
+    const QPointer<QWidget> guard{closing};
+    if (closing == tabs_->currentWidget()) {
+        const auto restore = previouslyVisitedTab(closing);
+        // Some close paths ask for confirmation or finish asynchronously, so
+        // the restore only applies once the tab is actually gone.
+        QTimer::singleShot(0, this, [this, guard, restore] {
+            const auto closed = guard == nullptr || tabs_->indexOf(guard) < 0;
+            if (closed && restore != nullptr && tabs_->indexOf(restore) >= 0) {
+                tabs_->setCurrentWidget(restore);
+            }
+        });
+    }
     if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
         properties->close();
         return;

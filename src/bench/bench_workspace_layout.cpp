@@ -103,6 +103,7 @@ void BenchMainWindow::buildWorkspace() {
            "Hold Ctrl to copy."));
     connect(tabs_, &QTabWidget::tabCloseRequested, this, &BenchMainWindow::closeTabAt);
     connect(tabs_, &QTabWidget::currentChanged, this, [this](const int) {
+        rememberTabVisit(tabs_->currentWidget());
         refreshTabActions();
         refreshTrackViewActions();
         refreshSelectionStatus();

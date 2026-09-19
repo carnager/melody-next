@@ -263,6 +263,11 @@ class BenchMainWindow final : public QMainWindow {
     void replayListEdit(bool undo);
     void markTabDirty(ListTab& tab);
     void closeTabAt(int index);
+    // Most-recently-visited tabs, newest first, so closing one returns to
+    // where you came from rather than to its neighbour.
+    QList<QPointer<QWidget>> tab_visit_history_;
+    void rememberTabVisit(QWidget* tab);
+    [[nodiscard]] QPointer<QWidget> previouslyVisitedTab(QWidget* closed) const;
     void closeCurrentTab();
     void createList();
     void duplicateCurrentTab();

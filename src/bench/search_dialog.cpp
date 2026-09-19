@@ -388,6 +388,12 @@ void SearchDialog::deleteSearch() {
     loadSavedSearches(*search, true);
 }
 
+void SearchDialog::preferServerScope() {
+    if (server_scope_.run && scope_ != nullptr) {
+        scope_->setCurrentIndex(2);
+    }
+}
+
 bool SearchDialog::databaseScope() const { return scope_->currentIndex() == 0; }
 
 bool SearchDialog::serverScope() const { return scope_->currentIndex() == 2; }

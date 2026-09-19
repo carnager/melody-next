@@ -234,6 +234,8 @@ class BenchMainWindowTest final : public QObject {
     void serverWorkingTabCreationGestures();
     void libraryDragResolvesUnexpandedBranch();
     void selectionActionsFollowTheActiveTab();
+    void closingATabReturnsToThePreviousOne();
+    void searchOpensInTheScopeOfTheActiveTab();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3877,6 +3879,69 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QSettings settings;
     settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.sync();
+}
+
+// Search where you are: opened from a server-side tab, the dialog starts on
+// the server library rather than the local database.
+void BenchMainWindowTest::searchOpensInTheScopeOfTheActiveTab() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-search-dialog"));
+    QVERIFY(tabs != nullptr && queue_view != nullptr && action != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+
+    tabs->setCurrentWidget(queue_view);
+    action->trigger();
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
+                nullptr);
+    auto* scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    QVERIFY(scope != nullptr);
+    QCOMPARE(scope->count(), 3); // Library database, current tab, server library.
+    QCOMPARE(scope->currentIndex(), 2);
+
+    // Reopening from a local tab leaves the choice alone rather than forcing
+    // the server scope back on.
+    dialog->close();
+    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-search-dialog")) == nullptr);
+    for (int index = 0; index < tabs->count(); ++index) {
+        if (tabs->widget(index) != queue_view &&
+            qobject_cast<QTableView*>(tabs->widget(index)) != nullptr) {
+            tabs->setCurrentIndex(index);
+            break;
+        }
+    }
+    action->trigger();
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
+                nullptr);
+    scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    QVERIFY(scope != nullptr);
+    QCOMPARE(scope->currentIndex(), 0);
+    dialog->close();
+}
+
+// Closing a tab returns to the one you came from, not to its neighbour.
+void BenchMainWindowTest::closingATabReturnsToThePreviousOne() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    QVERIFY(tabs != nullptr && queue_view != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+
+    auto* first = window.openMpdPlaylistTab(QStringLiteral("First"), true);
+    auto* second = window.openMpdPlaylistTab(QStringLiteral("Second"), true);
+    QVERIFY(first != nullptr && second != nullptr);
+
+    // Visit the queue, then the second list: closing it goes back to the
+    // queue, even though "First" sits right beside it.
+    tabs->setCurrentWidget(queue_view);
+    tabs->setCurrentWidget(second->view);
+    window.closeTabAt(tabs->indexOf(second->view));
+    QTRY_COMPARE(tabs->currentWidget(), static_cast<QWidget*>(queue_view));
+    QVERIFY(tabs->indexOf(first->view) >= 0);
 }
 
 // Delete and Play act on the tab you are looking at. The regression twice

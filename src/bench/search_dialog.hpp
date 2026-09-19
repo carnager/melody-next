@@ -60,6 +60,10 @@ class SearchDialog final : public QDialog {
                  QWidget* parent = nullptr);
     ~SearchDialog() override;
 
+    // Opens on the scope that matches where the search was started: a
+    // server-side tab searches the server library.
+    void preferServerScope();
+
   signals:
     // Both scopes carry cached rows directly; opening never starts file discovery.
     void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action);

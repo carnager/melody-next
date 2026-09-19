@@ -83,6 +83,7 @@ class MpdQueueModelTest final : public QObject {
     void keepsSelectionOnStableIdAcrossMove();
     void resetsForAComplexReorder();
     void loadsGroupedQueueArtworkSerially();
+    void loadsArtworkPastTheRequestBudget();
     void exposesMelodyOutputState();
     void projectsHeterogeneousBrowserEntries();
     void exposesOutputCountToQml();
@@ -288,6 +289,39 @@ void MpdQueueModelTest::loadsGroupedQueueArtworkSerially() {
                  .value<QImage>()
                  .pixelColor(4, 4),
              QColor(Qt::red));
+}
+
+// The request budget bounds requests in flight, not the number of albums a
+// list may ever load: a long list used to stop showing covers once 64
+// albums had been fetched.
+void MpdQueueModelTest::loadsArtworkPastTheRequestBudget() {
+    MpdQueueModel model;
+    QSignalSpy artwork_requests{&model, &MpdQueueModel::artworkRequested};
+    model.setArtworkEnabled(true);
+
+    constexpr int albums = 200;
+    std::vector<mpd::Track> tracks;
+    tracks.reserve(static_cast<std::size_t>(albums));
+    for (int album = 0; album < albums; ++album) {
+        const auto uri = QStringLiteral("album-%1/01.flac").arg(album);
+        tracks.push_back(search_track(uri.toStdString(),
+                                      QStringLiteral("Album %1").arg(album).toStdString(),
+                                      QStringLiteral("Track %1").arg(album).toStdString(), "1",
+                                      QStringLiteral("release-%1").arg(album).toStdString()));
+    }
+    model.replaceTracks(std::move(tracks));
+
+    QImage cover{8, 8, QImage::Format_ARGB32_Premultiplied};
+    cover.fill(Qt::blue);
+    for (int answered = 0; answered < albums; ++answered) {
+        QCOMPARE(artwork_requests.size(), answered + 1);
+        model.acceptArtwork(artwork_requests.back().front().toULongLong(), cover);
+    }
+    QCOMPARE(artwork_requests.size(), albums);
+    QCOMPARE(model.data(model.index(albums - 1, 0), MpdQueueModel::AlbumArtworkRole)
+                 .value<QImage>()
+                 .pixelColor(4, 4),
+             QColor(Qt::blue));
 }
 
 void MpdQueueModelTest::exposesMelodyOutputState() {

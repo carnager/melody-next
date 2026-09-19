@@ -22,6 +22,9 @@
 namespace trackknife::quick {
 namespace {
 
+// Requests in flight at once. Only one is ever outstanding today, but the
+// bound stays as the guard against a fan-out: it must count *pending*
+// requests, since `requested` stays set on the albums already fetched.
 constexpr qsizetype maximum_artwork_requests = 64;
 constexpr int maximum_artwork_attempts = 3;
 constexpr quint64 artwork_token_namespace = quint64{1} << 62U;
@@ -597,8 +600,10 @@ void MpdQueueModel::acceptArtwork(const quint64 token, const QImage& image) {
             }
         } else if (++artwork->failed_attempts < maximum_artwork_attempts) {
             artwork->requested = false;
-            artwork->token = 0U;
         }
+        // Answered either way: the request is no longer in flight, and a
+        // finished album must not occupy the request budget forever.
+        artwork->token = 0U;
         break;
     }
     requestNextArtwork();
@@ -626,9 +631,10 @@ void MpdQueueModel::synchronizeArtwork() {
 }
 
 void MpdQueueModel::requestNextArtwork() {
-    if (!artwork_enabled_ || active_artwork_token_ ||
-        std::ranges::count_if(album_artwork_, &AlbumArtwork::requested) >=
-            maximum_artwork_requests) {
+    const auto pending = std::ranges::count_if(album_artwork_, [](const AlbumArtwork& artwork) {
+        return artwork.requested && artwork.token != 0U;
+    });
+    if (!artwork_enabled_ || active_artwork_token_ || pending >= maximum_artwork_requests) {
         return;
     }
     QString previous_key;

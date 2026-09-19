@@ -41,6 +41,20 @@ tests locate widgets by object name, which ignores visibility.
 - The field-set save/delete entries move into the More menu, replacing
   the unreachable hidden buttons.
 
+## Addendum: sidebar-hosted file list
+
+Even full-width, the in-editor file list was a wide flat band spending a
+third of the height on a path column — the wrong shape for a path list.
+While a tag editor tab is active, the local sources sidebar gains a
+temporary **Files** page: a mirror view sharing the editor's model and
+selection model (nothing reparents, so the dialog's object tree and every
+dialog-scoped lookup stay intact), with a breadcrumb of the selection's
+common folder above rows rendered relative to it — plain filenames for
+the ordinary one-album edit. The in-dialog copy hides while mirrored and
+returns when the editor's tab is left or closed; the temporary page is
+never persisted as the default sidebar view. Standalone dialogs keep the
+stacked layout.
+
 ## Consequences
 
 - On small screens the editor is a files list over a full-width field

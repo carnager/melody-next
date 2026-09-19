@@ -34,6 +34,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLayout>
 #include <QMenu>
 #include <QMessageBox>
 #include <QSettings>
@@ -912,13 +913,114 @@ bool BenchMainWindow::isMpdContext() const {
            mpdListTabForWidget(current) != nullptr;
 }
 
+// ADR-0183 addendum: while a tag editor tab is active, its file list is
+// hosted as a temporary Files page in the local sources sidebar — the
+// path list gets a tall column and the field table the full height, with
+// the selection scoping still live. The dialog reclaims the widget on
+// close; a destroyed editor leaves only sidebar state to tear down.
+void BenchMainWindow::updatePropertiesFileHosting() {
+    if (tabs_ == nullptr || local_source_tabs_ == nullptr ||
+        properties_files_view_ == nullptr) {
+        return;
+    }
+    auto* current = qobject_cast<MetadataPropertiesDialog*>(tabs_->currentWidget());
+    const auto teardown = [this] {
+        properties_files_view_->setModel(nullptr);
+        if (properties_files_dir_ != nullptr) {
+            properties_files_dir_->clear();
+        }
+        if (local_source_tabs_->count() > 2) {
+            local_source_tabs_->removeTab(2);
+        }
+        if (previous_local_source_index_ >= 0) {
+            local_source_tabs_->setCurrentIndex(previous_local_source_index_);
+            previous_local_source_index_ = -1;
+        }
+    };
+    if (current == nullptr) {
+        if (hosted_properties_ != nullptr) {
+            hosted_properties_->setFileListHosted(false);
+            hosted_properties_.clear();
+        }
+        teardown();
+        return;
+    }
+    if (hosted_properties_ == current) {
+        return;
+    }
+    if (hosted_properties_ != nullptr) {
+        hosted_properties_->setFileListHosted(false);
+        hosted_properties_.clear();
+    }
+    auto* source_view = current->fileListView();
+    if (source_view == nullptr) {
+        // The grid (and its file list) builds asynchronously; host once it
+        // exists.
+        teardown();
+        connect(current, &MetadataPropertiesDialog::fileListConstructed, this,
+                &BenchMainWindow::refreshActiveContext,
+                static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
+        return;
+    }
+    hosted_properties_ = current;
+    if (previous_local_source_index_ < 0) {
+        previous_local_source_index_ = std::min(local_source_tabs_->currentIndex(), 1);
+    }
+    current->setFileListHosted(true);
+    // A mirror view sharing model and selection — nothing reparents, so the
+    // dialog's object tree (and every dialog-scoped lookup) stays intact.
+    properties_files_view_->setModel(source_view->model());
+    properties_files_view_->setSelectionModel(source_view->selectionModel());
+    QString common_dir;
+    if (auto* model = properties_files_view_->model()) {
+        for (int column = 1; column < model->columnCount(); ++column) {
+            properties_files_view_->setColumnHidden(column, true);
+        }
+        // Breadcrumb: the selection's common folder; rows render relative
+        // to it (plain filenames for a one-album edit).
+        for (int row = 0; row < model->rowCount(); ++row) {
+            auto path = model->index(row, 0).data(Qt::DisplayRole).toString();
+            const auto slash = path.lastIndexOf(QLatin1Char('/'));
+            auto directory = slash >= 0 ? path.left(slash + 1) : QString{};
+            if (row == 0) {
+                common_dir = directory;
+                continue;
+            }
+            while (!common_dir.isEmpty() && !directory.startsWith(common_dir)) {
+                const auto parent =
+                    common_dir.lastIndexOf(QLatin1Char('/'), common_dir.size() - 2);
+                common_dir = parent >= 0 ? common_dir.left(parent + 1) : QString{};
+            }
+        }
+    }
+    if (properties_files_dir_ != nullptr) {
+        properties_files_dir_->setText(common_dir);
+        properties_files_dir_->setToolTip(common_dir);
+    }
+    if (properties_files_delegate_ != nullptr) {
+        properties_files_delegate_->setProperty("relative-prefix", common_dir);
+    }
+    connect(current, &QObject::destroyed, this,
+            &BenchMainWindow::refreshActiveContext,
+            static_cast<Qt::ConnectionType>(Qt::QueuedConnection | Qt::UniqueConnection));
+    if (local_source_tabs_->count() < 3) {
+        local_source_tabs_->addTab(QStringLiteral("Files"));
+    }
+    local_source_tabs_->setCurrentIndex(2);
+}
+
 void BenchMainWindow::refreshActiveContext() {
+    updatePropertiesFileHosting();
     const auto mpd = isMpdContext();
     const auto authority = mpd ? QStringLiteral("mpd") : QStringLiteral("local");
     const auto context_changed = property("trackknife-active-authority").toString() != authority;
     setProperty("trackknife-active-authority", authority);
     if (source_stack_ != nullptr) {
         auto* source = mpd ? mpd_library_panel_
+                       : local_source_tabs_ != nullptr &&
+                               local_source_tabs_->currentIndex() == 2 &&
+                               properties_files_page_ != nullptr
+                           ? properties_files_page_
                        : local_source_tabs_ != nullptr && local_source_tabs_->currentIndex() == 1 &&
                                local_library_ != nullptr
                            ? static_cast<QWidget*>(local_library_)

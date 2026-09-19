@@ -133,6 +133,11 @@ struct FilePublicationApplyProgressState {
 class MetadataPropertiesDialog final : public QDialog {
     Q_OBJECT
 
+  signals:
+    // ADR-0183 addendum: the file list exists only after the asynchronous
+    // grid build; sidebar hosting waits for this.
+    void fileListConstructed();
+
   public:
     MetadataPropertiesDialog(std::size_t requested_item_count,
                              MetadataPropertiesSourceReader source_reader,
@@ -200,6 +205,15 @@ class MetadataPropertiesDialog final : public QDialog {
     void finishOutputLayoutExample();
     void updateWritePlanButton();
     void updateApplySummary();
+
+  public:
+    // ADR-0183 addendum: sidebar hosting of the file list by the bench
+    // window; the dialog reclaims the widget on close.
+    [[nodiscard]] QTableView* fileListView();
+    void setFileListHosted(bool hosted);
+
+  private:
+    bool file_list_hosted_{false};
     void invalidateWritePlan();
     void startProposals();
     void finishProposals();

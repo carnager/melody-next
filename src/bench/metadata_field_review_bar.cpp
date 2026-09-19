@@ -34,13 +34,13 @@ MetadataFieldReviewBar::MetadataFieldReviewBar(QTableView* fields, MetadataAggre
     changed_only_->setObjectName(QStringLiteral("bench-metadata-changed-only"));
     changed_only_->setToolTip(tr("Show fields with staged edits in the selected files."));
     controls->addWidget(changed_only_);
-    auto* show_files = new QCheckBox(tr("Show files"), this);
-    show_files->setObjectName(QStringLiteral("bench-metadata-show-files"));
-    show_files->setChecked(true);
-    show_files->setToolTip(tr("Hide the file list to make more room for fields. "
-                              "The selected files stay selected."));
-    connect(show_files, &QCheckBox::toggled, files, &QWidget::setVisible);
-    controls->addWidget(show_files);
+    show_files_ = new QCheckBox(tr("Show files"), this);
+    show_files_->setObjectName(QStringLiteral("bench-metadata-show-files"));
+    show_files_->setChecked(true);
+    show_files_->setToolTip(tr("Hide the file list to make more room for fields. "
+                               "The selected files stay selected."));
+    connect(show_files_, &QCheckBox::toggled, files, &QWidget::setVisible);
+    controls->addWidget(show_files_);
     layout->addLayout(controls);
     status_ = new QLabel(this);
     status_->setObjectName(QStringLiteral("bench-metadata-field-filter-status"));
@@ -131,6 +131,16 @@ void MetadataFieldReviewBar::refresh() {
                                .arg(counts)
                                .arg(changed)
                          : tr("%1 · Updating changes… · Apply includes hidden edits.").arg(counts));
+}
+
+void MetadataFieldReviewBar::setFilesToggleVisible(const bool visible) {
+    if (show_files_ != nullptr) {
+        show_files_->setVisible(visible);
+    }
+}
+
+bool MetadataFieldReviewBar::filesToggleChecked() const {
+    return show_files_ == nullptr || show_files_->isChecked();
 }
 
 } // namespace trackknife::bench

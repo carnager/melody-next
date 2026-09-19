@@ -229,6 +229,7 @@ class BenchMainWindowTest final : public QObject {
     void convertDialogAppliesPermanentReplayGain();
     void settingsControlStartupContextAndMusicRoot();
     void mpdSugarActionsMaterializeAndOpenDialog();
+    void propertiesFileListHostsInSidebar();
     void serverListTabsPersistAndRenderOffline();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
@@ -1492,6 +1493,84 @@ void BenchMainWindowTest::committedMetadataRefreshesDuplicatesAndPreservesCueOve
     QVERIFY(!rejected.has_value());
     QCOMPARE(rejected.error().code, core::ErrorCode::conflict);
     QCOMPARE(model.rows()[0], legacy);
+}
+
+// ADR-0183 addendum: while a tag editor tab is active, its file list is
+// hosted as a temporary Files page in the local sources sidebar; leaving
+// or closing the editor returns the widget and the sidebar state.
+void BenchMainWindowTest::propertiesFileListHostsInSidebar() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto source_path = media.filePath(QStringLiteral("hosted.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), source_path));
+    const auto encoded = QFile::encodeName(source_path);
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({std::string{encoded.constData(),
+                                       static_cast<std::size_t>(encoded.size())}});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+    auto* files_page = window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
+    QVERIFY(tabs != nullptr && properties_action != nullptr && source_tabs != nullptr &&
+            files_page != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* list_view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(list_view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(list_view->model());
+    QVERIFY(list_model != nullptr);
+    QTRY_COMPARE(list_model->rowCount(), 1);
+    QTRY_VERIFY(list_model->rows().front().probed);
+    list_view->selectionModel()->select(list_model->index(0, 0),
+                                        QItemSelectionModel::ClearAndSelect |
+                                            QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    const auto stored_view = QSettings{}.value(QStringLiteral("local-library/view")).toInt();
+    properties_action->trigger();
+    auto* properties =
+        window.findChild<MetadataPropertiesDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+
+    // Hosted: third sidebar tab, file list living inside the sidebar page.
+    QTRY_COMPARE(source_tabs->count(), 3);
+    QCOMPARE(source_tabs->tabText(2), QStringLiteral("Files"));
+    QCOMPARE(source_tabs->currentIndex(), 2);
+    // The mirror view shares the dialog view's model and selection; the
+    // dialog's own copy hides but keeps its object tree intact.
+    QTableView* files_view = nullptr;
+    QTRY_VERIFY((files_view = window.findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-files"))) != nullptr);
+    QVERIFY(properties->isAncestorOf(files_view));
+    QVERIFY(!files_view->isVisible());
+    auto* mirror =
+        window.findChild<QTableView*>(QStringLiteral("bench-properties-files-view"));
+    QVERIFY(mirror != nullptr);
+    QVERIFY(files_page->isAncestorOf(mirror));
+    QTRY_VERIFY(mirror->model() != nullptr);
+    QCOMPARE(mirror->model(), files_view->model());
+    QCOMPARE(mirror->selectionModel(), files_view->selectionModel());
+    // Breadcrumb carries the common folder; rows render relative to it.
+    auto* crumb = window.findChild<QLabel*>(QStringLiteral("bench-properties-files-dir"));
+    QVERIFY(crumb != nullptr);
+    QVERIFY(crumb->text().endsWith(QLatin1Char('/')));
+    QVERIFY(!crumb->text().contains(QStringLiteral("hosted.flac")));
+    // The temporary page never becomes the persisted default view.
+    QCOMPARE(QSettings{}.value(QStringLiteral("local-library/view")).toInt(), stored_view);
+
+    // Switching to the list tab clears the mirror and the sidebar state.
+    tabs->setCurrentWidget(list_view);
+    QTRY_COMPARE(source_tabs->count(), 2);
+    QVERIFY(mirror->model() == nullptr);
+    QVERIFY(source_tabs->currentIndex() < 2);
+
+    // Re-selecting the editor hosts again; closing tears everything down.
+    tabs->setCurrentWidget(properties);
+    QTRY_COMPARE(source_tabs->count(), 3);
+    QTRY_VERIFY(mirror->model() != nullptr);
+    QVERIFY(properties->close());
+    QTRY_COMPARE(source_tabs->count(), 2);
+    QTRY_VERIFY(mirror->model() == nullptr);
 }
 
 void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {

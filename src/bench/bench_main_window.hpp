@@ -37,6 +37,7 @@
 class QActionGroup;
 class QDialog;
 class QLabel;
+class QStyledItemDelegate;
 class QListWidget;
 class QLineEdit;
 class QMenu;
@@ -80,6 +81,7 @@ namespace trackknife::bench {
 struct MetadataOperationJobOutcome;
 class MusicBrainzFetchService;
 class LocalLibraryPanel;
+class MetadataPropertiesDialog;
 class SearchDialog;
 class MpdLibrarySearchModel;
 class DesktopNotifier;
@@ -389,6 +391,15 @@ class BenchMainWindow final : public QMainWindow {
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     LocalLibraryPanel* local_library_{nullptr};
     QTabBar* local_source_tabs_{nullptr};
+    // ADR-0183 addendum: temporary sidebar page hosting the active tag
+    // editor's file list.
+    QWidget* properties_files_page_{nullptr};
+    QTableView* properties_files_view_{nullptr};
+    QLabel* properties_files_dir_{nullptr};
+    QStyledItemDelegate* properties_files_delegate_{nullptr};
+    QPointer<MetadataPropertiesDialog> hosted_properties_;
+    int previous_local_source_index_{-1};
+    void updatePropertiesFileHosting();
     QTabBar* mpd_source_tabs_{nullptr};
     QStackedWidget* mpd_source_pages_{nullptr};
     QTreeView* folder_view_{nullptr};

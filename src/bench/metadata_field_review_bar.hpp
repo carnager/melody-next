@@ -24,12 +24,17 @@ class MetadataFieldReviewBar final : public QWidget {
     void revealField(int row);
     void setLayoutFields(QStringList canonical_names);
     [[nodiscard]] QStringList visibleFieldNames() const;
+    // ADR-0183 addendum: hidden while the file list is hosted in the
+    // sources sidebar, where the toggle has no meaning.
+    void setFilesToggleVisible(bool visible);
+    [[nodiscard]] bool filesToggleChecked() const;
 
   private:
     void refresh();
 
     QTableView* fields_;
     MetadataAggregateModel* model_;
+    QCheckBox* show_files_{nullptr};
     QLineEdit* search_;
     QCheckBox* changed_only_;
     QLabel* status_;

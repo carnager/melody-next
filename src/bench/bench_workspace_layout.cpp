@@ -25,6 +25,8 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QHeaderView>
+#include <QStyledItemDelegate>
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -54,6 +56,27 @@
 #include <vector>
 
 namespace trackknife::bench {
+namespace {
+
+// ADR-0183 addendum: the sidebar file list shows a breadcrumb of the
+// selection's common folder and renders each row relative to it — plain
+// filenames for the ordinary one-album edit.
+class RelativePathDelegate final : public QStyledItemDelegate {
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    [[nodiscard]] QString displayText(const QVariant& value,
+                                      const QLocale& locale) const override {
+        const auto prefix = property("relative-prefix").toString();
+        const auto text = value.toString();
+        if (!prefix.isEmpty() && text.startsWith(prefix)) {
+            return text.mid(prefix.size());
+        }
+        return QStyledItemDelegate::displayText(value, locale);
+    }
+};
+
+} // namespace
+
 namespace {
 
 constexpr auto panel_layout_settings_key = "workspace/panel-layout-v1";
@@ -124,7 +147,11 @@ void BenchMainWindow::buildWorkspace() {
         QSettings{}.value(QStringLiteral("local-library/view"), 0).toInt() == 1 ? 1 : 0);
     heading_row->addWidget(local_source_tabs_);
     connect(local_source_tabs_, &QTabBar::currentChanged, this, [this](int index) {
-        QSettings{}.setValue(QStringLiteral("local-library/view"), index);
+        // The temporary Files page (index 2, ADR-0183 addendum) is
+        // session-only and must not become the persisted default view.
+        if (index == 0 || index == 1) {
+            QSettings{}.setValue(QStringLiteral("local-library/view"), index);
+        }
         refreshActiveContext();
     });
     mpd_source_tabs_ = make_source_tabs(QStringLiteral("bench-mpd-source-tabs"),
@@ -215,6 +242,34 @@ void BenchMainWindow::buildWorkspace() {
         openLocalPaths({folder_model_->rawPath(index)});
     });
     source_stack_->addWidget(folder_view_);
+    properties_files_page_ = new QWidget(source_stack_);
+    properties_files_page_->setObjectName(QStringLiteral("bench-properties-files-page"));
+    auto* files_page_layout = new QVBoxLayout(properties_files_page_);
+    files_page_layout->setContentsMargins(0, 0, 0, 0);
+    files_page_layout->setSpacing(0);
+    properties_files_dir_ = new QLabel(properties_files_page_);
+    properties_files_dir_->setObjectName(QStringLiteral("bench-properties-files-dir"));
+    properties_files_dir_->setTextFormat(Qt::PlainText);
+    properties_files_dir_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    properties_files_dir_->setContentsMargins(6, 4, 6, 2);
+    files_page_layout->addWidget(properties_files_dir_);
+    properties_files_view_ = new QTableView(properties_files_page_);
+    properties_files_view_->setObjectName(QStringLiteral("bench-properties-files-view"));
+    properties_files_view_->setAccessibleName(QStringLiteral("Files in the active tag editor"));
+    properties_files_view_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    properties_files_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    properties_files_view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    properties_files_view_->setAlternatingRowColors(true);
+    properties_files_view_->setShowGrid(false);
+    properties_files_view_->setWordWrap(false);
+    properties_files_view_->setTextElideMode(Qt::ElideRight);
+    properties_files_view_->verticalHeader()->hide();
+    properties_files_view_->horizontalHeader()->hide();
+    properties_files_view_->horizontalHeader()->setStretchLastSection(true);
+    properties_files_delegate_ = new RelativePathDelegate(properties_files_view_);
+    properties_files_view_->setItemDelegate(properties_files_delegate_);
+    files_page_layout->addWidget(properties_files_view_);
+    source_stack_->addWidget(properties_files_page_);
     folders_layout->addWidget(source_stack_, 1);
 
     buildMpdWorkspace();

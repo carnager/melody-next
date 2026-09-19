@@ -1367,6 +1367,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_sections_->addTab(panel_scroll, QStringLiteral("Apply && Scripts"));
     transformation_panel_->show();
     root_layout_->insertWidget(root_layout_->count() - 1, metadata_splitter_, 1);
+    emit fileListConstructed();
 
     selection_debounce_ = new QTimer(this);
     selection_debounce_->setSingleShot(true);
@@ -2346,6 +2347,26 @@ void MetadataPropertiesDialog::updateWritePlanButton() {
                                    !apply_running_ && !artwork_operation_running_);
     updateTransformationButton();
     updateApplySummary();
+}
+
+QTableView* MetadataPropertiesDialog::fileListView() {
+    return file_list_;
+}
+
+// ADR-0183 addendum: while the bench window mirrors this file list in its
+// sources sidebar (a second view sharing model and selection), the
+// in-dialog copy hides. Nothing reparents; standalone dialogs are
+// unaffected.
+void MetadataPropertiesDialog::setFileListHosted(const bool hosted) {
+    if (file_list_ == nullptr || hosted == file_list_hosted_) {
+        return;
+    }
+    file_list_hosted_ = hosted;
+    if (field_review_bar_ != nullptr) {
+        field_review_bar_->setFilesToggleVisible(!hosted);
+    }
+    file_list_->setVisible(!hosted && (field_review_bar_ == nullptr ||
+                                       field_review_bar_->filesToggleChecked()));
 }
 
 // ADR-0183: with the apply options folded into the Apply & Scripts tab,

@@ -30,7 +30,11 @@ Two server-side list kinds, with distinct jobs:
 - **MPD stored playlists** — long-term, server-owned lists in the sidebar,
   opened as tabs, edited as server round trips (ADR-0129), and played as
   playback contexts (ADR-0187) so switching between them resumes each one.
-  "Copy to server list" writes here.
+  "Add to playlist" writes here, with a New playlist… entry that creates
+  one and opens its tab.
+
+Each destination appears exactly once in the context menu: **Copy to tab**
+for working tabs, **Add to playlist** for stored playlists.
 
 Tracks move between the two freely: any MPD surface can copy a selection
 into a working tab or a stored playlist, and dropping rows on the tab strip

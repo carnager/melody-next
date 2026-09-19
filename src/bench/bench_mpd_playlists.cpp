@@ -90,6 +90,7 @@ void BenchMainWindow::buildMpdPlaylists() {
         if (index == 1 && mpd_controller_ != nullptr && mpd_controller_->connected() &&
             mpd_controller_->supportsCommand(QStringLiteral("listplaylists"))) {
             mpd_controller_->browseStoredPlaylists();
+            mpd_controller_->browseScratchLists();
         }
     });
 
@@ -104,6 +105,7 @@ void BenchMainWindow::buildMpdPlaylists() {
             return;
         }
         mpd_controller_->browseStoredPlaylists();
+        mpd_controller_->browseScratchLists();
         for (const auto& tab : mpd_playlist_tabs_) {
             mpd_controller_->openStoredPlaylist(tab->name);
         }
@@ -130,6 +132,8 @@ void BenchMainWindow::buildMpdPlaylists() {
 
     connect(mpd_controller_, &quick::MpdProbeController::storedPlaylistListLoaded, this,
             &BenchMainWindow::acceptMpdStoredPlaylistNames);
+    connect(mpd_controller_, &quick::MpdProbeController::scratchListsLoaded, this,
+            &BenchMainWindow::acceptMpdScratchLists);
     connect(mpd_controller_, &quick::MpdProbeController::storedPlaylistLoaded, this,
             &BenchMainWindow::acceptMpdStoredPlaylistContents);
     connect(mpd_controller_, &quick::MpdProbeController::storedPlaylistRenamed, this,
@@ -160,16 +164,17 @@ BenchMainWindow::MpdPlaylistTab* BenchMainWindow::mpdPlaylistTabNamed(const QStr
     return found == mpd_playlist_tabs_.end() ? nullptr : found->get();
 }
 
-void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select) {
+BenchMainWindow::MpdPlaylistTab* BenchMainWindow::openMpdPlaylistTab(const QString& name,
+                                                                    const bool select) {
     if (name.isEmpty()) {
-        return;
+        return nullptr;
     }
     if (auto* existing = mpdPlaylistTabNamed(name)) {
         if (select) {
             tabs_->setCurrentWidget(existing->view);
         }
         mpd_controller_->openStoredPlaylist(name);
-        return;
+        return existing;
     }
 
     auto tab = std::make_unique<MpdPlaylistTab>();
@@ -312,7 +317,10 @@ void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select)
     const auto index = tabs_->insertTab(
         mpdTabInsertionIndex(), view, QIcon::fromTheme(QStringLiteral("network-server")), name);
     tabs_->setTabToolTip(index, QStringLiteral("Stored playlist on the connected MPD server"));
+    tab->scratch = mpd_scratch_lists_.contains(name);
+    auto* opened = tab.get();
     mpd_playlist_tabs_.push_back(std::move(tab));
+    refreshMpdPlaylistTabChrome(*opened);
     persistOpenPlaylistTabs();
     if (select) {
         tabs_->setCurrentIndex(index);
@@ -320,6 +328,21 @@ void BenchMainWindow::openMpdPlaylistTab(const QString& name, const bool select)
     }
     refreshTabActions();
     mpd_controller_->openStoredPlaylist(name);
+    return opened;
+}
+
+// A scratch tab reads as a working list, a playlist tab as the stored
+// playlist it is — same object either way, different presentation.
+void BenchMainWindow::refreshMpdPlaylistTabChrome(MpdPlaylistTab& tab) {
+    const auto index = tabs_->indexOf(tab.view);
+    if (index < 0) {
+        return;
+    }
+    tabs_->setTabIcon(index, QIcon::fromTheme(tab.scratch ? QStringLiteral("view-list-text")
+                                                          : QStringLiteral("network-server")));
+    tabs_->setTabToolTip(index, tab.scratch
+                                    ? QStringLiteral("Working list on the connected MPD server")
+                                    : QStringLiteral("Stored playlist on the connected MPD server"));
 }
 
 // ADR-0140: committed search-result tabs. Query-keyed snapshots of a
@@ -537,12 +560,15 @@ void BenchMainWindow::showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& po
             [this, uris] { mpd_controller_->replaceQueueWithUris(uris); });
     track_context_menu_->addSeparator();
     addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-search-"));
-    addCopyToWorkingTabMenu(track_context_menu_, tab.view);
+    addSendToTabMenu(track_context_menu_, [this, view = tab.view] {
+        return selectedMpdViewTracks(view);
+    });
     addCopyToServerListMenu(track_context_menu_, tab.view);
     track_context_menu_->popup(tab.view->viewport()->mapToGlobal(position));
 }
 
 void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {
+    mpd_playlist_names_ = names;
     if (mpd_playlists_list_ == nullptr) {
         return;
     }
@@ -558,7 +584,12 @@ void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {
         }
     }
     mpd_playlists_list_->clear();
+    // ADR-0191: working lists are stored playlists too, but they belong in
+    // the tab strip; the sidebar stays the curated-playlist view.
     for (const auto& name : names) {
+        if (mpd_scratch_lists_.contains(name)) {
+            continue;
+        }
         auto* item = new QTreeWidgetItem(mpd_playlists_list_, {name});
         item->setIcon(0, QIcon::fromTheme(QStringLiteral("view-media-playlist")));
         // A child placeholder makes the expander appear before the tracks
@@ -572,6 +603,20 @@ void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {
         }
     }
     restoreOpenPlaylistTabs(names);
+}
+
+// The server's scratch flags arrived: tabs and sidebar both follow them.
+void BenchMainWindow::acceptMpdScratchLists(const QStringList& names) {
+    const auto changed = mpd_scratch_lists_ != QSet<QString>{names.begin(), names.end()};
+    mpd_scratch_lists_ = QSet<QString>{names.begin(), names.end()};
+    if (!changed) {
+        return;
+    }
+    for (const auto& tab : mpd_playlist_tabs_) {
+        tab->scratch = mpd_scratch_lists_.contains(tab->name);
+        refreshMpdPlaylistTabChrome(*tab);
+    }
+    acceptMpdStoredPlaylistNames(mpd_playlist_names_);
 }
 
 // ADR-0187: the playlist tab whose list is the active context marks the
@@ -766,7 +811,10 @@ void BenchMainWindow::showMpdPlaylistSidebarMenu(const QPoint& position) {
     refresh->setObjectName(QStringLiteral("action-mpd-playlist-refresh"));
     refresh->setEnabled(mpd_controller_->connected());
     connect(refresh, &QAction::triggered, this,
-            [this] { mpd_controller_->browseStoredPlaylists(); });
+            [this] {
+                mpd_controller_->browseStoredPlaylists();
+                mpd_controller_->browseScratchLists();
+            });
     mpd_playlists_menu_->popup(mpd_playlists_list_->viewport()->mapToGlobal(position));
 }
 
@@ -799,7 +847,9 @@ void BenchMainWindow::showMpdPlaylistTrackMenu(MpdPlaylistTab& tab, const QPoint
             [this, uris] { mpd_controller_->addUris(uris, true); });
     track_context_menu_->addSeparator();
     addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-playlist-"));
-    addCopyToWorkingTabMenu(track_context_menu_, tab.view);
+    addSendToTabMenu(track_context_menu_, [this, view = tab.view] {
+        return selectedMpdViewTracks(view);
+    });
     addCopyToServerListMenu(track_context_menu_, tab.view);
     track_context_menu_->addSeparator();
     auto* remove = track_context_menu_->addAction(QStringLiteral("Remove from playlist"));

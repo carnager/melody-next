@@ -168,16 +168,14 @@ class Client final {
     set_melody_track_ratings(std::span<const std::uint64_t> song_ids, unsigned rating);
     [[nodiscard]] core::Result<void> melody_context_play(std::string_view name,
                                                          std::optional<unsigned> row);
-    [[nodiscard]] core::Result<void> melody_context_tracks(const std::vector<std::string>& uris,
-                                                           unsigned row, const std::string& label);
-    [[nodiscard]] core::Result<void> melody_context_resync(const std::vector<std::string>& uris);
     [[nodiscard]] core::Result<void> melody_context_queue(std::optional<unsigned> row);
     [[nodiscard]] core::Result<void> melody_context_queue_write(bool replace,
                                                                 const std::vector<std::string>& uris,
                                                                 int position);
     [[nodiscard]] core::Result<void> melody_context_queue_delete(const std::vector<unsigned>& rows);
     [[nodiscard]] core::Result<void> melody_context_queue_move(unsigned from, unsigned to);
-    [[nodiscard]] core::Result<void> melody_context_label(const std::string& label);
+    [[nodiscard]] core::Result<std::vector<std::string>> melody_scratch_lists();
+    [[nodiscard]] core::Result<void> melody_set_scratch(const std::string& name, bool scratch);
     // Stages a track list across as many protocol lines as it takes; the
     // command that consumes it then carries no URIs.
     [[nodiscard]] core::Result<void> stage_context_uris(const std::vector<std::string>& uris);

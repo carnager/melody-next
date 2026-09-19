@@ -231,10 +231,7 @@ class BenchMainWindowTest final : public QObject {
     void settingsControlStartupContextAndMusicRoot();
     void mpdSugarActionsMaterializeAndOpenDialog();
     void propertiesFileListHostsInSidebar();
-    void serverListTabsPersistAndRenderOffline();
-    void workingTabDeleteRemovesSelectedRows();
     void serverWorkingTabCreationGestures();
-    void serverWorkingTabCreationGesturesLegacy();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -1035,8 +1032,10 @@ void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
     auto* send_to = window.findChild<QMenu*>(QStringLiteral("bench-send-to-tab-menu"));
     QVERIFY(send_to != nullptr);
     QVERIFY(!send_to->actions().isEmpty());
-    QCOMPARE(send_to->actions().at(0)->text(), QStringLiteral("MPD Queue"));
-    auto* queue_placements = send_to->actions().at(0)->menu();
+    // "New list…" first, then a separator, then a submenu per open tab.
+    QCOMPARE(send_to->actions().at(0)->text(), QStringLiteral("New list…"));
+    QCOMPARE(send_to->actions().at(2)->text(), QStringLiteral("MPD Queue"));
+    auto* queue_placements = send_to->actions().at(2)->menu();
     QVERIFY(queue_placements != nullptr);
     QCOMPARE(queue_placements->actions().size(), 3);
     QCOMPARE(queue_placements->actions().at(1)->text(), QStringLiteral("Insert next"));
@@ -3890,85 +3889,9 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     settings.sync();
 }
 
-// ADR-0188: working tabs are client-owned temporary lists of server
-// tracks: they persist, render offline from their snapshots, and are
-// edited freely without touching any stored playlist.
-void BenchMainWindowTest::workingTabDeleteRemovesSelectedRows() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* remove = window.findChild<QAction*>(QStringLiteral("action-remove-selected-tracks"));
-    QVERIFY(tabs != nullptr);
-    QVERIFY(remove != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-
-    const auto make_track = [](const std::string& uri, const std::string& title) {
-        mpd::Track track;
-        track.uri = uri;
-        track.metadata = mpd::Metadata{{{"Title", title}, {"Artist", "Working"}}};
-        return track;
-    };
-    auto* tab = window.createServerListTab(
-        QStringLiteral("Scratch"),
-        {make_track("w/1.flac", "One"), make_track("w/2.flac", "Two"),
-         make_track("w/3.flac", "Three")});
-    QVERIFY(tab != nullptr);
-    tabs->setCurrentWidget(tab->view);
-    QCOMPARE(tab->model->rowCount(), 3);
-
-    tab->view->selectRow(1);
-    // The shortcut only fires when the action is enabled, so the selection
-    // has to keep it enabled on its own — no context menu in between.
-    QTRY_VERIFY(remove->isEnabled());
-    remove->trigger();
-    QCOMPARE(tab->model->rowCount(), 2);
-    QCOMPARE(tab->model->index(1, 0).data(ui::track_source_role).toString(),
-             QStringLiteral("w/3.flac"));
-}
-
-void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
-    const auto make_track = [](const char* uri, const char* artist, const char* title) {
-        trackknife::mpd::Track track;
-        track.uri = uri;
-        track.metadata = trackknife::mpd::Metadata{{{"Artist", artist}, {"Title", title}}};
-        return track;
-    };
-    {
-        BenchMainWindow first;
-        first.show();
-        auto* tabs = first.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QVERIFY(tabs != nullptr);
-        QTRY_VERIFY(tabs->count() >= 2);
-        auto* tab = first.createServerListTab(
-            QStringLiteral("Road trip"),
-            {make_track("a/1.flac", "First", "One"), make_track("a/2.flac", "First", "Two")});
-        QVERIFY(tab != nullptr);
-        QCOMPARE(tab->model->rowCount(), 2);
-        tab->model->removeTrackRows({0});
-        first.markMpdListTabDirty(*tab);
-        QCOMPARE(tab->model->rowCount(), 1);
-        first.close();
-    }
-    BenchMainWindow reopened;
-    reopened.show();
-    auto* tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QVERIFY(tabs != nullptr);
-    BenchMainWindow::MpdListTab* restored = nullptr;
-    QTRY_VERIFY([&] {
-        for (int index = 0; index < tabs->count(); ++index) {
-            if (auto* found = reopened.mpdListTabForWidget(tabs->widget(index))) {
-                restored = found;
-                return true;
-            }
-        }
-        return false;
-    }());
-    QCOMPARE(displayText(restored->document.name), QStringLiteral("Road trip"));
-    QCOMPARE(restored->model->rowCount(), 1);
-    QCOMPARE(restored->model->trackAt(0)->metadata.first("Title"),
-             std::optional<std::string_view>{"Two"});
-}
-
+// ADR-0191: working tabs are scratch lists on the server — dropping a
+// selection on the tab strip creates one there, and it never becomes a
+// client-owned copy.
 void BenchMainWindowTest::serverWorkingTabCreationGestures() {
     BenchMainWindow window;
     window.show();
@@ -3986,62 +3909,32 @@ void BenchMainWindowTest::serverWorkingTabCreationGestures() {
         track.metadata = trackknife::mpd::Metadata{{{"Title", uri}}};
         return track;
     };
-    queue_model->replaceTracks({make_track("q/1.flac", 1), make_track("q/2.flac", 2),
-                                make_track("q/3.flac", 3)});
-    QCOMPARE(queue_model->rowCount(), 3);
+    queue_model->replaceTracks({make_track("q/1.flac", 1), make_track("q/2.flac", 2)});
     queue_view->selectionModel()->select(
         queue_model->index(0, 0),
         QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-    queue_view->selectionModel()->select(
-        queue_model->index(1, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
 
-    // ADR-0188: dropping the selection past the last tab builds a working
-    // tab from it — and must leave the queue exactly as it was.
+    // Disconnected there is no server to hold the list, so the drop creates
+    // no tab — and the queue it was dragged from is left alone.
     const auto tabs_before = tabs->count();
     const QPointF drop_point{static_cast<qreal>(tabs->tabBar()->width() - 2), 4.0};
     QMimeData mime;
     QDropEvent drop{drop_point,     Qt::CopyAction | Qt::MoveAction, &mime,
                     Qt::LeftButton, Qt::NoModifier,                  QEvent::Drop};
     QVERIFY(window.handleTabTrackDrop(queue_view, &drop, drop_point.toPoint()));
-    QTRY_COMPARE(tabs->count(), tabs_before + 1);
-    QCOMPARE(queue_model->rowCount(), 3);
-    BenchMainWindow::MpdListTab* created = nullptr;
-    for (int index = 0; index < tabs->count(); ++index) {
-        if (auto* found = window.mpdListTabForWidget(tabs->widget(index))) {
-            created = found;
-        }
-    }
-    QVERIFY(created != nullptr);
-    QCOMPARE(created->model->rowCount(), 2);
-    QCOMPARE(created->model->trackAt(0)->uri, std::string{"q/1.flac"});
-}
+    QCOMPARE(tabs->count(), tabs_before);
+    QCOMPARE(queue_model->rowCount(), 2);
 
-void BenchMainWindowTest::serverWorkingTabCreationGesturesLegacy() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QVERIFY(tabs != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-
-    // Disconnected, the retired documents create no tabs and nothing is
-    // pushed to a server that is not there.
-    for (int index = 0; index < tabs->count(); ++index) {
-        QVERIFY(tabs->tabText(index) != QStringLiteral("Road trip"));
-    }
-
-    // The creation gesture lives on the MPD queue's context menu and is
-    // disabled until a server can take it.
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(queue_view != nullptr);
+    // The creation gesture is offered on the queue's context menu, disabled
+    // until a server can take the list.
     tabs->setCurrentWidget(queue_view);
     const QPoint menu_point{4, 4};
     QVERIFY(QMetaObject::invokeMethod(queue_view, "customContextMenuRequested",
                                       Qt::DirectConnection, Q_ARG(QPoint, menu_point)));
     auto* create =
-        window.findChild<QAction*>(QStringLiteral("action-copy-to-new-server-list"));
-    if (create != nullptr) {
-        QVERIFY(!create->isEnabled());
-    }
+        window.findChild<QAction*>(QStringLiteral("action-send-to-new-working-list"));
+    QVERIFY(create != nullptr);
+    QVERIFY(!create->isEnabled());
 }
 
 // A metadata commit invalidates the album's cached cover and reloads it;

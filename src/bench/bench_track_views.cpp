@@ -317,15 +317,6 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
 // The table the tab strip is currently showing, whichever kind of list it
 // holds. Selection-driven actions ask this rather than each surface.
 QTableView* BenchMainWindow::activeTrackView() {
-    if (auto* list_tab = currentMpdListTab()) {
-        return list_tab->view;
-    }
-    if (auto* playlist_tab = currentMpdPlaylistTab()) {
-        return playlist_tab->view;
-    }
-    if (auto* search_tab = currentMpdSearchTab()) {
-        return search_tab->view;
-    }
     if (isMpdContext()) {
         return mpd_queue_view_;
     }
@@ -358,18 +349,6 @@ void BenchMainWindow::refreshSelectionActions() {
 void BenchMainWindow::refreshSelectionStatus() {
     refreshSelectionActions();
     if (selection_status_ == nullptr) {
-        return;
-    }
-    if (auto* list_tab = currentMpdListTab()) {
-        if (list_tab->view->selectionModel() != nullptr) {
-            const auto selected = list_tab->view->selectionModel()->selectedRows().size();
-            const auto label = displayText(list_tab->document.name);
-            selection_status_->setText(
-                selected > 0 ? QStringLiteral("%1 · %2 selected").arg(label).arg(selected)
-                             : QStringLiteral("%1 · %2 tracks")
-                                   .arg(label)
-                                   .arg(list_tab->model->rowCount()));
-        }
         return;
     }
     if (isMpdContext()) {

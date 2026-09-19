@@ -159,9 +159,6 @@ struct Track {
 // whether a displaced queue is waiting to be restored.
 struct MelodyContextState {
     std::string name;
-    // The client's own tag for the list it materialized, handed back
-    // verbatim: how a client recognizes its list in the live queue.
-    std::string label;
     bool queue_stashed{false};
 
     friend bool operator==(const MelodyContextState&, const MelodyContextState&) = default;

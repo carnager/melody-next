@@ -593,9 +593,6 @@ void BenchMainWindow::buildMpdWorkspace() {
                             for (const auto& search_tab : mpd_search_tabs_) {
                                 search_tab->model->acceptArtwork(token, image);
                             }
-                            for (const auto& list_tab : mpd_list_tabs_) {
-                                list_tab->model->acceptArtwork(token, image);
-                            }
                         });
                 watcher->setFuture(QtConcurrent::run([bytes] {
                     auto image = QImage::fromData(bytes);
@@ -642,11 +639,7 @@ void BenchMainWindow::buildMpdWorkspace() {
             server_library_model_->reload();
             if (mpd_controller_->supportsCommand(QStringLiteral("listplaylists"))) {
                 mpd_controller_->browseStoredPlaylists();
-            }
-            // Working tabs restored before the connection asked for covers
-            // into the void; ask again now that the server answers.
-            for (const auto& list_tab : mpd_list_tabs_) {
-                list_tab->model->retryMissingArtwork();
+                mpd_controller_->browseScratchLists();
             }
         }
         if (!connected && was_connected) {
@@ -660,7 +653,6 @@ void BenchMainWindow::buildMpdWorkspace() {
         refreshSelectionStatus();
         refreshMpdStatusControls();
         refreshMpdPlaylistContextMarkers();
-        refreshActiveMpdListTab();
     });
     auto* output_model = mpd_controller_->outputModel();
     const auto refresh_outputs = [this] {
@@ -779,7 +771,6 @@ void BenchMainWindow::activateMpdLibraryAction(const QModelIndex& index, const i
     sendTracksToMpdTab(visibleMpdTabTarget().value_or(
                            MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
                                         .label = QStringLiteral("MPD Queue"),
-                                        .working = nullptr,
                                         .playlist = {}}),
                        tracks, mode);
 }

@@ -92,8 +92,8 @@ enum class SessionCommandKind {
     melody_album_rating,
     melody_context_play,
     melody_context_queue,
-    melody_context_tracks,
-    melody_context_resync,
+    melody_scratch_lists,
+    melody_set_scratch,
     melody_context_queue_add,
     melody_context_queue_replace,
     melody_context_queue_delete,
@@ -166,9 +166,8 @@ class Session final {
     // switch back to the stashed queue. row = std::nullopt resumes.
     [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
-    [[nodiscard]] std::uint64_t melody_context_tracks(std::vector<std::string> uris, unsigned row,
-                                                      std::string label);
-    [[nodiscard]] std::uint64_t melody_context_resync(std::vector<std::string> uris);
+    [[nodiscard]] std::uint64_t melody_scratch_lists();
+    [[nodiscard]] std::uint64_t melody_set_scratch(std::string name, bool scratch);
     // Queue-context edits: the Queue tab's list is the server's stash while
     // another list is the active queue, so its edits go there.
     [[nodiscard]] std::uint64_t melody_context_queue_add(std::vector<std::string> uris,

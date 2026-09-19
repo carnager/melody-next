@@ -199,8 +199,9 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
         qCDebug(tkDebug) << "  list" << displayText(document.name) << "kind"
                          << static_cast<int>(document.kind) << "items"
                          << static_cast<int>(document.items.size());
+        // ADR-0191: lists live on the server now, so the client-owned
+        // documents of the previous design are dropped rather than migrated.
         if (document.kind == persistence::ListKind::mpd) {
-            addMpdListTab(std::move(document), false);
             continue;
         }
         addListTab(std::move(document), false);
@@ -248,46 +249,6 @@ std::vector<persistence::ListDocument> BenchMainWindow::collectDocuments() {
         const auto id = view->property("bench-document-id").toString();
         auto* tab = tabForDocument(id);
         if (tab == nullptr) {
-            if (auto* list_tab = mpdListTabForWidget(view)) {
-                auto document = list_tab->document;
-                document.items.clear();
-                // ADR-0181: mpd items require a profile identity; keep the
-                // one the document was saved with, else stamp the current
-                // connection's (a random id is the never-expected last
-                // resort that keeps the workspace save valid).
-                auto profile_id = list_tab->document.items.empty()
-                                      ? std::optional<core::StableId>{}
-                                      : list_tab->document.items.front().profile_id;
-                if (!profile_id) {
-                    profile_id = currentMpdProfileId();
-                }
-                if (!profile_id) {
-                    profile_id = core::StableId::random();
-                }
-                for (const auto& track : list_tab->model->tracksSnapshot()) {
-                    persistence::ListItem item{
-                        .source = persistence::ListSource::mpd,
-                        .profile_id = profile_id,
-                        .source_reference = track.uri,
-                        .logical_reference = std::nullopt,
-                        .segment = std::nullopt,
-                        .source_selection = std::nullopt,
-                        .duration_ms = track.duration
-                                           ? std::optional<std::int64_t>{track.duration->count()}
-                                           : std::nullopt,
-                        .fields = {},
-                    };
-                    item.fields.reserve(track.metadata.fields().size());
-                    for (const auto& pair : track.metadata.fields()) {
-                        item.fields.push_back(persistence::SnapshotField{
-                            .name = pair.name,
-                            .value = pair.value,
-                        });
-                    }
-                    document.items.push_back(std::move(item));
-                }
-                documents.push_back(std::move(document));
-            }
             continue;
         }
         auto document = tab->document;
@@ -903,8 +864,7 @@ bool BenchMainWindow::isMpdContext() const {
     auto* current = tabs_->currentWidget();
     return (mpd_queue_view_ != nullptr && current == mpd_queue_view_) ||
            mpdPlaylistTabForWidget(current) != nullptr ||
-           mpdSearchTabForWidget(current) != nullptr ||
-           mpdListTabForWidget(current) != nullptr;
+           mpdSearchTabForWidget(current) != nullptr;
 }
 
 // ADR-0183 addendum: while a tag editor tab is active, its file list is
@@ -1264,19 +1224,18 @@ void BenchMainWindow::closeTabAt(const int index) {
         return;
     }
     if (auto* playlist_tab = mpdPlaylistTabForWidget(view)) {
+        // ADR-0191: closing a working list is the gesture that discards it —
+        // it exists on the server only as long as its tab does. Curated
+        // playlists just lose their tab.
+        if (playlist_tab->scratch) {
+            confirmCloseScratchList(playlist_tab->name);
+            return;
+        }
         closeMpdPlaylistTab(playlist_tab->name);
         return;
     }
     if (auto* search_tab = mpdSearchTabForWidget(view)) {
         closeMpdSearchTab(search_tab);
-        return;
-    }
-    if (auto* list_tab = mpdListTabForWidget(view)) {
-        if (list_tab->document.pinned) {
-            statusBar()->showMessage(QStringLiteral("Unpin this tab before closing it"), 3'000);
-            return;
-        }
-        closeMpdListTab(list_tab);
         return;
     }
     auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
@@ -1401,18 +1360,6 @@ void BenchMainWindow::saveCurrentList() {
 }
 
 void BenchMainWindow::renameCurrentList() {
-    if (auto* list_tab = currentMpdListTab()) {
-        bool accepted = false;
-        const auto name = QInputDialog::getText(this, QStringLiteral("Rename tab"),
-                                                QStringLiteral("Name:"), QLineEdit::Normal,
-                                                displayText(list_tab->document.name), &accepted)
-                              .trimmed();
-        if (accepted && !name.isEmpty()) {
-            list_tab->document.name = utf8Bytes(name);
-            markMpdListTabDirty(*list_tab);
-        }
-        return;
-    }
     auto* tab = currentListTab();
     if (tab == nullptr) {
         return;
@@ -1466,10 +1413,6 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     }
     if (auto* search_tab = mpdSearchTabForWidget(view)) {
         showMpdSearchTrackMenu(*search_tab, position);
-        return;
-    }
-    if (auto* list_tab = mpdListTabForWidget(view)) {
-        showMpdListTrackMenu(*list_tab, position);
         return;
     }
 
@@ -1582,7 +1525,8 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
             }
         }
         track_context_menu_->addSeparator();
-        addCopyToWorkingTabMenu(track_context_menu_, mpd_queue_view_);
+        addSendToTabMenu(track_context_menu_,
+                         [this] { return selectedMpdViewTracks(mpd_queue_view_); });
         addCopyToServerListMenu(track_context_menu_, mpd_queue_view_);
         const auto queue_uris = selectedMpdQueueUris();
         auto* save_queue =
@@ -1897,22 +1841,6 @@ void BenchMainWindow::replayListEdit(const bool undo) {
 }
 
 void BenchMainWindow::removeSelectedRows() {
-    // ADR-0188: a working tab edits in client memory, so Delete removes
-    // there rather than from whatever the server is playing.
-    if (auto* list_tab = currentMpdListTab()) {
-        if (list_tab->view->selectionModel() == nullptr) {
-            return;
-        }
-        QList<int> rows;
-        for (const auto& index : list_tab->view->selectionModel()->selectedRows()) {
-            rows.push_back(index.row());
-        }
-        if (!rows.isEmpty()) {
-            list_tab->model->removeTrackRows(std::move(rows));
-            markMpdListTabDirty(*list_tab);
-        }
-        return;
-    }
     if (auto* playlist_tab = currentMpdPlaylistTab()) {
         if (playlist_tab->view->selectionModel() == nullptr) {
             return;

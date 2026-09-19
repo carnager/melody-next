@@ -317,11 +317,15 @@ struct Session::Impl {
             return without_payload(client.melody_context_play(command.uri, command.queue_position));
         case SessionCommandKind::melody_context_queue:
             return without_payload(client.melody_context_queue(command.queue_position));
-        case SessionCommandKind::melody_context_tracks:
-            return without_payload(client.melody_context_tracks(
-                command.uris, command.queue_position.value_or(0U), command.secondary_uri));
-        case SessionCommandKind::melody_context_resync:
-            return without_payload(client.melody_context_resync(command.uris));
+        case SessionCommandKind::melody_scratch_lists: {
+            auto names = client.melody_scratch_lists();
+            if (!names) {
+                return std::unexpected(std::move(names.error()));
+            }
+            return SessionCommandPayload{std::move(*names)};
+        }
+        case SessionCommandKind::melody_set_scratch:
+            return without_payload(client.melody_set_scratch(command.uri, command.enabled));
         case SessionCommandKind::melody_context_queue_add:
             return without_payload(client.melody_context_queue_write(
                 false, command.uris, static_cast<int>(command.object_id) - 1));
@@ -516,14 +520,16 @@ struct Session::Impl {
             return static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::melody_context_play:
         case SessionCommandKind::melody_context_queue:
-        case SessionCommandKind::melody_context_tracks:
-        case SessionCommandKind::melody_context_resync:
         case SessionCommandKind::melody_context_queue_add:
         case SessionCommandKind::melody_context_queue_replace:
         case SessionCommandKind::melody_context_queue_delete:
         case SessionCommandKind::melody_context_queue_move:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
+        case SessionCommandKind::melody_scratch_lists:
+            return 0U;
+        case SessionCommandKind::melody_set_scratch:
+            return static_cast<std::uint32_t>(IdleEvent::stored_playlist);
         case SessionCommandKind::queue_play:
             return static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::queue_delete:
@@ -882,23 +888,6 @@ std::uint64_t Session::melody_context_play(std::string name,
     return implementation_->enqueue(std::move(command));
 }
 
-std::uint64_t Session::melody_context_tracks(std::vector<std::string> uris, const unsigned row,
-                                             std::string label) {
-    Impl::PendingCommand command;
-    command.kind = SessionCommandKind::melody_context_tracks;
-    command.uris = std::move(uris);
-    command.queue_position = row;
-    command.secondary_uri = std::move(label);
-    return implementation_->enqueue(std::move(command));
-}
-
-std::uint64_t Session::melody_context_resync(std::vector<std::string> uris) {
-    Impl::PendingCommand command;
-    command.kind = SessionCommandKind::melody_context_resync;
-    command.uris = std::move(uris);
-    return implementation_->enqueue(std::move(command));
-}
-
 // The insert position rides in object_id biased by one, so -1 (append) stays
 // representable in the unsigned field every command shares.
 std::uint64_t Session::melody_context_queue_add(std::vector<std::string> uris,
@@ -932,6 +921,20 @@ std::uint64_t Session::melody_context_queue_move(const unsigned from, const unsi
     command.object_id = from;
     command.queue_position = to;
     return implementation_->enqueue(command);
+}
+
+std::uint64_t Session::melody_scratch_lists() {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_scratch_lists;
+    return implementation_->enqueue(command);
+}
+
+std::uint64_t Session::melody_set_scratch(std::string name, const bool scratch) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_set_scratch;
+    command.uri = std::move(name);
+    command.enabled = scratch;
+    return implementation_->enqueue(std::move(command));
 }
 
 std::uint64_t Session::melody_context_queue(const std::optional<unsigned> row) {

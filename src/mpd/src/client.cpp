@@ -1767,52 +1767,6 @@ core::Result<void> Client::set_melody_album_rating(const MelodyAlbumKey& key,
     }
     return {};
 }
-
-// Playback contexts (melody docs/protocol.md): play a stored playlist as
-// the active context, optionally starting at a row, and read which context
-// is active ("" = the live queue).
-core::Result<void> Client::melody_context_play(const std::string_view name,
-                                               const std::optional<unsigned> row) {
-    auto* connection = implementation_->connection.get();
-    const std::string playlist{name};
-    const auto row_text = row ? std::to_string(*row) : std::string{};
-    const auto sent =
-        row ? mpd_send_command(connection, "melody_context", "play", playlist.c_str(),
-                               row_text.c_str(), nullptr)
-            : mpd_send_command(connection, "melody_context", "play", playlist.c_str(), nullptr);
-    if (!sent || !mpd_response_finish(connection)) {
-        return std::unexpected(implementation_->take_error("melody_context play"));
-    }
-    return {};
-}
-
-core::Result<void> Client::melody_context_resync(const std::vector<std::string>& uris) {
-    if (auto staged = stage_context_uris(uris); !staged) {
-        return staged;
-    }
-    return implementation_->run_composed("melody_context resync", "melody_context resync");
-}
-
-core::Result<void> Client::melody_context_tracks(const std::vector<std::string>& uris,
-                                                 const unsigned row, const std::string& label) {
-    if (uris.empty()) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                           .message = "A context needs at least one track",
-                                           .context = {}});
-    }
-    if (auto staged = stage_context_uris(uris); !staged) {
-        return staged;
-    }
-    if (auto played = implementation_->run_composed("melody_context tracks " + std::to_string(row),
-                                                    "melody_context tracks");
-        !played) {
-        return played;
-    }
-    // The label goes with the list it names, so the client can recognize its
-    // own list as the live queue afterwards.
-    return melody_context_label(label);
-}
-
 namespace {
 // libmpdclient writes a command through a fixed 4 KiB buffer, so a list of
 // any real size cannot travel on one line: it is staged across several
@@ -1862,6 +1816,22 @@ core::Result<void> Client::stage_context_uris(const std::vector<std::string>& ur
 // Queue-context edits (docs/protocol.md). While another list is the active
 // queue the queue context is the server's stash — the list the Queue tab is
 // showing — so edits aimed at that tab have to address it there.
+core::Result<void> Client::melody_context_play(const std::string_view name,
+                                               const std::optional<unsigned> row) {
+    auto* connection = implementation_->connection.get();
+    const std::string playlist{name};
+    const auto row_text = row ? std::to_string(*row) : std::string{};
+    const auto sent =
+        row ? mpd_send_command(connection, "melody_context", "play", playlist.c_str(),
+                               row_text.c_str(), nullptr)
+            : mpd_send_command(connection, "melody_context", "play", playlist.c_str(), nullptr);
+    if (!sent || !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context play"));
+    }
+    return {};
+}
+
+// Queue-context edits (docs/protocol.md).
 core::Result<void> Client::melody_context_queue_write(const bool replace,
                                                      const std::vector<std::string>& uris,
                                                      const int position) {
@@ -1901,14 +1871,6 @@ core::Result<void> Client::melody_context_queue_delete(const std::vector<unsigne
     }
     return implementation_->run_composed(line, "melody_context queuedelete");
 }
-
-core::Result<void> Client::melody_context_label(const std::string& label) {
-    return implementation_->run_composed(
-        label.empty() ? std::string{"melody_context label"}
-                      : "melody_context label " + quoted_argument(label),
-        "melody_context label");
-}
-
 core::Result<void> Client::melody_context_queue_move(const unsigned from, const unsigned to) {
     return implementation_->run_composed(
         "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to),
@@ -1939,6 +1901,30 @@ core::Result<std::vector<Track>> Client::melody_context_queue_tracks() {
     return project_tracks(*pairs);
 }
 
+// Scratch lists (docs/protocol.md): stored playlists a client presents as
+// working tabs rather than beside curated playlists.
+core::Result<std::vector<std::string>> Client::melody_scratch_lists() {
+    if (!mpd_send_command(implementation_->connection.get(), "melody_scratch", nullptr)) {
+        return std::unexpected(implementation_->take_error("melody_scratch"));
+    }
+    auto pairs = implementation_->receive_pairs("receive melody_scratch");
+    if (!pairs) {
+        return std::unexpected(std::move(pairs.error()));
+    }
+    std::vector<std::string> names;
+    for (const auto& pair : *pairs) {
+        if (ascii_case_equal(pair.name, "scratch")) {
+            names.push_back(pair.value);
+        }
+    }
+    return names;
+}
+
+core::Result<void> Client::melody_set_scratch(const std::string& name, const bool scratch) {
+    return implementation_->run_composed(
+        "melody_scratch " + quoted_argument(name) + (scratch ? " 1" : " 0"), "melody_scratch set");
+}
+
 core::Result<MelodyContextState> Client::melody_active_context() {
     if (!mpd_send_command(implementation_->connection.get(), "melody_context", nullptr)) {
         return std::unexpected(implementation_->take_error("melody_context"));
@@ -1951,8 +1937,6 @@ core::Result<MelodyContextState> Client::melody_active_context() {
     for (const auto& pair : *pairs) {
         if (ascii_case_equal(pair.name, "context")) {
             state.name = pair.value;
-        } else if (ascii_case_equal(pair.name, "label")) {
-            state.label = pair.value;
         } else if (ascii_case_equal(pair.name, "stashed")) {
             state.queue_stashed = pair.value != "0";
         }

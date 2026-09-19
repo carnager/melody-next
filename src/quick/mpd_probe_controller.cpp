@@ -965,24 +965,6 @@ void MpdProbeController::playStoredPlaylistContext(const QString& name, const in
     emit stateChanged();
 }
 
-void MpdProbeController::playTrackListContext(const QStringList& uris, const int row,
-                                              const QString& label) {
-    if (!session_ || !connected_ || uris.isEmpty()) {
-        return;
-    }
-    std::vector<std::string> encoded;
-    encoded.reserve(static_cast<std::size_t>(uris.size()));
-    for (const auto& uri : uris) {
-        encoded.push_back(uri.toUtf8().toStdString());
-    }
-    const auto position = static_cast<unsigned>(std::max(row, 0));
-    const auto command_id = session_->melody_context_tracks(std::move(encoded), position,
-                                                            label.toStdString());
-    pending_commands_.insert(command_id);
-    beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
-    emit stateChanged();
-}
-
 // Deleting from the queue context addresses rows, not song ids: the stash is
 // a list the server holds, not the queue whose ids the model carries.
 void MpdProbeController::removeQueueContextRows(const std::vector<int>& rows) {
@@ -1000,18 +982,26 @@ void MpdProbeController::removeQueueContextRows(const std::vector<int>& rows) {
     emit stateChanged();
 }
 
-// Re-materializes the client's active list after it was edited, keeping the
-// playing track playing.
-void MpdProbeController::resyncTrackListContext(const QStringList& uris) {
-    if (!session_ || !connected_ || uris.isEmpty()) {
+// Scratch lists (ADR-0191): stored playlists the client shows as working
+// tabs. The flag lives on the server with the list itself.
+void MpdProbeController::browseScratchLists() {
+    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("melody_scratch"))) {
+        emit scratchListsLoaded({});
         return;
     }
-    std::vector<std::string> encoded;
-    encoded.reserve(static_cast<std::size_t>(uris.size()));
-    for (const auto& uri : uris) {
-        encoded.push_back(uri.toUtf8().toStdString());
+    if (pending_scratch_query_) {
+        session_->cancel_pending(*pending_scratch_query_);
     }
-    pending_commands_.insert(session_->melody_context_resync(std::move(encoded)));
+    pending_scratch_query_ = session_->melody_scratch_lists();
+    emit stateChanged();
+}
+
+void MpdProbeController::setPlaylistScratch(const QString& name, const bool scratch) {
+    if (!session_ || !connected_ || name.isEmpty() ||
+        !supportsCommand(QStringLiteral("melody_scratch"))) {
+        return;
+    }
+    pending_commands_.insert(session_->melody_set_scratch(name.toStdString(), scratch));
     emit stateChanged();
 }
 
@@ -1697,12 +1687,6 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     // ADR-0188: the Queue tab shows the queue context's own list. While
     // another tab is the active queue, the server holds this list stashed —
     // it must keep showing unchanged rather than the other tab's tracks.
-    // While a list of the client's own is the live queue, its rows are kept
-    // here: that list's tab shows the queue, so whatever another client adds
-    // to the queue shows up where the user is looking.
-    context_label_ = snapshot.context ? QString::fromStdString(snapshot.context->label)
-                                      : QString{};
-    live_queue_tracks_ = queue_stashed_ ? snapshot.queue : std::vector<mpd::Track>{};
     auto queue_rows = queue_stashed_ ? std::move(snapshot.queue_context_tracks)
                                      : std::move(snapshot.queue);
     requestMelodyAlbumRatings(queue_rows);
@@ -1941,6 +1925,20 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
                 emit artworkLoaded(current_artwork_uri_,
                                    QByteArray{data, static_cast<qsizetype>(bytes->size())});
             }
+        }
+        emit stateChanged();
+        return;
+    }
+    if (result.kind == mpd::SessionCommandKind::melody_scratch_lists) {
+        if (pending_scratch_query_ && *pending_scratch_query_ == result.id) {
+            pending_scratch_query_.reset();
+            QStringList names;
+            if (const auto* values = std::get_if<std::vector<std::string>>(&result.payload)) {
+                for (const auto& value : *values) {
+                    names.push_back(from_utf8(value));
+                }
+            }
+            emit scratchListsLoaded(names);
         }
         emit stateChanged();
         return;

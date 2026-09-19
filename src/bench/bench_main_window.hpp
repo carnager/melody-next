@@ -137,6 +137,9 @@ class BenchMainWindow final : public QMainWindow {
     // playlist name, session-only, refreshed exclusively from server re-reads.
     struct MpdPlaylistTab {
         QString name;
+        // A scratch list is a working tab: server-owned like every list, but
+        // presented in the tab strip instead of the Playlists sidebar.
+        bool scratch{false};
         quick::MpdQueueModel* model{nullptr};
         QTableView* view{nullptr};
         ui::TrackViewLayout view_layout;
@@ -205,7 +208,13 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] MpdPlaylistTab* mpdPlaylistTabForWidget(QWidget* widget) const;
     [[nodiscard]] MpdPlaylistTab* currentMpdPlaylistTab() const;
     [[nodiscard]] MpdPlaylistTab* mpdPlaylistTabNamed(const QString& name) const;
-    void openMpdPlaylistTab(const QString& name, bool select);
+    MpdPlaylistTab* openMpdPlaylistTab(const QString& name, bool select);
+    void refreshMpdPlaylistTabChrome(MpdPlaylistTab& tab);
+    // Names the server flags as scratch lists, refreshed with the playlist
+    // listing; a tab is a working tab exactly when its list is in here.
+    QSet<QString> mpd_scratch_lists_;
+    QStringList mpd_playlist_names_;
+    void acceptMpdScratchLists(const QStringList& names);
     void acceptMpdStoredPlaylistNames(const QStringList& names);
     void acceptMpdStoredPlaylistContents(const QString& name);
     void renameMpdPlaylistTab(const QString& from, const QString& to);
@@ -451,34 +460,20 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
     std::vector<std::unique_ptr<MpdSearchTab>> mpd_search_tabs_;
 
-    // ADR-0188: server working tabs — client-owned, temporary lists of
-    // server tracks that are edited freely and played like the queue.
-    // Long-term curation lives in MPD stored playlists instead.
-    struct MpdListTab {
-        persistence::ListDocument document;
-        quick::MpdQueueModel* model{nullptr};
-        QTableView* view{nullptr};
-        ui::TrackViewLayout view_layout;
-    };
-    std::vector<std::unique_ptr<MpdListTab>> mpd_list_tabs_;
+    // ADR-0191: a working tab is a scratch list — a stored playlist on the
+    // server flagged so it shows here rather than beside curated playlists.
+    // Lists live on the server; the client holds no list of its own.
     [[nodiscard]] int mpdTabInsertionIndex();
-    MpdListTab* addMpdListTab(persistence::ListDocument document, bool select);
-    [[nodiscard]] MpdListTab* mpdListTabForWidget(QWidget* widget) const;
-    [[nodiscard]] MpdListTab* currentMpdListTab() const;
-    void closeMpdListTab(MpdListTab* tab);
-    void refreshMpdListTabChrome(MpdListTab& tab);
-    void markMpdListTabDirty(MpdListTab& tab);
-    [[nodiscard]] static QString mpdListTabLabel(const MpdListTab& tab);
-    [[nodiscard]] bool isActiveMpdListTab(const MpdListTab& tab) const;
-    void refreshActiveMpdListTab();
-    void showMpdListTrackMenu(MpdListTab& tab, const QPoint& position);
+    [[nodiscard]] QString uniqueScratchListName();
+    void createScratchListTab(const QString& name, const QStringList& uris);
+    void promoteScratchList(const QString& name);
+    void confirmCloseScratchList(const QString& name);
     // ADR-0190: every MPD-side tab is a destination for a selection of
     // server tracks — the visible one by default, any other by name.
     struct MpdTabTarget {
-        enum class Kind { queue, working, playlist };
+        enum class Kind { queue, playlist };
         Kind kind{Kind::queue};
         QString label;
-        MpdListTab* working{nullptr};
         QString playlist;
     };
     enum class MpdSendMode { append, insert_next, replace };
@@ -490,9 +485,7 @@ class BenchMainWindow final : public QMainWindow {
     void sendMpdLibraryEntryToTab(const QModelIndex& index, MpdSendMode mode);
     void addSendToTabMenu(QMenu* menu, const std::function<std::vector<mpd::Track>()>& selection);
     void addCopyToServerListMenu(QMenu* menu, QTableView* source_view);
-    void addCopyToWorkingTabMenu(QMenu* menu, QTableView* source_view);
     [[nodiscard]] std::vector<mpd::Track> selectedMpdViewTracks(QTableView* view) const;
-    MpdListTab* createServerListTab(const QString& name, std::vector<mpd::Track> tracks);
     // Enter pressed before the debounced search finished: commit this
     // query as soon as its results arrive (ADR-0140).
     QString pending_mpd_search_commit_;

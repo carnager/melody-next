@@ -442,8 +442,8 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<std::unique_ptr<MpdListTab>> mpd_list_tabs_;
     [[nodiscard]] int mpdTabInsertionIndex();
     MpdListTab* addMpdListTab(persistence::ListDocument document, bool select);
-    MpdListTab* mpdListTabForWidget(QWidget* widget);
-    MpdListTab* currentMpdListTab();
+    [[nodiscard]] MpdListTab* mpdListTabForWidget(QWidget* widget) const;
+    [[nodiscard]] MpdListTab* currentMpdListTab() const;
     void closeMpdListTab(MpdListTab* tab);
     void refreshMpdListTabChrome(MpdListTab& tab);
     void markMpdListTabDirty(MpdListTab& tab);

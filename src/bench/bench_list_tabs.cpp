@@ -907,7 +907,9 @@ bool BenchMainWindow::isMpdContext() const {
     }
     auto* current = tabs_->currentWidget();
     return (mpd_queue_view_ != nullptr && current == mpd_queue_view_) ||
-           mpdPlaylistTabForWidget(current) != nullptr || mpdSearchTabForWidget(current) != nullptr;
+           mpdPlaylistTabForWidget(current) != nullptr ||
+           mpdSearchTabForWidget(current) != nullptr ||
+           mpdListTabForWidget(current) != nullptr;
 }
 
 void BenchMainWindow::refreshActiveContext() {

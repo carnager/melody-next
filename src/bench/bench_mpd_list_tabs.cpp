@@ -71,14 +71,14 @@ int BenchMainWindow::mpdTabInsertionIndex() {
     return index;
 }
 
-BenchMainWindow::MpdListTab* BenchMainWindow::mpdListTabForWidget(QWidget* widget) {
+BenchMainWindow::MpdListTab* BenchMainWindow::mpdListTabForWidget(QWidget* widget) const {
     const auto found =
         std::ranges::find(mpd_list_tabs_, widget,
                           [](const std::unique_ptr<MpdListTab>& tab) { return tab->view; });
     return found == mpd_list_tabs_.end() ? nullptr : found->get();
 }
 
-BenchMainWindow::MpdListTab* BenchMainWindow::currentMpdListTab() {
+BenchMainWindow::MpdListTab* BenchMainWindow::currentMpdListTab() const {
     return mpdListTabForWidget(tabs_->currentWidget());
 }
 

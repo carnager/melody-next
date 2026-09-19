@@ -99,6 +99,10 @@ class MpdQueueModel final : public QAbstractTableModel {
         QImage image;
         bool requested{false};
         quint64 token{0U};
+        // Empty responses (disconnect, transient server misses) re-arm the
+        // request up to this bound instead of leaving the album coverless
+        // for the session.
+        int failed_attempts{0};
     };
 
     void synchronizeArtwork();

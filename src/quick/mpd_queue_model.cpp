@@ -23,6 +23,7 @@ namespace trackknife::quick {
 namespace {
 
 constexpr qsizetype maximum_artwork_requests = 64;
+constexpr int maximum_artwork_attempts = 3;
 constexpr quint64 artwork_token_namespace = quint64{1} << 62U;
 // One counter for every MpdQueueModel instance: the live queue, playlist,
 // search, and server list tabs all receive the broadcast artwork responses,
@@ -530,6 +531,7 @@ void MpdQueueModel::retryMissingArtwork() {
             (!active_artwork_token_ || artwork.token != *active_artwork_token_)) {
             artwork.requested = false;
             artwork.token = 0U;
+            artwork.failed_attempts = 0;
             rearmed = true;
         }
     }
@@ -549,9 +551,13 @@ void MpdQueueModel::acceptArtwork(const quint64 token, const QImage& image) {
         }
         if (!image.isNull()) {
             artwork->image = image;
+            artwork->failed_attempts = 0;
             if (!tracks_.empty()) {
                 emit dataChanged(index(0, 0), index(rowCount() - 1, 0), {AlbumArtworkRole});
             }
+        } else if (++artwork->failed_attempts < maximum_artwork_attempts) {
+            artwork->requested = false;
+            artwork->token = 0U;
         }
         break;
     }

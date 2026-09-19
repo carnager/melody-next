@@ -967,7 +967,15 @@ QString LocalListModel::groupKey(const int row) const {
 }
 
 void LocalListModel::setArtwork(const QString& key, QImage image) {
-    artwork_.insert(key, std::move(image));
+    // A null image clears the entry. Inserting it instead would leave
+    // hasArtwork() true, and the artwork reload after an invalidation
+    // (metadata commit, ReplayGain write, conversion) would skip its
+    // delivery — the album then shows the placeholder for the session.
+    if (image.isNull()) {
+        artwork_.remove(key);
+    } else {
+        artwork_.insert(key, std::move(image));
+    }
     if (!rows_.empty()) {
         emit dataChanged(index(0, local_artwork_column),
                          index(static_cast<int>(rows_.size()) - 1, local_artwork_column),

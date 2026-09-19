@@ -230,6 +230,7 @@ class BenchMainWindowTest final : public QObject {
     void settingsControlStartupContextAndMusicRoot();
     void mpdSugarActionsMaterializeAndOpenDialog();
     void serverListTabsPersistAndRenderOffline();
+    void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
@@ -3885,6 +3886,48 @@ void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
     tabs->setCurrentWidget(queue_view);
     QVERIFY(reopened.findChild<QMenu*>(QStringLiteral("bench-copy-to-server-list-menu")) ==
             nullptr);
+}
+
+// A metadata commit invalidates the album's cached cover and reloads it;
+// the reload must actually reach the model again. The regression: clearing
+// via a null insert left hasArtwork() true, so the reloaded cover was
+// silently dropped and the album showed the placeholder for the session.
+void BenchMainWindowTest::localArtworkSurvivesInvalidation() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto flac = media.filePath(QStringLiteral("one.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), flac));
+    {
+        QImage cover{32, 32, QImage::Format_RGB32};
+        cover.fill(Qt::darkRed);
+        QVERIFY(cover.save(media.filePath(QStringLiteral("cover.png")), "PNG"));
+    }
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({QFile::encodeName(flac).toStdString()});
+    QTableView* view = nullptr;
+    LocalListModel* model = nullptr;
+    QTRY_VERIFY([&] {
+        for (auto* candidate : window.findChildren<QTableView*>()) {
+            if (qobject_cast<LocalListModel*>(candidate->model()) &&
+                candidate->model()->rowCount() == 1) {
+                view = candidate;
+                model = qobject_cast<LocalListModel*>(candidate->model());
+                return true;
+            }
+        }
+        return false;
+    }());
+    QTRY_VERIFY(model->rows().front().probed);
+    const auto artwork = [&] {
+        return model->data(model->index(0, 0), static_cast<int>(ui::track_album_artwork_role))
+            .value<QImage>();
+    };
+    QTRY_VERIFY(!artwork().isNull());
+
+    window.invalidateArtwork(model->rows().front().raw_path);
+    QTRY_VERIFY(!artwork().isNull());
 }
 
 void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {

@@ -233,6 +233,7 @@ class BenchMainWindowTest final : public QObject {
     void propertiesFileListHostsInSidebar();
     void serverListTabsPersistAndRenderOffline();
     void serverWorkingTabCreationGestures();
+    void serverWorkingTabCreationGesturesLegacy();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3926,6 +3927,53 @@ void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
 }
 
 void BenchMainWindowTest::serverWorkingTabCreationGestures() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    QVERIFY(tabs != nullptr && queue_view != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+    auto* queue_model = qobject_cast<quick::MpdQueueModel*>(queue_view->model());
+    QVERIFY(queue_model != nullptr);
+
+    const auto make_track = [](const char* uri, std::uint32_t id) {
+        trackknife::mpd::Track track;
+        track.uri = uri;
+        track.queue_id = id;
+        track.metadata = trackknife::mpd::Metadata{{{"Title", uri}}};
+        return track;
+    };
+    queue_model->replaceTracks({make_track("q/1.flac", 1), make_track("q/2.flac", 2),
+                                make_track("q/3.flac", 3)});
+    QCOMPARE(queue_model->rowCount(), 3);
+    queue_view->selectionModel()->select(
+        queue_model->index(0, 0),
+        QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    queue_view->selectionModel()->select(
+        queue_model->index(1, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+
+    // ADR-0188: dropping the selection past the last tab builds a working
+    // tab from it — and must leave the queue exactly as it was.
+    const auto tabs_before = tabs->count();
+    const QPointF drop_point{static_cast<qreal>(tabs->tabBar()->width() - 2), 4.0};
+    QMimeData mime;
+    QDropEvent drop{drop_point,     Qt::CopyAction | Qt::MoveAction, &mime,
+                    Qt::LeftButton, Qt::NoModifier,                  QEvent::Drop};
+    QVERIFY(window.handleTabTrackDrop(queue_view, &drop, drop_point.toPoint()));
+    QTRY_COMPARE(tabs->count(), tabs_before + 1);
+    QCOMPARE(queue_model->rowCount(), 3);
+    BenchMainWindow::MpdListTab* created = nullptr;
+    for (int index = 0; index < tabs->count(); ++index) {
+        if (auto* found = window.mpdListTabForWidget(tabs->widget(index))) {
+            created = found;
+        }
+    }
+    QVERIFY(created != nullptr);
+    QCOMPARE(created->model->rowCount(), 2);
+    QCOMPARE(created->model->trackAt(0)->uri, std::string{"q/1.flac"});
+}
+
+void BenchMainWindowTest::serverWorkingTabCreationGesturesLegacy() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));

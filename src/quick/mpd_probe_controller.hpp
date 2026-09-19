@@ -207,6 +207,9 @@ class MpdProbeController final : public QObject {
     // row < 0 resumes where the list was left.
     Q_INVOKABLE void playStoredPlaylistContext(const QString& name, int row);
     Q_INVOKABLE void playQueueContext(int row);
+    // ADR-0188: play a working tab's tracks as a context — the queue is
+    // stashed rather than replaced.
+    Q_INVOKABLE void playTrackListContext(const QStringList& uris, int row);
     void addAlbum(mpd::AlbumFilter album, QueueAddMode mode);
     void loadSearchAlbum(quint64 token, const mpd::AlbumFilter& album);
     Q_INVOKABLE void browseDirectory(const QString& uri);

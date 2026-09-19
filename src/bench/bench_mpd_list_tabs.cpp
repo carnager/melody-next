@@ -165,9 +165,16 @@ BenchMainWindow::MpdListTab* BenchMainWindow::addMpdListTab(persistence::ListDoc
         for (const auto& track : tracks) {
             uris.push_back(displayText(track.uri));
         }
-        if (!uris.isEmpty()) {
-            mpd_controller_->replaceQueueWithUrisAndPlayAt(uris, index.row());
+        if (uris.isEmpty()) {
+            return;
         }
+        // ADR-0188: playing a working tab stashes the queue instead of
+        // destroying it, so the tab behaves like any other playable list.
+        if (mpd_controller_->supportsPlaybackContexts()) {
+            mpd_controller_->playTrackListContext(uris, index.row());
+            return;
+        }
+        mpd_controller_->replaceQueueWithUrisAndPlayAt(uris, index.row());
     };
     view->setActivateCallback(play_from_row);
     connect(view, &QTableView::doubleClicked, this, play_from_row);
@@ -324,27 +331,26 @@ void BenchMainWindow::addCopyToWorkingTabMenu(QMenu* menu, QTableView* source_vi
     }
 }
 
-// ADR-0187: server lists are stored playlists. "Copy to server list"
-// creates or extends one on the server and opens its tab, so a list made
-// here is the same object every client sees and can be played as a
-// context.
+// ADR-0188: one destination per concept — "Copy to tab" builds a working
+// tab, this builds or extends a stored playlist. New playlist… creates it
+// server-side and opens its tab.
 void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_view) {
-    auto* submenu = menu->addMenu(QStringLiteral("Copy to server list"));
-    submenu->setObjectName(QStringLiteral("bench-copy-to-server-list-menu"));
     const auto uris = selectedMpdViewUris(source_view);
+    auto* submenu = menu->addMenu(QStringLiteral("Add to playlist"));
+    submenu->setObjectName(QStringLiteral("bench-mpd-add-to-playlist-menu"));
     const auto ready = !uris.isEmpty() && mpd_controller_->connected() &&
                        mpd_controller_->supportsCommand(QStringLiteral("playlistadd"));
     submenu->setEnabled(ready);
-    auto* create = submenu->addAction(QStringLiteral("New list…"));
+    auto* create = submenu->addAction(QStringLiteral("New playlist…"));
     create->setObjectName(QStringLiteral("action-copy-to-new-server-list"));
     create->setEnabled(ready);
     connect(create, &QAction::triggered, this, [this, uris] {
         bool accepted = false;
-        const auto name =
-            QInputDialog::getText(this, QStringLiteral("New server list"),
-                                  QStringLiteral("List name:"), QLineEdit::Normal,
-                                  QStringLiteral("Server list"), &accepted)
-                .trimmed();
+        const auto name = QInputDialog::getText(this, QStringLiteral("New playlist"),
+                                                QStringLiteral("Playlist name:"),
+                                                QLineEdit::Normal,
+                                                QStringLiteral("Playlist"), &accepted)
+                              .trimmed();
         if (!accepted || name.isEmpty()) {
             return;
         }
@@ -357,50 +363,10 @@ void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_vi
             const auto name = mpd_playlists_list_->item(row)->text();
             auto* action = submenu->addAction(name);
             action->setEnabled(ready);
-            connect(action, &QAction::triggered, this, [this, name, uris] {
-                mpd_controller_->addToStoredPlaylist(name, uris, -1);
-            });
+            connect(action, &QAction::triggered, this,
+                    [this, name, uris] { mpd_controller_->addToStoredPlaylist(name, uris, -1); });
         }
     }
-}
-
-// migrateServerListDocuments pushes each client-owned list left over from
-// ADR-0181 to the server as a stored playlist and opens its tab, then
-// forgets the document. Names collide with existing playlists are suffixed.
-// Runs on the first connect that advertises playlistadd; offline the
-// documents simply wait.
-void BenchMainWindow::migrateServerListDocuments() {
-    if (pending_server_lists_.empty() || mpd_controller_ == nullptr ||
-        !mpd_controller_->connected() ||
-        !mpd_controller_->supportsCommand(QStringLiteral("playlistadd"))) {
-        return;
-    }
-    auto pending = std::exchange(pending_server_lists_, {});
-    for (const auto& document : pending) {
-        QStringList uris;
-        uris.reserve(static_cast<qsizetype>(document.items.size()));
-        for (const auto& item : document.items) {
-            uris.push_back(displayText(item.source_reference));
-        }
-        if (uris.isEmpty()) {
-            continue;
-        }
-        auto name = displayText(document.name);
-        if (name.trimmed().isEmpty()) {
-            name = QStringLiteral("Server list");
-        }
-        if (mpd_playlists_list_ != nullptr) {
-            int suffix = 2;
-            while (!mpd_playlists_list_->findItems(name, Qt::MatchExactly).isEmpty()) {
-                name = QStringLiteral("%1 (%2)").arg(displayText(document.name)).arg(suffix++);
-            }
-        }
-        mpd_controller_->addToStoredPlaylist(name, uris, -1);
-        openMpdPlaylistTab(name, false);
-        statusBar()->showMessage(
-            QStringLiteral("Moved the server list “%1” to a stored playlist").arg(name), 5'000);
-    }
-    schedulePersist();
 }
 
 void BenchMainWindow::showMpdListTrackMenu(MpdListTab& tab, const QPoint& position) {
@@ -461,20 +427,6 @@ void BenchMainWindow::showMpdListTrackMenu(MpdListTab& tab, const QPoint& positi
     });
     addCopyToWorkingTabMenu(track_context_menu_, tab.view);
     addCopyToServerListMenu(track_context_menu_, tab.view);
-    if (mpd_playlists_list_ != nullptr && mpd_playlists_list_->count() > 0) {
-        auto* playlist_menu = track_context_menu_->addMenu(QStringLiteral("Add to playlist"));
-        playlist_menu->setObjectName(QStringLiteral("bench-mpd-list-add-to-playlist-menu"));
-        playlist_menu->setEnabled(command_ready && !uris.isEmpty() &&
-                                  mpd_controller_->supportsCommand(
-                                      QStringLiteral("playlistadd")));
-        for (int row = 0; row < mpd_playlists_list_->count(); ++row) {
-            const auto playlist_name = mpd_playlists_list_->item(row)->text();
-            auto* add = playlist_menu->addAction(playlist_name);
-            connect(add, &QAction::triggered, this, [this, playlist_name, uris] {
-                mpd_controller_->addToStoredPlaylist(playlist_name, uris, -1);
-            });
-        }
-    }
     track_context_menu_->popup(tab.view->viewport()->mapToGlobal(position));
 }
 

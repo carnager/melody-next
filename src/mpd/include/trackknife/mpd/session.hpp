@@ -89,6 +89,7 @@ enum class SessionCommandKind {
     melody_album_rating,
     melody_context_play,
     melody_context_queue,
+    melody_context_tracks,
     database_expression_search,
 };
 
@@ -157,6 +158,7 @@ class Session final {
     // switch back to the stashed queue. row = std::nullopt resumes.
     [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
+    [[nodiscard]] std::uint64_t melody_context_tracks(std::vector<std::string> uris, unsigned row);
     // Server-translated structured query: a raw filter expression plus an
     // optional Melody sort argument; the payload is the bounded track list.
     [[nodiscard]] std::uint64_t search_expression(std::string filter_expression, std::string sort,

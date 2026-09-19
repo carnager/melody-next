@@ -1770,6 +1770,34 @@ core::Result<void> Client::melody_context_play(const std::string_view name,
     return {};
 }
 
+core::Result<void> Client::melody_context_tracks(const std::vector<std::string>& uris,
+                                                 const unsigned row) {
+    if (uris.empty()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "A context needs at least one track",
+                                           .context = {}});
+    }
+    // libmpdclient's send_command is variadic with a fixed argument list, so
+    // the track list is composed into one quoted command line.
+    auto* connection = implementation_->connection.get();
+    std::string line = "melody_context tracks " + std::to_string(row);
+    for (const auto& uri : uris) {
+        line += " \"";
+        for (const auto character : uri) {
+            if (character == '"' || character == '\\') {
+                line.push_back('\\');
+            }
+            line.push_back(character);
+        }
+        line += '"';
+    }
+    if (!mpd_send_command(connection, line.c_str(), nullptr) ||
+        !mpd_response_finish(connection)) {
+        return std::unexpected(implementation_->take_error("melody_context tracks"));
+    }
+    return {};
+}
+
 core::Result<void> Client::melody_context_queue(const std::optional<unsigned> row) {
     auto* connection = implementation_->connection.get();
     const auto row_text = row ? std::to_string(*row) : std::string{};

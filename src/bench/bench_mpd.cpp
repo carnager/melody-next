@@ -632,9 +632,6 @@ void BenchMainWindow::buildMpdWorkspace() {
             if (mpd_controller_->supportsCommand(QStringLiteral("listplaylists"))) {
                 mpd_controller_->browseStoredPlaylists();
             }
-            // ADR-0187: hand any retired client-owned list to the
-            // server now that one is available.
-            migrateServerListDocuments();
         }
         if (!connected && was_connected) {
             acceptMpdStoredPlaylistNames({});

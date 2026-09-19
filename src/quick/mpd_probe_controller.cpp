@@ -861,6 +861,22 @@ void MpdProbeController::playStoredPlaylistContext(const QString& name, const in
     emit stateChanged();
 }
 
+void MpdProbeController::playTrackListContext(const QStringList& uris, const int row) {
+    if (!session_ || !connected_ || uris.isEmpty()) {
+        return;
+    }
+    std::vector<std::string> encoded;
+    encoded.reserve(static_cast<std::size_t>(uris.size()));
+    for (const auto& uri : uris) {
+        encoded.push_back(uri.toUtf8().toStdString());
+    }
+    const auto position = static_cast<unsigned>(std::max(row, 0));
+    const auto command_id = session_->melody_context_tracks(std::move(encoded), position);
+    pending_commands_.insert(command_id);
+    beginOptimisticPlayback(command_id, mpd::PlaybackState::playing);
+    emit stateChanged();
+}
+
 void MpdProbeController::playQueueContext(const int row) {
     if (!session_ || !connected_) {
         return;

@@ -457,8 +457,6 @@ class BenchMainWindow final : public QMainWindow {
         ui::TrackViewLayout view_layout;
     };
     std::vector<std::unique_ptr<MpdListTab>> mpd_list_tabs_;
-    std::vector<persistence::ListDocument> pending_server_lists_;
-    void migrateServerListDocuments();
     [[nodiscard]] int mpdTabInsertionIndex();
     MpdListTab* addMpdListTab(persistence::ListDocument document, bool select);
     [[nodiscard]] MpdListTab* mpdListTabForWidget(QWidget* widget) const;

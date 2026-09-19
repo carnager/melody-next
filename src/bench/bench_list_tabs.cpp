@@ -1580,20 +1580,6 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         addCopyToWorkingTabMenu(track_context_menu_, mpd_queue_view_);
         addCopyToServerListMenu(track_context_menu_, mpd_queue_view_);
         const auto queue_uris = selectedMpdQueueUris();
-        if (mpd_playlists_list_ != nullptr && mpd_playlists_list_->count() > 0) {
-            auto* playlist_menu = track_context_menu_->addMenu(QStringLiteral("Add to playlist"));
-            playlist_menu->setObjectName(QStringLiteral("bench-mpd-add-to-playlist-menu"));
-            playlist_menu->setEnabled(
-                command_ready && !queue_uris.isEmpty() &&
-                mpd_controller_->supportsCommand(QStringLiteral("playlistadd")));
-            for (int row = 0; row < mpd_playlists_list_->count(); ++row) {
-                const auto playlist_name = mpd_playlists_list_->item(row)->text();
-                auto* add = playlist_menu->addAction(playlist_name);
-                connect(add, &QAction::triggered, this, [this, playlist_name, queue_uris] {
-                    mpd_controller_->addToStoredPlaylist(playlist_name, queue_uris, -1);
-                });
-            }
-        }
         auto* save_queue =
             track_context_menu_->addAction(QStringLiteral("Save queue as playlist…"));
         save_queue->setObjectName(QStringLiteral("action-mpd-save-queue-as-playlist"));

@@ -309,6 +309,9 @@ struct Session::Impl {
             return without_payload(client.melody_context_play(command.uri, command.queue_position));
         case SessionCommandKind::melody_context_queue:
             return without_payload(client.melody_context_queue(command.queue_position));
+        case SessionCommandKind::melody_context_tracks:
+            return without_payload(
+                client.melody_context_tracks(command.uris, command.queue_position.value_or(0U)));
         case SessionCommandKind::queue_play:
             return without_payload(command.queue_position
                                        ? client.play_position(*command.queue_position)
@@ -492,6 +495,7 @@ struct Session::Impl {
             return static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::melody_context_play:
         case SessionCommandKind::melody_context_queue:
+        case SessionCommandKind::melody_context_tracks:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::queue_play:
@@ -839,6 +843,14 @@ std::uint64_t Session::melody_context_play(std::string name,
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::melody_context_play;
     command.uri = std::move(name);
+    command.queue_position = row;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_tracks(std::vector<std::string> uris, const unsigned row) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::melody_context_tracks;
+    command.uris = std::move(uris);
     command.queue_position = row;
     return implementation_->enqueue(std::move(command));
 }

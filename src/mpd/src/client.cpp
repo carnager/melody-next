@@ -702,12 +702,15 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
 
 core::Result<std::vector<Track>> Client::search_expression(
     const std::string_view filter_expression, const std::string_view sort, const unsigned limit) {
-    constexpr unsigned maximum_page_size = 500U;
+    // A query like "date IS 1992" legitimately matches thousands of tracks;
+    // the window bounds one response, it does not decide what a search may
+    // return.
+    constexpr unsigned maximum_page_size = 20'000U;
     const std::string expression{filter_expression};
     if (expression.empty() || expression.contains('\0') || limit > maximum_page_size) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
                                            .message = "expression search needs a filter and a "
-                                                      "page size of at most 500",
+                                                      "page size of at most 20000",
                                            .context = {}});
     }
     auto* connection = implementation_->connection.get();

@@ -123,7 +123,7 @@ class BenchMainWindow final : public QMainWindow {
 
   private:
     friend class BenchMainWindowTest;
-    bool handleTabTrackDrop(QTableView* source, QDropEvent* event, const QPoint& position);
+    bool handleTabTrackDrop(QAbstractItemView* source, QDropEvent* event, const QPoint& position);
     struct ListTab {
         persistence::ListDocument document;
         LocalListModel* model{nullptr};
@@ -453,6 +453,12 @@ class BenchMainWindow final : public QMainWindow {
     std::optional<MpdLibraryAction> pending_mpd_library_action_;
     QPersistentModelIndex pending_mpd_library_index_;
     int pending_mpd_library_insertion_row_{-1};
+    // A drop or menu action taken on a library branch that has not been
+    // fetched yet; runs when its rows arrive.
+    QPersistentModelIndex pending_library_selection_;
+    std::function<void(std::vector<mpd::Track>)> pending_library_apply_;
+    bool resolveLibraryTracks(const QModelIndexList& indexes,
+                              std::function<void(std::vector<mpd::Track>)> apply);
     QTabWidget* tabs_{nullptr};
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QPointer<SearchDialog> search_dialog_;
@@ -465,6 +471,7 @@ class BenchMainWindow final : public QMainWindow {
     // Lists live on the server; the client holds no list of its own.
     [[nodiscard]] int mpdTabInsertionIndex();
     [[nodiscard]] QString uniqueScratchListName();
+    [[nodiscard]] QString promptScratchListName();
     void createScratchListTab(const QString& name, const QStringList& uris);
     void promoteScratchList(const QString& name);
     void confirmCloseScratchList(const QString& name);
@@ -483,7 +490,12 @@ class BenchMainWindow final : public QMainWindow {
     void sendTracksToMpdTab(const MpdTabTarget& target, std::vector<mpd::Track> tracks,
                             MpdSendMode mode);
     void sendMpdLibraryEntryToTab(const QModelIndex& index, MpdSendMode mode);
-    void addSendToTabMenu(QMenu* menu, const std::function<std::vector<mpd::Track>()>& selection);
+    // `resolve` handles selections whose tracks are not loaded yet, and
+    // returns false when there is nothing to send.
+    using MpdTrackResolver =
+        std::function<bool(const std::function<void(std::vector<mpd::Track>)>&)>;
+    void addSendToTabMenu(QMenu* menu, const std::function<std::vector<mpd::Track>()>& selection,
+                          MpdTrackResolver resolve = {});
     void addCopyToServerListMenu(QMenu* menu, QTableView* source_view);
     [[nodiscard]] std::vector<mpd::Track> selectedMpdViewTracks(QTableView* view) const;
     // Enter pressed before the debounced search finished: commit this

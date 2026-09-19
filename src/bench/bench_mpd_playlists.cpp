@@ -286,18 +286,26 @@ BenchMainWindow::MpdPlaylistTab* BenchMainWindow::openMpdPlaylistTab(const QStri
     view->setExternalDropCallback([this, raw_tab](QAbstractItemView* source, const QVariantList&,
                                                   const int insertion_row, const Qt::DropAction) {
         QStringList uris;
-        if (source == server_library_view_ && source->selectionModel() != nullptr) {
-            QSet<QString> seen;
-            for (const auto& index : source->selectionModel()->selectedRows(0)) {
-                for (const auto& track : server_library_model_->tracks(index)) {
-                    const auto uri = displayText(track.uri);
-                    if (!seen.contains(uri)) {
-                        seen.insert(uri);
-                        uris.push_back(uri);
+        if (source == static_cast<QAbstractItemView*>(
+                          static_cast<QTreeView*>(server_library_view_)) &&
+            source->selectionModel() != nullptr) {
+            // The branch may not be fetched yet — an unexpanded artist is
+            // the ordinary case — so the drop finishes when its rows land.
+            const auto target_name = raw_tab->name;
+            return resolveLibraryTracks(
+                source->selectionModel()->selectedRows(0),
+                [this, target_name, insertion_row](std::vector<mpd::Track> tracks) {
+                    QStringList resolved;
+                    for (const auto& track : tracks) {
+                        resolved.push_back(displayText(track.uri));
                     }
-                }
-            }
-        } else if (auto* table = qobject_cast<QTableView*>(source)) {
+                    if (!resolved.isEmpty()) {
+                        mpd_controller_->addToStoredPlaylist(target_name, resolved,
+                                                            insertion_row);
+                    }
+                });
+        }
+        if (auto* table = qobject_cast<QTableView*>(source)) {
             uris = selectedMpdViewUris(table);
         }
         if (uris.isEmpty()) {

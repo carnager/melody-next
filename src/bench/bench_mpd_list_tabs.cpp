@@ -78,6 +78,16 @@ std::vector<mpd::Track> BenchMainWindow::selectedMpdViewTracks(QTableView* view)
     return tracks;
 }
 
+// Asks for a working-list name, pre-filled with a free one.
+QString BenchMainWindow::promptScratchListName() {
+    bool accepted = false;
+    const auto name = QInputDialog::getText(this, QStringLiteral("New list"),
+                                            QStringLiteral("List name:"), QLineEdit::Normal,
+                                            uniqueScratchListName(), &accepted)
+                          .trimmed();
+    return accepted ? name : QString{};
+}
+
 // A fresh working-list name that no playlist is using — the drop gesture
 // has no dialog to ask in, so it names the list itself.
 QString BenchMainWindow::uniqueScratchListName() {
@@ -278,7 +288,8 @@ void BenchMainWindow::sendTracksToMpdTab(const MpdTabTarget& target,
 // actions above it already cover the common case — the visible tab — so this
 // is for aiming somewhere else without switching tabs first.
 void BenchMainWindow::addSendToTabMenu(QMenu* menu,
-                                       const std::function<std::vector<mpd::Track>()>& selection) {
+                                       const std::function<std::vector<mpd::Track>()>& selection,
+                                       MpdTrackResolver resolve) {
     auto* submenu = menu->addMenu(QStringLiteral("Send to tab"));
     submenu->setObjectName(QStringLiteral("bench-send-to-tab-menu"));
     const auto targets = mpdTabTargets();
@@ -287,17 +298,28 @@ void BenchMainWindow::addSendToTabMenu(QMenu* menu,
     create->setObjectName(QStringLiteral("action-send-to-new-working-list"));
     create->setEnabled(connected && mpd_controller_->supportsCommand(
                                         QStringLiteral("playlistadd")));
-    connect(create, &QAction::triggered, this, [this, selection] {
-        const auto tracks = selection();
+    connect(create, &QAction::triggered, this, [this, selection, resolve] {
+        auto tracks = selection();
+        if (tracks.empty() && resolve) {
+            // Name the list first, then let the branch load into it.
+            const auto named = promptScratchListName();
+            if (named.isEmpty()) {
+                return;
+            }
+            resolve([this, named](std::vector<mpd::Track> loaded) {
+                QStringList uris;
+                for (const auto& track : loaded) {
+                    uris.push_back(displayText(track.uri));
+                }
+                createScratchListTab(named, uris);
+            });
+            return;
+        }
         if (tracks.empty()) {
             return;
         }
-        bool accepted = false;
-        const auto name = QInputDialog::getText(this, QStringLiteral("New list"),
-                                                QStringLiteral("List name:"), QLineEdit::Normal,
-                                                uniqueScratchListName(), &accepted)
-                              .trimmed();
-        if (!accepted || name.isEmpty()) {
+        const auto name = promptScratchListName();
+        if (name.isEmpty()) {
             return;
         }
         QStringList uris;
@@ -320,10 +342,16 @@ void BenchMainWindow::addSendToTabMenu(QMenu* menu,
         for (const auto& [label, mode] : modes) {
             auto* action = tab_menu->addAction(label);
             action->setEnabled(connected);
-            connect(action, &QAction::triggered, this, [this, target, mode, selection] {
+            connect(action, &QAction::triggered, this, [this, target, mode, selection, resolve] {
+                const auto send = [this, target, mode](std::vector<mpd::Track> tracks) {
+                    sendTracksToMpdTab(target, std::move(tracks), mode);
+                };
+                if (resolve && resolve(send)) {
+                    return;
+                }
                 auto tracks = selection();
                 if (!tracks.empty()) {
-                    sendTracksToMpdTab(target, std::move(tracks), mode);
+                    send(std::move(tracks));
                 }
             });
         }

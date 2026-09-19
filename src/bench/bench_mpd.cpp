@@ -613,6 +613,8 @@ void BenchMainWindow::buildMpdWorkspace() {
                 pending_mpd_library_action_.reset();
                 pending_mpd_library_index_ = QPersistentModelIndex{};
                 pending_mpd_library_insertion_row_ = -1;
+                pending_library_apply_ = {};
+                pending_library_selection_ = QPersistentModelIndex{};
                 server_library_view_->cancelPendingExpansions();
                 statusBar()->showMessage(
                     QStringLiteral("Could not browse the MPD library: %1").arg(error), 5'000);
@@ -793,7 +795,49 @@ void BenchMainWindow::sendMpdLibraryEntryToTab(const QModelIndex& index, const M
     activateMpdLibraryAction(index, static_cast<int>(action));
 }
 
+// A library branch is fetched on demand, so a selection can be acted on
+// before its tracks exist here — dragging an unexpanded artist is the
+// ordinary case. The branch is requested and the work finishes a round trip
+// later, when the rows land.
+bool BenchMainWindow::resolveLibraryTracks(const QModelIndexList& indexes,
+                                           std::function<void(std::vector<mpd::Track>)> apply) {
+    std::vector<mpd::Track> tracks;
+    QSet<QString> seen;
+    for (const auto& index : indexes) {
+        for (const auto& track : server_library_model_->tracks(index)) {
+            const auto uri = displayText(track.uri);
+            if (!seen.contains(uri)) {
+                seen.insert(uri);
+                tracks.push_back(track);
+            }
+        }
+    }
+    if (!tracks.empty()) {
+        apply(std::move(tracks));
+        return true;
+    }
+    if (indexes.size() == 1 && server_library_model_->canFetchMore(indexes.front())) {
+        pending_library_selection_ = QPersistentModelIndex{indexes.front()};
+        pending_library_apply_ = std::move(apply);
+        server_library_view_->expand(indexes.front());
+        server_library_model_->fetchMore(indexes.front());
+        return true;
+    }
+    return false;
+}
+
 void BenchMainWindow::completePendingMpdLibraryAction() {
+    if (pending_library_apply_) {
+        if (!pending_library_selection_.isValid()) {
+            pending_library_apply_ = {};
+        } else if (auto tracks =
+                       server_library_model_->tracks(QModelIndex{pending_library_selection_});
+                   !tracks.empty()) {
+            auto apply = std::exchange(pending_library_apply_, {});
+            pending_library_selection_ = QPersistentModelIndex{};
+            apply(std::move(tracks));
+        }
+    }
     if (!pending_mpd_library_action_) {
         return;
     }
@@ -860,6 +904,8 @@ void BenchMainWindow::showMpdLibraryContextMenu(const QPoint& position) {
     addSendToTabMenu(mpd_library_context_menu_, [this, target] {
         return target.isValid() ? server_library_model_->tracks(QModelIndex{target})
                                 : std::vector<mpd::Track>{};
+    }, [this, target](const std::function<void(std::vector<mpd::Track>)>& apply) {
+        return target.isValid() && resolveLibraryTracks({QModelIndex{target}}, apply);
     });
     mpd_library_context_menu_->addSeparator();
     auto* update_directory =

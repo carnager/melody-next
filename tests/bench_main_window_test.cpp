@@ -232,6 +232,7 @@ class BenchMainWindowTest final : public QObject {
     void mpdSugarActionsMaterializeAndOpenDialog();
     void propertiesFileListHostsInSidebar();
     void serverWorkingTabCreationGestures();
+    void libraryDragResolvesUnexpandedBranch();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -3887,6 +3888,42 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QSettings settings;
     settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.sync();
+}
+
+// A library branch loads on demand, so dropping an artist that was never
+// expanded must request its tracks and finish when they land — not quietly
+// drop nothing.
+void BenchMainWindowTest::libraryDragResolvesUnexpandedBranch() {
+    BenchMainWindow window;
+    window.show();
+    auto* library = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
+    auto* library_model = window.findChild<ui::ServerLibraryTreeModel*>();
+    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    QVERIFY(library != nullptr && library_model != nullptr && queue_view != nullptr);
+
+    QSignalSpy root_requests{library_model, &ui::ServerLibraryTreeModel::rootRequested};
+    library_model->reload();
+    QTRY_COMPARE(root_requests.size(), 1);
+    library_model->acceptRoot(root_requests.front().at(0).toULongLong(),
+                              root_requests.front().at(1).toString(),
+                              {QStringLiteral("Dragged Artist")}, {});
+    const auto artist = library_model->index(0, 0);
+    QVERIFY(artist.isValid());
+    QVERIFY(library_model->canFetchMore(artist)); // Never expanded.
+    library->selectionModel()->select(artist, QItemSelectionModel::ClearAndSelect |
+                                                  QItemSelectionModel::Rows);
+
+    // The drop is accepted and asks the server for the branch.
+    QSignalSpy branch_requests{library_model, &ui::ServerLibraryTreeModel::branchRequested};
+    QMimeData mime;
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    // Past the last tab: the strip's "make a new list" region.
+    const QPointF drop_point{static_cast<qreal>(tabs->tabBar()->width() - 2), 4.0};
+    QDropEvent drop{drop_point,     Qt::CopyAction, &mime,
+                    Qt::LeftButton, Qt::NoModifier, QEvent::Drop};
+    QVERIFY(window.handleTabTrackDrop(library, &drop, drop_point.toPoint()));
+    QTRY_VERIFY(!branch_requests.isEmpty()); // Expanding may ask more than once.
 }
 
 // ADR-0191: working tabs are scratch lists on the server — dropping a

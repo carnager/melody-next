@@ -863,8 +863,7 @@ bool BenchMainWindow::isMpdContext() const {
     }
     auto* current = tabs_->currentWidget();
     return (mpd_queue_view_ != nullptr && current == mpd_queue_view_) ||
-           mpdPlaylistTabForWidget(current) != nullptr ||
-           mpdSearchTabForWidget(current) != nullptr;
+           mpdPlaylistTabForWidget(current) != nullptr;
 }
 
 // ADR-0183 addendum: while a tag editor tab is active, its file list is
@@ -1179,10 +1178,8 @@ void BenchMainWindow::refreshTabActions() {
         list_edit_bar_->setView(available ? tab->view : nullptr);
     if (list_find_bar_ != nullptr) {
         auto* playlist_tab = currentMpdPlaylistTab();
-        auto* search_tab = currentMpdSearchTab();
         auto* find_view = available        ? tab->view
                           : playlist_tab   ? playlist_tab->view
-                          : search_tab     ? search_tab->view
                           : isMpdContext() ? mpd_queue_view_
                                            : nullptr;
         list_find_bar_->setView(find_view);
@@ -1205,7 +1202,6 @@ void BenchMainWindow::refreshTabActions() {
             qobject_cast<MetadataPropertiesDialog*>(tabs_->currentWidget()) != nullptr;
         close_tab_action_->setEnabled(
             properties_tab || currentMpdPlaylistTab() != nullptr ||
-            currentMpdSearchTab() != nullptr ||
             (available && !tab->document.pinned));
     }
 }
@@ -1232,10 +1228,6 @@ void BenchMainWindow::closeTabAt(const int index) {
             return;
         }
         closeMpdPlaylistTab(playlist_tab->name);
-        return;
-    }
-    if (auto* search_tab = mpdSearchTabForWidget(view)) {
-        closeMpdSearchTab(search_tab);
         return;
     }
     auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
@@ -1409,10 +1401,6 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     tabs_->setCurrentWidget(view);
     if (auto* playlist_tab = mpdPlaylistTabForWidget(view)) {
         showMpdPlaylistTrackMenu(*playlist_tab, position);
-        return;
-    }
-    if (auto* search_tab = mpdSearchTabForWidget(view)) {
-        showMpdSearchTrackMenu(*search_tab, position);
         return;
     }
 

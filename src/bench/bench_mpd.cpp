@@ -590,9 +590,6 @@ void BenchMainWindow::buildMpdWorkspace() {
                             for (const auto& playlist_tab : mpd_playlist_tabs_) {
                                 playlist_tab->model->acceptArtwork(token, image);
                             }
-                            for (const auto& search_tab : mpd_search_tabs_) {
-                                search_tab->model->acceptArtwork(token, image);
-                            }
                         });
                 watcher->setFuture(QtConcurrent::run([bytes] {
                     auto image = QImage::fromData(bytes);

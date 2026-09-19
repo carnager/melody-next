@@ -322,9 +322,6 @@ QTableView* BenchMainWindow::activeTrackView() {
     if (auto* playlist_tab = currentMpdPlaylistTab()) {
         return playlist_tab->view;
     }
-    if (auto* search_tab = currentMpdSearchTab()) {
-        return search_tab->view;
-    }
     if (isMpdContext()) {
         return mpd_queue_view_;
     }
@@ -345,10 +342,8 @@ void BenchMainWindow::refreshSelectionActions() {
     const auto server_ready = !isMpdContext() ||
                               (mpd_controller_ != nullptr && mpd_controller_->connected() &&
                                !mpd_controller_->commandBusy());
-    // A committed search is a result listing, not a list you edit.
-    const auto removable = currentMpdSearchTab() == nullptr;
     if (remove_selected_action_ != nullptr) {
-        remove_selected_action_->setEnabled(has_selection && server_ready && removable);
+        remove_selected_action_->setEnabled(has_selection && server_ready);
     }
     if (play_selected_action_ != nullptr) {
         play_selected_action_->setEnabled(view != nullptr && view->currentIndex().isValid() &&
@@ -371,13 +366,9 @@ void BenchMainWindow::refreshSelectionStatus() {
             convert_action_->setEnabled(false);
         }
         auto* playlist_tab = currentMpdPlaylistTab();
-        auto* search_tab = currentMpdSearchTab();
-        auto* view = playlist_tab   ? playlist_tab->view
-                     : search_tab   ? search_tab->view
-                                    : mpd_queue_view_;
-        const auto label = playlist_tab ? playlist_tab->name
-                           : search_tab ? QStringLiteral("Search: %1").arg(search_tab->query)
-                                        : QStringLiteral("MPD Queue");
+        auto* view = playlist_tab != nullptr ? playlist_tab->view : mpd_queue_view_;
+        const auto label =
+            playlist_tab != nullptr ? playlist_tab->name : QStringLiteral("MPD Queue");
         if (view->selectionModel() == nullptr) {
             selection_status_->setText(label);
             return;

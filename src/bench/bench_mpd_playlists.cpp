@@ -39,7 +39,6 @@ namespace trackknife::bench {
 
 namespace {
 constexpr char playlist_name_property[] = "bench-mpd-playlist-name";
-constexpr char search_query_property[] = "bench-mpd-search-query";
 } // namespace
 
 namespace {
@@ -48,14 +47,20 @@ constexpr int playlist_loaded_role = Qt::UserRole + 101;
 constexpr int playlist_track_uri_role = Qt::UserRole + 102;
 } // namespace
 
-QStringList BenchMainWindow::mpdPlaylistNames() const {
+// Every stored playlist the server has, working lists included. Name
+// collisions are decided here: the sidebar hides scratch lists, so reading
+// names off it would let a "new" list reuse an existing one's name and
+// quietly append to it.
+QStringList BenchMainWindow::mpdPlaylistNames() const { return mpd_playlist_names_; }
+
+// The curated ones only — what "Add to playlist" offers.
+QStringList BenchMainWindow::curatedPlaylistNames() const {
     QStringList names;
-    if (mpd_playlists_list_ == nullptr) {
-        return names;
-    }
-    names.reserve(mpd_playlists_list_->topLevelItemCount());
-    for (int index = 0; index < mpd_playlists_list_->topLevelItemCount(); ++index) {
-        names.push_back(mpd_playlists_list_->topLevelItem(index)->text(0));
+    names.reserve(mpd_playlist_names_.size());
+    for (const auto& name : mpd_playlist_names_) {
+        if (!mpd_scratch_lists_.contains(name)) {
+            names.push_back(name);
+        }
     }
     return names;
 }
@@ -353,29 +358,6 @@ void BenchMainWindow::refreshMpdPlaylistTabChrome(MpdPlaylistTab& tab) {
                                     : QStringLiteral("Stored playlist on the connected MPD server"));
 }
 
-// ADR-0140: committed search-result tabs. Query-keyed snapshots of a
-// finished library search, session-only like stored-playlist tabs, but
-// read-only: rows only feed the live queue.
-BenchMainWindow::MpdSearchTab* BenchMainWindow::mpdSearchTabForWidget(QWidget* widget) const {
-    if (widget == nullptr) {
-        return nullptr;
-    }
-    const auto found =
-        std::ranges::find(mpd_search_tabs_, widget, [](const std::unique_ptr<MpdSearchTab>& tab) {
-            return static_cast<QWidget*>(tab->view);
-        });
-    return found == mpd_search_tabs_.end() ? nullptr : found->get();
-}
-
-BenchMainWindow::MpdSearchTab* BenchMainWindow::currentMpdSearchTab() const {
-    return tabs_ == nullptr ? nullptr : mpdSearchTabForWidget(tabs_->currentWidget());
-}
-
-BenchMainWindow::MpdSearchTab* BenchMainWindow::mpdSearchTabForQuery(const QString& query) const {
-    const auto found = std::ranges::find(mpd_search_tabs_, query, &MpdSearchTab::query);
-    return found == mpd_search_tabs_.end() ? nullptr : found->get();
-}
-
 void BenchMainWindow::commitMpdSearchTab() {
     if (mpd_controller_ == nullptr || mpd_search_field_ == nullptr) {
         return;
@@ -402,107 +384,18 @@ void BenchMainWindow::commitMpdSearchTab() {
     openMpdSearchTab(query, std::move(tracks), true);
 }
 
+// ADR-0192: a committed search is a list like any other — it is written to
+// the server as a working list, so it can be edited, reordered, played and
+// added to exactly like the tabs beside it. Searching the same thing again
+// refreshes that list in place.
 void BenchMainWindow::openMpdSearchTab(const QString& query, std::vector<mpd::Track> tracks,
                                        const bool select) {
-    if (auto* existing = mpdSearchTabForQuery(query)) {
-        existing->model->replaceTracks(std::move(tracks));
-        if (select) {
-            tabs_->setCurrentWidget(existing->view);
-        }
-        refreshSelectionStatus();
-        return;
+    QStringList uris;
+    uris.reserve(static_cast<qsizetype>(tracks.size()));
+    for (const auto& track : tracks) {
+        uris.push_back(displayText(track.uri));
     }
-
-    auto tab = std::make_unique<MpdSearchTab>();
-    tab->query = query;
-    tab->model = new quick::MpdQueueModel(this);
-    tab->model->setArtworkEnabled(true);
-    connect(tab->model, &quick::MpdQueueModel::artworkRequested, mpd_controller_,
-            &quick::MpdProbeController::loadServerLibraryArtwork);
-
-    auto* view = new ui::QueueTableView(tabs_);
-    tab->view = view;
-    view->setObjectName(QStringLiteral("bench-mpd-search-tab-view"));
-    view->setProperty(search_query_property, query);
-    view->setAccessibleName(QStringLiteral("MPD search results %1").arg(query));
-    view->setModel(tab->model);
-    view->setAlternatingRowColors(true);
-    view->setShowGrid(false);
-    view->setSelectionBehavior(QAbstractItemView::SelectRows);
-    view->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    view->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    view->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    view->setWordWrap(false);
-    view->setTextElideMode(Qt::ElideRight);
-    view->verticalHeader()->hide();
-    view->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-    view->horizontalHeader()->setHighlightSections(false);
-    view->horizontalHeader()->setStretchLastSection(false);
-    view->horizontalHeader()->setMinimumSectionSize(24);
-    view->horizontalHeader()->setMaximumSectionSize(4'096);
-    view->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-    view->setDragEnabled(true);
-    view->setDragDropMode(QAbstractItemView::DragOnly);
-    view->setContextMenuPolicy(Qt::CustomContextMenu);
-
-    auto* raw_tab = tab.get();
-    connect(view, &QWidget::customContextMenuRequested, this,
-            [this, view](const QPoint& position) { showTrackContextMenu(view, position); });
-    // Enter and double-click append the selection to the live queue — the
-    // same contract as stored-playlist tabs and the live search surface.
-    view->setActivateCallback([this, raw_tab](const QModelIndex& index) {
-        if (index.isValid()) {
-            const auto uris = selectedMpdViewUris(raw_tab->view);
-            if (!uris.isEmpty()) {
-                mpd_controller_->addUris(uris, false);
-            }
-        }
-    });
-    connect(view, &QTableView::doubleClicked, this, [this, raw_tab](const QModelIndex& index) {
-        if (index.isValid()) {
-            const auto uris = selectedMpdViewUris(raw_tab->view);
-            if (!uris.isEmpty()) {
-                mpd_controller_->addUris(uris, false);
-            }
-        }
-    });
-    connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-            [this] { refreshSelectionStatus(); });
-    connect(tab->model, &QAbstractItemModel::modelReset, this,
-            [this] { refreshSelectionStatus(); });
-
-    tab->view_layout = mpd_view_layout_;
-    applyTrackViewLayout(view, tab->view_layout, mpd_view_layout_);
-    tab->model->replaceTracks(std::move(tracks));
-
-    const auto index =
-        tabs_->insertTab(mpdTabInsertionIndex(), view,
-                         QIcon::fromTheme(QStringLiteral("network-server")),
-                         QStringLiteral("Search: %1").arg(query));
-    tabs_->setTabToolTip(index,
-                         QStringLiteral("Committed MPD search results (snapshot of the query)"));
-    mpd_search_tabs_.push_back(std::move(tab));
-    if (select) {
-        tabs_->setCurrentIndex(index);
-        view->setFocus(Qt::ShortcutFocusReason);
-    }
-    refreshTabActions();
-}
-
-void BenchMainWindow::closeMpdSearchTab(MpdSearchTab* tab) {
-    if (tab == nullptr) {
-        return;
-    }
-    const auto index = tabs_->indexOf(tab->view);
-    if (index >= 0) {
-        tabs_->removeTab(index);
-    }
-    tab->view->deleteLater();
-    tab->model->deleteLater();
-    std::erase_if(mpd_search_tabs_,
-                  [tab](const std::unique_ptr<MpdSearchTab>& owned) { return owned.get() == tab; });
-    refreshTabActions();
+    createScratchListTab(query, uris, select);
 }
 
 
@@ -533,46 +426,6 @@ void BenchMainWindow::addMappedLocalTrackActions(QMenu* menu, const QStringList&
         connect(command, &QAction::triggered, this,
                 [this, uris, dialog] { materializeMpdSelectionForDialog(uris, dialog); });
     }
-}
-
-void BenchMainWindow::showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& position) {
-    if (track_context_menu_ == nullptr) {
-        return;
-    }
-    const auto target = tab.view->indexAt(position);
-    if (target.isValid() && tab.view->selectionModel() != nullptr &&
-        !tab.view->selectionModel()->isRowSelected(target.row(), target.parent())) {
-        tab.view->selectionModel()->select(target, QItemSelectionModel::ClearAndSelect |
-                                                       QItemSelectionModel::Rows);
-        tab.view->selectionModel()->setCurrentIndex(target, QItemSelectionModel::NoUpdate);
-    }
-    refreshSelectionStatus();
-    const auto command_ready = mpd_controller_->connected() && !mpd_controller_->commandBusy();
-    const auto uris = selectedMpdViewUris(tab.view);
-
-    track_context_menu_->clear();
-    auto* append = track_context_menu_->addAction(QStringLiteral("Append to live queue"));
-    append->setObjectName(QStringLiteral("action-mpd-search-append-selection"));
-    append->setEnabled(command_ready && !uris.isEmpty());
-    connect(append, &QAction::triggered, this,
-            [this, uris] { mpd_controller_->addUris(uris, false); });
-    auto* next = track_context_menu_->addAction(QStringLiteral("Insert next in live queue"));
-    next->setObjectName(QStringLiteral("action-mpd-search-next-selection"));
-    next->setEnabled(command_ready && !uris.isEmpty());
-    connect(next, &QAction::triggered, this,
-            [this, uris] { mpd_controller_->addUris(uris, true); });
-    auto* replace = track_context_menu_->addAction(QStringLiteral("Replace queue and play"));
-    replace->setObjectName(QStringLiteral("action-mpd-search-replace-selection"));
-    replace->setEnabled(command_ready && !uris.isEmpty());
-    connect(replace, &QAction::triggered, this,
-            [this, uris] { mpd_controller_->replaceQueueWithUris(uris); });
-    track_context_menu_->addSeparator();
-    addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-search-"));
-    addSendToTabMenu(track_context_menu_, [this, view = tab.view] {
-        return selectedMpdViewTracks(view);
-    });
-    addCopyToServerListMenu(track_context_menu_, tab.view);
-    track_context_menu_->popup(tab.view->viewport()->mapToGlobal(position));
 }
 
 void BenchMainWindow::acceptMpdStoredPlaylistNames(const QStringList& names) {

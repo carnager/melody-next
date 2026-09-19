@@ -50,8 +50,7 @@ int BenchMainWindow::mpdTabInsertionIndex() {
     ++index;
     while (index < tabs_->count()) {
         auto* widget = tabs_->widget(index);
-        if (mpdPlaylistTabForWidget(qobject_cast<QTableView*>(widget)) == nullptr &&
-            mpdSearchTabForWidget(qobject_cast<QTableView*>(widget)) == nullptr) {
+        if (mpdPlaylistTabForWidget(qobject_cast<QTableView*>(widget)) == nullptr) {
             break;
         }
         ++index;
@@ -104,7 +103,8 @@ QString BenchMainWindow::uniqueScratchListName() {
 // ADR-0191: a working tab is created on the server — a stored playlist
 // flagged scratch, so it belongs to whoever connects rather than to this
 // client, and opens as a tab instead of a sidebar entry.
-void BenchMainWindow::createScratchListTab(const QString& name, const QStringList& uris) {
+void BenchMainWindow::createScratchListTab(const QString& name, const QStringList& uris,
+                                          const bool select) {
     if (name.isEmpty() || uris.isEmpty()) {
         return;
     }
@@ -114,9 +114,14 @@ void BenchMainWindow::createScratchListTab(const QString& name, const QStringLis
         statusBar()->showMessage(QStringLiteral("Connect to MPD to create a working list"), 3'000);
         return;
     }
+    // Reusing a name replaces that list rather than growing it: committing
+    // the same search twice refreshes its tab instead of doubling it.
+    if (mpdPlaylistNames().contains(name)) {
+        mpd_controller_->clearStoredPlaylist(name);
+    }
     mpd_controller_->addToStoredPlaylist(name, uris, -1);
     mpd_controller_->setPlaylistScratch(name, true);
-    if (auto* tab = openMpdPlaylistTab(name, true)) {
+    if (auto* tab = openMpdPlaylistTab(name, select)) {
         tab->scratch = true;
     }
     refreshMpdPlaylistsSoon();
@@ -186,7 +191,7 @@ void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_vi
         mpd_controller_->addToStoredPlaylist(name, uris, -1);
         openMpdPlaylistTab(name, true);
     });
-    const auto playlist_names = mpdPlaylistNames();
+    const auto playlist_names = curatedPlaylistNames();
     if (!playlist_names.isEmpty()) {
         submenu->addSeparator();
         for (const auto& name : playlist_names) {

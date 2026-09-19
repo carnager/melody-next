@@ -145,16 +145,6 @@ class BenchMainWindow final : public QMainWindow {
         ui::TrackViewLayout view_layout;
     };
 
-    // Committed search-result tab (ADR-0140): keyed by the search query,
-    // session-only, holding the finished search's track-hit snapshot.
-    // Recommitting the same query refreshes the tab in place.
-    struct MpdSearchTab {
-        QString query;
-        quick::MpdQueueModel* model{nullptr};
-        QTableView* view{nullptr};
-        ui::TrackViewLayout view_layout;
-    };
-
     void buildPlaylistActions(QMenu* file_menu);
     void importPlaylistDialog();
     void exportPlaylistDialog();
@@ -225,13 +215,8 @@ class BenchMainWindow final : public QMainWindow {
     void refreshMpdPlaylistsSoon();
     void showMpdPlaylistSidebarMenu(const QPoint& position);
     void showMpdPlaylistTrackMenu(MpdPlaylistTab& tab, const QPoint& position);
-    [[nodiscard]] MpdSearchTab* mpdSearchTabForWidget(QWidget* widget) const;
-    [[nodiscard]] MpdSearchTab* currentMpdSearchTab() const;
-    [[nodiscard]] MpdSearchTab* mpdSearchTabForQuery(const QString& query) const;
     void commitMpdSearchTab();
     void openMpdSearchTab(const QString& query, std::vector<mpd::Track> tracks, bool select);
-    void closeMpdSearchTab(MpdSearchTab* tab);
-    void showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& position);
     void addMpdPlaylistActions(QMenu* menu, const QString& name);
     void promptSaveQueueAsPlaylist();
     void promptRenameMpdPlaylist(const QString& name);
@@ -464,7 +449,6 @@ class BenchMainWindow final : public QMainWindow {
     QPointer<SearchDialog> search_dialog_;
     QAction* replaygain_action_{nullptr};
     std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
-    std::vector<std::unique_ptr<MpdSearchTab>> mpd_search_tabs_;
 
     // ADR-0191: a working tab is a scratch list — a stored playlist on the
     // server flagged so it shows here rather than beside curated playlists.
@@ -472,7 +456,7 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] int mpdTabInsertionIndex();
     [[nodiscard]] QString uniqueScratchListName();
     [[nodiscard]] QString promptScratchListName();
-    void createScratchListTab(const QString& name, const QStringList& uris);
+    void createScratchListTab(const QString& name, const QStringList& uris, bool select = true);
     void promoteScratchList(const QString& name);
     void confirmCloseScratchList(const QString& name);
     // ADR-0190: every MPD-side tab is a destination for a selection of
@@ -505,6 +489,7 @@ class BenchMainWindow final : public QMainWindow {
     // tracks, like albums in the library.
     QTreeWidget* mpd_playlists_list_{nullptr};
     [[nodiscard]] QStringList mpdPlaylistNames() const;
+    [[nodiscard]] QStringList curatedPlaylistNames() const;
     QMenu* mpd_playlists_menu_{nullptr};
     QTimer* mpd_playlists_refresh_timer_{nullptr};
 

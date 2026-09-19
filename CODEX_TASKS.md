@@ -115,77 +115,88 @@ and the Covers page records the artwork/* policy keys for Wave 3.
 
 ---
 
-# Task 3: Two reported bugs (investigated, not fixed)
+# Task 3: Two reported bugs (root causes confirmed on the live server)
 
-Reported by the user; the notes below are verified starting points, not
-guesses. Neither is fixed.
+Reported by the user. Both were investigated against the running melodyd
+on the user's server, including its SQLite database — the findings below
+are measured, not hypothesised. Neither is fixed.
 
-## 3a. Server ReplayGain applies, but the output hover says it is off
+## 3a. ReplayGain applies, but the output hover says it is off
 
 Symptom: switching ReplayGain modes against Melody works (playback
 audibly gets quieter), yet the transport's output tooltip reads
 "Melody ReplayGain: Off".
 
-Verified:
+**Confirmed cause: the mode is only pushed to outputs that are enabled at
+the moment it changes, and Trackknife's output is not enabled.** Live
+evidence from the server:
 
-- The server state is correct. `replay_gain_status` on the live daemon
-  answers `replay_gain_mode: album`.
-- The tooltip does **not** read server state. It is built in
-  `src/bench/bench_mpd.cpp:1476-1485` from
-  `melody_endpoint_->snapshot().replay_gain_mode`, i.e. the *local
-  Melody playback endpoint's* player mode, which is set only when the
-  agent-protocol `replaygain` command arrives
-  (`src/audio/src/melody_agent.cpp:539` and `:577` →
-  `player.set_replay_gain_mode`).
-- melodyd's `cmdReplayGainMode`
-  (`../melody/melodyd/mpd_commands.go:2668-2678`) assigns
-  `c.app.cfg.Player.ReplayGain` in memory and pushes
-  `setProperty("replaygain", mode)` to `a.target()` — the fan-out over
-  *currently enabled* targets (`main.go:1362`). An endpoint that is not
-  enabled at that moment never learns the new mode, and the only replays
-  are on queue-reload paths (`main.go:2234`, `main.go:2388-2390`), not on
-  registration/enable.
+- `replay_gain_status` answers `replay_gain_mode: album` — server state is
+  correct.
+- `outputs` shows `Trackknife` with `outputenabled: 0`, while `caprica` is
+  `outputenabled: 1` and primary. The audible gain change happens on
+  caprica.
+- `cmdReplayGainMode` (`../melody/melodyd/mpd_commands.go:2668-2678`)
+  pushes `setProperty("replaygain", mode)` to `a.target()`, the fan-out
+  over *enabled* targets only (`main.go:1362`). A disabled endpoint never
+  receives it, and nothing replays the mode when an output is later
+  enabled or an agent re-registers — the only replays sit on queue-reload
+  paths (`main.go:2234`, `main.go:2388-2390`).
+- The tooltip reads the endpoint's *local player* mode
+  (`src/bench/bench_mpd.cpp:1476-1485` ←
+  `melody_endpoint_->snapshot().replay_gain_mode`, set only when the agent
+  `replaygain` command arrives, `src/audio/src/melody_agent.cpp:539`,
+  `:577`), so a never-notified endpoint honestly reports Off.
 
-Check in this order: (a) whether the Trackknife endpoint is in the
-enabled set when the mode changes, and whether registering/enabling an
-agent replays the current mode (it appears not to); (b) whether the
-agent-side `replaygain` handler updates the snapshot the tooltip reads;
-(c) whether the tooltip should show the *server's* mode
-(`replay_gain_status`, already parsed for `mpd_replaygain_button_`'s own
-tooltip at `bench_mpd.cpp:335`) rather than the endpoint's, since the
-user reads it as "server ReplayGain".
+Fix shape: melodyd should apply the current mode when an output is
+enabled or an agent registers (alongside the volume/queue sync it already
+does), not only to the enabled set at change time. Consider also whether
+a tooltip labelled as the server's ReplayGain should read
+`replay_gain_status` (already parsed for the toolbar button at
+`bench_mpd.cpp:335`) instead of the endpoint's player state.
 
-Related defect worth fixing in the same pass: melodyd never persists the
-mode to `melodyd.toml`, so it silently reverts on daemon restart while
-stock MPD keeps it.
+Secondary defect: runtime mode changes are never written back to
+`melodyd.toml`, so a restart silently reverts to the file's value. (On
+this server the file happens to say `replaygain = "album"` already, which
+masks the problem.)
 
 ## 3b. `REPLAYGAIN_ALBUM_GAIN MISSING` matches every track
 
-Symptom: the tkq query reports every indexed track as missing the field,
-including tracks that carry it.
+Symptom: the tkq query reports every track as missing the field.
 
-Verified:
+**Confirmed cause (Server library scope): melodyd stores ReplayGain in
+dedicated columns and never in the generic tag table, so tag-based filter
+conditions can never see it.** Live evidence from the server database:
 
-- A name mismatch is **ruled out**: the query canonicalizes through
-  `internal::tkq_canonical_field` (`src/persistence/src/tkq_row.cpp:37`)
-  → `metadata::canonicalize_field_name`
-  (`src/metadata/src/document.cpp:50`), yielding `replaygainalbumgain`,
-  which is exactly the spelling the FLAC mapping uses
-  (`src/metadata/src/flac_mapping.cpp:80`).
-- `MISSING` on a generic field compiles to
-  `NOT EXISTS(SELECT 1 FROM local_library_fields f WHERE f.canonical_name = ? …)`
-  (`src/persistence/src/local_library.cpp`, the `exists_head` region
-  around :615-660).
-- So the likely cause is that ReplayGain fields never reach
-  `local_library_fields` during scanning — see the inserts at
-  `local_library.cpp:414-433` and `:1875` and whatever assembles the
-  indexed field list for a scanned row. Fastest confirmation on a real
-  library database:
-  `SELECT DISTINCT canonical_name FROM local_library_fields WHERE canonical_name LIKE 'replaygain%';`
-  Empty result confirms it. The mirror symptom to check:
-  `REPLAYGAIN_ALBUM_GAIN PRESENT` should then match nothing.
+- `SELECT tag, COUNT(*) FROM track_tags WHERE lower(tag) LIKE '%replaygain%'`
+  → **zero rows**.
+- `SELECT COUNT(*), SUM(replay_gain_album IS NOT NULL AND replay_gain_album<>0), …`
+  → 66803 tracks, 66802 with album gain, 66793 with track gain. The data
+  is there, just not as tags.
+- The scanner writes these into the `tracks` columns
+  (`../melody/melodyd/scanner.go:802-805`), while the filter evaluator
+  resolves ordinary tags through `trackFieldValues` → `track["tags"]`
+  (`../melody/melodyd/filter_expr.go`), which has no replaygain entry for
+  any track. `(replaygain_album_gain == "")` therefore matches everything.
 
-Design constraint for the fix: per ADR-0166 the index must not answer
-"missing" from absent *evidence*. Either index these fields (preferred,
-they are ordinary tags) or make queries over unindexed fields report a
-Refresh requirement instead of silently matching everything.
+Fix shape (Melody side): teach the filter evaluator — and
+`tracksByConditions` for the indexed fast path — to resolve
+`replaygain_album_gain`, `replaygain_track_gain`,
+`replaygain_album_peak`, and `replaygain_track_peak` from the dedicated
+columns, exactly as `rating` and the technical pseudo-fields already are
+(`isTechnicalConditionTag` / `matchTechnicalCondition` are the pattern to
+copy; `buildTrackMap` already exposes them under `track["replay_gain"]`).
+Document them in `docs/protocol.md` alongside the technical conditions.
+
+If the same query also misbehaves in the **local Database scope**, that is
+a separate defect with the same shape on the Trackknife side: `MISSING`
+compiles to `NOT EXISTS(… local_library_fields …)`
+(`src/persistence/src/local_library.cpp`, `exists_head` region ~:615-660),
+name canonicalization is ruled out (query and indexer share
+`metadata::canonicalize_field_name`, both yielding
+`replaygainalbumgain`), so check whether the scanner writes RG fields into
+`local_library_fields` at all (inserts at `local_library.cpp:414-433` and
+`:1875`):
+`SELECT DISTINCT canonical_name FROM local_library_fields WHERE canonical_name LIKE 'replaygain%';`
+Per ADR-0166 the index must not answer "missing" from absent evidence —
+either index these fields or report a Refresh requirement.

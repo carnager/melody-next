@@ -16,6 +16,7 @@ qt_add_library(
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp
     bench_mpd.cpp
+    bench_mpd_list_tabs.cpp
     bench_mpd_playlists.cpp
     desktop_notifier.cpp
     mpris_service.cpp

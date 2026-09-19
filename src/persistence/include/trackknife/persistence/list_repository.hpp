@@ -20,7 +20,9 @@
 
 namespace trackknife::persistence {
 
-enum class ListKind : std::uint8_t { scratch, saved };
+// mpd documents are client-owned working lists of server tracks
+// (ADR-0181): every item is ListSource::mpd, rendered from its snapshot.
+enum class ListKind : std::uint8_t { scratch, saved, mpd };
 enum class ListSource : std::uint8_t { mpd, local };
 
 struct SnapshotField {

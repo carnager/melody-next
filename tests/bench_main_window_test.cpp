@@ -229,6 +229,7 @@ class BenchMainWindowTest final : public QObject {
     void convertDialogAppliesPermanentReplayGain();
     void settingsControlStartupContextAndMusicRoot();
     void mpdSugarActionsMaterializeAndOpenDialog();
+    void serverListTabsPersistAndRenderOffline();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
@@ -3801,6 +3802,89 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QSettings settings;
     settings.remove(QLatin1String(SettingsDialog::music_root_key));
     settings.sync();
+}
+
+// ADR-0181: client-owned server list tabs persist their snapshots and
+// render them with no connection; edits are pure client memory.
+void BenchMainWindowTest::serverListTabsPersistAndRenderOffline() {
+    const auto make_track = [](const char* uri, const char* artist, const char* title) {
+        trackknife::mpd::Track track;
+        track.uri = uri;
+        track.metadata = trackknife::mpd::Metadata{{
+            {"Artist", artist},
+            {"Title", title},
+        }};
+        track.duration = std::chrono::milliseconds{200'000};
+        return track;
+    };
+    {
+        BenchMainWindow window;
+        window.show();
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_VERIFY(tabs->count() >= 2);
+        auto* tab = window.createServerListTab(
+            QStringLiteral("Road trip"),
+            {make_track("Artist/Album/01.flac", "First", "Opening"),
+             make_track("Artist/Album/02.flac", "First", "Middle"),
+             make_track("Artist/Album/03.flac", "First", "Closing")});
+        QVERIFY(tab != nullptr);
+        QCOMPARE(tab->model->rowCount(), 3);
+
+        // Client-side reorder and removal, no server round trips.
+        QCOMPARE(tab->model->moveTrackRows({2}, 0), 0);
+        tab->model->removeTrackRows({1});
+        window.markMpdListTabDirty(*tab);
+        QCOMPARE(tab->model->rowCount(), 2);
+        QCOMPARE(tab->model->trackAt(0)->uri, std::string{"Artist/Album/03.flac"});
+        QCOMPARE(tab->model->trackAt(1)->uri, std::string{"Artist/Album/02.flac"});
+
+        // The context menu offers the playback gestures and client removal.
+        tab->view->selectRow(0);
+        QVERIFY(QMetaObject::invokeMethod(
+            tab->view, "customContextMenuRequested", Qt::DirectConnection,
+            Q_ARG(QPoint, tab->view->visualRect(tab->model->index(0, 0)).center())));
+        for (const auto* name :
+             {"action-mpd-list-replace-selection", "action-mpd-list-append-selection",
+              "action-mpd-list-next-selection", "action-mpd-list-remove-selection",
+              "action-mpd-list-edit-tags", "action-mpd-list-replaygain",
+              "action-mpd-list-convert"}) {
+            QVERIFY2(window.findChild<QAction*>(QLatin1String(name)) != nullptr, name);
+        }
+        window.close();
+    }
+
+    BenchMainWindow reopened;
+    reopened.show();
+    auto* tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    BenchMainWindow::MpdListTab* restored = nullptr;
+    QTRY_VERIFY([&] {
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (auto* found = reopened.mpdListTabForWidget(tabs->widget(i))) {
+                restored = found;
+                return true;
+            }
+        }
+        return false;
+    }());
+    QCOMPARE(displayText(restored->document.name), QStringLiteral("Road trip"));
+    QCOMPARE(restored->model->rowCount(), 2);
+    // Offline rendering comes from the persisted snapshot fields.
+    QCOMPARE(restored->model->trackAt(0)->uri, std::string{"Artist/Album/03.flac"});
+    QCOMPARE(restored->model->trackAt(0)->metadata.first("Artist"),
+             std::optional<std::string_view>{"First"});
+    QCOMPARE(restored->model->trackAt(0)->metadata.first("Title"),
+             std::optional<std::string_view>{"Closing"});
+    QCOMPARE(restored->model->trackAt(0)->duration,
+             std::optional{std::chrono::milliseconds{200'000}});
+
+    // The MPD queue context menu offers the creation gesture.
+    auto* queue_view = reopened.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
+    QVERIFY(queue_view != nullptr);
+    tabs->setCurrentWidget(queue_view);
+    QVERIFY(reopened.findChild<QMenu*>(QStringLiteral("bench-copy-to-server-list-menu")) ==
+            nullptr);
 }
 
 void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {

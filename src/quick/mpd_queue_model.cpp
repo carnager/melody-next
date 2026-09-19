@@ -8,6 +8,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <functional>
 #include <chrono>
 #include <cstddef>
 #include <limits>
@@ -371,6 +372,70 @@ void MpdQueueModel::setCurrentSongId(const std::optional<std::uint32_t> song_id)
     if (new_row && new_row != old_row) {
         emit dataChanged(index(*new_row, 0), index(*new_row, column_count - 1), {CurrentRole});
     }
+}
+
+void MpdQueueModel::appendTracks(std::vector<mpd::Track> tracks) {
+    if (tracks.empty() ||
+        tracks_.size() + tracks.size() >
+            static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return;
+    }
+    const auto first = static_cast<int>(tracks_.size());
+    beginInsertRows({}, first, first + static_cast<int>(tracks.size()) - 1);
+    tracks_.insert(tracks_.end(), std::make_move_iterator(tracks.begin()),
+                   std::make_move_iterator(tracks.end()));
+    endInsertRows();
+    synchronizeArtwork();
+    requestNextArtwork();
+}
+
+void MpdQueueModel::removeTrackRows(QList<int> rows) {
+    std::sort(rows.begin(), rows.end(), std::greater<>{});
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    for (const auto row : rows) {
+        if (row < 0 || static_cast<std::size_t>(row) >= tracks_.size()) {
+            continue;
+        }
+        beginRemoveRows({}, row, row);
+        tracks_.erase(tracks_.begin() + row);
+        endRemoveRows();
+    }
+    synchronizeArtwork();
+}
+
+int MpdQueueModel::moveTrackRows(const QList<int>& rows, const int insertion_row) {
+    std::vector<int> sources;
+    sources.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto row : rows) {
+        if (row >= 0 && static_cast<std::size_t>(row) < tracks_.size()) {
+            sources.push_back(row);
+        }
+    }
+    std::sort(sources.begin(), sources.end());
+    sources.erase(std::unique(sources.begin(), sources.end()), sources.end());
+    if (sources.empty()) {
+        return -1;
+    }
+    std::vector<mpd::Track> block;
+    block.reserve(sources.size());
+    for (const auto row : sources) {
+        block.push_back(tracks_[static_cast<std::size_t>(row)]);
+    }
+    auto target = std::clamp(insertion_row, 0, static_cast<int>(tracks_.size()));
+    for (const auto row : sources) {
+        if (row < target) {
+            --target;
+        }
+    }
+    beginResetModel();
+    for (auto it = sources.rbegin(); it != sources.rend(); ++it) {
+        tracks_.erase(tracks_.begin() + *it);
+    }
+    tracks_.insert(tracks_.begin() + target, std::make_move_iterator(block.begin()),
+                   std::make_move_iterator(block.end()));
+    endResetModel();
+    synchronizeArtwork();
+    return target;
 }
 
 void MpdQueueModel::replaceTracks(std::vector<mpd::Track> tracks) {

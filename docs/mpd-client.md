@@ -224,17 +224,22 @@ The central tab strip contains several explicit list kinds from ADR-0010:
 - live MPD queue;
 - MPD stored playlists;
 - unsaved/persistent scratch lists;
-- named Trackknife lists.
+- named Trackknife lists;
+- persistent client-owned server list tabs (ADR-0181).
 
 All kinds preserve duplicates and order and use the same virtualized track
 view. Their supported mutations and save targets differ. Tabs hold server
-items only: tags, ReplayGain, renaming, and conversion are Trackbench work,
-and handing a mapped tab or selection to Trackbench is deferred cross-tool
-work (ADR-0025). There is no mixed playback-queue tab.
+items only: in-place tags, ReplayGain, renaming, and conversion stay
+Trackbench work, reachable from mapped selections through the explicit
+materialization actions (ADR-0180). There is no mixed playback-queue tab.
 
-Scratch and named Trackknife lists store rich snapshots so remote entries stay
-legible while disconnected. Snapshot metadata is fallback display data, not
-canonical server or file metadata.
+Server list tabs (ADR-0181) are persistent client-owned working lists of
+server tracks: created by "Copy to server list" from the queue, committed
+searches, or stored playlist tabs; reordered, trimmed, and renamed purely
+client-side; restored across restarts from their metadata snapshots so
+they stay legible while disconnected. Activation appends to the live
+queue; "Replace queue and play" is the explicit playback gesture. Snapshot
+metadata is fallback display data, not canonical server or file metadata.
 
 ## Server library and search
 

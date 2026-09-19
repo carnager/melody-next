@@ -1248,6 +1248,19 @@ void BenchMainWindow::applyLibraryOrder(const bool persist) {
     }
 }
 
+std::optional<core::StableId> BenchMainWindow::currentMpdProfileId() const {
+    if (mpd_controller_ != nullptr) {
+        if (const auto parsed =
+                core::StableId::parse(mpd_controller_->profileId().toStdString())) {
+            return *parsed;
+        }
+    }
+    if (!mpd_profiles_.empty()) {
+        return mpd_profiles_.front().id;
+    }
+    return std::nullopt;
+}
+
 QString BenchMainWindow::effectiveMpdMusicRoot() const {
     if (mpd_controller_ != nullptr) {
         const auto parsed = core::StableId::parse(mpd_controller_->profileId().toStdString());

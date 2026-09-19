@@ -226,6 +226,7 @@ class BenchMainWindow final : public QMainWindow {
 
     ListTab* addListTab(persistence::ListDocument document, bool select);
     [[nodiscard]] QString effectiveMpdMusicRoot() const;
+    [[nodiscard]] std::optional<core::StableId> currentMpdProfileId() const;
     ListTab* materializeMpdSelectionAsLocalTab(const QStringList& uris);
     void maybeOpenMaterializedDialog();
     [[nodiscard]] ListTab* currentListTab();
@@ -429,6 +430,26 @@ class BenchMainWindow final : public QMainWindow {
     QAction* replaygain_action_{nullptr};
     std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
     std::vector<std::unique_ptr<MpdSearchTab>> mpd_search_tabs_;
+
+    // ADR-0181: client-owned persistent working list of server tracks,
+    // rendered from metadata snapshots and edited purely client-side.
+    struct MpdListTab {
+        persistence::ListDocument document;
+        quick::MpdQueueModel* model{nullptr};
+        QTableView* view{nullptr};
+        ui::TrackViewLayout view_layout;
+    };
+    std::vector<std::unique_ptr<MpdListTab>> mpd_list_tabs_;
+    MpdListTab* addMpdListTab(persistence::ListDocument document, bool select);
+    MpdListTab* mpdListTabForWidget(QWidget* widget);
+    MpdListTab* currentMpdListTab();
+    void closeMpdListTab(MpdListTab* tab);
+    void refreshMpdListTabChrome(MpdListTab& tab);
+    void markMpdListTabDirty(MpdListTab& tab);
+    void showMpdListTrackMenu(MpdListTab& tab, const QPoint& position);
+    void addCopyToServerListMenu(QMenu* menu, QTableView* source_view);
+    [[nodiscard]] std::vector<mpd::Track> selectedMpdViewTracks(QTableView* view) const;
+    MpdListTab* createServerListTab(const QString& name, std::vector<mpd::Track> tracks);
     // Enter pressed before the debounced search finished: commit this
     // query as soon as its results arrive (ADR-0140).
     QString pending_mpd_search_commit_;

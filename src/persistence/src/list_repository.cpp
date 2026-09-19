@@ -24,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 36U;
+constexpr unsigned current_schema_version = 37U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1089,6 +1089,16 @@ UPDATE schema_version SET version = 36;
             return result;
         }
     }
+    if (version <= 36) {
+        // ADR-0181: list documents may now use kind 2 (mpd). No DDL change;
+        // the bump makes older builds refuse the database cleanly instead
+        // of failing on an unknown document kind at load time.
+        constexpr auto migration = "UPDATE schema_version SET version = 37;";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
     if (auto result = execute(database, "COMMIT"); !result) {
         rollback();
         return result;
@@ -1637,7 +1647,8 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
         auto id = core::StableId::parse(id_text);
         const auto kind = sqlite3_column_int(documents_query->get(), 1);
         if (!id || (kind != static_cast<int>(ListKind::scratch) &&
-                    kind != static_cast<int>(ListKind::saved))) {
+                    kind != static_cast<int>(ListKind::saved) &&
+                    kind != static_cast<int>(ListKind::mpd))) {
             return std::unexpected(core::Error{.code = core::ErrorCode::database,
                                                .message = "Invalid persisted list document",
                                                .context = {{"document_id", id_text}}});

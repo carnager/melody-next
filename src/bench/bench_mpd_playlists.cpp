@@ -453,6 +453,7 @@ void BenchMainWindow::showMpdSearchTrackMenu(MpdSearchTab& tab, const QPoint& po
             [this, uris] { mpd_controller_->replaceQueueWithUris(uris); });
     track_context_menu_->addSeparator();
     addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-search-"));
+    addCopyToServerListMenu(track_context_menu_, tab.view);
     track_context_menu_->popup(tab.view->viewport()->mapToGlobal(position));
 }
 
@@ -600,6 +601,7 @@ void BenchMainWindow::showMpdPlaylistTrackMenu(MpdPlaylistTab& tab, const QPoint
             [this, uris] { mpd_controller_->addUris(uris, true); });
     track_context_menu_->addSeparator();
     addMappedLocalTrackActions(track_context_menu_, uris, QStringLiteral("action-mpd-playlist-"));
+    addCopyToServerListMenu(track_context_menu_, tab.view);
     track_context_menu_->addSeparator();
     auto* remove = track_context_menu_->addAction(QStringLiteral("Remove from playlist"));
     remove->setObjectName(QStringLiteral("action-mpd-playlist-remove-selection"));

@@ -64,6 +64,15 @@ class MpdQueueModel final : public QAbstractTableModel {
     }
 
     void replaceTracks(std::vector<mpd::Track> tracks);
+    // ADR-0181: client-mode editing for client-owned server list tabs. The
+    // live-queue instance never calls these; server reconciliation stays in
+    // replaceTracks.
+    void appendTracks(std::vector<mpd::Track> tracks);
+    void removeTrackRows(QList<int> rows);
+    // Moves the given rows in front of insertion_row (rows-count semantics of
+    // QueueTableView's reorder callback); returns the moved block's first
+    // final row, or -1 when nothing moved.
+    int moveTrackRows(const QList<int>& rows, int insertion_row);
     void setCurrentSongId(std::optional<std::uint32_t> song_id);
     void setArtworkEnabled(bool enabled);
     // ADR-0179: per-URI sticker ratings from the session snapshot. A track's

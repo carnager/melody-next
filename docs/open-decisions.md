@@ -4,7 +4,9 @@ Accepted foundations are recorded in ADRs through 0174. ADR-0058 supersedes
 ADR-0025's permanent process split: Trackbench is the primary workspace and
 hosts authority-bound MPD Queue and Local Queue tabs. The active primary tab
 switches the server-library/local-folders sidebar, MPD/PipeWire output selector,
-transport controller, row type, and available commands. The queues never mix,
+transport controller, row type, and available commands. The queues never mix
+(a persisted document is entirely local or entirely server rows; ADR-0181's
+server list tabs are the client-owned MPD-row kind),
 and local operations remain unavailable to MPD rows. The former standalone
 Trackknife executable was retired in ADR-0071; stored-playlist tabs were
 migrated in ADR-0129 and committed search tabs in ADR-0140.

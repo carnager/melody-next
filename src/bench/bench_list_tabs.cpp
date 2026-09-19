@@ -193,6 +193,12 @@ void BenchMainWindow::initializePersistence() {
 void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> documents) {
     lists_restored_ = true;
     for (auto& document : documents) {
+        if (document.kind == persistence::ListKind::mpd) {
+            // ADR-0181: client-owned server list tabs restore from their
+            // snapshots without any connection.
+            addMpdListTab(std::move(document), false);
+            continue;
+        }
         addListTab(std::move(document), false);
     }
     if (list_tabs_.empty()) {
@@ -238,6 +244,46 @@ std::vector<persistence::ListDocument> BenchMainWindow::collectDocuments() {
         const auto id = view->property("bench-document-id").toString();
         auto* tab = tabForDocument(id);
         if (tab == nullptr) {
+            if (auto* list_tab = mpdListTabForWidget(view)) {
+                auto document = list_tab->document;
+                document.items.clear();
+                // ADR-0181: mpd items require a profile identity; keep the
+                // one the document was saved with, else stamp the current
+                // connection's (a random id is the never-expected last
+                // resort that keeps the workspace save valid).
+                auto profile_id = list_tab->document.items.empty()
+                                      ? std::optional<core::StableId>{}
+                                      : list_tab->document.items.front().profile_id;
+                if (!profile_id) {
+                    profile_id = currentMpdProfileId();
+                }
+                if (!profile_id) {
+                    profile_id = core::StableId::random();
+                }
+                for (const auto& track : list_tab->model->tracksSnapshot()) {
+                    persistence::ListItem item{
+                        .source = persistence::ListSource::mpd,
+                        .profile_id = profile_id,
+                        .source_reference = track.uri,
+                        .logical_reference = std::nullopt,
+                        .segment = std::nullopt,
+                        .source_selection = std::nullopt,
+                        .duration_ms = track.duration
+                                           ? std::optional<std::int64_t>{track.duration->count()}
+                                           : std::nullopt,
+                        .fields = {},
+                    };
+                    item.fields.reserve(track.metadata.fields().size());
+                    for (const auto& pair : track.metadata.fields()) {
+                        item.fields.push_back(persistence::SnapshotField{
+                            .name = pair.name,
+                            .value = pair.value,
+                        });
+                    }
+                    document.items.push_back(std::move(item));
+                }
+                documents.push_back(std::move(document));
+            }
             continue;
         }
         auto document = tab->document;
@@ -329,6 +375,15 @@ std::vector<persistence::TrackViewPreset> BenchMainWindow::collectTrackViewLayou
                                : ui::serializeTrackViewLayout(captureTrackViewLayout(*tab));
         layouts.push_back(persistence::TrackViewPreset{
             .binding = utf8Bytes(QStringLiteral("local:%1").arg(id)),
+            .header_state = std::string{bytes.constData(), static_cast<std::size_t>(bytes.size())},
+        });
+    }
+    for (const auto& tab : mpd_list_tabs_) {
+        const auto id = QString::fromStdString(tab->document.id.to_string());
+        const auto bytes = ui::serializeTrackViewLayout(
+            captureTrackViewLayout(tab->view, tab->view_layout));
+        layouts.push_back(persistence::TrackViewPreset{
+            .binding = utf8Bytes(QStringLiteral("mpd-list:%1").arg(id)),
             .header_state = std::string{bytes.constData(), static_cast<std::size_t>(bytes.size())},
         });
     }
@@ -1077,11 +1132,15 @@ void BenchMainWindow::refreshTabActions() {
         find_next_action_->setEnabled(find_view != nullptr);
         find_previous_action_->setEnabled(find_view != nullptr);
     }
+    const auto mpd_list_available = currentMpdListTab() != nullptr;
     for (auto* action :
          {duplicate_tab_action_, pin_tab_action_, save_tab_action_, rename_tab_action_}) {
         if (action != nullptr) {
             action->setEnabled(available);
         }
+    }
+    if (rename_tab_action_ != nullptr && mpd_list_available) {
+        rename_tab_action_->setEnabled(true);
     }
     if (pin_tab_action_ != nullptr) {
         const QSignalBlocker blocker{pin_tab_action_};
@@ -1090,9 +1149,11 @@ void BenchMainWindow::refreshTabActions() {
     if (close_tab_action_ != nullptr) {
         const auto properties_tab =
             qobject_cast<MetadataPropertiesDialog*>(tabs_->currentWidget()) != nullptr;
-        close_tab_action_->setEnabled(properties_tab || currentMpdPlaylistTab() != nullptr ||
-                                      currentMpdSearchTab() != nullptr ||
-                                      (available && !tab->document.pinned));
+        close_tab_action_->setEnabled(
+            properties_tab || currentMpdPlaylistTab() != nullptr ||
+            currentMpdSearchTab() != nullptr ||
+            (currentMpdListTab() != nullptr && !currentMpdListTab()->document.pinned) ||
+            (available && !tab->document.pinned));
     }
 }
 
@@ -1115,6 +1176,14 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     if (auto* search_tab = mpdSearchTabForWidget(view)) {
         closeMpdSearchTab(search_tab);
+        return;
+    }
+    if (auto* list_tab = mpdListTabForWidget(view)) {
+        if (list_tab->document.pinned) {
+            statusBar()->showMessage(QStringLiteral("Unpin this list before closing it"), 3'000);
+            return;
+        }
+        closeMpdListTab(list_tab);
         return;
     }
     auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
@@ -1239,6 +1308,20 @@ void BenchMainWindow::saveCurrentList() {
 }
 
 void BenchMainWindow::renameCurrentList() {
+    if (auto* list_tab = currentMpdListTab()) {
+        const auto current_name = displayText(list_tab->document.name);
+        bool accepted = false;
+        const auto name =
+            QInputDialog::getText(this, QStringLiteral("Rename list"), QStringLiteral("Name:"),
+                                  QLineEdit::Normal, current_name, &accepted)
+                .trimmed();
+        if (!accepted || name.isEmpty() || name == current_name) {
+            return;
+        }
+        list_tab->document.name = utf8Bytes(name);
+        markMpdListTabDirty(*list_tab);
+        return;
+    }
     auto* tab = currentListTab();
     if (tab == nullptr) {
         return;
@@ -1292,6 +1375,10 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     }
     if (auto* search_tab = mpdSearchTabForWidget(view)) {
         showMpdSearchTrackMenu(*search_tab, position);
+        return;
+    }
+    if (auto* list_tab = mpdListTabForWidget(view)) {
+        showMpdListTrackMenu(*list_tab, position);
         return;
     }
 
@@ -1404,6 +1491,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
             }
         }
         track_context_menu_->addSeparator();
+        addCopyToServerListMenu(track_context_menu_, mpd_queue_view_);
         const auto queue_uris = selectedMpdQueueUris();
         if (mpd_playlists_list_ != nullptr && mpd_playlists_list_->count() > 0) {
             auto* playlist_menu = track_context_menu_->addMenu(QStringLiteral("Add to playlist"));

@@ -73,6 +73,9 @@ class MpdQueueModel final : public QAbstractTableModel {
     // QueueTableView's reorder callback); returns the moved block's first
     // final row, or -1 when nothing moved.
     int moveTrackRows(const QList<int>& rows, int insertion_row);
+    // Re-arms artwork requests that came back empty (e.g. fired while the
+    // connection was down) and pumps the request cycle again.
+    void retryMissingArtwork();
     void setCurrentSongId(std::optional<std::uint32_t> song_id);
     void setArtworkEnabled(bool enabled);
     // ADR-0179: per-URI sticker ratings from the session snapshot. A track's

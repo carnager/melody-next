@@ -517,6 +517,21 @@ void MpdQueueModel::setArtworkEnabled(const bool enabled) {
     }
 }
 
+void MpdQueueModel::retryMissingArtwork() {
+    bool rearmed = false;
+    for (auto& artwork : album_artwork_) {
+        if (artwork.requested && artwork.image.isNull() &&
+            (!active_artwork_token_ || artwork.token != *active_artwork_token_)) {
+            artwork.requested = false;
+            artwork.token = 0U;
+            rearmed = true;
+        }
+    }
+    if (rearmed) {
+        requestNextArtwork();
+    }
+}
+
 void MpdQueueModel::acceptArtwork(const quint64 token, const QImage& image) {
     if (!active_artwork_token_ || *active_artwork_token_ != token) {
         return;

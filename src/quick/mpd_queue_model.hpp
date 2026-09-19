@@ -110,7 +110,6 @@ class MpdQueueModel final : public QAbstractTableModel {
     std::optional<std::uint32_t> current_song_id_;
     QHash<QString, AlbumArtwork> album_artwork_;
     std::optional<quint64> active_artwork_token_;
-    quint64 artwork_generation_{0U};
     bool artwork_enabled_{false};
 };
 

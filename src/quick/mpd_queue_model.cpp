@@ -8,6 +8,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <chrono>
 #include <cstddef>
@@ -23,6 +24,11 @@ namespace {
 
 constexpr qsizetype maximum_artwork_requests = 64;
 constexpr quint64 artwork_token_namespace = quint64{1} << 62U;
+// One counter for every MpdQueueModel instance: the live queue, playlist,
+// search, and server list tabs all receive the broadcast artwork responses,
+// so per-instance counters would mint colliding tokens and paint one
+// album's cover onto another model's pending album.
+std::atomic<quint64> artwork_generation{0U};
 
 [[nodiscard]] QString from_utf8(std::string_view value) {
     return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
@@ -593,7 +599,7 @@ void MpdQueueModel::requestNextArtwork() {
             continue;
         }
         artwork->requested = true;
-        artwork->token = artwork_token_namespace | ++artwork_generation_;
+        artwork->token = artwork_token_namespace | ++artwork_generation;
         active_artwork_token_ = artwork->token;
         emit artworkRequested(artwork->token, artwork->uri);
         return;

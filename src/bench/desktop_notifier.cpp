@@ -35,7 +35,7 @@ bool DesktopNotifier::publish(const MprisPlaybackState& state, const bool window
     if (playing) {
         last_track_key_ = state.track_key;
     }
-    if (!changed || !enabled_ || window_active) {
+    if (!changed || !enabled_ || (background_only_ && window_active)) {
         return false;
     }
     const auto summary = state.title.isEmpty() ? state.track_key : state.title;
@@ -53,13 +53,19 @@ bool DesktopNotifier::publish(const MprisPlaybackState& state, const bool window
     return true;
 }
 
+void DesktopNotifier::sendTest() {
+    send(QStringLiteral("Trackknife"), QStringLiteral("Track-change notifications are working."));
+}
+
 void DesktopNotifier::send(const QString& summary, const QString& body) {
     if (send_override_) {
         send_override_(summary, body);
+        emit deliveryFinished({});
         return;
     }
     auto bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) {
+        emit deliveryFinished(QStringLiteral("No desktop session bus is available"));
         return;
     }
     auto call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.Notifications"),
@@ -67,8 +73,9 @@ void DesktopNotifier::send(const QString& summary, const QString& body) {
                                                QStringLiteral("org.freedesktop.Notifications"),
                                                QStringLiteral("Notify"));
     QVariantMap hints;
-    hints.insert(QStringLiteral("urgency"), QVariant::fromValue(static_cast<uchar>(0U)));
+    hints.insert(QStringLiteral("urgency"), QVariant::fromValue(static_cast<uchar>(1U)));
     hints.insert(QStringLiteral("transient"), true);
+    hints.insert(QStringLiteral("suppress-sound"), true);
     hints.insert(QStringLiteral("desktop-entry"), QStringLiteral("trackknife"));
     call << QStringLiteral("Trackknife") << replace_id_ << QStringLiteral("audio-x-generic")
          << summary << body << QStringList{} << hints << -1;
@@ -79,6 +86,7 @@ void DesktopNotifier::send(const QString& summary, const QString& body) {
                 if (reply.isValid()) {
                     replace_id_ = reply.value();
                 }
+                emit deliveryFinished(reply.isError() ? reply.error().message() : QString{});
                 finished->deleteLater();
             });
 }

@@ -9,9 +9,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <functional>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -407,9 +407,8 @@ void MpdQueueModel::setCurrentSongId(const std::optional<std::uint32_t> song_id)
 }
 
 void MpdQueueModel::appendTracks(std::vector<mpd::Track> tracks) {
-    if (tracks.empty() ||
-        tracks_.size() + tracks.size() >
-            static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    if (tracks.empty() || tracks_.size() + tracks.size() >
+                              static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         return;
     }
     const auto first = static_cast<int>(tracks_.size());
@@ -422,9 +421,8 @@ void MpdQueueModel::appendTracks(std::vector<mpd::Track> tracks) {
 }
 
 void MpdQueueModel::insertTracks(const int insertion_row, std::vector<mpd::Track> tracks) {
-    if (tracks.empty() ||
-        tracks_.size() + tracks.size() >
-            static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    if (tracks.empty() || tracks_.size() + tracks.size() >
+                              static_cast<std::size_t>(std::numeric_limits<int>::max())) {
         return;
     }
     if (insertion_row < 0 || insertion_row >= static_cast<int>(tracks_.size())) {

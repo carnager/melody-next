@@ -159,6 +159,10 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void loadNewestRootOrder(const QString& tag);
     Q_INVOKABLE void moveQueueItem(int row, int target_row);
     Q_INVOKABLE void moveQueueItems(const QVariantList& rows, int insertion_row);
+    [[nodiscard]] const mpd::Track* listPriorityTrack(const QString& context, int row,
+                                                      const QString& uri) const;
+    void setListPriority(const QString& context, const QList<QPair<int, QString>>& selection,
+                         int priority);
     Q_INVOKABLE void setQueuePriority(const QVariantList& rows, int priority);
     // ADR-0179: 0-10 track/album ratings. The backend is picked from the
     // advertised commands: Melody's native rate extension when getrating is
@@ -170,9 +174,12 @@ class MpdProbeController final : public QObject {
     [[nodiscard]] bool supportsAlbumRatings() const {
         return supportsCommand(QStringLiteral("albumrate"));
     }
+    void setTracksRating(const std::vector<mpd::Track>& tracks, int rating,
+                         const QString& list_name = {});
     Q_INVOKABLE void setTrackRating(const QVariantList& rows, int rating);
     Q_INVOKABLE void setMelodyAlbumRating(const QString& album_artist, const QString& album,
-                                          const QString& date, int rating);
+                                          const QString& date, int rating,
+                                          const QString& list_name = {});
     // The explicitly stored Melody album rating for a queue album group;
     // 0 when unrated or not yet loaded.
     [[nodiscard]] unsigned melodyStoredAlbumRating(const QString& group_key) const {
@@ -184,6 +191,11 @@ class MpdProbeController final : public QObject {
     [[nodiscard]] bool supportsPlaybackContexts() const {
         return connected_ && supportsCommand(QStringLiteral("melody_context"));
     }
+    [[nodiscard]] const std::optional<mpd::RequestQueueState>& requestQueue() const {
+        return request_queue_;
+    }
+    void lastFm(const QString& operation, const QStringList& arguments = {});
+    void editRequestQueue(mpd::RequestQueueCommand command);
     [[nodiscard]] QString activeContextName() const { return active_context_; }
     // Queue position of the playing song, -1 when nothing plays.
     [[nodiscard]] int songPosition() const { return song_position_; }
@@ -209,6 +221,10 @@ class MpdProbeController final : public QObject {
     // row < 0 resumes where the list was left.
     Q_INVOKABLE void playStoredPlaylistContext(const QString& name, int row);
     Q_INVOKABLE void playQueueContext(int row);
+    // One list interface; an empty name addresses the unnamed server context.
+    void playListContext(const QString& name, int row);
+    void removeListItems(const QString& name, const QVariantList& rows);
+    void cropListToItems(const QString& name, const QVariantList& rows, int row_count);
     // Queue-context row removal, shared by delete/crop/clear while stashed.
     void removeQueueContextRows(const std::vector<int>& rows);
     Q_INVOKABLE void browseScratchLists();
@@ -254,6 +270,7 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void setOutputEnabled(quint32 output_id, bool enabled);
 
   signals:
+    void lastFmCompleted(const QString& operation, const QByteArray& json, const QString& error);
     void stateChanged();
     void notificationRequested(const QString& message);
     void searchFinished(const QString& query, bool success);
@@ -322,6 +339,11 @@ class MpdProbeController final : public QObject {
     mpd::PlaybackModeState consume_mode_{mpd::PlaybackModeState::unknown};
     mpd::ReplayGainMode replay_gain_mode_{mpd::ReplayGainMode::unknown};
     QString active_context_;
+    std::vector<mpd::Track> active_context_tracks_;
+    std::optional<mpd::RequestQueueState> request_queue_;
+    QHash<quint64, QString> lastfm_commands_;
+    QHash<quint64, QString> pending_rating_lists_;
+    QHash<quint64, int> pending_list_playbacks_;
     std::optional<std::uint64_t> pending_scratch_query_;
     int song_position_{-1};
     bool queue_stashed_{false};
@@ -352,6 +374,8 @@ class MpdProbeController final : public QObject {
     bool search_has_more_{false};
     std::optional<std::uint64_t> pending_browser_query_;
     std::optional<std::uint64_t> pending_newest_order_;
+    QString pending_newest_tag_;
+    QHash<QString, QStringList> newest_order_cache_;
     std::optional<std::uint64_t> pending_tag_query_;
     std::optional<std::uint64_t> pending_stored_playlists_query_;
     QString pending_tag_name_;

@@ -189,6 +189,28 @@ QString MpdProbeController::replayGainMode() const {
     return replay_gain_name(optimistic_replay_gain_.value_or(replay_gain_mode_));
 }
 
+void MpdProbeController::lastFm(const QString& operation, const QStringList& arguments) {
+    if (!session_ || !connected() || !supportsCommand(QStringLiteral("melody_lastfm"))) {
+        emit lastFmCompleted(operation, {}, QStringLiteral("This server does not support Last.fm"));
+        return;
+    }
+    mpd::LastFmCommand command{operation.toStdString(), {}};
+    for (const auto& argument : arguments)
+        command.arguments.push_back(argument.toStdString());
+    const auto id = session_->lastfm(std::move(command));
+    lastfm_commands_.insert(id, operation);
+    pending_commands_.insert(id);
+}
+
+void MpdProbeController::editRequestQueue(mpd::RequestQueueCommand command) {
+    if (!session_ || !connected() || !supportsCommand(QStringLiteral("melody_upnext")) ||
+        !request_queue_)
+        return;
+    command.revision = request_queue_->revision;
+    pending_commands_.insert(session_->edit_request_queue(std::move(command)));
+    emit stateChanged();
+}
+
 void MpdProbeController::probe(const QString& host, const int port, const QString& password,
                                const QString& music_root) {
     probeProfile(QString::fromStdString(core::StableId::random().to_string()), host, port, password,
@@ -280,6 +302,9 @@ void MpdProbeController::probeProfile(const QString& profile_id, const QString& 
                             return;
                         }
                         if (database_changed) {
+                            controller->newest_order_cache_.clear();
+                            controller->pending_newest_order_.reset();
+                            controller->pending_newest_tag_.clear();
                             emit controller->serverDatabaseChanged();
                         }
                         if (playlists_changed) {
@@ -457,6 +482,13 @@ void MpdProbeController::loadNewestRootOrder(const QString& tag) {
         emit newestRootOrderLoaded({}, QStringLiteral("Not connected"));
         return;
     }
+    if (newest_order_cache_.contains(tag)) {
+        emit newestRootOrderLoaded(newest_order_cache_.value(tag), {});
+        return;
+    }
+    if (pending_newest_order_ && pending_newest_tag_ == tag)
+        return;
+    pending_newest_tag_ = tag;
     constexpr unsigned newest_track_window = 2'000U;
     pending_newest_order_ =
         session_->newest_root_values(tag.toUtf8().toStdString(), newest_track_window);
@@ -544,8 +576,7 @@ void MpdProbeController::moveQueueItems(const QVariantList& rows, const int inse
                     --from;
                 }
             }
-            const auto to = std::min(target + static_cast<int>(index),
-                                     queue_model_.rowCount() - 1);
+            const auto to = std::min(target + static_cast<int>(index), queue_model_.rowCount() - 1);
             if (from != to) {
                 pending_commands_.insert(session_->melody_context_queue_move(
                     static_cast<unsigned>(from), static_cast<unsigned>(to)));
@@ -628,35 +659,62 @@ void MpdProbeController::moveQueueItems(const QVariantList& rows, const int inse
     emit stateChanged();
 }
 
+const mpd::Track* MpdProbeController::listPriorityTrack(const QString& context, int row,
+                                                        const QString& uri) const {
+    if (context != active_context_ || row < 0)
+        return nullptr;
+    const auto* track = context.isEmpty()
+                            ? queue_model_.trackAt(row)
+                            : (static_cast<std::size_t>(row) < active_context_tracks_.size()
+                                   ? &active_context_tracks_[static_cast<std::size_t>(row)]
+                                   : nullptr);
+    return track && from_utf8(track->uri) == uri ? track : nullptr;
+}
+
 void MpdProbeController::setQueuePriority(const QVariantList& rows, const int priority) {
-    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("prioid")) || priority < 0 ||
-        priority > 255) {
-        return;
-    }
-    QSet<std::uint32_t> unique_ids;
-    std::vector<std::uint32_t> song_ids;
-    song_ids.reserve(static_cast<std::size_t>(rows.size()));
+    QList<QPair<int, QString>> selection;
     for (const auto& value : rows) {
         bool valid = false;
         const auto row = value.toInt(&valid);
-        if (!valid) {
-            continue;
-        }
-        if (const auto song_id = queue_model_.queueIdAt(row);
-            song_id && !unique_ids.contains(*song_id)) {
-            unique_ids.insert(*song_id);
-            song_ids.push_back(*song_id);
-        }
+        if (const auto* track = valid ? queue_model_.trackAt(row) : nullptr)
+            selection.push_back({row, from_utf8(track->uri)});
     }
-    if (song_ids.empty()) {
+    setListPriority({}, selection, priority);
+}
+
+void MpdProbeController::setListPriority(const QString& context,
+                                         const QList<QPair<int, QString>>& selection,
+                                         int priority) {
+    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("prioid")) || priority < 0 ||
+        priority > 255)
         return;
+    std::vector<std::uint32_t> ids;
+    for (const auto& [row, uri] : selection) {
+        const auto* track = listPriorityTrack(context, row, uri);
+        if (!track || !track->queue_id)
+            return; // Stale or inactive list: never guess another occurrence.
+        ids.push_back(*track->queue_id);
     }
+    if (ids.empty())
+        return;
     pending_commands_.insert(
-        session_->set_queue_priority(std::move(song_ids), static_cast<unsigned>(priority)));
+        session_->set_queue_priority(std::move(ids), static_cast<unsigned>(priority)));
     emit stateChanged();
 }
 
 void MpdProbeController::setTrackRating(const QVariantList& rows, const int rating) {
+    std::vector<mpd::Track> tracks;
+    for (const auto& value : rows) {
+        bool valid = false;
+        const auto row = value.toInt(&valid);
+        if (const auto* track = valid ? queue_model_.trackAt(row) : nullptr)
+            tracks.push_back(*track);
+    }
+    setTracksRating(tracks, rating);
+}
+
+void MpdProbeController::setTracksRating(const std::vector<mpd::Track>& tracks, const int rating,
+                                         const QString& list_name) {
     if (!session_ || !connected_ || !supportsRatings() || rating < 0 || rating > 10) {
         return;
     }
@@ -665,36 +723,30 @@ void MpdProbeController::setTrackRating(const QVariantList& rows, const int rati
     std::vector<std::string> uris;
     QSet<QString> unique_uris;
     QSet<quint64> unique_ids;
-    for (const auto& value : rows) {
-        bool valid = false;
-        const auto row = value.toInt(&valid);
-        if (!valid) {
-            continue;
-        }
+    for (const auto& track : tracks) {
         if (melody) {
-            const auto* track = queue_model_.trackAt(row);
-            if (track != nullptr && track->melody_song_id &&
-                !unique_ids.contains(*track->melody_song_id)) {
-                unique_ids.insert(*track->melody_song_id);
-                song_ids.push_back(*track->melody_song_id);
+            if (track.melody_song_id && !unique_ids.contains(*track.melody_song_id)) {
+                unique_ids.insert(*track.melody_song_id);
+                song_ids.push_back(*track.melody_song_id);
             }
-        } else if (const auto uri = queue_model_.uriAt(row)) {
-            const auto key = from_utf8(*uri);
+        } else if (!track.uri.empty()) {
+            const auto key = from_utf8(track.uri);
             if (!unique_uris.contains(key)) {
                 unique_uris.insert(key);
-                uris.push_back(*uri);
+                uris.push_back(track.uri);
             }
         }
     }
+    std::uint64_t id{};
     if (melody && !song_ids.empty()) {
-        pending_commands_.insert(
-            session_->set_melody_track_ratings(std::move(song_ids), static_cast<unsigned>(rating)));
+        id = session_->set_melody_track_ratings(std::move(song_ids), static_cast<unsigned>(rating));
     } else if (!melody && !uris.empty()) {
-        pending_commands_.insert(
-            session_->set_sticker_ratings(std::move(uris), static_cast<unsigned>(rating)));
-    } else {
+        id = session_->set_sticker_ratings(std::move(uris), static_cast<unsigned>(rating));
+    } else
         return;
-    }
+    pending_commands_.insert(id);
+    if (!list_name.isEmpty())
+        pending_rating_lists_.insert(id, list_name);
     emit stateChanged();
 }
 
@@ -703,15 +755,15 @@ void MpdProbeController::searchServerExpression(const QString& expression, const
     if (!completion) {
         return;
     }
-    if (!session_ || !supportsServerQueries()) {
-        completion(std::unexpected(core::Error{
-            .code = core::ErrorCode::unsupported,
-            .message = "the connected server does not support structured queries",
-            .context = {}}));
+    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("search"))) {
+        completion(std::unexpected(
+            core::Error{.code = core::ErrorCode::unsupported,
+                        .message = "the connected server does not support structured queries",
+                        .context = {}}));
         return;
     }
-    const auto id = session_->search_expression(expression.toUtf8().toStdString(),
-                                                sort.toUtf8().toStdString());
+    const auto id =
+        session_->search_expression(expression.toUtf8().toStdString(), sort.toUtf8().toStdString());
     pending_commands_.insert(id);
     pending_expression_searches_.insert(id, std::move(completion));
     emit stateChanged();
@@ -745,24 +797,28 @@ void MpdProbeController::requestMelodyAlbumRatings(const std::vector<mpd::Track>
         if (seen.size() > maximum_album_queries) {
             break;
         }
-        const auto id = session_->melody_album_rating(mpd::MelodyAlbumKey{
-            .album_artist = album_artist, .album = album, .date = date});
+        const auto id = session_->melody_album_rating(
+            mpd::MelodyAlbumKey{.album_artist = album_artist, .album = album, .date = date});
         pending_commands_.insert(id);
         pending_album_rating_queries_.insert(id, group_key);
     }
 }
 
 void MpdProbeController::setMelodyAlbumRating(const QString& album_artist, const QString& album,
-                                              const QString& date, const int rating) {
+                                              const QString& date, const int rating,
+                                              const QString& list_name) {
     if (!session_ || !connected_ || !supportsAlbumRatings() || rating < 0 || rating > 10 ||
         album_artist.isEmpty() || album.isEmpty()) {
         return;
     }
-    pending_commands_.insert(session_->set_melody_album_rating(
+    const auto id = session_->set_melody_album_rating(
         mpd::MelodyAlbumKey{.album_artist = album_artist.toStdString(),
                             .album = album.toStdString(),
                             .date = date.toStdString()},
-        static_cast<unsigned>(rating)));
+        static_cast<unsigned>(rating));
+    pending_commands_.insert(id);
+    if (!list_name.isEmpty())
+        pending_rating_lists_.insert(id, list_name);
     emit stateChanged();
 }
 
@@ -1003,6 +1059,52 @@ void MpdProbeController::setPlaylistScratch(const QString& name, const bool scra
     }
     pending_commands_.insert(session_->melody_set_scratch(name.toStdString(), scratch));
     emit stateChanged();
+}
+
+void MpdProbeController::playListContext(const QString& name, int row) {
+    if (name.isEmpty()) {
+        if (queue_stashed_)
+            playQueueContext(row);
+        else
+            playQueueItem(row);
+    } else if (supportsPlaybackContexts()) {
+        playStoredPlaylistContext(name, row);
+    } else if (session_ && connected_) {
+        const auto id = session_->load_stored_playlist(name.toStdString());
+        pending_list_playbacks_.insert(id, row);
+        pending_commands_.insert(id);
+        emit stateChanged();
+    }
+}
+void MpdProbeController::removeListItems(const QString& name, const QVariantList& rows) {
+    if (rows.isEmpty())
+        return;
+    if (name.isEmpty())
+        removeQueueItems(rows);
+    else
+        removeStoredPlaylistItems(name, rows);
+}
+void MpdProbeController::cropListToItems(const QString& name, const QVariantList& rows,
+                                         int row_count) {
+    if (rows.isEmpty())
+        return;
+    if (name.isEmpty()) {
+        cropQueueToItems(rows);
+        return;
+    }
+    QSet<int> keep;
+    for (const auto& value : rows) {
+        bool valid = false;
+        const auto row = value.toInt(&valid);
+        if (!valid || row < 0 || row >= row_count)
+            return;
+        keep.insert(row);
+    }
+    QVariantList remove;
+    for (int row = 0; row < row_count; ++row)
+        if (!keep.contains(row))
+            remove.push_back(row);
+    removeListItems(name, remove);
 }
 
 void MpdProbeController::playQueueContext(const int row) {
@@ -1523,6 +1625,11 @@ void MpdProbeController::applyState(const std::uint64_t token, mpd::SessionState
     if (token != connection_token_ || state.generation < generation_) {
         return;
     }
+    if (state.generation != generation_) {
+        newest_order_cache_.clear();
+        pending_newest_order_.reset();
+        pending_newest_tag_.clear();
+    }
     generation_ = state.generation;
     switch (state.phase) {
     case mpd::SessionPhase::connecting:
@@ -1628,15 +1735,13 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     elapsed_ms_ = snapshot.status.elapsed ? snapshot.status.elapsed->count() : 0;
     duration_ms_ = snapshot.status.duration ? snapshot.status.duration->count() : 0;
     volume_ = snapshot.status.volume ? static_cast<int>(*snapshot.status.volume) : -1;
-    song_position_ = snapshot.status.song_position
-                         ? static_cast<int>(*snapshot.status.song_position)
-                         : -1;
-    active_context_ = snapshot.context ? QString::fromStdString(snapshot.context->name)
-                                      : QString{};
+    song_position_ =
+        snapshot.status.song_position ? static_cast<int>(*snapshot.status.song_position) : -1;
+    request_queue_ = snapshot.requests;
+    active_context_ = snapshot.context ? QString::fromStdString(snapshot.context->name) : QString{};
     queue_stashed_ = snapshot.context && snapshot.context->queue_stashed;
-    qCDebug(tkDebug) << "snapshot: context" << (active_context_.isEmpty()
-                                                    ? QStringLiteral("(queue)")
-                                                    : active_context_)
+    qCDebug(tkDebug) << "snapshot: context"
+                     << (active_context_.isEmpty() ? QStringLiteral("(queue)") : active_context_)
                      << "stashed" << queue_stashed_ << "queue rows"
                      << static_cast<int>(snapshot.queue.size()) << "queue-context rows"
                      << static_cast<int>(snapshot.queue_context_tracks.size()) << "song pos"
@@ -1687,8 +1792,9 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     // ADR-0188: the Queue tab shows the queue context's own list. While
     // another tab is the active queue, the server holds this list stashed —
     // it must keep showing unchanged rather than the other tab's tracks.
-    auto queue_rows = queue_stashed_ ? std::move(snapshot.queue_context_tracks)
-                                     : std::move(snapshot.queue);
+    auto queue_rows =
+        queue_stashed_ ? std::move(snapshot.queue_context_tracks) : std::move(snapshot.queue);
+    active_context_tracks_ = queue_stashed_ ? std::move(snapshot.queue) : std::vector<mpd::Track>{};
     requestMelodyAlbumRatings(queue_rows);
     queue_model_.replaceTracks(std::move(queue_rows));
     queue_model_.setAlbumRatings(melody_album_ratings_);
@@ -1711,12 +1817,19 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
     qCDebug(tkDebug) << "command" << static_cast<int>(result.kind) << "id" << result.id
                      << (result.error ? QString::fromStdString(result.error->message)
                                       : QStringLiteral("ok"));
+    if (result.kind == mpd::SessionCommandKind::lastfm) {
+        const auto operation = lastfm_commands_.take(result.id);
+        const auto* reply = std::get_if<mpd::LastFmReply>(&result.payload);
+        emit lastFmCompleted(
+            operation, reply ? QByteArray::fromStdString(reply->json) : QByteArray{},
+            result.error ? QString::fromStdString(result.error->message) : QString{});
+        return;
+    }
     if (result.kind == mpd::SessionCommandKind::database_expression_search) {
         if (auto completion = pending_expression_searches_.take(result.id)) {
             if (result.error) {
                 completion(std::unexpected(*result.error));
-            } else if (const auto* tracks =
-                           std::get_if<std::vector<mpd::Track>>(&result.payload)) {
+            } else if (const auto* tracks = std::get_if<std::vector<mpd::Track>>(&result.payload)) {
                 completion(*tracks);
             } else {
                 completion(std::unexpected(
@@ -1752,6 +1865,9 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         melody_album_ratings_.clear();
         melody_album_stored_ratings_.clear();
     }
+    const auto rated_list = pending_rating_lists_.take(result.id);
+    if (!rated_list.isEmpty() && !result.error)
+        reloadStoredPlaylist(rated_list);
     if (result.kind == mpd::SessionCommandKind::database_browse) {
         if (!pending_browser_query_ || *pending_browser_query_ != result.id) {
             emit stateChanged();
@@ -1794,6 +1910,9 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         } else {
             error = QStringLiteral("Newest ordering returned an invalid response");
         }
+        if (error.isEmpty())
+            newest_order_cache_.insert(pending_newest_tag_, values);
+        pending_newest_tag_.clear();
         emit newestRootOrderLoaded(values, error);
         emit stateChanged();
         return;
@@ -1971,6 +2090,23 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         emit stateChanged();
         return;
     }
+    const auto playback = pending_list_playbacks_.find(result.id);
+    if (playback != pending_list_playbacks_.end()) {
+        const auto row = *playback;
+        pending_list_playbacks_.erase(playback);
+        if (result.error) {
+            emit notificationRequested(
+                QStringLiteral("Playlist failed: %1").arg(from_utf8(result.error->message)));
+        } else if (const auto* tracks = std::get_if<std::vector<mpd::Track>>(&result.payload)) {
+            QStringList uris;
+            for (const auto& track : *tracks)
+                uris.push_back(from_utf8(track.uri));
+            if (!uris.isEmpty())
+                replaceQueueWithUrisAndPlayAt(uris, row);
+        }
+        emit stateChanged();
+        return;
+    }
     if (result.kind == mpd::SessionCommandKind::stored_playlist) {
         const auto query = pending_playlist_queries_.find(result.id);
         if (query == pending_playlist_queries_.end()) {
@@ -1983,6 +2119,7 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
             emit notificationRequested(
                 QStringLiteral("Playlist failed: %1").arg(from_utf8(result.error->message)));
         } else if (const auto* tracks = std::get_if<std::vector<mpd::Track>>(&result.payload)) {
+            requestMelodyAlbumRatings(*tracks);
             browser_playlist_model_.replaceTracks(*tracks);
             browser_showing_playlist_ = true;
             browser_status_ = QStringLiteral("%1 · %2 track%3")
@@ -2310,6 +2447,13 @@ mpd::PlaybackState MpdProbeController::presentedPlaybackState() const noexcept {
 }
 
 void MpdProbeController::clearSessionState() {
+    lastfm_commands_.clear();
+    pending_rating_lists_.clear();
+    pending_list_playbacks_.clear();
+    active_context_tracks_.clear();
+    newest_order_cache_.clear();
+    pending_newest_order_.reset();
+    pending_newest_tag_.clear();
     busy_ = false;
     connected_ = false;
     generation_ = 0U;

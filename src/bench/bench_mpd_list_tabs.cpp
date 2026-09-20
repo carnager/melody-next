@@ -9,19 +9,16 @@
 #include "bench/bench_main_window_helpers.hpp"
 
 #include "quick/mpd_probe_controller.hpp"
+#include "quick/mpd_queue_model.hpp"
 #include "ui/server_library_tree_model.hpp"
 #include "ui/server_library_tree_view.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "uicommon/queue_table_view.hpp"
 
-#include <QHeaderView>
-#include <QScrollArea>
-#include <QFrame>
-#include <QIcon>
-#include <QVBoxLayout>
 #include <QAbstractItemView>
-#include <chrono>
 #include <QAction>
+#include <QFrame>
+#include <QHeaderView>
+#include <QIcon>
 #include <QInputDialog>
 #include <QItemSelectionModel>
 #include <QLineEdit>
@@ -29,15 +26,16 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QStatusBar>
 #include <QTableView>
+#include <QVBoxLayout>
+#include <chrono>
 
 #include <algorithm>
 #include <utility>
 
 namespace trackknife::bench {
-
-
 
 // mpdTabInsertionIndex keeps every server-side tab grouped directly after
 // the MPD Queue: new MPD tabs insert after the last existing one instead of
@@ -80,10 +78,10 @@ std::vector<mpd::Track> BenchMainWindow::selectedMpdViewTracks(QTableView* view)
 // Asks for a working-list name, pre-filled with a free one.
 QString BenchMainWindow::promptScratchListName() {
     bool accepted = false;
-    const auto name = QInputDialog::getText(this, QStringLiteral("New list"),
-                                            QStringLiteral("List name:"), QLineEdit::Normal,
-                                            uniqueScratchListName(), &accepted)
-                          .trimmed();
+    const auto name =
+        QInputDialog::getText(this, QStringLiteral("New list"), QStringLiteral("List name:"),
+                              QLineEdit::Normal, uniqueScratchListName(), &accepted)
+            .trimmed();
     return accepted ? name : QString{};
 }
 
@@ -104,7 +102,7 @@ QString BenchMainWindow::uniqueScratchListName() {
 // flagged scratch, so it belongs to whoever connects rather than to this
 // client, and opens as a tab instead of a sidebar entry.
 void BenchMainWindow::createScratchListTab(const QString& name, const QStringList& uris,
-                                          const bool select) {
+                                           const bool select) {
     if (name.isEmpty() || uris.isEmpty()) {
         return;
     }
@@ -181,8 +179,7 @@ void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_vi
     connect(create, &QAction::triggered, this, [this, uris] {
         bool accepted = false;
         const auto name = QInputDialog::getText(this, QStringLiteral("New playlist"),
-                                                QStringLiteral("Playlist name:"),
-                                                QLineEdit::Normal,
+                                                QStringLiteral("Playlist name:"), QLineEdit::Normal,
                                                 QStringLiteral("Playlist"), &accepted)
                               .trimmed();
         if (!accepted || name.isEmpty()) {
@@ -207,13 +204,11 @@ void BenchMainWindow::addCopyToServerListMenu(QMenu* menu, QTableView* source_vi
 // it, so "send this somewhere" needs no special case per surface.
 std::vector<BenchMainWindow::MpdTabTarget> BenchMainWindow::mpdTabTargets() const {
     std::vector<MpdTabTarget> targets;
-    targets.push_back(MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
-                                   .label = QStringLiteral("MPD Queue"),
-                                   .playlist = {}});
+    targets.push_back(MpdTabTarget{
+        .kind = MpdTabTarget::Kind::queue, .label = QStringLiteral("MPD Queue"), .playlist = {}});
     for (const auto& tab : mpd_playlist_tabs_) {
-        targets.push_back(MpdTabTarget{.kind = MpdTabTarget::Kind::playlist,
-                                       .label = tab->name,
-                                       .playlist = tab->name});
+        targets.push_back(MpdTabTarget{
+            .kind = MpdTabTarget::Kind::playlist, .label = tab->name, .playlist = tab->name});
     }
     return targets;
 }
@@ -232,16 +227,15 @@ std::optional<BenchMainWindow::MpdTabTarget> BenchMainWindow::visibleMpdTabTarge
     }
     for (const auto& tab : mpd_playlist_tabs_) {
         if (tab->view == current) {
-            return MpdTabTarget{.kind = MpdTabTarget::Kind::playlist,
-                                .label = tab->name,
-                                .playlist = tab->name};
+            return MpdTabTarget{
+                .kind = MpdTabTarget::Kind::playlist, .label = tab->name, .playlist = tab->name};
         }
     }
     return std::nullopt;
 }
 
-void BenchMainWindow::sendTracksToMpdTab(const MpdTabTarget& target,
-                                         std::vector<mpd::Track> tracks, const MpdSendMode mode) {
+void BenchMainWindow::sendTracksToMpdTab(const MpdTabTarget& target, std::vector<mpd::Track> tracks,
+                                         const MpdSendMode mode) {
     if (tracks.empty()) {
         return;
     }
@@ -273,10 +267,10 @@ void BenchMainWindow::sendTracksToMpdTab(const MpdTabTarget& target,
             break;
         case MpdSendMode::insert_next: {
             auto* tab = mpdPlaylistTabNamed(target.playlist);
-            const auto row = tab != nullptr && tab->view != nullptr &&
-                                     tab->view->currentIndex().isValid()
-                                 ? tab->view->currentIndex().row() + 1
-                                 : 0;
+            const auto row =
+                tab != nullptr && tab->view != nullptr && tab->view->currentIndex().isValid()
+                    ? tab->view->currentIndex().row() + 1
+                    : 0;
             mpd_controller_->addToStoredPlaylist(target.playlist, uris, row);
             break;
         }
@@ -301,8 +295,8 @@ void BenchMainWindow::addSendToTabMenu(QMenu* menu,
     const auto connected = mpd_controller_->connected();
     auto* create = submenu->addAction(QStringLiteral("New list…"));
     create->setObjectName(QStringLiteral("action-send-to-new-working-list"));
-    create->setEnabled(connected && mpd_controller_->supportsCommand(
-                                        QStringLiteral("playlistadd")));
+    create->setEnabled(connected &&
+                       mpd_controller_->supportsCommand(QStringLiteral("playlistadd")));
     connect(create, &QAction::triggered, this, [this, selection, resolve] {
         auto tracks = selection();
         if (tracks.empty() && resolve) {

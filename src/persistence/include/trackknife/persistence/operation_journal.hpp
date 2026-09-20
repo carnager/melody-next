@@ -30,6 +30,8 @@ class SqliteMetadataOperationJournal final : public operations::MetadataOperatio
     load(const core::StableId& id) const override;
     [[nodiscard]] core::Result<std::vector<operations::MetadataOperationJournalRecord>>
     load_incomplete() const override;
+    [[nodiscard]] core::Result<std::vector<operations::MetadataOperationJournalRecord>>
+    load_incomplete_for_source(const std::string& raw_path) const override;
     [[nodiscard]] core::Result<std::optional<operations::MetadataOperationBackupRecord>>
     load_backup(const core::StableId& id) const override;
     [[nodiscard]] core::Result<std::vector<operations::MetadataOperationBackupRecord>>

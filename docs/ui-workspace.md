@@ -567,3 +567,42 @@ Local and MPD library trees share row metrics, indentation, icon sizing, and
 animated expansion (ADR-0168). Artist subtitles display **1 album** / **N albums**.
 Local counts come from the background indexed query; MPD counts arrive through
 a background grouped tag query, without fetching every track or opening branches.
+
+## Playback navigation
+
+**Workspace → Cursor follows playback** is off by default and remembered.
+When enabled, a new playing row becomes the selected cursor row and scrolls
+into view if its list is currently visible. It does not switch tabs or keep
+resetting a manual selection while the same track plays.
+
+**Workspace → Jump to playing** (`Ctrl+J`) opens the playback list and centers
+its current row, using the selected tab's local/server authority. A closed
+server playlist is reopened and loaded asynchronously. During an Up Next
+request it opens the request panel instead of selecting an unrelated list row.
+Neither navigation action changes playback or the sticky Active marker.
+
+## Keyboard shortcuts
+
+Settings → Shortcuts lists editable application bindings. Save applies and
+persists them; Cancel leaves current bindings alone. Restore defaults edits the
+form until Save. Empty bindings disable a shortcut. Duplicate and chord-prefix
+conflicts are rejected, including the reserved Ctrl+L library-search shortcut.
+These are application shortcuts, not desktop-wide hotkeys.
+
+| Action | Default |
+| --- | --- |
+| Play / Pause | Space |
+| Stop | Ctrl+. |
+| Previous / Next track | Alt+Left / Alt+Right |
+| Queue next / Queue at end | Ctrl+Return / Ctrl+Shift+Return |
+| Show Up Next | Ctrl+Shift+U |
+| Jump to playing | Ctrl+J |
+| Cursor follows playback | Ctrl+Shift+J |
+| Find in list / Search | Ctrl+F / Ctrl+Shift+F |
+| Open files / Open folder | Ctrl+O / Ctrl+Shift+O |
+| New / Duplicate / Close tab | Ctrl+N / Ctrl+Shift+D / Ctrl+W |
+| Rename / Save list | F2 / Ctrl+S |
+| Edit tags / Settings | Alt+Return / Ctrl+, |
+
+Playback and queue shortcuts use the selected tab's authority. Queue shortcuts
+use the current track selection and the same Up Next actions as the track menu.

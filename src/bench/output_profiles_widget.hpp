@@ -14,7 +14,6 @@
 
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QComboBox;
 class QPushButton;
 
@@ -36,7 +35,7 @@ struct OutputProfileStore {
 };
 
 // ADR-0185: the naming-layout and move-destination managers, hosted by the
-// Settings screen's Naming page. List-based selection, store-backed CRUD;
+// Settings screen's Naming page. Compact preset selection, store-backed CRUD;
 // emits profilesChanged so open tag editors can refresh their selectors.
 class OutputProfilesManagerWidget final : public QWidget {
     Q_OBJECT
@@ -68,7 +67,7 @@ class OutputProfilesManagerWidget final : public QWidget {
     bool loading_{false};
     bool mutation_running_{false};
 
-    QListWidget* layout_list_{nullptr};
+    QComboBox* layout_list_{nullptr};
     QLineEdit* layout_name_{nullptr};
     QLineEdit* directory_expression_{nullptr};
     QLineEdit* basename_expression_{nullptr};
@@ -76,7 +75,7 @@ class OutputProfilesManagerWidget final : public QWidget {
     QPushButton* layout_new_{nullptr};
     QPushButton* layout_save_{nullptr};
     QPushButton* layout_remove_{nullptr};
-    QListWidget* destination_list_{nullptr};
+    QComboBox* destination_list_{nullptr};
     QLineEdit* destination_name_{nullptr};
     QLineEdit* destination_root_{nullptr};
     QPushButton* destination_browse_{nullptr};

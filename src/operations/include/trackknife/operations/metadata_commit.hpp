@@ -55,6 +55,11 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
                       const MetadataDependentStateCommitter& dependent_state_committer,
                       const core::CancellationToken& cancellation = {});
 
+// Policy-owned folder image, independently journaled from the media container.
+[[nodiscard]] core::Result<MetadataCommitResult>
+commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperationJournal& journal,
+                    const core::CancellationToken& cancellation = {});
+
 enum class MetadataRecoveryOutcome : std::uint8_t {
     completed,
     rolled_back,
@@ -69,6 +74,11 @@ struct MetadataRecoveryResult {
 
     friend bool operator==(const MetadataRecoveryResult&, const MetadataRecoveryResult&) = default;
 };
+
+[[nodiscard]] core::Result<MetadataRecoveryResult>
+recover_folder_image(const MetadataOperationJournalRecord& record,
+                     MetadataOperationJournal& journal,
+                     const core::CancellationToken& cancellation = {});
 
 // Recovers every nonterminal metadata journal. Safe identities are either
 // completed (including dependent-state replay) or rolled back; ambiguous files

@@ -349,10 +349,9 @@ class SessionServer final {
                 write_all(client, "OK\n");
             }
         } else if (command == "sticker \"find\" \"song\" \"\" \"rating\"") {
-            write_all(client,
-                      "file: Slayer/Divine Intervention/01.flac\nsticker: rating=" +
-                          std::to_string(sticker_rating_.load(std::memory_order_acquire)) +
-                          "\nOK\n");
+            write_all(client, "file: Slayer/Divine Intervention/01.flac\nsticker: rating=" +
+                                  std::to_string(sticker_rating_.load(std::memory_order_acquire)) +
+                                  "\nOK\n");
         } else if (command.starts_with("rate ")) {
             rate_commands_.fetch_add(1U, std::memory_order_release);
             const auto args = quoted_args(command);
@@ -745,8 +744,7 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
                 "queue snapshots must retain Melody rating lines");
         lock.unlock();
 
-        static_cast<void>(
-            session.set_sticker_ratings({"Slayer/Divine Intervention/01.flac"}, 9U));
+        static_cast<void>(session.set_sticker_ratings({"Slayer/Divine Intervention/01.flac"}, 9U));
         lock.lock();
         const auto sticker_rated = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
             return sticker_rating_finished && server.stickerSetCommandCount() == 1U &&

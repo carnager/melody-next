@@ -491,6 +491,11 @@ if(TRACKKNIFE_BUILD_UI)
     add_test(NAME server-library-tree-model COMMAND trackknife_server_library_tree_model_tests)
     set_tests_properties(server-library-tree-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+    qt_add_executable(trackknife_lastfm_service_tests lastfm_service_test.cpp)
+    target_link_libraries(trackknife_lastfm_service_tests PRIVATE Trackknife::BenchUi Qt6::Network
+        Qt6::Test trackknife_project_options trackknife_project_warnings)
+    add_test(NAME lastfm-service COMMAND trackknife_lastfm_service_tests)
+    set_tests_properties(lastfm-service PROPERTIES TIMEOUT 30)
     qt_add_executable(trackknife_bench_main_window_tests bench_main_window_test.cpp)
     qt_add_executable(trackknife_mpris_service_tests mpris_service_test.cpp)
     target_link_libraries(trackknife_mpris_service_tests PRIVATE Trackknife::BenchUi Qt6::DBus
@@ -560,3 +565,10 @@ add_test(
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check_spdx.sh"
             "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
+
+add_executable(trackknife_debug_log_tests debug_log_test.cpp)
+target_link_libraries(
+    trackknife_debug_log_tests
+    PRIVATE Trackknife::UiCommon trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME debug-log COMMAND trackknife_debug_log_tests)

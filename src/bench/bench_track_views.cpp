@@ -339,9 +339,9 @@ void BenchMainWindow::refreshSelectionActions() {
                                !view->selectionModel()->selectedRows().isEmpty();
     // Every MPD-side list is edited on the server, so all of them need a
     // connection that is not mid-command; local lists never do.
-    const auto server_ready = !isMpdContext() ||
-                              (mpd_controller_ != nullptr && mpd_controller_->connected() &&
-                               !mpd_controller_->commandBusy());
+    const auto server_ready =
+        !isMpdContext() || (mpd_controller_ != nullptr && mpd_controller_->connected() &&
+                            !mpd_controller_->commandBusy());
     if (remove_selected_action_ != nullptr) {
         remove_selected_action_->setEnabled(has_selection && server_ready);
     }
@@ -352,6 +352,19 @@ void BenchMainWindow::refreshSelectionActions() {
 }
 
 void BenchMainWindow::refreshSelectionStatus() {
+    if (tabs_) {
+        auto* source = qobject_cast<QTableView*>(tabs_->currentWidget());
+        const bool can_queue =
+            source && source->selectionModel() &&
+            !source->selectionModel()->selectedRows().isEmpty() &&
+            (qobject_cast<LocalListModel*>(source->model()) ||
+             (isMpdContext() && mpd_controller_->connected() &&
+              mpd_controller_->supportsCommand(QStringLiteral("melody_upnext"))));
+        for (const auto& name :
+             {QStringLiteral("action-queue-next"), QStringLiteral("action-queue-end")})
+            if (auto* action = findChild<QAction*>(name))
+                action->setEnabled(can_queue);
+    }
     refreshSelectionActions();
     if (selection_status_ == nullptr) {
         return;

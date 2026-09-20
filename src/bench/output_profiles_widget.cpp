@@ -15,9 +15,9 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QPointer>
 #include <QPushButton>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -34,22 +34,30 @@ namespace {
 
 } // namespace
 
-OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore store,
-                                                         QWidget* parent)
+OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore store, QWidget* parent)
     : QWidget(parent), store_(std::move(store)) {
     setObjectName(QStringLiteral("bench-output-profiles-manager"));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     const auto expression_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
 
-    auto* layouts_box = new QGroupBox(QStringLiteral("Naming layouts"), this);
-    auto* layouts_row = new QHBoxLayout(layouts_box);
-    layout_list_ = new QListWidget(layouts_box);
+    auto* sections = new QTabWidget(this);
+    sections->setObjectName(QStringLiteral("bench-output-profile-sections"));
+    root->addWidget(sections, 1);
+    auto* layouts_box = new QWidget(sections);
+    auto* layouts_row = new QVBoxLayout(layouts_box);
+    layouts_row->setContentsMargins(16, 16, 16, 16);
+    layouts_row->setSpacing(16);
+    layout_list_ = new QComboBox(layouts_box);
     layout_list_->setObjectName(QStringLiteral("bench-output-layout-list"));
-    layout_list_->setMaximumWidth(220);
+    layout_list_->setAccessibleName(QStringLiteral("Naming layout"));
+    layout_list_->setPlaceholderText(QStringLiteral("New naming layout"));
+    layout_list_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     layouts_row->addWidget(layout_list_);
     auto* layout_form_holder = new QVBoxLayout;
     auto* layout_form = new QFormLayout;
+    layout_form->setVerticalSpacing(12);
+    layout_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     layout_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     layout_name_ = new QLineEdit(layouts_box);
     layout_name_->setObjectName(QStringLiteral("bench-output-layout-name"));
@@ -58,12 +66,14 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     directory_expression_ = new QLineEdit(layouts_box);
     directory_expression_->setObjectName(
         QStringLiteral("bench-output-layout-directory-expression"));
-    directory_expression_->setPlaceholderText(QStringLiteral("For example: %album artist%/%album%"));
+    directory_expression_->setPlaceholderText(
+        QStringLiteral("For example: %album artist%/%album%"));
     directory_expression_->setFont(expression_font);
     layout_form->addRow(QStringLiteral("Folders:"), directory_expression_);
     basename_expression_ = new QLineEdit(layouts_box);
     basename_expression_->setObjectName(QStringLiteral("bench-output-layout-basename-expression"));
-    basename_expression_->setPlaceholderText(QStringLiteral("For example: %tracknumber% - %title%"));
+    basename_expression_->setPlaceholderText(
+        QStringLiteral("For example: %tracknumber% - %title%"));
     basename_expression_->setFont(expression_font);
     layout_form->addRow(QStringLiteral("Filename:"), basename_expression_);
     sanitization_policy_ = new QComboBox(layouts_box);
@@ -78,7 +88,7 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     auto* layout_buttons = new QHBoxLayout;
     layout_new_ = new QPushButton(QStringLiteral("New"), layouts_box);
     layout_new_->setObjectName(QStringLiteral("bench-output-layout-new"));
-    layout_save_ = new QPushButton(QStringLiteral("Save"), layouts_box);
+    layout_save_ = new QPushButton(QStringLiteral("Save layout"), layouts_box);
     layout_save_->setObjectName(QStringLiteral("bench-output-layout-save"));
     layout_remove_ = new QPushButton(QStringLiteral("Remove"), layouts_box);
     layout_remove_->setObjectName(QStringLiteral("bench-output-layout-remove"));
@@ -89,16 +99,23 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     layout_form_holder->addLayout(layout_buttons);
     layout_form_holder->addStretch(1);
     layouts_row->addLayout(layout_form_holder, 1);
-    root->addWidget(layouts_box, 1);
+    sections->addTab(layouts_box, QStringLiteral("Naming layouts"));
 
-    auto* destinations_box = new QGroupBox(QStringLiteral("Move destinations"), this);
-    auto* destinations_row = new QHBoxLayout(destinations_box);
-    destination_list_ = new QListWidget(destinations_box);
+    auto* destinations_box = new QWidget(sections);
+    auto* destinations_row = new QVBoxLayout(destinations_box);
+    destinations_row->setContentsMargins(16, 16, 16, 16);
+    destinations_row->setSpacing(16);
+    destination_list_ = new QComboBox(destinations_box);
     destination_list_->setObjectName(QStringLiteral("bench-destination-list"));
-    destination_list_->setMaximumWidth(220);
+    destination_list_->setAccessibleName(QStringLiteral("Move destination"));
+    destination_list_->setPlaceholderText(QStringLiteral("New move destination"));
+    destination_list_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     destinations_row->addWidget(destination_list_);
     auto* destination_form_holder = new QVBoxLayout;
     auto* destination_form = new QFormLayout;
+    destination_form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    destination_form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    destination_form->setVerticalSpacing(12);
     destination_name_ = new QLineEdit(destinations_box);
     destination_name_->setObjectName(QStringLiteral("bench-destination-name"));
     destination_name_->setPlaceholderText(QStringLiteral("For example: Music library"));
@@ -116,7 +133,7 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     auto* destination_buttons = new QHBoxLayout;
     destination_new_ = new QPushButton(QStringLiteral("New"), destinations_box);
     destination_new_->setObjectName(QStringLiteral("bench-destination-new"));
-    destination_save_ = new QPushButton(QStringLiteral("Save"), destinations_box);
+    destination_save_ = new QPushButton(QStringLiteral("Save destination"), destinations_box);
     destination_save_->setObjectName(QStringLiteral("bench-destination-save"));
     destination_remove_ = new QPushButton(QStringLiteral("Remove"), destinations_box);
     destination_remove_->setObjectName(QStringLiteral("bench-destination-remove"));
@@ -127,29 +144,28 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     destination_form_holder->addLayout(destination_buttons);
     destination_form_holder->addStretch(1);
     destinations_row->addLayout(destination_form_holder, 1);
-    root->addWidget(destinations_box);
+    sections->addTab(destinations_box, QStringLiteral("Move destinations"));
 
     status_ = new QLabel(this);
     status_->setObjectName(QStringLiteral("bench-output-profiles-status"));
     status_->setWordWrap(true);
     root->addWidget(status_);
 
-    connect(layout_list_, &QListWidget::currentRowChanged, this,
+    connect(layout_list_, &QComboBox::currentIndexChanged, this,
             &OutputProfilesManagerWidget::selectLayoutRow);
-    connect(destination_list_, &QListWidget::currentRowChanged, this,
+    connect(destination_list_, &QComboBox::currentIndexChanged, this,
             &OutputProfilesManagerWidget::selectDestinationRow);
     connect(layout_new_, &QPushButton::clicked, this, [this] {
-        layout_list_->setCurrentRow(-1);
+        layout_list_->setCurrentIndex(-1);
         selectLayoutRow(-1);
         layout_name_->setFocus();
     });
     connect(destination_new_, &QPushButton::clicked, this, [this] {
-        destination_list_->setCurrentRow(-1);
+        destination_list_->setCurrentIndex(-1);
         selectDestinationRow(-1);
         destination_name_->setFocus();
     });
-    connect(layout_save_, &QPushButton::clicked, this,
-            &OutputProfilesManagerWidget::saveLayout);
+    connect(layout_save_, &QPushButton::clicked, this, &OutputProfilesManagerWidget::saveLayout);
     connect(destination_save_, &QPushButton::clicked, this,
             &OutputProfilesManagerWidget::saveDestination);
     connect(layout_remove_, &QPushButton::clicked, this,
@@ -157,16 +173,14 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
     connect(destination_remove_, &QPushButton::clicked, this,
             &OutputProfilesManagerWidget::removeDestination);
     for (auto* edited : {layout_name_, basename_expression_, destination_name_}) {
-        connect(edited, &QLineEdit::textChanged, this,
-                &OutputProfilesManagerWidget::updateButtons);
+        connect(edited, &QLineEdit::textChanged, this, &OutputProfilesManagerWidget::updateButtons);
     }
     connect(destination_browse_, &QPushButton::clicked, this, [this] {
-        const auto initial =
-            destination_root_raw_path_.empty()
-                ? QString{}
-                : QFile::decodeName(
-                      QByteArray{destination_root_raw_path_.data(),
-                                 static_cast<qsizetype>(destination_root_raw_path_.size())});
+        const auto initial = destination_root_raw_path_.empty()
+                                 ? QString{}
+                                 : QFile::decodeName(QByteArray{
+                                       destination_root_raw_path_.data(),
+                                       static_cast<qsizetype>(destination_root_raw_path_.size())});
         const auto selected = QFileDialog::getExistingDirectory(
             this, QStringLiteral("Choose move destination"), initial,
             QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
@@ -236,8 +250,8 @@ void OutputProfilesManagerWidget::rebuildLists(const std::optional<core::StableI
         if (!layout_id) {
             return layouts_.empty() ? -1 : 0;
         }
-        const auto found = std::ranges::find(layouts_, *layout_id,
-                                             &persistence::SavedOutputLayoutProfile::id);
+        const auto found =
+            std::ranges::find(layouts_, *layout_id, &persistence::SavedOutputLayoutProfile::id);
         return found == layouts_.end() ? (layouts_.empty() ? -1 : 0)
                                        : static_cast<int>(found - layouts_.begin());
     }();
@@ -250,8 +264,8 @@ void OutputProfilesManagerWidget::rebuildLists(const std::optional<core::StableI
         return found == destinations_.end() ? (destinations_.empty() ? -1 : 0)
                                             : static_cast<int>(found - destinations_.begin());
     }();
-    layout_list_->setCurrentRow(layout_row);
-    destination_list_->setCurrentRow(destination_row);
+    layout_list_->setCurrentIndex(layout_row);
+    destination_list_->setCurrentIndex(destination_row);
     selectLayoutRow(layout_row);
     selectDestinationRow(destination_row);
 }
@@ -273,6 +287,8 @@ void OutputProfilesManagerWidget::selectLayoutRow(const int row) {
     basename_expression_->setText(displayText(saved.profile.basename_expression));
     sanitization_policy_->setCurrentIndex(std::max(
         0, sanitization_policy_->findData(displayText(saved.profile.sanitization_policy.name))));
+    directory_expression_->setCursorPosition(0);
+    basename_expression_->setCursorPosition(0);
     updateButtons();
 }
 
@@ -327,13 +343,12 @@ void OutputProfilesManagerWidget::saveLayout() {
         }
         self->mutation_running_ = false;
         if (!error.isEmpty()) {
-            self->status_->setText(
-                QStringLiteral("Could not save naming layout · %1").arg(error));
+            self->status_->setText(QStringLiteral("Could not save naming layout · %1").arg(error));
             self->updateButtons();
             return;
         }
-        const auto found = std::ranges::find(self->layouts_, saved.id,
-                                             &persistence::SavedOutputLayoutProfile::id);
+        const auto found =
+            std::ranges::find(self->layouts_, saved.id, &persistence::SavedOutputLayoutProfile::id);
         if (found == self->layouts_.end()) {
             self->layouts_.push_back(saved);
         } else {
@@ -454,11 +469,9 @@ void OutputProfilesManagerWidget::removeDestination() {
 
 void OutputProfilesManagerWidget::updateButtons() {
     const auto available = !loading_ && !mutation_running_;
-    for (auto* widget :
-         std::initializer_list<QWidget*>{layout_list_, layout_name_, directory_expression_,
-                                         basename_expression_, sanitization_policy_,
-                                         destination_list_, destination_name_,
-                                         destination_root_}) {
+    for (auto* widget : std::initializer_list<QWidget*>{
+             layout_list_, layout_name_, directory_expression_, basename_expression_,
+             sanitization_policy_, destination_list_, destination_name_, destination_root_}) {
         widget->setEnabled(available);
     }
     layout_new_->setEnabled(available && bool{store_.save_layout});

@@ -243,8 +243,7 @@ class MetadataTransformationDialog final : public QDialog {
         fields_completer_->setWidget(input_);
         connect(fields_completer_, QOverload<const QString&>::of(&QCompleter::activated), this,
                 [this](const QString& name) { insertFieldsSuggestion(name); });
-        connect(input_, &QLineEdit::textEdited, this,
-                [this] { refreshFieldsCompleter(true); });
+        connect(input_, &QLineEdit::textEdited, this, [this] { refreshFieldsCompleter(true); });
         replacement_label_ = new QLabel(QStringLiteral("Replacement:"), this);
         replacement_ = new QLineEdit(this);
         replacement_->setObjectName(QStringLiteral("bench-metadata-transformation-replacement"));

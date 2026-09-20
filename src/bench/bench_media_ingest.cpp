@@ -556,8 +556,7 @@ void BenchMainWindow::maybeOpenMaterializedDialog() {
         return;
     }
     const auto& rows = tab->model->rows();
-    if (rows.empty() ||
-        !std::ranges::all_of(rows, [](const auto& row) { return row.probed; })) {
+    if (rows.empty() || !std::ranges::all_of(rows, [](const auto& row) { return row.probed; })) {
         return;
     }
     const auto kind = std::exchange(pending_dialog_kind_, MaterializedDialog::none);
@@ -860,8 +859,7 @@ void BenchMainWindow::startDiscovery(std::vector<std::string> raw_paths, QString
 
 void BenchMainWindow::finishDiscovery() {
     discovery_running_ = false;
-    const auto follow_up =
-        std::exchange(discovery_dialog_follow_up_, MaterializedDialog::none);
+    const auto follow_up = std::exchange(discovery_dialog_follow_up_, MaterializedDialog::none);
     auto result = discovery_watcher_.result();
     auto* tab = tabForDocument(discovery_target_document_);
     if (tab == nullptr || (discovery_anchored_ && !discovery_insertion_anchor_.isValid())) {
@@ -892,8 +890,8 @@ void BenchMainWindow::finishDiscovery() {
             pending_dialog_kind_ = follow_up;
             maybeOpenMaterializedDialog();
         } else {
-            statusBar()->showMessage(
-                QStringLiteral("Nothing to edit — no files were opened"), 5'000);
+            statusBar()->showMessage(QStringLiteral("Nothing to edit — no files were opened"),
+                                     5'000);
         }
     }
     if (!result.issues.empty()) {

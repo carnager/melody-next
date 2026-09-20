@@ -24,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 37U;
+constexpr unsigned current_schema_version = 38U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1094,6 +1094,31 @@ UPDATE schema_version SET version = 36;
         // the bump makes older builds refuse the database cleanly instead
         // of failing on an unknown document kind at load time.
         constexpr auto migration = "UPDATE schema_version SET version = 37;";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 37) {
+        constexpr auto migration =
+            "DROP INDEX operation_journal_state;"
+            "CREATE TABLE operation_journal_v38 ("
+            "id TEXT PRIMARY KEY NOT NULL, kind INTEGER NOT NULL CHECK(kind = 0), "
+            "state INTEGER NOT NULL CHECK(state BETWEEN 0 AND 5), "
+            "source_path BLOB NOT NULL, prepared_path BLOB NOT NULL, backup_path BLOB NOT NULL, "
+            "expected_device BLOB NOT NULL, expected_inode BLOB NOT NULL, "
+            "expected_size BLOB NOT NULL, expected_mtime_seconds BLOB NOT NULL, "
+            "expected_mtime_nanoseconds BLOB NOT NULL, prepared_device BLOB, "
+            "prepared_inode BLOB, prepared_size BLOB, prepared_mtime_seconds BLOB, "
+            "prepared_mtime_nanoseconds BLOB, published_device BLOB, published_inode BLOB, "
+            "published_size BLOB, published_mtime_seconds BLOB, "
+            "published_mtime_nanoseconds BLOB, error_code INTEGER, error_message BLOB, "
+            "content_kind INTEGER NOT NULL DEFAULT 0 CHECK(content_kind BETWEEN 0 AND 4));"
+            "INSERT INTO operation_journal_v38 SELECT * FROM operation_journal;"
+            "DROP TABLE operation_journal;"
+            "ALTER TABLE operation_journal_v38 RENAME TO operation_journal;"
+            "CREATE INDEX operation_journal_state ON operation_journal(state);"
+            "UPDATE schema_version SET version = 38;";
         if (auto result = execute(database, migration); !result) {
             rollback();
             return result;

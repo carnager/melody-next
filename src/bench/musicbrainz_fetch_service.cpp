@@ -173,8 +173,8 @@ void MusicBrainzFetchService::acoustidLookup(
     if (client_key.isEmpty()) {
         completion(std::unexpected(core::Error{
             .code = core::ErrorCode::unsupported,
-            .message = "no AcoustID client key is configured "
-                       "(musicbrainz/acoustid-client-key)",
+            .message = "Set an AcoustID client key in Settings → Metadata services before "
+                       "identifying by audio fingerprint",
             .context = {},
         }));
         return;

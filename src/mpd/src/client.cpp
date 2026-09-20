@@ -37,7 +37,6 @@ std::string quoted_argument(const std::string& value) {
     return quoted;
 }
 
-
 struct ConnectionDeleter {
     void operator()(mpd_connection* connection) const noexcept {
         if (connection != nullptr) {
@@ -601,8 +600,8 @@ struct MelodyRatingSearch {
         value > maximum_rating) {
         return std::nullopt;
     }
-    return "(" + std::string{name} + " " + std::string{comparator} + " " +
-           std::to_string(value) + ")";
+    return "(" + std::string{name} + " " + std::string{comparator} + " " + std::to_string(value) +
+           ")";
 }
 
 [[nodiscard]] MelodyRatingSearch parse_melody_rating_search(const std::string_view query) {
@@ -675,8 +674,9 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
         });
     }
     const std::string query_text{query};
-    const auto parsed = melody_rating_filters ? parse_melody_rating_search(query_text)
-                                              : MelodyRatingSearch{.words = query_text, .conditions = {}};
+    const auto parsed = melody_rating_filters
+                            ? parse_melody_rating_search(query_text)
+                            : MelodyRatingSearch{.words = query_text, .conditions = {}};
     auto* connection = implementation_->connection.get();
     if (!mpd_search_db_songs(connection, false)) {
         return std::unexpected(implementation_->take_error("begin search"));
@@ -700,8 +700,9 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
     return project_tracks(*pairs);
 }
 
-core::Result<std::vector<Track>> Client::search_expression(
-    const std::string_view filter_expression, const std::string_view sort, const unsigned limit) {
+core::Result<std::vector<Track>> Client::search_expression(const std::string_view filter_expression,
+                                                           const std::string_view sort,
+                                                           const unsigned limit) {
     // A query like "date IS 1992" legitimately matches thousands of tracks;
     // the window bounds one response, it does not decide what a search may
     // return.
@@ -741,8 +742,8 @@ core::Result<std::vector<Track>> Client::search_expression(
 }
 
 core::Result<std::vector<MelodyAlbum>>
-Client::search_melody_albums(const std::string_view filter_expression,
-                             const std::string_view sort, const unsigned limit) {
+Client::search_melody_albums(const std::string_view filter_expression, const std::string_view sort,
+                             const unsigned limit) {
     const std::string expression{filter_expression};
     if (expression.empty() || expression.contains('\0')) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
@@ -864,8 +865,7 @@ core::Result<LibrarySearchResult> Client::search_library(const std::string_view 
             if (tracks->size() > static_cast<std::size_t>(track_limit)) {
                 tracks->resize(static_cast<std::size_t>(track_limit));
             }
-            return LibrarySearchResult{.albums = std::move(albums),
-                                       .tracks = std::move(*tracks)};
+            return LibrarySearchResult{.albums = std::move(albums), .tracks = std::move(*tracks)};
         }
     }
 
@@ -1411,7 +1411,32 @@ core::Result<void> Client::delete_ids(const std::span<const std::uint32_t> song_
 }
 
 core::Result<std::vector<std::string>> Client::newest_tag_values(const std::string_view tag,
-                                                                 const unsigned track_limit) {
+                                                                 const unsigned track_limit,
+                                                                 const bool melody_album_order) {
+    if (melody_album_order && tag == "AlbumArtist") {
+        auto pairs = command_pairs("melody_albums_latest");
+        if (!pairs)
+            return std::unexpected(std::move(pairs.error()));
+        std::vector<std::string> ordered;
+        std::unordered_set<std::string> seen;
+        for (const auto& pair : *pairs) {
+            if (pair.name != "X-Album")
+                continue;
+            const auto first = pair.value.find('\t');
+            const auto second =
+                first == std::string::npos ? first : pair.value.find('\t', first + 1);
+            if (first == std::string::npos || second == std::string::npos) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::invalid_argument,
+                                .message = "Melody returned an invalid latest-album record",
+                                .context = {}});
+            }
+            auto artist = pair.value.substr(first + 1, second - first - 1);
+            if (!artist.empty() && seen.insert(artist).second)
+                ordered.push_back(std::move(artist));
+        }
+        return ordered;
+    }
     const std::string tag_name{tag};
     auto* connection = implementation_->connection.get();
     // "Added" is the database insertion time (MPD 0.24) — the honest
@@ -1745,8 +1770,7 @@ core::Result<void> Client::set_melody_track_ratings(const std::span<const std::u
     }
     for (const auto song_id : song_ids) {
         const auto id_text = std::to_string(song_id);
-        if (!mpd_send_command(connection, "rate", id_text.c_str(), rating_text.c_str(),
-                              nullptr)) {
+        if (!mpd_send_command(connection, "rate", id_text.c_str(), rating_text.c_str(), nullptr)) {
             return std::unexpected(implementation_->take_error("send rate command list"));
         }
     }
@@ -1807,8 +1831,8 @@ constexpr std::size_t maximum_command_line = 3'000U;
 // "stage" discards anything a failed earlier command left behind, so a list
 // is never silently prefixed with someone else's tracks.
 core::Result<void> Client::stage_context_uris(const std::vector<std::string>& uris) {
-    if (auto cleared = implementation_->run_composed("melody_context stage",
-                                                     "melody_context stage");
+    if (auto cleared =
+            implementation_->run_composed("melody_context stage", "melody_context stage");
         !cleared) {
         return cleared;
     }
@@ -1847,8 +1871,8 @@ core::Result<void> Client::melody_context_play(const std::string_view name,
 
 // Queue-context edits (docs/protocol.md).
 core::Result<void> Client::melody_context_queue_write(const bool replace,
-                                                     const std::vector<std::string>& uris,
-                                                     const int position) {
+                                                      const std::vector<std::string>& uris,
+                                                      const int position) {
     if (uris.empty()) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
                                            .message = "A queue edit needs at least one track",
@@ -1886,21 +1910,142 @@ core::Result<void> Client::melody_context_queue_delete(const std::vector<unsigne
     return implementation_->run_composed(line, "melody_context queuedelete");
 }
 core::Result<void> Client::melody_context_queue_move(const unsigned from, const unsigned to) {
-    return implementation_->run_composed(
-        "melody_context queuemove " + std::to_string(from) + " " + std::to_string(to),
-        "melody_context queuemove");
+    return implementation_->run_composed("melody_context queuemove " + std::to_string(from) + " " +
+                                             std::to_string(to),
+                                         "melody_context queuemove");
 }
 
 core::Result<void> Client::melody_context_queue(const std::optional<unsigned> row) {
     auto* connection = implementation_->connection.get();
     const auto row_text = row ? std::to_string(*row) : std::string{};
-    const auto sent = row ? mpd_send_command(connection, "melody_context", "queue",
-                                             row_text.c_str(), nullptr)
-                          : mpd_send_command(connection, "melody_context", "queue", nullptr);
+    const auto sent =
+        row ? mpd_send_command(connection, "melody_context", "queue", row_text.c_str(), nullptr)
+            : mpd_send_command(connection, "melody_context", "queue", nullptr);
     if (!sent || !mpd_response_finish(connection)) {
         return std::unexpected(implementation_->take_error("melody_context queue"));
     }
     return {};
+}
+
+core::Result<LastFmReply> Client::lastfm(const LastFmCommand& command) {
+    const auto& op = command.operation;
+    if ((op != "status" && op != "begin" && op != "finish" && op != "disconnect" &&
+         op != "enable" && op != "love" && op != "unlove" && op != "info") ||
+        command.arguments.size() > 2)
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Invalid Last.fm command",
+                                           .context = {}});
+    std::string line = "melody_lastfm " + op;
+    for (const auto& arg : command.arguments) {
+        if (arg.size() > 1024 || arg.find_first_of("\r\n") != std::string::npos ||
+            arg.find('\0') != std::string::npos)
+            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                               .message = "Invalid Last.fm argument",
+                                               .context = {}});
+        line += " " + quoted_argument(arg);
+    }
+    if (!mpd_send_command(implementation_->connection.get(), line.c_str(), nullptr))
+        return std::unexpected(implementation_->take_error("melody_lastfm"));
+    auto pairs = implementation_->receive_pairs("melody_lastfm");
+    if (!pairs)
+        return std::unexpected(pairs.error());
+    for (const auto& pair : *pairs)
+        if (pair.name == "lastfm")
+            return LastFmReply{pair.value};
+    return std::unexpected(core::Error{
+        .code = core::ErrorCode::backend, .message = "Missing Last.fm response", .context = {}});
+}
+
+core::Result<RequestQueueState> Client::request_queue() {
+    if (!mpd_send_command(implementation_->connection.get(), "melody_upnext", nullptr))
+        return std::unexpected(implementation_->take_error("melody_upnext"));
+    auto pairs = implementation_->receive_pairs("melody_upnext");
+    if (!pairs)
+        return std::unexpected(pairs.error());
+    RequestQueueState state;
+    bool has_revision = false;
+    const auto first_track = std::find_if(pairs->begin(), pairs->end(), [](const Pair& pair) {
+        return ascii_case_equal(pair.name, "file");
+    });
+    for (auto it = pairs->begin(); it != first_track; ++it) {
+        const auto& pair = *it;
+        if (pair.name == "undo")
+            state.can_undo = pair.value == "1";
+        if (pair.name == "context")
+            state.context = pair.value;
+        if (pair.name == "revision" || pair.name == "active") {
+            unsigned value = 0;
+            auto parsed =
+                std::from_chars(pair.value.data(), pair.value.data() + pair.value.size(), value);
+            if (parsed.ec != std::errc{} || parsed.ptr != pair.value.data() + pair.value.size())
+                return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                                   .message = "Malformed Up Next response",
+                                                   .context = {}});
+            if (pair.name == "revision") {
+                state.revision = value;
+                has_revision = true;
+            } else
+                state.active_id = value;
+        }
+    }
+    if (!has_revision)
+        return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                           .message = "Up Next response has no revision",
+                                           .context = {}});
+    auto tracks = project_tracks(std::span<const Pair>{first_track, pairs->end()});
+    if (!tracks)
+        return std::unexpected(tracks.error());
+    state.pending = std::move(*tracks);
+    return state;
+}
+
+core::Result<void> Client::edit_request_queue(const RequestQueueCommand& command) {
+    std::string operation;
+    switch (command.operation) {
+    case RequestQueueOperation::append:
+        operation = "append";
+        break;
+    case RequestQueueOperation::prepend:
+        operation = "prepend";
+        break;
+    case RequestQueueOperation::remove:
+        operation = "remove";
+        break;
+    case RequestQueueOperation::move:
+        operation = "move";
+        break;
+    case RequestQueueOperation::clear:
+        operation = "clear";
+        break;
+    case RequestQueueOperation::resume:
+        operation = "return";
+        break;
+    case RequestQueueOperation::insert:
+        operation = "insert";
+        break;
+    case RequestQueueOperation::play:
+        operation = "play";
+        break;
+    case RequestQueueOperation::undo:
+        operation = "undo";
+        break;
+    }
+    if (command.operation == RequestQueueOperation::append ||
+        command.operation == RequestQueueOperation::prepend ||
+        command.operation == RequestQueueOperation::insert) {
+        if (auto staged = stage_context_uris(command.uris); !staged)
+            return staged;
+    }
+    std::string line = "melody_upnext " + operation + " " + std::to_string(command.revision);
+    if (command.operation == RequestQueueOperation::insert)
+        line += " " + std::to_string(command.position);
+    if (command.operation == RequestQueueOperation::remove ||
+        command.operation == RequestQueueOperation::move ||
+        command.operation == RequestQueueOperation::play)
+        line += " " + std::to_string(command.id);
+    if (command.operation == RequestQueueOperation::move)
+        line += " " + std::to_string(command.position);
+    return implementation_->run_composed(line, "melody_upnext");
 }
 
 core::Result<std::vector<Track>> Client::melody_context_queue_tracks() {
@@ -1963,8 +2108,7 @@ core::Result<MelodyAlbumRating> Client::melody_album_rating(const MelodyAlbumKey
         return std::unexpected(std::move(*error));
     }
     if (!mpd_send_command(implementation_->connection.get(), "getalbumrating",
-                          key.album_artist.c_str(), key.album.c_str(), key.date.c_str(),
-                          nullptr)) {
+                          key.album_artist.c_str(), key.album.c_str(), key.date.c_str(), nullptr)) {
         return std::unexpected(implementation_->take_error("send getalbumrating"));
     }
     auto pairs = implementation_->receive_pairs("receive getalbumrating");

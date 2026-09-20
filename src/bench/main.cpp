@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "uicommon/debug_log.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
+#include "uicommon/debug_log.hpp"
 
 #include <QApplication>
 #include <QDateTime>

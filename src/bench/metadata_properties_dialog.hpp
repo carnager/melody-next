@@ -3,11 +3,11 @@
 #pragma once
 
 #include "bench/metadata_artwork_section.hpp"
-#include "bench/output_profiles_widget.hpp"
-#include "bench/settings_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
+#include "bench/output_profiles_widget.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/replaygain_scan.hpp"
+#include "bench/settings_dialog.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/transformation.hpp"
 #include "trackknife/metadata/write_plan.hpp"
@@ -46,6 +46,7 @@ class QLabel;
 class QInputDialog;
 class QLineEdit;
 class QListWidget;
+class QItemSelectionModel;
 class QProgressBar;
 class QPushButton;
 class QAction;
@@ -345,7 +346,8 @@ class MetadataPropertiesDialog final : public QDialog {
 
     QTableView* fields_{nullptr};
     MetadataFieldReviewBar* field_review_bar_{nullptr};
-    QTableView* file_list_{nullptr};
+    QPointer<QTableView> file_list_;
+    QItemSelectionModel* file_selection_{nullptr};
     QLabel* technical_status_{nullptr};
     std::map<std::string, std::optional<TechnicalInfo>> technical_cache_;
     std::deque<std::string> technical_queue_;

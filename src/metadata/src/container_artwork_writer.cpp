@@ -697,6 +697,11 @@ core::Result<PreparedArtworkWrite>
 prepare_qualified_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
                                      const std::string& prepared_raw_path,
                                      const core::CancellationToken& cancellation) {
+    if (source_plan.folder_image || !source_plan.embed)
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::invalid_argument,
+            .message = "Folder image policy must execute through the journaled artwork committer",
+            .context = {}});
     if (!source_plan.additional_changes.empty()) {
         auto merged = merge_artwork_write_plan(
             {}, ArtworkWritePlan{.sources = {source_plan},

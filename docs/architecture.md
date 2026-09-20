@@ -298,6 +298,14 @@ evaluates from the captured revision-qualified source tags. Executor-proven
 directory creation remains batch-owned if later work rolls back, while an
 unexplained path appearance still fails admission (ADR-0075).
 
+ADR-0184 adds a separate descriptor-relative folder-image publisher beside the
+embedded-artwork committer. Captured storage policy extends ready artwork plans,
+not draft intents. Schema 38 shares the metadata journal and backup lifecycle
+but routes folder recovery separately from media-document projection. A shared
+folder is one destination; conflicting incoming hashes block review. Folder and
+media files remain distinct journaled publications with explicit partial-failure
+reporting. The Fields thumbnail consumes the existing bounded artwork worker.
+
 ### `jobs`
 
 Bounded resource-aware scheduler, dependencies, cancellation, progress,
@@ -525,3 +533,49 @@ combining their queues or controllers:
 
 ADR-0115 authorizes the optional local library. A plugin SDK and elaborate
 theme system remain deferred until both authority experiences are excellent.
+
+Per ADR-0194, tag editors own their metadata and selection models directly. Each
+creates one file-list widget that the workspace hosts in its Files sidebar;
+there is no second mirror view. Leaving a tab returns its widget to the editor.
+
+## Shared dynamic playlists (ADR-0195)
+
+`DynamicPlaylistService` owns definition evaluation, provider requests, bounded
+matching, cancellation generations, limits, and shuffle. The editor uses the
+same service for both authorities. Adapters evaluate typed `CompiledTkq`
+queries on a local-library worker or the serialized MPD session. Results are
+homogeneous local or remote vectors; presentation uses the existing local and
+MPD track models and shared track-view engine. The service never mutates a
+queue. Opening a snapshot crosses into the existing authority-specific list
+creation path only after an explicit user action.
+
+## Up Next (ADR-0196)
+
+The shared request panel renders authority-specific pending models. Local
+`audio::RequestQueue` owns occurrence IDs and one pending-edit undo; the local
+audio worker publishes occurrence tokens for gapless handoffs. Its original
+list traversal remains suspended until the FIFO drains. Persistence uses a
+versioned payload on the existing serialized UI-state repository. Melody owns
+remote requests and continuation independently of client lifetime; typed
+revision-qualified commands and snapshots cross the MPD session boundary.
+Stock MPD never runs an emulated client-owned progression scheduler.
+
+## Last.fm (ADR-0197)
+
+Qt-free `core::ListenAccounting` consumes occurrence identity, position, playing
+state, and monotonic samples. The local audio worker publishes a playback
+instance on loads and gapless handoffs. Trackbench forwards only local-player
+samples, independently of the selected tab, to a dedicated LastFmService worker
+that owns HTTP and private file persistence. Account UI is shared with Melody
+through typed command/reply envelopes on the serialized MPD session. Melody's
+separate Go service samples only its primary output; provider network work never
+holds queue/audio locks. There is one bounded durable outbox per authority and
+no scrobbling in endpoint playback or stock-MPD clients.
+
+Per ADR-0198, server queue and named-list track menus use one selection and
+construction path. Shared actions resolve the source view instead of reading
+MPD Queue implicitly. Backend addressing retains the existing unnamed-context
+and named-playlist commands. Priority resolves selected positions/URIs to stable
+occurrence IDs only in the active playback context; inactive lists cannot
+accidentally mutate another list's priorities. Whole-list management remains on
+the list/tab surface.

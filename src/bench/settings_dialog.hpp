@@ -3,24 +3,30 @@
 #pragma once
 
 #include "bench/output_profiles_widget.hpp"
+#include "trackknife/metadata/artwork_write_plan.hpp"
 
 #include <QDialog>
 
+class QAction;
 class QCheckBox;
 class QComboBox;
 class QLineEdit;
 class QListWidget;
 class QStackedWidget;
+class QSpinBox;
+class QDoubleSpinBox;
 
 namespace trackknife::bench {
 
 // The application settings screen (ADR-0112, ADR-0185): a paged dialog —
-// General (startup context, MPD music folder), Naming (the reusable
+// General (startup context, MPD music folder, notifications), Playback (local
+// buffering and ReplayGain preamps), Naming (the reusable
 // output-layout and move-destination profile managers), ReplayGain
 // (set-once scan preferences), and Covers (the ADR-0184 storage policy
-// keys; enforcement lands with the policy work). Simple values persist
+// captured at cover review). Simple values persist
 // through QSettings on Save; profile edits persist immediately through the
 // injected store.
+class ShortcutSettings;
 class SettingsDialog final : public QDialog {
     Q_OBJECT
 
@@ -30,12 +36,30 @@ class SettingsDialog final : public QDialog {
     void outputProfilesChanged();
 
   public:
-    enum class Page : std::uint8_t { general, naming, replaygain, covers };
-    explicit SettingsDialog(QWidget* parent = nullptr,
-                            OutputProfileStore profile_store = {});
+    enum class Page : std::uint8_t {
+        general,
+        playback,
+        library,
+        connections,
+        naming,
+        replaygain,
+        covers,
+        metadata_services,
+        lastfm,
+        shortcuts
+    };
+    explicit SettingsDialog(QWidget* parent = nullptr, OutputProfileStore profile_store = {},
+                            std::function<QWidget*(QWidget*)> library_folders = {},
+                            std::function<QWidget*(QWidget*)> connections = {},
+                            std::function<QWidget*(QWidget*)> lastfm = {},
+                            QList<QAction*> shortcuts = {});
     void showPage(Page page);
+    void editCustomBuffer();
+    void focusReplayGainPreamp();
+    [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();
 
     // QSettings keys shared with the consumers.
+    static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
     static constexpr auto startup_context_key = "startup/context";
     static constexpr auto music_root_key = "mpd/music-root";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
@@ -47,11 +71,21 @@ class SettingsDialog final : public QDialog {
 
   private:
     void save();
+    ShortcutSettings* shortcuts_{};
 
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
     QComboBox* startup_{nullptr};
+    QCheckBox* notifications_{nullptr};
+    QCheckBox* notifications_background_{nullptr};
+    QComboBox* buffer_profile_{nullptr};
+    QSpinBox* buffer_capacity_{nullptr};
+    QSpinBox* buffer_threshold_{nullptr};
+    QDoubleSpinBox* preamp_with_{nullptr};
+    QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* music_root_{nullptr};
+    QLineEdit* lastfm_key_{nullptr};
+    QLineEdit* acoustid_key_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};
     QCheckBox* replaygain_true_peak_{nullptr};
     QCheckBox* artwork_embed_{nullptr};

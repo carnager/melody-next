@@ -33,6 +33,7 @@ enum class MetadataOperationContentKind : std::uint8_t {
     // carrier-internal identity encoded in each change's exact_native_name.
     cue_replay_gain,
     loudness_sidecar,
+    folder_image,
 };
 
 // The file-mutation journal reaches `complete` before its exact old inode can
@@ -140,6 +141,19 @@ class MetadataOperationJournal {
     load(const core::StableId& id) const = 0;
     [[nodiscard]] virtual core::Result<std::vector<MetadataOperationJournalRecord>>
     load_incomplete() const = 0;
+    // Admission checks validate only evidence belonging to the file being saved.
+    // Full recovery still uses load_incomplete() and reports damaged records.
+    [[nodiscard]] virtual core::Result<std::vector<MetadataOperationJournalRecord>>
+    load_incomplete_for_source(const std::string& raw_path) const {
+        auto records = load_incomplete();
+        if (!records)
+            return std::unexpected(records.error());
+        std::vector<MetadataOperationJournalRecord> matching;
+        for (auto& record : *records)
+            if (record.source_raw_path == raw_path)
+                matching.push_back(std::move(record));
+        return matching;
+    }
     [[nodiscard]] virtual core::Result<std::optional<MetadataOperationBackupRecord>>
     load_backup(const core::StableId& id) const = 0;
     [[nodiscard]] virtual core::Result<std::vector<MetadataOperationBackupRecord>>

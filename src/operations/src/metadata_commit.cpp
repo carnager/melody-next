@@ -706,6 +706,17 @@ verify_published_content(const MetadataOperationJournalRecord& record,
         }
         return metadata::MetadataDocument{};
     }
+    if (record.content_kind == MetadataOperationContentKind::folder_image) {
+        auto image = metadata::read_artwork_image_file(record.source_raw_path, 16U * 1024U * 1024U,
+                                                       cancellation);
+        if (!image || image->source_revision != revision || record.changes.size() != 1 ||
+            record.changes.front().planned_values !=
+                std::vector<std::string>{
+                    metadata::artwork_fingerprint_hex(image->content_fingerprint)})
+            return std::unexpected(operation_error(
+                core::ErrorCode::conflict, "Folder image hash changed", record.source_raw_path));
+        return metadata::MetadataDocument{};
+    }
     auto reread = metadata::read_local_metadata(record.source_raw_path, cancellation);
     if (!reread || reread->source_revision != revision) {
         return std::unexpected(
@@ -1237,6 +1248,19 @@ verify_original_content(const MetadataOperationJournalRecord& record,
         if (!verified) {
             return std::unexpected(std::move(verified.error()));
         }
+        return metadata::MetadataDocument{};
+    }
+    if (record.content_kind == MetadataOperationContentKind::folder_image) {
+        auto image = metadata::read_artwork_image_file(record.source_raw_path, 16U * 1024U * 1024U,
+                                                       cancellation);
+        if (!image || image->source_revision != record.expected_revision ||
+            record.changes.size() != 1 ||
+            record.changes.front().original_values !=
+                std::vector<std::string>{
+                    metadata::artwork_fingerprint_hex(image->content_fingerprint)})
+            return std::unexpected(operation_error(core::ErrorCode::conflict,
+                                                   "Original folder image hash changed",
+                                                   record.source_raw_path));
         return metadata::MetadataDocument{};
     }
     auto reread = metadata::read_local_metadata(record.source_raw_path, cancellation);
@@ -1897,6 +1921,50 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
                             MetadataOperationJournal& journal,
                             const MetadataDependentStateCommitter& dependent_state_committer,
                             const core::CancellationToken& cancellation) {
+    if (source_plan.artwork && source_plan.artwork->folder_image) {
+        if (!dependent_state_committer || !source_plan.ready() || !source_plan.observed_revision ||
+            source_plan.expected_revision != source_plan.observed_revision ||
+            source_plan.raw_path != source_plan.artwork->raw_media_path ||
+            source_plan.expected_revision != source_plan.artwork->expected_media_revision ||
+            std::filesystem::path{source_plan.raw_path}.parent_path() !=
+                std::filesystem::path{source_plan.artwork->folder_image->raw_path}.parent_path())
+            return std::unexpected(operation_error(core::ErrorCode::invalid_argument,
+                                                   "Incomplete cover plan", source_plan.raw_path));
+        auto fresh = metadata::read_local_metadata(source_plan.raw_path, cancellation);
+        if (!fresh || fresh->source_revision != *source_plan.observed_revision)
+            return std::unexpected(operation_error(core::ErrorCode::conflict,
+                                                   "Cover source changed after review",
+                                                   source_plan.raw_path));
+        auto folder =
+            commit_folder_image(*source_plan.artwork->folder_image, journal, cancellation);
+        if (!folder)
+            return std::unexpected(folder.error());
+        auto media = source_plan;
+        if (source_plan.artwork->embed) {
+            auto embedded =
+                std::make_shared<metadata::ArtworkWritePlanSource>(*source_plan.artwork);
+            embedded->folder_image.reset();
+            media.artwork = std::move(embedded);
+        } else {
+            media.artwork.reset();
+        }
+        if (media.changes.empty() && !media.artwork) {
+            return MetadataCommitResult{.journal_id = {},
+                                        .source_raw_path = media.raw_path,
+                                        .backup_raw_path = {},
+                                        .previous_revision = fresh->source_revision,
+                                        .published_revision = fresh->source_revision,
+                                        .document = std::move(fresh->document),
+                                        .occurrence_indexes = media.occurrence_indexes,
+                                        .content_kind = MetadataOperationContentKind::text_fields};
+        }
+        auto committed =
+            commit_flac_metadata_source(media, journal, dependent_state_committer, cancellation);
+        if (!committed)
+            committed.error().message =
+                "Folder image saved; media save failed: " + committed.error().message;
+        return committed;
+    }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(source_plan.raw_path));
     }
@@ -1917,7 +1985,7 @@ commit_flac_metadata_source(const metadata::MetadataWritePlanSource& source_plan
     if (!process_lock) {
         return std::unexpected(std::move(process_lock.error()));
     }
-    const auto incomplete = journal.load_incomplete();
+    const auto incomplete = journal.load_incomplete_for_source(source_plan.raw_path);
     if (!incomplete) {
         return std::unexpected(incomplete.error());
     }
@@ -2016,6 +2084,16 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
                       MetadataOperationJournal& journal,
                       const MetadataDependentStateCommitter& dependent_state_committer,
                       const core::CancellationToken& cancellation) {
+    if (source_plan.folder_image) {
+        auto combined = metadata::merge_artwork_write_plan(
+            {}, metadata::ArtworkWritePlan{.sources = {source_plan},
+                                           .logical_intent_count =
+                                               source_plan.occurrence_indexes.size()});
+        if (!combined)
+            return std::unexpected(combined.error());
+        return commit_flac_metadata_source(combined->sources.front(), journal,
+                                           dependent_state_committer, cancellation);
+    }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(source_plan.raw_media_path));
     }
@@ -2552,6 +2630,13 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             });
             continue;
         }
+        if (record.content_kind == MetadataOperationContentKind::folder_image) {
+            auto recovered = recover_folder_image(record, journal, cancellation);
+            if (!recovered)
+                return std::unexpected(recovered.error());
+            results.push_back(std::move(*recovered));
+            continue;
+        }
         auto process_lock =
             acquire_process_lock(record.expected_revision, cancellation, record.source_raw_path);
         if (!process_lock) {
@@ -2803,6 +2888,11 @@ undo_flac_metadata_operation(const core::StableId& journal_id, MetadataOperation
     }
     auto backup = std::move(**loaded);
     const auto& record = backup.operation;
+    if (record.content_kind == MetadataOperationContentKind::folder_image &&
+        !record.changes.front().original_present)
+        return std::unexpected(operation_error(
+            core::ErrorCode::unsupported,
+            "A newly created folder image has no prior image to restore", record.source_raw_path));
     if (backup.state != BackupState::retained || !record.published_revision) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
                                                "metadata backup is not available for undo",

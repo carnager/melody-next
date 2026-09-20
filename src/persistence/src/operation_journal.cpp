@@ -293,7 +293,7 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
 
 [[nodiscard]] bool valid_content_kind(const int value) {
     return value >= static_cast<int>(ContentKind::text_fields) &&
-           value <= static_cast<int>(ContentKind::loudness_sidecar);
+           value <= static_cast<int>(ContentKind::folder_image);
 }
 
 [[nodiscard]] bool valid_backup_state(const int value) {
@@ -419,6 +419,21 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
         (!artwork_record && (record.changes.empty() || record.artwork)) ||
         (artwork_record && !record.artwork)) {
         return std::unexpected(invalid_record("Invalid metadata-operation content evidence"));
+    }
+    if (record.content_kind == ContentKind::folder_image) {
+        const auto hash = [](const std::string& value) {
+            return value.size() == 64 && std::ranges::all_of(value, [](char c) {
+                       return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+                   });
+        };
+        if (record.changes.size() != 1 || record.changes.front().canonical_name != "folderimage" ||
+            record.changes.front().kind != metadata::StagedMetadataPatchKind::replace_values ||
+            record.changes.front().planned_values.size() != 1 ||
+            !hash(record.changes.front().planned_values.front()) ||
+            (record.changes.front().original_present &&
+             (record.changes.front().original_values.size() != 1 ||
+              !hash(record.changes.front().original_values.front()))))
+            return std::unexpected(invalid_record("Invalid folder-image journal hash evidence"));
     }
     if (record.artwork) {
         const auto& artwork = *record.artwork;
@@ -1332,6 +1347,29 @@ SqliteMetadataOperationJournal::load_incomplete() const {
         "content_kind "
         "FROM operation_journal WHERE state NOT IN (3, 4) ORDER BY rowid LIMIT 10001";
     auto records = load_records(implementation_->database, sql);
+    if (!records) {
+        return std::unexpected(std::move(records.error()));
+    }
+    if (records->size() > maximum_incomplete_records) {
+        return std::unexpected(
+            database_error(implementation_->database, "Too many incomplete operation journals"));
+    }
+    return records;
+}
+
+core::Result<std::vector<operations::MetadataOperationJournalRecord>>
+SqliteMetadataOperationJournal::load_incomplete_for_source(const std::string& raw_path) const {
+    std::scoped_lock lock{implementation_->mutex};
+    constexpr auto sql =
+        "SELECT id, state, source_path, prepared_path, backup_path, expected_device, "
+        "expected_inode, expected_size, expected_mtime_seconds, expected_mtime_nanoseconds, "
+        "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
+        "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
+        "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
+        "content_kind "
+        "FROM operation_journal WHERE source_path = ? AND state NOT IN (3, 4) ORDER BY rowid LIMIT "
+        "10001";
+    auto records = load_records(implementation_->database, sql, raw_path);
     if (!records) {
         return std::unexpected(std::move(records.error()));
     }

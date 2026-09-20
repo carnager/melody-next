@@ -2,11 +2,13 @@
 
 #pragma once
 
+#include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
-#include "bench/settings_dialog.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
+#include "bench/settings_dialog.hpp"
 #include "trackknife/audio/playback_order.hpp"
+#include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
@@ -37,6 +39,7 @@
 
 class QActionGroup;
 class QDialog;
+class QDockWidget;
 class QLabel;
 class QStyledItemDelegate;
 class QListWidget;
@@ -59,10 +62,12 @@ class QVBoxLayout;
 
 namespace trackknife::audio {
 class LocalAuditionService;
+struct LocalAuditionSnapshot;
 class MelodyAgentService;
 } // namespace trackknife::audio
 
 namespace trackknife::ui {
+class QueueTableView;
 class ListPersistenceService;
 class LocalFolderTreeModel;
 class ServerLibraryTreeModel;
@@ -153,6 +158,17 @@ class BenchMainWindow final : public QMainWindow {
     void buildMpdSearch();
     void buildMpdStatusControls();
     void buildTransport();
+    void buildUpNext();
+    void refreshUpNext();
+    void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
+    void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1);
+    void addUpNextActions(QMenu* menu, QTableView* source);
+    void editUpNext(int operation, int row = -1, int destination = -1);
+    void persistUpNext();
+    void restoreUpNext();
+    [[nodiscard]] bool playLocalRequest();
+    void adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry);
+
     [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
     void loadPanelLayout();
     void applyPanelLayout(const ui::PanelLayout& layout);
@@ -210,12 +226,15 @@ class BenchMainWindow final : public QMainWindow {
     void renameMpdPlaylistTab(const QString& from, const QString& to);
     void refreshMpdPlaylistContextMarkers();
     void persistOpenPlaylistTabs();
+    void refreshMpdPlaylistSidebar();
     void restoreOpenPlaylistTabs(const QStringList& available);
     void closeMpdPlaylistTab(const QString& name);
     void refreshMpdPlaylistsSoon();
     void showMpdPlaylistSidebarMenu(const QPoint& position);
-    void showMpdPlaylistTrackMenu(MpdPlaylistTab& tab, const QPoint& position);
     void commitMpdSearchTab();
+    void showDynamicPlaylists();
+    QStringList mpdDynamicSnapshots() const;
+    void setMpdDynamicSnapshot(const QString& name, bool enabled);
     void openMpdSearchTab(const QString& query, std::vector<mpd::Track> tracks, bool select);
     void addMpdPlaylistActions(QMenu* menu, const QString& name);
     void promptSaveQueueAsPlaylist();
@@ -258,6 +277,14 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] bool canReplayCrossTabMove(bool undo);
     bool replayCrossTabMove(bool undo);
     void refreshTabChrome(ListTab& tab);
+    void setActiveLocalList(const QString& id);
+    void refreshPlaybackCursor(bool jump = false);
+    void buildShortcuts();
+    QList<QAction*> configurable_shortcuts_;
+    QAction* follow_playback_action_{};
+    QPointer<QTableView> followed_playback_view_;
+    QPersistentModelIndex followed_playback_index_;
+    QString pending_playing_list_;
     void refreshTabActions();
     void refreshListHistoryActions();
     void replayListEdit(bool undo);
@@ -288,7 +315,7 @@ class BenchMainWindow final : public QMainWindow {
     void playCurrentRow();
     void showMetadataProperties();
     void showConvertDialog();
-    void showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
+    SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     [[nodiscard]] OutputProfileStore buildOutputProfileStore();
     void applyLibraryOrder(bool persist);
     void startMetadataOperationRecovery();
@@ -387,6 +414,7 @@ class BenchMainWindow final : public QMainWindow {
     void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms);
     void showCustomPlaybackBufferDialog();
     void refreshPlaybackBufferChecks();
+    void reloadPlaybackPreferences();
     void togglePlayPause();
     void seekToMs(qint64 position_ms);
 
@@ -402,9 +430,7 @@ class BenchMainWindow final : public QMainWindow {
     // ADR-0183 addendum: temporary sidebar page hosting the active tag
     // editor's file list.
     QWidget* properties_files_page_{nullptr};
-    QTableView* properties_files_view_{nullptr};
     QLabel* properties_files_dir_{nullptr};
-    QStyledItemDelegate* properties_files_delegate_{nullptr};
     QPointer<MetadataPropertiesDialog> hosted_properties_;
     int previous_local_source_index_{-1};
     void updatePropertiesFileHosting();
@@ -490,7 +516,7 @@ class BenchMainWindow final : public QMainWindow {
     // Enter pressed before the debounced search finished: commit this
     // query as soon as its results arrive (ADR-0140).
     QString pending_mpd_search_commit_;
-    // ADR-0189: the Playlists sidebar is a tree — playlists expand to their
+    // ADR-0188: the Playlists sidebar is a tree — playlists expand to their
     // tracks, like albums in the library.
     QTreeWidget* mpd_playlists_list_{nullptr};
     [[nodiscard]] QStringList mpdPlaylistNames() const;
@@ -521,8 +547,7 @@ class BenchMainWindow final : public QMainWindow {
     QAction* mpd_edit_tags_action_{nullptr};
     QAction* mpd_replaygain_action_{nullptr};
     QAction* mpd_convert_action_{nullptr};
-    QToolButton* library_order_az_{nullptr};
-    QToolButton* library_order_latest_{nullptr};
+    QComboBox* library_order_{nullptr};
     QAction* remove_selected_action_{nullptr};
     QAction* undo_list_action_{nullptr};
     QAction* redo_list_action_{nullptr};
@@ -561,8 +586,6 @@ class BenchMainWindow final : public QMainWindow {
     QAction* mpd_random_action_{nullptr};
     QAction* mpd_single_action_{nullptr};
     QAction* mpd_consume_action_{nullptr};
-    QAction* mpd_append_selection_action_{nullptr};
-    QAction* mpd_add_next_selection_action_{nullptr};
     QAction* mpd_crop_selection_action_{nullptr};
     QToolButton* mpd_repeat_button_{nullptr};
     QToolButton* mpd_random_button_{nullptr};
@@ -665,11 +688,35 @@ class BenchMainWindow final : public QMainWindow {
     QString local_replaygain_{QStringLiteral("off")};
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};
+    std::optional<ListTab> detached_playback_;
     audio::PlaybackOrder playback_order_;
+    audio::RequestQueue<LocalTrackRow> local_requests_;
+    std::optional<audio::RequestQueue<LocalTrackRow>::Entry> requested_request_;
+    std::optional<audio::RequestQueue<LocalTrackRow>::Entry> queued_request_;
+    QDockWidget* up_next_dock_{nullptr};
+    QToolButton* up_next_button_{nullptr};
+    ui::QueueTableView* up_next_view_{nullptr};
+    LocalListModel* up_next_local_model_{nullptr};
+    quick::MpdQueueModel* up_next_mpd_model_{nullptr};
+    QLabel* up_next_status_{nullptr};
+    bool up_next_restored_{false};
+    std::uint64_t up_next_local_revision_{0};
+    unsigned up_next_remote_revision_{0};
+    QString up_next_remote_profile_;
+
     QPersistentModelIndex playback_index_;
     QPersistentModelIndex queued_playback_index_;
     QPersistentModelIndex requested_playback_index_;
     bool consuming_row_{false};
+    LastFmService* lastfm_{};
+    QElapsedTimer lastfm_clock_;
+    qint64 lastfm_sample_time_{-1000};
+    void buildLastFm();
+    void sampleLastFm(const audio::LocalAuditionSnapshot& snapshot);
+    QWidget* buildLastFmSettings(QWidget* parent);
+    void addLastFmActions(QMenu* menu, QTableView* view);
+    // Last explicitly played local list; transport stop does not release it.
+    QString active_local_list_id_;
     QString playback_document_id_;
     int playback_row_{-1};
     LocalTrackSource playback_source_;
@@ -679,6 +726,8 @@ class BenchMainWindow final : public QMainWindow {
     // dropped or rejected a queue.
     quint64 last_chain_transitions_{0U};
     std::optional<LocalTrackSource> last_requested_next_;
+    std::uint64_t last_requested_token_{0U};
+    QPersistentModelIndex request_return_index_;
     QElapsedTimer next_request_timer_;
     bool seeking_{false};
     bool changing_volume_{false};

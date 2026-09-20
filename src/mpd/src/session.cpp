@@ -143,12 +143,15 @@ struct Session::Impl {
         unsigned rating{0U};
         std::vector<std::uint64_t> melody_song_ids;
         MelodyAlbumKey album_rating_key;
+        RequestQueueCommand request;
+        LastFmCommand lastfm;
     };
 
     static constexpr std::size_t maximum_pending_commands = 64U;
 
     [[nodiscard]] static bool is_query(const SessionCommandKind kind) noexcept {
-        return kind == SessionCommandKind::database_browse ||
+        return kind == SessionCommandKind::database_newest ||
+               kind == SessionCommandKind::database_browse ||
                kind == SessionCommandKind::database_tag ||
                kind == SessionCommandKind::database_album_counts ||
                kind == SessionCommandKind::database_tag_tracks ||
@@ -168,6 +171,7 @@ struct Session::Impl {
     // command worker when it builds search constraints.
     std::atomic_bool melody_rating_search{false};
     std::atomic_bool melody_album_search{false};
+    std::atomic_bool melody_latest_albums{false};
     std::atomic_bool melody_contexts{false};
     // Melody takes a whole batch of playlist additions as one write.
     std::atomic_bool melody_playlist_batch{false};
@@ -315,6 +319,14 @@ struct Session::Impl {
         switch (command.kind) {
         case SessionCommandKind::transport:
             return without_payload(client.run_transport(command.action));
+        case SessionCommandKind::lastfm: {
+            auto result = client.lastfm(command.lastfm);
+            if (!result)
+                return std::unexpected(result.error());
+            return std::move(*result);
+        }
+        case SessionCommandKind::request_queue_edit:
+            return without_payload(client.edit_request_queue(command.request));
         case SessionCommandKind::melody_context_play:
             return without_payload(client.melody_context_play(command.uri, command.queue_position));
         case SessionCommandKind::melody_context_queue:
@@ -361,7 +373,9 @@ struct Session::Impl {
         case SessionCommandKind::database_update:
             return without_payload(client.update_database(command.uri));
         case SessionCommandKind::database_newest: {
-            auto result = client.newest_tag_values(command.uri, command.priority);
+            auto result =
+                client.newest_tag_values(command.uri, command.priority,
+                                         melody_latest_albums.load(std::memory_order_acquire));
             if (!result) {
                 return std::unexpected(std::move(result.error()));
             }
@@ -503,8 +517,8 @@ struct Session::Impl {
             return SessionCommandPayload{*result};
         }
         case SessionCommandKind::database_expression_search: {
-            auto result = client.search_expression(command.uri, command.secondary_uri,
-                                                   command.query_limit);
+            auto result =
+                client.search_expression(command.uri, command.secondary_uri, command.query_limit);
             if (!result) {
                 return std::unexpected(std::move(result.error()));
             }
@@ -521,6 +535,7 @@ struct Session::Impl {
         case SessionCommandKind::transport:
         case SessionCommandKind::seek:
             return static_cast<std::uint32_t>(IdleEvent::player);
+        case SessionCommandKind::request_queue_edit:
         case SessionCommandKind::melody_context_play:
         case SessionCommandKind::melody_context_queue:
         case SessionCommandKind::melody_context_queue_add:
@@ -529,6 +544,7 @@ struct Session::Impl {
         case SessionCommandKind::melody_context_queue_move:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
+        case SessionCommandKind::lastfm:
         case SessionCommandKind::melody_scratch_lists:
             return 0U;
         case SessionCommandKind::melody_set_scratch:
@@ -608,6 +624,9 @@ struct Session::Impl {
                 std::memory_order_release);
             melody_contexts.store(snapshot.capabilities.supports_command("melody_context"),
                                   std::memory_order_release);
+            melody_latest_albums.store(
+                snapshot.capabilities.supports_command("melody_albums_latest"),
+                std::memory_order_release);
             melody_album_search.store(snapshot.capabilities.supports_command("searchalbums"),
                                       std::memory_order_release);
         }
@@ -629,6 +648,14 @@ struct Session::Impl {
                 return std::unexpected(std::move(current.error()));
             }
             snapshot.current_song = std::move(*current);
+        }
+        if (snapshot.capabilities.supports_command("melody_upnext") &&
+            (all || (requested & (static_cast<std::uint32_t>(IdleEvent::queue) |
+                                  static_cast<std::uint32_t>(IdleEvent::player))) != 0U)) {
+            auto state = client.request_queue();
+            if (!state)
+                return std::unexpected(state.error());
+            snapshot.requests = std::move(*state);
         }
         // ADR-0187: which stored playlist is materialized as the playback
         // context. Refreshed with the queue, since a switch replaces it.
@@ -789,6 +816,10 @@ struct Session::Impl {
                                     static_cast<std::uint32_t>(IdleEvent::player),
                                 std::memory_order_release);
                         }
+                        if (command->kind == SessionCommandKind::request_queue_edit) {
+                            pending_refresh.fetch_or(refresh_after(*command),
+                                                     std::memory_order_release);
+                        }
                         finish_command(*command, std::monostate{}, error);
                         if (!requires_reconnect(error)) {
                             continue;
@@ -885,8 +916,21 @@ std::uint64_t Session::play_queue_id(const std::uint32_t song_id) {
     return implementation_->enqueue(command);
 }
 
-std::uint64_t Session::melody_context_play(std::string name,
-                                          const std::optional<unsigned> row) {
+std::uint64_t Session::lastfm(LastFmCommand request) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::lastfm;
+    command.lastfm = std::move(request);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::edit_request_queue(RequestQueueCommand request) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::request_queue_edit;
+    command.request = std::move(request);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::melody_context_play(std::string name, const std::optional<unsigned> row) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::melody_context_play;
     command.uri = std::move(name);
@@ -896,8 +940,7 @@ std::uint64_t Session::melody_context_play(std::string name,
 
 // The insert position rides in object_id biased by one, so -1 (append) stays
 // representable in the unsigned field every command shares.
-std::uint64_t Session::melody_context_queue_add(std::vector<std::string> uris,
-                                                const int position) {
+std::uint64_t Session::melody_context_queue_add(std::vector<std::string> uris, const int position) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::melody_context_queue_add;
     command.uris = std::move(uris);

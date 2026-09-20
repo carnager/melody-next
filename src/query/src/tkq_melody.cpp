@@ -40,8 +40,8 @@ namespace {
         {"musicbrainzreleasegroupid", "musicbrainz_releasegroupid"},
         {"musicbrainzworkid", "musicbrainz_workid"},
     }};
-    const auto found = std::ranges::find(renames, canonical,
-                                         [](const auto& rename) { return rename.first; });
+    const auto found =
+        std::ranges::find(renames, canonical, [](const auto& rename) { return rename.first; });
     return found == renames.end() ? canonical : std::string{found->second};
 }
 
@@ -50,8 +50,8 @@ namespace {
 }
 
 [[nodiscard]] bool technical_field(const std::string& canonical) {
-    return canonical == "samplerate" || canonical == "bitspersample" ||
-           canonical == "channels" || canonical == "lengthms";
+    return canonical == "samplerate" || canonical == "bitspersample" || canonical == "channels" ||
+           canonical == "lengthms";
 }
 
 [[nodiscard]] bool numeric_server_field(const std::string& canonical) {
@@ -138,9 +138,9 @@ namespace {
     case TkqComparison::less:
     case TkqComparison::equal: {
         if (!server_numeric && !full_grammar) {
-            return std::unexpected(unsupported(
-                "this server compares numbers only on rating, albumrating, samplerate, "
-                "bitspersample, channels, and length_ms"));
+            return std::unexpected(
+                unsupported("this server compares numbers only on rating, albumrating, samplerate, "
+                            "bitspersample, channels, and length_ms"));
         }
         auto number = predicate.number;
         if (canonical == "lengthms") {
@@ -151,8 +151,7 @@ namespace {
         if (predicate.comparison == TkqComparison::equal && !server_numeric) {
             // The server's == is string equality on ordinary tags; the
             // range pair reproduces tkq's leading-integer EQUAL.
-            return "((" + tag + " >= " + rendered + ") AND (" + tag + " <= " + rendered +
-                   "))";
+            return "((" + tag + " >= " + rendered + ") AND (" + tag + " <= " + rendered + "))";
         }
         const auto* comparator = predicate.comparison == TkqComparison::greater ? ">"
                                  : predicate.comparison == TkqComparison::less  ? "<"
@@ -167,9 +166,8 @@ namespace {
             return "(" + tag + " != \"\")";
         }
         return std::unexpected(unsupported(
-            full_grammar
-                ? "PRESENT cannot run on the server for probe-derived technical fields"
-                : "PRESENT only translates for rating and albumrating on this server"));
+            full_grammar ? "PRESENT cannot run on the server for probe-derived technical fields"
+                         : "PRESENT only translates for rating and albumrating on this server"));
     case TkqComparison::missing:
         if (!full_grammar) {
             return std::unexpected(
@@ -180,16 +178,16 @@ namespace {
             return "(!(" + tag + " >= 1))";
         }
         if (technical_field(canonical) || canonical == "codec") {
-            return std::unexpected(unsupported(
-                "MISSING cannot run on the server for probe-derived technical fields"));
+            return std::unexpected(
+                unsupported("MISSING cannot run on the server for probe-derived technical fields"));
         }
         return "(" + tag + " == \"\")";
     }
     return std::unexpected(unsupported("unsupported comparison"));
 }
 
-[[nodiscard]] core::Result<std::string>
-translate_node(const CompiledTkq& compiled, std::size_t index, const bool full_grammar) {
+[[nodiscard]] core::Result<std::string> translate_node(const CompiledTkq& compiled,
+                                                       std::size_t index, const bool full_grammar) {
     const auto& node = compiled.nodes[index];
     switch (node.kind) {
     case TkqNodeKind::predicate:
@@ -213,8 +211,8 @@ translate_node(const CompiledTkq& compiled, std::size_t index, const bool full_g
     }
     case TkqNodeKind::not_node: {
         if (!full_grammar) {
-            return std::unexpected(unsupported(
-                "NOT cannot run on this server; its filter grammar has no negation"));
+            return std::unexpected(
+                unsupported("NOT cannot run on this server; its filter grammar has no negation"));
         }
         auto child = translate_node(compiled, node.children.front(), full_grammar);
         if (!child) {
@@ -253,9 +251,9 @@ translate_node(const CompiledTkq& compiled, std::size_t index, const bool full_g
     constexpr std::array sortable{"artist", "albumartist", "album", "title",
                                   "date",   "track",       "disc"};
     if (std::ranges::find(sortable, field) == sortable.end()) {
-        return std::unexpected(
-            unsupported("the server cannot sort by %" + field + "%; supported: artist, "
-                        "albumartist, album, title, date, track, disc"));
+        return std::unexpected(unsupported("the server cannot sort by %" + field +
+                                           "%; supported: artist, "
+                                           "albumartist, album, title, date, track, disc"));
     }
     return (sort.direction == TkqSortDirection::descending ? "-" : "") + field;
 }

@@ -1,18 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_properties_dialog.hpp"
+#include "bench/cover_review.hpp"
+#include "bench/cover_thumbnail.hpp"
+#include "bench/file_scope_view.hpp"
 
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_exact_value_dialog.hpp"
 #include "bench/metadata_field_review_bar.hpp"
-#include "bench/settings_dialog.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_rule_script_import_dialog.hpp"
 #include "bench/metadata_scalar_delegate.hpp"
 #include "bench/metadata_transformation_dialog.hpp"
 #include "bench/metadata_transformation_preview_model.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
+#include "bench/settings_dialog.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/formats/probe.hpp"
 #include "trackknife/loudness/grouping.hpp"
@@ -52,6 +55,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QModelIndex>
+#include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPersistentModelIndex>
@@ -59,11 +63,11 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSpinBox>
-#include <QScrollArea>
 #include <QSplitter>
 #include <QStandardItemModel>
 #include <QStringListModel>
@@ -409,24 +413,24 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     more_button->setMenu(more_menu);
     grid_tools_layout->addWidget(more_button);
     grid_tools_layout->addStretch(1);
-    undo_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-undo")), QString{},
-                                   grid_tools_);
+    undo_button_ =
+        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-undo")), QString{}, grid_tools_);
     undo_button_->setObjectName(QStringLiteral("bench-metadata-undo"));
     undo_button_->setAccessibleName(QStringLiteral("Undo"));
     undo_button_->setToolTip(QStringLiteral("Undo the last draft edit (Ctrl+Z)"));
     undo_button_->setShortcut(QKeySequence::Undo);
     undo_button_->setEnabled(false);
     grid_tools_layout->addWidget(undo_button_);
-    redo_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-redo")), QString{},
-                                   grid_tools_);
+    redo_button_ =
+        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-redo")), QString{}, grid_tools_);
     redo_button_->setObjectName(QStringLiteral("bench-metadata-redo"));
     redo_button_->setAccessibleName(QStringLiteral("Redo"));
     redo_button_->setToolTip(QStringLiteral("Redo the last undone draft edit (Ctrl+Shift+Z)"));
     redo_button_->setShortcut(QKeySequence::Redo);
     redo_button_->setEnabled(false);
     grid_tools_layout->addWidget(redo_button_);
-    discard_button_ = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear")),
-                                      QString{}, grid_tools_);
+    discard_button_ =
+        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear")), QString{}, grid_tools_);
     discard_button_->setObjectName(QStringLiteral("bench-metadata-discard"));
     discard_button_->setAccessibleName(QStringLiteral("Discard drafts"));
     discard_button_->setToolTip(QStringLiteral("Throw away every pending draft edit"));
@@ -638,6 +642,8 @@ MetadataPropertiesDialog::~MetadataPropertiesDialog() {
     if (technical_probing_) {
         technical_watcher_.waitForFinished();
     }
+    // The sole file view may currently be parented into the workspace sidebar.
+    delete file_list_.data();
 }
 
 void MetadataPropertiesDialog::setArtworkMutationServices(
@@ -976,11 +982,15 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_splitter_->setObjectName(QStringLiteral("bench-metadata-splitter"));
     metadata_splitter_->setChildrenCollapsible(false);
 
-    file_list_ = new QTableView(metadata_splitter_);
+    file_list_ = new FileScopeView(metadata_splitter_);
     file_list_->setObjectName(QStringLiteral("bench-metadata-files"));
     file_list_->setAccessibleName(QStringLiteral("Files included in metadata edit"));
-    grid_model_ = new MetadataGridModel(std::move(selection), std::move(track_labels_), file_list_);
+    grid_model_ = new MetadataGridModel(std::move(selection), std::move(track_labels_), this);
     file_list_->setModel(grid_model_);
+    auto* initial_selection = file_list_->selectionModel();
+    file_selection_ = new QItemSelectionModel(grid_model_, this);
+    file_list_->setSelectionModel(file_selection_);
+    delete initial_selection;
     file_list_->setAlternatingRowColors(true);
     file_list_->setShowGrid(false);
     file_list_->setWordWrap(false);
@@ -991,7 +1001,6 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     file_list_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     file_list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     file_list_->verticalHeader()->hide();
-    file_list_->verticalHeader()->setDefaultSectionSize(24);
     file_list_->setMinimumHeight(120);
     file_list_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     for (auto column = 1; column < grid_model_->columnCount(); ++column) {
@@ -1047,7 +1056,9 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     fields_pane_layout->addWidget(field_review_bar_);
     grid_tools_->setParent(fields_pane);
     fields_pane_layout->addWidget(grid_tools_);
-    fields_pane_layout->addWidget(fields_, 1);
+    auto* fields_body = new QHBoxLayout;
+    fields_body->addWidget(fields_, 1);
+    fields_pane_layout->addLayout(fields_body, 1);
     grid_tools_->show();
 
     metadata_sections_ = new QTabWidget(metadata_splitter_);
@@ -1058,6 +1069,12 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_sections_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     metadata_sections_->addTab(fields_pane, QStringLiteral("Fields"));
     artwork_section_ = new MetadataArtworkSection(metadata_sections_);
+    fields_body->addWidget(artwork_section_->createCompactCover(fields_pane));
+    connect(artwork_section_, &MetadataArtworkSection::openArtworkRequested, this,
+            [this] { metadata_sections_->setCurrentWidget(artwork_section_); });
+    connect(artwork_section_, &MetadataArtworkSection::coverSettingsRequested, this,
+            [this] { emit openSettingsRequested(SettingsDialog::Page::covers); });
+    artwork_section_->setActive(true);
     artwork_section_->setUnifiedApply(static_cast<bool>(plan_applier_factory_));
     artwork_section_->setMutationServices(artwork_plan_applier_factory_,
                                           [this](const auto& result) { artworkApplied(result); });
@@ -1129,7 +1146,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     connect(metadata_sections_, &QTabWidget::currentChanged, this,
             [this, artwork_page](const int index) {
                 if (artwork_section_ != nullptr) {
-                    artwork_section_->setActive(index == artwork_page);
+                    artwork_section_->setActive(index == 0 || index == artwork_page);
                 }
             });
 
@@ -1154,7 +1171,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     selection_debounce_->setInterval(40);
     connect(selection_debounce_, &QTimer::timeout, this,
             &MetadataPropertiesDialog::updateSelectionProjection);
-    connect(file_list_->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this] {
+    connect(file_selection_, &QItemSelectionModel::selectionChanged, this, [this] {
         scheduleSelectionProjection();
         updateTechnicalSummary();
     });
@@ -1201,8 +1218,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                 updateTransformationButton();
             });
     if (grid_model_->rowCount() > 0) {
-        file_list_->selectionModel()->setCurrentIndex(grid_model_->index(0, 0),
-                                                      QItemSelectionModel::NoUpdate);
+        file_selection_->setCurrentIndex(grid_model_->index(0, 0), QItemSelectionModel::NoUpdate);
         file_list_->selectAll();
         updateSelectionProjection();
     }
@@ -1227,8 +1243,7 @@ void MetadataPropertiesDialog::scheduleSelectionProjection() {
 }
 
 void MetadataPropertiesDialog::updateSelectionProjection() {
-    if (file_list_ == nullptr || aggregate_model_ == nullptr ||
-        file_list_->selectionModel() == nullptr) {
+    if (aggregate_model_ == nullptr || file_selection_ == nullptr) {
         return;
     }
 
@@ -1801,10 +1816,10 @@ void MetadataPropertiesDialog::rebuildActionsMenu() {
             replaygain_grouping_->setCurrentIndex(index);
             if (index == 4) {
                 bool accepted = false;
-                const auto expression = QInputDialog::getText(
-                    this, QStringLiteral("Group by expression"),
-                    QStringLiteral("tkfmt-1 expression:"), QLineEdit::Normal,
-                    replaygain_expression_->text(), &accepted);
+                const auto expression =
+                    QInputDialog::getText(this, QStringLiteral("Group by expression"),
+                                          QStringLiteral("tkfmt-1 expression:"), QLineEdit::Normal,
+                                          replaygain_expression_->text(), &accepted);
                 if (accepted) {
                     replaygain_expression_->setText(expression);
                 }
@@ -1841,28 +1856,23 @@ void MetadataPropertiesDialog::rebuildActionsMenu() {
     connect(open_editor, &QAction::triggered, transform_button_, &QPushButton::click);
 }
 
-void MetadataPropertiesDialog::reloadOutputProfiles() {
-    loadOutputProfiles();
-}
+void MetadataPropertiesDialog::reloadOutputProfiles() { loadOutputProfiles(); }
 
-QTableView* MetadataPropertiesDialog::fileListView() {
-    return file_list_;
-}
+QTableView* MetadataPropertiesDialog::fileListView() { return file_list_; }
 
-// ADR-0183 addendum: while the bench window mirrors this file list in its
-// sources sidebar (a second view sharing model and selection), the
-// in-dialog copy hides. Nothing reparents; standalone dialogs are
-// unaffected.
+// The workspace moves this one view into its sidebar; state stays editor-owned.
 void MetadataPropertiesDialog::setFileListHosted(const bool hosted) {
-    if (file_list_ == nullptr || hosted == file_list_hosted_) {
+    if (!file_list_ || hosted == file_list_hosted_)
         return;
-    }
     file_list_hosted_ = hosted;
-    if (field_review_bar_ != nullptr) {
-        field_review_bar_->setFilesToggleVisible(!hosted);
+    field_review_bar_->setFilesToggleVisible(!hosted);
+    file_list_->horizontalHeader()->setVisible(!hosted);
+    file_list_->setTextElideMode(hosted ? Qt::ElideRight : Qt::ElideMiddle);
+    if (!hosted) {
+        file_list_->itemDelegate()->setProperty("relative-prefix", QString{});
+        metadata_splitter_->insertWidget(0, file_list_);
     }
-    file_list_->setVisible(!hosted && (field_review_bar_ == nullptr ||
-                                       field_review_bar_->filesToggleChecked()));
+    file_list_->setVisible(hosted || field_review_bar_->filesToggleChecked());
 }
 
 // ADR-0183: with the apply options folded into the Apply & Scripts tab,
@@ -1884,9 +1894,9 @@ void MetadataPropertiesDialog::updateApplySummary() {
     if (move_files_check_ != nullptr && move_files_check_->isChecked()) {
         parts << QStringLiteral("move");
     }
-    apply_summary_->setText(parts.isEmpty()
-                                ? QString{}
-                                : QStringLiteral("Apply: %1").arg(parts.join(QStringLiteral(" · "))));
+    apply_summary_->setText(
+        parts.isEmpty() ? QString{}
+                        : QStringLiteral("Apply: %1").arg(parts.join(QStringLiteral(" · "))));
 }
 
 void MetadataPropertiesDialog::invalidateWritePlan() {
@@ -2200,8 +2210,8 @@ bool MetadataPropertiesDialog::stageTransformationPreservingSelection(
         return false;
     }
     QList<int> selected_rows;
-    if (file_list_ != nullptr && file_list_->selectionModel() != nullptr) {
-        const auto rows = file_list_->selectionModel()->selectedRows();
+    if (file_selection_ != nullptr) {
+        const auto rows = file_selection_->selectedRows();
         selected_rows.reserve(rows.size());
         for (const auto& row : rows) {
             selected_rows.push_back(row.row());
@@ -2211,14 +2221,14 @@ bool MetadataPropertiesDialog::stageTransformationPreservingSelection(
     if (!grid_model_->stageTransformation(preview, step_sources)) {
         return false;
     }
-    if (grid_model_->columnCount() != columns_before && file_list_ != nullptr &&
-        file_list_->selectionModel() != nullptr && !selected_rows.isEmpty()) {
+    if (grid_model_->columnCount() != columns_before && file_selection_ != nullptr &&
+        !selected_rows.isEmpty()) {
         QItemSelection restored;
         const auto last_column = grid_model_->columnCount() - 1;
         for (const auto row : selected_rows) {
             restored.select(grid_model_->index(row, 0), grid_model_->index(row, last_column));
         }
-        file_list_->selectionModel()->select(restored, QItemSelectionModel::ClearAndSelect);
+        file_selection_->select(restored, QItemSelectionModel::ClearAndSelect);
     }
     return true;
 }
@@ -2499,6 +2509,7 @@ void MetadataPropertiesDialog::startWritePlan() {
         .move_files = move_files_check_->isChecked(),
         .replaygain = false,
     };
+    const auto cover_policy = SettingsDialog::artworkPolicy();
     const auto has_path_operation =
         operation_selection.rename_files || operation_selection.move_files;
     if (grid_model_ == nullptr || write_plan_running_ ||
@@ -2506,6 +2517,11 @@ void MetadataPropertiesDialog::startWritePlan() {
         return;
     }
 
+    if (has_path_operation && !artwork_intents.empty() && cover_policy.write_folder_image) {
+        read_only_->setText(
+            QStringLiteral("Save folder covers before renaming or moving these files"));
+        return;
+    }
     std::optional<operations::OutputLayoutProfile> output_layout;
     std::optional<operations::DestinationProfile> destination;
     if (has_path_operation) {
@@ -2572,7 +2588,7 @@ void MetadataPropertiesDialog::startWritePlan() {
     write_plan_watcher_.setFuture(QtConcurrent::run(
         [selection, draft = std::move(draft), items = std::move(items), operation_selection,
          output_layout = std::move(output_layout), destination = std::move(destination),
-         cancellation, plan_options, artwork_intents]() mutable {
+         cancellation, plan_options, artwork_intents, cover_policy]() mutable {
             // WYSIWYG apply: the plan writes exactly the staged draft.
             // Automatic scripts already staged their edits into the grid.
             const auto metadata_context_change_count =
@@ -2589,7 +2605,8 @@ void MetadataPropertiesDialog::startWritePlan() {
             }
 
             if (!artwork_intents.empty()) {
-                auto art = metadata::revalidate_artwork_write_plan(artwork_intents, cancellation);
+                auto art =
+                    operations::plan_artwork_storage(artwork_intents, cover_policy, cancellation);
                 if (!art) {
                     return std::make_shared<WritePlanResult>(std::unexpected(art.error()));
                 }
@@ -2680,7 +2697,12 @@ void MetadataPropertiesDialog::finishWritePlan() {
 
     auto plan = std::make_shared<const operations::PreparationPlan>(std::move(**result));
     if (plan->ready()) {
-        startApply(std::move(plan));
+        std::vector<metadata::FolderImageWritePlan> folders;
+        if (plan->metadata)
+            for (const auto& source : plan->metadata->sources)
+                if (source.artwork && source.artwork->folder_image)
+                    folders.push_back(*source.artwork->folder_image);
+        reviewFolderImages(this, folders, [this, plan] { startApply(plan); });
         return;
     }
 
@@ -3222,10 +3244,10 @@ QStringList MetadataPropertiesDialog::metadataFieldNameSuggestions(const QString
 
 std::vector<std::size_t> MetadataPropertiesDialog::selectedItemIndexes() const {
     std::vector<std::size_t> selected_items;
-    if (file_list_ == nullptr || file_list_->selectionModel() == nullptr) {
+    if (file_selection_ == nullptr) {
         return selected_items;
     }
-    const auto rows = file_list_->selectionModel()->selectedRows(0);
+    const auto rows = file_selection_->selectedRows(0);
     selected_items.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
         if (row.isValid() && row.row() >= 0) {
@@ -3283,8 +3305,8 @@ void MetadataPropertiesDialog::promptAddField() {
     updateTransformationButton();
     connect(prompt, &QDialog::accepted, this, [this, prompt] {
         std::vector<int> selected_rows;
-        if (file_list_ != nullptr && file_list_->selectionModel() != nullptr) {
-            const auto indexes = file_list_->selectionModel()->selectedRows(0);
+        if (file_selection_ != nullptr) {
+            const auto indexes = file_selection_->selectedRows(0);
             selected_rows.reserve(static_cast<std::size_t>(indexes.size()));
             for (const auto& index : indexes) {
                 selected_rows.push_back(index.row());
@@ -3310,16 +3332,14 @@ void MetadataPropertiesDialog::promptAddField() {
         if (recent_field_names_.size() > maximum_recent_field_names) {
             recent_field_names_.resize(maximum_recent_field_names);
         }
-        if (file_list_ != nullptr && file_list_->selectionModel() != nullptr &&
-            grid_model_ != nullptr) {
+        if (file_selection_ != nullptr && grid_model_ != nullptr) {
             QItemSelection restored_selection;
             for (const auto row : selected_rows) {
                 const auto track = grid_model_->index(row, 0);
                 restored_selection.select(track, track);
             }
-            file_list_->selectionModel()->select(restored_selection,
-                                                 QItemSelectionModel::ClearAndSelect |
-                                                     QItemSelectionModel::Rows);
+            file_selection_->select(restored_selection, QItemSelectionModel::ClearAndSelect |
+                                                            QItemSelectionModel::Rows);
         }
         loaded_field_count_ = static_cast<std::size_t>(aggregate_model_->rowCount());
         updateSelectionProjection();

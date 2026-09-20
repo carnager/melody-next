@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/mpris_service.hpp"
+#include <QDockWidget>
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -10,6 +11,7 @@
 #include "trackknife/audio/melody_agent.hpp"
 #include "uicommon/line_slider.hpp"
 
+#include "uicommon/track_row_roles.hpp"
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -28,6 +30,8 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
+#include <QTabWidget>
+#include <QTableView>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -173,12 +177,14 @@ load_and_play(audio::LocalAuditionService& player, const LocalTrackSource& sourc
 
 [[nodiscard]] core::Result<void>
 queue_gapless(audio::LocalAuditionService& player, const LocalTrackSource& source,
-              std::optional<formats::ReplayGainInfo> replay_gain_override = {}) {
+              std::optional<formats::ReplayGainInfo> replay_gain_override = {},
+              std::uint64_t token = 0U) {
     return source.segment
                ? player.queue_gapless_next_selected_segment(source.raw_path, source.selection,
-                                                            *source.segment, replay_gain_override)
+                                                            *source.segment, replay_gain_override,
+                                                            token)
                : player.queue_gapless_next_selected(source.raw_path, source.selection,
-                                                    replay_gain_override);
+                                                    replay_gain_override, token);
 }
 
 [[nodiscard]] LocalTrackSource source_from_snapshot(const audio::LocalAuditionSnapshot& snapshot) {
@@ -215,6 +221,8 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 
     buildWorkspace();
     buildTransport();
+    buildLastFm();
+    buildShortcuts();
     connect(&metadata_operation_watcher_, &QFutureWatcherBase::finished, this,
             &BenchMainWindow::finishMetadataOperationJob);
     initializePersistence();
@@ -237,6 +245,7 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 BenchMainWindow::~BenchMainWindow() { stopBackgroundWork(); }
 
 void BenchMainWindow::buildTransport() {
+    buildUpNext();
     auto* bar = addToolBar(QStringLiteral("Transport"));
     bar->setObjectName(QStringLiteral("bench-transport"));
     bar->setMovable(false);
@@ -304,6 +313,18 @@ void BenchMainWindow::buildTransport() {
     add_transport_button(play_pause_action_);
     add_transport_button(stop_action_);
     add_transport_button(next_action_);
+    up_next_button_ = new QToolButton(transport);
+    up_next_button_->setObjectName(QStringLiteral("action-up-next"));
+    up_next_button_->setText(QStringLiteral("Up Next · 0"));
+    up_next_button_->setAutoRaise(true);
+    up_next_button_->setFixedHeight(26);
+    up_next_button_->setAcceptDrops(true);
+    up_next_button_->installEventFilter(this);
+    connect(up_next_button_, &QToolButton::clicked, this, [this] {
+        up_next_dock_->setVisible(!up_next_dock_->isVisible());
+        refreshUpNext();
+    });
+    transport_layout->addWidget(up_next_button_);
     header_layout->addWidget(transport, 1, 0, Qt::AlignVCenter);
 
     auto* track_display = new QWidget(header);
@@ -406,8 +427,7 @@ void BenchMainWindow::buildTransport() {
     notifications_action_->setChecked(
         QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
     notifications_action_->setToolTip(
-        QStringLiteral("Show a notification when the track changes while Trackknife is in the "
-                       "background"));
+        QStringLiteral("Show a notification when playback changes to another track."));
     connect(notifications_action_, &QAction::toggled, this, [this](const bool enabled) {
         QSettings{}.setValue(QStringLiteral("desktop/notifications"), enabled);
         if (notifier_ != nullptr) {
@@ -500,42 +520,36 @@ void BenchMainWindow::configurePlaybackBuffer(const QString& profile, const int 
         5'000);
 }
 
-void BenchMainWindow::showCustomPlaybackBufferDialog() {
-    const auto current = loadPlaybackBufferPreference().config;
-
-    QDialog dialog{this};
-    dialog.setObjectName(QStringLiteral("bench-custom-buffer-dialog"));
-    dialog.setWindowTitle(QStringLiteral("Custom playback buffer"));
-    auto* form = new QFormLayout(&dialog);
-    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-
-    auto* capacity = new QSpinBox(&dialog);
-    capacity->setObjectName(QStringLiteral("bench-buffer-capacity"));
-    capacity->setRange(minimum_custom_buffer_ms, maximum_custom_buffer_ms);
-    capacity->setSuffix(QStringLiteral(" ms"));
-    capacity->setValue(static_cast<int>(current.capacity.count()));
-    form->addRow(QStringLiteral("Capacity"), capacity);
-
-    auto* threshold = new QSpinBox(&dialog);
-    threshold->setObjectName(QStringLiteral("bench-buffer-start-threshold"));
-    threshold->setRange(1, capacity->value());
-    threshold->setSuffix(QStringLiteral(" ms"));
-    threshold->setValue(
-        std::min(static_cast<int>(current.start_threshold.count()), capacity->value()));
-    form->addRow(QStringLiteral("Start playback at"), threshold);
-    connect(capacity, &QSpinBox::valueChanged, threshold,
-            [threshold](const int value) { threshold->setMaximum(value); });
-
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    form->addRow(buttons);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        configurePlaybackBuffer(QStringLiteral("custom"), capacity->value(), threshold->value());
-    } else {
-        refreshPlaybackBufferChecks();
+void BenchMainWindow::reloadPlaybackPreferences() {
+    const QSettings settings;
+    const auto preference = loadPlaybackBufferPreference();
+    if (selected_buffer_profile_ != preference.profile ||
+        (player_ && player_->snapshot().configured_buffer != preference.config)) {
+        configurePlaybackBuffer(preference.profile,
+                                static_cast<int>(preference.config.capacity.count()),
+                                static_cast<int>(preference.config.start_threshold.count()));
     }
+    if (notifier_)
+        notifier_->setBackgroundOnly(
+            settings.value(QStringLiteral("desktop/notifications-background-only"), false)
+                .toBool());
+    if (notifications_action_)
+        notifications_action_->setChecked(
+            settings.value(QStringLiteral("desktop/notifications"), false).toBool());
+    const auto with_gain =
+        settings.value(QStringLiteral("playback/rg-preamp-with"), 0.0).toDouble();
+    const auto without_gain =
+        settings.value(QStringLiteral("playback/rg-preamp-without"), 0.0).toDouble();
+    if (local_rg_preamp_with_ != with_gain || local_rg_preamp_without_ != without_gain) {
+        local_rg_preamp_with_ = with_gain;
+        local_rg_preamp_without_ = without_gain;
+        applyLocalPlaybackModes();
+    }
+}
+
+void BenchMainWindow::showCustomPlaybackBufferDialog() {
+    refreshPlaybackBufferChecks();
+    showSettingsDialog(SettingsDialog::Page::playback)->editCustomBuffer();
 }
 
 void BenchMainWindow::refreshPlaybackBufferChecks() {
@@ -815,36 +829,7 @@ void BenchMainWindow::applyLocalPlaybackModes() {
 // Separate preamps for tracks with and without loudness data (ADR-0138);
 // both apply only while local ReplayGain is active.
 void BenchMainWindow::showReplayGainPreampDialog() {
-    QDialog dialog{this};
-    dialog.setWindowTitle(QStringLiteral("ReplayGain preamp"));
-    dialog.setObjectName(QStringLiteral("bench-rg-preamp-dialog"));
-    auto* form = new QFormLayout(&dialog);
-    const auto preamp_limit = static_cast<double>(audio::maximum_replay_gain_preamp_db);
-    const auto make_spin = [&](const QString& name, const double value) {
-        auto* spin = new QDoubleSpinBox(&dialog);
-        spin->setObjectName(name);
-        spin->setRange(-preamp_limit, preamp_limit);
-        spin->setSingleStep(0.5);
-        spin->setDecimals(1);
-        spin->setSuffix(QStringLiteral(" dB"));
-        spin->setValue(value);
-        return spin;
-    };
-    auto* with_gain = make_spin(QStringLiteral("bench-rg-preamp-with"), local_rg_preamp_with_);
-    auto* without_gain =
-        make_spin(QStringLiteral("bench-rg-preamp-without"), local_rg_preamp_without_);
-    form->addRow(QStringLiteral("With ReplayGain data:"), with_gain);
-    form->addRow(QStringLiteral("Without ReplayGain data:"), without_gain);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    form->addRow(buttons);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-    local_rg_preamp_with_ = with_gain->value();
-    local_rg_preamp_without_ = without_gain->value();
-    applyLocalPlaybackModes();
+    showSettingsDialog(SettingsDialog::Page::playback)->focusReplayGainPreamp();
 }
 
 void BenchMainWindow::refreshLocalPlaybackControls() {
@@ -945,7 +930,8 @@ void BenchMainWindow::adoptPlaybackRow(ListTab& tab, const int row, const LocalT
 
 std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlaybackRow() {
     if (local_single_ != 0) {
-        if (local_repeat_ && local_consume_ == 0 && playback_index_.isValid()) {
+        if (local_repeat_ && local_consume_ == 0 && playback_index_.isValid() &&
+            local_requests_.pending().empty() && !local_requests_.active()) {
             return std::make_pair(playback_index_.row(), playback_source_);
         }
         return std::nullopt;
@@ -967,6 +953,15 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
             QStringLiteral("Playback failed: %1").arg(displayText(result.error().message)), 5'000);
         return;
     }
+    if (detached_playback_ && detached_playback_->model != tab.model) {
+        detached_playback_->model->deleteLater();
+        detached_playback_.reset();
+    }
+    local_requests_.abandon();
+    requested_request_.reset();
+    queued_request_.reset();
+    persistUpNext();
+    refreshUpNext();
     const auto id = QString::fromStdString(tab.document.id.to_string());
     if (playback_document_id_ != id) {
         if (auto* previous = tabForDocument(playback_document_id_); previous != nullptr) {
@@ -974,6 +969,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
         }
     }
     playback_document_id_ = id;
+    setActiveLocalList(id);
     playback_index_ = tab.model->index(row, 0);
     playback_row_ = row;
     playback_source_ = source;
@@ -993,6 +989,9 @@ BenchMainWindow::adjacentPlaybackRow(const int direction) {
     if (tab == nullptr || playback_source_.raw_path.empty()) {
         return std::nullopt;
     }
+    if (direction > 0 && local_requests_.active() && request_return_index_.isValid())
+        return std::make_pair(request_return_index_.row(),
+                              tab->model->source(request_return_index_.row()));
     if (!playback_index_.isValid()) {
         return std::nullopt;
     }
@@ -1003,15 +1002,76 @@ BenchMainWindow::adjacentPlaybackRow(const int direction) {
     return std::make_pair(*adjacent, tab->model->source(*adjacent));
 }
 
+void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry) {
+    if (std::ranges::none_of(local_requests_.pending(),
+                             [&](const auto& pending) { return pending.id == entry.id; }))
+        statusBar()->showMessage(
+            QStringLiteral(
+                "This request was already handed to the player; your queue edits apply next."),
+            5000);
+    if (!local_requests_.active()) {
+        request_return_index_ = QPersistentModelIndex{};
+        const auto next = adjacentPlaybackRow(1);
+        if (auto* tab = tabForDocument(playback_document_id_); tab && next)
+            request_return_index_ = tab->model->index(next->first, 0);
+        if (auto* tab = tabForDocument(playback_document_id_))
+            consumePlaybackRow(*tab, playback_index_);
+    }
+    local_requests_.started(std::move(entry));
+    if (auto* tab = tabForDocument(playback_document_id_))
+        tab->model->setCurrentSource({}, -1);
+    requested_request_.reset();
+    queued_request_.reset();
+    queued_playback_index_ = QPersistentModelIndex{};
+    requested_playback_index_ = QPersistentModelIndex{};
+    last_requested_next_.reset();
+    persistUpNext();
+    refreshUpNext();
+}
+
+bool BenchMainWindow::playLocalRequest() {
+    if (!player_ || local_requests_.pending().empty())
+        return false;
+    const auto entry = local_requests_.pending().front();
+    LocalTrackSource source{entry.source.raw_path, entry.source.selection, entry.source.segment};
+    auto result =
+        load_and_play(*player_, source, local_replay_gain_override(*up_next_local_model_, 0));
+    if (result) {
+        adoptLocalRequest(entry);
+        advance_pending_ = true;
+    } else
+        statusBar()->showMessage(
+            QStringLiteral("Playback failed: %1").arg(displayText(result.error().message)), 5000);
+    return true;
+}
+
 void BenchMainWindow::playAdjacent(const int direction) {
+    if (direction > 0 && playLocalRequest())
+        return;
+    if (direction < 0 && local_requests_.active() && player_) {
+        const auto& row = local_requests_.active()->source;
+        static_cast<void>(load_and_play(
+            *player_, LocalTrackSource{row.raw_path, row.selection, row.segment}, std::nullopt));
+        advance_pending_ = true;
+        return;
+    }
     auto* tab = tabForDocument(playback_document_id_);
     const auto next = adjacentPlaybackRow(direction);
     if (tab == nullptr || !next || player_ == nullptr) {
+        if (direction > 0 && local_requests_.active() && player_) {
+            static_cast<void>(player_->stop());
+            local_requests_.finished();
+            persistUpNext();
+            refreshUpNext();
+        }
         return;
     }
     if (auto result = load_and_play(*player_, next->second,
                                     local_replay_gain_override(*tab->model, next->first));
         result) {
+        local_requests_.finished();
+        persistUpNext();
+        refreshUpNext();
         adoptPlaybackRow(*tab, next->first, next->second, true, direction);
         advance_pending_ = true;
         last_requested_next_.reset();
@@ -1035,6 +1095,10 @@ void BenchMainWindow::togglePlayPause() {
     if (playerActive(snapshot.state)) {
         static_cast<void>(player_->pause());
     } else {
+        if ((snapshot.state == audio::LocalAuditionState::empty ||
+             snapshot.state == audio::LocalAuditionState::ended) &&
+            playLocalRequest())
+            return;
         static_cast<void>(player_->play());
     }
 }
@@ -1054,7 +1118,116 @@ void BenchMainWindow::seekToMs(const qint64 position_ms) {
     static_cast<void>(player_->seek_to_sample(position_ms * snapshot.format->sample_rate / 1'000));
 }
 
+void BenchMainWindow::buildShortcuts() {
+    const auto bind = [this](QAction* action, const QString& name, const QString& keys) {
+        action->setObjectName(name);
+        action->setShortcut(QKeySequence(keys));
+        action->setShortcutContext(Qt::WindowShortcut);
+        addAction(action);
+    };
+    bind(play_pause_action_, QStringLiteral("action-play-pause"), QStringLiteral("Space"));
+    bind(stop_action_, QStringLiteral("action-stop"), QStringLiteral("Ctrl+."));
+    bind(previous_action_, QStringLiteral("action-previous-track"), QStringLiteral("Alt+Left"));
+    bind(next_action_, QStringLiteral("action-next-track"), QStringLiteral("Alt+Right"));
+    for (const bool prepend : {true, false}) {
+        auto* action = new QAction(prepend ? tr("Queue next") : tr("Queue at end"), this);
+        bind(action,
+             prepend ? QStringLiteral("action-queue-next") : QStringLiteral("action-queue-end"),
+             prepend ? QStringLiteral("Ctrl+Return") : QStringLiteral("Ctrl+Shift+Return"));
+        connect(action, &QAction::triggered, this, [this, prepend] {
+            auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+            if (view && view->selectionModel() &&
+                (qobject_cast<LocalListModel*>(view->model()) || isMpdContext()))
+                enqueueUpNext(view, prepend);
+        });
+    }
+    for (auto* action : findChildren<QAction*>()) {
+        if (!action->objectName().startsWith(QStringLiteral("action-")) ||
+            action->shortcut().isEmpty())
+            continue;
+        action->setProperty("shortcut-default",
+                            action->shortcut().toString(QKeySequence::PortableText));
+        const auto key = QStringLiteral("shortcuts/") + action->objectName();
+        if (QSettings{}.contains(key))
+            action->setShortcut(
+                QKeySequence(QSettings{}.value(key).toString(), QKeySequence::PortableText));
+        configurable_shortcuts_.append(action);
+    }
+    std::sort(configurable_shortcuts_.begin(), configurable_shortcuts_.end(),
+              [](const QAction* a, const QAction* b) {
+                  return a->text().localeAwareCompare(b->text()) < 0;
+              });
+}
+
+void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
+    if (!tabs_ || (!jump && (!follow_playback_action_ || !follow_playback_action_->isChecked())))
+        return;
+    QTableView* view = nullptr;
+    int row = -1;
+    if (isMpdContext()) {
+        if (!mpd_controller_->connected())
+            return;
+        if (const auto& requests = mpd_controller_->requestQueue();
+            requests && requests->active_id != 0) {
+            if (jump && up_next_dock_) {
+                up_next_dock_->show();
+                up_next_dock_->raise();
+            }
+            return;
+        }
+        const auto name = mpd_controller_->activeContextName();
+        row = mpd_controller_->songPosition();
+        if (row < 0)
+            return;
+        if (name.isEmpty()) {
+            if (mpd_controller_->queueStashed())
+                return;
+            view = mpd_queue_view_;
+        } else if (auto* tab = mpdPlaylistTabNamed(name)) {
+            view = tab->view;
+        } else if (jump) {
+            pending_playing_list_ = name;
+            openMpdPlaylistTab(name, true);
+            return;
+        }
+        // Context positions can temporarily precede the list refresh. Never
+        // select a different track just because it occupies the same row.
+        if (view && (row >= view->model()->rowCount() ||
+                     view->model()->index(row, 0).data(ui::track_source_role).toString() !=
+                         mpd_controller_->nowPlayingUri()))
+            return;
+    } else {
+        if (local_requests_.active()) {
+            if (jump && up_next_dock_) {
+                up_next_dock_->show();
+                up_next_dock_->raise();
+            }
+            return;
+        }
+        if (auto* tab = tabForDocument(playback_document_id_); tab && playback_index_.isValid()) {
+            view = tab->view;
+            row = playback_index_.row();
+        }
+    }
+    if (!view || !view->model() || row < 0 || row >= view->model()->rowCount())
+        return;
+    const auto index = view->model()->index(row, ui::track_title_column);
+    if (!jump && (tabs_->currentWidget() != view ||
+                  (followed_playback_view_ == view && followed_playback_index_ == index)))
+        return;
+    followed_playback_view_ = view;
+    followed_playback_index_ = index;
+    if (jump)
+        tabs_->setCurrentWidget(view);
+    view->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect |
+                                                       QItemSelectionModel::Rows);
+    view->scrollTo(index, QAbstractItemView::PositionAtCenter);
+    if (jump)
+        view->setFocus(Qt::ShortcutFocusReason);
+}
+
 void BenchMainWindow::refreshTransport() {
+    refreshPlaybackCursor();
     if (player_ == nullptr) {
         if (isMpdContext()) {
             refreshMpdTransport();
@@ -1069,10 +1242,14 @@ void BenchMainWindow::refreshTransport() {
         return;
     }
     const auto snapshot = player_->snapshot();
+    sampleLastFm(snapshot);
     // Observable for offscreen tests and diagnostics.
     setProperty("trackknife-player-state", static_cast<int>(snapshot.state));
 
+    refreshUpNext();
     const auto queued_source = queued_source_from_snapshot(snapshot);
+    if (requested_request_ && snapshot.next_occurrence_token == requested_request_->id)
+        queued_request_ = requested_request_;
     if (requested_playback_index_.isValid() && queued_source) {
         if (const auto* tab = tabForDocument(playback_document_id_);
             tab != nullptr &&
@@ -1085,8 +1262,17 @@ void BenchMainWindow::refreshTransport() {
     if (snapshot.chain_transitions != last_chain_transitions_) {
         last_chain_transitions_ = snapshot.chain_transitions;
         last_requested_next_.reset();
-        if (auto* tab = tabForDocument(playback_document_id_);
-            tab != nullptr && !snapshot.raw_path.empty()) {
+        auto transitioned_request =
+            queued_request_ && queued_request_->id == snapshot.occurrence_token
+                ? queued_request_
+                : requested_request_;
+        if (transitioned_request && snapshot.occurrence_token != 0U &&
+            transitioned_request->id == snapshot.occurrence_token) {
+            adoptLocalRequest(*transitioned_request);
+        } else if (auto* tab = tabForDocument(playback_document_id_);
+                   tab != nullptr && !snapshot.raw_path.empty()) {
+            local_requests_.finished();
+            persistUpNext();
             const auto transitioned_source = source_from_snapshot(snapshot);
             const auto row =
                 queued_playback_index_.isValid() &&
@@ -1149,24 +1335,34 @@ void BenchMainWindow::refreshTransport() {
         // next source is still loading and race through the list.
         if (!advance_pending_) {
             advance_pending_ = true;
-            const auto next = automaticPlaybackRow();
-            if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
-                if (next) {
-                    if (auto result =
-                            load_and_play(*player_, next->second,
-                                          local_replay_gain_override(*tab->model, next->first));
-                        result) {
-                        adoptPlaybackRow(*tab, next->first, next->second, true);
-                        last_requested_next_.reset();
-                        queued_playback_index_ = QPersistentModelIndex{};
-                        requested_playback_index_ = QPersistentModelIndex{};
+            const bool request_started = local_single_ == 0 && playLocalRequest();
+            const auto next = request_started ? std::nullopt : automaticPlaybackRow();
+            if (!request_started) {
+                if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
+                    if (next) {
+                        if (auto result =
+                                load_and_play(*player_, next->second,
+                                              local_replay_gain_override(*tab->model, next->first));
+                            result) {
+                            local_requests_.finished();
+                            persistUpNext();
+                            adoptPlaybackRow(*tab, next->first, next->second, true);
+                            last_requested_next_.reset();
+                            queued_playback_index_ = QPersistentModelIndex{};
+                            requested_playback_index_ = QPersistentModelIndex{};
+                        } else {
+                            statusBar()->showMessage(QStringLiteral("Playback failed: %1")
+                                                         .arg(displayText(result.error().message)),
+                                                     5'000);
+                        }
                     } else {
-                        statusBar()->showMessage(QStringLiteral("Playback failed: %1")
-                                                     .arg(displayText(result.error().message)),
-                                                 5'000);
+                        if (!local_requests_.active())
+                            consumePlaybackRow(*tab, playback_index_);
                     }
-                } else {
-                    consumePlaybackRow(*tab, playback_index_);
+                }
+                if (local_single_ == 0) {
+                    local_requests_.finished();
+                    persistUpNext();
                 }
             }
             if (local_single_ == 2) {
@@ -1176,7 +1372,7 @@ void BenchMainWindow::refreshTransport() {
             }
         }
     } else if (snapshot.state == audio::LocalAuditionState::empty) {
-        if (!playback_document_id_.isEmpty()) {
+        if (!playback_document_id_.isEmpty() && local_requests_.pending().empty()) {
             if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
                 tab->model->setCurrentSource({}, -1);
             }
@@ -1243,26 +1439,44 @@ void BenchMainWindow::refreshTransport() {
         snapshot.state != audio::LocalAuditionState::loading &&
         snapshot.state != audio::LocalAuditionState::ended && !advance_pending_) {
         const auto next = automaticPlaybackRow();
-        const auto desired = next ? std::optional{next->second} : std::nullopt;
+        const auto next_request = local_single_ == 0 && !local_requests_.pending().empty()
+                                      ? std::optional{local_requests_.pending().front()}
+                                      : std::nullopt;
+        const auto desired = next_request
+                                 ? std::optional{LocalTrackSource{next_request->source.raw_path,
+                                                                  next_request->source.selection,
+                                                                  next_request->source.segment}}
+                                 : (next ? std::optional{next->second} : std::nullopt);
         const auto desired_marker = desired.value_or(LocalTrackSource{});
         const auto queued = queued_source_from_snapshot(snapshot);
-        const bool changed = !last_requested_next_ || *last_requested_next_ != desired_marker;
-        const bool stale = desired != queued && (!next_request_timer_.isValid() ||
-                                                 next_request_timer_.elapsed() > 1'000);
-        if (desired != queued && (changed || stale)) {
+        const auto desired_token = next_request ? next_request->id : 0U;
+        const bool changed = !last_requested_next_ || *last_requested_next_ != desired_marker ||
+                             desired_token != last_requested_token_;
+        const bool stale =
+            (desired != queued || desired_token != snapshot.next_occurrence_token) &&
+            (!next_request_timer_.isValid() || next_request_timer_.elapsed() > 1'000);
+        const bool token_changed = desired_token != snapshot.next_occurrence_token;
+        if ((desired != queued || token_changed) && (changed || stale)) {
             if (!desired) {
                 static_cast<void>(player_->clear_gapless_next());
+                requested_request_.reset();
             } else {
                 auto* tab = tabForDocument(playback_document_id_);
-                auto override_info = tab != nullptr
-                                         ? local_replay_gain_override(*tab->model, next->first)
-                                         : std::nullopt;
-                if (auto result = queue_gapless(*player_, *desired, override_info); result) {
-                    if (tab != nullptr) {
+                auto override_info =
+                    next_request ? local_replay_gain_override(*up_next_local_model_, 0)
+                                 : (tab != nullptr && next
+                                        ? local_replay_gain_override(*tab->model, next->first)
+                                        : std::nullopt);
+                if (auto result = queue_gapless(*player_, *desired, override_info, desired_token);
+                    result) {
+                    requested_request_ = next_request;
+                    if (tab != nullptr && next && !next_request) {
                         requested_playback_index_ = tab->model->index(next->first, 0);
-                    }
+                    } else
+                        requested_playback_index_ = QPersistentModelIndex{};
                 }
             }
+            last_requested_token_ = desired_token;
             last_requested_next_ = desired_marker;
             next_request_timer_.start();
         }
@@ -1276,10 +1490,12 @@ void BenchMainWindow::refreshTransport() {
     const bool source_ready = snapshot.format.has_value() &&
                               snapshot.state != audio::LocalAuditionState::loading &&
                               snapshot.state != audio::LocalAuditionState::failed;
-    previous_action_->setEnabled(adjacentPlaybackRow(-1).has_value());
-    next_action_->setEnabled(adjacentPlaybackRow(1).has_value());
-    play_pause_action_->setEnabled(source_ready && snapshot.output_target_available &&
-                                   !snapshot.output_suspended);
+    previous_action_->setEnabled(local_requests_.active().has_value() ||
+                                 adjacentPlaybackRow(-1).has_value());
+    next_action_->setEnabled(!local_requests_.pending().empty() ||
+                             adjacentPlaybackRow(1).has_value());
+    play_pause_action_->setEnabled((source_ready || !local_requests_.pending().empty()) &&
+                                   snapshot.output_target_available && !snapshot.output_suspended);
     play_pause_action_->setText(active ? QStringLiteral("Pause") : QStringLiteral("Play"));
     if (transport_icon_playing_ != std::optional{active}) {
         transport_icon_playing_ = active;
@@ -1320,6 +1536,12 @@ void BenchMainWindow::refreshTransport() {
                 }
                 context = details.join(QStringLiteral(" · "));
             }
+        }
+        if (local_requests_.active()) {
+            const auto& request = local_requests_.active()->source;
+            label =
+                displayText(request.artist) + QStringLiteral(" — ") + displayText(request.title);
+            context = QStringLiteral("Up Next");
         }
         now_playing_->setText(label);
         now_playing_context_->setText(context);
@@ -1457,6 +1679,12 @@ void BenchMainWindow::buildMprisService() {
     // ADR-0144: quiet, opt-in track-change notifications share the MPRIS
     // now-playing snapshot.
     notifier_ = new DesktopNotifier(this);
+    notifier_->setBackgroundOnly(
+        QSettings{}.value(QStringLiteral("desktop/notifications-background-only"), false).toBool());
+    connect(notifier_, &DesktopNotifier::deliveryFinished, this, [this](const QString& error) {
+        if (!error.isEmpty())
+            statusBar()->showMessage(QStringLiteral("Notification failed: %1").arg(error), 8000);
+    });
     notifier_->setEnabled(
         QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
     if (notifications_action_ != nullptr) {
@@ -1519,6 +1747,13 @@ void BenchMainWindow::publishMprisState() {
                 }
             }
         }
+        if (local_requests_.active()) {
+            const auto& request = *local_requests_.active();
+            state.track_key += QStringLiteral("#up-next-%1").arg(request.id);
+            state.title = displayText(request.source.title);
+            state.artist = displayText(request.source.artist);
+            state.album = displayText(request.source.album);
+        }
         if (snapshot.format && snapshot.format->sample_rate > 0) {
             state.position_us = snapshot.position_sample * 1'000'000 / snapshot.format->sample_rate;
             if (snapshot.end_sample) {
@@ -1529,16 +1764,19 @@ void BenchMainWindow::publishMprisState() {
         const bool source_ready = snapshot.format.has_value() &&
                                   snapshot.state != audio::LocalAuditionState::loading &&
                                   snapshot.state != audio::LocalAuditionState::failed;
-        state.can_next = adjacentPlaybackRow(1).has_value();
-        state.can_previous = adjacentPlaybackRow(-1).has_value();
-        state.can_play = source_ready && snapshot.output_target_available;
+        state.can_next = !local_requests_.pending().empty() || adjacentPlaybackRow(1).has_value();
+        state.can_previous =
+            local_requests_.active().has_value() || adjacentPlaybackRow(-1).has_value();
+        state.can_play = (source_ready || !local_requests_.pending().empty()) &&
+                         snapshot.output_target_available;
         state.can_pause = state.can_play;
         state.can_seek = source_ready && state.length_us > 0;
     }
     if (mpris_ != nullptr) {
         mpris_->publish(state);
     }
-    if (notifier_ != nullptr && notifier_->publish(state, isActiveWindow())) {
+    if (notifier_ != nullptr &&
+        notifier_->publish(state, QApplication::activeWindow() != nullptr)) {
         setProperty("trackknife-notifications-sent",
                     static_cast<qulonglong>(notifier_->sentCount()));
         setProperty("trackknife-notification-summary", notifier_->lastSummary());

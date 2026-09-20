@@ -73,6 +73,10 @@ struct LocalAuditionSnapshot {
     formats::AudioSourceSelection next_selection;
     std::optional<formats::SampleRange> next_segment;
     std::uint64_t chain_transitions{0U};
+    std::uint64_t playback_instance{0U}; // increments on loads and gapless handoffs
+    // Opaque caller occurrence tokens distinguish identical consecutive sources.
+    std::uint64_t occurrence_token{0U};
+    std::uint64_t next_occurrence_token{0U};
     // Caller-supplied ReplayGain replacing the decoder's tag values for
     // the active and queued source (ADR-0139).
     std::optional<formats::ReplayGainInfo> replay_gain_override;
@@ -167,7 +171,8 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void> queue_gapless_next(std::string raw_path);
     [[nodiscard]] core::Result<void>
     queue_gapless_next_selected(std::string raw_path, formats::AudioSourceSelection selection,
-                                std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+                                std::optional<formats::ReplayGainInfo> replay_gain_override = {},
+                                std::uint64_t occurrence_token = 0U);
     [[nodiscard]] core::Result<void>
     queue_gapless_network_stream(std::string url,
                                  std::optional<formats::ReplayGainInfo> replay_gain_override = {});
@@ -175,7 +180,8 @@ class LocalAuditionService final {
                                                                 formats::SampleRange segment);
     [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(
         std::string raw_path, formats::AudioSourceSelection selection, formats::SampleRange segment,
-        std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+        std::optional<formats::ReplayGainInfo> replay_gain_override = {},
+        std::uint64_t occurrence_token = 0U);
     [[nodiscard]] core::Result<void> clear_gapless_next();
     [[nodiscard]] core::Result<void> play();
     [[nodiscard]] core::Result<void> pause();

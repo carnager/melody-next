@@ -18,14 +18,23 @@ qt_add_library(
     bench_mpd.cpp
     bench_mpd_list_tabs.cpp
     bench_mpd_playlists.cpp
+    bench_dynamic_playlists.cpp
+    dynamic_playlist_service.cpp
+    dynamic_playlist_dialog.cpp
     desktop_notifier.cpp
     mpris_service.cpp
     mpris_service.hpp
     mpd_library_search_model.cpp
     mpd_library_search_model.hpp
     bench_track_views.cpp
+    bench_lastfm.cpp
+    lastfm_service.cpp
+    lastfm_service.hpp
+    bench_up_next.cpp
     bench_transport.cpp
     bench_workspace_layout.cpp
+    playback_tab_widget.hpp
+    file_scope_view.hpp
     convert_dialog.cpp
     convert_dialog.hpp
     local_list_model.cpp
@@ -36,6 +45,9 @@ qt_add_library(
     track_list_find_bar.hpp
     local_library_panel.cpp
     local_library_panel.hpp
+    cover_thumbnail.cpp
+    cover_thumbnail.hpp
+    cover_review.cpp
     metadata_artwork_section.cpp
     metadata_artwork_section.hpp
     metadata_dialog_helpers.cpp
@@ -54,6 +66,10 @@ qt_add_library(
     metadata_scalar_delegate.hpp
     output_profiles_widget.cpp
     output_profiles_widget.hpp
+    connection_profiles_widget.cpp
+    connection_profiles_widget.hpp
+    shortcut_settings.cpp
+    shortcut_settings.hpp
     settings_dialog.cpp
     settings_dialog.hpp
     metadata_transformation_dialog.cpp
@@ -73,7 +89,7 @@ add_library(Trackknife::BenchUi ALIAS trackknife_bench_ui)
 
 target_link_libraries(
     trackknife_bench_ui
-    PUBLIC Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Persistence
+    PUBLIC Trackknife::Mpd Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Persistence
            Trackknife::Convert Trackknife::Formats Trackknife::Loudness Trackknife::Metadata Trackknife::MusicBrainz
            Trackknife::Operations Trackknife::Audio
            trackknife_project_options

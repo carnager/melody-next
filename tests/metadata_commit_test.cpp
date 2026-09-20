@@ -31,6 +31,8 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <sqlite3.h>
+
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -2745,12 +2747,266 @@ void recovers_interrupted_carrier_publications() {
     CHECK(published_sheet.find("REM REPLAYGAIN_TRACK_GAIN -6.02 dB") != std::string::npos);
 }
 
+void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::path& fixtures) {
+    TemporaryDirectory directory;
+    const auto old = materialize(fixtures, directory.path() / "old.flac");
+    auto journal = open_journal(directory, "existing.sqlite3");
+    auto old_plan = title_plan(old, "Old save");
+    CHECK(journal && old_plan);
+    if (!journal || !old_plan)
+        return;
+    CHECK(operations::commit_flac_metadata_source(*old_plan, *journal, successful_dependent_commit)
+              .has_value());
+    sqlite3* database = nullptr;
+    CHECK(sqlite3_open((directory.path() / "existing.sqlite3").c_str(), &database) == SQLITE_OK);
+    // Reproduce the existing workspace: reconciliation record with missing
+    // child evidence. Preserve it and never interpret it as safe to overwrite.
+    CHECK(sqlite3_exec(
+              database,
+              "UPDATE operation_journal SET state=5, error_code=0, error_message='cancelled';"
+              "DELETE FROM operation_journal_changes; DELETE FROM operation_journal_occurrences;",
+              nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(database);
+    CHECK(!journal->load_incomplete());
+    CHECK(!journal->load_incomplete_for_source(old.native()));
+    auto blocked = title_plan(old, "Must not save");
+    CHECK(blocked && !operations::commit_flac_metadata_source(*blocked, *journal,
+                                                              successful_dependent_commit));
+    const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / "new.flac");
+    const auto donor =
+        materialize(fixtures, "external-blue-jpeg.b64", directory.path() / "donor.jpg");
+    metadata::ArtworkWritePlanIntent intent{
+        .occurrence_index = 0,
+        .raw_media_path = media.native(),
+        .expected_media_revision = *core::observe_local_source_revision(media.native()),
+        .target_ordinal = 0,
+        .expected_target_fingerprint = {},
+        .kind = metadata::ArtworkWritePlanIntentKind::add,
+        .replacement_raw_path = donor.native(),
+        .added_role = metadata::ArtworkRole::front,
+        .added_description = {},
+        .replacement_embedded_source = std::nullopt};
+    metadata::ArtworkStoragePolicy policy;
+    policy.write_folder_image = true;
+    auto plan = operations::plan_artwork_storage({intent}, policy);
+    CHECK(plan && plan->ready());
+    if (!plan || !plan->ready())
+        return;
+    const auto saved = operations::commit_artwork_source(plan->sources.front(), *journal,
+                                                         successful_dependent_commit);
+    if (!saved)
+        std::cerr << saved.error().message << '\n';
+    CHECK(saved.has_value());
+    CHECK(read_bytes(directory.path() / "cover.jpg") == read_bytes(donor));
+    const auto inventory = metadata::read_local_artwork_inventory(media.native());
+    CHECK(inventory.has_value());
+    const auto image = metadata::read_artwork_image_file(donor.native());
+    CHECK(image.has_value());
+    if (inventory && image) {
+        bool found = false;
+        for (const auto& item : inventory->items)
+            found |= item.provenance == metadata::ArtworkProvenance::embedded &&
+                     item.role == metadata::ArtworkRole::front &&
+                     item.content_fingerprint == image->content_fingerprint;
+        CHECK(found);
+    }
+    CHECK(!journal->load_incomplete()); // Damaged evidence remains visible to recovery.
+}
+
+void folder_cover_policy_publication_and_recovery(const std::filesystem::path& fixtures) {
+    TemporaryDirectory directory;
+    const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / "track.flac");
+    const auto donor =
+        materialize(fixtures, "external-blue-jpeg.b64", directory.path() / "donor.jpg");
+    const auto original_media = read_bytes(media);
+    const auto inventory = metadata::read_local_artwork_inventory(media.native());
+    CHECK(inventory.has_value());
+    if (!inventory)
+        return;
+    metadata::ArtworkWritePlanIntent intent{.occurrence_index = 0,
+                                            .raw_media_path = media.native(),
+                                            .expected_media_revision = inventory->media_revision,
+                                            .target_ordinal = 0,
+                                            .expected_target_fingerprint = {},
+                                            .kind = metadata::ArtworkWritePlanIntentKind::add,
+                                            .replacement_raw_path = donor.native(),
+                                            .added_role = metadata::ArtworkRole::front,
+                                            .added_description = {},
+                                            .replacement_embedded_source = std::nullopt};
+    metadata::ArtworkStoragePolicy policy{.embed = false,
+                                          .write_folder_image = true,
+                                          .folder_image_name = "cover.jpg",
+                                          .fetch_source = "coverartarchive"};
+    auto plan = operations::plan_artwork_storage({intent}, policy);
+    CHECK(plan && plan->ready() && plan->sources.front().folder_image);
+    auto journal = open_journal(directory, "folder.sqlite3");
+    if (!plan || !plan->ready() || !journal)
+        return;
+    const auto folder_plan = *plan->sources.front().folder_image;
+    CHECK(!operations::commit_artwork_source(plan->sources.front(), *journal, {}));
+    CHECK(!std::filesystem::exists(folder_plan.raw_path));
+    const auto published = operations::commit_artwork_source(plan->sources.front(), *journal,
+                                                             successful_dependent_commit);
+    if (!published)
+        std::cerr << published.error().message << '\n';
+    CHECK(published.has_value());
+    CHECK(read_bytes(media) == original_media);
+    CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
+    CHECK(
+        operations::commit_folder_image(folder_plan, *journal).has_value()); // shared-folder dedup
+    auto backups = journal->load_backups();
+    CHECK(backups && backups->size() == 1);
+
+    // Creation also survives a lost published transition without inventing an
+    // original inode or calling the media-dependent-state callback.
+    auto new_folder = folder_plan;
+    new_folder.raw_path = (directory.path() / "created.jpg").native();
+    FailingPublishedTransitionJournal interrupted_create{*journal};
+    CHECK(!operations::commit_folder_image(new_folder, interrupted_create));
+    auto created_recovery =
+        operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    CHECK(created_recovery && created_recovery->size() == 1 &&
+          created_recovery->front().outcome == operations::MetadataRecoveryOutcome::completed);
+    CHECK(read_bytes(new_folder.raw_path) == read_bytes(donor));
+
+    // A readable format without an embedded-artwork writer can still publish
+    // a folder front without rewriting its audio container.
+    const auto wavpack =
+        materialize(fixtures, "tagged-tone-wavpack.b64", directory.path() / "track.wv");
+    const auto wavpack_bytes = read_bytes(wavpack);
+    auto unqualified = intent;
+    unqualified.raw_media_path = wavpack.native();
+    unqualified.expected_media_revision = *core::observe_local_source_revision(wavpack.native());
+    auto folder_policy = policy;
+    folder_policy.folder_image_name = "wavpack-front.jpg";
+    auto unqualified_plan = operations::plan_artwork_storage({unqualified}, folder_policy);
+    CHECK(unqualified_plan && unqualified_plan->ready());
+    if (unqualified_plan && unqualified_plan->ready()) {
+        CHECK(operations::commit_artwork_source(unqualified_plan->sources.front(), *journal,
+                                                successful_dependent_commit)
+                  .has_value());
+        CHECK(read_bytes(wavpack) == wavpack_bytes);
+        CHECK(read_bytes(directory.path() / "wavpack-front.jpg") == read_bytes(donor));
+    }
+
+    // Replace a different valid picture, retain exact old bytes, and recover a
+    // publication interrupted before the published journal transition.
+    const auto red = directory.path() / "red.png";
+    {
+        TagLib::FLAC::File file{media.c_str(), false};
+        CHECK(!file.pictureList().isEmpty());
+        if (file.pictureList().isEmpty())
+            return;
+        const auto data = file.pictureList().front()->data();
+        std::ofstream out(red, std::ios::binary);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    auto red_image = metadata::read_artwork_image_file(red.native());
+    auto old_image = metadata::read_artwork_image_file(folder_plan.raw_path);
+    CHECK(red_image && old_image);
+    if (!red_image || !old_image)
+        return;
+    metadata::FolderImageWritePlan replace{
+        .raw_path = folder_plan.raw_path, .image = *red_image, .original = *old_image};
+    FailingPublishedTransitionJournal interrupted{*journal};
+    CHECK(!operations::commit_folder_image(replace, interrupted));
+    CHECK(read_bytes(folder_plan.raw_path) == read_bytes(red));
+    auto recovery = operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    CHECK(recovery && recovery->size() == 1 &&
+          recovery->front().outcome == operations::MetadataRecoveryOutcome::completed);
+    CHECK(interrupted.created_id.has_value());
+    if (interrupted.created_id) {
+        auto record = journal->load(*interrupted.created_id);
+        CHECK(record && *record && read_bytes((**record).backup_raw_path) == read_bytes(donor));
+        CHECK(operations::undo_flac_metadata_operation(*interrupted.created_id, *journal,
+                                                       successful_dependent_commit)
+                  .has_value());
+        CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
+    }
+    // An interrupted prepublication create removes only its recorded artifact.
+    if (interrupted_create.created_id) {
+        auto recorded = journal->load(*interrupted_create.created_id);
+        CHECK(recorded && *recorded);
+        if (recorded && *recorded) {
+            auto pending = **recorded;
+            pending.id = core::StableId::random();
+            pending.state = State::planned;
+            pending.source_raw_path = (directory.path() / "unpublished.jpg").native();
+            const auto stem = ".trackknife-" + pending.id.to_string() + ".metadata-";
+            pending.prepared_raw_path = (directory.path() / (stem + "prepared")).native();
+            pending.backup_raw_path = (directory.path() / (stem + "backup")).native();
+            pending.prepared_revision.reset();
+            pending.published_revision.reset();
+            CHECK(journal->create(pending).has_value());
+            std::filesystem::copy_file(donor, pending.prepared_raw_path);
+            pending.prepared_revision =
+                *core::observe_local_source_revision(pending.prepared_raw_path);
+            CHECK(journal
+                      ->transition(pending.id, {.expected_state = State::planned,
+                                                .state = State::prepared,
+                                                .prepared_revision = pending.prepared_revision,
+                                                .published_revision = std::nullopt,
+                                                .failure = std::nullopt})
+                      .has_value());
+            auto rolled_back =
+                operations::recover_metadata_operations(*journal, successful_dependent_commit);
+            CHECK(rolled_back && rolled_back->size() == 1 &&
+                  rolled_back->front().outcome == operations::MetadataRecoveryOutcome::rolled_back);
+            CHECK(!std::filesystem::exists(pending.prepared_raw_path));
+            CHECK(!std::filesystem::exists(pending.source_raw_path));
+        }
+    }
+    // Fresh review refuses an externally changed destination; no bytes lost.
+    auto changed = replace;
+    changed.original = *red_image;
+    CHECK(!operations::commit_folder_image(changed, *journal));
+    CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
+    core::CancellationSource stop;
+    stop.request_cancellation();
+    CHECK(!operations::commit_folder_image(replace, *journal, stop.token()));
+    CHECK(read_bytes(folder_plan.raw_path) == read_bytes(donor));
+    const auto link = directory.path() / "link.jpg";
+    std::filesystem::create_symlink(donor, link);
+    auto unsafe = folder_plan;
+    unsafe.raw_path = link.native();
+    CHECK(!operations::commit_folder_image(unsafe, *journal));
+    CHECK(std::filesystem::is_symlink(link));
+    policy.folder_image_name = "../escape.jpg";
+    CHECK(!operations::plan_artwork_storage({intent}, policy));
+    policy.folder_image_name = "cover.jpg";
+    policy.embed = false;
+    policy.write_folder_image = false;
+    CHECK(!operations::plan_artwork_storage({intent}, policy));
+    // Conflicting front images in one folder block the complete review.
+    policy.write_folder_image = true;
+    auto second = intent;
+    second.replacement_raw_path = red.native();
+    // Both images must resolve to the same extension to target one file.
+    const auto other_jpeg = directory.path() / "other.jpg";
+    auto other_bytes = read_bytes(donor);
+    other_bytes.push_back(0); // trailing JPEG data preserves a valid image with distinct bytes
+    {
+        std::ofstream out(other_jpeg, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(other_bytes.data()),
+                  static_cast<std::streamsize>(other_bytes.size()));
+    }
+    const auto media2 =
+        materialize(fixtures, "art-tone-flac.b64", directory.path() / "second.flac");
+    second.raw_media_path = media2.native();
+    second.expected_media_revision = *core::observe_local_source_revision(media2.native());
+    second.replacement_raw_path = other_jpeg.native();
+    CHECK(!operations::plan_artwork_storage({intent, second}, policy));
+}
+
 } // namespace
 
 int main(const int argc, char** argv) {
     CHECK(argc == 2);
     if (argc == 2) {
         const std::filesystem::path fixture_directory{argv[1]};
+        damaged_unrelated_journal_does_not_block_cover_save(fixture_directory);
+        folder_cover_policy_publication_and_recovery(fixture_directory);
         commits_atomically_and_retains_verified_backup(fixture_directory);
         rolls_back_dependent_and_journal_failures(fixture_directory);
         preserves_ambiguous_external_changes_for_reconciliation(fixture_directory);

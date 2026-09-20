@@ -208,10 +208,11 @@ bool ArtworkWritePlanSource::ready() const noexcept {
              item.replacement);
         return complete && (item.kind == ArtworkWritePlanIntentKind::add || item.original);
     };
-    const auto complete = expected_media_revision && observed_media_revision &&
-                          *expected_media_revision == *observed_media_revision &&
-                          is_qualified_artwork_adapter(adapter_name) && change_ready(change) &&
-                          std::ranges::all_of(additional_changes, change_ready);
+    const auto complete =
+        expected_media_revision && observed_media_revision &&
+        *expected_media_revision == *observed_media_revision &&
+        (embed ? is_qualified_artwork_adapter(adapter_name) : folder_image.has_value()) &&
+        change_ready(change) && std::ranges::all_of(additional_changes, change_ready);
     return complete &&
            std::ranges::none_of(issues, [](const auto& issue) { return issue.blocking; });
 }

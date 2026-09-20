@@ -162,10 +162,9 @@ void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
     QCOMPARE(melody_model.data(melody_model.index(0, 0), MpdQueueModel::RatingRole).toUInt(), 4U);
     // Album ratings key on the delegate's group identity and paint over the
     // group's cover from the artwork column.
-    melody_model.setAlbumRatings(
-        {{MpdQueueModel::albumGroupKey(melody_rated), 9U}});
-    QCOMPARE(melody_model.data(melody_model.index(0, ui::track_artwork_column),
-                               ui::track_album_rating_role)
+    melody_model.setAlbumRatings({{MpdQueueModel::albumGroupKey(melody_rated), 9U}});
+    QCOMPARE(melody_model
+                 .data(melody_model.index(0, ui::track_artwork_column), ui::track_album_rating_role)
                  .toUInt(),
              9U);
     QCOMPARE(model.totalDurationMs(), 220'900);

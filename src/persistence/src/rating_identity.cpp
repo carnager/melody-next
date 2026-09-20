@@ -38,8 +38,7 @@ namespace {
 
 std::string track_rating_hash(const std::string_view album_artist, const std::string_view album,
                               const std::string_view title, const int track_number) {
-    return core::sha256_hex(
-        joined({album_artist, album, title, std::to_string(track_number)}));
+    return core::sha256_hex(joined({album_artist, album, title, std::to_string(track_number)}));
 }
 
 std::string album_rating_hash(const std::string_view album_artist, const std::string_view album,

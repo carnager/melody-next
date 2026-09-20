@@ -32,7 +32,7 @@ class QTreeView;
 
 namespace trackknife::bench {
 
-enum class LocalLibraryAction { append, next, replace, new_list };
+enum class LocalLibraryAction { append, next, replace, new_list, request_next, request_end };
 
 class LocalLibraryPanel final : public QWidget {
     Q_OBJECT
@@ -40,6 +40,7 @@ class LocalLibraryPanel final : public QWidget {
     explicit LocalLibraryPanel(std::filesystem::path database_path, QWidget* parent = nullptr);
     ~LocalLibraryPanel() override;
     void addRoot(std::string raw_path);
+    QWidget* createFoldersWidget(QWidget* parent);
     // Reload committed index records; filesystem scans require the Refresh button.
     void refreshLibrary();
     void stop();
@@ -60,6 +61,7 @@ class LocalLibraryPanel final : public QWidget {
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
     void ratingsChanged();
+    void manageFoldersRequested();
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -131,6 +133,7 @@ class LocalLibraryPanel final : public QWidget {
     QTimer* change_timer_{nullptr};
     QTimer* artwork_timer_{nullptr};
     QPointer<QDialog> folders_dialog_;
+    QPointer<QWidget> folders_widget_;
     QListWidget* roots_list_{nullptr};
     QLabel* roots_error_{nullptr};
     std::size_t generation_{0};

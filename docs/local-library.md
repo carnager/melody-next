@@ -184,3 +184,11 @@ MPD queue. The related `bench-main-window`, `queue-table-view`, and
 Older test runs and sanitizer results are recorded in ADRs 0115–0118 and 0126.
 These tests do not establish scan-time budgets for large collections or slow
 network mounts.
+
+### Managing indexed folders
+
+Use **Settings → Library**, or the sidebar’s **Folders…** shortcut, to add or
+remove indexed folders and see their scan/availability status. Changes save
+immediately; removing a folder leaves its files untouched. Only **Refresh** in
+the Library sidebar starts a filesystem scan. These folders are separate from
+Folders-browser bookmarks and the MPD server’s music-folder mapping.

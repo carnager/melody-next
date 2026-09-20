@@ -88,6 +88,11 @@ class MetadataArtworkSection final : public QWidget {
     explicit MetadataArtworkSection(QWidget* parent = nullptr);
     ~MetadataArtworkSection() override;
 
+    QWidget* createCompactCover(QWidget* parent);
+    void stageFrontCover(const QString& path);
+    void pasteFrontCover(const QImage& image);
+    void removeFrontCover();
+    void refreshStoragePolicy();
     void setScope(std::vector<MetadataArtworkScopeSource> sources,
                   bool source_limit_exceeded = false);
     void setActive(bool active);
@@ -108,6 +113,10 @@ class MetadataArtworkSection final : public QWidget {
 
   signals:
     void operationRunningChanged(bool running);
+    void frontCoverChanged(const QImage& image, bool mixed);
+    void frontActionsChanged(bool editable, bool fetchable);
+    void openArtworkRequested();
+    void coverSettingsRequested();
     void pendingChangesChanged(bool pending);
 
   private:
@@ -159,6 +168,9 @@ class MetadataArtworkSection final : public QWidget {
     QFutureWatcher<std::shared_ptr<core::Result<operations::ArtworkApplyResult>>> apply_watcher_;
     QFutureWatcher<std::shared_ptr<core::Result<operations::ArtworkExportResult>>> export_watcher_;
     QFutureWatcher<std::vector<QImage>> preview_watcher_;
+    QFutureWatcher<core::Result<QString>> paste_watcher_;
+    QImage front_image_;
+    bool front_mixed_{false};
     core::CancellationSource preview_cancellation_;
     std::size_t preview_generation_{0U};
     std::size_t preview_job_generation_{0U};

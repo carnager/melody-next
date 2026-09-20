@@ -258,10 +258,9 @@ void MpdSearchResultModel::replace(std::optional<std::vector<mpd::AlbumSummary>>
                 .duration_ms = 0,
                 .filter = std::move(summary.filter),
                 .artwork_uri = from_utf8(summary.artwork_uri),
-                .rating = summary.rating != 0U
-                              ? summary.rating
-                              : std::min(10U, static_cast<unsigned>(
-                                                  std::lround(summary.computed_rating))),
+                .rating = summary.rating != 0U ? summary.rating
+                                               : std::min(10U, static_cast<unsigned>(std::lround(
+                                                                   summary.computed_rating))),
             });
         }
     } else {

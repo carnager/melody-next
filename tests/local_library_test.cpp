@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/dynamic_playlist_dialog.hpp"
+#include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/search_dialog.hpp"
-#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/core/sha256.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/persistence/rating_identity.hpp"
@@ -143,6 +145,7 @@ class LocalLibraryTest final : public QObject {
     void scansOnlyOnRefresh();
     void queryModeFiltersAndCommitsResults();
     void databaseSearchOpensCachedRowsWithoutFiles();
+    void dynamicRulesFollowIndexedTagsAndKeepRawPaths();
     void locateLoadsAdditionalTreePages();
     void cachedSearchTabsLoadCovers_data();
     void cachedSearchTabsLoadCovers();
@@ -531,9 +534,9 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Migrations unwind strictly in reverse order down to the truncation-era
     // schema before the app re-migrates forward.
-    for (const auto* name : {"0036_server_search_scope.down", "0035_local_ratings.down",
-                             "0034_metadata_field_filters.down",
-                             "0033_complete_library_fields.down"}) {
+    for (const auto* name :
+         {"0036_server_search_scope.down", "0035_local_ratings.down",
+          "0034_metadata_field_filters.down", "0033_complete_library_fields.down"}) {
         QFile downgrade{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));
@@ -702,8 +705,7 @@ void LocalLibraryTest::ratingsFollowContentIdentity() {
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
 
-    const auto track_hash =
-        persistence::track_rating_hash("Björk", "Test album", "First song", 3);
+    const auto track_hash = persistence::track_rating_hash("Björk", "Test album", "First song", 3);
     // The album identity carries the fixture's tagged year, matching
     // Melody's year-only date normalization.
     const auto album_hash = persistence::album_rating_hash("Björk", "Test album", "2026");
@@ -788,7 +790,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 37U);
+        QCOMPARE(*repository->schema_version(), 38U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
@@ -832,7 +834,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 37U);
+    QCOMPARE(*repository->schema_version(), 38U);
 }
 
 void LocalLibraryTest::scansOnlyOnRefresh_data() {
@@ -1035,6 +1037,58 @@ void LocalLibraryTest::cachedSearchTabsLoadCovers() {
                         .contains(QStringLiteral("not in the local library")));
     }
     qputenv("XDG_DATA_HOME", old_data);
+}
+
+void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto alpha = fixture(root, "raw-\xff.flac", "Alpha");
+    QVERIFY(!alpha.empty());
+    const auto database = base / "state.sqlite";
+    auto library = persistence::LocalLibrary::open(database);
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress progress;
+    QVERIFY(library->scan({}, progress));
+    DynamicPlaylistDialog dialog{
+        QStringLiteral("local"), QStringLiteral("Local library"),
+        [database](query::CompiledTkq compiled, core::CancellationToken cancellation,
+                   DynamicPlaylistService::Completion completion) {
+            completion(queryDynamicLocalLibrary(database, compiled, cancellation));
+        }};
+    dialog.show();
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("dynamic-query"));
+    auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
+    auto* view = dialog.findChild<QTableView*>(QStringLiteral("dynamic-tracks"));
+    input->setText(QStringLiteral("title IS Alpha"));
+    refresh->click();
+    QCOMPARE(view->model()->rowCount(), 1);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model);
+    QCOMPARE(model->rows().front().raw_path, alpha);
+    // Newly indexed matching tracks join the same definition after invalidation.
+    QVERIFY(!fixture(root, "02.flac", "Alpha").empty());
+    persistence::LibraryScanProgress next;
+    QVERIFY(library->scan({}, next));
+    dialog.libraryChanged();
+    QTRY_COMPARE(view->model()->rowCount(), 2);
+    // Results remain entirely index-backed when the media folder goes offline.
+    std::filesystem::rename(root, base / "offline");
+    refresh->click();
+    QCOMPARE(view->model()->rowCount(), 2);
+    std::vector<LocalTrackRow> snapshot;
+    connect(&dialog, &DynamicPlaylistDialog::snapshotRequested, &dialog,
+            [&snapshot](const QString&, const DynamicPlaylistService::Tracks& tracks) {
+                snapshot = std::get<std::vector<LocalTrackRow>>(tracks);
+            });
+    dialog.findChild<QPushButton*>(QStringLiteral("dynamic-open"))->click();
+    QCOMPARE(snapshot.size(), 2U);
+    QVERIFY(snapshot.front().probed);
+    auto cancelled = core::CancellationSource{};
+    cancelled.request_cancellation();
+    const auto compiled = query::compile_tkq("ALL");
+    QVERIFY(compiled);
+    QVERIFY(!queryDynamicLocalLibrary(database, *compiled, cancelled.token()));
 }
 
 void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {

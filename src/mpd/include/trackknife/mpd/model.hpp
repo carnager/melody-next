@@ -68,6 +68,14 @@ struct MelodyAlbum {
     friend bool operator==(const MelodyAlbum&, const MelodyAlbum&) = default;
 };
 
+struct LastFmCommand {
+    std::string operation;
+    std::vector<std::string> arguments;
+};
+struct LastFmReply {
+    std::string json;
+};
+
 struct Pair {
     std::string name;
     std::string value;
@@ -157,6 +165,32 @@ struct Track {
 
 // ADR-0188: which list is materialized as the playback context, and
 // whether a displaced queue is waiting to be restored.
+enum class RequestQueueOperation {
+    append,
+    prepend,
+    remove,
+    move,
+    clear,
+    resume,
+    insert,
+    play,
+    undo
+};
+struct RequestQueueCommand {
+    RequestQueueOperation operation{RequestQueueOperation::append};
+    unsigned revision{0};
+    unsigned id{0};
+    unsigned position{0};
+    std::vector<std::string> uris;
+};
+struct RequestQueueState {
+    unsigned revision{0};
+    unsigned active_id{0};
+    bool can_undo{false};
+    std::string context;
+    std::vector<Track> pending;
+};
+
 struct MelodyContextState {
     std::string name;
     bool queue_stashed{false};

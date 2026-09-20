@@ -328,22 +328,21 @@ void ratings_project_from_melody_lines_and_sticker_entries() {
             "unrated songs must stay unrated");
     require(songs->front().metadata.first("X-Rating") == std::nullopt,
             "projected extension lines must not leak into tag metadata");
-    require(!trackknife::mpd::project_tracks(
-                std::vector<Pair>{{"file", "a.flac"}, {"X-Rating", "11"}}),
-            "a rating outside 0-10 must fail projection");
+    require(
+        !trackknife::mpd::project_tracks(std::vector<Pair>{{"file", "a.flac"}, {"X-Rating", "11"}}),
+        "a rating outside 0-10 must fail projection");
 
     const std::vector<Pair> sticker_pairs{
-        {"file", "a.flac"},          {"sticker", "rating=10"}, {"file", "b.flac"},
-        {"sticker", "rating=text"},  {"file", "c.flac"},       {"sticker", "rating=99"},
-        {"file", "d.flac"},          {"sticker", "playcount=4"},
+        {"file", "a.flac"},         {"sticker", "rating=10"},   {"file", "b.flac"},
+        {"sticker", "rating=text"}, {"file", "c.flac"},         {"sticker", "rating=99"},
+        {"file", "d.flac"},         {"sticker", "playcount=4"},
     };
     const auto ratings = trackknife::mpd::project_sticker_ratings(sticker_pairs);
     require(ratings.has_value() && ratings->size() == 1U,
             "only interoperable rating stickers may project");
     require(ratings->front().uri == "a.flac" && ratings->front().rating == 10U,
             "sticker ratings must keep their URI and value");
-    require(!trackknife::mpd::project_sticker_ratings(
-                std::vector<Pair>{{"sticker", "rating=5"}}),
+    require(!trackknife::mpd::project_sticker_ratings(std::vector<Pair>{{"sticker", "rating=5"}}),
             "sticker entries without a file identity must fail");
 }
 

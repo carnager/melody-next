@@ -55,6 +55,7 @@ struct Command {
     std::optional<formats::ReplayGainInfo> replay_gain_override;
     std::shared_ptr<std::promise<core::Result<LocalAuditionSourceRelocationResult>>>
         relocation_completion;
+    std::uint64_t occurrence_token{0U};
 };
 
 // Sliders are perceptual: PipeWire's stream mixer is linear amplitude, so the
@@ -286,6 +287,7 @@ struct LocalAuditionService::Impl {
     }
 
     void clear_pending_next() {
+        pending_next_token = 0U;
         pending_next_path.clear();
         pending_next_revision.reset();
         pending_next_selection = {};
@@ -303,6 +305,8 @@ struct LocalAuditionService::Impl {
         while (const auto boundary = source->take_chain_crossing()) {
             track_base = *boundary;
             if (!pending_next_path.empty()) {
+                current_token = pending_next_token;
+                pending_next_token = 0U;
                 current_path = std::move(pending_next_path);
                 pending_next_path.clear();
                 current_revision = pending_next_revision;
@@ -319,6 +323,7 @@ struct LocalAuditionService::Impl {
                                            ? std::optional{*playback.end_sample - track_base}
                                            : std::nullopt;
             ++chain_transitions;
+            ++playback_instance;
         }
     }
 
@@ -336,6 +341,9 @@ struct LocalAuditionService::Impl {
         next.replay_gain_override = current_replay_gain_override;
         next.next_replay_gain_override = pending_next_replay_gain_override;
         next.chain_transitions = chain_transitions;
+        next.playback_instance = playback_instance;
+        next.occurrence_token = current_token;
+        next.next_occurrence_token = pending_next_token;
         next.error = std::move(error);
         if (source) {
             const auto playback = source->snapshot();
@@ -531,6 +539,8 @@ struct LocalAuditionService::Impl {
         sticky_failure.reset();
         clear_pending_next();
         track_base = 0;
+        current_token = command.occurrence_token;
+        ++playback_instance;
         current_path = std::move(command.raw_path);
         current_revision.reset();
         current_selection = command.selection;
@@ -671,6 +681,7 @@ struct LocalAuditionService::Impl {
             return;
         }
         if (restart) {
+            ++playback_instance;
             track_base = source->sample_range().start_sample;
             const auto restarted_snapshot = source->snapshot();
             current_duration_samples =
@@ -724,6 +735,7 @@ struct LocalAuditionService::Impl {
             output_active = false;
         }
         auto stopped = source->stop();
+        ++playback_instance;
         // The core collapses the chain back to single-source semantics.
         track_base = 0;
         clear_pending_next();
@@ -801,6 +813,7 @@ struct LocalAuditionService::Impl {
                      confirmed_revision.error().code == core::ErrorCode::not_found);
             }
             if (revision_matches) {
+                pending_next_token = command.occurrence_token;
                 pending_next_path = std::move(path);
                 pending_next_revision = observed_revision;
                 pending_next_selection = command.selection;
@@ -1216,6 +1229,9 @@ struct LocalAuditionService::Impl {
     std::optional<std::int64_t> current_duration_samples;
     std::int64_t track_base{0};
     std::uint64_t chain_transitions{0U};
+    std::uint64_t playback_instance{0U};
+    std::uint64_t current_token{0U};
+    std::uint64_t pending_next_token{0U};
     std::chrono::steady_clock::time_point last_publish{};
     std::chrono::steady_clock::time_point last_device_monitor_poll{};
     std::chrono::steady_clock::time_point last_output_recovery_attempt{};
@@ -1334,7 +1350,7 @@ core::Result<void> LocalAuditionService::queue_gapless_next(std::string raw_path
 
 core::Result<void> LocalAuditionService::queue_gapless_next_selected(
     std::string raw_path, formats::AudioSourceSelection selection,
-    std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    std::optional<formats::ReplayGainInfo> replay_gain_override, std::uint64_t occurrence_token) {
     if (raw_path.empty()) {
         return std::unexpected(invalid_config("local audition path must not be empty"));
     }
@@ -1349,7 +1365,8 @@ core::Result<void> LocalAuditionService::queue_gapless_next_selected(
                                             .relocation = {},
                                             .relocated_pending_commands = 0U,
                                             .replay_gain_override = replay_gain_override,
-                                            .relocation_completion = {}});
+                                            .relocation_completion = {},
+                                            .occurrence_token = occurrence_token});
 }
 
 core::Result<void> LocalAuditionService::queue_gapless_network_stream(
@@ -1381,8 +1398,8 @@ LocalAuditionService::queue_gapless_next_segment(std::string raw_path,
 
 core::Result<void> LocalAuditionService::queue_gapless_next_selected_segment(
     std::string raw_path, formats::AudioSourceSelection selection,
-    const formats::SampleRange segment,
-    std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    const formats::SampleRange segment, std::optional<formats::ReplayGainInfo> replay_gain_override,
+    std::uint64_t occurrence_token) {
     if (raw_path.empty()) {
         return std::unexpected(invalid_config("local audition path must not be empty"));
     }
@@ -1397,7 +1414,8 @@ core::Result<void> LocalAuditionService::queue_gapless_next_selected_segment(
                                             .relocation = {},
                                             .relocated_pending_commands = 0U,
                                             .replay_gain_override = replay_gain_override,
-                                            .relocation_completion = {}});
+                                            .relocation_completion = {},
+                                            .occurrence_token = occurrence_token});
 }
 
 core::Result<void> LocalAuditionService::clear_gapless_next() {

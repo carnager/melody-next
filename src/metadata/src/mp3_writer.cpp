@@ -327,6 +327,11 @@ core::Result<PreparedFlacMetadataWrite>
 prepare_qualified_metadata_write_copy(const MetadataWritePlanSource& source_plan,
                                       const std::string& prepared_raw_path,
                                       const core::CancellationToken& cancellation) {
+    if (source_plan.artwork && (source_plan.artwork->folder_image || !source_plan.artwork->embed))
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::invalid_argument,
+            .message = "Folder image policy must execute through the journaled metadata committer",
+            .context = {}});
     if (source_plan.artwork) {
         return prepare_composed_metadata_write_copy(source_plan, prepared_raw_path, cancellation);
     }

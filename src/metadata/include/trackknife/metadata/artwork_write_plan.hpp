@@ -87,6 +87,22 @@ struct ArtworkWritePlanChange {
     friend bool operator==(const ArtworkWritePlanChange&, const ArtworkWritePlanChange&) = default;
 };
 
+// Captured during review; the basename follows the image's encoded format.
+struct FolderImageWritePlan {
+    std::string raw_path;
+    ArtworkImageFile image;
+    std::optional<ArtworkImageFile> original;
+    friend bool operator==(const FolderImageWritePlan&, const FolderImageWritePlan&) = default;
+};
+
+struct ArtworkStoragePolicy {
+    bool embed{true};
+    bool write_folder_image{false};
+    std::string folder_image_name{"cover.jpg"};
+    std::string fetch_source{"coverartarchive"};
+    friend bool operator==(const ArtworkStoragePolicy&, const ArtworkStoragePolicy&) = default;
+};
+
 struct ArtworkWritePlanSource {
     std::string raw_media_path;
     std::vector<std::size_t> occurrence_indexes;
@@ -96,6 +112,8 @@ struct ArtworkWritePlanSource {
     ArtworkWritePlanChange change;
     std::vector<ArtworkWritePlanIssue> issues;
     std::vector<ArtworkWritePlanChange> additional_changes{};
+    bool embed{true};
+    std::optional<FolderImageWritePlan> folder_image{};
 
     [[nodiscard]] bool ready() const noexcept;
     [[nodiscard]] std::size_t blocking_issue_count() const noexcept;

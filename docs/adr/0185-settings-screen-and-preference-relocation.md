@@ -51,3 +51,57 @@ screens automate against it.
   profile CRUD, matching the previous managers' behavior.
 - SettingsDialog stays constructable without a store (the Naming page
   degrades to a note), keeping standalone tests trivial.
+
+## Naming presentation update (2026-09-20)
+
+Naming layouts and move destinations now occupy separate tabs within Naming.
+Compact preset dropdowns replace the persistent selected lists, leaving the
+full content width for labelled expression and destination editors. Save layout
+and Save destination retain the same immediate store-backed persistence.
+Settings navigation uses a muted selection fill and a narrow accent marker.
+
+## Playback preferences update (2026-09-20)
+
+Settings adds a Playback page for local buffer presets/custom durations and
+ReplayGain preamps with/without gain metadata. General adds background track
+notifications. Existing preference keys and playback-menu shortcuts remain
+shared; Settings saves only on Save, and Cancel changes neither live playback
+nor persisted preferences. Saving applies preamps and notification preferences
+to the running workspace; buffer changes follow the existing next-track boundary.
+The page states that MPD playback uses server settings. Custom start thresholds
+cannot exceed capacity, and preamps retain the audio core's existing limits.
+
+## Library folders update (2026-09-20)
+
+Library in Settings hosts the existing asynchronous indexed-folder manager.
+The sidebar Folders shortcut opens this page, reusing an already open Settings
+screen; standalone library panels retain the same manager in a small dialog.
+Folder additions and removals persist immediately, as the page explains, and
+removal leaves the underlying files untouched. Opening Settings or adding a
+folder never initiates a filesystem scan: the sidebar Refresh action remains
+the explicit scan trigger. Folder paths retain raw-byte identity.
+
+## Connection profiles update (2026-09-20)
+
+Connections in Settings manages saved MPD/Melody profiles through asynchronous
+profile persistence: name, host/socket, port, local music-folder mapping, and
+the single startup connection. Save profile and Remove persist immediately;
+failures leave both the committed profile set and the editable form intact.
+Settings does not connect or disconnect sessions. Existing Connect remains the
+quick connection action and accepts session-only passwords. Unedited raw folder
+paths survive profile edits exactly. The existing fallback music-folder setting
+moves from General to Connections and still follows Settings Save/Cancel.
+
+## Metadata services and consistency update (2026-09-20)
+
+Metadata services exposes the existing AcoustID client-key preference with
+masked entry and an explicit Show control. Save trims and stores the key,
+Cancel preserves it, and clearing then saving disables key-backed lookup.
+MusicBrainz text search needs no credentials. The page explains local storage
+and explicit fingerprint lookups; no network call occurs while editing settings.
+Missing-key errors direct users to this page rather than a settings key name.
+
+Custom-buffer and ReplayGain-preamp shortcuts now open the existing Playback
+settings controls; duplicate dialogs are removed. Settings pages scroll and
+forms wrap on smaller windows. Page-specific footer text distinguishes ordinary
+Save/Cancel preferences from immediate profile and indexed-folder operations.

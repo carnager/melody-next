@@ -21,6 +21,10 @@ rejects unrelated file changes through fresh revision checks.
 The Edit tags file selector shows full paths with readable Unicode filenames.
 Invalid filename bytes and control characters use lossless escapes; display
 formatting never changes the raw paths used for file operations.
+Checkboxes show the current editing scope on neutral, padded rows. Click a
+checkbox or press Space to toggle a file; filename clicks and Shift/Ctrl retain
+normal list selection. This controls new edits; Apply still saves all staged
+changes, including changes already staged on files subsequently unchecked.
 
 **Trackknife decision (ADR-0157):** Properties can filter field names and show
 only fields changed in the selected files. **Show files** collapses the file
@@ -190,6 +194,23 @@ the source of an effective value and choose the write target.
 
 ## Editing covers
 
+**Trackbench decision (ADR-0184):** The Fields pane shows a compact front-cover
+thumbnail. Drop or paste an image, use Fetch cover, or choose a file from its
+context menu to stage the selected files' front cover. Open Artwork for detailed
+roles, per-file rows, archive browsing, and problems. Cover settings opens the
+Covers settings page.
+
+Settings → Covers chooses embedding, a folder image, or both. The folder name's
+extension follows the input (`.jpg` or `.png`), without recompression. Apply
+reviews exact folder destinations and create/replace decisions before Save.
+Existing images retain recovery backups; different images targeting one shared
+folder are blocked. Folder-only front additions do not require embedded-write
+support. Remove affects embedded fronts only; external images are not deleted.
+Save folder covers before using Rename/Move. Folder and media writes have
+separate journals: a later media failure explicitly reports an already saved
+folder image, and retry safely recognizes identical bytes. Conversion retains
+its separate artwork preference.
+
 In **Edit tags… → Artwork**, select individual covers with Ctrl/Shift or all
 rows with Ctrl+A. **Remove** (or Delete) stages removal of the selected embedded
 pictures, including multiple versions of the same type in one file. External
@@ -216,8 +237,9 @@ batch. Feedback reports those outcomes. For physical tag/artwork saves, use
 files are skipped. Changed source files and unresolved recovery records remain
 blocked; reopen changed files to review them again. This retry control does not
 yet cover rename/move, CUE sheets, or loudness sidecars (ADR-0161).
-External image deletion and artwork
-mutation in unqualified containers remain outside this workflow (ADR-0160).
+External image deletion and embedded artwork mutation in unqualified containers
+remain outside this workflow. ADR-0184 permits journaled creation/replacement of
+the one policy-selected folder image, independently of embedded writers.
 
 ## Tag editor
 
@@ -676,7 +698,8 @@ publication, restart recovery, refresh, and exact Undo remain the ADR-0079
 lifecycle. **Copy to Selection** is Add with one inventoried donor: embedded
 donors are reread transiently by exact revision/ordinal/hash without a temp
 file, retain role/description, and exclude their own media source. External
-siblings can be donors but are never modified. **Export…** rereads selected
+siblings can be donors. ADR-0184 additionally permits journaled publication of
+the exact policy-selected folder image; other siblings are never modified. **Export…** rereads selected
 embedded or external rows in a two-worker cancellable job and exclusively
 creates deterministic `artwork-N-role` outputs with a MIME-derived suffix; it
 never overwrites, journals, or retains backups. Other container writers remain

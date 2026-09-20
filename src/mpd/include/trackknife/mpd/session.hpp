@@ -41,6 +41,7 @@ struct SessionSnapshot {
     // context, empty for the live queue. Absent when the server does not
     // advertise melody_context.
     std::optional<MelodyContextState> context;
+    std::optional<RequestQueueState> requests;
     // The queue context's own contents: the stashed queue while another
     // list is materialized, so the Queue tab keeps showing its own list.
     std::vector<Track> queue_context_tracks;
@@ -90,6 +91,8 @@ enum class SessionCommandKind {
     melody_rating,
     melody_album_rate,
     melody_album_rating,
+    request_queue_edit,
+    lastfm,
     melody_context_play,
     melody_context_queue,
     melody_scratch_lists,
@@ -104,7 +107,8 @@ enum class SessionCommandKind {
 using SessionCommandPayload =
     std::variant<std::monostate, std::vector<DatabaseEntry>, std::vector<Track>,
                  std::vector<StoredPlaylist>, std::vector<std::string>, std::vector<std::byte>,
-                 LibrarySearchResult, std::vector<ArtistAlbumCount>, MelodyAlbumRating>;
+                 LibrarySearchResult, std::vector<ArtistAlbumCount>, MelodyAlbumRating,
+                 LastFmReply>;
 
 struct SessionCommandResult {
     std::uint64_t id{0U};
@@ -138,6 +142,7 @@ class Session final {
     Session(Session&&) = delete;
     Session& operator=(Session&&) = delete;
 
+    [[nodiscard]] std::uint64_t lastfm(LastFmCommand command);
     void request_full_refresh();
     void cancel_pending(std::uint64_t command_id);
     [[nodiscard]] std::uint64_t run_transport(TransportAction action);
@@ -156,14 +161,14 @@ class Session final {
     // Ratings on the interoperable 0-10 scale (ADR-0179). The adapter picks
     // the backend from advertised capabilities: sticker for stock MPD,
     // Melody's native commands when `getrating` is advertised.
-    [[nodiscard]] std::uint64_t set_sticker_ratings(std::vector<std::string> uris,
-                                                    unsigned rating);
+    [[nodiscard]] std::uint64_t set_sticker_ratings(std::vector<std::string> uris, unsigned rating);
     [[nodiscard]] std::uint64_t set_melody_track_ratings(std::vector<std::uint64_t> song_ids,
                                                          unsigned rating);
     [[nodiscard]] std::uint64_t set_melody_album_rating(MelodyAlbumKey key, unsigned rating);
     [[nodiscard]] std::uint64_t melody_album_rating(MelodyAlbumKey key);
     // ADR-0187: play a stored playlist as the active playback context, or
     // switch back to the stashed queue. row = std::nullopt resumes.
+    [[nodiscard]] std::uint64_t edit_request_queue(RequestQueueCommand command);
     [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_scratch_lists();

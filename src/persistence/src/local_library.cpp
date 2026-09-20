@@ -954,14 +954,13 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                 page.more = true;
                 break;
             }
-            page.entries.push_back({query.kind, statement.bytes(0), statement.bytes(1),
-                                    statement.bytes(2), statement.bytes(3),
-                                    static_cast<std::size_t>(statement.number(4)),
-                                    static_cast<std::size_t>(statement.number(5)),
-                                    static_cast<int>(statement.number(6)),
-                                    static_cast<std::size_t>(statement.number(7)),
-                                    statement.bytes(8),
-                                    static_cast<unsigned>(statement.number(9))});
+            page.entries.push_back(
+                {query.kind, statement.bytes(0), statement.bytes(1), statement.bytes(2),
+                 statement.bytes(3), static_cast<std::size_t>(statement.number(4)),
+                 static_cast<std::size_t>(statement.number(5)),
+                 static_cast<int>(statement.number(6)),
+                 static_cast<std::size_t>(statement.number(7)), statement.bytes(8),
+                 static_cast<unsigned>(statement.number(9))});
             page.entries.back().label = format_label(page.entries.back(), !query.text.empty());
         }
         return page;
@@ -1302,8 +1301,7 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
 core::Result<void> LocalLibrary::set_rating(const std::string& hash, const bool album,
                                             const unsigned rating) {
     const auto result = checked([&] {
-        if (hash.size() != 64U ||
-            hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
+        if (hash.size() != 64U || hash.find_first_not_of("0123456789abcdef") != std::string::npos) {
             fail("Rating identity must be a 64-character content hash",
                  core::ErrorCode::invalid_argument);
         }

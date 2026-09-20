@@ -4,12 +4,12 @@
 
 #include <QLoggingCategory>
 
-Q_LOGGING_CATEGORY(tkDebug, "trackknife.debug")
+Q_LOGGING_CATEGORY(tkDebug, "trackknife.debug", QtWarningMsg)
 
 namespace trackknife::ui {
 
 void enableDebugLogging() {
-    QLoggingCategory::setFilterRules(QStringLiteral("trackknife.debug=true"));
+    QLoggingCategory::setFilterRules(QStringLiteral("trackknife.debug.debug=true"));
     qSetMessagePattern(QStringLiteral("%{time hh:mm:ss.zzz} %{category}: %{message}"));
 }
 

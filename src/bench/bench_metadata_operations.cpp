@@ -564,53 +564,51 @@ void BenchMainWindow::showReplayGainDialog() {
 OutputProfileStore BenchMainWindow::buildOutputProfileStore() {
     auto* const persistence_service = persistence_;
     return OutputProfileStore{
-            .load =
-                [persistence_service](OutputProfileStore::LoadCompletion completion) {
-                    if (!persistence_service) {
-                        completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->loadOutputProfiles(std::move(completion));
-                },
-            .save_layout =
-                [persistence_service](persistence::SavedOutputLayoutProfile profile,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->saveOutputLayoutProfile(std::move(profile),
-                                                                 std::move(completion));
-                },
-            .remove_layout =
-                [persistence_service](core::StableId id,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->removeOutputLayoutProfile(id, std::move(completion));
-                },
-            .save_destination =
-                [persistence_service](persistence::SavedDestinationProfile profile,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->saveDestinationProfile(std::move(profile),
-                                                                std::move(completion));
-                },
-            .remove_destination =
-                [persistence_service](core::StableId id,
-                                      OutputProfileStore::Completion completion) {
-                    if (!persistence_service) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->removeDestinationProfile(id, std::move(completion));
-                },
-        };
+        .load =
+            [persistence_service](OutputProfileStore::LoadCompletion completion) {
+                if (!persistence_service) {
+                    completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
+                    return;
+                }
+                persistence_service->loadOutputProfiles(std::move(completion));
+            },
+        .save_layout =
+            [persistence_service](persistence::SavedOutputLayoutProfile profile,
+                                  OutputProfileStore::Completion completion) {
+                if (!persistence_service) {
+                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    return;
+                }
+                persistence_service->saveOutputLayoutProfile(std::move(profile),
+                                                             std::move(completion));
+            },
+        .remove_layout =
+            [persistence_service](core::StableId id, OutputProfileStore::Completion completion) {
+                if (!persistence_service) {
+                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    return;
+                }
+                persistence_service->removeOutputLayoutProfile(id, std::move(completion));
+            },
+        .save_destination =
+            [persistence_service](persistence::SavedDestinationProfile profile,
+                                  OutputProfileStore::Completion completion) {
+                if (!persistence_service) {
+                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    return;
+                }
+                persistence_service->saveDestinationProfile(std::move(profile),
+                                                            std::move(completion));
+            },
+        .remove_destination =
+            [persistence_service](core::StableId id, OutputProfileStore::Completion completion) {
+                if (!persistence_service) {
+                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    return;
+                }
+                persistence_service->removeDestinationProfile(id, std::move(completion));
+            },
+    };
 }
 
 void BenchMainWindow::showMetadataProperties() {
@@ -1079,6 +1077,19 @@ void BenchMainWindow::applyCommittedRelocation(
             syncArtwork(*tab);
         }
     }
+    const auto update_request = [&](LocalTrackRow& row) {
+        if (row.raw_path == result.source_raw_path) {
+            row.raw_path = result.target_raw_path;
+            row.source_revision = result.target_revision;
+        }
+    };
+    local_requests_.updateSources(update_request);
+    if (requested_request_)
+        update_request(requested_request_->source);
+    if (queued_request_)
+        update_request(queued_request_->source);
+    persistUpNext();
+    refreshUpNext();
     if (playback_source_.raw_path == result.source_raw_path) {
         playback_source_.raw_path = result.target_raw_path;
     }

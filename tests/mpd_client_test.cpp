@@ -200,6 +200,25 @@ class FakeMpdServer final {
             }
             write_all(client, "file: Rated/A/01.flac\nAlbumArtist: Rated Artist\n"
                               "Album: Rated Release\nTitle: Rated track\nX-Rating: 9\nOK\n");
+        } else if (command == R"(melody_lastfm love "Björk & A" "A + B")") {
+            write_all(client, "lastfm: {\"loved\":true}\nOK\n");
+        } else if (command == "melody_upnext") {
+            write_all(client, "revision: 42\nactive: 12\ncontext: Road\nfile: A.flac\nTitle: "
+                              "A\nPos: 0\nId: 20\nfile: A.flac\nTitle: A\nPos: 1\nId: 21\nOK\n");
+        } else if (command == "melody_context stage" ||
+                   command == "melody_context stage \"A.flac\"") {
+            write_all(client, "OK\n");
+        } else if (command == "melody_upnext append 42" ||
+                   command == "melody_upnext move 42 21 0" ||
+                   command == "melody_upnext return 42") {
+            write_all(client, "OK\n");
+        } else if (command == "melody_upnext clear 41") {
+            write_all(client,
+                      "ACK [2@0] {melody_upnext} request queue changed; refresh before retrying\n");
+        } else if (command == "melody_albums_latest") {
+            write_all(client, "X-Album: 3\tFresh Artist\tNew album\t2026\n"
+                              "X-Album: 2\tFresh Artist\tAnother album\t2025\n"
+                              "X-Album: 1\tOld Artist\tOld album\t1990\nOK\n");
         } else if (command.starts_with("search ")) {
             if (command.find("sort") != std::string_view::npos) {
                 // The banner advertises MPD 0.24, so the newest lookup must
@@ -279,17 +298,17 @@ class FakeMpdServer final {
         } else if (command.starts_with("playlistadd ") && command_list) {
             return;
         } else if (command.starts_with("play ") || command.starts_with("playid ") ||
-                   command.starts_with("deleteid ") ||
-                   command.starts_with("moveid ") || command.starts_with("seekid ") ||
-                   command.starts_with("prioid ") || command.starts_with("setvol ") ||
-                   command.starts_with("enableoutput ") || command.starts_with("switchoutput ") ||
-                   command.starts_with("repeat ") || command.starts_with("random ") ||
-                   command.starts_with("single ") || command.starts_with("consume ") ||
-                   command.starts_with("replay_gain_mode ") || command.starts_with("save ") ||
-                   command.starts_with("load ") || command.starts_with("playlistadd ") ||
-                   command.starts_with("playlistdelete ") || command.starts_with("playlistmove ") ||
-                   command.starts_with("playlistclear ") || command.starts_with("rename ") ||
-                   command.starts_with("rm ") || command == "clear") {
+                   command.starts_with("deleteid ") || command.starts_with("moveid ") ||
+                   command.starts_with("seekid ") || command.starts_with("prioid ") ||
+                   command.starts_with("setvol ") || command.starts_with("enableoutput ") ||
+                   command.starts_with("switchoutput ") || command.starts_with("repeat ") ||
+                   command.starts_with("random ") || command.starts_with("single ") ||
+                   command.starts_with("consume ") || command.starts_with("replay_gain_mode ") ||
+                   command.starts_with("save ") || command.starts_with("load ") ||
+                   command.starts_with("playlistadd ") || command.starts_with("playlistdelete ") ||
+                   command.starts_with("playlistmove ") || command.starts_with("playlistclear ") ||
+                   command.starts_with("rename ") || command.starts_with("rm ") ||
+                   command == "clear") {
             write_all(client, "OK\n");
         } else if (command == "sticker \"delete\" \"song\" \"unrated.flac\" \"rating\"") {
             write_all(client, "ACK [50@0] {sticker} no such sticker\n");
@@ -520,6 +539,36 @@ void client_negotiates_and_preserves_extensions() {
                 missing_delete.error().code == trackknife::core::ErrorCode::not_found,
             "MPD no-exist ACKs must retain a recoverable typed error");
     require(client.clear_queue().has_value(), "queue clear must use the command connection");
+    const auto loved = client.lastfm({"love", {"Björk & A", "A + B"}});
+    require(loved && loved->json == R"({"loved":true})",
+            "Last.fm command quotes metadata and returns typed state");
+    require(!client.lastfm({"love", {"bad\nmetadata", "song"}}),
+            "Last.fm rejects command injection");
+    const auto requests = client.request_queue();
+    require(requests && requests->revision == 42 && requests->active_id == 12 &&
+                requests->context == "Road" && requests->pending.size() == 2,
+            "Up Next snapshot must retain revision and ordered duplicates");
+    require(requests->pending[0].queue_id == 20 && requests->pending[1].queue_id == 21,
+            "request identity is occurrence-based");
+    trackknife::mpd::RequestQueueCommand request;
+    request.revision = 42;
+    request.uris = {"A.flac"};
+    require(client.edit_request_queue(request).has_value(),
+            "request batch is staged then committed");
+    request.operation = trackknife::mpd::RequestQueueOperation::move;
+    request.id = 21;
+    request.position = 0;
+    require(client.edit_request_queue(request).has_value(),
+            "request moves carry identity and revision");
+    request.operation = trackknife::mpd::RequestQueueOperation::resume;
+    require(client.edit_request_queue(request).has_value(), "explicit return reaches daemon");
+    request.operation = trackknife::mpd::RequestQueueOperation::clear;
+    request.revision = 41;
+    require(!client.edit_request_queue(request), "stale request edits must surface conflicts");
+    const auto melody_newest = client.newest_tag_values("AlbumArtist", 2'000U, true);
+    require(melody_newest &&
+                *melody_newest == std::vector<std::string>{"Fresh Artist", "Old Artist"},
+            "Melody latest albums must provide complete, deduplicated artist order");
     const auto newest = client.newest_tag_values("AlbumArtist", 2'000U);
     require(newest &&
                 *newest == std::vector<std::string>{"Fresh Artist", "Middle Artist", "Old Artist"},
@@ -550,17 +599,16 @@ void client_negotiates_and_preserves_extensions() {
     require(!client.add_id(""), "an empty queue URI must fail before protocol I/O");
     require(!client.set_volume(101U), "out-of-range volume must fail before protocol I/O");
 
-    const auto rating_search = client.search_library("beatles rating>=8", 200U, 1'000U, 0U,
-                                              {.rating_filters = true, .album_search = false});
+    const auto rating_search = client.search_library(
+        "beatles rating>=8", 200U, 1'000U, 0U, {.rating_filters = true, .album_search = false});
     require(rating_search.has_value() && rating_search->tracks.size() == 1U &&
                 rating_search->tracks.front().rating == 9U,
             "rating search terms must become a Melody filter expression");
     const auto plain_rating_search = client.search_library("beatles rating>=8");
     require(plain_rating_search.has_value() && plain_rating_search->tracks.size() == 3U,
             "without the Melody gate, rating words stay ordinary search text");
-    const auto album_search =
-        client.search_library("albumrating>=8", 200U, 1'000U, 0U,
-                              {.rating_filters = true, .album_search = true});
+    const auto album_search = client.search_library("albumrating>=8", 200U, 1'000U, 0U,
+                                                    {.rating_filters = true, .album_search = true});
     require(album_search.has_value() && album_search->albums.size() == 2U,
             "album search must take the album section from searchalbums records");
     const auto& rated_album = album_search->albums.front();
@@ -590,9 +638,9 @@ void client_negotiates_and_preserves_extensions() {
             "multi-selection rating must use one sticker command list");
     require(!client.set_sticker_rating("Artist/Release/01.flac", 11U),
             "a rating above 10 must fail before protocol I/O");
-    require(!client.set_sticker_ratings(std::array{std::string{"a.flac"}, std::string{"a.flac"}},
-                                        5U),
-            "rating batches must reject duplicate URIs before protocol I/O");
+    require(
+        !client.set_sticker_ratings(std::array{std::string{"a.flac"}, std::string{"a.flac"}}, 5U),
+        "rating batches must reject duplicate URIs before protocol I/O");
     const auto sticker_map = client.sticker_ratings();
     require(sticker_map.has_value() && sticker_map->size() == 1U &&
                 sticker_map->front().uri == "Artist/Release/01.flac" &&
@@ -600,17 +648,17 @@ void client_negotiates_and_preserves_extensions() {
             "bulk rating load must project interoperable stickers and skip foreign values");
     require(client.set_melody_track_rating(4'711U, 8U).has_value(),
             "Melody track rating must use the database song id");
-    require(client.set_melody_track_ratings(std::array{std::uint64_t{4'711U}, std::uint64_t{4'712U}},
-                                            6U)
-                .has_value(),
-            "multi-selection Melody rating must use one command list");
+    require(
+        client
+            .set_melody_track_ratings(std::array{std::uint64_t{4'711U}, std::uint64_t{4'712U}}, 6U)
+            .has_value(),
+        "multi-selection Melody rating must use one command list");
     const trackknife::mpd::MelodyAlbumKey album_key{
         .album_artist = "Credited Artist", .album = "Early Release", .date = "1998"};
     require(client.set_melody_album_rating(album_key, 8U).has_value(),
             "Melody album rating must send the literal album identity");
     const auto album_rating = client.melody_album_rating(album_key);
-    require(album_rating.has_value() && album_rating->rating == 8U &&
-                album_rating->computed == 7.5,
+    require(album_rating.has_value() && album_rating->rating == 8U && album_rating->computed == 7.5,
             "Melody album rating reads must project both stored and computed values");
     require(!client.set_melody_album_rating(
                 trackknife::mpd::MelodyAlbumKey{.album_artist = "", .album = "X", .date = ""}, 5U),

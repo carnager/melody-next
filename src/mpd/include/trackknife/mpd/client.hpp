@@ -70,6 +70,9 @@ struct QueueMove {
 // request/response at a time by construction.
 class Client final {
   public:
+    [[nodiscard]] core::Result<LastFmReply> lastfm(const LastFmCommand& command);
+    [[nodiscard]] core::Result<RequestQueueState> request_queue();
+    [[nodiscard]] core::Result<void> edit_request_queue(const RequestQueueCommand& command);
     Client(Client&&) noexcept;
     Client& operator=(Client&&) noexcept;
     Client(const Client&) = delete;
@@ -92,9 +95,10 @@ class Client final {
     [[nodiscard]] core::Result<std::vector<Track>>
     find_tag_tracks(std::string_view tag, std::string_view value, unsigned limit = 10'000U);
     [[nodiscard]] core::Result<std::vector<std::byte>> artwork(std::string_view uri, bool embedded);
-    [[nodiscard]] core::Result<std::vector<Track>>
-    search_any(std::string_view query, unsigned offset = 0U, unsigned limit = 200U,
-               bool melody_rating_filters = false);
+    [[nodiscard]] core::Result<std::vector<Track>> search_any(std::string_view query,
+                                                              unsigned offset = 0U,
+                                                              unsigned limit = 200U,
+                                                              bool melody_rating_filters = false);
     [[nodiscard]] core::Result<LibrarySearchResult>
     search_library(std::string_view query, unsigned track_limit = 200U,
                    unsigned album_limit = 1'000U, unsigned offset = 0U,
@@ -147,8 +151,8 @@ class Client final {
     [[nodiscard]] core::Result<void> update_database(const std::string& uri);
     // Distinct values of tag over the library's most recently modified
     // tracks, newest first — the ordering source for "Latest" browsing.
-    [[nodiscard]] core::Result<std::vector<std::string>> newest_tag_values(std::string_view tag,
-                                                                           unsigned track_limit);
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    newest_tag_values(std::string_view tag, unsigned track_limit, bool melody_album_order = false);
     [[nodiscard]] core::Result<void> move_id(std::uint32_t song_id, unsigned position);
     [[nodiscard]] core::Result<void> move_ids(std::span<const QueueMove> moves);
     [[nodiscard]] core::Result<void> set_priority_id(std::uint32_t song_id, unsigned priority);
@@ -170,9 +174,8 @@ class Client final {
     [[nodiscard]] core::Result<void> melody_context_play(std::string_view name,
                                                          std::optional<unsigned> row);
     [[nodiscard]] core::Result<void> melody_context_queue(std::optional<unsigned> row);
-    [[nodiscard]] core::Result<void> melody_context_queue_write(bool replace,
-                                                                const std::vector<std::string>& uris,
-                                                                int position);
+    [[nodiscard]] core::Result<void>
+    melody_context_queue_write(bool replace, const std::vector<std::string>& uris, int position);
     [[nodiscard]] core::Result<void> melody_context_queue_delete(const std::vector<unsigned>& rows);
     [[nodiscard]] core::Result<void> melody_context_queue_move(unsigned from, unsigned to);
     [[nodiscard]] core::Result<std::vector<std::string>> melody_scratch_lists();

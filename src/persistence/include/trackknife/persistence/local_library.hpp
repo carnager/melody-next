@@ -117,8 +117,9 @@ class LocalLibrary final {
     // library entries, so files outside the library rate identically.
     core::Result<void> set_rating(const std::string& hash, bool album, unsigned rating);
     // Stored ratings for each hash in input order; 0 means unrated.
-    core::Result<std::vector<unsigned>> ratings(const std::vector<std::string>& hashes,
-                                                const core::CancellationToken& cancellation = {}) const;
+    core::Result<std::vector<unsigned>>
+    ratings(const std::vector<std::string>& hashes,
+            const core::CancellationToken& cancellation = {}) const;
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
 

@@ -5,6 +5,8 @@
 - [Melody setup](melody.md): connect to the server and set up speakers.
 - [Local library](local-library.md#using-the-library): add folders, browse albums,
   search, and save searches.
+- [Last.fm accounts and scrobbling](lastfm.md): independent local/server accounts and Love/Unlove.
+- [Dynamic playlists](dynamic-playlists.md): shared local/server rules and Last.fm sources.
 - [Search syntax](query-language.md): field filters such as
   `bitspersample EQUAL 24` and `REPLAYGAIN_ALBUM_GAIN MISSING`.
 - [Formatting and scripts](tkfmt.md): naming patterns and tag transformations.
@@ -17,7 +19,7 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-16, through ADR-0178 and database schema 34.
+Updated on 2026-09-20, through ADR-0200 and database schema 38.
 
 The application is built as `trackknife` from `src/bench`. Older development
 documents call this workspace **Trackbench**. It combines the MPD client and
@@ -31,8 +33,8 @@ context menu or by dropping them on the tab strip. Both libraries show artist
 album counts loaded in the background.
 
 M5 local tagging/file operations, M6 MusicBrainz identification, M7 ReplayGain,
-M8 conversion, and the M9 Melody endpoint are complete. M10 hardening,
-packaging, and release work is active. The [feature matrix](feature-matrix.md)
+M8 conversion, the M9 Melody endpoint, and M10 hardening are complete.
+Post-release workspace improvements are active. The [feature matrix](feature-matrix.md)
 lists what works and its restrictions. The [roadmap](roadmap.md) lists the
 remaining work.
 
@@ -60,7 +62,10 @@ also available in [CMakePresets.json](../CMakePresets.json).
 
 ## Feature references
 
-- [MPD client](mpd-client.md): connections, the server library, queues, and playlists.
+- [Up Next](up-next.md): temporary requests with automatic return to normal
+  playback in local and Melody contexts; [design](adr/0196-up-next-request-queue.md).
+- [MPD client](mpd-client.md): connections, the server library, queues, and playlists;
+  [shared server-list interactions](adr/0198-shared-server-list-interactions.md).
 - [Workspace](ui-workspace.md): tabs, views, controls, and performance requirements.
 - [Local library](local-library.md): indexing, offline folders, refresh, and searches.
 - [Metadata and files](metadata-and-files.md): tag drafts, artwork, rename/move, and recovery.

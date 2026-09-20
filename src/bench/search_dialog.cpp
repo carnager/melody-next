@@ -236,7 +236,7 @@ void SearchDialog::updateSavedSearchButtons() {
         selected &&
         (selected->expression != utf8Bytes(input_->text().trimmed()) ||
          selected->dialect != (query_mode_->isChecked() ? "tkq-1" : "words-1") ||
-         selected->scope != (databaseScope()  ? persistence::SavedSearchScope::library
+         selected->scope != (databaseScope() ? persistence::SavedSearchScope::library
                              : serverScope() ? persistence::SavedSearchScope::server
                                              : persistence::SavedSearchScope::current_tab));
     update_search_->setEnabled(available && has_input && changed);
@@ -320,11 +320,10 @@ void SearchDialog::useSavedSearch(int index) {
         const QSignalBlocker scope_blocker{scope_};
         const QSignalBlocker mode_blocker{query_mode_};
         input_->setText(displayText(search.expression));
-        scope_->setCurrentIndex(search.scope == persistence::SavedSearchScope::library ? 0
-                                : search.scope == persistence::SavedSearchScope::server &&
-                                        scope_->count() > 2
-                                    ? 2
-                                    : 1);
+        scope_->setCurrentIndex(
+            search.scope == persistence::SavedSearchScope::library                         ? 0
+            : search.scope == persistence::SavedSearchScope::server && scope_->count() > 2 ? 2
+                                                                                           : 1);
         query_mode_->setChecked(search.dialect == "tkq-1");
     }
     QSettings{}.setValue(QStringLiteral("search/query-mode"), query_mode_->isChecked());
@@ -355,7 +354,7 @@ void SearchDialog::saveSearch(bool update) {
     }
     search->expression = utf8Bytes(input_->text().trimmed());
     search->dialect = query_mode_->isChecked() ? "tkq-1" : "words-1";
-    search->scope = databaseScope()  ? persistence::SavedSearchScope::library
+    search->scope = databaseScope() ? persistence::SavedSearchScope::library
                     : serverScope() ? persistence::SavedSearchScope::server
                                     : persistence::SavedSearchScope::current_tab;
     loadSavedSearches(*search);
@@ -433,34 +432,34 @@ void SearchDialog::startServerSearch(query::CompiledTkq compiled) {
     searching_ = true;
     status_->setText(QStringLiteral("Searching the server library…"));
     const auto generation = generation_;
-    server_scope_.run(
-        compiled, [this, generation, compiled](const QStringList& labels, const int total,
-                                               const QString& error) {
-            searching_ = false;
-            if (generation != generation_ || !serverScope()) {
-                return;
-            }
-            results_->clear();
-            result_rows_.clear();
-            if (!error.isEmpty()) {
-                error_->setText(error);
-                error_->show();
-                status_->setText(QStringLiteral("The server cannot run this query"));
-                open_button_->setEnabled(false);
-                return;
-            }
-            error_->hide();
-            results_->addItems(labels);
-            server_result_query_ = compiled;
-            status_->setText(
-                total == 1 ? QStringLiteral("1 match")
-                           : QStringLiteral("%1 matches%2")
-                                 .arg(total)
-                                 .arg(total > labels.size()
-                                          ? QStringLiteral(" · showing first %1").arg(labels.size())
-                                          : QString{}));
-            open_button_->setEnabled(total > 0);
-        });
+    server_scope_.run(compiled, [this, generation, compiled](const QStringList& labels,
+                                                             const int total,
+                                                             const QString& error) {
+        searching_ = false;
+        if (generation != generation_ || !serverScope()) {
+            return;
+        }
+        results_->clear();
+        result_rows_.clear();
+        if (!error.isEmpty()) {
+            error_->setText(error);
+            error_->show();
+            status_->setText(QStringLiteral("The server cannot run this query"));
+            open_button_->setEnabled(false);
+            return;
+        }
+        error_->hide();
+        results_->addItems(labels);
+        server_result_query_ = compiled;
+        status_->setText(
+            total == 1 ? QStringLiteral("1 match")
+                       : QStringLiteral("%1 matches%2")
+                             .arg(total)
+                             .arg(total > labels.size()
+                                      ? QStringLiteral(" · showing first %1").arg(labels.size())
+                                      : QString{}));
+        open_button_->setEnabled(total > 0);
+    });
 }
 
 std::optional<query::CompiledTkq> SearchDialog::compileInput() {

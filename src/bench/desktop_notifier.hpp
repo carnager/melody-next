@@ -12,8 +12,8 @@
 namespace trackknife::bench {
 
 // ADR-0144: posts a quiet "now playing" notification on track changes
-// while the window is in the background. Off by default; missing
-// session bus or notification daemon degrade to nothing.
+// with an optional background-only restriction. Off by default; delivery
+// failures are reported without affecting playback. See ADR-0195.
 class DesktopNotifier final : public QObject {
     Q_OBJECT
 
@@ -21,11 +21,13 @@ class DesktopNotifier final : public QObject {
     explicit DesktopNotifier(QObject* parent = nullptr);
 
     void setEnabled(bool enabled) noexcept { enabled_ = enabled; }
+    void setBackgroundOnly(bool value) noexcept { background_only_ = value; }
+    void sendTest();
     [[nodiscard]] bool isEnabled() const noexcept { return enabled_; }
 
     // Consumes one authority-aware now-playing snapshot; returns true
     // when a notification was posted for it. Track keys are tracked
-    // even while disabled or focused so state changes never
+    // even while disabled or suppressed so state changes never
     // retro-notify an old transition.
     bool publish(const MprisPlaybackState& state, bool window_active);
 
@@ -39,10 +41,14 @@ class DesktopNotifier final : public QObject {
         send_override_ = std::move(send);
     }
 
+  signals:
+    void deliveryFinished(const QString& error);
+
   private:
     void send(const QString& summary, const QString& body);
 
     bool enabled_{false};
+    bool background_only_{false};
     QString last_track_key_;
     QString last_summary_;
     QString last_body_;

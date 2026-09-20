@@ -19,8 +19,7 @@ namespace {
     const auto inner_radius = outer_radius * 0.42;
     for (int point = 0; point < 10; ++point) {
         const auto radius = point % 2 == 0 ? outer_radius : inner_radius;
-        const auto angle =
-            -std::numbers::pi / 2.0 + point * std::numbers::pi / 5.0;
+        const auto angle = -std::numbers::pi / 2.0 + point * std::numbers::pi / 5.0;
         const QPointF vertex{center.x() + radius * std::cos(angle),
                              center.y() + radius * std::sin(angle)};
         if (point == 0) {
@@ -64,8 +63,8 @@ void paintRatingOverlay(QPainter* painter, const QRect& cover, const unsigned ra
         const auto star = starPath(center, radius);
         if (half_star && slot + 1 == star_slots) {
             painter->save();
-            painter->setClipRect(QRectF{center.x() - radius, static_cast<qreal>(band.top()),
-                                        radius, static_cast<qreal>(band.height())});
+            painter->setClipRect(QRectF{center.x() - radius, static_cast<qreal>(band.top()), radius,
+                                        static_cast<qreal>(band.height())});
             painter->drawPath(star);
             painter->restore();
         } else {
@@ -174,8 +173,7 @@ QString ratingMenuLabel(const unsigned rating) {
     const auto half = rating % 2U != 0U;
     const auto stars = rating / 2U;
     if (half) {
-        return stars == 0U ? QStringLiteral("½ star")
-                           : QStringLiteral("%1½ stars").arg(stars);
+        return stars == 0U ? QStringLiteral("½ star") : QStringLiteral("%1½ stars").arg(stars);
     }
     return stars == 1U ? QStringLiteral("1 star") : QStringLiteral("%1 stars").arg(stars);
 }

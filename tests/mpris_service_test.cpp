@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/desktop_notifier.hpp"
 #include "bench/mpris_service.hpp"
 
 #include <QDBusConnection>
@@ -11,12 +12,56 @@
 
 namespace trackknife::bench {
 
+class NotificationFixture final : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.freedesktop.Notifications")
+  public:
+    QVariantMap hints;
+    quint32 replaced{0};
+    QString body;
+  public slots:
+    quint32 Notify(const QString&, quint32 replace_id, const QString&, const QString&,
+                   const QString& message, const QStringList&, const QVariantMap& values, int) {
+        replaced = replace_id;
+        hints = values;
+        body = message;
+        return 42U;
+    }
+};
+
 class MprisServiceTest final : public QObject {
     Q_OBJECT
   private slots:
     void publishesDiffedStateWithoutABus();
     void exportsThePlayerOverTheSessionBus();
+    void notificationDeliveryReportsAcceptanceAndFailure();
 };
+
+void MprisServiceTest::notificationDeliveryReportsAcceptanceAndFailure() {
+    auto bus = QDBusConnection::sessionBus();
+    if (!bus.isConnected() || !bus.registerService(QStringLiteral("org.freedesktop.Notifications")))
+        QSKIP("run this case under dbus-run-session to use an isolated notification fixture");
+    NotificationFixture fixture;
+    QVERIFY(bus.registerObject(QStringLiteral("/org/freedesktop/Notifications"), &fixture,
+                               QDBusConnection::ExportAllSlots));
+    DesktopNotifier notifier;
+    QSignalSpy delivered(&notifier, &DesktopNotifier::deliveryFinished);
+    notifier.sendTest();
+    QTRY_COMPARE(delivered.size(), 1);
+    QVERIFY(delivered.front().front().toString().isEmpty());
+    QCOMPARE(fixture.hints.value(QStringLiteral("urgency")).toUInt(), 1U);
+    QCOMPARE(fixture.hints.value(QStringLiteral("suppress-sound")).toBool(), true);
+    QCOMPARE(fixture.replaced, 0U);
+    QVERIFY(fixture.body.contains(QStringLiteral("working")));
+    notifier.sendTest();
+    QTRY_COMPARE(delivered.size(), 2);
+    QCOMPARE(fixture.replaced, 42U);
+    bus.unregisterObject(QStringLiteral("/org/freedesktop/Notifications"));
+    notifier.sendTest();
+    QTRY_COMPARE(delivered.size(), 3);
+    QVERIFY(!delivered.back().front().toString().isEmpty());
+    bus.unregisterService(QStringLiteral("org.freedesktop.Notifications"));
+}
 
 // The state machine must work identically whether or not a session bus
 // exists; without one the service is inert but fully observable.

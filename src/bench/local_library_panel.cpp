@@ -790,8 +790,12 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
     auto* menu = new QMenu(tree_);
     menu->setObjectName(QStringLiteral("local-library-context-menu"));
     menu->setAttribute(Qt::WA_DeleteOnClose);
-    const std::array labels{tr("Append to current list"), tr("Insert next in current list"),
-                            tr("Replace list and play"), tr("Open in new tab")};
+    const std::array labels{tr("Append to current list"),
+                            tr("Insert next in current list"),
+                            tr("Replace list and play"),
+                            tr("Open in new tab"),
+                            tr("Queue next"),
+                            tr("Queue at end")};
     const auto icons = libraryActionIcons(this);
     for (int action = 0; action < static_cast<int>(labels.size()); ++action) {
         auto* command =
@@ -824,8 +828,7 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                 rate_menu->addAction(stars);
                 choice = stars;
             }
-            choice->setObjectName(
-                QStringLiteral("action-local-library-rate-%1").arg(rating));
+            choice->setObjectName(QStringLiteral("action-local-library-rate-%1").arg(rating));
             choice->setChecked(target_entry.rating == rating);
             connect(choice, &QAction::triggered, this, [this, target, target_entry, rating] {
                 storeRating(target_entry.rating_hash,
@@ -1071,13 +1074,17 @@ void LocalLibraryPanel::addRoot(std::string raw_path) {
                  } else {
                      status_->setText(outcome.error);
                  }
-                 if (folders_dialog_) {
+                 if (folders_widget_) {
                      roots_error_->setText(outcome.error);
                  }
              }});
 }
 
 void LocalLibraryPanel::showFolders() {
+    if (receivers(SIGNAL(manageFoldersRequested())) > 0) {
+        emit manageFoldersRequested();
+        return;
+    }
     if (folders_dialog_) {
         folders_dialog_->raise();
         folders_dialog_->activateWindow();
@@ -1090,34 +1097,52 @@ void LocalLibraryPanel::showFolders() {
     dialog->resize(560, 320);
     folders_dialog_ = dialog;
     auto* layout = new QVBoxLayout(dialog);
-    auto* explanation =
-        new QLabel(tr("Choose the folders to browse and search as your local music library. "
-                      "Removing a folder from this list leaves its files untouched."),
-                   dialog);
+    layout->addWidget(createFoldersWidget(dialog));
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    layout->addWidget(buttons);
+    dialog->show();
+}
+
+QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
+    auto* widget = new QWidget(parent);
+    widget->setObjectName(QStringLiteral("local-library-folders-settings"));
+    folders_widget_ = widget;
+    auto* layout = new QVBoxLayout(widget);
+    auto* explanation = new QLabel(
+        tr("Choose the folders to browse and search as your local music library. "
+           "Folder changes are saved immediately. Removing a folder leaves its files untouched. "),
+        widget);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
-    roots_list_ = new QListWidget(dialog);
+    auto* scan_note =
+        new QLabel(tr("Only Refresh in the Library sidebar scans your folders for music."), widget);
+    scan_note->setWordWrap(true);
+    layout->addWidget(scan_note);
+    roots_list_ = new QListWidget(widget);
     roots_list_->setObjectName(QStringLiteral("local-library-roots"));
     layout->addWidget(roots_list_, 1);
-    roots_error_ = new QLabel(dialog);
+    roots_error_ = new QLabel(widget);
     roots_error_->setObjectName(QStringLiteral("local-library-folder-error"));
     roots_error_->setWordWrap(true);
     layout->addWidget(roots_error_);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    auto* buttons = new QDialogButtonBox(widget);
     auto* add = buttons->addButton(tr("Add folder…"), QDialogButtonBox::ActionRole);
     auto* remove = buttons->addButton(tr("Remove"), QDialogButtonBox::ActionRole);
+    add->setObjectName(QStringLiteral("local-library-folder-add"));
+    remove->setObjectName(QStringLiteral("local-library-folder-remove"));
     remove->setEnabled(false);
     connect(roots_list_, &QListWidget::currentRowChanged, remove,
             [remove](int row) { remove->setEnabled(row >= 0); });
     connect(add, &QPushButton::clicked, this, [this] {
         const auto path =
-            QFileDialog::getExistingDirectory(folders_dialog_, tr("Add music folder"));
+            QFileDialog::getExistingDirectory(folders_widget_, tr("Add music folder"));
         if (!path.isEmpty()) {
             addRoot(QFile::encodeName(path).toStdString());
         }
     });
     connect(remove, &QPushButton::clicked, this, [this] {
-        if (!folders_dialog_ || roots_list_->currentItem() == nullptr) {
+        if (!folders_widget_ || roots_list_->currentItem() == nullptr) {
             return;
         }
         const auto path =
@@ -1137,15 +1162,14 @@ void LocalLibraryPanel::showFolders() {
                      } else {
                          status_->setText(outcome.error);
                      }
-                     if (folders_dialog_) {
+                     if (folders_widget_) {
                          roots_error_->setText(outcome.error);
                      }
                  }});
     });
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
     layout->addWidget(buttons);
     loadRoots();
-    dialog->show();
+    return widget;
 }
 
 void LocalLibraryPanel::loadRoots() {
@@ -1168,7 +1192,7 @@ void LocalLibraryPanel::loadRoots() {
                      status_->setText(tr("Choose Folders… to add your music collection."));
                  }
                  std::size_t offline = 0;
-                 if (folders_dialog_) {
+                 if (folders_widget_) {
                      roots_list_->clear();
                  }
                  for (const auto& root : outcome.roots) {
@@ -1176,7 +1200,7 @@ void LocalLibraryPanel::loadRoots() {
                      if (unavailable) {
                          ++offline;
                      }
-                     if (!folders_dialog_) {
+                     if (!folders_widget_) {
                          continue;
                      }
                      auto* item = new QListWidgetItem(pathLabel(root.raw_path) +

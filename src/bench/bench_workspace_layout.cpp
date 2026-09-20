@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/connection_profiles_widget.hpp"
+#include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
+#include "bench/metadata_artwork_section.hpp"
+#include "bench/playback_tab_widget.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 
@@ -9,6 +13,7 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "ui/server_library_tree_view.hpp"
+#include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/panel_layout.hpp"
 #include "uicommon/queue_item_delegate.hpp"
@@ -19,14 +24,14 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QButtonGroup>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
-#include <QIcon>
 #include <QHeaderView>
-#include <QStyledItemDelegate>
+#include <QIcon>
 #include <QLabel>
 #include <QListWidget>
 #include <QListWidgetItem>
@@ -34,6 +39,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QSettings>
+#include <QStyledItemDelegate>
 #include <QToolButton>
 
 #include <QShortcut>
@@ -56,26 +62,7 @@
 #include <vector>
 
 namespace trackknife::bench {
-namespace {
-
-// ADR-0183 addendum: the sidebar file list shows a breadcrumb of the
-// selection's common folder and renders each row relative to it — plain
-// filenames for the ordinary one-album edit.
-class RelativePathDelegate final : public QStyledItemDelegate {
-  public:
-    using QStyledItemDelegate::QStyledItemDelegate;
-    [[nodiscard]] QString displayText(const QVariant& value,
-                                      const QLocale& locale) const override {
-        const auto prefix = property("relative-prefix").toString();
-        const auto text = value.toString();
-        if (!prefix.isEmpty() && text.startsWith(prefix)) {
-            return text.mid(prefix.size());
-        }
-        return QStyledItemDelegate::displayText(value, locale);
-    }
-};
-
-} // namespace
+namespace {} // namespace
 
 namespace {
 
@@ -89,7 +76,7 @@ constexpr auto layout_container_kind_property = "trackknife-layout-container-kin
 } // namespace
 
 void BenchMainWindow::buildWorkspace() {
-    tabs_ = new QTabWidget(this);
+    tabs_ = new PlaybackTabWidget(this);
     tabs_->setObjectName(QStringLiteral("bench-tabs"));
     tabs_->setDocumentMode(true);
     tabs_->setMovable(true);
@@ -162,37 +149,18 @@ void BenchMainWindow::buildWorkspace() {
     mpd_source_tabs_->setVisible(false);
     heading_row->addWidget(mpd_source_tabs_);
     heading_row->addStretch(1);
-    const auto make_order_button = [this](const QString& label, const QString& name) {
-        auto* button = new QToolButton(folders_panel_);
-        button->setText(label);
-        button->setObjectName(name);
-        button->setCheckable(true);
-        button->setAutoRaise(true);
-        button->setVisible(false);
-        return button;
-    };
-    library_order_az_ =
-        make_order_button(QStringLiteral("A–Z"), QStringLiteral("bench-library-order-az"));
-    library_order_az_->setToolTip(QStringLiteral("Sort artists alphabetically"));
-    library_order_latest_ =
-        make_order_button(QStringLiteral("Latest"), QStringLiteral("bench-library-order-latest"));
-    library_order_latest_->setToolTip(
-        QStringLiteral("Sort artists by their most recently added music"));
-    {
-        const QSettings settings;
-        const auto latest = settings.value(QStringLiteral("mpd/library-order")).toString() ==
-                            QStringLiteral("latest");
-        library_order_az_->setChecked(!latest);
-        library_order_latest_->setChecked(latest);
-    }
-    auto* order_group = new QButtonGroup(this);
-    order_group->setExclusive(true);
-    order_group->addButton(library_order_az_);
-    order_group->addButton(library_order_latest_);
-    connect(order_group, &QButtonGroup::buttonClicked, this,
-            [this](QAbstractButton*) { applyLibraryOrder(true); });
-    heading_row->addWidget(library_order_az_);
-    heading_row->addWidget(library_order_latest_);
+    library_order_ = new QComboBox(folders_panel_);
+    library_order_->setObjectName(QStringLiteral("bench-library-order"));
+    library_order_->setAccessibleName(QStringLiteral("Library ordering"));
+    library_order_->addItem(QStringLiteral("A–Z"), QStringLiteral("az"));
+    library_order_->addItem(QStringLiteral("Latest added"), QStringLiteral("latest"));
+    library_order_->setCurrentIndex(
+        QSettings{}.value(QStringLiteral("mpd/library-order")).toString() ==
+                QStringLiteral("latest")
+            ? 1
+            : 0);
+    library_order_->setVisible(false);
+    connect(library_order_, &QComboBox::activated, this, [this](int) { applyLibraryOrder(true); });
     folders_layout->addLayout(heading_row);
     folder_bookmarks_heading_ = new QLabel(QStringLiteral("Bookmarks"), folders_panel_);
     auto* bookmarks_heading = folder_bookmarks_heading_;
@@ -254,22 +222,6 @@ void BenchMainWindow::buildWorkspace() {
     properties_files_dir_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     properties_files_dir_->setContentsMargins(6, 4, 6, 2);
     files_page_layout->addWidget(properties_files_dir_);
-    properties_files_view_ = new QTableView(properties_files_page_);
-    properties_files_view_->setObjectName(QStringLiteral("bench-properties-files-view"));
-    properties_files_view_->setAccessibleName(QStringLiteral("Files in the active tag editor"));
-    properties_files_view_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    properties_files_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    properties_files_view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    properties_files_view_->setAlternatingRowColors(true);
-    properties_files_view_->setShowGrid(false);
-    properties_files_view_->setWordWrap(false);
-    properties_files_view_->setTextElideMode(Qt::ElideRight);
-    properties_files_view_->verticalHeader()->hide();
-    properties_files_view_->horizontalHeader()->hide();
-    properties_files_view_->horizontalHeader()->setStretchLastSection(true);
-    properties_files_delegate_ = new RelativePathDelegate(properties_files_view_);
-    properties_files_view_->setItemDelegate(properties_files_delegate_);
-    files_page_layout->addWidget(properties_files_view_);
     source_stack_->addWidget(properties_files_page_);
     folders_layout->addWidget(source_stack_, 1);
 
@@ -322,15 +274,21 @@ void BenchMainWindow::buildWorkspace() {
 
     auto* file_menu = menuBar()->addMenu(QStringLiteral("&File"));
     auto* new_list = file_menu->addAction(QStringLiteral("New list…"));
+    new_list->setObjectName(QStringLiteral("action-new-list"));
     new_list->setShortcut(QKeySequence::New);
     connect(new_list, &QAction::triggered, this, &BenchMainWindow::createList);
     auto* open_files = file_menu->addAction(QStringLiteral("Open files…"));
+    open_files->setObjectName(QStringLiteral("action-open-files"));
     open_files->setShortcut(QKeySequence::Open);
     connect(open_files, &QAction::triggered, this, &BenchMainWindow::openFilesDialog);
     auto* open_folder = file_menu->addAction(QStringLiteral("Open folder…"));
+    open_folder->setObjectName(QStringLiteral("action-open-folder"));
     open_folder->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
     connect(open_folder, &QAction::triggered, this, &BenchMainWindow::openFolderDialog);
     buildPlaylistActions(file_menu);
+    auto* dynamic = file_menu->addAction(QStringLiteral("Dynamic playlists…"));
+    dynamic->setObjectName(QStringLiteral("action-dynamic-playlists"));
+    connect(dynamic, &QAction::triggered, this, &BenchMainWindow::showDynamicPlaylists);
     auto* backup_workspace = file_menu->addAction(QStringLiteral("Back up workspace database…"));
     backup_workspace->setObjectName(QStringLiteral("action-backup-workspace"));
     connect(backup_workspace, &QAction::triggered, this, &BenchMainWindow::backupWorkspace);
@@ -355,6 +313,7 @@ void BenchMainWindow::buildWorkspace() {
     connect(mpd_diagnostics, &QAction::triggered, this, &BenchMainWindow::showMpdDiagnostics);
     file_menu->addSeparator();
     auto* quit = file_menu->addAction(QStringLiteral("Quit"));
+    quit->setObjectName(QStringLiteral("action-quit"));
     quit->setShortcut(QKeySequence::Quit);
     connect(quit, &QAction::triggered, this, &QWidget::close);
 
@@ -458,8 +417,7 @@ void BenchMainWindow::buildWorkspace() {
     auto* settings_action = edit_menu->addAction(QStringLiteral("Settings…"));
     settings_action->setObjectName(QStringLiteral("action-settings"));
     settings_action->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
-    connect(settings_action, &QAction::triggered, this,
-            [this] { showSettingsDialog(); });
+    connect(settings_action, &QAction::triggered, this, [this] { showSettingsDialog(); });
     edit_menu->addSeparator();
     remove_selected_action_ = edit_menu->addAction(QStringLiteral("Remove selected"));
     remove_selected_action_->setObjectName(QStringLiteral("action-remove-selected-tracks"));
@@ -486,6 +444,22 @@ void BenchMainWindow::buildWorkspace() {
     });
 
     auto* workspace_menu = menuBar()->addMenu(QStringLiteral("&Workspace"));
+    auto* jump_playing = workspace_menu->addAction(tr("Jump to playing"));
+    jump_playing->setObjectName(QStringLiteral("action-jump-to-playing"));
+    jump_playing->setShortcut(QKeySequence(QStringLiteral("Ctrl+J")));
+    connect(jump_playing, &QAction::triggered, this, [this] { refreshPlaybackCursor(true); });
+    follow_playback_action_ = workspace_menu->addAction(tr("Cursor follows playback"));
+    follow_playback_action_->setObjectName(QStringLiteral("action-follow-playback"));
+    follow_playback_action_->setCheckable(true);
+    follow_playback_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+J")));
+    follow_playback_action_->setChecked(
+        QSettings{}.value(QStringLiteral("workspace/follow-playback"), false).toBool());
+    connect(follow_playback_action_, &QAction::toggled, this, [this](bool enabled) {
+        QSettings{}.setValue(QStringLiteral("workspace/follow-playback"), enabled);
+        followed_playback_index_ = QPersistentModelIndex{};
+        refreshPlaybackCursor();
+    });
+    workspace_menu->addSeparator();
     auto* search_action = workspace_menu->addAction(QStringLiteral("Search…"));
     search_action->setObjectName(QStringLiteral("action-search-dialog"));
     search_action->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
@@ -1061,19 +1035,68 @@ void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index
 
 } // namespace trackknife::bench
 
-void trackknife::bench::BenchMainWindow::showSettingsDialog(
-    const SettingsDialog::Page page) {
-    auto* dialog = new SettingsDialog(this, buildOutputProfileStore());
+trackknife::bench::SettingsDialog*
+trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Page page) {
+    for (auto* existing : findChildren<SettingsDialog*>()) {
+        if (existing->isVisible()) {
+            existing->showPage(page);
+            existing->raise();
+            existing->activateWindow();
+            return existing;
+        }
+    }
+    std::function<QWidget*(QWidget*)> library_folders;
+    if (local_library_) {
+        library_folders = [this](QWidget* parent) {
+            return local_library_->createFoldersWidget(parent);
+        };
+    }
+    const auto connections = [this](QWidget* parent) -> QWidget* {
+        if (!local_library_) {
+            auto* note =
+                new QLabel(QStringLiteral("Connection profiles are not available yet. Reopen "
+                                          "Settings after workspace loading finishes."),
+                           parent);
+            note->setWordWrap(true);
+            return note;
+        }
+        return new ConnectionProfilesWidget(
+            mpd_profiles_,
+            [this](ConnectionProfilesWidget::Profiles profiles, std::function<void(QString)> done) {
+                if (!persistence_) {
+                    done(QStringLiteral("Profile storage is unavailable"));
+                    return;
+                }
+                auto retained = profiles;
+                const QPointer self{this};
+                persistence_->saveProfiles(
+                    std::move(profiles),
+                    [self, profiles = std::move(retained), done = std::move(done)](QString error) {
+                        if (self && error.isEmpty())
+                            self->mpd_profiles_ = profiles;
+                        done(std::move(error));
+                    });
+            },
+            parent);
+    };
+    auto* dialog = new SettingsDialog(
+        this, buildOutputProfileStore(), std::move(library_folders), connections,
+        [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_);
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {
         for (int index = 0; index < tabs_->count(); ++index) {
-            if (auto* properties =
-                    qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
+            if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
                 properties->reloadOutputProfiles();
             }
         }
     });
+    connect(dialog, &QDialog::accepted, this, [this] {
+        reloadPlaybackPreferences();
+        for (auto* section : findChildren<MetadataArtworkSection*>())
+            section->refreshStoragePolicy();
+    });
     dialog->showPage(page);
     dialog->open();
+    return dialog;
 }

@@ -25,6 +25,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -57,14 +58,14 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
-#include <tuple>
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <limits>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 namespace trackknife::bench {
@@ -134,44 +135,41 @@ void BenchMainWindow::buildMpdStatusControls() {
         mpd_controller_->setConsumeMode(mode < 0 || mode >= 2 ? 0 : mode + 1);
     });
 
-    mpd_append_selection_action_ = new QAction(
-        QIcon::fromTheme(QStringLiteral("list-add"), style()->standardIcon(QStyle::SP_ArrowRight)),
-        QStringLiteral("Append selection to queue"), this);
-    mpd_append_selection_action_->setObjectName(QStringLiteral("action-mpd-append-selection"));
-    connect(mpd_append_selection_action_, &QAction::triggered, this,
-            [this] { mpd_controller_->addUris(selectedMpdQueueUris(), false); });
-    mpd_add_next_selection_action_ = new QAction(
-        QIcon::fromTheme(QStringLiteral("go-next"), style()->standardIcon(QStyle::SP_ArrowForward)),
-        QStringLiteral("Add selection next"), this);
-    mpd_add_next_selection_action_->setObjectName(QStringLiteral("action-mpd-add-next-selection"));
-    connect(mpd_add_next_selection_action_, &QAction::triggered, this,
-            [this] { mpd_controller_->addUris(selectedMpdQueueUris(), true); });
     mpd_load_local_action_ = new QAction(QIcon::fromTheme(QStringLiteral("folder-open")),
                                          QStringLiteral("Load as local files"), this);
     mpd_load_local_action_->setObjectName(QStringLiteral("action-mpd-load-local"));
-    connect(mpd_load_local_action_, &QAction::triggered, this,
-            [this] { loadMpdUrisAsLocalFiles(selectedMpdQueueUris()); });
+    connect(mpd_load_local_action_, &QAction::triggered, this, [this] {
+        loadMpdUrisAsLocalFiles(
+            selectedMpdViewUris(qobject_cast<QTableView*>(tabs_->currentWidget())));
+    });
     // ADR-0180: file-operation sugar on mapped selections — load as local
     // files, then open the dialog on the created tab.
     mpd_edit_tags_action_ = new QAction(QStringLiteral("Edit tags…"), this);
     mpd_edit_tags_action_->setObjectName(QStringLiteral("action-mpd-edit-tags"));
     connect(mpd_edit_tags_action_, &QAction::triggered, this, [this] {
-        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::edit_tags);
+        materializeMpdSelectionForDialog(
+            selectedMpdViewUris(qobject_cast<QTableView*>(tabs_->currentWidget())),
+            MaterializedDialog::edit_tags);
     });
     mpd_replaygain_action_ = new QAction(QStringLiteral("ReplayGain…"), this);
     mpd_replaygain_action_->setObjectName(QStringLiteral("action-mpd-replaygain"));
     connect(mpd_replaygain_action_, &QAction::triggered, this, [this] {
-        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::replay_gain);
+        materializeMpdSelectionForDialog(
+            selectedMpdViewUris(qobject_cast<QTableView*>(tabs_->currentWidget())),
+            MaterializedDialog::replay_gain);
     });
     mpd_convert_action_ = new QAction(QStringLiteral("Convert files…"), this);
     mpd_convert_action_->setObjectName(QStringLiteral("action-mpd-convert"));
     connect(mpd_convert_action_, &QAction::triggered, this, [this] {
-        materializeMpdSelectionForDialog(selectedMpdQueueUris(), MaterializedDialog::convert);
+        materializeMpdSelectionForDialog(
+            selectedMpdViewUris(qobject_cast<QTableView*>(tabs_->currentWidget())),
+            MaterializedDialog::convert);
     });
     mpd_go_to_artist_action_ = new QAction(QStringLiteral("Go to artist"), this);
     mpd_go_to_artist_action_->setObjectName(QStringLiteral("action-mpd-go-to-artist"));
     connect(mpd_go_to_artist_action_, &QAction::triggered, this, [this] {
-        const auto index = mpd_queue_view_->currentIndex();
+        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+        const auto index = view ? view->currentIndex() : QModelIndex{};
         if (index.isValid()) {
             goToMpdLibraryEntry(index.siblingAtColumn(0)
                                     .data(static_cast<int>(ui::track_album_artist_role))
@@ -182,7 +180,8 @@ void BenchMainWindow::buildMpdStatusControls() {
     mpd_go_to_album_action_ = new QAction(QStringLiteral("Go to album"), this);
     mpd_go_to_album_action_->setObjectName(QStringLiteral("action-mpd-go-to-album"));
     connect(mpd_go_to_album_action_, &QAction::triggered, this, [this] {
-        const auto index = mpd_queue_view_->currentIndex();
+        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+        const auto index = view ? view->currentIndex() : QModelIndex{};
         if (index.isValid()) {
             goToMpdLibraryEntry(
                 index.siblingAtColumn(0)
@@ -191,10 +190,20 @@ void BenchMainWindow::buildMpdStatusControls() {
                 index.siblingAtColumn(ui::track_album_column).data(Qt::DisplayRole).toString());
         }
     });
-    mpd_crop_selection_action_ = new QAction(QStringLiteral("Crop queue to selection"), this);
+    mpd_crop_selection_action_ = new QAction(QStringLiteral("Crop list to selection"), this);
     mpd_crop_selection_action_->setObjectName(QStringLiteral("action-mpd-crop-selection"));
-    connect(mpd_crop_selection_action_, &QAction::triggered, this,
-            [this] { mpd_controller_->cropQueueToItems(selectedMpdQueueRows()); });
+    connect(mpd_crop_selection_action_, &QAction::triggered, this, [this] {
+        if (!isMpdContext())
+            return;
+        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+        if (!view || !view->selectionModel())
+            return;
+        QVariantList rows;
+        for (const auto& index : view->selectionModel()->selectedRows())
+            rows.push_back(index.row());
+        mpd_controller_->cropListToItems(view->property("bench-mpd-playlist-name").toString(), rows,
+                                         view->model()->rowCount());
+    });
 
     mpd_priority_menu_ = new QMenu(QStringLiteral("Priority"), this);
     mpd_priority_menu_->setObjectName(QStringLiteral("bench-mpd-priority-menu"));
@@ -214,7 +223,18 @@ void BenchMainWindow::buildMpdStatusControls() {
         action->setData(priority);
         priority_group->addAction(action);
         connect(action, &QAction::triggered, this, [this, priority] {
-            mpd_controller_->setQueuePriority(selectedMpdQueueRows(), priority);
+            auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+            if (!view || !view->selectionModel())
+                return;
+            auto* model = qobject_cast<quick::MpdQueueModel*>(view->model());
+            if (!model)
+                return;
+            QList<QPair<int, QString>> selection;
+            for (const auto& index : view->selectionModel()->selectedRows())
+                if (const auto uri = model->uriAt(index.row()))
+                    selection.push_back({index.row(), QString::fromStdString(*uri)});
+            const auto* tab = currentMpdPlaylistTab();
+            mpd_controller_->setListPriority(tab ? tab->name : QString{}, selection, priority);
         });
     }
 
@@ -237,7 +257,10 @@ void BenchMainWindow::buildMpdStatusControls() {
         action->setData(rating);
         rate_group->addAction(action);
         connect(action, &QAction::triggered, this, [this, rating] {
-            mpd_controller_->setTrackRating(selectedMpdQueueRows(), static_cast<int>(rating));
+            mpd_controller_->setTracksRating(
+                selectedMpdViewTracks(qobject_cast<QTableView*>(tabs_->currentWidget())),
+                static_cast<int>(rating),
+                currentMpdPlaylistTab() ? currentMpdPlaylistTab()->name : QString{});
         });
     }
 
@@ -409,7 +432,7 @@ void BenchMainWindow::buildMpdWorkspace() {
     view->setDefaultDropAction(Qt::MoveAction);
     view->setActivateCallback([controller = mpd_controller_](const QModelIndex& index) {
         if (index.isValid()) {
-            controller->playQueueItem(index.row());
+            controller->playListContext({}, index.row());
         }
     });
     view->setReorderCallback(
@@ -470,14 +493,7 @@ void BenchMainWindow::buildMpdWorkspace() {
                 if (!index.isValid()) {
                     return;
                 }
-                // ADR-0188: while another list is the active queue, this tab
-                // shows its own stashed list — playing a row brings it back
-                // rather than addressing the other list's queue ids.
-                if (controller->queueStashed()) {
-                    controller->playQueueContext(index.row());
-                    return;
-                }
-                controller->playQueueItem(index.row());
+                controller->playListContext({}, index.row());
             });
     connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this] { refreshSelectionStatus(); });
@@ -511,8 +527,8 @@ void BenchMainWindow::buildMpdWorkspace() {
                 preserved_mpd_view_layout_.clear();
                 schedulePersist();
             });
-    const auto queue_index = tabs_->addTab(
-        view, QIcon::fromTheme(QStringLiteral("network-server")), QStringLiteral("MPD Queue"));
+    const auto queue_index = tabs_->addTab(view, QIcon::fromTheme(QStringLiteral("network-server")),
+                                           QStringLiteral("MPD Queue"));
     tabs_->setTabToolTip(queue_index,
                          QStringLiteral("Authoritative queue on the connected MPD server"));
     if (auto* close = tabs_->tabBar()->tabButton(queue_index, QTabBar::RightSide)) {
@@ -561,18 +577,17 @@ void BenchMainWindow::buildMpdWorkspace() {
                         QStringLiteral("Could not load the newest ordering: %1").arg(error), 5'000);
                     return;
                 }
-                if (library_order_latest_ != nullptr && library_order_latest_->isChecked()) {
+                if (library_order_ != nullptr && library_order_->currentIndex() == 1) {
                     server_library_model_->setRootOrdering(values);
-                }
-            });
-    connect(mpd_controller_, &quick::MpdProbeController::serverLibraryRootLoaded, this,
-            [this](quint64, const QString&, const QStringList&, const QString& error) {
-                if (error.isEmpty()) {
-                    applyLibraryOrder(false);
                 }
             });
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryRootLoaded,
             server_library_model_, &ui::ServerLibraryTreeModel::acceptRoot);
+    connect(mpd_controller_, &quick::MpdProbeController::serverLibraryRootLoaded, this,
+            [this](quint64, const QString&, const QStringList&, const QString& error) {
+                if (error.isEmpty())
+                    applyLibraryOrder(false);
+            });
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryAlbumCountsLoaded,
             server_library_model_, &ui::ServerLibraryTreeModel::acceptAlbumCounts);
     connect(mpd_controller_, &quick::MpdProbeController::serverLibraryBranchLoaded,
@@ -767,11 +782,11 @@ void BenchMainWindow::activateMpdLibraryAction(const QModelIndex& index, const i
     } else if (requested == MpdLibraryAction::next) {
         mode = MpdSendMode::insert_next;
     }
-    sendTracksToMpdTab(visibleMpdTabTarget().value_or(
-                           MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
-                                        .label = QStringLiteral("MPD Queue"),
-                                        .playlist = {}}),
-                       tracks, mode);
+    sendTracksToMpdTab(
+        visibleMpdTabTarget().value_or(MpdTabTarget{.kind = MpdTabTarget::Kind::queue,
+                                                    .label = QStringLiteral("MPD Queue"),
+                                                    .playlist = {}}),
+        tracks, mode);
 }
 
 // The menu's direct actions run through the same lazy-fetch path as the
@@ -889,8 +904,8 @@ void BenchMainWindow::showMpdLibraryContextMenu(const QPoint& position) {
     };
     for (const auto& [label, icon, mode] : actions) {
         auto* command = mpd_library_context_menu_->addAction(QIcon::fromTheme(icon), label);
-        command->setObjectName(QStringLiteral("action-mpd-library-%1")
-                                   .arg(mode == MpdSendMode::append ? 0 : 2));
+        command->setObjectName(
+            QStringLiteral("action-mpd-library-%1").arg(mode == MpdSendMode::append ? 0 : 2));
         command->setEnabled(command_ready);
         connect(command, &QAction::triggered, this, [this, target, mode] {
             if (target.isValid()) {
@@ -898,12 +913,39 @@ void BenchMainWindow::showMpdLibraryContextMenu(const QPoint& position) {
             }
         });
     }
-    addSendToTabMenu(mpd_library_context_menu_, [this, target] {
-        return target.isValid() ? server_library_model_->tracks(QModelIndex{target})
-                                : std::vector<mpd::Track>{};
-    }, [this, target](const std::function<void(std::vector<mpd::Track>)>& apply) {
-        return target.isValid() && resolveLibraryTracks({QModelIndex{target}}, apply);
-    });
+    for (bool prepend : {true, false}) {
+        auto* request = mpd_library_context_menu_->addAction(
+            prepend ? QStringLiteral("Queue next") : QStringLiteral("Queue at end"));
+        request->setEnabled(command_ready &&
+                            mpd_controller_->supportsCommand(QStringLiteral("melody_upnext")));
+        connect(
+            request, &QAction::triggered, this,
+            [this, target, prepend, profile = mpd_controller_->profileId()] {
+                if (!target.isValid())
+                    return;
+                resolveLibraryTracks({QModelIndex{target}}, [this, prepend, profile](
+                                                                std::vector<mpd::Track> tracks) {
+                    if (profile != mpd_controller_->profileId() || !mpd_controller_->connected())
+                        return;
+                    mpd::RequestQueueCommand command;
+                    command.operation = prepend ? mpd::RequestQueueOperation::prepend
+                                                : mpd::RequestQueueOperation::append;
+                    for (const auto& track : tracks)
+                        command.uris.push_back(track.uri);
+                    if (!command.uris.empty())
+                        mpd_controller_->editRequestQueue(std::move(command));
+                });
+            });
+    }
+    addSendToTabMenu(
+        mpd_library_context_menu_,
+        [this, target] {
+            return target.isValid() ? server_library_model_->tracks(QModelIndex{target})
+                                    : std::vector<mpd::Track>{};
+        },
+        [this, target](const std::function<void(std::vector<mpd::Track>)>& apply) {
+            return target.isValid() && resolveLibraryTracks({QModelIndex{target}}, apply);
+        });
     mpd_library_context_menu_->addSeparator();
     auto* update_directory =
         mpd_library_context_menu_->addAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
@@ -981,8 +1023,8 @@ void BenchMainWindow::buildMpdSearch() {
     field->setPlaceholderText(QStringLiteral("Search albums and tracks"));
     library_layout->addWidget(field);
     auto* tools = new QHBoxLayout;
-    tools->addWidget(library_order_az_);
-    tools->addWidget(library_order_latest_);
+    tools->addWidget(new QLabel(QStringLiteral("Sort:"), library_page));
+    tools->addWidget(library_order_);
     tools->addStretch();
     library_layout->addLayout(tools);
     mpd_library_stack_ = new QStackedWidget(library_page);
@@ -1077,9 +1119,8 @@ void BenchMainWindow::buildMpdSearch() {
                     results->setCurrentIndex(index);
                 QMenu menu(results);
                 if (MpdLibrarySearchModel::actionable(index)) {
-                    const QStringList labels{tr("Append to live queue"),
-                                             tr("Insert next in live queue"),
-                                             tr("Replace queue and play")};
+                    const QStringList labels{tr("Add to MPD Queue"), tr("Insert next in MPD Queue"),
+                                             tr("Replace MPD Queue and play")};
                     for (int action = 0; action < labels.size(); ++action) {
                         menu.addAction(labels[action], this, [this, index, action] {
                             activateMpdSearchResult(index, action);
@@ -1319,7 +1360,7 @@ QStringList BenchMainWindow::selectedMpdQueueUris() const {
 // Applies the chosen library root ordering: Latest asks MPD for the
 // newest-first artist ranking, A-Z restores the alphabetical order.
 void BenchMainWindow::applyLibraryOrder(const bool persist) {
-    const auto latest = library_order_latest_ != nullptr && library_order_latest_->isChecked();
+    const auto latest = library_order_ != nullptr && library_order_->currentIndex() == 1;
     if (persist) {
         QSettings settings;
         settings.setValue(QStringLiteral("mpd/library-order"),
@@ -1339,8 +1380,7 @@ void BenchMainWindow::applyLibraryOrder(const bool persist) {
 
 std::optional<core::StableId> BenchMainWindow::currentMpdProfileId() const {
     if (mpd_controller_ != nullptr) {
-        if (const auto parsed =
-                core::StableId::parse(mpd_controller_->profileId().toStdString())) {
+        if (const auto parsed = core::StableId::parse(mpd_controller_->profileId().toStdString())) {
             return *parsed;
         }
     }
@@ -1354,8 +1394,7 @@ QString BenchMainWindow::effectiveMpdMusicRoot() const {
     if (mpd_controller_ != nullptr) {
         const auto parsed = core::StableId::parse(mpd_controller_->profileId().toStdString());
         const auto profile =
-            parsed ? std::ranges::find(mpd_profiles_, *parsed,
-                                       &persistence::ConnectionProfile::id)
+            parsed ? std::ranges::find(mpd_profiles_, *parsed, &persistence::ConnectionProfile::id)
                    : mpd_profiles_.end();
         if (profile != mpd_profiles_.end() && profile->local_music_root &&
             !profile->local_music_root->empty()) {
@@ -1396,8 +1435,8 @@ BenchMainWindow::materializeMpdSelectionAsLocalTab(const QStringList& uris) {
         const auto resolved = mpd::resolve_below_music_root(
             root_path,
             std::string_view{uri_bytes.constData(), static_cast<std::size_t>(uri_bytes.size())});
-        if (!resolved || !QFileInfo::exists(QFile::decodeName(QByteArray::fromStdString(
-                             resolved->native())))) {
+        if (!resolved ||
+            !QFileInfo::exists(QFile::decodeName(QByteArray::fromStdString(resolved->native())))) {
             ++missing;
             continue;
         }
@@ -1450,21 +1489,31 @@ void BenchMainWindow::refreshMpdPriorityMenu() {
     if (mpd_priority_menu_ == nullptr) {
         return;
     }
-    const auto rows = selectedMpdQueueRows();
-    const auto ready = !rows.isEmpty() && mpd_controller_->connected() &&
-                       !mpd_controller_->commandBusy() &&
-                       mpd_controller_->supportsCommand(QStringLiteral("prioid"));
-    mpd_priority_menu_->setEnabled(ready);
+    auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+    auto* model = view ? qobject_cast<quick::MpdQueueModel*>(view->model()) : nullptr;
+    const auto rows =
+        view && view->selectionModel() ? view->selectionModel()->selectedRows() : QModelIndexList{};
+    const auto* tab = currentMpdPlaylistTab();
+    const auto context = tab ? tab->name : QString{};
+    const bool active = context == mpd_controller_->activeContextName();
+    mpd_priority_menu_->setEnabled(active && !rows.isEmpty() && mpd_controller_->connected() &&
+                                   !mpd_controller_->commandBusy() &&
+                                   mpd_controller_->supportsCommand(QStringLiteral("prioid")));
     std::optional<unsigned> selected_priority;
-    bool priorities_match = !rows.isEmpty();
-    for (const auto& value : rows) {
-        const auto priority = mpd_queue_view_->model()
-                                  ->index(value.toInt(), 0)
-                                  .data(quick::MpdQueueModel::PriorityRole);
-        const auto numeric = priority.isValid() ? priority.toUInt() : 0U;
-        if (!selected_priority) {
+    bool priorities_match = active && !rows.isEmpty();
+    for (const auto& index : rows) {
+        const auto uri = model ? model->uriAt(index.row()) : std::nullopt;
+        const auto* track = uri ? mpd_controller_->listPriorityTrack(context, index.row(),
+                                                                     QString::fromStdString(*uri))
+                                : nullptr;
+        if (!track) {
+            priorities_match = false;
+            break;
+        }
+        const auto numeric = track->priority.value_or(0U);
+        if (!selected_priority)
             selected_priority = numeric;
-        } else if (*selected_priority != numeric) {
+        else if (*selected_priority != numeric) {
             priorities_match = false;
             break;
         }
@@ -1480,17 +1529,17 @@ void BenchMainWindow::refreshMpdRateMenu() {
     if (mpd_rate_menu_ == nullptr) {
         return;
     }
-    const auto rows = selectedMpdQueueRows();
+    auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+    const auto rows =
+        view && view->selectionModel() ? view->selectionModel()->selectedRows() : QModelIndexList{};
     const auto ready = !rows.isEmpty() && mpd_controller_->connected() &&
                        !mpd_controller_->commandBusy() && mpd_controller_->supportsRatings();
     mpd_rate_menu_->setEnabled(ready);
     std::optional<unsigned> selected_rating;
     bool ratings_match = !rows.isEmpty();
     for (const auto& value : rows) {
-        const auto rating = mpd_queue_view_->model()
-                                ->index(value.toInt(), 0)
-                                .data(quick::MpdQueueModel::RatingRole)
-                                .toUInt();
+        const auto rating =
+            view->model()->index(value.row(), 0).data(quick::MpdQueueModel::RatingRole).toUInt();
         if (!selected_rating) {
             selected_rating = rating;
         } else if (*selected_rating != rating) {
@@ -1559,8 +1608,7 @@ void BenchMainWindow::refreshMpdTransport() {
         // pushes the mode to an enabled Trackknife output.
         const auto server_mode = mpd_controller_->replayGainMode();
         output_tooltip += QStringLiteral("\nServer ReplayGain: %1")
-                              .arg(server_mode.isEmpty() ? QStringLiteral("unknown")
-                                                         : server_mode);
+                              .arg(server_mode.isEmpty() ? QStringLiteral("unknown") : server_mode);
     }
     if (melody_endpoint_ != nullptr) {
         const auto endpoint = melody_endpoint_->snapshot();

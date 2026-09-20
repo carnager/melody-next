@@ -17,6 +17,12 @@
 
 namespace trackknife::operations {
 
+// Captures policy destinations and detects conflicting images for a shared folder.
+[[nodiscard]] core::Result<metadata::ArtworkWritePlan>
+plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
+                     const metadata::ArtworkStoragePolicy& policy,
+                     const core::CancellationToken& cancellation = {});
+
 enum class ArtworkApplySourceState : std::uint8_t {
     pending,
     running,

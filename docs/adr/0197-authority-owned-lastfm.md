@@ -78,3 +78,14 @@ artist/title encoding. References: [track.getInfo](https://www.last.fm/api/show/
 and [REST requests](https://www.last.fm/api/rest). The Qt Last.fm service and Go
 Last.fm/daemon suites pass; the reported live HTTP 500 has not been reproduced
 with provider credentials.
+
+Setup refinement: retain user-owned application credentials (no bundled key or
+secret). Guide registration in Settings, reuse the entered key for dynamic
+playlists on explicit Connect with an opt-out checkbox, and keep the Metadata
+services field synchronized so Settings Save cannot restore an older value.
+Only the API key is copied into local read-service settings, never the secret.
+Each authority accepts `begin` without arguments to reconnect using its own
+saved credentials; status exposes only credential-presence and pending-auth
+booleans. The setup fields hide after credentials are saved. Service fixtures
+cover signed reconnects and credential removal; UI tests cover input validation,
+key reuse, and opt-out. Live browser approval remains manually validated.

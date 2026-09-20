@@ -14,7 +14,10 @@ MPD Queue and named server-list tabs share the same track menu and action order.
 Click **Up Next · N** in the transport, or press **Ctrl+Shift+U**, to open its
 side panel. The panel shows the current authority, pending tracks, and normal
 playback destination. Its rows stay single-line, with artist, title, and length.
-Drag to reorder or insert tracks; dropping onto the transport button appends.
+Drag one or more rows to reorder requests, or drag tracks from a queue/list
+tab into the panel at the insertion line. Adding requests leaves the source
+list intact; local and server tracks stay in their respective authorities.
+Dropping onto the transport button appends.
 The compact toolbar and right-click menu offer Remove, Move up/down, Clear,
 and Undo for pending requests. Ctrl/Shift-click selects multiple rows; Delete
 removes the selection, and move/drag operations retain its order. A batch is one

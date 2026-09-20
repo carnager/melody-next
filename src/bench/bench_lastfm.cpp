@@ -20,6 +20,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace trackknife::bench {
 void BenchMainWindow::buildLastFm() {
@@ -98,6 +99,21 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         page);
     note->setWordWrap(true);
     layout->addWidget(note);
+    auto* credentials = new QWidget(page);
+    credentials->setObjectName(QStringLiteral("lastfm-credentials"));
+    auto* credentials_layout = new QVBoxLayout(credentials);
+    credentials_layout->setContentsMargins(0, 0, 0, 0);
+    auto* instructions = new QLabel(
+        QStringLiteral("1. Register a free Last.fm API application using the link below. "
+                       "Choose an application name such as Melody or Trackknife; "
+                       "no callback URL is needed for desktop authorization.\n"
+                       "2. Paste the API key and shared secret here once. "
+                       "You can use the same pair for both players.\n"
+                       "3. Connect to enable scrobbling, then approve access in your browser. "
+                       "This page connects automatically once you approve."),
+        credentials);
+    instructions->setWordWrap(true);
+    credentials_layout->addWidget(instructions);
     auto* form = new QFormLayout;
     auto* key = new QLineEdit(page);
     key->setObjectName(QStringLiteral("lastfm-account-key"));
@@ -108,7 +124,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     secret->setEchoMode(QLineEdit::Password);
     form->addRow(QStringLiteral("API key:"), key);
     form->addRow(QStringLiteral("Shared secret:"), secret);
-    layout->addLayout(form);
+    credentials_layout->addLayout(form);
     auto* link = new QLabel(
         QStringLiteral(
             "<a href=\"https://www.last.fm/api/account/create\">Create a Last.fm API account</a> · "
@@ -116,7 +132,13 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         page);
     link->setOpenExternalLinks(true);
     link->setWordWrap(true);
-    layout->addWidget(link);
+    credentials_layout->addWidget(link);
+    auto* reuse =
+        new QCheckBox(QStringLiteral("Use this API key for dynamic playlists too"), credentials);
+    reuse->setObjectName(QStringLiteral("lastfm-reuse-key"));
+    reuse->setChecked(true);
+    credentials_layout->addWidget(reuse);
+    layout->addWidget(credentials);
     auto* security = new QLabel(
         QStringLiteral("Credentials are saved privately on the selected player. Server setup uses "
                        "your MPD connection; use a trusted network or tunnel."),
@@ -124,13 +146,35 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     security->setWordWrap(true);
     layout->addWidget(security);
     auto* buttons = new QHBoxLayout;
-    auto* begin = new QPushButton(QStringLiteral("Authorize in browser…"), page);
+    auto* begin = new QPushButton(QStringLiteral("Connect to Last.fm…"), page);
     begin->setObjectName(QStringLiteral("lastfm-authorize"));
-    auto* finish = new QPushButton(QStringLiteral("Finish authorization"), page);
-    finish->setObjectName(QStringLiteral("lastfm-finish"));
+    auto* cancel = new QPushButton(QStringLiteral("Cancel"), page);
+    cancel->setObjectName(QStringLiteral("lastfm-cancel"));
+    cancel->hide();
+    auto* poll = new QTimer(page);
+    poll->setObjectName(QStringLiteral("lastfm-auth-poll"));
+    poll->setSingleShot(true);
+    poll->setInterval(3000);
+    auto* deadline = new QTimer(page);
+    deadline->setObjectName(QStringLiteral("lastfm-auth-deadline"));
+    deadline->setSingleShot(true);
+    deadline->setInterval(5 * 60 * 1000);
+    auto waiting = [page, begin, cancel, authority, poll, deadline](bool active) {
+        page->setProperty("auth-waiting", active);
+        const bool idle = !active && !page->property("auth-request-pending").toBool();
+        begin->setEnabled(idle);
+        authority->setEnabled(idle);
+        cancel->setVisible(active);
+        if (active)
+            deadline->start();
+        else {
+            poll->stop();
+            deadline->stop();
+        }
+    };
     auto* disconnect = new QPushButton(QStringLiteral("Disconnect / clear pending"), page);
     buttons->addWidget(begin);
-    buttons->addWidget(finish);
+    buttons->addWidget(cancel);
     buttons->addWidget(disconnect);
     layout->addLayout(buttons);
     auto* enabled = new QCheckBox(QStringLiteral("Scrobble playback to Last.fm"), page);
@@ -141,24 +185,63 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     status->setWordWrap(true);
     layout->addWidget(status);
     layout->addStretch();
-    auto send = [this, authority, status](const QString& op,
-                                          const QStringList& args = QStringList{}) {
-        if (op != QStringLiteral("status"))
+    auto send = [this, authority, status, page](const QString& op,
+                                                const QStringList& args = QStringList{}) {
+        if (op == QStringLiteral("begin") || op == QStringLiteral("finish"))
+            page->setProperty("auth-request-pending", true);
+        if (op != QStringLiteral("status") && op != QStringLiteral("finish"))
             status->setText(QStringLiteral("Working…"));
         if (authority->currentIndex() == 1)
             mpd_controller_->lastFm(op, args);
         else
             lastfm_->execute(op, args);
     };
-    auto receive = [status, enabled](const QString& op, const QJsonObject& state,
-                                     const QString& error) {
-        QSignalBlocker block(enabled);
-        enabled->setChecked(state.value("enabled").toBool());
-        enabled->setEnabled(state.value("connected").toBool());
+    connect(poll, &QTimer::timeout, page, [send] { send(QStringLiteral("finish")); });
+    connect(deadline, &QTimer::timeout, page, [waiting, status] {
+        waiting(false);
+        status->setText(QStringLiteral("Authorization timed out. Connect again to retry."));
+    });
+    connect(cancel, &QPushButton::clicked, page, [waiting, status] {
+        waiting(false);
+        status->setText(QStringLiteral("Stopped waiting for approval. Connect again to retry."));
+    });
+    auto receive = [page, status, enabled, credentials, begin, secret, poll,
+                    waiting](const QString& op, const QJsonObject& state, const QString& error) {
+        const bool auth_reply = op == QStringLiteral("begin") || op == QStringLiteral("finish");
+        if (auth_reply) {
+            page->setProperty("auth-request-pending", false);
+            if (!page->property("auth-waiting").toBool()) {
+                waiting(false);
+                return;
+            }
+        }
         if (!error.isEmpty()) {
+            // Older Melody versions return the provider's pending code as an ACK.
+            if (op == QStringLiteral("finish") && error.contains(QStringLiteral("(code 14)"))) {
+                poll->start();
+                return;
+            }
+            if (auth_reply)
+                waiting(false);
             status->setText(error);
             return;
         }
+        QSignalBlocker block(enabled);
+        enabled->setChecked(state.value("enabled").toBool());
+        enabled->setEnabled(state.value("connected").toBool());
+        if (op == QStringLiteral("finish") && state.value("authorization_pending").toBool()) {
+            poll->start();
+            return;
+        }
+        if (op == QStringLiteral("finish"))
+            waiting(false);
+        const bool saved = state.value("credentials_saved").toBool();
+        credentials->setVisible(!saved);
+        begin->setProperty("credentials-saved", saved);
+        begin->setText(saved ? QStringLiteral("Reconnect in browser…")
+                             : QStringLiteral("Connect to Last.fm…"));
+        if (op == QStringLiteral("begin"))
+            secret->clear();
         status->setText(
             QStringLiteral("%1 · %2 pending\n%3")
                 .arg(state.value("connected").toBool()
@@ -167,6 +250,8 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
                 .arg(state.value("pending").toInt())
                 .arg(state.value("message").toString()));
         if (op == QStringLiteral("begin")) {
+            status->setText(QStringLiteral("Waiting for browser approval…"));
+            poll->start();
             const QUrl url(state.value("url").toString());
             if (url.scheme() == QStringLiteral("https") &&
                 url.host() == QStringLiteral("www.last.fm"))
@@ -185,23 +270,55 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
             if (authority->currentIndex() == 1)
                 receive(op, QJsonDocument::fromJson(payload).object(), error);
         });
-    connect(begin, &QPushButton::clicked, page, [send, key, secret] {
-        send(QStringLiteral("begin"), {key->text().trimmed(), secret->text().trimmed()});
-        secret->clear();
+    connect(
+        begin, &QPushButton::clicked, page,
+        [send, key, secret, reuse, begin, status, parent, waiting] {
+            if (begin->property("credentials-saved").toBool()) {
+                waiting(true);
+                send(QStringLiteral("begin"));
+                return;
+            }
+            const auto api_key = key->text().trimmed();
+            const auto shared_secret = secret->text().trimmed();
+            const auto valid = [](const QString& value) {
+                return value.size() == 32 && std::all_of(value.begin(), value.end(), [](QChar c) {
+                           return (c >= u'0' && c <= u'9') || (c >= u'a' && c <= u'f') ||
+                                  (c >= u'A' && c <= u'F');
+                       });
+            };
+            if (!valid(api_key) || !valid(shared_secret)) {
+                status->setText(QStringLiteral("Paste the 32-character API key and shared secret "
+                                               "from your Last.fm API account."));
+                return;
+            }
+            if (reuse->isChecked()) {
+                QSettings{}.setValue(QStringLiteral("lastfm/api-key"), api_key);
+                // Keep the other settings page in sync so Save cannot overwrite the reused key.
+                if (auto* field =
+                        parent->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key")))
+                    field->setText(api_key);
+            }
+            waiting(true);
+            send(QStringLiteral("begin"), {api_key, shared_secret});
+        });
+    connect(disconnect, &QPushButton::clicked, page, [send, waiting] {
+        waiting(false);
+        send(QStringLiteral("disconnect"));
     });
-    connect(finish, &QPushButton::clicked, page, [send] { send(QStringLiteral("finish")); });
-    connect(disconnect, &QPushButton::clicked, page,
-            [send] { send(QStringLiteral("disconnect")); });
     connect(enabled, &QCheckBox::toggled, page, [send](bool value) {
         send(QStringLiteral("enable"), {value ? QStringLiteral("1") : QStringLiteral("0")});
     });
-    connect(authority, &QComboBox::currentIndexChanged, page, [send, secret] {
-        secret->clear();
-        send(QStringLiteral("status"));
-    });
+    connect(authority, &QComboBox::currentIndexChanged, page,
+            [send, secret, begin, credentials, waiting] {
+                begin->setProperty("credentials-saved", false);
+                credentials->show();
+                waiting(false);
+                secret->clear();
+                send(QStringLiteral("status"));
+            });
     auto* timer = new QTimer(page);
     connect(timer, &QTimer::timeout, page, [page, send] {
-        if (page->isVisible())
+        if (page->isVisible() && !page->property("auth-waiting").toBool())
             send(QStringLiteral("status"));
     });
     timer->start(10000);

@@ -4820,6 +4820,68 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QTRY_VERIFY(status->text().contains(QStringLiteral("Not connected")));
     authority->setCurrentIndex(1);
     QTRY_VERIFY(status->text().contains(QStringLiteral("does not support Last.fm")));
+    auto* key = dialog->findChild<QLineEdit*>(QStringLiteral("lastfm-account-key"));
+    auto* reuse = dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-reuse-key"));
+    auto* begin = dialog->findChild<QPushButton*>(QStringLiteral("lastfm-authorize"));
+    auto* cancel = dialog->findChild<QPushButton*>(QStringLiteral("lastfm-cancel"));
+    auto* poll = dialog->findChild<QTimer*>(QStringLiteral("lastfm-auth-poll"));
+    auto* deadline = dialog->findChild<QTimer*>(QStringLiteral("lastfm-auth-deadline"));
+    QVERIFY(key && reuse && begin && cancel && poll && deadline);
+    QVERIFY(!dialog->findChild<QPushButton*>(QStringLiteral("lastfm-finish")));
+    QVERIFY(reuse->isChecked());
+    QVERIFY(cancel->isHidden());
+    key->setText(QStringLiteral("invalid"));
+    begin->click();
+    QVERIFY(status->text().contains(QStringLiteral("32-character")));
+    // The disconnected server sends no HTTP; sharing the key is an explicit local setting.
+    key->setText(QString(32, 'a'));
+    secret->setText(QString(32, 'b'));
+    begin->click();
+    QCOMPARE(QSettings{}.value(QStringLiteral("lastfm/api-key")).toString(), QString(32, 'a'));
+    auto* read_key = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key"));
+    QCOMPARE(read_key->text(), QString(32, 'a'));
+    reuse->setChecked(false);
+    key->setText(QString(32, 'c'));
+    begin->click();
+    QCOMPARE(QSettings{}.value(QStringLiteral("lastfm/api-key")).toString(), QString(32, 'a'));
+    window.mpd_controller_->lastFmCompleted(
+        QStringLiteral("status"),
+        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    QVERIFY(dialog->findChild<QWidget*>(QStringLiteral("lastfm-credentials"))->isHidden());
+    QVERIFY(!poll->isActive());
+    QVERIFY(begin->property("credentials-saved").toBool());
+    // Feed deterministic replies without opening a real browser or contacting Last.fm.
+    auto* page = dialog->findChild<QWidget*>(QStringLiteral("lastfm-settings"));
+    page->setProperty("auth-waiting", true);
+    window.mpd_controller_->lastFmCompleted(QStringLiteral("begin"),
+        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    QVERIFY(poll->isActive());
+    QVERIFY(status->text().contains(QStringLiteral("Waiting for browser approval")));
+    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
+        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    QVERIFY(poll->isActive());
+    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
+        QByteArray(R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"), {});
+    QVERIFY(!poll->isActive());
+    QVERIFY(!page->property("auth-waiting").toBool());
+    QVERIFY(dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-enabled"))->isChecked());
+    page->setProperty("auth-waiting", true);
+    poll->start();
+    cancel->click();
+    QVERIFY(!poll->isActive());
+    QVERIFY(status->text().contains(QStringLiteral("Stopped waiting")));
+    // A late reply after cancellation must not restart polling.
+    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
+        QByteArray(R"({"authorization_pending":true})"), {});
+    QVERIFY(!poll->isActive());
+    page->setProperty("auth-waiting", true);
+    poll->start();
+    QMetaObject::invokeMethod(deadline, "timeout", Qt::DirectConnection);
+    QVERIFY(!poll->isActive());
+    QVERIFY(status->text().contains(QStringLiteral("timed out")));
+    authority->setCurrentIndex(0);
+    QTRY_VERIFY(!begin->property("credentials-saved").toBool());
+    QVERIFY(cancel->isHidden());
     dialog->close();
     LocalListModel model;
     LocalTrackRow track;
@@ -4878,6 +4940,14 @@ void BenchMainWindowTest::upNextMultiSelectionEdits() {
     QCOMPARE(original.size(), std::size_t{5});
     auto* view = window.up_next_view_;
     QCOMPARE(view->selectionMode(), QAbstractItemView::ExtendedSelection);
+    QCOMPARE(view->dragDropMode(), QAbstractItemView::DragDrop);
+    QVERIFY(view->dragEnabled());
+    QVERIFY(view->acceptDrops());
+    QVERIFY(view->viewport()->acceptDrops());
+    QVERIFY(view->showDropIndicator());
+    QVERIFY(!view->dragDropOverwriteMode());
+    QCOMPARE(view->defaultDropAction(), Qt::MoveAction);
+    QVERIFY(view->model()->index(0, 0).flags().testFlag(Qt::ItemIsDragEnabled));
     const auto select = [&](std::initializer_list<int> rows) {
         view->selectionModel()->clearSelection();
         for (const auto i : rows)

@@ -57,6 +57,7 @@ void LastFmServiceTest::accountAndPersistence() {
     QUrl endpoint(QStringLiteral("http://127.0.0.1:%1/").arg(server.serverPort()));
     QList<QUrlQuery> requests;
     bool failing = true;
+    bool approved = false;
     connect(&server, &QTcpServer::newConnection, this, [&] {
         while (server.hasPendingConnections()) {
             auto* socket = server.nextPendingConnection();
@@ -99,7 +100,9 @@ void LastFmServiceTest::accountAndPersistence() {
                 if (method == "auth.getToken")
                     response = R"({"token":"TOKEN"})";
                 if (method == "auth.getSession")
-                    response = R"({"session":{"name":"listener","key":"SESSION"}})";
+                    response =
+                        approved ? QByteArray(R"({"session":{"name":"listener","key":"SESSION"}})")
+                                 : QByteArray(R"({"error":14})");
                 if (method == "track.getInfo")
                     response = R"({"track":{"userloved":"1"}})";
                 if (method == "track.scrobble")
@@ -124,6 +127,29 @@ void LastFmServiceTest::accountAndPersistence() {
         service.execute("finish");
         QTRY_COMPARE(spy.size(), 2);
         QCOMPARE(spy.last()[2].toString(), QString{});
+        QVERIFY(spy.last()[1].toJsonObject().value("authorization_pending").toBool());
+        QVERIFY(!spy.last()[1].toJsonObject().value("enabled").toBool());
+        spy.removeLast();
+        approved = true;
+        service.execute("finish");
+        QTRY_COMPARE(spy.size(), 2);
+        QCOMPARE(spy.last()[2].toString(), QString{});
+        QVERIFY(spy.last()[1].toJsonObject().value("enabled").toBool());
+        service.execute("enable", {"0"});
+        QTRY_COMPARE(spy.size(), 3);
+        spy.removeLast();
+        service.execute("begin");
+        QTRY_COMPARE(spy.size(), 3);
+        QCOMPARE(spy.last()[2].toString(), QString{});
+        QVERIFY(spy.last()[1].toJsonObject().value("credentials_saved").toBool());
+        QVERIFY(spy.last()[1].toJsonObject().value("authorization_pending").toBool());
+        spy.removeLast();
+        service.execute("finish");
+        QTRY_COMPARE(spy.size(), 3);
+        QCOMPARE(spy.last()[2].toString(), QString{});
+        QVERIFY(!spy.last()[1].toJsonObject().value("authorization_pending").toBool());
+        QVERIFY(!spy.last()[1].toJsonObject().value("enabled").toBool());
+        spy.removeLast();
         service.execute("enable", {"1"});
         QTRY_COMPARE(spy.size(), 3);
         service.execute("love", {QStringLiteral("Björk & A"), "A + B"});

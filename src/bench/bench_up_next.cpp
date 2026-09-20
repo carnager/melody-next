@@ -78,6 +78,12 @@ void BenchMainWindow::buildUpNext() {
     up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_length_column,
                                                             QHeaderView::ResizeToContents);
     up_next_view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    up_next_view_->setDragDropMode(QAbstractItemView::DragDrop);
+    up_next_view_->setDragEnabled(true);
+    up_next_view_->setAcceptDrops(true);
+    up_next_view_->setDropIndicatorShown(true);
+    up_next_view_->setDragDropOverwriteMode(false);
+    up_next_view_->setDefaultDropAction(Qt::MoveAction);
     up_next_view_->setReorderCallback(
         [this](const QVariantList&, int destination) { editUpNextSelection(4, destination); });
     up_next_view_->setExternalDropCallback(

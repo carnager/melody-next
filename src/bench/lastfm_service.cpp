@@ -59,7 +59,10 @@ class Worker final : public QObject {
                 {"user", state_.value("user")},
                 {"enabled", state_.value("enabled").toBool()},
                 {"pending", state_.value("pending").toArray().size()},
-                {"message", message_}};
+                {"message", message_},
+                {"credentials_saved", state_.value("key").toString().size() == 32 &&
+                                          state_.value("secret").toString().size() == 32},
+                {"authorization_pending", !token_.isEmpty()}};
     }
     bool save() {
         if (blocked_)
@@ -182,17 +185,23 @@ class Worker final : public QObject {
         QString method;
         QMap<QString, QString> params;
         if (op == "begin") {
-            if (args.size() != 2 || args[0].size() != 32 || args[1].size() != 32) {
+            const auto credentials = args.isEmpty() ? QStringList{state_.value("key").toString(),
+                                                                  state_.value("secret").toString()}
+                                                    : args;
+            if (credentials.size() != 2 || credentials[0].size() != 32 ||
+                credentials[1].size() != 32) {
                 fail("Provide the 32-character API key and shared secret");
                 return;
             }
             if (!state_.value("session").toString().isEmpty() &&
-                (state_.value("key") != args[0] || state_.value("secret") != args[1])) {
+                (state_.value("key") != credentials[0] ||
+                 state_.value("secret") != credentials[1])) {
                 fail("Disconnect before changing API credentials");
                 return;
             }
-            state_["key"] = args[0];
-            state_["secret"] = args[1];
+            token_.clear();
+            state_["key"] = credentials[0];
+            state_["secret"] = credentials[1];
             method = "auth.getToken";
         } else if (op == "finish") {
             if (token_.isEmpty()) {
@@ -223,6 +232,10 @@ class Worker final : public QObject {
             return;
         }
         call(method, params, [this, op, args](QJsonObject response, int code, bool) {
+            if (op == "finish" && code == 14) {
+                finish(op, {{"authorization_pending", true}});
+                return;
+            }
             if (code != 0) {
                 finish(op, {}, QStringLiteral("Last.fm request failed (code %1)").arg(code));
                 return;
@@ -246,6 +259,8 @@ class Worker final : public QObject {
                     finish(op, {}, "Last.fm returned no session");
                     return;
                 }
+                if (state_.value("user").toString().isEmpty())
+                    state_["enabled"] = true;
                 if (state_.value("user") != session.value("name"))
                     state_["pending"] = QJsonArray{};
                 if (!state_.value("user").toString().isEmpty() &&

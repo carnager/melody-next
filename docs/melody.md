@@ -10,11 +10,31 @@ an ordinary client connection.
 Install `melodyd` following the [Melody build instructions](https://github.com/carnager/melody-music#getting-started).
 Install `mpv` on machines that will play audio.
 
-Run `melodyd setup` — it asks for your music folder, ports, and an optional
-web password and writes the config for you. Starting `melodyd` in a terminal
-without a configuration runs the same questions automatically. If you prefer
-to write it by hand, create `~/.config/melody/melodyd.toml` (or
-`$XDG_CONFIG_HOME/melody/melodyd.toml` if you use a custom config directory):
+Run setup in a terminal **before enabling the service**:
+
+```sh
+melodyd setup
+```
+
+For a source build, use `./bin/melodyd setup` from the Melody checkout.
+The wizard asks for an existing music folder, the MPD port, the HTTP listening
+address, an optional web password, and the server name. Press Enter to keep a
+suggested value. Keep MPD enabled (normally port `6600`) for Trackknife.
+
+Setup writes `~/.config/melody/melodyd.toml`, or
+`$XDG_CONFIG_HOME/melody/melodyd.toml`. It configures the daemon and exits;
+it does not start playback or enable the service. Starting `melodyd` without a
+usable configuration runs the wizard automatically only when attached to a
+terminal. A systemd service cannot answer its questions.
+
+You can rerun `melodyd setup`: existing settings become the defaults, additional
+settings are kept, and the old file is backed up as `melodyd.toml.bak`.
+Comments are not preserved. Pressing Enter at the password prompt keeps an
+existing password; to remove it, edit `server.web_secret` in the config.
+Restart the daemon after reconfiguration.
+
+If you prefer to write the configuration by hand, this is a local-only HTTP
+example:
 
 ```toml
 [server]
@@ -88,6 +108,23 @@ stable song identity from the server HTTP endpoint on port `6701`. The endpoint
 uses the MPD queue's identity and clock in either mode; it does not transfer the
 row into a Local Queue tab.
 
+## Lists, Up Next, and Last.fm
+
+Named server lists remain owned by Melody; opening another tab does not switch
+playback. The **Active** label identifies the playback list, independently of
+which tab you are browsing, and stays in place through Stop and Pause.
+
+Supporting Melody versions expose **Queue next / Queue at end** as a temporary
+request queue that returns to normal playback when requests finish. The daemon
+owns progression, so closing Trackknife does not interrupt it. See
+[Up Next](up-next.md) for panel controls and server requirements.
+
+Under **Settings → Last.fm**, choose **Melody server** to authorize the server's
+own scrobbler and enable Love/Unlove. Its account is independent of local
+Trackknife playback. Avoid running a second scrobbler for the same Melody
+playback. See [Last.fm setup](lastfm.md) and [dynamic playlists](dynamic-playlists.md)
+for using loved tracks in recommendations.
+
 ## Play on another machine
 
 Install `melody-agent` and `mpv` on the playback machine. In its
@@ -124,12 +161,12 @@ Set **Local music root** in Trackknife's connection dialog to that mount.
 The relative paths must match: if Melody reports `Artist/Album/01.flac`, a
 root of `/mnt/music` must contain `/mnt/music/Artist/Album/01.flac`.
 
-Right-click any server selection and choose Edit tags…, ReplayGain…, or
-Convert files… — Trackknife opens the mapped files in a local tab and
+Right-click any server selection and choose **Tools → Edit tags…**,
+**Tools → ReplayGain…**, or **Tools → Convert files…** — Trackknife opens the mapped files in a local tab and
 starts the dialog for you ("Load as local files" remains available to just
 open the tab). Melody's file watcher picks up the changes automatically.
 Writes need filesystem permissions; the MPD connection does not grant them.
 The mapping is separate from the optional local library and does not add
 folders to it.
 
-For more server options, see [Melody's configuration reference](https://github.com/carnager/melody-music#configuration-reference).
+For more server options, see [Melody's configuration reference](https://github.com/carnager/melody-music/blob/main/docs/melodyd.md).

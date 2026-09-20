@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
+#include "bench/playback_tab_widget.hpp"
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
@@ -1193,11 +1194,10 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     const auto active =
         QString::fromStdString(tab.document.id.to_string()) == active_local_list_id_;
     tab.view->setProperty("bench-playback-active", active);
-    tabs_->tabBar()->setTabTextColor(index, active ? tabs_->palette().color(QPalette::Highlight)
-                                                   : QColor{});
+    tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, active);
-    tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}) +
-                                 (active ? tr(" · Active") : QString{}));
+    tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}));
+    tabs_->setTabIcon(index, active ? playbackSpeakerIcon(tabs_->palette()) : QIcon{});
     const auto kind = tab.document.kind == persistence::ListKind::scratch
                           ? QStringLiteral("Persistent scratch list")
                           : QStringLiteral("Named Trackknife working list");
@@ -1205,6 +1205,8 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
                          QStringLiteral("%1%2%3").arg(
                              kind, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
                              tab.document.dirty ? QStringLiteral(" · modified") : QString{}));
+    if (active)
+        tabs_->setTabToolTip(index, tabs_->tabToolTip(index) + tr(" · Active playback queue"));
     tab.view->setAccessibleName(QStringLiteral("%1 track list").arg(name));
     if (auto* close = tabs_->tabBar()->tabButton(index, QTabBar::RightSide)) {
         close->setVisible(!tab.document.pinned);

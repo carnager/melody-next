@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -15,22 +16,44 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QStatusBar>
+#include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <algorithm>
+#include <numeric>
 
 namespace trackknife::bench {
 void BenchMainWindow::buildUpNext() {
-    up_next_dock_ = new QDockWidget(QStringLiteral("Up Next"), this);
+    const auto visible = QSettings{}.value(QStringLiteral("up-next/visible"), false).toBool();
+    auto* panel = new AnimatedPanelDock(QStringLiteral("Up Next"), QStringLiteral("up-next"), this);
+    up_next_dock_ = panel;
     up_next_dock_->setObjectName(QStringLiteral("bench-up-next"));
     up_next_dock_->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     auto* content = new QWidget(up_next_dock_);
     auto* layout = new QVBoxLayout(content);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+    auto* heading = new QHBoxLayout;
+    heading->setContentsMargins(10, 8, 6, 8);
+    auto* title = new QLabel(QStringLiteral("Up Next"), content);
+    auto font = title->font();
+    font.setBold(true);
+    title->setFont(font);
+    heading->addWidget(title, 1);
+    auto* close = new QToolButton(content);
+    close->setObjectName(QStringLiteral("up-next-close"));
+    close->setAutoRaise(true);
+    close->setIcon(QIcon::fromTheme(QStringLiteral("window-close")));
+    close->setToolTip(QStringLiteral("Close Up Next"));
+    close->setAccessibleName(close->toolTip());
+    connect(close, &QToolButton::clicked, up_next_dock_,
+            [this] { up_next_dock_->setVisible(false); });
+    heading->addWidget(close);
+    layout->addLayout(heading);
     up_next_status_ = new QLabel(content);
+    up_next_status_->setObjectName(QStringLiteral("up-next-status"));
     up_next_status_->setWordWrap(true);
-    layout->addWidget(up_next_status_);
+    up_next_status_->setMargin(10);
     up_next_view_ = new ui::QueueTableView(content);
     up_next_view_->setObjectName(QStringLiteral("up-next-tracks"));
     up_next_local_model_ = new LocalListModel(this);
@@ -39,23 +62,24 @@ void BenchMainWindow::buildUpNext() {
     auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(up_next_view_, flat, flat);
     up_next_view_->setAlbumGroupingEnabled(false);
-    up_next_view_->verticalHeader()->setDefaultSectionSize(
-        std::max(28, up_next_view_->fontMetrics().height() + 10));
+
     for (int col = 0; col < up_next_local_model_->columnCount(); ++col)
         up_next_view_->setColumnHidden(col, col != ui::track_artist_column &&
                                                 col != ui::track_title_column &&
                                                 col != ui::track_length_column);
+    up_next_view_->setAlternatingRowColors(true);
+    up_next_view_->setShowGrid(false);
+    up_next_view_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_artist_column,
+                                                            QHeaderView::Interactive);
+    up_next_view_->setColumnWidth(ui::track_artist_column, 140);
     up_next_view_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    up_next_view_->setSelectionMode(QAbstractItemView::SingleSelection);
+    up_next_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_length_column,
                                                             QHeaderView::ResizeToContents);
     up_next_view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    up_next_view_->setReorderCallback([this](const QVariantList& rows, int destination) {
-        if (rows.size() == 1) {
-            int from = rows.front().toInt();
-            editUpNext(2, from, destination > from ? destination - 1 : destination);
-        }
-    });
+    up_next_view_->setReorderCallback(
+        [this](const QVariantList&, int destination) { editUpNextSelection(4, destination); });
     up_next_view_->setExternalDropCallback(
         [this](QAbstractItemView* source, const QVariantList&, int position, Qt::DropAction) {
             auto* table = qobject_cast<QTableView*>(source);
@@ -67,7 +91,7 @@ void BenchMainWindow::buildUpNext() {
             enqueueUpNext(table, false, position);
             return true;
         });
-    up_next_view_->setActivateCallback([this](const QModelIndex& index) {
+    const auto playRequest = [this](const QModelIndex& index) {
         if (!index.isValid())
             return;
         if (isMpdContext()) {
@@ -84,27 +108,32 @@ void BenchMainWindow::buildUpNext() {
             refreshUpNext();
             static_cast<void>(playLocalRequest());
         }
-    });
-    layout->addWidget(up_next_view_, 1);
-    auto* actions = new QHBoxLayout;
-    auto button = [&](const QString& text, auto callback) {
-        auto* b = new QPushButton(text, content);
-        connect(b, &QPushButton::clicked, this, callback);
-        actions->addWidget(b);
-        return b;
     };
-    button(QStringLiteral("Remove"),
-           [this] { editUpNext(1, up_next_view_->currentIndex().row()); });
-    button(QStringLiteral("↑"), [this] {
-        int row = up_next_view_->currentIndex().row();
-        editUpNext(2, row, row - 1);
-    });
-    button(QStringLiteral("↓"), [this] {
-        int row = up_next_view_->currentIndex().row();
-        editUpNext(2, row, row + 1);
-    });
-    button(QStringLiteral("Clear"), [this] { editUpNext(0); });
-    auto* undo = button(QStringLiteral("Undo"), [this] {
+    up_next_view_->setActivateCallback(playRequest);
+    layout->addWidget(up_next_view_, 1);
+    auto* actions = new QToolBar(content);
+    actions->setObjectName(QStringLiteral("up-next-toolbar"));
+    actions->setIconSize(QSize(16, 16));
+    actions->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    auto button = [&](const QString& text, const QString& icon, auto callback) {
+        auto* action = actions->addAction(QIcon::fromTheme(icon), text);
+        connect(action, &QAction::triggered, this, callback);
+        return action;
+    };
+    auto* removeAction = button(QStringLiteral("Remove from Up Next"),
+                                QStringLiteral("list-remove"), [this] { editUpNextSelection(1); });
+    removeAction->setObjectName(QStringLiteral("up-next-remove"));
+    auto* moveUp = button(QStringLiteral("Move up"), QStringLiteral("go-up"),
+                          [this] { editUpNextSelection(2); });
+    moveUp->setObjectName(QStringLiteral("up-next-move-up"));
+    auto* moveDown = button(QStringLiteral("Move down"), QStringLiteral("go-down"),
+                            [this] { editUpNextSelection(3); });
+    moveDown->setObjectName(QStringLiteral("up-next-move-down"));
+    actions->addSeparator();
+    auto* clearAction = button(QStringLiteral("Clear pending tracks"), QStringLiteral("edit-clear"),
+                               [this] { editUpNext(0); });
+    clearAction->setObjectName(QStringLiteral("up-next-clear"));
+    auto* undo = button(QStringLiteral("Undo"), QStringLiteral("edit-undo"), [this] {
         if (isMpdContext()) {
             mpd::RequestQueueCommand command;
             command.operation = mpd::RequestQueueOperation::undo;
@@ -117,8 +146,10 @@ void BenchMainWindow::buildUpNext() {
         }
     });
     undo->setObjectName(QStringLiteral("up-next-undo"));
-    layout->addLayout(actions);
+    layout->insertWidget(1, actions);
+    layout->addWidget(up_next_status_);
     auto* resume = new QPushButton(QStringLiteral("Return to playlist now"), content);
+    resume->setFlat(true);
     resume->setObjectName(QStringLiteral("up-next-return"));
     layout->addWidget(resume);
     connect(resume, &QPushButton::clicked, this, [this] {
@@ -134,25 +165,34 @@ void BenchMainWindow::buildUpNext() {
             refreshUpNext();
         }
     });
-    auto* remove = new QAction(QStringLiteral("Remove from Up Next"), up_next_view_);
+    auto* remove = removeAction;
     remove->setShortcut(Qt::Key_Delete);
     remove->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     up_next_view_->addAction(remove);
-    connect(remove, &QAction::triggered, this,
-            [this] { editUpNext(1, up_next_view_->currentIndex().row()); });
-    up_next_dock_->setWidget(content);
+    up_next_view_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(
+        up_next_view_, &QWidget::customContextMenuRequested, this,
+        [this, actions, playRequest](const QPoint& point) {
+            QMenu menu(up_next_view_);
+            auto* play = menu.addAction(QIcon::fromTheme(QStringLiteral("media-playback-start")),
+                                        tr("Play"));
+            play->setEnabled(up_next_view_->isEnabled() && up_next_view_->currentIndex().isValid());
+            connect(play, &QAction::triggered, this, [this, playRequest] {
+                const auto index = up_next_view_->currentIndex();
+                if (index.isValid())
+                    playRequest(index);
+            });
+            menu.addSeparator();
+            menu.addActions(actions->actions());
+            menu.exec(up_next_view_->viewport()->mapToGlobal(point));
+        });
+    connect(
+        up_next_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+        [this] { refreshUpNext(); }, Qt::QueuedConnection);
+    panel->setPanelContent(content);
     addDockWidget(Qt::RightDockWidgetArea, up_next_dock_);
-    up_next_dock_->hide();
-    up_next_dock_->resize(QSettings{}.value(QStringLiteral("up-next/width"), 420).toInt(), 400);
-    up_next_dock_->setVisible(QSettings{}.value(QStringLiteral("up-next/visible"), false).toBool());
-    connect(up_next_dock_, &QDockWidget::visibilityChanged, this, [this](bool visible) {
-        if (!isVisible())
-            return;
-        QSettings{}.setValue(QStringLiteral("up-next/visible"), visible);
-        if (!visible && up_next_dock_->width() > 0)
-            QSettings{}.setValue(QStringLiteral("up-next/width"), up_next_dock_->width());
-    });
-    auto* toggle = up_next_dock_->toggleViewAction();
+    up_next_dock_->setVisible(visible);
+    auto* toggle = panel->panelToggleAction();
     toggle->setObjectName(QStringLiteral("action-show-up-next"));
     toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
     addAction(toggle);
@@ -164,7 +204,12 @@ void BenchMainWindow::refreshUpNext() {
     if (!up_next_dock_)
         return;
     const bool server = isMpdContext();
-    if (auto* undo = up_next_dock_->findChild<QPushButton*>(QStringLiteral("up-next-undo")))
+    std::vector<std::uint64_t> selectedIds;
+    for (const auto& index : up_next_view_->selectionModel()->selectedRows())
+        if (index.row() >= 0 && index.row() < static_cast<int>(up_next_display_ids_.size()))
+            selectedIds.push_back(up_next_display_ids_[static_cast<std::size_t>(index.row())]);
+    bool replaced = false;
+    if (auto* undo = up_next_dock_->findChild<QAction*>(QStringLiteral("up-next-undo")))
         undo->setEnabled(server
                              ? (mpd_controller_->connected() && mpd_controller_->requestQueue() &&
                                 mpd_controller_->requestQueue()->can_undo)
@@ -177,17 +222,27 @@ void BenchMainWindow::refreshUpNext() {
     auto* model = server ? static_cast<QAbstractItemModel*>(up_next_mpd_model_)
                          : static_cast<QAbstractItemModel*>(up_next_local_model_);
     if (up_next_view_->model() != model) {
+        selectedIds.clear();
+        up_next_display_ids_.clear();
+        up_next_local_revision_ = 0;
+        up_next_remote_revision_ = 0;
         up_next_view_->setModel(model);
         auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
         applyTrackViewLayout(up_next_view_, flat, flat);
         up_next_view_->setAlbumGroupingEnabled(false);
-        up_next_view_->verticalHeader()->setDefaultSectionSize(
-            std::max(28, up_next_view_->fontMetrics().height() + 10));
+
         for (int col = 0; col < model->columnCount(); ++col)
             up_next_view_->setColumnHidden(col, col != ui::track_artist_column &&
                                                     col != ui::track_title_column &&
                                                     col != ui::track_length_column);
-        up_next_view_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+        up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_artist_column,
+                                                                QHeaderView::Interactive);
+        up_next_view_->setColumnWidth(ui::track_artist_column, 140);
+        up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_length_column,
+                                                                QHeaderView::ResizeToContents);
+        connect(
+            up_next_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            [this] { refreshUpNext(); }, Qt::QueuedConnection);
         up_next_view_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     }
     if (server) {
@@ -200,18 +255,22 @@ void BenchMainWindow::refreshUpNext() {
             if (up_next_remote_revision_ != state->revision ||
                 up_next_remote_profile_ != mpd_controller_->profileId()) {
                 up_next_mpd_model_->replaceTracks(state->pending);
+                replaced = true;
+                up_next_display_ids_.clear();
+                for (const auto& track : state->pending)
+                    up_next_display_ids_.push_back(track.queue_id.value_or(0));
                 up_next_remote_revision_ = state->revision;
                 up_next_remote_profile_ = mpd_controller_->profileId();
             }
-            up_next_status_->setText(QStringLiteral("Melody · %1 pending\n%2\nThen resume: %3")
+            up_next_status_->setText(QStringLiteral("Melody · %1 pending\nReturn to: %3")
                                          .arg(state->pending.size())
-                                         .arg(mpd_controller_->nowPlaying())
                                          .arg(state->context.empty()
                                                   ? QStringLiteral("Queue")
                                                   : QString::fromStdString(state->context)));
         } else {
             if (up_next_mpd_model_->rowCount() != 0)
                 up_next_mpd_model_->replaceTracks({});
+            up_next_display_ids_.clear();
             up_next_remote_revision_ = 0;
             up_next_status_->setText(QStringLiteral(
                 "Up Next requires a connected Melody server with request-queue support. Stock MPD "
@@ -224,6 +283,10 @@ void BenchMainWindow::refreshUpNext() {
             for (const auto& entry : local_requests_.pending())
                 rows.push_back(entry.source);
             up_next_local_model_->replaceRows(std::move(rows));
+            replaced = true;
+            up_next_display_ids_.clear();
+            for (const auto& entry : local_requests_.pending())
+                up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = local_requests_.revision();
         }
         auto* tab = tabForDocument(playback_document_id_);
@@ -232,12 +295,46 @@ void BenchMainWindow::refreshUpNext() {
             playing = QString::fromStdString(local_requests_.active()->source.artist + " — " +
                                              local_requests_.active()->source.title);
         up_next_status_->setText(
-            QStringLiteral("Local · %1 pending%2\nThen resume: %3")
+            QStringLiteral("Local · %1 pending%2\nReturn to: %3")
                 .arg(local_requests_.pending().size())
                 .arg(playing.isEmpty() ? QString{} : QStringLiteral("\nPlaying: ") + playing)
                 .arg(tab ? QString::fromStdString(tab->document.name)
                          : QStringLiteral("No normal playback")));
     }
+    if (replaced) {
+        auto* selection = up_next_view_->selectionModel();
+        const QSignalBlocker blocker(selection);
+        for (std::size_t i = 0; i < up_next_display_ids_.size(); ++i)
+            if (std::ranges::find(selectedIds, up_next_display_ids_[i]) != selectedIds.end()) {
+                const auto index = model->index(static_cast<int>(i), ui::track_title_column);
+                selection->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                if (!selection->currentIndex().isValid())
+                    selection->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+            }
+    }
+    const auto selectionRows = up_next_view_->selectionModel()->selectedRows();
+    int first = model->rowCount(), last = -1;
+    for (const auto& index : selectionRows) {
+        first = std::min(first, index.row());
+        last = std::max(last, index.row());
+    }
+    const bool batchAvailable =
+        !server || selectionRows.size() <= 1 ||
+        mpd_controller_->supportsCommand(QStringLiteral("melody_upnext_edit"));
+    const auto row = selectionRows.isEmpty() ? -1 : first;
+    const auto count = model->rowCount();
+    const auto enabled = up_next_view_->isEnabled();
+    for (const auto& [name, available] : std::initializer_list<std::pair<const char*, bool>>{
+             {"up-next-remove", batchAvailable && row >= 0 && row < count},
+             {"up-next-move-up", batchAvailable && row > 0},
+             {"up-next-move-down", batchAvailable && row >= 0 && last + 1 < count},
+             {"up-next-clear", count > 0}}) {
+        if (auto* action = up_next_dock_->findChild<QAction*>(QString::fromLatin1(name)))
+            action->setEnabled(enabled && available);
+    }
+    if (count == 0 && enabled)
+        up_next_status_->setText(up_next_status_->text() +
+                                 tr("\nQueue tracks from any list, or drag them here."));
     if (up_next_button_)
         up_next_button_->setText(QStringLiteral("Up Next · %1").arg(model->rowCount()));
 }
@@ -293,6 +390,79 @@ void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int 
     persistUpNext();
     refreshUpNext();
     statusBar()->showMessage(QStringLiteral("Added %1 to Up Next").arg(count), 3000);
+}
+
+// operation: remove, move up, move down, or drag to an insertion boundary.
+void BenchMainWindow::editUpNextSelection(int operation, int destination) {
+    const auto count = static_cast<int>(up_next_display_ids_.size());
+    std::vector<bool> selected(static_cast<std::size_t>(count), false);
+    for (const auto& index : up_next_view_->selectionModel()->selectedRows())
+        if (index.row() >= 0 && index.row() < count)
+            selected[static_cast<std::size_t>(index.row())] = true;
+    if (std::ranges::find(selected, true) == selected.end())
+        return;
+    if (isMpdContext() && !mpd_controller_->supportsCommand(QStringLiteral("melody_upnext_edit"))) {
+        const auto rows = up_next_view_->selectionModel()->selectedRows();
+        if (rows.size() != 1) {
+            statusBar()->showMessage(
+                tr("Update Melody to edit multiple Up Next requests together."), 5000);
+            return;
+        }
+        const auto row = rows.front().row();
+        editUpNext(operation == 1 ? 1 : 2, row,
+                   operation == 2   ? row - 1
+                   : operation == 3 ? row + 1
+                                    : destination - (destination > row ? 1 : 0));
+        return;
+    }
+    std::vector<int> order(static_cast<std::size_t>(count));
+    std::iota(order.begin(), order.end(), 0);
+    if (operation == 1) {
+        std::erase_if(order, [&](int row) { return selected[static_cast<std::size_t>(row)]; });
+    } else if (operation == 2) {
+        if (selected.front())
+            return;
+        for (int i = 1; i < count; ++i)
+            if (selected[static_cast<std::size_t>(order[static_cast<std::size_t>(i)])] &&
+                !selected[static_cast<std::size_t>(order[static_cast<std::size_t>(i - 1)])])
+                std::swap(order[static_cast<std::size_t>(i)],
+                          order[static_cast<std::size_t>(i - 1)]);
+    } else if (operation == 3) {
+        if (selected.back())
+            return;
+        for (int i = count - 2; i >= 0; --i)
+            if (selected[static_cast<std::size_t>(order[static_cast<std::size_t>(i)])] &&
+                !selected[static_cast<std::size_t>(order[static_cast<std::size_t>(i + 1)])])
+                std::swap(order[static_cast<std::size_t>(i)],
+                          order[static_cast<std::size_t>(i + 1)]);
+    } else {
+        destination = std::clamp(destination, 0, count);
+        std::vector<int> moving;
+        int before = 0;
+        for (int i = 0; i < count; ++i)
+            if (selected[static_cast<std::size_t>(i)]) {
+                moving.push_back(i);
+                if (i < destination)
+                    ++before;
+            }
+        std::erase_if(order, [&](int row) { return selected[static_cast<std::size_t>(row)]; });
+        order.insert(order.begin() + destination - before, moving.begin(), moving.end());
+    }
+    std::vector<std::uint64_t> ids;
+    for (const auto row : order)
+        ids.push_back(up_next_display_ids_[static_cast<std::size_t>(row)]);
+    if (ids == up_next_display_ids_)
+        return;
+    if (isMpdContext()) {
+        mpd::RequestQueueCommand command;
+        command.operation = mpd::RequestQueueOperation::retain;
+        command.ids.assign(ids.begin(), ids.end());
+        mpd_controller_->editRequestQueue(std::move(command));
+    } else if (local_requests_.retain(ids)) {
+        last_requested_next_.reset();
+        persistUpNext();
+        refreshUpNext();
+    }
 }
 
 void BenchMainWindow::editUpNext(int operation, int row, int destination) {

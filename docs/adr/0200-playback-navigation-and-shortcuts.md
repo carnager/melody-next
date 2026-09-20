@@ -29,3 +29,12 @@ Save, Cancel, and binding restoration in a new window.
 
 The development build and the complete `bench-main-window`, `mpris-service`,
 and `lastfm-service` CTest suites pass. Whitespace and SPDX checks pass.
+
+## Separate playback and browsing cues
+
+The selected tab uses a lighter background and accent underline. The active
+playback queue uses an accent speaker icon and an “Active playback queue”
+tooltip, retained through pause and stop. Tab titles use normal text color;
+the former “Active” suffix is replaced by the icon. A tab can show both cues.
+The custom tab painter keeps these distinctions visible under native themes
+that override label colors. Rendering and sticky-state tests cover this.

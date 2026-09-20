@@ -210,7 +210,8 @@ class FakeMpdServer final {
             write_all(client, "OK\n");
         } else if (command == "melody_upnext append 42" ||
                    command == "melody_upnext move 42 21 0" ||
-                   command == "melody_upnext return 42") {
+                   command == "melody_upnext return 42" ||
+                   command == "melody_upnext_edit 42 21 20") {
             write_all(client, "OK\n");
         } else if (command == "melody_upnext clear 41") {
             write_all(client,
@@ -560,6 +561,10 @@ void client_negotiates_and_preserves_extensions() {
     request.position = 0;
     require(client.edit_request_queue(request).has_value(),
             "request moves carry identity and revision");
+    request.operation = trackknife::mpd::RequestQueueOperation::retain;
+    request.ids = {21, 20};
+    require(client.edit_request_queue(request).has_value(),
+            "batch request edits send ordered occurrence IDs in one revision");
     request.operation = trackknife::mpd::RequestQueueOperation::resume;
     require(client.edit_request_queue(request).has_value(), "explicit return reaches daemon");
     request.operation = trackknife::mpd::RequestQueueOperation::clear;

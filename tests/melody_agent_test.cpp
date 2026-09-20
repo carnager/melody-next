@@ -11,6 +11,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <clocale>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -150,6 +151,18 @@ struct FakeMelody {
                     break;
                 }
             }
+            send_text(control, "get_property time-pos\n");
+            bool saw_position = false;
+            for (int lines = 0; lines < 10; ++lines) {
+                const auto response = read_line(control);
+                if (response.starts_with("value: ")) {
+                    CHECK(response.find(',') == std::string::npos);
+                    saw_position = true;
+                }
+                if (response == "OK")
+                    break;
+            }
+            CHECK(saw_position);
             send_text(control, "ping\n");
             for (int lines = 0; lines < 10 && read_line(control) != "OK"; ++lines) {
             }
@@ -453,6 +466,7 @@ int main(const int argc, char** argv) {
     CHECK(::gethostname(hostname.data(), hostname.size()) == 0);
     CHECK(trackknife::audio::MelodyAgentConfig{}.name ==
           "Trackknife @ " + std::string{hostname.data()});
+    CHECK(std::setlocale(LC_NUMERIC, "de_DE.UTF-8") != nullptr);
     sourceResolutionIsContainedAndStable();
     sourceResolutionAcceptsTrailingRootSeparators();
     v2RegistrationQueueAndPlaybackFixture();

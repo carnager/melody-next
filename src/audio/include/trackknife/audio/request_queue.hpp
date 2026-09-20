@@ -50,6 +50,23 @@ template <class Source> class RequestQueue {
         pending_.insert(pending_.begin() + static_cast<std::ptrdiff_t>(position), std::move(item));
         return true;
     }
+    // Retain/reorder exact occurrences as one revision and one undo step.
+    bool retain(const std::vector<std::uint64_t>& ids) {
+        std::vector<Entry> next;
+        for (const auto id : ids) {
+            const auto it = std::find_if(pending_.begin(), pending_.end(),
+                                         [id](const Entry& entry) { return entry.id == id; });
+            if (it == pending_.end() ||
+                std::any_of(next.begin(), next.end(),
+                            [id](const Entry& entry) { return entry.id == id; }))
+                return false;
+            next.push_back(*it);
+        }
+        ++revision_;
+        undo_ = pending_;
+        pending_ = std::move(next);
+        return true;
+    }
     // A committed preload may finish after its pending entry was removed. Retain
     // that exact occurrence as active rather than consuming a different request.
     void started(Entry entry) {

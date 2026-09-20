@@ -2000,6 +2000,12 @@ core::Result<RequestQueueState> Client::request_queue() {
 }
 
 core::Result<void> Client::edit_request_queue(const RequestQueueCommand& command) {
+    if (command.operation == RequestQueueOperation::retain) {
+        std::string line = "melody_upnext_edit " + std::to_string(command.revision);
+        for (const auto id : command.ids)
+            line += " " + std::to_string(id);
+        return implementation_->run_composed(line, "melody_upnext_edit");
+    }
     std::string operation;
     switch (command.operation) {
     case RequestQueueOperation::append:
@@ -2025,6 +2031,8 @@ core::Result<void> Client::edit_request_queue(const RequestQueueCommand& command
         break;
     case RequestQueueOperation::play:
         operation = "play";
+        break;
+    case RequestQueueOperation::retain:
         break;
     case RequestQueueOperation::undo:
         operation = "undo";

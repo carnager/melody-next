@@ -174,6 +174,11 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                         : QStringLiteral("Notification failed: %1").arg(error));
             });
 
+    panel_animations_ = new QCheckBox(QStringLiteral("Animate panel opening and closing"), general);
+    panel_animations_->setObjectName(QStringLiteral("bench-settings-panel-animations"));
+    panel_animations_->setChecked(
+        settings.value(QStringLiteral("appearance/panel-animations"), true).toBool());
+    general_form->addRow(QStringLiteral("Appearance:"), panel_animations_);
     add_page(QStringLiteral("General"), general);
 
     auto* playback = new QWidget(this);
@@ -527,6 +532,8 @@ void SettingsDialog::save() {
     QSettings settings;
     settings.setValue(QLatin1String(acoustid_client_key), acoustid_key_->text().trimmed());
     settings.setValue(QStringLiteral("lastfm/api-key"), lastfm_key_->text().trimmed());
+    settings.setValue(QStringLiteral("appearance/panel-animations"),
+                      panel_animations_->isChecked());
     settings.setValue(QStringLiteral("desktop/notifications"), notifications_->isChecked());
     settings.setValue(QStringLiteral("desktop/notifications-background-only"),
                       notifications_background_->isChecked());

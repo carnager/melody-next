@@ -19,7 +19,7 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-20, through ADR-0200 and database schema 38.
+Updated on 2026-09-20, through ADR-0201 and database schema 38.
 
 The application is built as `trackknife` from `src/bench`. Older development
 documents call this workspace **Trackbench**. It combines the MPD client and

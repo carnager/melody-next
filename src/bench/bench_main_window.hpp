@@ -164,6 +164,7 @@ class BenchMainWindow final : public QMainWindow {
     void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1);
     void addUpNextActions(QMenu* menu, QTableView* source);
     void editUpNext(int operation, int row = -1, int destination = -1);
+    void editUpNextSelection(int operation, int destination = -1);
     void persistUpNext();
     void restoreUpNext();
     [[nodiscard]] bool playLocalRequest();
@@ -699,6 +700,7 @@ class BenchMainWindow final : public QMainWindow {
     LocalListModel* up_next_local_model_{nullptr};
     quick::MpdQueueModel* up_next_mpd_model_{nullptr};
     QLabel* up_next_status_{nullptr};
+    std::vector<std::uint64_t> up_next_display_ids_;
     bool up_next_restored_{false};
     std::uint64_t up_next_local_revision_{0};
     unsigned up_next_remote_revision_{0};
@@ -730,6 +732,9 @@ class BenchMainWindow final : public QMainWindow {
     QPersistentModelIndex request_return_index_;
     QElapsedTimer next_request_timer_;
     bool seeking_{false};
+    QToolButton* mute_button_{nullptr};
+    QHash<QString, int> unmuted_volumes_;
+    void refreshMuteButton();
     bool changing_volume_{false};
     QString last_player_error_;
     QString last_device_monitor_error_;

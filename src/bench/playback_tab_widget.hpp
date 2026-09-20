@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <QPainterPath>
+#include <QPixmap>
 #include <QStyleOptionTab>
 #include <QStylePainter>
 #include <QTabBar>
@@ -8,8 +10,31 @@
 
 namespace trackknife::bench {
 
-// Some native themes ignore QTabBar::setTabTextColor. Keep their tab shapes,
-// but draw active labels ourselves so playback identity remains visible.
+inline QIcon playbackSpeakerIcon(const QPalette& palette) {
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const auto color = palette.color(QPalette::Highlight);
+    painter.setPen(QPen(color, 2.5, Qt::SolidLine, Qt::RoundCap));
+    painter.setBrush(color);
+    QPainterPath speaker;
+    speaker.moveTo(5, 12);
+    speaker.lineTo(11, 12);
+    speaker.lineTo(18, 6);
+    speaker.lineTo(18, 26);
+    speaker.lineTo(11, 20);
+    speaker.lineTo(5, 20);
+    speaker.closeSubpath();
+    painter.drawPath(speaker);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawArc(QRectF(16, 8, 10, 16), -60 * 16, 120 * 16);
+    painter.drawArc(QRectF(15, 3, 16, 26), -60 * 16, 120 * 16);
+    return QIcon(pixmap);
+}
+
+// Draw selection independently of playback identity, even under themes that
+// override tab label colors. The icon identifies playback; the underline browsing.
 class PlaybackTabBar final : public QTabBar {
   public:
     using QTabBar::QTabBar;
@@ -21,9 +46,12 @@ class PlaybackTabBar final : public QTabBar {
             QStyleOptionTab option;
             initStyleOption(&option, index);
             painter.drawControl(QStyle::CE_TabBarTabShape, option);
-            if (!tabData(index).toBool()) {
-                painter.drawControl(QStyle::CE_TabBarTabLabel, option);
-                return;
+            if (index == currentIndex()) {
+                painter.fillRect(option.rect.adjusted(1, 1, -1, -1),
+                                 palette().color(QPalette::Window).lighter(115));
+                painter.fillRect(QRect(option.rect.left() + 2, option.rect.bottom() - 2,
+                                       option.rect.width() - 4, 3),
+                                 palette().color(QPalette::Highlight));
             }
             auto rect = option.rect.adjusted(10, 0, -10, 0);
             if (!option.leftButtonSize.isEmpty())
@@ -44,7 +72,7 @@ class PlaybackTabBar final : public QTabBar {
                 x += icon_width;
             }
             painter.save();
-            painter.setPen(palette().color(QPalette::Highlight));
+            painter.setPen(palette().color(QPalette::WindowText));
             painter.drawText(QRect(x, rect.top(), qMax(0, rect.right() - x + 1), rect.height()),
                              Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, text);
             painter.restore();

@@ -1599,6 +1599,7 @@ void BenchMainWindow::refreshMpdTransport() {
         const QSignalBlocker blocker{volume_};
         volume_->setValue(mpd_controller_->volume());
     }
+    refreshMuteButton();
     device_button_->setEnabled(connected);
     auto output_tooltip = QStringLiteral("MPD output: %1").arg(mpd_controller_->activeOutputName());
     if (mpd_controller_->supportsReplayGain()) {

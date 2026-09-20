@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/connection_profiles_widget.hpp"
@@ -23,6 +24,7 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "quick/mpd_search_result_model.hpp"
+#include "trackknife/audio/local_audition.hpp"
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
 #include "trackknife/formats/decoder.hpp"
@@ -244,6 +246,9 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback_data();
     void upNextPreservesNormalPlayback();
     void upNextEditingAndPersistence();
+    void upNextPanelAnimationAndSettings();
+    void upNextMultiSelectionEdits();
+    void muteRestoresLocalVolumeAcrossBrowsing();
     void lastFmSettingsAndTrackActions();
     void dynamicPlaylistsShareRulesAndRecommendationMatching();
     void dynamicPlaylistCatalogAndEditor();
@@ -1291,16 +1296,17 @@ void BenchMainWindowTest::activeTabAccentSurvivesThemeTextColor() {
     const QColor accent(240, 30, 160);
     palette.setColor(QPalette::Highlight, accent);
     bar.setPalette(palette);
-    bar.addTab(QStringLiteral("Album · Active"));
+    bar.addTab(QStringLiteral("Album"));
     bar.addTab(QStringLiteral("Browsing"));
     bar.resize(360, 40);
-    bar.setTabTextColor(0, accent);
+    bar.setTabIcon(0, playbackSpeakerIcon(palette));
     bar.setTabData(0, true);
     const auto colored_pixels = [&] {
         const auto image = bar.grab().toImage();
         int count = 0;
-        for (int y = 0; y < image.height(); ++y)
-            for (int x = 0; x < image.width(); ++x)
+        const auto rect = bar.tabRect(0).adjusted(0, 0, 0, -4);
+        for (int y = rect.top(); y <= rect.bottom(); ++y)
+            for (int x = rect.left(); x <= rect.right(); ++x)
                 if (const auto pixel = image.pixelColor(x, y);
                     pixel.red() > 80 && pixel.blue() > 40 && pixel.green() < pixel.red() / 3)
                     ++count;
@@ -1309,7 +1315,11 @@ void BenchMainWindowTest::activeTabAccentSurvivesThemeTextColor() {
     QVERIFY(colored_pixels() > 10);
     bar.setCurrentIndex(1);
     QVERIFY(colored_pixels() > 10);
+    const auto image = bar.grab().toImage();
+    QCOMPARE(image.pixelColor(bar.tabRect(1).center().x(), bar.tabRect(1).bottom() - 1), accent);
+    QVERIFY(image.pixelColor(bar.tabRect(0).center().x(), bar.tabRect(0).bottom() - 1) != accent);
     bar.setTabData(0, false);
+    bar.setTabIcon(0, QIcon{});
     QCOMPARE(colored_pixels(), 0);
 }
 
@@ -1322,24 +1332,26 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
     const auto index = tabs->indexOf(local.view);
-    QVERIFY(tabs->tabText(index).endsWith(QStringLiteral(" · Active")));
+    QVERIFY(tabs->tabBar()->tabData(index).toBool());
+    QVERIFY(!tabs->tabIcon(index).isNull());
+    QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("Active playback queue")));
     tabs->setCurrentWidget(window.mpd_queue_view_);
     window.refreshUpNext();
-    QVERIFY(tabs->tabText(index).endsWith(QStringLiteral(" · Active")));
+    QVERIFY(tabs->tabBar()->tabData(index).toBool());
     tabs->setCurrentWidget(local.view);
     window.stop_action_->trigger();
     window.playback_document_id_.clear();
     window.refreshTransport();
-    QVERIFY(tabs->tabText(index).endsWith(QStringLiteral(" · Active")));
+    QVERIFY(tabs->tabBar()->tabData(index).toBool());
     auto other = local.document;
     other.id = core::StableId::random();
     other.name = "Another list";
     auto* next = window.addListTab(std::move(other), true);
     QVERIFY(next != nullptr);
-    QVERIFY(tabs->tabText(index).endsWith(QStringLiteral(" · Active")));
+    QVERIFY(tabs->tabBar()->tabData(index).toBool());
     window.setActiveLocalList(QString::fromStdString(next->document.id.to_string()));
-    QVERIFY(!tabs->tabText(index).endsWith(QStringLiteral(" · Active")));
-    QVERIFY(tabs->tabText(tabs->indexOf(next->view)).endsWith(QStringLiteral(" · Active")));
+    QVERIFY(!tabs->tabBar()->tabData(index).toBool());
+    QVERIFY(tabs->tabBar()->tabData(tabs->indexOf(next->view)).toBool());
 }
 
 void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
@@ -4827,6 +4839,124 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QCOMPARE(submenu->actions()[2]->text(), QStringLiteral("Unlove track"));
 }
 
+void BenchMainWindowTest::muteRestoresLocalVolumeAcrossBrowsing() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(!window.list_tabs_.empty());
+    auto* local = window.list_tabs_.front()->view;
+    window.tabs_->setCurrentWidget(local);
+    window.volume_->setValue(37);
+    QTRY_COMPARE(window.player_->snapshot().volume_percent, 37);
+    QTest::mouseClick(window.mute_button_, Qt::LeftButton);
+    QTRY_COMPARE(window.player_->snapshot().volume_percent, 0);
+    QVERIFY(window.mute_button_->isChecked());
+    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
+    QVERIFY(!window.mute_button_->isEnabled());
+    window.tabs_->setCurrentWidget(local);
+    QTRY_VERIFY(window.mute_button_->isEnabled());
+    QTest::mouseClick(window.mute_button_, Qt::LeftButton);
+    QTRY_COMPARE(window.player_->snapshot().volume_percent, 37);
+    QVERIFY(!window.mute_button_->isChecked());
+    window.volume_->setValue(0);
+    QTRY_COMPARE(window.player_->snapshot().volume_percent, 0);
+    QVERIFY(window.mute_button_->isChecked());
+    window.volume_->setValue(21);
+    QTRY_COMPARE(window.player_->snapshot().volume_percent, 21);
+    QVERIFY(!window.mute_button_->isChecked());
+}
+
+void BenchMainWindowTest::upNextMultiSelectionEdits() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.up_next_restored_ && !window.list_tabs_.empty());
+    window.tabs_->setCurrentWidget(window.list_tabs_.front()->view);
+    LocalTrackRow row;
+    row.raw_path = "/tmp/request.flac";
+    row.title = "Duplicate request";
+    window.enqueueLocalRequests({row, row, row, row, row});
+    const auto original = window.up_next_display_ids_;
+    QCOMPARE(original.size(), std::size_t{5});
+    auto* view = window.up_next_view_;
+    QCOMPARE(view->selectionMode(), QAbstractItemView::ExtendedSelection);
+    const auto select = [&](std::initializer_list<int> rows) {
+        view->selectionModel()->clearSelection();
+        for (const auto i : rows)
+            view->selectionModel()->select(view->model()->index(i, 0),
+                                           QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    };
+    select({1, 3});
+    window.editUpNextSelection(4, 5);
+    QCOMPARE(window.up_next_display_ids_,
+             (std::vector<std::uint64_t>{original[0], original[2], original[4], original[1],
+                                         original[3]}));
+    QCOMPARE(view->selectionModel()->selectedRows().size(), 2);
+    window.editUpNextSelection(2);
+    QCOMPARE(window.up_next_display_ids_,
+             (std::vector<std::uint64_t>{original[0], original[2], original[1], original[3],
+                                         original[4]}));
+    const auto moved = window.up_next_display_ids_;
+    window.editUpNextSelection(1);
+    QCOMPARE(window.local_requests_.pending().size(), std::size_t{3});
+    QVERIFY(window.local_requests_.undo());
+    window.refreshUpNext();
+    QCOMPARE(window.up_next_display_ids_, moved);
+    const auto revision = window.local_requests_.revision();
+    QVERIFY(!window.local_requests_.retain({original[0], original[0]}));
+    QCOMPARE(window.local_requests_.revision(), revision);
+    QCOMPARE(window.up_next_display_ids_, moved);
+}
+
+void BenchMainWindowTest::upNextPanelAnimationAndSettings() {
+    QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), false);
+    QSettings{}.setValue(QStringLiteral("up-next/visible"), false);
+    QSettings{}.setValue(QStringLiteral("up-next/width"), 380);
+    BenchMainWindow window;
+    window.resize(1320, 760);
+    window.show();
+    QTRY_VERIFY(window.up_next_restored_);
+    auto* dock = window.up_next_dock_;
+    auto* animation = dock->findChild<QVariantAnimation*>();
+    QVERIFY(animation);
+    auto* toggle = window.findChild<QAction*>(QStringLiteral("action-show-up-next"));
+    QSettings{}.setValue(QStringLiteral("appearance/panel-animations"), true);
+    toggle->trigger();
+    QTRY_COMPARE(animation->state(), QAbstractAnimation::Running);
+    QTest::qWait(40);
+    toggle->trigger();
+    QVERIFY(!toggle->isChecked());
+    QTest::qWait(30);
+    toggle->trigger();
+    QTRY_COMPARE(animation->state(), QAbstractAnimation::Stopped);
+    QVERIFY(dock->isVisible());
+    QVERIFY(toggle->isChecked());
+    QVERIFY(qAbs(dock->width() - 380) <= 2);
+    QVERIFY(window.up_next_view_->isVisible());
+    window.resizeDocks({dock}, {460}, Qt::Horizontal);
+    QTRY_COMPARE(QSettings{}.value(QStringLiteral("up-next/width")).toInt(), 460);
+    toggle->trigger();
+    QTRY_VERIFY(!dock->isVisible());
+    QCOMPARE(QSettings{}.value(QStringLiteral("up-next/width")).toInt(), 460);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::general);
+    auto* checkbox =
+        dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-panel-animations"));
+    QVERIFY(checkbox && checkbox->isChecked());
+    checkbox->setChecked(false);
+    dialog->reject();
+    QVERIFY(QSettings{}.value(QStringLiteral("appearance/panel-animations")).toBool());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    dialog = window.showSettingsDialog(SettingsDialog::Page::general);
+    checkbox = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-panel-animations"));
+    checkbox->setChecked(false);
+    auto* buttons = dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Save), Qt::LeftButton);
+    QVERIFY(!QSettings{}.value(QStringLiteral("appearance/panel-animations")).toBool());
+    toggle->trigger();
+    QVERIFY(dock->isVisible());
+    QCOMPARE(animation->state(), QAbstractAnimation::Stopped);
+    toggle->trigger();
+    QVERIFY(!dock->isVisible());
+}
+
 void BenchMainWindowTest::upNextEditingAndPersistence() {
     audio::RequestQueue<std::string> queue;
     QVERIFY(queue.insert({"A", "A"}, 0));
@@ -4859,9 +4989,9 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     QVERIFY(!window.up_next_view_->albumGroupingEnabled());
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
-        window.up_next_dock_->show();
+        window.up_next_dock_->setVisible(true);
         window.resize(1320, 760);
-        QTest::qWait(80);
+        QTest::qWait(250);
         QVERIFY(window.grab().save(directory + QStringLiteral("/up-next.png")));
     }
     window.editUpNext(1, 0);

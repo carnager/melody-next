@@ -15,9 +15,18 @@ Click **Up Next · N** in the transport, or press **Ctrl+Shift+U**, to open its
 side panel. The panel shows the current authority, pending tracks, and normal
 playback destination. Its rows stay single-line, with artist, title, and length.
 Drag to reorder or insert tracks; dropping onto the transport button appends.
-Delete/Remove, the move buttons, Clear, and Undo edit pending requests. Enter or
+The compact toolbar and right-click menu offer Remove, Move up/down, Clear,
+and Undo for pending requests. Ctrl/Shift-click selects multiple rows; Delete
+removes the selection, and move/drag operations retain its order. A batch is one
+Undo step. Melody batch editing requires a server advertising `melody_upnext_edit`.
+Enter or
 double-click starts a selected request now. **Return to playlist now** skips the
 active request, clears pending requests, and returns immediately.
+
+The resizable right-side panel uses the same flat rows as normal queues. Its
+footer identifies the authority and return destination. Opening and closing
+animate briefly and preserve the expanded width, including when toggled midway.
+Turn motion off in **Settings → General → Animate panel opening and closing**.
 
 Enqueueing does not start stopped playback or unpause it. Clear leaves the
 currently playing request alone. Next serves pending requests before normal

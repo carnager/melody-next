@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -567,13 +568,13 @@ struct MelodyAgentService::Impl {
             }
             if (arguments[0] == "time-pos") {
                 return "value: " +
-                       std::to_string(static_cast<double>(playback.position_sample) / rate) +
+                       std::format("{:.6f}", static_cast<double>(playback.position_sample) / rate) +
                        "\nOK\n";
             }
             if (arguments[0] == "duration") {
                 const auto duration =
                     playback.end_sample ? static_cast<double>(*playback.end_sample) / rate : 0.0;
-                return "value: " + std::to_string(duration) + "\nOK\n";
+                return "value: " + std::format("{:.6f}", duration) + "\nOK\n";
             }
             if (arguments[0] == "volume") {
                 return "value: " + std::to_string(playback.volume_percent) + "\nOK\n";
@@ -683,7 +684,8 @@ struct MelodyAgentService::Impl {
                     playback.end_sample ? static_cast<double>(*playback.end_sample) / rate : 0.0;
                 const auto report = "agent_state " + state_name(playback.state) + " " +
                                     std::to_string(state.current_position) + " " +
-                                    std::to_string(elapsed) + " " + std::to_string(duration) + " " +
+                                    std::format("{:.6f}", elapsed) + " " +
+                                    std::format("{:.6f}", duration) + " " +
                                     std::to_string(playback.volume_percent) + "\n";
                 if (auto sent = send_all(control.get(), report); !sent) {
                     return sent;

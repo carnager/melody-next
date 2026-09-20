@@ -174,7 +174,8 @@ enum class RequestQueueOperation {
     resume,
     insert,
     play,
-    undo
+    undo,
+    retain
 };
 struct RequestQueueCommand {
     RequestQueueOperation operation{RequestQueueOperation::append};
@@ -182,6 +183,7 @@ struct RequestQueueCommand {
     unsigned id{0};
     unsigned position{0};
     std::vector<std::string> uris;
+    std::vector<unsigned> ids{};
 };
 struct RequestQueueState {
     unsigned revision{0};

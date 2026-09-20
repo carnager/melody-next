@@ -244,6 +244,25 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 
 BenchMainWindow::~BenchMainWindow() { stopBackgroundWork(); }
 
+void BenchMainWindow::refreshMuteButton() {
+    if (!mute_button_ || !volume_)
+        return;
+    const bool muted = volume_->value() == 0;
+    if (!muted && volume_->isEnabled()) {
+        const auto key = isMpdContext() ? QStringLiteral("server/") + mpd_controller_->profileId() +
+                                              "/" + mpd_controller_->activeOutputName()
+                                        : QStringLiteral("local");
+        unmuted_volumes_.insert(key, volume_->value());
+    }
+    mute_button_->setEnabled(volume_->isEnabled());
+    mute_button_->setChecked(muted);
+    mute_button_->setIcon(QIcon::fromTheme(
+        muted ? QStringLiteral("audio-volume-muted") : QStringLiteral("audio-volume-high"),
+        style()->standardIcon(muted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume)));
+    mute_button_->setToolTip(muted ? tr("Unmute") : tr("Mute"));
+    mute_button_->setAccessibleName(mute_button_->toolTip());
+}
+
 void BenchMainWindow::buildTransport() {
     buildUpNext();
     auto* bar = addToolBar(QStringLiteral("Transport"));
@@ -321,7 +340,7 @@ void BenchMainWindow::buildTransport() {
     up_next_button_->setAcceptDrops(true);
     up_next_button_->installEventFilter(this);
     connect(up_next_button_, &QToolButton::clicked, this, [this] {
-        up_next_dock_->setVisible(!up_next_dock_->isVisible());
+        findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
         refreshUpNext();
     });
     transport_layout->addWidget(up_next_button_);
@@ -373,7 +392,32 @@ void BenchMainWindow::buildTransport() {
         duration_->fontMetrics().horizontalAdvance(QStringLiteral("00:00:00")));
     header_layout->addWidget(duration_, 1, 3, Qt::AlignVCenter);
 
-    volume_ = new ui::LineSlider(header);
+    auto* volumeBox = new QWidget(header);
+    auto* volumeLayout = new QHBoxLayout(volumeBox);
+    volumeLayout->setContentsMargins(0, 0, 0, 0);
+    volumeLayout->setSpacing(4);
+    mute_button_ = new QToolButton(volumeBox);
+    mute_button_->setObjectName(QStringLiteral("bench-mute"));
+    mute_button_->setAutoRaise(true);
+    mute_button_->setCheckable(true);
+    mute_button_->setIconSize(QSize(18, 18));
+    mute_button_->setFixedSize(26, 26);
+    volumeLayout->addWidget(mute_button_);
+    connect(mute_button_, &QToolButton::clicked, this, [this] {
+        if (!volume_->isEnabled())
+            return;
+        const auto key = isMpdContext() ? QStringLiteral("server/") + mpd_controller_->profileId() +
+                                              "/" + mpd_controller_->activeOutputName()
+                                        : QStringLiteral("local");
+        if (volume_->value() > 0) {
+            unmuted_volumes_.insert(key, volume_->value());
+            volume_->setValue(0);
+        } else {
+            volume_->setValue(unmuted_volumes_.value(key, 100));
+        }
+        refreshMuteButton();
+    });
+    volume_ = new ui::LineSlider(volumeBox);
     volume_->setObjectName(QStringLiteral("bench-volume"));
     volume_->setAccessibleName(QStringLiteral("Volume"));
     volume_->setRange(0, 100);
@@ -388,8 +432,11 @@ void BenchMainWindow::buildTransport() {
         } else if (player_ != nullptr) {
             static_cast<void>(player_->set_volume_percent(value));
         }
+        refreshMuteButton();
     });
-    header_layout->addWidget(volume_, 1, 4, Qt::AlignVCenter);
+    volumeLayout->addWidget(volume_);
+    header_layout->addWidget(volumeBox, 1, 4, Qt::AlignVCenter);
+    refreshMuteButton();
 
     device_button_ = new QToolButton(header);
     device_button_->setObjectName(QStringLiteral("bench-device"));
@@ -1170,7 +1217,7 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
         if (const auto& requests = mpd_controller_->requestQueue();
             requests && requests->active_id != 0) {
             if (jump && up_next_dock_) {
-                up_next_dock_->show();
+                up_next_dock_->setVisible(true);
                 up_next_dock_->raise();
             }
             return;
@@ -1199,7 +1246,7 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
     } else {
         if (local_requests_.active()) {
             if (jump && up_next_dock_) {
-                up_next_dock_->show();
+                up_next_dock_->setVisible(true);
                 up_next_dock_->raise();
             }
             return;
@@ -1238,6 +1285,7 @@ void BenchMainWindow::refreshTransport() {
         }
         seek_->setEnabled(false);
         volume_->setEnabled(false);
+        refreshMuteButton();
         device_button_->setEnabled(false);
         return;
     }
@@ -1573,6 +1621,7 @@ void BenchMainWindow::refreshTransport() {
         const QSignalBlocker blocker{volume_};
         volume_->setValue(snapshot.volume_percent);
     }
+    refreshMuteButton();
 
     std::vector<std::pair<std::string, std::string>> choices;
     choices.reserve(snapshot.devices.size());

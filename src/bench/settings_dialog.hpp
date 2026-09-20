@@ -76,6 +76,7 @@ class SettingsDialog final : public QDialog {
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
     QComboBox* startup_{nullptr};
+    QCheckBox* panel_animations_{nullptr};
     QCheckBox* notifications_{nullptr};
     QCheckBox* notifications_background_{nullptr};
     QComboBox* buffer_profile_{nullptr};

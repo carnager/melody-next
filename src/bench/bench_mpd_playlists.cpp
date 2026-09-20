@@ -5,6 +5,7 @@
 // round trip; rows change only when the post-mutation re-read arrives.
 
 #include "bench/bench_main_window.hpp"
+#include "bench/playback_tab_widget.hpp"
 #include "uicommon/debug_log.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
@@ -342,16 +343,18 @@ void BenchMainWindow::refreshMpdPlaylistTabChrome(MpdPlaylistTab& tab) {
     }
     const auto active =
         mpd_controller_->connected() && mpd_controller_->activeContextName() == tab.name;
-    tabs_->setTabText(index, tab.name + (active ? tr(" · Active") : QString{}));
-    tabs_->tabBar()->setTabTextColor(index, active ? tabs_->palette().color(QPalette::Highlight)
-                                                   : QColor{});
+    tabs_->setTabText(index, tab.name);
+    tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, active);
-    tabs_->setTabIcon(index, QIcon::fromTheme(active        ? QStringLiteral("media-playback-start")
-                                              : tab.scratch ? QStringLiteral("view-list-text")
+    tabs_->setTabIcon(index,
+                      active ? playbackSpeakerIcon(tabs_->palette())
+                             : QIcon::fromTheme(tab.scratch ? QStringLiteral("view-list-text")
                                                             : QStringLiteral("network-server")));
     tabs_->setTabToolTip(
         index, tab.scratch ? QStringLiteral("Working list on the connected MPD server")
                            : QStringLiteral("Stored playlist on the connected MPD server"));
+    if (active)
+        tabs_->setTabToolTip(index, tabs_->tabToolTip(index) + tr(" · Active playback queue"));
 }
 
 void BenchMainWindow::commitMpdSearchTab() {
@@ -486,10 +489,11 @@ void BenchMainWindow::refreshMpdPlaylistContextMarkers() {
     if (queue_index >= 0) {
         const auto queue_active =
             mpd_controller_->connected() && active.isEmpty() && !mpd_controller_->queueStashed();
-        tabs_->setTabText(queue_index,
-                          tr("MPD Queue") + (queue_active ? tr(" · Active") : QString{}));
-        tabs_->tabBar()->setTabTextColor(
-            queue_index, queue_active ? tabs_->palette().color(QPalette::Highlight) : QColor{});
+        tabs_->setTabText(queue_index, tr("MPD Queue"));
+        tabs_->tabBar()->setTabTextColor(queue_index, QColor{});
+        tabs_->setTabIcon(queue_index, queue_active
+                                           ? playbackSpeakerIcon(tabs_->palette())
+                                           : QIcon::fromTheme(QStringLiteral("network-server")));
         tabs_->tabBar()->setTabData(queue_index, queue_active);
         tabs_->setTabToolTip(
             queue_index,

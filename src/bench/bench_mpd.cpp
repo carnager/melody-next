@@ -1674,7 +1674,7 @@ void BenchMainWindow::refreshMelodyEndpoint() {
     }
     melody_player_storage_ = std::move(*player);
     audio::MelodyAgentConfig config{
-        .name = "Trackknife",
+        .name = audio::default_melody_agent_name(),
         .host = profile->host,
         .port = profile->port,
         .local_music_root = profile->local_music_root,

@@ -299,6 +299,7 @@ class MpdProbeController final : public QObject {
 
   private:
     void applyState(std::uint64_t token, mpd::SessionState state);
+    friend class MpdQueueModelTest;
     void applySnapshot(std::uint64_t token, mpd::SessionSnapshot snapshot);
     void applyCommandResult(std::uint64_t token, mpd::SessionCommandResult result);
     void submitTransport(mpd::TransportAction action);

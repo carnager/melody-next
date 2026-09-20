@@ -576,7 +576,7 @@ void BenchMainWindow::rebuildDeviceMenu() {
                 output_model->data(index, quick::MpdOutputModel::EnabledRole).toBool();
             auto label = name;
             QString endpoint_detail;
-            if (name == QStringLiteral("Trackknife") && melody_endpoint_ != nullptr) {
+            if (melody_endpoint_ != nullptr && name == displayText(melody_endpoint_->name())) {
                 const auto endpoint = melody_endpoint_->snapshot();
                 const auto mode = endpoint.replay_gain_mode == audio::ReplayGainMode::track
                                       ? QStringLiteral("Track")

@@ -76,6 +76,7 @@ class MpdQueueModelTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void reusedStatusDoesNotRewindPlayback();
     void projectsOrderedMetadataAndQueueIdentity();
     void avoidsResetForAnUnchangedSnapshot();
     void reconcilesSingleInsertionWithoutReset();
@@ -90,6 +91,36 @@ class MpdQueueModelTest final : public QObject {
     void groupsLiveSearchAlbumsAndTracks();
     void acceptsOneCharacterSearchAndReportsDisconnectedAlbums();
 };
+
+void MpdQueueModelTest::reusedStatusDoesNotRewindPlayback() {
+    using namespace std::chrono;
+    MpdProbeController controller;
+    mpd::SessionSnapshot snapshot;
+    snapshot.status.state = mpd::PlaybackState::playing;
+    snapshot.status.elapsed = milliseconds{1000};
+    snapshot.status.duration = milliseconds{10000};
+    snapshot.status_sample_time = steady_clock::now() - seconds{2};
+    controller.applySnapshot(controller.connection_token_, snapshot);
+    QVERIFY(controller.elapsedMs() >= 3000);
+    QVERIFY(controller.elapsedMs() < 3500);
+    const auto previous = controller.elapsedMs();
+    // An unrelated output update republishes the same status sample.
+    controller.applySnapshot(controller.connection_token_, snapshot);
+    QVERIFY(controller.elapsedMs() >= previous);
+    // A newly sampled backward seek must still take effect.
+    snapshot.status.elapsed = milliseconds{200};
+    snapshot.status_sample_time = steady_clock::now();
+    controller.applySnapshot(controller.connection_token_, snapshot);
+    QVERIFY(controller.elapsedMs() >= 200 && controller.elapsedMs() < 500);
+    snapshot.status.state = mpd::PlaybackState::paused;
+    snapshot.status_sample_time = steady_clock::now() - seconds{2};
+    controller.applySnapshot(controller.connection_token_, snapshot);
+    QCOMPARE(controller.elapsedMs(), 200);
+    snapshot.status.state = mpd::PlaybackState::playing;
+    snapshot.status_sample_time = steady_clock::now() - seconds{20};
+    controller.applySnapshot(controller.connection_token_, snapshot);
+    QCOMPARE(controller.elapsedMs(), 10000);
+}
 
 void MpdQueueModelTest::projectsOrderedMetadataAndQueueIdentity() {
     MpdQueueModel model;

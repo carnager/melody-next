@@ -45,6 +45,8 @@ struct SessionSnapshot {
     // The queue context's own contents: the stashed queue while another
     // list is materialized, so the Queue tab keeps showing its own list.
     std::vector<Track> queue_context_tracks;
+    // Preserved when a partial refresh reuses status instead of fetching it.
+    std::optional<std::chrono::steady_clock::time_point> status_sample_time{};
 };
 
 enum class SessionCommandKind {

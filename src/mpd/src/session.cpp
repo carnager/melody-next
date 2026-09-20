@@ -641,6 +641,7 @@ struct Session::Impl {
                 return std::unexpected(std::move(status.error()));
             }
             snapshot.status = std::move(*status);
+            snapshot.status_sample_time = std::chrono::steady_clock::now();
         }
         if (all || (requested & static_cast<std::uint32_t>(IdleEvent::player)) != 0U) {
             auto current = client.current_song();

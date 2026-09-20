@@ -18,8 +18,11 @@ namespace trackknife::audio {
 
 inline constexpr int melody_agent_protocol_version = 2;
 
+// Melody keys outputs by name, so the default must distinguish computers.
+[[nodiscard]] std::string default_melody_agent_name();
+
 struct MelodyAgentConfig {
-    std::string name{"Trackknife"};
+    std::string name{default_melody_agent_name()};
     std::string host{"127.0.0.1"};
     unsigned port{6600U};
     std::optional<std::string> local_music_root;
@@ -86,6 +89,7 @@ class MelodyAgentService final {
     ~MelodyAgentService();
 
     [[nodiscard]] MelodyAgentSnapshot snapshot() const;
+    [[nodiscard]] const std::string& name() const noexcept;
 
   private:
     struct Impl;

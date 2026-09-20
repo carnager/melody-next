@@ -91,9 +91,13 @@ Open **File → Connect to MPD…**:
 - **Local music root:** leave blank unless you also want to edit server files.
 
 Connect, select **MPD Queue**, and browse or search the server library. Use the
-output controls to enable the server's speakers, **Trackknife**, or another
+output controls to enable the server's speakers, **Trackknife @ computer-name**, or another
 connected agent. Trackknife becomes offline when this connection or the app is
 closed and reconnects with the same process identity after transient failures.
+The output name includes the computer hostname and stays stable across app
+restarts. Computers must have distinct hostnames: Melody identifies outputs by
+name, so the former shared “Trackknife” name made clients disconnect each other.
+After updating, select the newly named output on each computer.
 
 Melody servers advertise their native rating extension, so the queue's Rate
 menu writes 0-10 track ratings with Melody's `rate` command (keyed by the

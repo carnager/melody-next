@@ -219,6 +219,17 @@ template <typename Number>
 
 } // namespace
 
+std::string default_melody_agent_name() {
+    std::array<char, 256> hostname{};
+    if (::gethostname(hostname.data(), hostname.size()) == 0 && hostname.front() != '\0') {
+        hostname.back() = '\0';
+        return "Trackknife @ " + std::string{hostname.data()};
+    }
+    // Keep a failed hostname lookup from recreating the shared-name collision.
+    static const auto fallback = "Trackknife @ " + core::StableId::random().to_string();
+    return fallback;
+}
+
 core::Result<std::pair<std::string, bool>>
 resolve_melody_agent_source(const MelodyAgentConfig& config, const MelodyAgentQueueItem& item) {
     if (config.local_music_root) {
@@ -231,7 +242,12 @@ resolve_melody_agent_source(const MelodyAgentConfig& config, const MelodyAgentQu
                 return std::unexpected(agent_error("Melody queue URI escapes the music root"));
             }
         }
-        const auto root = std::filesystem::path{*config.local_music_root}.lexically_normal();
+        auto root = std::filesystem::path{*config.local_music_root}.lexically_normal();
+        // Ignore a trailing separator's empty component when checking containment,
+        // matching the MPD music-root resolver. Preserve the filesystem root itself.
+        if (!root.has_filename() && root.has_relative_path()) {
+            root = root.parent_path();
+        }
         const auto joined = (root / relative).lexically_normal();
         auto root_it = root.begin();
         auto joined_it = joined.begin();
@@ -732,5 +748,9 @@ MelodyAgentService::MelodyAgentService(std::unique_ptr<Impl> implementation)
 MelodyAgentService::~MelodyAgentService() = default;
 
 MelodyAgentSnapshot MelodyAgentService::snapshot() const { return implementation_->get_snapshot(); }
+
+const std::string& MelodyAgentService::name() const noexcept {
+    return implementation_->config.name;
+}
 
 } // namespace trackknife::audio

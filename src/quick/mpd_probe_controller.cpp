@@ -1734,6 +1734,18 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     }
     elapsed_ms_ = snapshot.status.elapsed ? snapshot.status.elapsed->count() : 0;
     duration_ms_ = snapshot.status.duration ? snapshot.status.duration->count() : 0;
+    // Output/library-only refreshes carry the original status sample. Project
+    // it forward rather than resetting the advancing UI clock to stale elapsed.
+    if (playback_state_ == mpd::PlaybackState::playing && snapshot.status_sample_time &&
+        snapshot.status.elapsed) {
+        elapsed_ms_ +=
+            std::max<qint64>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::steady_clock::now() - *snapshot.status_sample_time)
+                                    .count());
+        if (duration_ms_ > 0) {
+            elapsed_ms_ = std::min(elapsed_ms_, duration_ms_);
+        }
+    }
     volume_ = snapshot.status.volume ? static_cast<int>(*snapshot.status.volume) : -1;
     song_position_ =
         snapshot.status.song_position ? static_cast<int>(*snapshot.status.song_position) : -1;

@@ -643,6 +643,8 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
         });
         require(ready, "session must publish a connected snapshot and react to idle events");
         require(latest.generation > 0U, "session snapshots must carry a generation");
+        require(latest.status_sample_time.has_value(),
+                "playback status must carry its sampling time for elapsed projection");
         require(latest.status.state == trackknife::mpd::PlaybackState::playing &&
                     latest.status.song_id == 7U,
                 "session snapshot must retain typed playback status");

@@ -119,7 +119,8 @@ struct FakeMelody {
             }
             send_text(control, "OK MPD 0.24.0\n");
             registration = read_line(control);
-            registered.store(registration.starts_with("agent_register \"Trackbench Test\" v2 "));
+            registered.store(registration.starts_with(
+                "agent_register \"" + trackknife::audio::default_melody_agent_name() + "\" v2 "));
             send_text(control, "OK\n");
 
             const auto sync = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
@@ -254,6 +255,25 @@ void sourceResolutionIsContainedAndStable() {
           streamed->first == "https://melody.example/api/v1/stream/stable-song");
 }
 
+void sourceResolutionAcceptsTrailingRootSeparators() {
+    trackknife::audio::MelodyAgentConfig config;
+    trackknife::audio::MelodyAgentQueueItem item;
+    item.uri = "Artist/Album/01.flac";
+    for (const auto* root : {"/mnt/music", "/mnt/music/", "/mnt/music///", "/mnt/music/./"}) {
+        config.local_music_root = root;
+        const auto resolved = trackknife::audio::resolve_melody_agent_source(config, item);
+        CHECK(resolved && resolved->second && resolved->first == "/mnt/music/Artist/Album/01.flac");
+        for (const auto* invalid : {"../secret.flac", "Artist/../../secret.flac", "/secret.flac"}) {
+            auto escaped = item;
+            escaped.uri = invalid;
+            CHECK(!trackknife::audio::resolve_melody_agent_source(config, escaped));
+        }
+    }
+    config.local_music_root = "/";
+    const auto resolved = trackknife::audio::resolve_melody_agent_source(config, item);
+    CHECK(resolved && resolved->first == "/Artist/Album/01.flac");
+}
+
 void v2RegistrationQueueAndPlaybackFixture() {
     const auto root =
         std::filesystem::temp_directory_path() /
@@ -267,10 +287,10 @@ void v2RegistrationQueueAndPlaybackFixture() {
         return;
     }
     auto endpoint = trackknife::audio::MelodyAgentService::create(
-        {.name = "Trackbench Test",
+        {.name = trackknife::audio::default_melody_agent_name(),
          .host = "127.0.0.1",
          .port = server.port,
-         .local_music_root = root.native(),
+         .local_music_root = root.native() + "/",
          .stream_base_url = {},
          .stream_format = "flac",
          .maximum_bit_rate = 192'000U,
@@ -278,6 +298,7 @@ void v2RegistrationQueueAndPlaybackFixture() {
          .report_period = std::chrono::milliseconds{20}},
         **player);
     CHECK(endpoint.has_value());
+    CHECK((*endpoint)->name() == trackknife::audio::default_melody_agent_name());
     for (int attempt = 0; attempt < 200 && (!server.registered.load() || !server.played.load());
          ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
@@ -428,7 +449,12 @@ int main(const int argc, char** argv) {
                    ? 0
                    : 1;
     }
+    std::array<char, 256> hostname{};
+    CHECK(::gethostname(hostname.data(), hostname.size()) == 0);
+    CHECK(trackknife::audio::MelodyAgentConfig{}.name ==
+          "Trackknife @ " + std::string{hostname.data()});
     sourceResolutionIsContainedAndStable();
+    sourceResolutionAcceptsTrailingRootSeparators();
     v2RegistrationQueueAndPlaybackFixture();
     networkStreamBypassesOnlyLocalRevisionChecks();
     return failures == 0 ? 0 : 1;

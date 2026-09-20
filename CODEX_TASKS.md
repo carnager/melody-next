@@ -1,143 +1,126 @@
 # Trackbench: agent task list
 
-Active handoff task below. (The former M5-era backlog this file carried is
-complete — see MILESTONES.md and ADRs 0169-0175.)
-
-STATUS: Part A (melodyd playback contexts) is implemented and deployed.
-Part B's core is implemented too: stored playlists are now the one kind of
-server list, played as contexts (ADR-0187). What remains from the plan
-below is the queue tab showing the stashed queue while a playlist plays
-(T4), and the client-side tests for the context commands (T7).
+One open task (Task 1), plus loose ends worth picking up (Task 2). The
+MPD-mode work this file used to carry is finished — see the ADR trail
+0187 → 0188 → 0190 → 0191 → 0192 and the "Shipped" section at the end.
 
 ---
 
-# Playback contexts: MPD mode feels like local mode
+# Task 1 — Picard-style covers (Wave 3)
 
-## Context
+Waves 1 and 2 are done (ADR-0183 compact tag editor, ADR-0185 settings
+screen, ADR-0186 Actions menu). The Covers settings page already records
+the policy keys (`artwork/embed`, `artwork/write-folder-image`,
+`artwork/folder-image-name`, `artwork/fetch-source`) — nothing reads
+them at apply time yet. That is this wave.
 
-User goal: MPD mode should feel like local mode — every server list independently playable (double-click a row, that list plays from there), switching lists destroys nothing, per-list resume. Hard constraint: melodyd stays 100% MPD compatible — contexts are a capability-advertised Melody extension implemented **over the single queue**: playing a stored playlist materializes it into the live queue while the server stashes the previous queue+position and keeps per-context resume positions. Stock clients always see one consistent ordinary queue (currentsong always in the queue). User-confirmed: full playback contexts; Trackknife's client-owned server list tabs (ADR-0181) become stored-playlist-backed and the client-owned kind retires via migration.
-
-Melody ships first (Part A), then Trackknife (Part B). Each repo stays green independently.
-
-## Part A — Melody (/home/carnager/Code/melody, main)
-
-### Wire protocol — one advertised command family `melody_context`
-- `melody_context` → `context: <name>` (empty = live-queue context). No new status keys.
-- `melody_context play <name> [pos]` — materialize playlist; pos given → start there elapsed 0 unpaused; pos omitted → resume `ctxPositions[name]` (pos clamped, elapsed best-effort), default 0/0; always unpauses. ACK errNoExist/errArg.
-- `melody_context queue [pos]` — restore stash whenever a stash exists (condition = stash present, not active≠""); active="", stash cleared; pos omitted → stashed pos+elapsed, **preserve pause state**; pos given → start there unpaused. No stash: pos → play-at-pos on current queue; no pos → no-op OK.
-- `melody_context queueinfo` — stash present: stashed queue in listplaylistinfo shape (`writeTrack(track,-1,0)`, no Id/Pos); else live queue.
-- Idle on every switch: `SubPlaylist` + `SubPlayer` + new `SubContext = "context"` (mpd.go:17-25, SubRating precedent).
-
-### Semantics table (normative, goes into protocol.md)
-State: `activeContext string`, `ctxStash *{songs,prios,pos,elapsed}`, `ctxPositions map[name]{pos,elapsed}` — all under playQueueMu. Invariant: stock commands never mutate context state.
-- play P from queue-context, no stash → stash live queue{songs,prios,curPos,elapsed}; materialize; active=P.
-- play P with orphan stash (after rm/clear of previous active) → do NOT re-stash; materialize; active=P.
-- play P2 while active P1 → `ctxPositions[P1]={curPos,elapsed}`; stash untouched; materialize P2 (P2==P1 allowed = re-play at row).
-- queue-context restore → if active P record its position; restore per rules.
-- Queue edits (add/delete/move/prio/shuffle/clear/consume) while active P → operate on materialization only, never written back, lost on switch (MPD `load` semantics); `clear` keeps active=P + stash restorable.
-- `playlistadd/playlistdelete/playlistmove` on the ACTIVE playlist → mirror the same structural edit incrementally onto the live queue (songids preserved; delete-of-current advances like queue delete-current; version bump + playlist notify). Non-active playlists unchanged.
-- `rename P→Q` active → active=Q, ctxPositions key follows. `rm P`/`playlistclear P` active → active=""; materialized content keeps playing; stash retained (restorable via `queue`).
-- Track end/advance/restart: unchanged — advancement is purely positional (main.go:1100/:878); restart restores activeContext/stash/ctxPositions from playqueue.json; curQueuePos+elapsed via existing playstate machinery.
-
-### Steps
-- **M1** Lift `replaceQueueLocked(songIDs, prios)` from `addSongsWithPriority`'s "replace" branch (main.go:1531-1552) and fix its verified leak: clear `pendingNextPos=-1`, `prioReturnPos=-1`, `prioPlayedIDs=nil` (mirror cmdClear mpd_commands.go:953). Regression test: replace after prio jump clears prio bookkeeping.
-- **M2** Context state on app struct (main.go:145-192) + persistence: `savedQueue` (main.go:1656) gains omitempty `ActiveContext`, `Stash{Songs,Priorities,Pos,Elapsed}`, `ContextPositions map[string]{Pos,Elapsed}`; wire savePlayQueue/restorePlayQueue (legacy files both directions safe).
-- **M3** New `melodyd/context.go`: `switchToPlaylistContext(name,pos,hasPos)` / `switchToQueueContext(pos,hasPos)` per table. Mechanics: read `time-pos`/pause via target **before** taking playQueueMu (cmdStatus:160 lock-order model); materialize via `playlistTrackSongIDs` (db.go:1392) + replaceQueueLocked; planSyncTarget under lock, execSyncPlan after unlock; elapsed via `setProperty("time-pos",…)` after sync (cmdSeek:592 model; agents exact via agentPlayAt seek, mpd.go:975); pause-preserve via plan.startPaused; savePlayQueue in every mutation. Elapsed resume is best-effort (same class as 5s watchPlayState poll) — document.
-- **M4** `cmdMelodyContext` in mpd_commands.go (read/play/queue/queueinfo; queueinfo reuses playlistTracks/writeTrack path of cmdListPlaylistInfo:2151, stash IDs through the cmdPlaylistInfo track-lookup helper); register `"melody_context"`. Active-playlist hooks in cmdRm:2236, cmdRenamePlaylist:2326, cmdPlaylistAdd:2263, cmdPlaylistDelete:2346, cmdPlaylistMove:2370, cmdPlaylistClear:2396. `SubContext` in mpd.go.
-- **M5** Go tests (newQueueStateTestApp harness with temp PlayQueueFile/PlayStateFile; dispatchCapture/dispatchError), 17 cases: read default; play materializes (content/curPos/version/active); play at pos + invalid pos/name; play stashes queue + clears prio state; playlist→playlist stores position, stash untouched; queue restore resumes pos/prios, records ctxPositions; queue restore at pos; queue no-stash no-op / pos-acts-as-play; P→queue→P resumes stored position; persistence round trip + legacy file loads; active-playlist edit mirrors queue (survivor songids preserved); delete-current advances; rm active keeps playback+stash (queue still restores); rename follows; orphan-stash play does not re-stash; queueinfo lists stash else live; queue edits not written back; clear keeps context+stash; resume pos clamped after playlist shrank.
-- **M6** Docs: protocol.md "Playback contexts" section (wire + table + stock-clients guarantee); protocol-roadmap.md (this ships the independent-lists capability; Phase 5 ordered sub-queue stays future); CHANGELOG. Then commit/push, merge to main, **deploy to gemenon** before Part B testing.
-
-## Part B — Trackknife (/home/carnager/Code/trackknife, main)
-
-- **T1 mpd core**: `PlaybackStatus` += `song_position` (verified missing — projection.cpp:383 parses songid but never `song`; add parse). Client (albumrate 5-layer precedent, client.cpp:1737/:1755): `melody_active_context()`, `melody_context_play(name, opt pos)`, `melody_context_queue(opt pos)`, `melody_context_queue_tracks()` (reuse stored-playlist track parser client.cpp:966), `move_in_stored_playlist_batch(name, moves)` via command list (:1670-1712 precedent). Session: snapshot += `active_context` + `queue_context_tracks` (filled when non-empty); kinds `context_play`/`context_queue`/`stored_playlist_move_batch`; atomic `melody_context_supported` (pattern session.cpp:161/556); refresh fetches context when supported; refresh masks: context ops → IdleEvent::queue|player (mirror stored_playlist_load :521), batch move → 0U. Fake-server tests: wire bytes, empty-context parse, status `song` parse, capability gating, snapshot fields, masks.
-- **T2 controller/model**: `supportsPlaybackContexts()`; invokables `playStoredPlaylistContext(name,row)` (−1 = resume), `playQueueContext(row)`, `moveStoredPlaylistItems(name,rows,insertion_row)`. Degradation without capability: **replace-and-play-at** (clear+load+play(row)), not append. `applySnapshot` stores `activeContextName()` + signal; `MpdQueueModel::setCurrentRow(opt<int>)` honored by CurrentRole (mpd_queue_model.cpp:235) for playlist-tab highlight, driven by active-name==tab-name ∧ status.song_position. Model test for setCurrentRow/CurrentRole precedence.
-- **T3 playlist tabs** (bench_mpd_playlists.cpp): activation/double-click (:172/:180) → playStoredPlaylistContext(name,row) with fallback; context-menu "Resume playlist" (row −1). Highlight wiring in acceptMpdStoredPlaylistContents (:482) + active-context changes; cleared on non-active tabs. Lift single-row reorder guard (:188-193) with the batch move (client-side index bookkeeping; single-move path kept for 1 row). Fold-in fixes: removeSelectedRows (bench_list_tabs.cpp:1823) routes by tab kind (today it hits the live-queue selection from playlist/search tabs); playlist-creating edits call browseStoredPlaylists() on success (controller :1804-1806) instead of relying on idle.
-- **T4 queue tab as the "" context**: when active context non-empty, the Queue tab shows `queue_context_tracks` (the stash) read-only — queue-mutating actions disabled, double-click → `playQueueContext(row)`, "Resume queue" action; empty context → today's live-queue behavior. This makes "switching lists destroys nothing" visible.
-- **T5 MpdListTab migration (retire ADR-0181 kind)**: keep `ListKind::mpd` enum+validator (old DBs load); restoreLists (bench_list_tabs.cpp:191-201) routes mpd docs to a pending-migration queue (no tabs offline). On first connect (hook bench_mpd.cpp:634-643): collision-suffix name against sidebar, push via addToStoredPlaylist, **read back to verify, only then** delete local doc, openMpdPlaylistTab(name). Remove ADR-0181 surface: bench_mpd_list_tabs.cpp (whole file), branch sites bench_list_tabs.cpp:1382/:904/:1137/:1157/:1178/:1313, bench_track_views.cpp:332, bench_mpd.cpp:588/:640, collectDocuments mpd branch :243-287, mpd-list layout bindings :381-389, MpdQueueModel client-edit methods, createServerListTab seam; replace test serverListTabsPersistAndRenderOffline (:3810-3890) with a migration test. Copy-to-server-list menus retarget stored playlists ("New list…" = playlistadd to new name + immediate sidebar refresh). ADR-0180 sugar stays on playlist tabs.
-- **T6 open-tab persistence** (roadmap.md:34-36): QSettings QStringList `mpd/open-playlist-tabs` updated on open/close/rename; replayed on connect, filtered against acceptMpdStoredPlaylistNames (:465).
-- **T7 tests**: activation issues context_play (name/row); fallback path; queue-tab stash mode (read-only + restore-at-row); highlight follows context+song_position; migration (docs → playlists → docs deleted → tabs open; failure keeps doc); open-tabs round trip incl. rename + vanished name; batch reorder bookkeeping; removeSelectedRows routing regression.
-- **T8 docs**: ADR-0182 "Playlist-backed server lists and playback contexts" (supersedes 0181, records migration + fallback); superseded-by note in ADR-0181; update mpd-client.md, melody.md, feature-matrix.md, open-decisions.md, roadmap.md.
-
-## Risks
-Lock ordering (elapsed capture before mutex — cmdStatus model); elapsed-seek best-effort on mpv targets (optionally reuse restorePlayState wait loop); switches reshuffle + clear prio bookkeeping (intended, documented); migration guarded by add-verify-delete + collision suffixes; queue-tab read-only mode must be airtight (central tab-kind routing is the guard); bare-idle stock clients see a harmless `context` subsystem name.
-
-## Verification
-- Melody: gofmt/go vet/`go test ./...`; live smoke against gemenon after deploy (play context, switch back, restart daemon mid-context, stock client `ncmpcpp`-style probe via nc: status/playlistinfo consistency).
-- Trackknife: full dev build; ctest mpd-client/mpd-session/bench-main-window/list-repository (known flakes: localPlaybackModesAdvance, metadataPropertiesArtworkRemove under load); manual: double-click rows across two playlist tabs + queue tab, verify resume + highlight + nothing destroyed.
-- Commits: melody first (branch off main, merge+push, deploy), then trackknife on main, push.
-
-
----
-
-# Task 2: Settings-driven cover policy and proper settings screen
-
-Wave 1 of the tag-editor compacting is DONE (ADR-0183: side panel became the
-"Apply & Scripts" sections tab, footer apply summary, compact header/tool
-row). These two waves remain. They are independent of Task 1 above except
-for shared wiring in src/bench/bench_metadata_operations.cpp — coordinate if
-both run concurrently.
-
-## Wave 2 — proper settings screen: DONE
-
-Shipped as ADR-0185: paged SettingsDialog (General / Naming / ReplayGain /
-Covers), profile managers relocated as the reusable
-OutputProfilesManagerWidget over the same OutputProfileStore, tag editor
-opens Settings via manageOutputProfilesRequested and refreshes selectors on
-outputProfilesChanged, ReplayGain prefs read from QSettings at scan time,
-and the Covers page records the artwork/* policy keys for Wave 3.
-
-## Wave 3 — Picard-style covers
-
-1. **Folder-cover write capability (new; the biggest chunk).** Artwork
-   writes are embedded-only today by design (container_artwork_writer.cpp
+1. **Folder-cover write capability (the biggest chunk).** Artwork writes
+   are embedded-only today by design (`container_artwork_writer.cpp`
    clears external patterns; ADR-0160: external images are never
    modified). Add a journaled "publish folder image" operation: write the
    policy-named image into the track's directory (create or replace),
    integrated into the artwork apply pipeline
-   (operations/src/artwork_apply.cpp + a commit path beside
-   operations::commit_artwork_source; the container writer stays
-   embedded-only). Needs ADR-0184 superseding ADR-0160's boundary for
-   exactly this policy-driven file, following the journaled same-filesystem
-   publication rules (ADR-0056/0057 family). Update
-   docs/metadata-and-files.md:218-220 and :676-684. Prefer deriving the
-   folder write from policy at commit time so ArtworkWritePlanIntent stays
-   unchanged.
+   (`operations/src/artwork_apply.cpp` plus a commit path beside
+   `operations::commit_artwork_source`; the container writer stays
+   embedded-only). Needs **ADR-0184**, superseding ADR-0160's boundary for
+   exactly this policy-driven file, following the journaled
+   same-filesystem publication rules (ADR-0056/0057 family). Update
+   `docs/metadata-and-files.md:218-220` and `:676-684`. Prefer deriving
+   the folder write from policy at commit time so
+   `ArtworkWritePlanIntent` stays unchanged.
+   Note: `settings_dialog.hpp:20` and ADR-0185 already cite ADR-0184 —
+   writing it closes those dangling references.
 2. **Editor thumbnail.** Small cover widget (~96-128 px) on the Fields
-   pane showing the selection's front cover (reuse MetadataArtworkSection
-   inventory plumbing). Drop/paste an image or click Fetch → stages
-   add/replace-front intents automatically per policy (embed and/or folder
-   image). Context menu: Fetch cover, Choose file…, Remove, Open Artwork
-   tab, Cover settings… (opens the SettingsDialog Covers page).
+   pane showing the selection's front cover (reuse
+   `MetadataArtworkSection` inventory plumbing). Drop/paste an image or
+   click Fetch → stages add/replace-front intents automatically per
+   policy (embed and/or folder image). Context menu: Fetch cover, Choose
+   file…, Remove, Open Artwork tab, Cover settings… (opens the
+   SettingsDialog Covers page).
 3. **Artwork tab stays** as the advanced surface (roles, per-file rows,
    CAA browser, problems), also honoring the folder-image policy on apply.
-4. Tests: policy round trip; thumbnail staging produces expected intents;
-   folder-image journaled write/replace/failure recovery; the convert
-   dialog's separate `convert/embed-artwork` carry stays untouched.
-
+4. Tests: policy round trip; thumbnail staging produces the expected
+   intents; folder-image journaled write/replace/failure recovery; the
+   convert dialog's separate `convert/embed-artwork` carry stays
+   untouched.
 
 ---
 
-# Task 3: Two reported bugs — FIXED
+# Task 2 — loose ends
 
-Both were diagnosed against the live server and fixed; kept here only as
-a record of what changed.
+Small, independent, each found while shipping the list work.
 
-**ReplayGain read as "off" in the output hover.** melodyd was exonerated:
-it persists the mode through `playstate.json` and applies it both when an
-output is enabled (`startOutputAt`) and when an agent registers
-(`reloadQueueIntoAgent`). The tooltip was describing the wrong thing —
-the *local* Melody endpoint's decoder mode, legitimately Off while that
-output is disabled (the user's `outputs` listing showed
-`Trackknife: outputenabled: 0` while caprica played). The hover now leads
-with `Server ReplayGain: <mode>` from `replay_gain_status`, and the
-endpoint line is labelled "This machine's playback".
+- **Pre-existing test failure.** `BenchMainWindowTest::
+  metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes` fails when
+  the bench binary is run directly (`role_choices` is 0, expected 1) but
+  passes under `ctest`, so it is order- or state-dependent. Verified
+  failing on an unmodified tree — not caused by the list work. Nobody has
+  looked at it.
+- **Genre and substring queries are slow** (melody). `find genre "Rock"`
+  takes ~1.7s against 66k tracks: the `track_tags` subquery is not
+  covering. A `track_tags(tag, value, track_id)` index would take most of
+  that off. `search title "…"` (~1.1s) is a substring match no index can
+  answer — leave it unless it bites.
+- **Duplicate playlist-tab restore.** `--debug` shows
+  `restoring playlist tabs …` twice per connect. Harmless, but it means
+  the refresh runs twice.
+- **ADR-0189 does not exist.** `bench_mpd_playlists.cpp:502` and
+  `bench_main_window.hpp:493` cite it for the expandable playlist
+  sidebar; that decision was recorded in ADR-0188 instead. Either write
+  the ADR or repoint the comments.
 
-**`REPLAYGAIN_ALBUM_GAIN MISSING` matched every track.** melodyd stores
-gains and peaks in dedicated `tracks` columns and never in `track_tags`
-(measured: zero replaygain rows there, 66802 of 66803 tracks carrying
-`replay_gain_album`), so tag-based conditions could not see them. The
-four `replaygain_*` conditions now resolve from those columns alongside
-the technical pseudo-fields, in both the indexed fast path and the
-structured evaluator, with decimal comparisons and the empty-value
-present/absent forms. Shipped in melody (`f7d6e1e`) with tests and
-protocol documentation.
+---
+
+# Shipped
+
+Kept short: the reasoning lives in the ADRs, the detail in the commits.
+
+**Lists live on the server (ADR-0191, supersedes 0181/0188's client-owned
+tabs).** A working tab is an ordinary MPD stored playlist carrying a
+Melody `scratch` flag, which only decides presentation: scratch lists in
+the tab strip, curated playlists in the sidebar. Created with
+`playlistadd`, edited with the stored-playlist commands, played as a
+context. Closing one deletes it; "Keep as playlist" promotes it. Legacy
+client-owned documents are dropped at startup, as agreed. This replaced a
+design where the client held its own copy of a list, which made a stock
+client's `mpc add` invisible and then overwrote it.
+
+**Committed searches are lists (ADR-0192, supersedes ADR-0140's search
+tabs).** Search hits are written to the server as a working list named
+after the query; re-running the query replaces that list. One kind of
+MPD-side tab remains.
+
+**Tabs are destinations (ADR-0190).** The library's direct actions name
+the visible tab (Add to X / Replace X); "Send to tab" reaches any other
+tab with Add / Insert next / Replace, plus "New list…". Working tabs
+accept drops from every server-track surface, and an unexpanded library
+branch is fetched before the drop completes.
+
+**Playback contexts (ADR-0187, melody `melody_context`).** Playing a list
+materializes it into the single queue and stashes what it displaced, with
+per-playlist resume. Stock clients only ever see an ordinary queue. The
+Queue tab shows the stashed list while another plays, and edits aimed at
+it reach the stash through `melody_context queue*`.
+
+**Melody protocol additions.** `melody_context stage` (a list too long
+for one 4 KiB command line arrives in chunks), `melody_playlistadd`
+(appends a staged list in one transaction — 100 tracks went from 0.91s to
+0.08s), `melody_scratch` (the working-list flag), plus the full filter
+grammar and ReplayGain conditions from the earlier waves.
+
+**Bugs fixed along the way.** Deleting a playlist left its tracks behind
+(foreign keys were never enabled, so `ON DELETE CASCADE` never fired and
+a new playlist reusing the row id inherited them). `find date 1992`
+matched any field containing 1992; legacy conditions carried an empty
+operator the evaluator read as a numeric compare, and `search` lost its
+substring semantics. Server searches asked for a 500-row window. Covers
+stopped loading after 64 albums because the request budget counted
+finished requests. Delete did nothing in list tabs. The client wedged
+after a command libmpdclient rejected locally.
+
+**Two earlier reported bugs (Task 3 in the old list).** The output hover
+was describing the local endpoint's decoder mode rather than the server's
+ReplayGain mode; it now leads with `Server ReplayGain: <mode>`.
+`REPLAYGAIN_ALBUM_GAIN MISSING` matched everything because melodyd stores
+gains in `tracks` columns, never in `track_tags`; the four `replaygain_*`
+conditions now resolve from those columns in both query paths.

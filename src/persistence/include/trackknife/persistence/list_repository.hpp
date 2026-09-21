@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace trackknife::persistence {
@@ -146,6 +147,18 @@ struct SavedSearch {
     friend bool operator==(const SavedSearch&, const SavedSearch&) = default;
 };
 
+// Local listening state uses the same metadata-derived track identity as ratings.
+// Paths used as fallbacks for absent tags can change that identity on relocation.
+struct LocalListeningHistory {
+    std::string track_hash;
+    std::uint64_t play_count{0U};
+    std::int64_t last_played_ms{0};
+    std::int64_t resume_position_ms{0};
+    std::int64_t updated_at_ms{0};
+
+    friend bool operator==(const LocalListeningHistory&, const LocalListeningHistory&) = default;
+};
+
 struct LocalMetadataRefresh {
     core::StableId operation_id;
     std::string source_reference;
@@ -236,6 +249,16 @@ class ListRepository final {
     [[nodiscard]] core::Result<std::vector<SavedSearch>> load_saved_searches() const;
     [[nodiscard]] core::Result<void> save_search(const SavedSearch& search);
     [[nodiscard]] core::Result<void> remove_search(const SavedSearch& expected);
+
+    [[nodiscard]] core::Result<std::optional<LocalListeningHistory>>
+    load_local_listening_history(std::string_view track_hash) const;
+    // Each call records one distinct qualified listen. Callers must serialize
+    // delivery and must not retry a write with an ambiguous outcome.
+    [[nodiscard]] core::Result<void> record_local_play(std::string_view track_hash,
+                                                       std::int64_t played_at_ms);
+    [[nodiscard]] core::Result<void> save_local_resume(std::string_view track_hash,
+                                                       std::int64_t position_ms,
+                                                       std::int64_t updated_at_ms);
 
   private:
     struct Impl;

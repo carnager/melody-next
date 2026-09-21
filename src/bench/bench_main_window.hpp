@@ -280,6 +280,7 @@ class BenchMainWindow final : public QMainWindow {
     void setActiveLocalList(const QString& id);
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
+    void showCommandPalette();
     QList<QAction*> configurable_shortcuts_;
     QAction* follow_playback_action_{};
     QPointer<QTableView> followed_playback_view_;

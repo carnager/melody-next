@@ -353,6 +353,7 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
         invalidateArtwork();
         reloadTree();
         loadRoots();
+        emit libraryContentChanged();
     });
     poll_timer_ = new QTimer(this);
     poll_timer_->setInterval(200);
@@ -364,6 +365,7 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
         invalidateArtwork();
         reloadTree();
         loadRoots();
+        emit libraryContentChanged();
     });
     artwork_timer_ = new QTimer(this);
     artwork_timer_->setSingleShot(true);

@@ -24,7 +24,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 38U;
+constexpr unsigned current_schema_version = 39U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1119,6 +1119,24 @@ UPDATE schema_version SET version = 36;
             "ALTER TABLE operation_journal_v38 RENAME TO operation_journal;"
             "CREATE INDEX operation_journal_state ON operation_journal(state);"
             "UPDATE schema_version SET version = 38;";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 38) {
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE local_listening_history (
+    track_hash TEXT PRIMARY KEY NOT NULL,
+    play_count INTEGER NOT NULL DEFAULT 0 CHECK(play_count >= 0),
+    last_played_ms INTEGER NOT NULL DEFAULT 0 CHECK(last_played_ms >= 0),
+    resume_position_ms INTEGER NOT NULL DEFAULT 0 CHECK(resume_position_ms >= 0),
+    resume_updated_at_ms INTEGER NOT NULL DEFAULT 0 CHECK(resume_updated_at_ms >= 0)
+);
+CREATE INDEX local_listening_history_last_played
+    ON local_listening_history(last_played_ms DESC);
+UPDATE schema_version SET version = 39;
+)sql";
         if (auto result = execute(database, migration); !result) {
             rollback();
             return result;
@@ -2256,7 +2274,8 @@ ListRepository::refresh_local_metadata(const LocalMetadataRefresh& refresh) {
         // document data on a recovery retry. The operation journal owns commit
         // evidence; there is no list-refresh record for zero affected rows.
         if (auto result = refresh_library_source(database, refresh.source_reference,
-                                                 refresh.source_reference, nullptr); !result) {
+                                                 refresh.source_reference, nullptr);
+            !result) {
             rollback();
             return std::unexpected(std::move(result.error()));
         }
@@ -4621,6 +4640,98 @@ core::Result<void> ListRepository::remove_search(const SavedSearch& expected) {
             .context = {}});
     }
     return {};
+}
+
+core::Result<std::optional<LocalListeningHistory>>
+ListRepository::load_local_listening_history(const std::string_view track_hash) const {
+    if (track_hash.size() != 64U ||
+        track_hash.find_first_not_of("0123456789abcdef") != std::string_view::npos) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Invalid listening-history track identity",
+                                           .context = {}});
+    }
+    auto* database = implementation_->database;
+    auto statement = prepare(database, "SELECT play_count,last_played_ms,resume_position_ms,"
+                                       "resume_updated_at_ms FROM local_listening_history "
+                                       "WHERE track_hash=?");
+    if (!statement || !bind_text(statement->get(), 1, track_hash)) {
+        return std::unexpected(statement
+                                   ? database_error(database, "Could not bind listening history")
+                                   : std::move(statement.error()));
+    }
+    const auto result = sqlite3_step(statement->get());
+    if (result == SQLITE_DONE)
+        return std::optional<LocalListeningHistory>{};
+    if (result != SQLITE_ROW)
+        return std::unexpected(database_error(database, "Could not load listening history"));
+    const auto count = sqlite3_column_int64(statement->get(), 0);
+    const auto played = sqlite3_column_int64(statement->get(), 1);
+    const auto position = sqlite3_column_int64(statement->get(), 2);
+    const auto updated = sqlite3_column_int64(statement->get(), 3);
+    if (count < 0 || played < 0 || position < 0 || updated < 0) {
+        return std::unexpected(database_error(database, "Invalid listening history record"));
+    }
+    return std::optional{LocalListeningHistory{
+        .track_hash = std::string{track_hash},
+        .play_count = static_cast<std::uint64_t>(count),
+        .last_played_ms = played,
+        .resume_position_ms = position,
+        .updated_at_ms = updated,
+    }};
+}
+
+core::Result<void> ListRepository::record_local_play(const std::string_view track_hash,
+                                                     const std::int64_t played_at_ms) {
+    if (played_at_ms <= 0) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "A completed play requires a timestamp",
+                                           .context = {}});
+    }
+    if (auto loaded = load_local_listening_history(track_hash); !loaded)
+        return std::unexpected(std::move(loaded.error()));
+    auto* database = implementation_->database;
+    auto statement =
+        prepare(database,
+                "INSERT INTO local_listening_history(track_hash,play_count,last_played_ms,"
+                "resume_position_ms,resume_updated_at_ms) VALUES(?,1,?,0,?) "
+                "ON CONFLICT(track_hash) DO UPDATE SET play_count=play_count+1,"
+                "last_played_ms=max(last_played_ms,excluded.last_played_ms),"
+                "resume_position_ms=CASE WHEN excluded.resume_updated_at_ms>=resume_updated_at_ms "
+                "THEN 0 ELSE resume_position_ms END,"
+                "resume_updated_at_ms=max(resume_updated_at_ms,excluded.resume_updated_at_ms)");
+    if (!statement || !bind_text(statement->get(), 1, track_hash) ||
+        sqlite3_bind_int64(statement->get(), 2, played_at_ms) != SQLITE_OK ||
+        sqlite3_bind_int64(statement->get(), 3, played_at_ms) != SQLITE_OK) {
+        return std::unexpected(statement ? database_error(database, "Could not bind completed play")
+                                         : std::move(statement.error()));
+    }
+    return step_done(database, statement->get(), "Could not record completed play");
+}
+
+core::Result<void> ListRepository::save_local_resume(const std::string_view track_hash,
+                                                     const std::int64_t position_ms,
+                                                     const std::int64_t updated_at_ms) {
+    if (position_ms < 0 || updated_at_ms <= 0) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Invalid local resume observation",
+                                           .context = {}});
+    }
+    if (auto loaded = load_local_listening_history(track_hash); !loaded)
+        return std::unexpected(std::move(loaded.error()));
+    auto* database = implementation_->database;
+    auto statement = prepare(
+        database, "INSERT INTO local_listening_history(track_hash,resume_position_ms,"
+                  "resume_updated_at_ms) VALUES(?,?,?) ON CONFLICT(track_hash) DO UPDATE SET "
+                  "resume_position_ms=excluded.resume_position_ms,"
+                  "resume_updated_at_ms=excluded.resume_updated_at_ms "
+                  "WHERE excluded.resume_updated_at_ms>resume_updated_at_ms");
+    if (!statement || !bind_text(statement->get(), 1, track_hash) ||
+        sqlite3_bind_int64(statement->get(), 2, position_ms) != SQLITE_OK ||
+        sqlite3_bind_int64(statement->get(), 3, updated_at_ms) != SQLITE_OK) {
+        return std::unexpected(statement ? database_error(database, "Could not bind local resume")
+                                         : std::move(statement.error()));
+    }
+    return step_done(database, statement->get(), "Could not save local resume");
 }
 
 } // namespace trackknife::persistence

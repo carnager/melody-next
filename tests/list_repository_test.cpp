@@ -75,6 +75,60 @@ void saved_searches_are_persistent_and_conflict_checked() {
     std::filesystem::remove_all(directory);
 }
 
+void local_listening_history_is_monotonic_and_persistent() {
+    namespace persistence = trackknife::persistence;
+    namespace core = trackknife::core;
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("trackbench-listens-" + core::StableId::random().to_string() + ".sqlite3");
+    const std::string hash(64U, 'a');
+    {
+        auto repository = persistence::ListRepository::open(path);
+        require(repository.has_value(), "listening-history database opens");
+        const auto absent = repository->load_local_listening_history(hash);
+        require(absent && !*absent, "unknown track has no history");
+        require(repository->save_local_resume(hash, 42'000, 1'000).has_value(),
+                "resume position is stored");
+        require(repository->save_local_resume(hash, 12'000, 999).has_value(),
+                "stale resume observation is harmless");
+        auto loaded = repository->load_local_listening_history(hash);
+        require(loaded && *loaded && (*loaded)->resume_position_ms == 42'000,
+                "older observation cannot rewind the stored resume point");
+        require(repository->record_local_play(hash, 2'000).has_value(),
+                "completed play is recorded");
+        require(repository->record_local_play(hash, 3'000).has_value(), "play count accumulates");
+        loaded = repository->load_local_listening_history(hash);
+        require(loaded && *loaded && (*loaded)->play_count == 2U &&
+                    (*loaded)->last_played_ms == 3'000 && (*loaded)->resume_position_ms == 0,
+                "completion advances history and clears resume");
+        require(!repository->save_local_resume({}, 1, 1), "empty identities are rejected");
+        require(!repository->record_local_play(std::string(64U, 'z'), 1),
+                "non-hash identities are rejected");
+        require(!repository->save_local_resume(hash, -1, 4'000),
+                "negative resume positions are rejected");
+        require(!repository->record_local_play(hash, 0),
+                "nonpositive play timestamps are rejected");
+        require(repository->save_local_resume(hash, 20'000, 5'000).has_value(),
+                "a later listening session can save progress");
+        require(repository->record_local_play(hash, 4'000).has_value(),
+                "a delayed earlier listen still contributes to the count");
+        require(repository->save_local_resume(hash, 1'000, 5'000).has_value(),
+                "duplicate timestamps cannot overwrite a stored observation");
+        loaded = repository->load_local_listening_history(hash);
+        require(loaded && *loaded && (*loaded)->play_count == 3U &&
+                    (*loaded)->resume_position_ms == 20'000 && (*loaded)->updated_at_ms == 5'000,
+                "delayed completion preserves newer resume state");
+    }
+    auto reopened = persistence::ListRepository::open(path);
+    require(reopened.has_value(), "listening-history database reopens");
+    const auto loaded = reopened->load_local_listening_history(hash);
+    require(loaded && *loaded && (*loaded)->play_count == 3U,
+            "listening history survives reopening");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    std::filesystem::remove(path.string() + "-wal", ignored);
+    std::filesystem::remove(path.string() + "-shm", ignored);
+}
+
 void list_documents_round_trip_transactionally() {
     namespace persistence = trackknife::persistence;
     const auto database_path = std::filesystem::temp_directory_path() /
@@ -180,7 +234,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 38U, "state repository schema must be explicit");
+        require(repository.schema_version() == 39U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -559,7 +613,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 38U,
+        require(repository.schema_version() == 39U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1276,7 +1330,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 38U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 39U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1603,6 +1657,7 @@ void legacy_logical_snapshots_block_refresh() {
 
 int main() {
     saved_searches_are_persistent_and_conflict_checked();
+    local_listening_history_is_monotonic_and_persistent();
     list_documents_round_trip_transactionally();
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();

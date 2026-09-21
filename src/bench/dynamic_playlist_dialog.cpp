@@ -134,6 +134,13 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
         [this](const DynamicPlaylistService::Tracks& tracks, int unmatched, const QString& error) {
             busy_ = false;
             refresh_->setEnabled(authority_valid_);
+            if (refresh_pending_) {
+                refresh_pending_ = false;
+                // A database change during this query invalidates its snapshot.
+                // Retain the last displayed result until a fresh evaluation finishes.
+                libraryChanged();
+                return;
+            }
             if (!error.isEmpty()) {
                 discardResults();
                 status_->setText(error);
@@ -174,6 +181,7 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     connect(refresh_, &QPushButton::clicked, this, &DynamicPlaylistDialog::refresh);
     connect(stop, &QPushButton::clicked, this, [this] {
         auto_refresh_ = false;
+        refresh_pending_ = false;
         refresh_timer_->stop();
         service_->cancel();
         busy_ = false;
@@ -315,6 +323,7 @@ void DynamicPlaylistDialog::discardResults() {
     if (loading_)
         return;
     auto_refresh_ = false;
+    refresh_pending_ = false;
     refresh_timer_->stop();
     service_->cancel();
     busy_ = false;
@@ -338,13 +347,18 @@ void DynamicPlaylistDialog::refresh(const bool preserve_results) {
         discardResults();
     }
     auto_refresh_ = true;
+    refresh_pending_ = false;
     busy_ = true;
     refresh_->setEnabled(false);
     service_->refresh(definition(), QSettings{}.value(QStringLiteral("lastfm/api-key")).toString());
 }
 void DynamicPlaylistDialog::libraryChanged() {
-    if (authority_valid_ && auto_refresh_ && !busy_ &&
-        source_->currentData() == QStringLiteral("rules") && !query_->text().isEmpty())
+    if (!authority_valid_ || !auto_refresh_ || source_->currentData() != QStringLiteral("rules") ||
+        query_->text().isEmpty())
+        return;
+    if (busy_)
+        refresh_pending_ = true;
+    else
         refresh_timer_->start();
 }
 void DynamicPlaylistDialog::invalidateAuthority() {

@@ -155,6 +155,8 @@ void BenchMainWindow::showDynamicPlaylists() {
     } else if (local_library_) {
         connect(local_library_, &LocalLibraryPanel::ratingsChanged, dialog,
                 &DynamicPlaylistDialog::libraryChanged);
+        connect(local_library_, &LocalLibraryPanel::libraryContentChanged, dialog,
+                &DynamicPlaylistDialog::libraryChanged);
     }
     connect(dialog, &DynamicPlaylistDialog::snapshotRequested, this,
             [this, mpd, layout](const QString& name, const DynamicPlaylistService::Tracks& tracks) {

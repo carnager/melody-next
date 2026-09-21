@@ -21,7 +21,9 @@ from a truncated response.
 
 Set a maximum of 1–500 tracks and optionally shuffle. **Save definition** keeps
 the rule/source. Saved rules refresh when selected and remain current while the
-window is open. **Stop** cancels the current work and automatic refresh.
+window is open. Local rules update after library scans, rating edits, and
+committed tag/path changes. Changes arriving during a query trigger a fresh
+evaluation. **Stop** cancels the current work and automatic refresh.
 **Open snapshot in new tab** creates an ordinary playlist you can play or edit;
 that snapshot stays stable as the dynamic definition changes. Results and
 snapshot tabs show one line per track, without album grouping. Server results

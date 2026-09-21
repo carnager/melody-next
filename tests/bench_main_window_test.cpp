@@ -43,6 +43,7 @@
 #include "trackknife/query/tkq_melody.hpp"
 #include "ui/server_library_tree_model.hpp"
 #include "ui/server_library_tree_view.hpp"
+#include "uicommon/command_palette.hpp"
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
@@ -209,6 +210,8 @@ class BenchMainWindowTest final : public QObject {
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
+    void commandPaletteFindsAndRunsRegisteredActions();
+    void commandPaletteTracksAvailabilityAndLifetime();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
@@ -252,6 +255,7 @@ class BenchMainWindowTest final : public QObject {
     void lastFmSettingsAndTrackActions();
     void dynamicPlaylistsShareRulesAndRecommendationMatching();
     void dynamicPlaylistCatalogAndEditor();
+    void dynamicPlaylistRetainsChangesDuringRefresh();
     void lastFmRefreshSelectsFreshTracksFromLargerPool();
     void replayGainScanPreservesLogicalSources_data();
     void replayGainScanPreservesLogicalSources();
@@ -335,6 +339,123 @@ void BenchMainWindowTest::cleanup() {
     settings.clear();
     settings.sync();
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
+}
+
+void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
+    BenchMainWindow window;
+    window.show();
+
+    auto* command = window.findChild<QAction*>(QStringLiteral("action-command-palette"));
+    QVERIFY(command != nullptr);
+    QCOMPARE(command->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+    QCOMPARE(window.findChild<QAction*>(QStringLiteral("action-connect-mpd"))->shortcut(),
+             QKeySequence(QStringLiteral("Ctrl+K")));
+    // Parameter choices and transient actions must not leak into command discovery.
+    QAction device(QStringLiteral("caprica"), &window);
+    device.setObjectName(QStringLiteral("action-mpd-output-123"));
+    QAction rating(QStringLiteral("1"), &window);
+    rating.setObjectName(QStringLiteral("action-mpd-queue-rate-1"));
+    command->trigger();
+
+    auto* palette = window.findChild<QDialog*>(QStringLiteral("command-palette"));
+    QVERIFY(palette != nullptr);
+    auto* filter = palette->findChild<QLineEdit*>(QStringLiteral("command-filter"));
+    auto* results = palette->findChild<QListWidget*>(QStringLiteral("command-results"));
+    auto* run = palette->findChild<QPushButton*>(QStringLiteral("command-run"));
+    QVERIFY(filter != nullptr);
+    QVERIFY(results != nullptr);
+    QVERIFY(run != nullptr);
+    filter->setText(QStringLiteral("caprica"));
+    QCOMPARE(results->count(), 0);
+    filter->setText(QStringLiteral("queue-rate"));
+    QCOMPARE(results->count(), 0);
+    QVERIFY(palette->findChild<QKeySequenceEdit*>() == nullptr);
+    command->trigger();
+    QCOMPARE(window.findChildren<ui::CommandPalette*>().size(), 1);
+
+    filter->setText(QStringLiteral("Settings"));
+    QCOMPARE(results->count(), 1);
+    QVERIFY(results->currentItem()->text().startsWith(QStringLiteral("Settings")));
+    run->click();
+    QTRY_VERIFY(window.findChild<SettingsDialog*>() != nullptr);
+    QVERIFY(!palette->isVisible());
+}
+
+void BenchMainWindowTest::commandPaletteTracksAvailabilityAndLifetime() {
+    QAction first{QStringLiteral("Open files")};
+    first.setObjectName(QStringLiteral("action-open-files"));
+    auto second = std::make_unique<QAction>(QStringLiteral("Open folder"));
+    second->setObjectName(QStringLiteral("action-open-folder"));
+    second->setEnabled(false);
+    QSignalSpy triggered{&first, &QAction::triggered};
+    ui::CommandPalette palette({&first, &first, second.get()});
+    palette.show();
+    auto* filter = palette.findChild<QLineEdit*>(QStringLiteral("command-filter"));
+    auto* results = palette.findChild<QListWidget*>(QStringLiteral("command-results"));
+    auto* run = palette.findChild<QPushButton*>(QStringLiteral("command-run"));
+    QCOMPARE(results->count(), 1);
+    second->setEnabled(true);
+    QCOMPARE(results->count(), 2);
+    QTest::keyClick(filter, Qt::Key_Down);
+    QCOMPARE(results->currentRow(), 1);
+    QVERIFY(run->isEnabled());
+    second->setEnabled(false);
+    QCOMPARE(results->count(), 1);
+    QCOMPARE(results->currentRow(), 0);
+    second->setEnabled(true);
+    QCOMPARE(results->count(), 2);
+    second.reset();
+    QCOMPARE(results->count(), 1);
+    filter->setText(QStringLiteral("files open"));
+    QCOMPARE(results->count(), 1);
+    first.setEnabled(false);
+    QCOMPARE(results->count(), 0);
+    QVERIFY(!run->isEnabled());
+    QTest::keyClick(filter, Qt::Key_Return);
+    QCOMPARE(triggered.count(), 0);
+    first.setEnabled(true);
+    QCOMPARE(results->count(), 1);
+    first.setVisible(false);
+    QCOMPARE(results->count(), 0);
+    QVERIFY(!run->isEnabled());
+    first.setVisible(true);
+    QTest::keyClick(filter, Qt::Key_Return);
+    QCOMPARE(triggered.count(), 1);
+    QVERIFY(!palette.isVisible());
+}
+
+void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
+    using Service = DynamicPlaylistService;
+    std::vector<Service::Completion> pending;
+    DynamicPlaylistDialog dialog(
+        QStringLiteral("local"), QStringLiteral("Local library"),
+        [&](query::CompiledTkq, core::CancellationToken, Service::Completion done) {
+            pending.push_back(std::move(done));
+        });
+    dialog.setAttribute(Qt::WA_DeleteOnClose, false);
+    auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
+    auto* stop = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-stop"));
+    refresh->click();
+    QCOMPARE(pending.size(), 1U);
+    dialog.libraryChanged();
+    dialog.libraryChanged();
+    LocalTrackRow stale;
+    stale.raw_path = "/stale.flac";
+    auto complete = std::move(pending.front());
+    complete(Service::Tracks{std::vector<LocalTrackRow>{stale}});
+    QCOMPARE(dialog.view()->model()->rowCount(), 0);
+    QTRY_COMPARE(pending.size(), 2U);
+    LocalTrackRow fresh;
+    fresh.raw_path = "/fresh.flac";
+    complete = std::move(pending.back());
+    complete(Service::Tracks{std::vector<LocalTrackRow>{fresh}});
+    QTRY_COMPARE(dialog.view()->model()->rowCount(), 1);
+    QCOMPARE(qobject_cast<LocalListModel*>(dialog.view()->model())->rows().front().raw_path,
+             fresh.raw_path);
+    dialog.libraryChanged();
+    stop->click();
+    QTest::qWait(600);
+    QCOMPARE(pending.size(), 2U);
 }
 
 void BenchMainWindowTest::metadataGridDisplaysUnicodePaths() {
@@ -4138,7 +4259,8 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         QVERIFY(artist_column.has_value());
         QVERIFY(!grid->data(grid->index(0, *artist_column), Qt::DisplayRole).toString().isEmpty());
         QVERIFY(properties->fileListView()->isVisible());
-        auto* files_page = window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
+        auto* files_page =
+            window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
         QVERIFY(files_page && files_page->isAncestorOf(properties->fileListView()));
         auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
         QCOMPARE(source_tabs->tabText(source_tabs->currentIndex()), QStringLiteral("Files"));
@@ -4149,8 +4271,9 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         const auto title = aggregate->fieldRow(QStringLiteral("title"));
         QVERIFY(title);
         QVERIFY(aggregate->setData(aggregate->index(*title, 2),
-                                  QStringLiteral("Edited without a local list"), Qt::EditRole));
-        auto* apply = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+                                   QStringLiteral("Edited without a local list"), Qt::EditRole));
+        auto* apply =
+            properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
         QTRY_VERIFY(apply->isEnabled());
         apply->click();
         QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) ==
@@ -4893,15 +5016,20 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     // Feed deterministic replies without opening a real browser or contacting Last.fm.
     auto* page = dialog->findChild<QWidget*>(QStringLiteral("lastfm-settings"));
     page->setProperty("auth-waiting", true);
-    window.mpd_controller_->lastFmCompleted(QStringLiteral("begin"),
+    window.mpd_controller_->lastFmCompleted(
+        QStringLiteral("begin"),
         QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
     QVERIFY(poll->isActive());
     QVERIFY(status->text().contains(QStringLiteral("Waiting for browser approval")));
-    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
+    window.mpd_controller_->lastFmCompleted(
+        QStringLiteral("finish"),
         QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
     QVERIFY(poll->isActive());
-    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
-        QByteArray(R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"), {});
+    window.mpd_controller_->lastFmCompleted(
+        QStringLiteral("finish"),
+        QByteArray(
+            R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"),
+        {});
     QVERIFY(!poll->isActive());
     QVERIFY(!page->property("auth-waiting").toBool());
     QVERIFY(dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-enabled"))->isChecked());
@@ -4912,7 +5040,7 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QVERIFY(status->text().contains(QStringLiteral("Stopped waiting")));
     // A late reply after cancellation must not restart polling.
     window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
-        QByteArray(R"({"authorization_pending":true})"), {});
+                                            QByteArray(R"({"authorization_pending":true})"), {});
     QVERIFY(!poll->isActive());
     page->setProperty("auth-waiting", true);
     poll->start();

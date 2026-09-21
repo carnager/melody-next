@@ -1,5 +1,28 @@
 # Trackbench: agent task list
 
+## Post-release priorities started on 2026-09-21
+
+Branch: `feature/listening-discovery-autoplaylists`. These are the first three
+priorities from the product assessment, separate from the historical task
+numbers below. The three priorities are not complete.
+
+1. **Listening history, resume, album shuffle:** schema-39 repository support
+   and tests for local play counts, last-played and resume observations are in
+   place (ADR-0204). Next: qualify stable physical/logical source identity,
+   thresholds and retry semantics; connect the playback/persistence workers;
+   expose history; add optional paused resume and album-preserving shuffle.
+2. **Command discovery and staged-operation UX:** the curated command palette
+   is available with Ctrl+Shift+P, with Settings retaining shortcut editing
+   (ADR-0205). Parameter choices such as device names and numeric ratings are
+   deliberately excluded. Broader staged-operation UX refinements remain open.
+3. **Autoplaylists and library views:** the existing dynamic-rule editor now
+   refreshes after local scans and committed index changes, with coalescing and
+   stale-query suppression (ADR-0206). Persistent live tabs, preservation of
+   playing occurrences during membership changes, and custom grouping remain
+   open. Opened snapshots retain their existing semantics.
+
+---
+
 Tasks 1, 2, 3, and 5 are implemented; validation notes and follow-ups are below. The
 MPD-mode work this file used to carry is finished — see the ADR trail
 0187 → 0188 → 0190 → 0191 → 0192 and the "Shipped" section at the end.

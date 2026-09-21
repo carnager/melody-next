@@ -61,6 +61,7 @@ class LocalLibraryPanel final : public QWidget {
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
     void ratingsChanged();
+    void libraryContentChanged();
     void manageFoldersRequested();
 
   protected:

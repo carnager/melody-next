@@ -44,6 +44,7 @@ class DynamicPlaylistDialog final : public QDialog {
     bool auto_refresh_{false};
     bool loading_{false};
     bool busy_{false};
+    bool refresh_pending_{false};
     bool authority_valid_{true};
     DynamicPlaylistService* service_;
     DynamicPlaylistService::Tracks tracks_;

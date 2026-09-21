@@ -13,6 +13,7 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
 #include "ui/server_library_tree_view.hpp"
+#include "uicommon/command_palette.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/panel_layout.hpp"
@@ -444,6 +445,11 @@ void BenchMainWindow::buildWorkspace() {
     });
 
     auto* workspace_menu = menuBar()->addMenu(QStringLiteral("&Workspace"));
+    auto* commands = workspace_menu->addAction(tr("Commands…"));
+    commands->setObjectName(QStringLiteral("action-command-palette"));
+    commands->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+    connect(commands, &QAction::triggered, this, &BenchMainWindow::showCommandPalette);
+    workspace_menu->addSeparator();
     auto* jump_playing = workspace_menu->addAction(tr("Jump to playing"));
     jump_playing->setObjectName(QStringLiteral("action-jump-to-playing"));
     jump_playing->setShortcut(QKeySequence(QStringLiteral("Ctrl+J")));
@@ -1034,6 +1040,55 @@ void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index
 }
 
 } // namespace trackknife::bench
+
+void trackknife::bench::BenchMainWindow::showCommandPalette() {
+    for (auto* existing : findChildren<ui::CommandPalette*>()) {
+        if (existing->isVisible()) {
+            existing->raise();
+            existing->activateWindow();
+            return;
+        }
+    }
+    QList<QAction*> commands;
+    // Deliberate task inventory. Device names, rating values, column names and
+    // transient context-menu choices are parameters, not standalone commands.
+    for (const auto* id : {"action-open-files",
+                           "action-open-folder",
+                           "action-new-list",
+                           "action-import-m3u8",
+                           "action-export-m3u8",
+                           "action-dynamic-playlists",
+                           "action-connect-mpd",
+                           "action-disconnect-mpd",
+                           "action-mpd-diagnostics",
+                           "action-settings",
+                           "action-search-dialog",
+                           "action-find-in-list",
+                           "action-jump-to-playing",
+                           "action-follow-playback",
+                           "action-show-up-next",
+                           "action-play-pause",
+                           "action-stop",
+                           "action-next-track",
+                           "action-previous-track",
+                           "action-save-list",
+                           "action-rename-tab",
+                           "action-duplicate-tab",
+                           "action-close-tab",
+                           "action-track-properties",
+                           "action-replaygain-dialog",
+                           "action-convert-files",
+                           "action-reverse-list",
+                           "action-deduplicate-list",
+                           "action-backup-workspace",
+                           "action-restore-workspace"}) {
+        if (auto* action = findChild<QAction*>(QString::fromLatin1(id)))
+            commands.append(action);
+    }
+    auto* palette = new ui::CommandPalette(std::move(commands), this);
+    palette->setAttribute(Qt::WA_DeleteOnClose);
+    palette->open();
+}
 
 trackknife::bench::SettingsDialog*
 trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Page page) {

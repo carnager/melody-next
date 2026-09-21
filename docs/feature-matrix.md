@@ -11,6 +11,11 @@ M5-M10 are complete; artifact-specific release acceptance remains governed by
 the release checklist.
 An implemented feature does not by itself close a milestone.
 
+Development update (2026-09-21): ADRs 0204–0206 add the local listening-history
+storage foundation, a curated workspace command palette, and dynamic-rule
+invalidation on local index changes. History collection/resume, album shuffle,
+persistent autoplaylist tabs, and custom library grouping remain open.
+
 ## Status vocabulary
 
 - **Implemented:** available in the current workspace or the named core service,
@@ -51,7 +56,7 @@ retaining warnings and errors (covered by the `debug-log` regression test).
 | Track-view layouts | Partial | Both authorities share grouped side/header artwork, plain/compact presentations, and persisted semantic-column order, visibility, and widths. Arbitrary expression-defined columns/grouping remain open. |
 | Workspace arrangement | Implemented | Versioned side-by-side, stacked, and tabbed panel composition with reorder/reset and validated restoration (ADRs 0026–0027). |
 | Keyboard navigation | Implemented | Settings → Shortcuts edits and persists main-window bindings, detects duplicate/prefix conflicts, and restores defaults with Save/Cancel. Playback, Up Next, Follow playback, Jump to playing, file, search, and tab actions have defaults. Tab navigation, Home/End, selection keys, and keyboard context actions retain native behavior. |
-| Command palette and shortcut editor | Backend only | A reusable command-palette widget exists, but the primary workspace does not expose it or a configurable shortcut editor. Older shell completion claims do not apply. |
+| Command palette and shortcut editor | Implemented | Workspace → Commands… (`Ctrl+Shift+P`) searches a curated task inventory, hides unavailable commands, shows right-aligned shortcuts, and runs the existing action. Device names, rating values, and other parameter choices are excluded (ADR-0205). Settings → Shortcuts owns binding changes, conflict validation, and default restoration. |
 
 Evidence: [workspace specification](ui-workspace.md),
 [workspace actions](../src/bench/bench_workspace_layout.cpp),
@@ -78,7 +83,7 @@ Evidence: [workspace specification](ui-workspace.md),
 | Local playback modes | Implemented | Repeat, track Random, Single/Consume including one-shot modes, and persistent local settings. Background progression continues in its original list. Metadata/path publication preserves row identity and advancement (ADRs 0119–0121). |
 | Server-side structured search | Implemented | Against Melody servers advertising `searchalbums`: album-record search results with rating overlays, and the Search dialog's Server library scope running translated tkq queries (AND-only subset; refusals are explicit). |
 | Track and album ratings | Implemented | Shared 0-10 star scale (ADR-0179): MPD rating stickers, Melody's native rating commands with album ratings, and a local content-identity store. Yellow star ratings show in an optional column, as overlays on album covers (track views and the library tree), and in five-star Rate menus in both authorities. Tag storage remains a recorded opt-in follow-up. |
-| Album shuffle, history, and resume | Open | Album shuffle preserving track order, play counts, last played, and persisted playback-position restoration. See [roadmap 7](roadmap.md#7-listening-history-and-album-oriented-playback). |
+| Album shuffle, history, and resume | Backend only | ADR-0204 and schema 39 persist content-identified local play counts, last-played timestamps, and monotonic resume positions. Playback observation, opt-in paused restoration, query fields, MPD/Melody authority, and album shuffle remain open. See [roadmap 7](roadmap.md#7-listening-history-and-album-oriented-playback). |
 | MPRIS/media keys/notifications | Partial | `org.mpris.MediaPlayer2.trackknife` exposes the active authority's transport, typed metadata, position/Seeked, and volume, and routes desktop commands (including media keys) through the same transport actions as the visible controls (ADR-0135). ADR-0144 adds opt-in track-change notifications fed by the same now-playing snapshot. ADR-0195 makes background-only suppression optional and adds an explicit Settings test, normal-urgency silent delivery, and visible delivery failures. Notification artwork, MPRIS artwork URLs, and LoopStatus/Shuffle mapping remain open. |
 
 Evidence: [MPD](mpd-client.md), [local library](local-library.md),

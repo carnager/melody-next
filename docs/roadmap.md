@@ -46,6 +46,10 @@ References: [working lists](playback-library-conversion.md#working-lists-and-sto
 
 ## 2. Library filters and saved searches
 
+ADR-0206 connects the existing dynamic-rule editor to local scan and committed
+index changes, including changes during an outstanding query. Persistent live
+tabs and custom library views remain open.
+
 Structured `tkq-1` queries and named saved searches are implemented. The Search
 dialog can search the library database or the current local tab. Opening database
 results uses cached tags and technical information; covers load separately.
@@ -138,6 +142,12 @@ Reference: [desktop integration](feature-matrix.md).
 
 ## 7. Listening history and album-oriented playback
 
+ADR-0204 adds schema-39 storage and repository tests for local listening
+statistics and resume observations. It does not yet collect plays or restore
+playback. Next: qualify occurrence identity and listening thresholds, connect
+the serialized persistence worker, expose statistics, implement opt-in paused
+resume, then album shuffle. Server statistics remain owned by the server.
+
 - [x] Track and album ratings on the shared 0-10 star scale (ADR-0179):
   MPD rating stickers, Melody's native rating commands, and a local
   content-identity store that survives rescans and moves.
@@ -176,8 +186,7 @@ Reference: [verification](playback-library-conversion.md#verification-and-diagno
 These are recorded requirements or proposals, not extra commitments for the
 next release.
 
-- **Workspace:** expose the command palette and shortcut editor; add custom
-  expression columns/grouping and the planned job,
+- **Workspace:** add custom expression columns/grouping and the planned job,
   diagnostic, queue-inspector, and search-editor panels.
 - **Metadata and paths:** possible new versioned sanitization/normalization
   policies (Linux and portable policies are available); richer typed matching;

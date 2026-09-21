@@ -3,13 +3,14 @@
 #pragma once
 
 #include <QDialog>
+#include <QPointer>
 
 class QAction;
 class QDialogButtonBox;
-class QKeySequenceEdit;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPushButton;
 
 namespace trackknife::ui {
 
@@ -19,19 +20,19 @@ class CommandPalette final : public QDialog {
   public:
     explicit CommandPalette(QList<QAction*> actions, QWidget* parent = nullptr);
 
-    static void restoreShortcuts(const QList<QAction*>& actions);
+  protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
     void rebuild();
     void updateSelection();
-    void applyShortcut();
     void runCurrent();
     [[nodiscard]] QAction* currentAction() const;
 
-    QList<QAction*> actions_;
+    QList<QPointer<QAction>> actions_;
     QLineEdit* filter_{nullptr};
     QListWidget* results_{nullptr};
-    QKeySequenceEdit* shortcut_{nullptr};
+    QPushButton* run_{nullptr};
     QLabel* status_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
 };

@@ -6,11 +6,11 @@ Branch: `feature/listening-discovery-autoplaylists`. These are the first three
 priorities from the product assessment, separate from the historical task
 numbers below. The three priorities are not complete.
 
-1. **Listening history, resume, album shuffle:** schema-39 repository support
-   and tests for local play counts, last-played and resume observations are in
-   place (ADR-0204). Next: qualify stable physical/logical source identity,
-   thresholds and retry semantics; connect the playback/persistence workers;
-   expose history; add optional paused resume and album-preserving shuffle.
+1. **Listening history, resume, album shuffle:** local playback now collects
+   qualified listens through the persistence worker, with source identity
+   preserved across app-managed publications and durable event deduplication
+   (ADR-0207, schema 40). Next: expose history; add optional paused resume and
+   album-preserving shuffle. Resume storage exists but is not connected yet.
 2. **Command discovery and staged-operation UX:** the curated command palette
    is available with Ctrl+Shift+P, with Settings retaining shortcut editing
    (ADR-0205). Parameter choices such as device names and numeric ratings are

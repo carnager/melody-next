@@ -147,8 +147,8 @@ struct SavedSearch {
     friend bool operator==(const SavedSearch&, const SavedSearch&) = default;
 };
 
-// Local listening state uses the same metadata-derived track identity as ratings.
-// Paths used as fallbacks for absent tags can change that identity on relocation.
+// Local listening state uses a repository-owned source identity plus decoder
+// selection/range. Verified publications preserve identity (ADR-0207).
 struct LocalListeningHistory {
     std::string track_hash;
     std::uint64_t play_count{0U};
@@ -252,6 +252,12 @@ class ListRepository final {
 
     [[nodiscard]] core::Result<std::optional<LocalListeningHistory>>
     load_local_listening_history(std::string_view track_hash) const;
+    // Resolves a revision-qualified local source; may create its durable identity.
+    [[nodiscard]] core::Result<std::string> local_listening_key(const ListItem& source);
+    // Atomically deduplicates a qualified playback occurrence and increments history.
+    [[nodiscard]] core::Result<void> record_local_listen(const ListItem& source,
+                                                         core::StableId occurrence_id,
+                                                         std::int64_t played_at_ms);
     // Each call records one distinct qualified listen. Callers must serialize
     // delivery and must not retry a write with an ambiguous outcome.
     [[nodiscard]] core::Result<void> record_local_play(std::string_view track_hash,

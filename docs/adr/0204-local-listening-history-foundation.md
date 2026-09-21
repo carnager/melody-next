@@ -5,6 +5,9 @@
 Accepted, 2026-09-21. This is the persistence foundation for roadmap area 7;
 playback observation and user-facing statistics remain in progress.
 
+ADR-0207 now implements observation and supersedes the metadata-derived key
+proposal below with revision-qualified, publication-linked source identity.
+
 ## Decision
 
 Persist local play counts, last-played time, and resume position against the

@@ -142,16 +142,17 @@ Reference: [desktop integration](feature-matrix.md).
 
 ## 7. Listening history and album-oriented playback
 
-ADR-0204 adds schema-39 storage and repository tests for local listening
-statistics and resume observations. It does not yet collect plays or restore
-playback. Next: qualify occurrence identity and listening thresholds, connect
-the serialized persistence worker, expose statistics, implement opt-in paused
-resume, then album shuffle. Server statistics remain owned by the server.
+ADR-0207 collects qualified local listens through the serialized persistence
+worker, deduplicates occurrences durably, and preserves physical/logical
+identity across app-managed publications. Next: expose statistics, implement
+opt-in paused resume, then album shuffle. Resume storage exists but runtime
+resume does not. Server statistics remain owned by the server.
 
 - [x] Track and album ratings on the shared 0-10 star scale (ADR-0179):
   MPD rating stickers, Melody's native rating commands, and a local
   content-identity store that survives rescans and moves.
-- [ ] Play counts and last-played timestamps.
+- [x] Collect local play counts and last-played timestamps (ADR-0207).
+- [ ] Display play counts and last-played timestamps in track views.
 - [x] Ratings as a search target: `rating`/`albumrating` tkq pseudo-fields in
   local queries and saved searches, and Melody rating filter terms in the
   server search box.

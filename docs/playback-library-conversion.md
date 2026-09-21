@@ -337,6 +337,15 @@ metadata or statistics invalidates affected membership incrementally.
 
 ## Playback statistics
 
+**Trackknife decision — implemented collection (ADR-0207):** local playback
+stores a play count and last-played time after advancing through half a track
+or four minutes, whichever is less, for tracks longer than 30 seconds. This
+works without Last.fm or tags. App-managed metadata edits and moves preserve
+history; distinct logical tracks remain separate. External changes are not
+automatically reconciled. History display, statistics queries, resume, and
+album shuffle remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
+for counting, identity, and failure semantics.
+
 Track-owned statistics include play count, first/last played, skip count,
 rating, and optional last position. They bind to stable identity/content rather
 than path alone, survive Trackbench file operations, and are importable/

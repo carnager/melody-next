@@ -212,6 +212,7 @@ class BenchMainWindowTest final : public QObject {
     void followPlaybackAndJumpRespectBrowsing();
     void commandPaletteFindsAndRunsRegisteredActions();
     void commandPaletteTracksAvailabilityAndLifetime();
+    void localListeningCountsPlaybackWithoutLastFm();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
@@ -422,6 +423,87 @@ void BenchMainWindowTest::commandPaletteTracksAvailabilityAndLifetime() {
     QTest::keyClick(filter, Qt::Key_Return);
     QCOMPARE(triggered.count(), 1);
     QVERIFY(!palette.isVisible());
+}
+
+void BenchMainWindowTest::localListeningCountsPlaybackWithoutLastFm() {
+    QTemporaryDir media;
+    const auto file = media.filePath(QStringLiteral("listen.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto path = QFile::encodeName(file).toStdString();
+    const auto revision = core::observe_local_source_revision(path);
+    QVERIFY(revision);
+    BenchMainWindow window;
+    QTRY_VERIFY(window.lists_restored_);
+    window.transport_timer_->stop();
+    audio::LocalAuditionSnapshot sample;
+    sample.raw_path = path;
+    sample.source_revision = *revision;
+    sample.playback_instance = 1;
+    sample.format = formats::PcmFormat{48000, 2, "stereo"};
+    sample.end_sample = 40 * 48000;
+    sample.state = audio::LocalAuditionState::playing;
+    persistence::ListItem source;
+    source.source = persistence::ListSource::local;
+    source.source_reference = path;
+    source.source_revision = *revision;
+    auto repository = persistence::ListRepository::open(window.database_path_);
+    QVERIFY(repository);
+    const auto key = repository->local_listening_key(source);
+    QVERIFY(key);
+    qint64 now = 0;
+    const auto observe = [&](int seconds) {
+        sample.position_sample = seconds * 48000;
+        window.sampleListeningHistory(sample, now, 100000 + now);
+        now += 1000;
+    };
+    const auto count = [&]() -> std::uint64_t {
+        const auto history = repository->load_local_listening_history(*key);
+        return history && *history ? (*history)->play_count : 0;
+    };
+    for (int second = 0; second <= 10; ++second)
+        observe(second);
+    QCOMPARE(count(), 0U);
+    sample.state = audio::LocalAuditionState::paused;
+    for (int n = 0; n < 10; ++n)
+        observe(10);
+    sample.state = audio::LocalAuditionState::playing;
+    observe(10);
+    observe(35); // Seeking forward and backward earns no credit.
+    observe(0);
+    for (int second = 1; second <= 9; ++second)
+        observe(second);
+    QCOMPARE(count(), 0U);
+    observe(10);
+    QTRY_COMPARE(count(), 1U);
+    for (int second = 11; second <= 40; ++second)
+        observe(second);
+    QCOMPARE(count(), 1U);
+    // A repeated occurrence of the exact same source counts independently.
+    ++sample.playback_instance;
+    for (int second = 0; second <= 20; ++second)
+        observe(second);
+    QTRY_COMPARE(count(), 2U);
+    ++sample.playback_instance;
+    sample.output_suspended = true;
+    for (int second = 0; second <= 40; ++second)
+        observe(second);
+    QCOMPARE(count(), 2U);
+    sample.output_suspended = false;
+    ++sample.playback_instance;
+    sample.end_sample = 30 * 48000; // Brief clips are not counted.
+    for (int second = 0; second <= 30; ++second)
+        observe(second);
+    QCOMPARE(count(), 2U);
+    sample.end_sample = 40 * 48000;
+    ++sample.playback_instance;
+    sample.segment = formats::SampleRange{48000, 41 * 48000};
+    source.segment = persistence::ListItemSegment{48000, 41 * 48000};
+    const auto logical_key = repository->local_listening_key(source);
+    QVERIFY(logical_key && logical_key != key);
+    for (int second = 0; second <= 20; ++second)
+        observe(second);
+    QTRY_VERIFY(repository->load_local_listening_history(*logical_key)->has_value());
+    QCOMPARE(count(), 2U);
 }
 
 void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {

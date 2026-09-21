@@ -129,6 +129,71 @@ void local_listening_history_is_monotonic_and_persistent() {
     std::filesystem::remove(path.string() + "-shm", ignored);
 }
 
+void local_listening_occurrences_are_idempotent_and_source_qualified() {
+    namespace persistence = trackknife::persistence;
+    namespace core = trackknife::core;
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("trackbench-occurrences-" + core::StableId::random().to_string() + ".sqlite3");
+    {
+        auto repository = persistence::ListRepository::open(path);
+        require(repository.has_value(), "occurrence database opens");
+        persistence::ListItem source;
+        source.source = persistence::ListSource::local;
+        source.source_reference = std::string{"/music/raw-"} + char(0xff) + ".flac";
+        source.source_revision = core::LocalSourceRevision{.device = 1, .inode = 2, .size = 3};
+        const auto key = repository->local_listening_key(source);
+        require(key.has_value(), "raw-byte source has a stable key without tags");
+        require(repository->save_local_resume(*key, 1234, 900).has_value(),
+                "resume fixture stored");
+        const auto event = core::StableId::random();
+        require(repository->record_local_listen(source, event, 1000).has_value(),
+                "first event counts");
+        require(repository->record_local_listen(source, event, 1000).has_value(),
+                "replay succeeds");
+        require(!repository->record_local_listen(source, event, 2000),
+                "different replay is rejected");
+        auto other = persistence::ListRepository::open(path);
+        require(other && other->record_local_listen(source, event, 1000),
+                "restart replay succeeds");
+        auto history = other->load_local_listening_history(*key);
+        require(history && *history && (*history)->play_count == 1, "retries cannot double count");
+        require((*history)->resume_position_ms == 1234,
+                "qualification does not imply completion or erase resume state");
+        require(other->record_local_listen(source, core::StableId::random(), 2000).has_value(),
+                "a separate occurrence counts again");
+        history = repository->load_local_listening_history(*key);
+        require(history && *history && (*history)->play_count == 2 &&
+                    (*history)->last_played_ms == 2000,
+                "independent connections see durable counts");
+        auto logical = source;
+        logical.segment = persistence::ListItemSegment{0, 44100};
+        const auto logical_key = repository->local_listening_key(logical);
+        require(logical_key && logical_key != key, "logical range differs from whole file");
+        logical.segment = persistence::ListItemSegment{44100, 88200};
+        require(repository->local_listening_key(logical) != logical_key,
+                "CUE ranges stay separate");
+        logical = source;
+        logical.source_selection = persistence::ListItemSourceSelection{1, 2};
+        require(repository->local_listening_key(logical) != key,
+                "decoder selections stay separate");
+        auto replacement = source;
+        ++replacement.source_revision->inode;
+        require(repository->local_listening_key(replacement) != key,
+                "reused paths do not inherit counts");
+        replacement.source = persistence::ListSource::mpd;
+        require(!repository->record_local_listen(replacement, core::StableId::random(), 3000),
+                "server sources cannot write local history");
+        replacement = source;
+        replacement.source_revision.reset();
+        require(!repository->local_listening_key(replacement), "revisionless sources are rejected");
+        require(!repository->record_local_listen(source, {}, 3000), "nil occurrence rejected");
+    }
+    std::filesystem::remove(path);
+    std::filesystem::remove(path.string() + "-wal");
+    std::filesystem::remove(path.string() + "-shm");
+}
+
 void list_documents_round_trip_transactionally() {
     namespace persistence = trackknife::persistence;
     const auto database_path = std::filesystem::temp_directory_path() /
@@ -234,7 +299,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 39U, "state repository schema must be explicit");
+        require(repository.schema_version() == 40U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -613,7 +678,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 39U,
+        require(repository.schema_version() == 40U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -952,12 +1017,16 @@ void committed_metadata_refreshes_every_occurrence_idempotently() {
         auto repository = std::move(*opened);
         require(repository.replace_all(stale_documents).has_value(),
                 "provenance-aware list snapshots must persist");
+        const auto history_key = repository.local_listening_key(stale_documents[0].items[0]);
+        require(history_key.has_value(), "pre-edit source has history identity");
         const auto applied = repository.refresh_local_metadata(refresh);
         require(applied == persistence::LocalMetadataRefreshResult{.affected_occurrences = 3U,
                                                                    .already_applied = false},
                 "one transaction must refresh every duplicate and logical occurrence");
         auto loaded = repository.load_all();
         require(loaded.has_value(), "refreshed list state must load");
+        require(repository.local_listening_key((*loaded)[0].items[0]) == history_key,
+                "retagging preserves history identity in the same transaction");
         const auto& whole_fields = (*loaded)[0].items[0].fields;
         require(whole_fields.size() == 4U && whole_fields[0].value == "New embedded" &&
                     whole_fields[1].value == "Alternate title" &&
@@ -1192,6 +1261,11 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
             "relocation fixture must own a durable source cache");
     auto stale_snapshot = repository.load_all();
     require(stale_snapshot.has_value(), "pre-relocation snapshot must load");
+    const auto listen_source = (*stale_snapshot)[0].items[0];
+    const auto listen_key = repository.local_listening_key(listen_source);
+    const auto listen_event = core::StableId::random();
+    require(listen_key && repository.record_local_listen(listen_source, listen_event, 1000),
+            "history exists before relocation");
     for (auto& document : *stale_snapshot) {
         for (auto& item : document.items) {
             if (item.source != persistence::ListSource::local || item.source_reference != source) {
@@ -1232,6 +1306,10 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
             "one transaction must re-key every duplicate and refresh the destination cache");
     auto loaded = repository.load_all();
     require(loaded.has_value(), "relocated documents must load");
+    require(repository.local_listening_key((*loaded)[0].items[0]) == listen_key,
+            "combined rename and metadata publication preserves history identity");
+    require(repository.record_local_listen((*loaded)[0].items[0], listen_event, 1000).has_value(),
+            "replay through the new path cannot count twice");
     require((*loaded)[0].items[0].source_reference == middle &&
                 (*loaded)[0].items[1].source_reference == middle &&
                 (*loaded)[1].items[0].source_reference == middle &&
@@ -1291,6 +1369,12 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 (*loaded)[0].items[0].source_revision == copied_again &&
                 (*loaded)[0].items[0].fields.front().value == "After combined publication",
             "relocation replay must follow the ordered source-to-target chain");
+    require(repository.local_listening_key((*loaded)[0].items[0]) == listen_key &&
+                repository.local_listening_key(listen_source) == listen_key,
+            "multi-step moves retain both current and delayed-observation identity");
+    auto listen_history = repository.load_local_listening_history(*listen_key);
+    require(listen_history && *listen_history && (*listen_history)->play_count == 1,
+            "renames preserve accumulated counts");
 
     const core::LocalSourceRevision reused_path_revision{.device = 90,
                                                          .inode = 91,
@@ -1330,7 +1414,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 39U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 40U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1658,6 +1742,7 @@ void legacy_logical_snapshots_block_refresh() {
 int main() {
     saved_searches_are_persistent_and_conflict_checked();
     local_listening_history_is_monotonic_and_persistent();
+    local_listening_occurrences_are_idempotent_and_source_qualified();
     list_documents_round_trip_transactionally();
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();

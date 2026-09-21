@@ -10,11 +10,13 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/melody_agent.hpp"
 #include "uicommon/line_slider.hpp"
+#include "uicommon/list_persistence_service.hpp"
 
 #include "uicommon/track_row_roles.hpp"
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -1273,6 +1275,43 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
         view->setFocus(Qt::ShortcutFocusReason);
 }
 
+void BenchMainWindow::sampleListeningHistory(const audio::LocalAuditionSnapshot& snapshot,
+                                             const qint64 monotonic_ms, const qint64 wall_ms) {
+    const bool qualified_source = !snapshot.raw_path.empty() && snapshot.source_revision &&
+                                  snapshot.playback_instance != 0 && snapshot.format &&
+                                  snapshot.format->sample_rate > 0;
+    const auto identity =
+        qualified_source ? std::to_string(snapshot.playback_instance) : std::string{};
+    const double rate = qualified_source ? snapshot.format->sample_rate : 1;
+    const double duration = qualified_source && snapshot.end_sample
+                                ? static_cast<double>(*snapshot.end_sample) / rate
+                                : 0;
+    const double position =
+        qualified_source ? static_cast<double>(snapshot.position_sample) / rate : 0;
+    const bool playing = qualified_source &&
+                         (snapshot.state == audio::LocalAuditionState::playing ||
+                          snapshot.state == audio::LocalAuditionState::draining) &&
+                         snapshot.output_target_available && !snapshot.output_suspended;
+    if (!local_listen_accounting_.observe(identity, duration, position, playing, monotonic_ms) ||
+        !persistence_)
+        return;
+    persistence::ListItem source;
+    source.source = persistence::ListSource::local;
+    source.source_reference = snapshot.raw_path;
+    source.source_revision = snapshot.source_revision;
+    source.source_selection = persistence::ListItemSourceSelection{
+        snapshot.selection.stream_index, snapshot.selection.subsong_index};
+    if (snapshot.segment)
+        source.segment = persistence::ListItemSegment{snapshot.segment->start_sample,
+                                                      snapshot.segment->end_sample};
+    persistence_->recordLocalListen(
+        std::move(source), core::StableId::random(), wall_ms, [this](const QString& error) {
+            if (!error.isEmpty())
+                statusBar()->showMessage(
+                    QStringLiteral("Could not save listening history: %1").arg(error), 10000);
+        });
+}
+
 void BenchMainWindow::refreshTransport() {
     refreshPlaybackCursor();
     if (player_ == nullptr) {
@@ -1291,6 +1330,10 @@ void BenchMainWindow::refreshTransport() {
     }
     const auto snapshot = player_->snapshot();
     sampleLastFm(snapshot);
+    if (!local_history_clock_.isValid())
+        local_history_clock_.start();
+    sampleListeningHistory(snapshot, local_history_clock_.elapsed(),
+                           QDateTime::currentMSecsSinceEpoch());
     // Observable for offscreen tests and diagnostics.
     setProperty("trackknife-player-state", static_cast<int>(snapshot.state));
 

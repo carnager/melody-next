@@ -10,6 +10,7 @@
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
+#include "trackknife/core/listen_accounting.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
 #include "trackknife/operations/file_publication.hpp"
@@ -717,6 +718,10 @@ class BenchMainWindow final : public QMainWindow {
     qint64 lastfm_sample_time_{-1000};
     void buildLastFm();
     void sampleLastFm(const audio::LocalAuditionSnapshot& snapshot);
+    core::ListenAccounting local_listen_accounting_;
+    QElapsedTimer local_history_clock_;
+    void sampleListeningHistory(const audio::LocalAuditionSnapshot& snapshot, qint64 monotonic_ms,
+                                qint64 wall_ms);
     QWidget* buildLastFmSettings(QWidget* parent);
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.

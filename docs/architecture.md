@@ -562,6 +562,12 @@ Stock MPD never runs an emulated client-owned progression scheduler.
 
 ## Last.fm (ADR-0197)
 
+ADR-0207 also uses the pure accounting primitive for independent local listening
+history. Only qualified occurrences cross the existing serialized persistence
+worker; schema-40 source identities follow verified publications in the same
+transaction as lists and caches. Collection does not depend on Last.fm accounts
+and does not observe the Melody endpoint or MPD transport.
+
 Qt-free `core::ListenAccounting` consumes occurrence identity, position, playing
 state, and monotonic samples. The local audio worker publishes a playback
 instance on loads and gapless handoffs. Trackbench forwards only local-player

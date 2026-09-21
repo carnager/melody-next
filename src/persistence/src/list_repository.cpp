@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/core/sha256.hpp"
 #include "trackknife/core/unicode.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -24,7 +25,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 39U;
+constexpr unsigned current_schema_version = 40U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -102,6 +103,51 @@ using Statement = std::unique_ptr<sqlite3_stmt, StatementDeleter>;
     const auto size = sqlite3_column_bytes(statement, column);
     const auto* data = reinterpret_cast<const char*>(sqlite3_column_text(statement, column));
     return data == nullptr || size <= 0 ? std::string{} : std::string{data, data + size};
+}
+
+std::string listening_observation(const std::string_view path,
+                                  const core::LocalSourceRevision& revision) {
+    // The path is length-prefixed raw bytes, never decoded or normalized.
+    return core::sha256_hex(std::to_string(path.size()) + ":" + std::string{path} + ":" +
+                            std::to_string(revision.device) + ":" + std::to_string(revision.inode) +
+                            ":" + std::to_string(revision.size) + ":" +
+                            std::to_string(revision.modification_time_seconds) + ":" +
+                            std::to_string(revision.modification_time_nanoseconds));
+}
+
+core::Result<std::string> listening_source(sqlite3* database, const std::string& observation,
+                                           const std::optional<std::string>& desired = {}) {
+    auto insert =
+        prepare(database, "INSERT INTO local_listening_sources(observation_hash,source_id) "
+                          "VALUES(?,?) ON CONFLICT(observation_hash) DO NOTHING");
+    const auto id = desired ? *desired : core::StableId::random().to_string();
+    if (!insert || !bind_text(insert->get(), 1, observation) || !bind_text(insert->get(), 2, id) ||
+        sqlite3_step(insert->get()) != SQLITE_DONE)
+        return std::unexpected(database_error(database, "Could not store listening identity"));
+    auto query =
+        prepare(database, "SELECT source_id FROM local_listening_sources WHERE observation_hash=?");
+    if (!query || !bind_text(query->get(), 1, observation) ||
+        sqlite3_step(query->get()) != SQLITE_ROW)
+        return std::unexpected(database_error(database, "Could not resolve listening identity"));
+    auto resolved = column_text(query->get(), 0);
+    if (desired && resolved != *desired)
+        return std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                           .message = "Conflicting listening source identity",
+                                           .context = {}});
+    return resolved;
+}
+
+core::Result<void> link_listening_source(sqlite3* database, const std::string_view previous_path,
+                                         const core::LocalSourceRevision& previous,
+                                         const std::string_view published_path,
+                                         const core::LocalSourceRevision& published) {
+    auto id = listening_source(database, listening_observation(previous_path, previous));
+    if (!id)
+        return std::unexpected(std::move(id.error()));
+    auto linked = listening_source(database, listening_observation(published_path, published), *id);
+    if (!linked)
+        return std::unexpected(std::move(linked.error()));
+    return {};
 }
 
 [[nodiscard]] std::string encode_unsigned(const std::uint64_t value) {
@@ -1136,6 +1182,24 @@ CREATE TABLE local_listening_history (
 CREATE INDEX local_listening_history_last_played
     ON local_listening_history(last_played_ms DESC);
 UPDATE schema_version SET version = 39;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 39) {
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE local_listening_sources (
+    observation_hash TEXT PRIMARY KEY NOT NULL,
+    source_id TEXT NOT NULL
+);
+CREATE TABLE local_listening_occurrences (
+    occurrence_id TEXT PRIMARY KEY NOT NULL,
+    track_hash TEXT NOT NULL,
+    played_at_ms INTEGER NOT NULL CHECK(played_at_ms > 0)
+);
+UPDATE schema_version SET version = 40;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();
@@ -2266,6 +2330,13 @@ ListRepository::refresh_local_metadata(const LocalMetadataRefresh& refresh) {
         rollback();
         return std::unexpected(std::move(error));
     }
+    if (auto linked =
+            link_listening_source(database, refresh.source_reference, refresh.previous_revision,
+                                  refresh.source_reference, refresh.published_revision);
+        !linked) {
+        rollback();
+        return std::unexpected(std::move(linked.error()));
+    }
     if (occurrences.empty()) {
         // A mapped-file editor need not create a list occurrence. There is no
         // list snapshot to reconcile or record, but the optional library may
@@ -3092,6 +3163,13 @@ ListRepository::relocate_local_source(const LocalSourceRelocation& relocation) {
         !result) {
         rollback();
         return std::unexpected(std::move(result.error()));
+    }
+    if (auto linked = link_listening_source(
+            database, relocation.source_reference, relocation.previous_revision,
+            relocation.target_reference, relocation.published_revision);
+        !linked) {
+        rollback();
+        return std::unexpected(std::move(linked.error()));
     }
     if (auto committed = execute(database, "COMMIT"); !committed) {
         rollback();
@@ -4640,6 +4718,96 @@ core::Result<void> ListRepository::remove_search(const SavedSearch& expected) {
             .context = {}});
     }
     return {};
+}
+
+core::Result<std::string> ListRepository::local_listening_key(const ListItem& source) {
+    if (source.source != ListSource::local || source.source_reference.empty() ||
+        source.source_reference.find('\0') != std::string::npos || !source.source_revision ||
+        source.source_revision->inode == 0 ||
+        (source.segment && (source.segment->start_sample < 0 ||
+                            (source.segment->end_sample &&
+                             *source.segment->end_sample <= source.segment->start_sample))) ||
+        (source.source_selection && (source.source_selection->audio_stream_index.value_or(0) < 0 ||
+                                     source.source_selection->subsong_index.value_or(0) < 0))) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "Listening history requires a qualified local source",
+                        .context = {}});
+    }
+    auto id =
+        listening_source(implementation_->database,
+                         listening_observation(source.source_reference, *source.source_revision));
+    if (!id)
+        return std::unexpected(std::move(id.error()));
+    const auto number = [](const auto& value) {
+        return value ? std::to_string(*value) : std::string{"default"};
+    };
+    const auto selection = source.source_selection.value_or(ListItemSourceSelection{});
+    // Identity follows playable content, not a CUE filename or list occurrence.
+    const auto range = source.segment ? std::to_string(source.segment->start_sample) + ":" +
+                                            number(source.segment->end_sample)
+                                      : std::string{"whole"};
+    return core::sha256_hex("local-listen-1:" + *id + ":" + number(selection.audio_stream_index) +
+                            ":" + number(selection.subsong_index) + ":" + range);
+}
+
+core::Result<void> ListRepository::record_local_listen(const ListItem& source,
+                                                       const core::StableId occurrence_id,
+                                                       const std::int64_t played_at_ms) {
+    if (occurrence_id.is_nil() || played_at_ms <= 0)
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "A listen requires an occurrence and timestamp",
+                        .context = {}});
+    auto* database = implementation_->database;
+    if (auto begun = execute(database, "BEGIN IMMEDIATE"); !begun)
+        return begun;
+    const auto finish = [database](core::Result<void> result) {
+        if (result)
+            result = execute(database, "COMMIT");
+        if (!result)
+            static_cast<void>(execute(database, "ROLLBACK"));
+        return result;
+    };
+    auto key = local_listening_key(source);
+    if (!key)
+        return finish(std::unexpected(std::move(key.error())));
+    auto event = prepare(
+        database, "INSERT INTO local_listening_occurrences(occurrence_id,track_hash,played_at_ms) "
+                  "VALUES(?,?,?) ON CONFLICT(occurrence_id) DO NOTHING");
+    if (!event || !bind_text(event->get(), 1, occurrence_id.to_string()) ||
+        !bind_text(event->get(), 2, *key) ||
+        sqlite3_bind_int64(event->get(), 3, played_at_ms) != SQLITE_OK ||
+        sqlite3_step(event->get()) != SQLITE_DONE)
+        return finish(
+            std::unexpected(database_error(database, "Could not store listening occurrence")));
+    if (sqlite3_changes(database) != 0) {
+        // Qualification can occur halfway through a track. It is not completion
+        // and must not clear a saved resume position.
+        auto increment = prepare(
+            database,
+            "INSERT INTO local_listening_history(track_hash,play_count,last_played_ms) "
+            "VALUES(?,1,?) ON CONFLICT(track_hash) DO UPDATE SET "
+            "play_count=play_count+1,last_played_ms=max(last_played_ms,excluded.last_played_ms)");
+        if (!increment || !bind_text(increment->get(), 1, *key) ||
+            sqlite3_bind_int64(increment->get(), 2, played_at_ms) != SQLITE_OK)
+            return finish(
+                std::unexpected(database_error(database, "Could not bind qualified listen")));
+        return finish(step_done(database, increment->get(), "Could not count qualified listen"));
+    }
+    auto existing =
+        prepare(database, "SELECT track_hash,played_at_ms FROM local_listening_occurrences "
+                          "WHERE occurrence_id=?");
+    if (!existing || !bind_text(existing->get(), 1, occurrence_id.to_string()) ||
+        sqlite3_step(existing->get()) != SQLITE_ROW)
+        return finish(
+            std::unexpected(database_error(database, "Could not read listening occurrence")));
+    if (column_text(existing->get(), 0) != *key ||
+        sqlite3_column_int64(existing->get(), 1) != played_at_ms)
+        return finish(std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                                  .message = "Listening occurrence replay differs",
+                                                  .context = {}}));
+    return finish({});
 }
 
 core::Result<std::optional<LocalListeningHistory>>

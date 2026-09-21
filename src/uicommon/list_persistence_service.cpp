@@ -235,6 +235,40 @@ void ListPersistenceService::backupDatabase(std::filesystem::path destination,
     });
 }
 
+void ListPersistenceService::recordLocalListen(persistence::ListItem source,
+                                               core::StableId occurrence_id,
+                                               std::int64_t played_at_ms,
+                                               CompletionCallback callback) {
+    if (pending_listens_ >= 16) {
+        if (callback)
+            callback(QStringLiteral("Listening history is busy; this listen was not saved."));
+        return;
+    }
+    ++pending_listens_;
+    const QPointer self{this};
+    invokeQueued(worker_, [self, state = state_, source = std::move(source), occurrence_id,
+                           played_at_ms, callback = std::move(callback)]() mutable {
+        QString error = state->initialization_error;
+        if (error.isEmpty() && !state->repository)
+            error = QStringLiteral("Listening history persistence is not initialized");
+        else if (error.isEmpty()) {
+            auto stored =
+                state->repository->record_local_listen(source, occurrence_id, played_at_ms);
+            if (!stored)
+                error = errorText(stored.error());
+        }
+        if (!self)
+            return;
+        invokeQueued(self, [self, callback = std::move(callback), error]() mutable {
+            if (!self)
+                return;
+            --self->pending_listens_;
+            if (callback)
+                callback(error);
+        });
+    });
+}
+
 void ListPersistenceService::loadMetadataTransformationChains(
     TransformationChainsCallback callback) {
     const QPointer self{this};

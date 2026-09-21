@@ -48,13 +48,17 @@ the panel explains that it does not support this separate request queue.
 
 Pending local requests are stored on the workspace persistence worker, including
 raw path bytes, logical source ranges, and metadata. Restore never starts audio
-by itself. An interrupted request is restored for replay from its beginning.
+by itself. With Settings → Playback → Restore local track and position enabled,
+an interrupted request is restored paused at its saved position, after validating
+the file revision (ADR-0211). Otherwise it remains pending for replay from the
+beginning. Changed or missing files produce an error instead of playing a replacement.
 A saved normal-list anchor is used only if its list and source still match;
 otherwise no unrelated list is chosen. Closing a local source tab during a
 request retains its playback model for the running session, without a hidden
 view. That deliberately closed list is not reopened on restart.
 
 Melody persists occurrence IDs and its return candidates with its queue state.
+Its paused restart resume also restores the exact active request's saved offset.
 Concurrent edits use revision checks; an uncertain network mutation is never
 silently replayed. Undo is one pending edit, becomes unavailable after playback
 advances or another server queue edit invalidates its revision, and does not

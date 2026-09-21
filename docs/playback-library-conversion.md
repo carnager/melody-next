@@ -360,8 +360,9 @@ for counting, identity, and failure semantics.
 opt-in restoration of the local list track and position on startup, paused and
 without opening an audio output until Play. Checkpoints are saved every five
 seconds and on orderly close. Missing, changed, or mismatched sources are not
-restored. Closed-list tracks and interrupted Up Next requests do not yet restore
-their position. Melody owns its independent server restart resume; connecting
+restored. ADR-0211 also restores interrupted Up Next requests paused in both
+authorities; closed-list normal playback remains unsupported. Melody owns its
+independent server restart resume; connecting
 Trackbench never seeks or pauses server playback. Stock MPD is left unchanged.
 
 Track-owned statistics include play count, first/last played, skip count,

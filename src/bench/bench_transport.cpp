@@ -1064,14 +1064,15 @@ BenchMainWindow::adjacentPlaybackRow(const int direction) {
     return std::make_pair(*adjacent, tab->model->source(*adjacent));
 }
 
-void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry) {
+void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry,
+                                        bool restoring) {
     if (std::ranges::none_of(local_requests_.pending(),
                              [&](const auto& pending) { return pending.id == entry.id; }))
         statusBar()->showMessage(
             QStringLiteral(
                 "This request was already handed to the player; your queue edits apply next."),
             5000);
-    if (!local_requests_.active()) {
+    if (!local_requests_.active() && !restoring) {
         request_return_index_ = QPersistentModelIndex{};
         const auto next = adjacentPlaybackRow(1);
         if (auto* tab = tabForDocument(playback_document_id_); tab && next)
@@ -1091,15 +1092,22 @@ void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entr
     refreshUpNext();
 }
 
-bool BenchMainWindow::playLocalRequest() {
+bool BenchMainWindow::playLocalRequest(std::optional<std::int64_t> restore_position_ms) {
     if (!player_ || local_requests_.pending().empty())
         return false;
     const auto entry = local_requests_.pending().front();
+    ++resume_intent_generation_;
+    if (restore_position_ms && !entry.source.source_revision)
+        return false;
     LocalTrackSource source{entry.source.raw_path, entry.source.selection, entry.source.segment};
     auto result =
-        load_and_play(*player_, source, local_replay_gain_override(*up_next_local_model_, 0));
+        restore_position_ms
+            ? player_->restore_paused(source.raw_path, *entry.source.source_revision,
+                                      source.selection, source.segment, *restore_position_ms,
+                                      local_replay_gain_override(*up_next_local_model_, 0))
+            : load_and_play(*player_, source, local_replay_gain_override(*up_next_local_model_, 0));
     if (result) {
-        adoptLocalRequest(entry);
+        adoptLocalRequest(entry, restore_position_ms.has_value());
         advance_pending_ = true;
     } else
         statusBar()->showMessage(

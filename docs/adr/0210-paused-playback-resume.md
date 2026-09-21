@@ -27,6 +27,9 @@ Stock MPD has no client-emulated restart restoration.
 
 ## Scope and limitations
 
+Update: ADR-0211 supersedes the interrupted Up Next limitation below for both
+authorities. Closed-list normal playback remains outside local resume.
+
 Local resume requires an open, persisted list occurrence. Closed-list playback
 and interrupted Up Next request positions remain unsupported. Melody also does
 not restore the offset of an active Up Next request. This does not complete the

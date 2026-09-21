@@ -41,6 +41,10 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     if (snapshot.state == audio::LocalAuditionState::loading)
         return;
     resume_save_clock_.start();
+    // Keep an active request's offset in the same payload as its exact source
+    // and pending FIFO, never in the normal-list checkpoint.
+    if (local_requests_.active())
+        persistUpNext();
     std::optional<ui::LocalResumeCheckpoint> checkpoint;
     const bool resumable = snapshot.state == audio::LocalAuditionState::paused ||
                            snapshot.state == audio::LocalAuditionState::playing ||
@@ -75,7 +79,8 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
 }
 
 void BenchMainWindow::restoreLocalResume() {
-    if (!persistence_ || !player_ || !resumeEnabled()) {
+    if (!persistence_ || !player_ || !resumeEnabled() ||
+        player_->snapshot().state != audio::LocalAuditionState::empty) {
         resume_restore_pending_ = false;
         return;
     }

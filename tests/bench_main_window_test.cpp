@@ -218,6 +218,8 @@ class BenchMainWindowTest final : public QObject {
     void localListeningColumnsLoadRefreshAndRespectAuthority();
     void melodyListeningColumnsRequireCapability();
     void localPlaybackRestoresPausedWithoutOutput();
+    void localRequestRestoresPaused_data();
+    void localRequestRestoresPaused();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -616,6 +618,89 @@ void BenchMainWindowTest::melodyListeningColumnsRequireCapability() {
                                 window.mpd_view_layout_);
     QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
     controller->connected_ = false;
+}
+
+void BenchMainWindowTest::localRequestRestoresPaused_data() {
+    QTest::addColumn<bool>("consume");
+    QTest::addColumn<bool>("enabled");
+    QTest::addColumn<bool>("changed");
+    QTest::addColumn<int>("pending_count");
+    QTest::newRow("duplicate-request") << false << true << false << 1;
+    QTest::newRow("consumed-anchor") << true << true << false << 1;
+    QTest::newRow("disabled") << false << false << false << 1;
+    QTest::newRow("changed-source") << false << true << true << 1;
+    QTest::newRow("full-pending-queue") << false << true << false << 500;
+}
+
+void BenchMainWindowTest::localRequestRestoresPaused() {
+    QFETCH(bool, consume);
+    QFETCH(bool, enabled);
+    QFETCH(bool, changed);
+    QFETCH(int, pending_count);
+    QTemporaryDir media;
+    const auto file = media.filePath(QStringLiteral("request.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto path = QFile::encodeName(file).toStdString();
+    const auto revision = core::observe_local_source_revision(path);
+    QVERIFY(revision);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), true);
+    {
+        BenchMainWindow window;
+        QTRY_VERIFY(window.up_next_restored_ && !window.resume_restore_pending_);
+        auto* tab = window.currentListTab();
+        QVERIFY(tab);
+        LocalTrackRow row;
+        row.raw_path = path;
+        row.source_revision = *revision;
+        row.probed = true;
+        tab->model->replaceRows({row, row});
+        window.playRow(*tab, 0, 0);
+        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
+        window.request_return_index_ = tab->model->index(1, 0);
+        window.enqueueLocalRequests({row});
+        QVERIFY(window.playLocalRequest(20));
+        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
+        window.enqueueLocalRequests(
+            std::vector<LocalTrackRow>(static_cast<std::size_t>(pending_count), row));
+        if (consume) {
+            window.local_consume_ = 1;
+            window.consumePlaybackRow(*tab, window.playback_index_);
+            QCOMPARE(tab->model->rowCount(), 1);
+        }
+        QCOMPARE(window.local_requests_.pending().size(), static_cast<std::size_t>(pending_count));
+        window.close();
+    }
+    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), enabled);
+    if (changed) {
+        QFile altered(file);
+        QVERIFY(altered.open(QIODevice::Append));
+        QCOMPARE(altered.write("x"), 1);
+        altered.close();
+    }
+    {
+        BenchMainWindow window;
+        QTRY_VERIFY(window.up_next_restored_ && !window.resume_restore_pending_);
+        if (!enabled) {
+            QCOMPARE(window.player_->snapshot().state, audio::LocalAuditionState::empty);
+            QVERIFY(!window.local_requests_.active());
+            QCOMPARE(window.local_requests_.pending().size(),
+                     static_cast<std::size_t>(pending_count + 1));
+        } else {
+            QTRY_COMPARE(window.player_->snapshot().state, changed
+                                                               ? audio::LocalAuditionState::failed
+                                                               : audio::LocalAuditionState::paused);
+            QVERIFY(window.local_requests_.active());
+            QCOMPARE(window.local_requests_.pending().size(),
+                     static_cast<std::size_t>(pending_count));
+            QCOMPARE(window.local_requests_.active()->source.raw_path, path);
+            QCOMPARE(window.request_return_index_.row(), consume ? 0 : 1);
+            if (!changed)
+                QCOMPARE(window.player_->snapshot().position_sample, 882);
+            QCOMPARE(window.player_->snapshot().output.state,
+                     audio::PipeWireOutputState::unconnected);
+        }
+        window.close();
+    }
 }
 
 void BenchMainWindowTest::localPlaybackRestoresPausedWithoutOutput() {

@@ -19,7 +19,9 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-21, through ADR-0210 and database schema 40.
+Updated on 2026-09-22, through ADR-0211 and database schema 40.
+
+- [ADR-0211: Interrupted request resume](adr/0211-interrupted-request-resume.md).
 
 - [ADR-0210: Paused playback resume](adr/0210-paused-playback-resume.md).
 

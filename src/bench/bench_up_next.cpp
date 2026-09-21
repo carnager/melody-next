@@ -2,8 +2,10 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/settings_dialog.hpp"
 #include "quick/mpd_probe_controller.hpp"
 #include "quick/mpd_queue_model.hpp"
+#include "trackknife/audio/local_audition.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include <QDockWidget>
@@ -14,6 +16,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
+#include <QScopeGuard>
 #include <QSettings>
 #include <QStatusBar>
 #include <QToolBar>
@@ -23,6 +26,18 @@
 #include <numeric>
 
 namespace trackknife::bench {
+namespace {
+QJsonArray continuationIdentity(const LocalTrackRow& row) {
+    const auto number = [](const auto& value) {
+        return value ? QString::number(*value) : QStringLiteral("none");
+    };
+    return {QString::fromLatin1(QByteArray::fromStdString(row.raw_path).toBase64()),
+            number(row.selection.stream_index), number(row.selection.subsong_index),
+            row.segment ? QString::number(row.segment->start_sample) : QStringLiteral("none"),
+            row.segment ? number(row.segment->end_sample) : QStringLiteral("none")};
+}
+} // namespace
+
 void BenchMainWindow::buildUpNext() {
     const auto visible = QSettings{}.value(QStringLiteral("up-next/visible"), false).toBool();
     auto* panel = new AnimatedPanelDock(QStringLiteral("Up Next"), QStringLiteral("up-next"), this);
@@ -562,6 +577,35 @@ void BenchMainWindow::persistUpNext() {
     };
     if (local_requests_.active())
         append(local_requests_.active()->source);
+    if (local_requests_.active() && player_ &&
+        QSettings{}.value(QLatin1String(SettingsDialog::restore_playback_key), false).toBool()) {
+        const auto snapshot = player_->snapshot();
+        const auto& source = local_requests_.active()->source;
+        if ((snapshot.state == audio::LocalAuditionState::paused ||
+             snapshot.state == audio::LocalAuditionState::playing ||
+             snapshot.state == audio::LocalAuditionState::buffering ||
+             snapshot.state == audio::LocalAuditionState::draining) &&
+            snapshot.raw_path == source.raw_path && snapshot.selection == source.selection &&
+            snapshot.chain_transitions == last_chain_transitions_ &&
+            snapshot.segment == source.segment && snapshot.source_revision && snapshot.format &&
+            snapshot.format->sample_rate > 0 && snapshot.position_sample >= 0 &&
+            (!snapshot.end_sample || snapshot.position_sample < *snapshot.end_sample)) {
+            const auto& revision = *snapshot.source_revision;
+            const auto rate = snapshot.format->sample_rate;
+            auto item = rows[0].toObject();
+            item[QStringLiteral("resume")] = QJsonObject{
+                {QStringLiteral("version"), 1},
+                {QStringLiteral("position"),
+                 QString::number(snapshot.position_sample / rate * 1000 +
+                                 snapshot.position_sample % rate * 1000 / rate)},
+                {QStringLiteral("revision"),
+                 QJsonArray{QString::number(revision.device), QString::number(revision.inode),
+                            QString::number(revision.size),
+                            QString::number(revision.modification_time_seconds),
+                            QString::number(revision.modification_time_nanoseconds)}}};
+            rows[0] = item;
+        }
+    }
     for (const auto& entry : local_requests_.pending())
         append(entry.source);
     QJsonObject state{
@@ -571,6 +615,14 @@ void BenchMainWindow::persistUpNext() {
         {QStringLiteral("row"), playback_index_.isValid() ? playback_index_.row() : -1}};
     state[QStringLiteral("anchor")] =
         QString::fromLatin1(QByteArray::fromStdString(playback_source_.raw_path).toBase64());
+    if (request_return_index_.isValid()) {
+        if (auto* tab = tabForDocument(playback_document_id_);
+            tab && request_return_index_.model() == tab->model) {
+            state[QStringLiteral("returnRow")] = request_return_index_.row();
+            state[QStringLiteral("returnSource")] = continuationIdentity(
+                tab->model->rows().at(static_cast<std::size_t>(request_return_index_.row())));
+        }
+    }
     persistence_->saveUiState(
         QStringLiteral("playback/up-next/v1"), QJsonDocument(state).toJson(QJsonDocument::Compact),
         [this](QString error) {
@@ -583,8 +635,18 @@ void BenchMainWindow::persistUpNext() {
 void BenchMainWindow::restoreUpNext() {
     if (!persistence_)
         return;
-    persistence_->loadUiState(QStringLiteral("playback/up-next/v1"), [this](QByteArray payload,
-                                                                            QString error) {
+    const auto generation = resume_intent_generation_;
+    const auto request_revision = local_requests_.revision();
+    persistence_->loadUiState(QStringLiteral("playback/up-next/v1"), [this, generation,
+                                                                      request_revision](
+                                                                         QByteArray payload,
+                                                                         QString error) {
+        const auto finish = qScopeGuard([this, generation] {
+            if (resume_restore_pending_ && generation == resume_intent_generation_)
+                restoreLocalResume();
+            else
+                resume_restore_pending_ = false;
+        });
         if (!error.isEmpty()) {
             statusBar()->showMessage(error, 5000);
             return;
@@ -598,14 +660,49 @@ void BenchMainWindow::restoreUpNext() {
                 return;
             }
             std::vector<LocalTrackRow> rows;
+            if (state.value(QStringLiteral("rows")).toArray().size() >
+                static_cast<qsizetype>(audio::RequestQueue<LocalTrackRow>::limit + 1)) {
+                statusBar()->showMessage(
+                    tr("Saved Up Next exceeds the queue limit; it has been preserved."), 8000);
+                return;
+            }
+            std::optional<std::int64_t> resume_position;
+            bool first = true;
             for (const auto& value : state.value(QStringLiteral("rows")).toArray()) {
                 const auto item = value.toObject();
+                const bool was_first = std::exchange(first, false);
                 LocalTrackRow row;
                 row.raw_path =
                     QByteArray::fromBase64(item.value(QStringLiteral("path")).toString().toLatin1())
                         .toStdString();
                 if (row.raw_path.empty())
                     continue;
+                if (was_first) {
+                    const auto resume = item.value(QStringLiteral("resume")).toObject();
+                    const auto revision = resume.value(QStringLiteral("revision")).toArray();
+                    bool valid = false;
+                    const auto position =
+                        resume.value(QStringLiteral("position")).toString().toLongLong(&valid);
+                    if (resume.value(QStringLiteral("version")).toInt() == 1 && valid &&
+                        position >= 0 && position <= 365LL * 24 * 60 * 60 * 1000 &&
+                        revision.size() == 5) {
+                        core::LocalSourceRevision observed;
+                        bool ok[5]{};
+                        observed.device = revision[0].toString().toULongLong(&ok[0]);
+                        observed.inode = revision[1].toString().toULongLong(&ok[1]);
+                        observed.size = revision[2].toString().toULongLong(&ok[2]);
+                        observed.modification_time_seconds =
+                            revision[3].toString().toLongLong(&ok[3]);
+                        observed.modification_time_nanoseconds =
+                            revision[4].toString().toLongLong(&ok[4]);
+                        if (std::ranges::all_of(ok, [](bool parsed) { return parsed; }) &&
+                            observed.inode != 0 && observed.modification_time_nanoseconds >= 0 &&
+                            observed.modification_time_nanoseconds < 1000000000) {
+                            row.source_revision = observed;
+                            resume_position = position;
+                        }
+                    }
+                }
                 row.title = item.value(QStringLiteral("title")).toString().toStdString();
                 row.artist = item.value(QStringLiteral("artist")).toString().toStdString();
                 if (item.contains(QStringLiteral("stream")))
@@ -655,8 +752,28 @@ void BenchMainWindow::restoreUpNext() {
                 }
                 rows.push_back(std::move(row));
             }
-            if (local_requests_.pending().empty())
-                local_requests_.insert(std::move(rows), 0);
+            const bool untouched = generation == resume_intent_generation_ &&
+                                   request_revision == local_requests_.revision() &&
+                                   local_requests_.pending().empty() && !local_requests_.active();
+            const bool resume_request =
+                untouched && resume_position && !rows.empty() && player_ &&
+                player_->snapshot().state == audio::LocalAuditionState::empty &&
+                QSettings{}
+                    .value(QLatin1String(SettingsDialog::restore_playback_key), false)
+                    .toBool();
+            std::vector<LocalTrackRow> remaining;
+            if (untouched) {
+                if (resume_request) {
+                    local_requests_.insert({rows.front()}, 0);
+                    remaining.assign(std::make_move_iterator(rows.begin() + 1),
+                                     std::make_move_iterator(rows.end()));
+                } else if (!local_requests_.insert(std::move(rows), 0)) {
+                    statusBar()->showMessage(
+                        tr("Saved Up Next exceeds the pending queue limit; it has been preserved."),
+                        8000);
+                    return;
+                }
+            }
             if (playback_document_id_.isEmpty() && !local_requests_.pending().empty()) {
                 const auto id = state.value(QStringLiteral("document")).toString();
                 const auto anchor = QByteArray::fromBase64(
@@ -672,6 +789,26 @@ void BenchMainWindow::restoreUpNext() {
                         resetPlaybackOrder();
                     }
                 }
+            }
+            if (resume_request) {
+                // Restore the saved continuation, not a newly computed one. In
+                // Consume mode the originating row may already have been removed.
+                const auto id = state.value(QStringLiteral("document")).toString();
+                if (auto* tab = tabForDocument(id)) {
+                    const auto row = state.value(QStringLiteral("returnRow")).toInt(-1);
+                    if (row >= 0 && row < tab->model->rowCount() &&
+                        continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(
+                            row))) == state.value(QStringLiteral("returnSource")).toArray()) {
+                        playback_document_id_ = id;
+                        request_return_index_ = tab->model->index(row, 0);
+                        if (playback_source_.raw_path.empty())
+                            playback_source_ = tab->model->source(row);
+                    }
+                }
+                refreshUpNext();
+                static_cast<void>(playLocalRequest(*resume_position));
+                if (!remaining.empty())
+                    local_requests_.insert(std::move(remaining), local_requests_.pending().size());
             }
         }
         local_requests_.forgetUndo();

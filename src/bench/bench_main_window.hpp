@@ -169,8 +169,8 @@ class BenchMainWindow final : public QMainWindow {
     void restoreUpNext();
     void restoreLocalResume();
     void checkpointLocalResume(const audio::LocalAuditionSnapshot& snapshot, bool force = false);
-    [[nodiscard]] bool playLocalRequest();
-    void adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry);
+    [[nodiscard]] bool playLocalRequest(std::optional<std::int64_t> restore_position_ms = {});
+    void adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry, bool restoring = false);
 
     [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
     void loadPanelLayout();

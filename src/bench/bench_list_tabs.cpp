@@ -115,9 +115,7 @@ void BenchMainWindow::initializePersistence() {
         resume_restore_pending_ = true;
         restoreLists(std::move(workspace.lists));
         restoreUpNext();
-        if (error.isEmpty())
-            restoreLocalResume();
-        else
+        if (!error.isEmpty())
             resume_restore_pending_ = false;
         if (error.isEmpty()) {
             local_library_ = new LocalLibraryPanel(database_path_, source_stack_);

@@ -1534,6 +1534,9 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addAction(play_selected_action_);
     addUpNextActions(track_context_menu_, view);
     if (server_list) {
+        refreshListHistoryActions();
+        if (view == mpd_queue_view_ && shuffle_albums_action_->isVisible())
+            track_context_menu_->addAction(shuffle_albums_action_);
         const auto has_uris = !selectedMpdViewUris(view).isEmpty();
         mpd_crop_selection_action_->setEnabled(command_ready && has_selection);
         track_context_menu_->addSeparator();
@@ -1698,6 +1701,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addSeparator();
     track_context_menu_->addMenu(sort_list_menu_);
     track_context_menu_->addAction(reverse_list_action_);
+    track_context_menu_->addAction(shuffle_albums_action_);
     track_context_menu_->addAction(deduplicate_list_action_);
     track_context_menu_->addSeparator();
     track_context_menu_->addAction(undo_list_action_);
@@ -1880,6 +1884,18 @@ void BenchMainWindow::refreshListHistoryActions() {
         return;
     const auto* tab = currentListTab();
     const auto* model = tab == nullptr ? nullptr : tab->model;
+    if (shuffle_albums_action_) {
+        const bool supported =
+            !isMpdContext() ||
+            (tabs_->currentWidget() == mpd_queue_view_ &&
+             mpd_controller_->activeContextName().isEmpty() &&
+             mpd_controller_->supportsCommand(QStringLiteral("melody_shuffle_albums")));
+        shuffle_albums_action_->setVisible(supported);
+        shuffle_albums_action_->setEnabled(
+            supported &&
+            (isMpdContext() ? mpd_controller_->connected() && !mpd_controller_->commandBusy()
+                            : model != nullptr && model->rowCount() > 1));
+    }
     if (sort_list_menu_) {
         const auto editable = model != nullptr && model->rowCount() > 1;
         sort_list_menu_->setEnabled(editable);

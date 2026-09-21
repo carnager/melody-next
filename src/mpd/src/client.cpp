@@ -329,6 +329,11 @@ core::Result<std::vector<Pair>> Client::command_pairs(std::string_view command) 
     return implementation_->receive_pairs(command_text);
 }
 
+core::Result<void> Client::shuffle_albums(const std::uint32_t revision) {
+    return implementation_->run_composed("melody_shuffle_albums " + std::to_string(revision),
+                                         "melody_shuffle_albums");
+}
+
 core::Result<PlaybackStatus> Client::status() {
     auto pairs = command_pairs("status");
     if (!pairs) {

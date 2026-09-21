@@ -9,6 +9,7 @@
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include <QRandomGenerator>
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -388,6 +389,22 @@ void BenchMainWindow::buildWorkspace() {
     connect(custom, &QAction::triggered, list_edit_bar_, &LocalListEditBar::openSort);
     reverse_list_action_ = edit_menu->addAction(tr("Reverse list"));
     reverse_list_action_->setObjectName(QStringLiteral("action-reverse-list"));
+    shuffle_albums_action_ = edit_menu->addAction(tr("Shuffle albums"));
+    shuffle_albums_action_->setObjectName(QStringLiteral("action-shuffle-albums"));
+    shuffle_albums_action_->setToolTip(tr("Reorder the whole list by album; retain each album's "
+                                          "existing track order. Random playback is unchanged."));
+    connect(shuffle_albums_action_, &QAction::triggered, this, [this] {
+        if (isMpdContext()) {
+            if (tabs_->currentWidget() == mpd_queue_view_)
+                mpd_controller_->shuffleAlbums();
+        } else {
+            list_edit_bar_->start({.kind = lists::EditKind::shuffle_albums,
+                                   .expression = {},
+                                   .seed = QRandomGenerator::global()->generate()});
+        }
+    });
+    connect(mpd_controller_, &quick::MpdProbeController::stateChanged, this,
+            &BenchMainWindow::refreshListHistoryActions);
     connect(reverse_list_action_, &QAction::triggered, this, [this] {
         list_edit_bar_->start({.kind = lists::EditKind::reverse, .expression = {}});
     });
@@ -1080,6 +1097,7 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
                            "action-replaygain-dialog",
                            "action-convert-files",
                            "action-reverse-list",
+                           "action-shuffle-albums",
                            "action-deduplicate-list",
                            "action-backup-workspace",
                            "action-restore-workspace"}) {

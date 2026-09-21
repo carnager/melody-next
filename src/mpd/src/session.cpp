@@ -102,6 +102,7 @@ void invoke_safely(const std::function<void(const SessionCommandResult&)>& callb
 [[nodiscard]] bool targets_live_queue_occurrence(const SessionCommandKind kind) noexcept {
     switch (kind) {
     case SessionCommandKind::queue_play:
+    case SessionCommandKind::shuffle_albums:
     case SessionCommandKind::queue_delete:
     case SessionCommandKind::queue_delete_batch:
     case SessionCommandKind::queue_move:
@@ -327,6 +328,8 @@ struct Session::Impl {
         }
         case SessionCommandKind::request_queue_edit:
             return without_payload(client.edit_request_queue(command.request));
+        case SessionCommandKind::shuffle_albums:
+            return without_payload(client.shuffle_albums(command.object_id));
         case SessionCommandKind::melody_context_play:
             return without_payload(client.melody_context_play(command.uri, command.queue_position));
         case SessionCommandKind::melody_context_queue:
@@ -559,6 +562,7 @@ struct Session::Impl {
         case SessionCommandKind::queue_move:
         case SessionCommandKind::queue_move_batch:
         case SessionCommandKind::queue_priority:
+        case SessionCommandKind::shuffle_albums:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
         case SessionCommandKind::database_update:
@@ -823,7 +827,8 @@ struct Session::Impl {
                                     static_cast<std::uint32_t>(IdleEvent::player),
                                 std::memory_order_release);
                         }
-                        if (command->kind == SessionCommandKind::request_queue_edit) {
+                        if (command->kind == SessionCommandKind::request_queue_edit ||
+                            command->kind == SessionCommandKind::shuffle_albums) {
                             pending_refresh.fetch_or(refresh_after(*command),
                                                      std::memory_order_release);
                         }
@@ -934,6 +939,13 @@ std::uint64_t Session::edit_request_queue(RequestQueueCommand request) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::request_queue_edit;
     command.request = std::move(request);
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::shuffle_albums(const std::uint32_t revision) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::shuffle_albums;
+    command.object_id = revision;
     return implementation_->enqueue(std::move(command));
 }
 

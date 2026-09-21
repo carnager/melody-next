@@ -6,11 +6,12 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <span>
 
 namespace trackknife::lists {
 
-enum class EditKind { sort, reverse, remove_duplicates };
+enum class EditKind { sort, reverse, remove_duplicates, shuffle_albums };
 
 struct Entry {
     std::string raw_path;
@@ -26,6 +27,7 @@ struct EditRequest {
     EditKind kind{EditKind::sort};
     std::string expression;
     bool descending{false};
+    std::uint32_t seed{0};
 };
 
 struct EditPlan {

@@ -353,7 +353,7 @@ automatically reconciled. In a local list, right-click a column header and enabl
 **Columns → Play count / Last played** to display stored history (ADR-0208).
 These columns update in the background; unplayed tracks show `0` / `Never`,
 while unavailable history shows a dash with an explanation. Statistics queries,
-and album shuffle remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
+and continuous album-random playback remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
 for counting, identity, and failure semantics.
 
 **Trackknife decision — paused resume (ADR-0210):** Settings → Playback offers
@@ -364,6 +364,14 @@ restored. ADR-0211 also restores interrupted Up Next requests paused in both
 authorities; closed-list normal playback remains unsupported. Melody owns its
 independent server restart resume; connecting
 Trackbench never seeks or pauses server playback. Stock MPD is left unchanged.
+
+**Trackknife decision — one-shot album shuffle (ADR-0212):** Edit → Shuffle albums
+reorders a whole local list, with Undo, or Melody's active unnamed MPD Queue.
+It groups exact album artist (artist fallback), album, and date; unknown albums
+remain independent entries. Within each album, existing order and duplicates
+are preserved. The playing occurrence is not restarted. Turn Random off to
+follow the resulting order; this command does not change playback modes.
+Named/stashed server lists and stock MPD are not supported by this command.
 
 Track-owned statistics include play count, first/last played, skip count,
 rating, and optional last position. They bind to stable identity/content rather

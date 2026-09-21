@@ -49,6 +49,8 @@ QString editLabel(lists::EditKind kind) {
         return QObject::tr("Sort list");
     case lists::EditKind::reverse:
         return QObject::tr("Reverse list");
+    case lists::EditKind::shuffle_albums:
+        return QObject::tr("Shuffle albums");
     case lists::EditKind::remove_duplicates:
         return QObject::tr("Remove duplicate entries");
     }

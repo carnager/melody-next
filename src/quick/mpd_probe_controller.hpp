@@ -266,6 +266,7 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void deleteStoredPlaylist(const QString& name);
     Q_INVOKABLE void setRepeatEnabled(bool enabled);
     Q_INVOKABLE void setRandomEnabled(bool enabled);
+    void shuffleAlbums();
     Q_INVOKABLE void setSingleMode(int mode);
     Q_INVOKABLE void setConsumeMode(int mode);
     Q_INVOKABLE void setReplayGainMode(const QString& mode);
@@ -348,6 +349,7 @@ class MpdProbeController final : public QObject {
     QString active_context_;
     std::vector<mpd::Track> active_context_tracks_;
     std::optional<mpd::RequestQueueState> request_queue_;
+    std::optional<std::uint32_t> queue_revision_;
     QHash<quint64, QString> lastfm_commands_;
     QHash<quint64, QString> pending_rating_lists_;
     QHash<quint64, int> pending_list_playbacks_;

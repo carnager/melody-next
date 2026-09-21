@@ -74,6 +74,7 @@ class Client final {
     [[nodiscard]] core::Result<LastFmReply> lastfm(const LastFmCommand& command);
     [[nodiscard]] core::Result<RequestQueueState> request_queue();
     [[nodiscard]] core::Result<void> edit_request_queue(const RequestQueueCommand& command);
+    [[nodiscard]] core::Result<void> shuffle_albums(std::uint32_t revision);
     Client(Client&&) noexcept;
     Client& operator=(Client&&) noexcept;
     Client(const Client&) = delete;

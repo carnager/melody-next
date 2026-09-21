@@ -208,11 +208,13 @@ class FakeMpdServer final {
         } else if (command == "melody_context stage" ||
                    command == "melody_context stage \"A.flac\"") {
             write_all(client, "OK\n");
-        } else if (command == "melody_upnext append 42" ||
+        } else if (command == "melody_shuffle_albums 42" || command == "melody_upnext append 42" ||
                    command == "melody_upnext move 42 21 0" ||
                    command == "melody_upnext return 42" ||
                    command == "melody_upnext_edit 42 21 20") {
             write_all(client, "OK\n");
+        } else if (command == "melody_shuffle_albums 41") {
+            write_all(client, "ACK [2@0] {melody_shuffle_albums} queue changed; refresh and retry\n");
         } else if (command == "melody_upnext clear 41") {
             write_all(client,
                       "ACK [2@0] {melody_upnext} request queue changed; refresh before retrying\n");
@@ -499,6 +501,9 @@ void client_negotiates_and_preserves_extensions() {
     require(client.set_volume(31U).has_value(), "absolute volume must use the command connection");
     require(client.set_repeat(true).has_value() && client.set_random(true).has_value(),
             "repeat and random modes must use typed command methods");
+    require(client.shuffle_albums(42).has_value(),
+            "album shuffle must transmit the captured queue revision");
+    require(!client.shuffle_albums(41), "stale album shuffle must report the server rejection");
     require(client.set_single(trackknife::mpd::PlaybackModeState::oneshot).has_value() &&
                 client.set_consume(trackknife::mpd::PlaybackModeState::on).has_value(),
             "single and consume must preserve extended mode states");

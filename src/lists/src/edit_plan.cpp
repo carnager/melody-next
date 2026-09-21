@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <numeric>
+#include <random>
 #include <set>
 #include <tuple>
 
@@ -147,6 +149,50 @@ core::Result<EditPlan> plan_edit(std::span<const Entry> entries, const EditReque
             return std::unexpected(error("List edits support at most one million rows",
                                          core::ErrorCode::limit_exceeded));
         EditPlan plan;
+        if (request.kind == EditKind::shuffle_albums) {
+            std::map<std::array<std::string, 3>, std::size_t> albums;
+            std::vector<std::vector<int>> groups;
+            std::size_t key_bytes = 0;
+            for (std::size_t row = 0; row < entries.size(); ++row) {
+                check();
+                const auto& fields = entries[row].display;
+                const auto& album = fields[2];
+                const auto& artist = fields[3].empty() ? fields[1] : fields[3];
+                const auto& date = fields[4];
+                const auto bytes = artist.size() + album.size() + date.size();
+                key_bytes += bytes;
+                if (bytes > 64U * 1024U || key_bytes > 64U * 1024U * 1024U)
+                    return std::unexpected(
+                        error("Album grouping keys exceed the list-edit memory limit",
+                              core::ErrorCode::limit_exceeded));
+                std::size_t group = groups.size();
+                if (!album.empty()) {
+                    const auto [it, inserted] =
+                        albums.try_emplace(std::array{artist, album, date}, group);
+                    group = it->second;
+                    if (inserted)
+                        groups.emplace_back();
+                } else
+                    groups.emplace_back();
+                groups[group].push_back(static_cast<int>(row));
+                if (progress)
+                    progress->store(row + 1);
+            }
+            std::mt19937 generator{request.seed};
+            // Explicit Fisher-Yates keeps cancellation responsive for large lists.
+            for (std::size_t size = groups.size(); size > 1; --size) {
+                check();
+                const auto other =
+                    std::uniform_int_distribution<std::size_t>{0, size - 1}(generator);
+                std::swap(groups[size - 1], groups[other]);
+            }
+            plan.positions.reserve(entries.size());
+            for (const auto& group : groups) {
+                check();
+                plan.positions.insert(plan.positions.end(), group.begin(), group.end());
+            }
+            return plan;
+        }
         if (request.kind == EditKind::remove_duplicates) {
             plan.removal = true;
             const auto less = [&](int left, int right) {

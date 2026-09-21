@@ -563,6 +563,7 @@ class BenchMainWindow final : public QMainWindow {
     LocalListEditBar* list_edit_bar_{nullptr};
     QMenu* sort_list_menu_{nullptr};
     QAction* reverse_list_action_{nullptr};
+    QAction* shuffle_albums_action_{nullptr};
     QAction* deduplicate_list_action_{nullptr};
     QAction* find_list_action_{nullptr};
     QAction* find_next_action_{nullptr};

@@ -14,8 +14,9 @@ numbers below. The three priorities are not complete.
    server columns and stats invalidation are supported (ADR-0209), separately from
    local history. ADR-0210 adds opt-in paused local list resume and hardens
    Melody's server-owned resume. ADR-0211 extends paused resume to interrupted
-   Up Next requests in both authorities. History queries and album-preserving
-   shuffle remain open.
+   Up Next requests in both authorities. ADR-0212 adds one-shot album-preserving
+   shuffle for local lists and Melody's active unnamed queue. History queries,
+   named server-list shuffle, and continuous album-random playback remain open.
 2. **Command discovery and staged-operation UX:** the curated command palette
    is available with Ctrl+Shift+P, with Settings retaining shortcut editing
    (ADR-0205). Parameter choices such as device names and numeric ratings are

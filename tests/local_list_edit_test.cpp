@@ -9,6 +9,8 @@
 #include <QTableView>
 #include <QTimer>
 #include <QtTest>
+#include <algorithm>
+#include <set>
 
 namespace trackknife::bench {
 namespace {
@@ -46,12 +48,57 @@ class LocalListEditTest final : public QObject {
     Q_OBJECT
   private slots:
     void stableNumericUnicodeAndCustomSorting();
+    void albumShuffleRetainsOrderAndOccurrences();
     void duplicateIdentityRetainsLogicalSources();
     void invalidAndCancelledPlansDoNotMutate();
     void editsPreserveOccurrencesAndUndo();
     void asynchronousCancellationAndStaleSnapshots();
     void limitsRejectIncompleteEdits();
 };
+void LocalListEditTest::albumShuffleRetainsOrderAndOccurrences() {
+    std::vector<lists::Entry> entries(8);
+    for (auto& item : entries)
+        item.display[3] = "Album Artist";
+    entries[0].display[2] = entries[3].display[2] = entries[5].display[2] = "A";
+    entries[1].display[2] = entries[4].display[2] = "B";
+    entries[6].display[2] = "A";
+    entries[6].display[4] = "Other edition";
+    std::set<std::vector<int>> outcomes;
+    for (std::uint32_t seed = 0; seed < 50; ++seed) {
+        const lists::EditRequest request{
+            .kind = lists::EditKind::shuffle_albums, .expression = {}, .seed = seed};
+        const auto plan = lists::plan_edit(entries, request);
+        QVERIFY(plan);
+        QCOMPARE(lists::plan_edit(entries, request)->positions, plan->positions);
+        auto sorted = plan->positions;
+        std::sort(sorted.begin(), sorted.end());
+        QCOMPARE(sorted, (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
+        const auto a = std::find(plan->positions.begin(), plan->positions.end(), 0);
+        QVERIFY(a + 2 < plan->positions.end());
+        QCOMPARE(*(a + 1), 3);
+        QCOMPARE(*(a + 2), 5);
+        const auto b = std::find(plan->positions.begin(), plan->positions.end(), 1);
+        QVERIFY(b + 1 < plan->positions.end());
+        QCOMPARE(*(b + 1), 4);
+        outcomes.insert(plan->positions);
+    }
+    QVERIFY(outcomes.size() > 1);
+    Workspace workspace{{row("A1"), row("B1"), row("A2")}};
+    auto tracks = workspace.model.rows();
+    tracks[0].album = tracks[2].album = "A";
+    tracks[1].album = "B";
+    workspace.model.replaceRows(tracks);
+    const QPersistentModelIndex playing{workspace.model.index(2, 0)};
+    QSignalSpy edited{workspace.bar, &LocalListEditBar::edited};
+    workspace.bar->start({.kind = lists::EditKind::shuffle_albums, .expression = {}, .seed = 3});
+    QTRY_COMPARE(edited.size(), 1);
+    QVERIFY(playing.isValid());
+    QCOMPARE(workspace.model.rows()[static_cast<std::size_t>(playing.row())].title,
+             std::string{"A2"});
+    QCOMPARE(workspace.model.undoLabel(), QStringLiteral("Shuffle albums"));
+    QVERIFY(workspace.model.undo());
+    QCOMPARE(workspace.model.rows(), tracks);
+}
 void LocalListEditTest::stableNumericUnicodeAndCustomSorting() {
     std::vector entries{entry("Éclair", "10/12"), entry("éclair", "2/12"), entry("Apple", "1")};
     auto plan = lists::plan_edit(entries, {.kind = lists::EditKind::sort, .expression = "%TITLE%"});
@@ -118,8 +165,8 @@ void LocalListEditTest::invalidAndCancelledPlansDoNotMutate() {
     QVERIFY(!invalid);
     core::CancellationSource cancellation;
     cancellation.request_cancellation();
-    for (auto kind :
-         {lists::EditKind::sort, lists::EditKind::reverse, lists::EditKind::remove_duplicates}) {
+    for (auto kind : {lists::EditKind::sort, lists::EditKind::reverse,
+                      lists::EditKind::remove_duplicates, lists::EditKind::shuffle_albums}) {
         const auto stopped = lists::plan_edit(entries, {.kind = kind, .expression = "%title%"},
                                               cancellation.token());
         QVERIFY(!stopped);

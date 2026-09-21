@@ -211,6 +211,14 @@ void MpdProbeController::editRequestQueue(mpd::RequestQueueCommand command) {
     emit stateChanged();
 }
 
+void MpdProbeController::shuffleAlbums() {
+    if (!session_ || !connected() || !queue_revision_ || !active_context_.isEmpty() ||
+        !supportsCommand(QStringLiteral("melody_shuffle_albums")))
+        return;
+    pending_commands_.insert(session_->shuffle_albums(*queue_revision_));
+    emit stateChanged();
+}
+
 void MpdProbeController::probe(const QString& host, const int port, const QString& password,
                                const QString& music_root) {
     probeProfile(QString::fromStdString(core::StableId::random().to_string()), host, port, password,
@@ -1754,6 +1762,7 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     song_position_ =
         snapshot.status.song_position ? static_cast<int>(*snapshot.status.song_position) : -1;
     request_queue_ = snapshot.requests;
+    queue_revision_ = snapshot.status.queue_version;
     active_context_ = snapshot.context ? QString::fromStdString(snapshot.context->name) : QString{};
     queue_stashed_ = snapshot.context && snapshot.context->queue_stashed;
     qCDebug(tkDebug) << "snapshot: context"

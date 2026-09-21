@@ -219,6 +219,7 @@ class BenchMainWindowTest final : public QObject {
     void melodyListeningColumnsRequireCapability();
     void localPlaybackRestoresPausedWithoutOutput();
     void localRequestRestoresPaused_data();
+    void albumShuffleIsCapabilityGated();
     void localRequestRestoresPaused();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
@@ -618,6 +619,34 @@ void BenchMainWindowTest::melodyListeningColumnsRequireCapability() {
                                 window.mpd_view_layout_);
     QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
     controller->connected_ = false;
+}
+
+void BenchMainWindowTest::albumShuffleIsCapabilityGated() {
+    BenchMainWindow window;
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab);
+    LocalTrackRow row;
+    row.raw_path = "/not-opened.flac";
+    row.probed = true;
+    tab->model->replaceRows({row, row});
+    window.refreshListHistoryActions();
+    QVERIFY(window.shuffle_albums_action_->isVisible());
+    QVERIFY(window.shuffle_albums_action_->isEnabled());
+    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
+    window.mpd_controller_->connected_ = true;
+    window.mpd_controller_->advertised_commands_.clear();
+    window.refreshListHistoryActions();
+    QVERIFY(!window.shuffle_albums_action_->isVisible());
+    QVERIFY(!window.shuffle_albums_action_->isEnabled());
+    window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_shuffle_albums"));
+    window.refreshListHistoryActions();
+    QVERIFY(window.shuffle_albums_action_->isVisible());
+    QVERIFY(window.shuffle_albums_action_->isEnabled());
+    window.mpd_controller_->active_context_ = QStringLiteral("Another playlist");
+    window.refreshListHistoryActions();
+    QVERIFY(!window.shuffle_albums_action_->isVisible());
+    window.mpd_controller_->connected_ = false;
 }
 
 void BenchMainWindowTest::localRequestRestoresPaused_data() {

@@ -50,6 +50,7 @@ struct SessionSnapshot {
 };
 
 enum class SessionCommandKind {
+    shuffle_albums,
     transport,
     queue_play,
     queue_add,
@@ -171,6 +172,7 @@ class Session final {
     // ADR-0187: play a stored playlist as the active playback context, or
     // switch back to the stashed queue. row = std::nullopt resumes.
     [[nodiscard]] std::uint64_t edit_request_queue(RequestQueueCommand command);
+    [[nodiscard]] std::uint64_t shuffle_albums(std::uint32_t revision);
     [[nodiscard]] std::uint64_t melody_context_play(std::string name, std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_context_queue(std::optional<unsigned> row);
     [[nodiscard]] std::uint64_t melody_scratch_lists();

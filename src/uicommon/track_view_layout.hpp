@@ -40,8 +40,9 @@ struct TrackViewLayout {
 
 [[nodiscard]] QByteArray serializeTrackViewLayout(const TrackViewLayout& layout);
 
-// Requires every registered column exactly once, at least one visible column,
-// bounded widths, and a known v1 presentation. Unknown/newer state is rejected
+// Requires unique registered columns, at least one visible column, bounded
+// widths, and a known v1 presentation. Newly registered columns append hidden.
+// Unknown/newer state is rejected
 // so callers can display a fallback without overwriting the original bytes.
 [[nodiscard]] std::optional<TrackViewLayout>
 deserializeTrackViewLayout(const QByteArray& bytes, const QStringList& registered_column_ids,

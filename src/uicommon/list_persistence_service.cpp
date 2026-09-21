@@ -263,8 +263,48 @@ void ListPersistenceService::recordLocalListen(persistence::ListItem source,
             if (!self)
                 return;
             --self->pending_listens_;
+            if (error.isEmpty())
+                emit self->listeningHistoryChanged();
             if (callback)
                 callback(error);
+        });
+    });
+}
+
+void ListPersistenceService::loadListeningHistory(std::vector<persistence::ListItem> sources,
+                                                  ListeningHistoryCallback callback) {
+    if (sources.size() > 64 || pending_history_reads_ >= 4) {
+        callback({}, QStringLiteral("Listening-history read limit reached. Try again."));
+        return;
+    }
+    ++pending_history_reads_;
+    const QPointer self{this};
+    invokeQueued(worker_, [self, state = state_, sources = std::move(sources),
+                           callback = std::move(callback)]() mutable {
+        std::vector<std::optional<persistence::LocalListeningHistory>> results;
+        QString error = state->initialization_error;
+        if (error.isEmpty() && !state->repository)
+            error = QStringLiteral("Listening history persistence is not initialized");
+        if (error.isEmpty()) {
+            results.reserve(sources.size());
+            for (const auto& source : sources) {
+                auto loaded = state->repository->lookup_local_listening_history(source);
+                if (!loaded) {
+                    error = errorText(loaded.error());
+                    results.clear();
+                    break;
+                }
+                results.push_back(std::move(*loaded));
+            }
+        }
+        if (!self)
+            return;
+        invokeQueued(self, [self, callback = std::move(callback), results = std::move(results),
+                            error]() mutable {
+            if (!self)
+                return;
+            --self->pending_history_reads_;
+            callback(std::move(results), error);
         });
     });
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_list_model.hpp"
+#include "uicommon/list_persistence_service.hpp"
+#include <QTimer>
 
 #include "trackknife/core/local_sources.hpp"
 #include "uicommon/rating_stars.hpp"
@@ -85,7 +87,26 @@ void project_display_metadata(LocalTrackRow& row) {
 
 } // namespace
 
-LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {}
+LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {
+    listening_timer_ = new QTimer(this);
+    listening_timer_->setSingleShot(true);
+    connect(listening_timer_, &QTimer::timeout, this, &LocalListModel::dispatchListeningHistory);
+    connect(this, &QAbstractItemModel::modelReset, this,
+            &LocalListModel::invalidateListeningHistory);
+    connect(this, &QAbstractItemModel::layoutChanged, this,
+            &LocalListModel::invalidateListeningHistory);
+    connect(this, &QAbstractItemModel::rowsInserted, this,
+            &LocalListModel::invalidateListeningHistory);
+    connect(this, &QAbstractItemModel::rowsRemoved, this,
+            &LocalListModel::invalidateListeningHistory);
+    connect(this, &QAbstractItemModel::rowsMoved, this,
+            &LocalListModel::invalidateListeningHistory);
+    connect(this, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+                if (roles.isEmpty())
+                    invalidateListeningHistory();
+            });
+}
 
 void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows, const bool remember,
                                  QString label) {
@@ -866,6 +887,10 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return {};
     }
     const auto& row = rows_[static_cast<std::size_t>(index.row())];
+    if (index.column() == local_play_count_column || index.column() == local_last_played_column) {
+        if (role == Qt::DisplayRole || role == Qt::ToolTipRole || role == Qt::TextAlignmentRole)
+            return listeningHistoryData(index, role);
+    }
     switch (role) {
     case ui::track_source_role:
         return QByteArray(row.raw_path.data(), static_cast<qsizetype>(row.raw_path.size()));

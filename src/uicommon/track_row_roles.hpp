@@ -56,13 +56,15 @@ enum TrackRowColumn : int {
     track_date_column = 5,
     track_length_column = 6,
     track_rating_column = 7,
-    track_column_count = 8,
+    track_play_count_column = 8,
+    track_last_played_column = 9,
+    track_column_count = 10,
 };
 
 // Column labels are part of the same shared contract as their positions. Keep
 // authority-specific models from drifting into near-equivalent names.
 inline constexpr std::array<const char*, track_column_count> track_column_headers{
-    "", "Artist", "#", "Title", "Album", "Date", "Length", "Rating"};
+    "", "Artist", "#", "Title", "Album", "Date", "Length", "Rating", "Play count", "Last played"};
 
 // The shared 0-10 rating rendered as star text: full stars in half-star
 // steps, nothing for unrated so the column stays quiet.

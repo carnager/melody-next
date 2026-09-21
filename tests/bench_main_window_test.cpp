@@ -52,9 +52,11 @@
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include <QClipboard>
+#include <QDateTime>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QKeySequenceEdit>
+#include <QLocale>
 #include <QMimeData>
 #include <QProxyStyle>
 #include <QStyleFactory>
@@ -213,6 +215,8 @@ class BenchMainWindowTest final : public QObject {
     void commandPaletteFindsAndRunsRegisteredActions();
     void commandPaletteTracksAvailabilityAndLifetime();
     void localListeningCountsPlaybackWithoutLastFm();
+    void localListeningColumnsLoadRefreshAndRespectAuthority();
+    void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
@@ -504,6 +508,143 @@ void BenchMainWindowTest::localListeningCountsPlaybackWithoutLastFm() {
         observe(second);
     QTRY_VERIFY(repository->load_local_listening_history(*logical_key)->has_value());
     QCOMPARE(count(), 2U);
+}
+
+void BenchMainWindowTest::localListeningColumnsLoadRefreshAndRespectAuthority() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab);
+    LocalTrackRow row;
+    row.raw_path = std::string{"/history/raw-"} + char(0xff) + ".flac";
+    row.source_revision = core::LocalSourceRevision{.device = 10, .inode = 11};
+    row.title = "History fixture";
+    row.probed = true;
+    auto unknown = row;
+    unknown.source_revision.reset();
+    auto logical = row;
+    logical.segment = formats::SampleRange{0, 48000};
+    tab->model->replaceRows({row, row, logical, unknown});
+    auto* model = tab->model;
+    const auto plays = [&](int n) {
+        return model->index(n, local_play_count_column).data().toString();
+    };
+    QVERIFY(tab->view->isColumnHidden(local_play_count_column));
+    QVERIFY(tab->view->isColumnHidden(local_last_played_column));
+    const auto hidden_layout = window.captureTrackViewLayout(*tab);
+    QCOMPARE(hidden_layout.columns.back().id, QStringLiteral("last-played"));
+    QCOMPARE(hidden_layout.columns.back().width, 170);
+    QVERIFY(model->listening_cache_.isEmpty());
+    window.setTrackColumnVisible(QStringLiteral("play-count"), true);
+    window.setTrackColumnVisible(QStringLiteral("last-played"), true);
+    QVERIFY(!tab->view->isColumnHidden(local_play_count_column));
+    QCOMPARE(tab->view->columnWidth(local_last_played_column), 170);
+    QTRY_COMPARE(plays(0), QStringLiteral("0"));
+    QTRY_COMPARE(model->index(0, local_last_played_column).data().toString(),
+                 QStringLiteral("Never"));
+    QCOMPARE(plays(3), QStringLiteral("—"));
+    QVERIFY(model->index(0, local_play_count_column)
+                .data(Qt::TextAlignmentRole)
+                .value<Qt::Alignment>()
+                .testFlag(Qt::AlignRight));
+    persistence::ListItem source;
+    source.source = persistence::ListSource::local;
+    source.source_reference = row.raw_path;
+    source.source_revision = row.source_revision;
+    const qint64 played_at = 1700000000000;
+    bool saved = false;
+    QSignalSpy resets(model, &QAbstractItemModel::modelReset);
+    tab->view->selectRow(1);
+    window.persistence_->recordLocalListen(source, core::StableId::random(), played_at,
+                                           [&](const QString& error) {
+                                               QVERIFY2(error.isEmpty(), qPrintable(error));
+                                               saved = true;
+                                           });
+    QTRY_VERIFY(saved);
+    QTRY_COMPARE(plays(0), QStringLiteral("1"));
+    QTRY_COMPARE(plays(1), QStringLiteral("1"));
+    QTRY_COMPARE(plays(2), QStringLiteral("0"));
+    QCOMPARE(model->index(0, local_last_played_column).data().toString(),
+             QLocale{}.toString(QDateTime::fromMSecsSinceEpoch(played_at), QLocale::ShortFormat));
+    QCOMPARE(resets.count(), 0);
+    QCOMPARE(tab->view->selectionModel()->selectedRows().front().row(), 1);
+    const auto restored_layout = ui::deserializeTrackViewLayout(
+        ui::serializeTrackViewLayout(window.captureTrackViewLayout(*tab)), trackColumnIds());
+    QVERIFY(restored_layout);
+    window.applyTrackViewLayout(*tab, *restored_layout);
+    QVERIFY(!tab->view->isColumnHidden(local_last_played_column));
+    window.copyTrackViewLayoutToAllTabs();
+    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_play_count_column));
+    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_last_played_column));
+    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
+    QVERIFY(!window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
+    window.tabs_->setCurrentWidget(tab->view);
+    QVERIFY(window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QCoreApplication::processEvents();
+        QVERIFY(window.grab().save(directory + QStringLiteral("/listening-history.png")));
+    }
+}
+
+void BenchMainWindowTest::localListeningCacheIsBoundedAndRejectsStaleResults() {
+    QTemporaryDir temporary;
+    const auto database = std::filesystem::path{temporary.path().toStdString()} / "history.sqlite";
+    ui::ListPersistenceService service(database);
+    bool ready = false;
+    service.initialize([&](auto, const QString& error) {
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        ready = true;
+    });
+    QTRY_VERIFY(ready);
+    LocalTrackRow row;
+    row.raw_path = "/history/a.flac";
+    row.source_revision = core::LocalSourceRevision{.device = 10, .inode = 20};
+    LocalListModel model;
+    model.setListeningHistoryService(&service);
+    model.replaceRows(std::vector<LocalTrackRow>(10000, row));
+    const auto value = [&](int n) {
+        return model.index(n, local_play_count_column).data().toString();
+    };
+    for (int n = 0; n < 10000; ++n)
+        static_cast<void>(value(n));
+    QVERIFY(model.listening_pending_.size() <= 64);
+    QVERIFY(model.listening_cache_.size() <= 512);
+    model.dispatchListeningHistory();
+    QVERIFY(model.listening_busy_);
+    // Change rows while the worker owns the detached request; its reply must not
+    // populate a different source that happens to occupy the same row number.
+    row.source_revision.reset();
+    model.replaceRows({row});
+    QTRY_VERIFY(!model.listening_busy_);
+    QVERIFY(model.listening_cache_.isEmpty());
+    QCOMPARE(value(0), QStringLiteral("—"));
+    row.source_revision = core::LocalSourceRevision{.device = 10, .inode = 21};
+    model.replaceRows({row});
+    QTRY_COMPARE(value(0), QStringLiteral("0"));
+    // Simulate a tall viewport repainting only the invalidated region. Rows
+    // beyond the first admission batch must not remain stuck on Loading.
+    model.replaceRows(std::vector<LocalTrackRow>(100, row));
+    const auto repaint =
+        QObject::connect(&model, &QAbstractItemModel::dataChanged, &model,
+                         [&](const QModelIndex& first, const QModelIndex& last) {
+                             for (int n = first.row(); n <= std::min(last.row(), 99); ++n)
+                                 static_cast<void>(value(n));
+                         });
+    for (int n = 0; n < 100; ++n)
+        static_cast<void>(value(n));
+    QTRY_VERIFY(model.listening_cache_.object(99) && model.listening_cache_.object(99)->loaded);
+    QObject::disconnect(repaint);
+    model.replaceRows({row});
+    // An unavailable database is not an unplayed track.
+    ui::ListPersistenceService unopened(database);
+    model.setListeningHistoryService(&unopened);
+    QTRY_COMPARE(value(0), QStringLiteral("—"));
+    QVERIFY(model.index(0, local_play_count_column)
+                .data(Qt::ToolTipRole)
+                .toString()
+                .contains(QStringLiteral("not initialized")));
 }
 
 void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {

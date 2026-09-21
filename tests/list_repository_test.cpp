@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/persistence/list_repository.hpp"
+#include <sqlite3.h>
 
 #include <cstdlib>
 #include <filesystem>
@@ -142,6 +143,23 @@ void local_listening_occurrences_are_idempotent_and_source_qualified() {
         source.source = persistence::ListSource::local;
         source.source_reference = std::string{"/music/raw-"} + char(0xff) + ".flac";
         source.source_revision = core::LocalSourceRevision{.device = 1, .inode = 2, .size = 3};
+        const auto unseen = repository->lookup_local_listening_history(source);
+        require(unseen && !*unseen, "unseen source has no listening record");
+        sqlite3* read_only = nullptr;
+        require(sqlite3_open_v2(path.c_str(), &read_only, SQLITE_OPEN_READONLY, nullptr) ==
+                    SQLITE_OK,
+                "read-only validation connection opens");
+        int identities = -1;
+        require(sqlite3_exec(
+                    read_only, "SELECT count(*) FROM local_listening_sources",
+                    [](void* output, int, char** values, char**) {
+                        *static_cast<int*>(output) = std::stoi(values[0]);
+                        return 0;
+                    },
+                    &identities, nullptr) == SQLITE_OK &&
+                    identities == 0,
+                "display lookup never creates listening identities");
+        sqlite3_close(read_only);
         const auto key = repository->local_listening_key(source);
         require(key.has_value(), "raw-byte source has a stable key without tags");
         require(repository->save_local_resume(*key, 1234, 900).has_value(),
@@ -158,6 +176,8 @@ void local_listening_occurrences_are_idempotent_and_source_qualified() {
                 "restart replay succeeds");
         auto history = other->load_local_listening_history(*key);
         require(history && *history && (*history)->play_count == 1, "retries cannot double count");
+        require(repository->lookup_local_listening_history(source) == history,
+                "read-only source lookup returns the stored statistics");
         require((*history)->resume_position_ms == 1234,
                 "qualification does not imply completion or erase resume state");
         require(other->record_local_listen(source, core::StableId::random(), 2000).has_value(),

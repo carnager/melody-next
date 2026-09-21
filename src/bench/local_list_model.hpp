@@ -5,11 +5,20 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractTableModel>
+#include <QCache>
 #include <QHash>
 #include <QImage>
+#include <QPointer>
+#include <QSet>
+
+class QTimer;
+namespace trackknife::ui {
+class ListPersistenceService;
+}
 
 #include <cstdint>
 #include <optional>
@@ -31,6 +40,8 @@ enum LocalTrackColumn : int {
     local_date_column = ui::track_date_column,
     local_length_column = ui::track_length_column,
     local_rating_column = ui::track_rating_column,
+    local_play_count_column = ui::track_play_count_column,
+    local_last_played_column = ui::track_last_played_column,
     local_column_count = ui::track_column_count,
 };
 
@@ -108,6 +119,8 @@ class LocalListModel final : public QAbstractTableModel {
 
   public:
     explicit LocalListModel(QObject* parent = nullptr);
+    void setListeningHistoryService(ui::ListPersistenceService* service);
+    void invalidateListeningHistory();
 
     void replaceRows(std::vector<LocalTrackRow> rows, bool remember = false, QString label = {});
     void appendPaths(std::vector<std::string> raw_paths, int insertion_row = -1);
@@ -203,6 +216,21 @@ class LocalListModel final : public QAbstractTableModel {
     void historyDiscarded(const QString& reason);
 
   private:
+    friend class BenchMainWindowTest;
+    struct ListeningCell {
+        bool loaded{false};
+        std::optional<persistence::LocalListeningHistory> history;
+        QString error;
+    };
+    [[nodiscard]] QVariant listeningHistoryData(const QModelIndex& index, int role) const;
+    void dispatchListeningHistory();
+    QPointer<ui::ListPersistenceService> listening_service_;
+    mutable QCache<int, ListeningCell> listening_cache_{512};
+    mutable QSet<int> listening_pending_;
+    mutable bool listening_overflow_{false};
+    QTimer* listening_timer_{nullptr};
+    std::uint64_t listening_generation_{0};
+    bool listening_busy_{false};
     struct Edit {
         enum class Kind : std::uint8_t { reorder, removal, addition, replacement };
         Kind kind{Kind::reorder};

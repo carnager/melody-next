@@ -34,7 +34,7 @@ BenchMainWindow::defaultTrackViewLayout(const ui::TrackViewPresentation presenta
         auto width = spec.default_width;
         // Ratings stay one click away in the Columns menu rather than
         // claiming space in every default view.
-        bool visible = spec.logical != local_rating_column;
+        bool visible = spec.logical < local_rating_column;
         if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
             spec.logical == local_artwork_column) {
             width = 42;
@@ -108,7 +108,11 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         if (logical < 0) {
             continue;
         }
-        view->setColumnHidden(logical, !column.visible);
+        const bool local_only =
+            logical == local_play_count_column || logical == local_last_played_column;
+        view->setColumnHidden(logical,
+                              !column.visible ||
+                                  (local_only && !qobject_cast<LocalListModel*>(view->model())));
         view->setColumnWidth(logical, column.width);
     }
     queue_view->setAlbumArtworkColumn(side_artwork ? local_artwork_column : -1);
@@ -144,9 +148,16 @@ BenchMainWindow::captureTrackViewLayout(const QTableView* view,
     layout.columns.reserve(static_cast<std::size_t>(header->count()));
     for (int visual = 0; visual < header->count(); ++visual) {
         const auto logical = header->logicalIndex(visual);
+        const auto id = trackColumnId(logical);
+        const auto saved = std::ranges::find(state.columns, id, &ui::TrackViewColumnLayout::id);
+        // Qt reports zero for hidden sections. Preserve the preferred width so
+        // toggling a column on does not collapse it to the minimum width.
+        const auto width = view->isColumnHidden(logical) && saved != state.columns.end()
+                               ? saved->width
+                               : header->sectionSize(logical);
         layout.columns.push_back(ui::TrackViewColumnLayout{
-            .id = trackColumnId(logical),
-            .width = std::max(24, header->sectionSize(logical)),
+            .id = id,
+            .width = std::max(24, width),
             .visible = !view->isColumnHidden(logical),
         });
     }
@@ -176,6 +187,9 @@ void BenchMainWindow::setTrackViewPresentation(const ui::TrackViewPresentation p
 }
 
 void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool visible) {
+    if (isMpdContext() &&
+        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
+        return;
     if (isMpdContext()) {
         if (applying_track_view_layout_) {
             return;
@@ -209,6 +223,9 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
         return;
     }
     found->visible = visible;
+    if (visible &&
+        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
+        tab->model->invalidateListeningHistory();
     tab->view_layout_persistence_protected = false;
     tab->preserved_view_layout.clear();
     applyTrackViewLayout(*tab, layout);
@@ -264,8 +281,11 @@ void BenchMainWindow::refreshTrackViewActions() {
           track_compact_queue_action_, track_layout_reset_action_, track_layout_copy_action_}) {
         action->setEnabled(available);
     }
-    for (auto* action : track_column_actions_) {
-        action->setEnabled(available);
+    for (auto it = track_column_actions_.begin(); it != track_column_actions_.end(); ++it) {
+        const bool local_only =
+            it.key() == QStringLiteral("play-count") || it.key() == QStringLiteral("last-played");
+        it.value()->setVisible(!local_only || (available && !isMpdContext()));
+        it.value()->setEnabled(available && (!local_only || !isMpdContext()));
     }
     if (!available) {
         return;

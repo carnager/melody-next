@@ -38,6 +38,7 @@ qt_add_library(
     convert_dialog.cpp
     convert_dialog.hpp
     local_list_model.cpp
+    local_list_history.cpp
     local_list_model.hpp
     local_list_edit_bar.cpp
     local_list_edit_bar.hpp

@@ -113,6 +113,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
         mpd_model_ = new quick::MpdQueueModel(this);
         view_->setModel(mpd_model_);
     }
+    // The preview is not a persisted local list and has no history loader.
+    view_->setColumnHidden(ui::track_play_count_column, true);
+    view_->setColumnHidden(ui::track_last_played_column, true);
     layout->addWidget(view_, 1);
     refresh_timer_ = new QTimer(this);
     refresh_timer_->setSingleShot(true);

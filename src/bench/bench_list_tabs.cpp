@@ -528,6 +528,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         restored_rows.push_back(std::move(row));
     }
     model->replaceRows(std::move(restored_rows));
+    model->setListeningHistoryService(persistence_);
 
     auto* view = new ui::QueueTableView(tabs_);
     view->setObjectName(QStringLiteral("bench-list-%1").arg(id.left(8)));
@@ -557,7 +558,10 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
             [this](const QString& reason) { statusBar()->showMessage(reason, 5'000); });
     connect(view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this] { refreshSelectionStatus(); });
-    connect(model, &QAbstractItemModel::dataChanged, this, [this] { refreshSelectionStatus(); });
+    connect(model, &QAbstractItemModel::dataChanged, this, [this](const QModelIndex& first) {
+        if (first.column() < local_play_count_column)
+            refreshSelectionStatus();
+    });
     connect(model, &QAbstractItemModel::rowsInserted, this, [this] { refreshSelectionStatus(); });
     connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { refreshSelectionStatus(); });
     connect(model, &QAbstractItemModel::modelReset, this, [this] { refreshSelectionStatus(); });

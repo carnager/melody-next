@@ -302,6 +302,12 @@ void QueueTableView::setModel(QAbstractItemModel* model) {
             connect(model, &QAbstractItemModel::dataChanged, this,
                     [this, refresh](const QModelIndex& first, const QModelIndex& last,
                                     const QList<int>& roles) {
+                        // Listening statistics cannot affect album grouping or artwork.
+                        if (first.column() >= track_play_count_column && !roles.isEmpty() &&
+                            std::ranges::all_of(roles, [](int role) {
+                                return role == Qt::DisplayRole || role == Qt::ToolTipRole;
+                            }))
+                            return;
                         refresh();
                         if (roles.isEmpty() || roles.contains(Qt::DisplayRole) ||
                             roles.contains(track_album_artist_role) ||

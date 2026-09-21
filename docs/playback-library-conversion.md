@@ -342,8 +342,11 @@ stores a play count and last-played time after advancing through half a track
 or four minutes, whichever is less, for tracks longer than 30 seconds. This
 works without Last.fm or tags. App-managed metadata edits and moves preserve
 history; distinct logical tracks remain separate. External changes are not
-automatically reconciled. History display, statistics queries, resume, and
-album shuffle remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
+automatically reconciled. In a local list, right-click a column header and enable
+**Columns → Play count / Last played** to display stored history (ADR-0208).
+These columns update in the background; unplayed tracks show `0` / `Never`,
+while unavailable history shows a dash with an explanation. Statistics queries,
+resume, and album shuffle remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
 for counting, identity, and failure semantics.
 
 Track-owned statistics include play count, first/last played, skip count,

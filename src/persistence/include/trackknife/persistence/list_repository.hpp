@@ -252,6 +252,9 @@ class ListRepository final {
 
     [[nodiscard]] core::Result<std::optional<LocalListeningHistory>>
     load_local_listening_history(std::string_view track_hash) const;
+    // Read-only lookup: an unseen qualified source has no history; never creates identity rows.
+    [[nodiscard]] core::Result<std::optional<LocalListeningHistory>>
+    lookup_local_listening_history(const ListItem& source) const;
     // Resolves a revision-qualified local source; may create its durable identity.
     [[nodiscard]] core::Result<std::string> local_listening_key(const ListItem& source);
     // Atomically deduplicates a qualified playback occurrence and increments history.

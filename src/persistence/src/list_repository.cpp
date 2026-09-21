@@ -115,6 +115,30 @@ std::string listening_observation(const std::string_view path,
                             std::to_string(revision.modification_time_nanoseconds));
 }
 
+bool valid_listening_source(const ListItem& source) {
+    return source.source == ListSource::local && !source.source_reference.empty() &&
+           source.source_reference.find('\0') == std::string::npos && source.source_revision &&
+           source.source_revision->inode != 0 &&
+           (!source.segment || (source.segment->start_sample >= 0 &&
+                                (!source.segment->end_sample ||
+                                 *source.segment->end_sample > source.segment->start_sample))) &&
+           (!source.source_selection ||
+            (source.source_selection->audio_stream_index.value_or(0) >= 0 &&
+             source.source_selection->subsong_index.value_or(0) >= 0));
+}
+
+std::string listening_track_key(const std::string& id, const ListItem& source) {
+    const auto number = [](const auto& value) {
+        return value ? std::to_string(*value) : std::string{"default"};
+    };
+    const auto selection = source.source_selection.value_or(ListItemSourceSelection{});
+    const auto range = source.segment ? std::to_string(source.segment->start_sample) + ":" +
+                                            number(source.segment->end_sample)
+                                      : std::string{"whole"};
+    return core::sha256_hex("local-listen-1:" + id + ":" + number(selection.audio_stream_index) +
+                            ":" + number(selection.subsong_index) + ":" + range);
+}
+
 core::Result<std::string> listening_source(sqlite3* database, const std::string& observation,
                                            const std::optional<std::string>& desired = {}) {
     auto insert =
@@ -4721,14 +4745,7 @@ core::Result<void> ListRepository::remove_search(const SavedSearch& expected) {
 }
 
 core::Result<std::string> ListRepository::local_listening_key(const ListItem& source) {
-    if (source.source != ListSource::local || source.source_reference.empty() ||
-        source.source_reference.find('\0') != std::string::npos || !source.source_revision ||
-        source.source_revision->inode == 0 ||
-        (source.segment && (source.segment->start_sample < 0 ||
-                            (source.segment->end_sample &&
-                             *source.segment->end_sample <= source.segment->start_sample))) ||
-        (source.source_selection && (source.source_selection->audio_stream_index.value_or(0) < 0 ||
-                                     source.source_selection->subsong_index.value_or(0) < 0))) {
+    if (!valid_listening_source(source)) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::invalid_argument,
                         .message = "Listening history requires a qualified local source",
@@ -4739,16 +4756,30 @@ core::Result<std::string> ListRepository::local_listening_key(const ListItem& so
                          listening_observation(source.source_reference, *source.source_revision));
     if (!id)
         return std::unexpected(std::move(id.error()));
-    const auto number = [](const auto& value) {
-        return value ? std::to_string(*value) : std::string{"default"};
-    };
-    const auto selection = source.source_selection.value_or(ListItemSourceSelection{});
     // Identity follows playable content, not a CUE filename or list occurrence.
-    const auto range = source.segment ? std::to_string(source.segment->start_sample) + ":" +
-                                            number(source.segment->end_sample)
-                                      : std::string{"whole"};
-    return core::sha256_hex("local-listen-1:" + *id + ":" + number(selection.audio_stream_index) +
-                            ":" + number(selection.subsong_index) + ":" + range);
+    return listening_track_key(*id, source);
+}
+
+core::Result<std::optional<LocalListeningHistory>>
+ListRepository::lookup_local_listening_history(const ListItem& source) const {
+    if (!valid_listening_source(source))
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "Listening history requires a qualified local source",
+                        .context = {}});
+    auto* database = implementation_->database;
+    auto query =
+        prepare(database, "SELECT source_id FROM local_listening_sources WHERE observation_hash=?");
+    if (!query ||
+        !bind_text(query->get(), 1,
+                   listening_observation(source.source_reference, *source.source_revision)))
+        return std::unexpected(database_error(database, "Could not query listening identity"));
+    const auto step = sqlite3_step(query->get());
+    if (step == SQLITE_DONE)
+        return std::optional<LocalListeningHistory>{};
+    if (step != SQLITE_ROW)
+        return std::unexpected(database_error(database, "Could not read listening identity"));
+    return load_local_listening_history(listening_track_key(column_text(query->get(), 0), source));
 }
 
 core::Result<void> ListRepository::record_local_listen(const ListItem& source,

@@ -42,11 +42,16 @@ void TrackViewLayoutTest::appendsNewlyRegisteredColumnsHidden() {
     const auto decoded = deserializeTrackViewLayout(
         QByteArray{R"({"schema":1,"presentation":"plain-columns",)"
                    R"("columns":[{"id":"artist","width":100,"visible":true}]})"},
-        {QStringLiteral("artist"), QStringLiteral("rating")}, &error);
+        {QStringLiteral("artist"), QStringLiteral("rating"), QStringLiteral("play-count"),
+         QStringLiteral("last-played")},
+        &error);
     QVERIFY2(decoded.has_value(), qPrintable(error));
-    QCOMPARE(decoded->columns.size(), 2U);
-    QCOMPARE(decoded->columns.back().id, QStringLiteral("rating"));
-    QVERIFY(!decoded->columns.back().visible);
+    QCOMPARE(decoded->columns.size(), 4U);
+    QCOMPARE(decoded->columns[1].id, QStringLiteral("rating"));
+    QCOMPARE(decoded->columns[2].id, QStringLiteral("play-count"));
+    QCOMPARE(decoded->columns[3].id, QStringLiteral("last-played"));
+    for (std::size_t n = 1; n < decoded->columns.size(); ++n)
+        QVERIFY(!decoded->columns[n].visible);
 }
 
 void TrackViewLayoutTest::rejectsInvalidLayouts_data() {

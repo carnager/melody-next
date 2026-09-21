@@ -32,6 +32,23 @@ files, local playback, PipeWire, and preparation tools. Never mix the two row
 types in one queue or expose local tagging/filesystem mutation commands in MPD
 context.
 
+## Local and Melody feature parity
+
+- Assess every feature for both local Trackbench playback and Melody-backed
+  playback. Where it makes sense in both authorities, implement and verify both;
+  do not treat a local-only implementation as completion of the feature.
+- Inspect Melody in `../melody` and change it when server-side support is the
+  appropriate solution. Server-owned playback, library, queue, and statistics
+  behavior belongs in Melody, not a client-side emulation tied to Trackbench's
+  lifetime or a single connected client.
+- Reuse existing Melody capabilities where they already provide the behavior.
+  Keep the user-facing workflow consistent without merging local and server
+  state, identities, or mutation authority.
+- Advertise and capability-gate new Melody protocol features. Preserve stock
+  MPD behavior and test unsupported-server handling as well as both supported
+  authorities. Explicitly document genuinely authority-specific features or
+  remaining parity gaps instead of silently omitting one side.
+
 ## Non-negotiable behavior
 
 - The project owns the versioned `tkfmt-1` formatting-expression language

@@ -19,8 +19,9 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-22, through ADR-0212 and database schema 40.
+Updated on 2026-09-22, through ADR-0213 and database schema 40.
 
+- [ADR-0213: Album shuffle for every Melody list](adr/0213-melody-list-album-shuffle.md).
 - [ADR-0212: One-shot album shuffle](adr/0212-one-shot-album-shuffle.md).
 
 - [ADR-0211: Interrupted request resume](adr/0211-interrupted-request-resume.md).

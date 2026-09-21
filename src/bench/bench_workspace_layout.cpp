@@ -397,6 +397,8 @@ void BenchMainWindow::buildWorkspace() {
         if (isMpdContext()) {
             if (tabs_->currentWidget() == mpd_queue_view_)
                 mpd_controller_->shuffleAlbums();
+            else if (const auto* tab = mpdPlaylistTabForWidget(tabs_->currentWidget()))
+                mpd_controller_->shuffleAlbums(tab->name);
         } else {
             list_edit_bar_->start({.kind = lists::EditKind::shuffle_albums,
                                    .expression = {},

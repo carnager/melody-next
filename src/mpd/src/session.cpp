@@ -329,7 +329,8 @@ struct Session::Impl {
         case SessionCommandKind::request_queue_edit:
             return without_payload(client.edit_request_queue(command.request));
         case SessionCommandKind::shuffle_albums:
-            return without_payload(client.shuffle_albums(command.object_id));
+            return without_payload(command.enabled ? client.shuffle_list_albums(command.uri)
+                                                   : client.shuffle_albums(command.object_id));
         case SessionCommandKind::melody_context_play:
             return without_payload(client.melody_context_play(command.uri, command.queue_position));
         case SessionCommandKind::melody_context_queue:
@@ -562,9 +563,12 @@ struct Session::Impl {
         case SessionCommandKind::queue_move:
         case SessionCommandKind::queue_move_batch:
         case SessionCommandKind::queue_priority:
-        case SessionCommandKind::shuffle_albums:
             return static_cast<std::uint32_t>(IdleEvent::queue) |
                    static_cast<std::uint32_t>(IdleEvent::player);
+        case SessionCommandKind::shuffle_albums:
+            return static_cast<std::uint32_t>(IdleEvent::queue) |
+                   static_cast<std::uint32_t>(IdleEvent::player) |
+                   (command.enabled ? static_cast<std::uint32_t>(IdleEvent::stored_playlist) : 0U);
         case SessionCommandKind::database_update:
         case SessionCommandKind::database_newest:
         case SessionCommandKind::database_browse:
@@ -946,6 +950,14 @@ std::uint64_t Session::shuffle_albums(const std::uint32_t revision) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::shuffle_albums;
     command.object_id = revision;
+    return implementation_->enqueue(std::move(command));
+}
+
+std::uint64_t Session::shuffle_list_albums(std::string name) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::shuffle_albums;
+    command.enabled = true;
+    command.uri = std::move(name);
     return implementation_->enqueue(std::move(command));
 }
 

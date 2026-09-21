@@ -266,7 +266,7 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void deleteStoredPlaylist(const QString& name);
     Q_INVOKABLE void setRepeatEnabled(bool enabled);
     Q_INVOKABLE void setRandomEnabled(bool enabled);
-    void shuffleAlbums();
+    void shuffleAlbums(const QString& name = {});
     Q_INVOKABLE void setSingleMode(int mode);
     Q_INVOKABLE void setConsumeMode(int mode);
     Q_INVOKABLE void setReplayGainMode(const QString& mode);

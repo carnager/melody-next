@@ -366,12 +366,15 @@ independent server restart resume; connecting
 Trackbench never seeks or pauses server playback. Stock MPD is left unchanged.
 
 **Trackknife decision — one-shot album shuffle (ADR-0212):** Edit → Shuffle albums
-reorders a whole local list, with Undo, or Melody's active unnamed MPD Queue.
+reorders a whole local list, with Undo, or any Melody list (ADR-0213).
 It groups exact album artist (artist fallback), album, and date; unknown albums
 remain independent entries. Within each album, existing order and duplicates
 are preserved. The playing occurrence is not restarted. Turn Random off to
 follow the resulting order; this command does not change playback modes.
-Named/stashed server lists and stock MPD are not supported by this command.
+Named and scratch/search-result lists and the stashed unnamed queue use Melody's
+revision-checked list command. Inactive edits do not switch playback; active edits
+retain current occurrence IDs and Up Next. Older daemons support only the active
+unnamed queue. Stock MPD does not support this command.
 
 Track-owned statistics include play count, first/last played, skip count,
 rating, and optional last position. They bind to stable identity/content rather

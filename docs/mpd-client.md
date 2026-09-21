@@ -246,6 +246,13 @@ metadata is fallback display data, not canonical server or file metadata.
 
 ## Server library and search
 
+Melody's authority-bound named and scratch/search-result tabs support the same
+one-shot **Shuffle albums** operation as the unnamed queue (ADR-0213). The
+advertised `melody_list_shuffle_albums` command targets the tab's captured name
+and checks a server revision. An empty name targets the unnamed queue even when
+it is stashed. Editing an inactive list never switches playback. Older Melody
+daemons retain the active-unnamed-queue-only fallback; stock MPD has no emulation.
+
 Per ADRs 0120 and 0122, the Sources panel hosts the MPD search field and either
 the browse tree or an expandable Albums/Tracks tree matching local search.
 Clearing search restores browsing;

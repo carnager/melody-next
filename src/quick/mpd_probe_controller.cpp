@@ -211,11 +211,21 @@ void MpdProbeController::editRequestQueue(mpd::RequestQueueCommand command) {
     emit stateChanged();
 }
 
-void MpdProbeController::shuffleAlbums() {
-    if (!session_ || !connected() || !queue_revision_ || !active_context_.isEmpty() ||
-        !supportsCommand(QStringLiteral("melody_shuffle_albums")))
+void MpdProbeController::shuffleAlbums(const QString& name) {
+    if (!session_ || !connected())
         return;
-    pending_commands_.insert(session_->shuffle_albums(*queue_revision_));
+    if (supportsCommand(QStringLiteral("melody_list_shuffle_albums"))) {
+        const auto id = session_->shuffle_list_albums(name.toUtf8().toStdString());
+        pending_commands_.insert(id);
+        if (!name.isEmpty())
+            pending_playlist_mutations_.insert(
+                id, {.kind = PlaylistMutationKind::edit, .name = name, .target_name = {}});
+    } else {
+        if (!name.isEmpty() || !queue_revision_ || !active_context_.isEmpty() ||
+            !supportsCommand(QStringLiteral("melody_shuffle_albums")))
+            return;
+        pending_commands_.insert(session_->shuffle_albums(*queue_revision_));
+    }
     emit stateChanged();
 }
 
@@ -2165,6 +2175,8 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
         if (result.error) {
             emit notificationRequested(QStringLiteral("Playlist command failed: %1")
                                            .arg(from_utf8(result.error->message)));
+            if (result.kind == mpd::SessionCommandKind::shuffle_albums)
+                reloadStoredPlaylist(mutation.name);
         } else {
             switch (mutation.kind) {
             case PlaylistMutationKind::save:

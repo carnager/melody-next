@@ -208,6 +208,12 @@ class FakeMpdServer final {
         } else if (command == "melody_context stage" ||
                    command == "melody_context stage \"A.flac\"") {
             write_all(client, "OK\n");
+        } else if (command == R"(melody_list_shuffle_albums "Year 2024")" ||
+                   command == R"(melody_list_shuffle_albums "")") {
+            write_all(client, "revision: abc123\nOK\n");
+        } else if (command == R"(melody_list_shuffle_albums "Year 2024" "abc123")" ||
+                   command == R"(melody_list_shuffle_albums "" "abc123")") {
+            write_all(client, "OK\n");
         } else if (command == "melody_shuffle_albums 42" || command == "melody_upnext append 42" ||
                    command == "melody_upnext move 42 21 0" ||
                    command == "melody_upnext return 42" ||
@@ -504,6 +510,10 @@ void client_negotiates_and_preserves_extensions() {
     require(client.shuffle_albums(42).has_value(),
             "album shuffle must transmit the captured queue revision");
     require(!client.shuffle_albums(41), "stale album shuffle must report the server rejection");
+    require(client.shuffle_list_albums("Year 2024").has_value() &&
+                client.shuffle_list_albums("").has_value(),
+            "list shuffle must read and return the revision for the explicit target");
+    require(!client.shuffle_list_albums("bad\nname"), "reject protocol control characters");
     require(client.set_single(trackknife::mpd::PlaybackModeState::oneshot).has_value() &&
                 client.set_consume(trackknife::mpd::PlaybackModeState::on).has_value(),
             "single and consume must preserve extended mode states");

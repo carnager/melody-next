@@ -334,6 +334,27 @@ core::Result<void> Client::shuffle_albums(const std::uint32_t revision) {
                                          "melody_shuffle_albums");
 }
 
+core::Result<void> Client::shuffle_list_albums(std::string_view name) {
+    if (name.find_first_of("\r\n") != std::string_view::npos ||
+        name.find('\0') != std::string_view::npos)
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Invalid Melody list name",
+                                           .context = {}});
+    const auto command = "melody_list_shuffle_albums " + quoted_argument(std::string{name});
+    auto pairs = command_pairs(command);
+    if (!pairs)
+        return std::unexpected(std::move(pairs.error()));
+    for (const auto& pair : *pairs) {
+        if (pair.name == "revision" && !pair.value.empty() &&
+            pair.value.find_first_not_of("0123456789abcdef") == std::string::npos)
+            return implementation_->run_composed(command + " " + quoted_argument(pair.value),
+                                                 "melody_list_shuffle_albums");
+    }
+    return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                       .message = "Melody omitted the list revision",
+                                       .context = {}});
+}
+
 core::Result<PlaybackStatus> Client::status() {
     auto pairs = command_pairs("status");
     if (!pairs) {

@@ -148,7 +148,8 @@ identity across app-managed publications. ADR-0208 adds optional local Play coun
 and Last played columns. ADR-0210 adds opt-in paused local list resume and
 identity-checked Melody resume. ADR-0211 extends both to interrupted Up Next
 requests. ADR-0212 adds one-shot album shuffle for local lists and Melody's active
-unnamed queue. Continuous album-random playback remains open. Server statistics
+unnamed queue; ADR-0213 extends it to every Melody list, including search results
+and the stashed queue. Continuous album-random playback remains open. Server statistics
 and resume remain server-owned.
 
 - [x] Track and album ratings on the shared 0-10 star scale (ADR-0179):
@@ -164,8 +165,8 @@ and resume remain server-owned.
   through the previewed metadata write workflow.
 - [ ] Restore playback position without automatically starting playback.
 - [x] One-shot Shuffle albums, preserving existing within-album order: local lists
-  and Melody's active unnamed queue (ADR-0212).
-- [ ] Continuous album-random playback and named server-list album shuffle.
+  and every Melody list (ADRs 0212–0213).
+- [ ] Continuous album-random playback.
 - [ ] Use listening statistics in queries, such as finding unplayed albums.
 - [ ] Optional autoplay when a list ends, choosing related tracks from the local
   or server library. Online similarity lookups need explicit opt-in, caching,

@@ -75,6 +75,7 @@ class Client final {
     [[nodiscard]] core::Result<RequestQueueState> request_queue();
     [[nodiscard]] core::Result<void> edit_request_queue(const RequestQueueCommand& command);
     [[nodiscard]] core::Result<void> shuffle_albums(std::uint32_t revision);
+    [[nodiscard]] core::Result<void> shuffle_list_albums(std::string_view name);
     Client(Client&&) noexcept;
     Client& operator=(Client&&) noexcept;
     Client(const Client&) = delete;

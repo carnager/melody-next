@@ -646,6 +646,19 @@ void BenchMainWindowTest::albumShuffleIsCapabilityGated() {
     window.mpd_controller_->active_context_ = QStringLiteral("Another playlist");
     window.refreshListHistoryActions();
     QVERIFY(!window.shuffle_albums_action_->isVisible());
+    window.mpd_controller_->advertised_commands_.insert(
+        QStringLiteral("melody_list_shuffle_albums"));
+    window.refreshListHistoryActions();
+    QVERIFY(window.shuffle_albums_action_->isVisible());
+    QVERIFY(window.shuffle_albums_action_->isEnabled());
+    QVERIFY(window.openMpdPlaylistTab(QStringLiteral("Year 2024"), true));
+    window.refreshListHistoryActions();
+    QVERIFY(window.shuffle_albums_action_->isVisible());
+    QVERIFY(window.shuffle_albums_action_->isEnabled());
+    window.mpd_controller_->advertised_commands_.remove(
+        QStringLiteral("melody_list_shuffle_albums"));
+    window.refreshListHistoryActions();
+    QVERIFY(!window.shuffle_albums_action_->isVisible());
     window.mpd_controller_->connected_ = false;
 }
 

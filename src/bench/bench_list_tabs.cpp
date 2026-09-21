@@ -1535,7 +1535,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     addUpNextActions(track_context_menu_, view);
     if (server_list) {
         refreshListHistoryActions();
-        if (view == mpd_queue_view_ && shuffle_albums_action_->isVisible())
+        if (shuffle_albums_action_->isVisible())
             track_context_menu_->addAction(shuffle_albums_action_);
         const auto has_uris = !selectedMpdViewUris(view).isEmpty();
         mpd_crop_selection_action_->setEnabled(command_ready && has_selection);
@@ -1887,6 +1887,9 @@ void BenchMainWindow::refreshListHistoryActions() {
     if (shuffle_albums_action_) {
         const bool supported =
             !isMpdContext() ||
+            ((tabs_->currentWidget() == mpd_queue_view_ ||
+              mpdPlaylistTabForWidget(tabs_->currentWidget()) != nullptr) &&
+             mpd_controller_->supportsCommand(QStringLiteral("melody_list_shuffle_albums"))) ||
             (tabs_->currentWidget() == mpd_queue_view_ &&
              mpd_controller_->activeContextName().isEmpty() &&
              mpd_controller_->supportsCommand(QStringLiteral("melody_shuffle_albums")));

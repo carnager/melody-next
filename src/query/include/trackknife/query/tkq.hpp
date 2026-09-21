@@ -32,7 +32,7 @@ enum class TkqComparison : std::uint8_t { has, is, greater, less, equal, present
 
 // A predicate's left-hand side: a plain field name, the `*` wildcard, or an
 // embedded tkfmt-1 expression whose evaluated text feeds the operator.
-enum class TkqOperandKind : std::uint8_t { field, any_field, expression };
+enum class TkqOperandKind : std::uint8_t { field, any_field, expression, history };
 
 struct TkqPredicate {
     TkqOperandKind operand{TkqOperandKind::field};

@@ -91,6 +91,26 @@ namespace {
 
 [[nodiscard]] core::Result<std::string> translate_predicate(const TkqPredicate& predicate,
                                                             const bool full_grammar) {
+    if (predicate.operand == TkqOperandKind::history) {
+        const auto tag = "history-" + predicate.field;
+        const auto comparison = predicate.comparison;
+        if (comparison == TkqComparison::has || comparison == TkqComparison::is)
+            return std::unexpected(unsupported("HISTORY requires numeric or presence comparisons"));
+        const auto op = comparison == TkqComparison::greater   ? ">"
+                        : comparison == TkqComparison::less    ? "<"
+                        : comparison == TkqComparison::present ? ">="
+                        : comparison == TkqComparison::missing ? "<"
+                                                               : "==";
+        const auto number =
+            comparison == TkqComparison::present || comparison == TkqComparison::missing
+                ? 0
+                : predicate.number;
+        const auto expression = "(" + tag + " " + op + " " + std::to_string(number) + ")";
+        if (comparison != TkqComparison::present && comparison != TkqComparison::missing &&
+            predicate.field != "playcount" && predicate.field != "albumplaycount")
+            return "((" + tag + " >= 0) AND " + expression + ")";
+        return expression;
+    }
     if (predicate.operand == TkqOperandKind::expression) {
         return std::unexpected(unsupported(
             "tkfmt expression predicates evaluate locally and cannot run on the server"));
@@ -261,7 +281,12 @@ namespace {
 } // namespace
 
 core::Result<MelodyTranslatedQuery> translate_tkq_to_melody(const CompiledTkq& compiled,
-                                                            const bool full_grammar) {
+                                                            const bool full_grammar,
+                                                            const bool history_filters) {
+    if (!history_filters && std::ranges::any_of(compiled.predicates, [](const auto& p) {
+            return p.operand == TkqOperandKind::history;
+        }))
+        return std::unexpected(unsupported("This server does not advertise history filters"));
     MelodyTranslatedQuery translated;
     if (compiled.match_all) {
         translated.filter_expression = "(base \"\")";

@@ -32,9 +32,11 @@
 
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -403,6 +405,7 @@ class BenchMainWindow final : public QMainWindow {
     void applyLocalPlaybackModes();
     void showReplayGainPreampDialog();
     void resetPlaybackOrder();
+    void prepareAlbumPlaybackOrder(std::uint64_t generation);
     void adoptPlaybackRow(ListTab& tab, int row, const LocalTrackSource& source, bool consume,
                           int direction = 1);
     void consumePlaybackRow(ListTab& tab, const QPersistentModelIndex& index);
@@ -591,6 +594,8 @@ class BenchMainWindow final : public QMainWindow {
     QWidget* mpd_status_separator_{nullptr};
     QAction* mpd_repeat_action_{nullptr};
     QAction* mpd_random_action_{nullptr};
+    QAction* mpd_album_random_action_{nullptr};
+    QToolButton* mpd_album_random_button_{nullptr};
     QAction* mpd_single_action_{nullptr};
     QAction* mpd_consume_action_{nullptr};
     QAction* mpd_crop_selection_action_{nullptr};
@@ -687,6 +692,7 @@ class BenchMainWindow final : public QMainWindow {
 
     QAction* local_repeat_action_{nullptr};
     QAction* local_random_action_{nullptr};
+    QAction* local_album_random_action_{nullptr};
     QAction* local_single_action_{nullptr};
     QAction* local_consume_action_{nullptr};
     std::vector<QToolButton*> local_mode_buttons_;
@@ -694,6 +700,13 @@ class BenchMainWindow final : public QMainWindow {
     QActionGroup* local_replaygain_group_{nullptr};
     bool local_repeat_{false};
     bool local_random_{false};
+    bool local_album_random_{false};
+    bool album_order_preparing_{false};
+    std::uint64_t album_order_generation_{0};
+    int album_order_build_row_{0};
+    std::size_t album_order_key_bytes_{0};
+    std::map<std::tuple<std::string, std::string, std::string>, std::size_t> album_order_keys_;
+    std::vector<std::vector<int>> album_order_groups_;
     int local_single_{0};
     int local_consume_{0};
     QString local_replaygain_{QStringLiteral("off")};

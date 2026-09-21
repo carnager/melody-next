@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "query/history_corpus.hpp"
 #include "trackknife/query/tkq.hpp"
 #include "trackknife/query/tkq_melody.hpp"
 
@@ -265,6 +266,30 @@ void melodyFullGrammarTranslatesStructuredQueries() {
 }
 
 int main() {
+    for (const auto& test : history_corpus::cases) {
+        const auto compiled = compile_tkq(test.source);
+        CHECK(compiled.has_value());
+        if (!compiled)
+            continue;
+        const auto output = trackknife::query::translate_tkq_to_melody(*compiled, true, true);
+        CHECK(output.has_value());
+        if (output)
+            CHECK(output->filter_expression == test.expected);
+    }
+    const auto history =
+        compile_tkq("HISTORY(albumplaycount) EQUAL 0 OR HISTORY(albumdayssinceplayed) GREATER 180");
+    CHECK(history.has_value());
+    CHECK(history->predicates.front().operand == trackknife::query::TkqOperandKind::history);
+    CHECK(!trackknife::query::translate_tkq_to_melody(*history, true));
+    const auto translated = trackknife::query::translate_tkq_to_melody(*history, true, true);
+    CHECK(translated.has_value());
+    CHECK(translated->filter_expression ==
+          "((history-albumplaycount == 0) OR ((history-albumdayssinceplayed >= 0) AND "
+          "(history-albumdayssinceplayed > 180)))");
+    CHECK(!compile_tkq("HISTORY(unknown) EQUAL 0"));
+    CHECK(!compile_tkq("HISTORY(playcount) HAS 1"));
+    CHECK(compile_tkq("HISTORY IS tag")->predicates.front().operand ==
+          trackknife::query::TkqOperandKind::field);
     simpleWordsBecomeAnAllWordSearch();
     melodyTranslationCoversTheSupportedSubset();
     melodyFullGrammarTranslatesStructuredQueries();

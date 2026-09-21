@@ -3,6 +3,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/error.hpp"
 #include "trackknife/core/stable_id.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
 
@@ -154,6 +155,22 @@ int main(const int argc, char** argv) {
 
     // Text, existence, numeric, date, and technical predicates over the
     // migration-30 substrate.
+    CHECK(paths_of("HISTORY(playcount) EQUAL 0").size() == 3U);
+    auto repository = persistence::ListRepository::open(base / "state.sqlite");
+    CHECK(repository.has_value());
+    persistence::ListItem listened;
+    listened.source = persistence::ListSource::local;
+    listened.source_reference = jazz;
+    const auto observed = core::observe_local_source_revision(jazz);
+    CHECK(observed.has_value());
+    listened.source_revision = *observed;
+    CHECK(repository->record_local_listen(listened, core::StableId::random(), 1'000).has_value());
+    CHECK(paths_of("HISTORY(playcount) EQUAL 1") == std::vector{jazz});
+    CHECK(paths_of("HISTORY(albumplaycount) EQUAL 0").size() == 2U);
+    CHECK(paths_of("HISTORY(dayssinceplayed) GREATER 180") == std::vector{jazz});
+    CHECK(paths_of("HISTORY(lastplayed) MISSING").size() == 2U);
+    CHECK(paths_of("HISTORY(albumlastplayed) PRESENT") == std::vector{jazz});
+    CHECK(paths_of("playcount MISSING").size() == 3U);
     CHECK(paths_of("genre IS jazz") == std::vector{jazz});
     CHECK(paths_of("genre IS JAZZ") == std::vector{jazz});
     CHECK(paths_of("genre HAS ja") == std::vector{jazz});
@@ -219,6 +236,19 @@ int main(const int argc, char** argv) {
         CHECK(!cancelled && cancelled.error().code == core::ErrorCode::cancelled);
     }
 
+    // Album predicates aggregate before ordinary predicates narrow candidates.
+    const auto companion = fixture(fixtures, root, "d.flac",
+                                   {{"TITLE", "Companion"},
+                                    {"ARTIST", "Miles Davis"},
+                                    {"ALBUM", "Kind of Blue"},
+                                    {"DATE", "1959"}});
+    persistence::LibraryScanProgress updated;
+    CHECK(library->scan({}, updated).has_value());
+    CHECK(paths_of("title IS Companion AND HISTORY(playcount) EQUAL 0") == std::vector{companion});
+    CHECK(paths_of("title IS Companion AND HISTORY(albumplaycount) EQUAL 0").empty());
+    CHECK(paths_of("title IS Companion AND HISTORY(albumplaycount) EQUAL 1") ==
+          std::vector{companion});
+    CHECK(paths_of("HISTORY(dayssinceplayed) GREATER -2") == std::vector{jazz});
     std::filesystem::remove_all(base, fs_error);
     return failures == 0 ? 0 : 1;
 }

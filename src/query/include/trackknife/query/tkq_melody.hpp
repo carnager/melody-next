@@ -30,6 +30,7 @@ struct MelodyTranslatedQuery {
 // predicates — is a typed error naming the unsupported construct, never a
 // silently broadened query.
 [[nodiscard]] core::Result<MelodyTranslatedQuery>
-translate_tkq_to_melody(const CompiledTkq& compiled, bool full_grammar = false);
+translate_tkq_to_melody(const CompiledTkq& compiled, bool full_grammar = false,
+                        bool history_filters = false);
 
 } // namespace trackknife::query

@@ -585,6 +585,11 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     connect(model, &QAbstractItemModel::rowsMoved, this, reset_order);
     connect(model, &QAbstractItemModel::modelReset, this, reset_order);
     connect(model, &QAbstractItemModel::layoutChanged, this, reset_order);
+    connect(model, &QAbstractItemModel::dataChanged, this,
+            [this, reset_order](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
+                if (local_album_random_ && roles.empty())
+                    reset_order();
+            });
     view->setProperty("trackknife-hover-row", -1);
     view->setAlternatingRowColors(true);
     view->setShowGrid(false);
@@ -788,8 +793,8 @@ void BenchMainWindow::openSearchDialog() {
                 [this](const query::CompiledTkq& compiled,
                        std::function<void(QStringList, int, QString)> completion) {
                     auto translated = query::translate_tkq_to_melody(
-                        compiled,
-                        mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")));
+                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")));
                     if (!translated) {
                         completion({}, 0, displayText(translated.error().message));
                         return;
@@ -829,8 +834,8 @@ void BenchMainWindow::openSearchDialog() {
             .open =
                 [this](const query::CompiledTkq& compiled, const QString& query_text) {
                     auto translated = query::translate_tkq_to_melody(
-                        compiled,
-                        mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")));
+                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")));
                     if (!translated) {
                         return;
                     }

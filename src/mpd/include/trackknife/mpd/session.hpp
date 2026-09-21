@@ -223,6 +223,7 @@ class Session final {
     [[nodiscard]] std::uint64_t set_volume(unsigned volume);
     [[nodiscard]] std::uint64_t set_repeat(bool enabled);
     [[nodiscard]] std::uint64_t set_random(bool enabled);
+    [[nodiscard]] std::uint64_t set_album_random(bool enabled);
     [[nodiscard]] std::uint64_t set_single(PlaybackModeState state);
     [[nodiscard]] std::uint64_t set_consume(PlaybackModeState state);
     [[nodiscard]] std::uint64_t set_replay_gain_mode(ReplayGainMode mode);

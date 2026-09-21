@@ -260,6 +260,22 @@ class Parser {
             return std::unexpected(current_error("a predicate should start here"));
         }
 
+        // Explicit accessor: previously invalid syntax, so ordinary file fields
+        // (including a tag named HISTORY or playcount) retain tkq-1 semantics.
+        if (operand_token.kind == TokenKind::word && operand_token.text == "HISTORY" &&
+            accept(TokenKind::open_paren)) {
+            if (position_ >= end_ || tokens_[position_].kind != TokenKind::word)
+                return std::unexpected(current_error("HISTORY needs a statistic name"));
+            field = lower(tokens_[position_++].text);
+            if (field != "playcount" && field != "lastplayed" && field != "dayssinceplayed" &&
+                field != "albumplaycount" && field != "albumlastplayed" &&
+                field != "albumdayssinceplayed")
+                return std::unexpected(current_error("Unknown HISTORY statistic"));
+            if (!accept(TokenKind::close_paren))
+                return std::unexpected(current_error("HISTORY needs a closing parenthesis"));
+            operand = TkqOperandKind::history;
+        }
+
         if (position_ >= end_ || tokens_[position_].kind != TokenKind::word ||
             !tokens_[position_].keyword) {
             return std::unexpected(parse_error(
@@ -285,6 +301,9 @@ class Parser {
         }
 
         const auto& name = operator_token.text;
+        if (operand == TkqOperandKind::history && (name == "HAS" || name == "IS"))
+            return std::unexpected(
+                current_error("HISTORY requires numeric or presence comparisons"));
         if (name == "PRESENT" || name == "MISSING") {
             if (operand == TkqOperandKind::any_field) {
                 return std::unexpected(parse_error("* cannot be tested for presence",

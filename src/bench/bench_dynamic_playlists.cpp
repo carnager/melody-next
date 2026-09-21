@@ -6,6 +6,7 @@
 #include "quick/mpd_probe_controller.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq_melody.hpp"
+#include "uicommon/list_persistence_service.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include <QFutureWatcher>
 #include <QMenu>
@@ -80,7 +81,8 @@ void BenchMainWindow::showDynamicPlaylists() {
                 }
             }
             const auto translated = query::translate_tkq_to_melody(
-                compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")));
+                compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
+                mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")));
             if (!translated) {
                 completion(std::unexpected(translated.error()));
                 return;
@@ -152,7 +154,11 @@ void BenchMainWindow::showDynamicPlaylists() {
                 });
         connect(mpd_controller_, &quick::MpdProbeController::serverDatabaseChanged, dialog,
                 &DynamicPlaylistDialog::libraryChanged);
+        connect(mpd_controller_, &quick::MpdProbeController::listeningStatisticsChanged, dialog,
+                &DynamicPlaylistDialog::libraryChanged);
     } else if (local_library_) {
+        connect(persistence_, &ui::ListPersistenceService::listeningHistoryChanged, dialog,
+                &DynamicPlaylistDialog::libraryChanged);
         connect(local_library_, &LocalLibraryPanel::ratingsChanged, dialog,
                 &DynamicPlaylistDialog::libraryChanged);
         connect(local_library_, &LocalLibraryPanel::libraryContentChanged, dialog,

@@ -542,6 +542,36 @@ void chainsSelectedCodecSubsongs(const std::filesystem::path& fixture_directory,
 void playbackOrderVisitsOccurrencesAndWraps() {
     using trackknife::audio::PlaybackOrder;
     PlaybackOrder order{1234U};
+    for (unsigned seed = 0; seed < 50; ++seed) {
+        PlaybackOrder albums{seed};
+        albums.resetAlbums({{0, 2, 4}, {1, 3}, {5}}, 2);
+        CHECK(albums.adjacent(1, false) == 4);
+        albums.advance(4);
+        CHECK(albums.adjacent(-1, false) == 2);
+        std::vector<int> visited{2, 4};
+        while (const auto next = albums.adjacent(1, false)) {
+            CHECK(albums.adjacent(1, false) == next);
+            visited.push_back(*next);
+            albums.advance(*next);
+            if (visited.size() > 6)
+                break;
+        }
+        CHECK(visited.size() == 5);
+        const auto first = std::find(visited.begin(), visited.end(), 1);
+        CHECK(first != visited.end() && first + 1 != visited.end() && *(first + 1) == 3);
+        const auto next = albums.adjacent(1, true);
+        CHECK(next.has_value());
+        CHECK(!albums.adjacent(1, false));
+        albums.advance(*next);
+        std::set<int> cycle{*next};
+        while (const auto row = albums.adjacent(1, false)) {
+            CHECK(cycle.insert(*row).second);
+            albums.advance(*row);
+            if (cycle.size() > 6)
+                break;
+        }
+        CHECK(cycle.size() == 6);
+    }
     order.reset(4, 0, false);
     CHECK(!order.adjacent(-1, false));
     CHECK(order.adjacent(-1, true) == 3);

@@ -7,6 +7,7 @@
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/query/tkq.hpp"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -42,6 +43,9 @@ struct TkqRowFacts {
     // shadow same-named file tags.
     std::int64_t rating{-1};
     std::int64_t album_rating{-1};
+    // Explicit HISTORY accessors; absence means unavailable, not unplayed.
+    // playcount, lastplayed, dayssinceplayed, and their three album equivalents.
+    std::optional<std::array<std::int64_t, 6>> history;
 };
 
 struct TkqRowTechnicals {

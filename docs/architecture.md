@@ -540,6 +540,15 @@ there is no second mirror view. Leaving a tab returns its widget to the editor.
 
 ## Shared dynamic playlists (ADR-0195)
 
+ADRs 0214–0215 add authority-owned album traversal and history query facts.
+Local album keys are captured in bounded UI batches and the Qt-free traversal
+is prepared on a worker; generation checks prevent stale list plans from being
+installed. Melody owns its own album cycles and pending Repeat occurrence IDs.
+No list order is mutated by playback modes. Explicit `HISTORY(...)` predicates
+consume a consistent local-library/history snapshot or translate to advertised
+Melody history filters. Whole-album aggregates precede predicate narrowing;
+history invalidations refresh open dynamic-rule previews in their own authority.
+
 `DynamicPlaylistService` owns definition evaluation, provider requests, bounded
 matching, cancellation generations, limits, and shuffle. The editor uses the
 same service for both authorities. Adapters evaluate typed `CompiledTkq`

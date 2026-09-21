@@ -214,17 +214,16 @@ void output_pairs_keep_stock_and_melody_state() {
 void status_pairs_project_typed_state_and_preserve_extensions() {
     using trackknife::mpd::Pair;
     const std::vector<Pair> pairs{
-        {"volume", "72"},        {"repeat", "1"},
-        {"random", "0"},         {"single", "oneshot"},
-        {"consume", "0"},        {"playlist", "43"},
-        {"playlistlength", "8"}, {"state", "play"},
-        {"songid", "73"},        {"nextsongid", "74"},
-        {"elapsed", "12.125"},   {"duration", "220.9"},
-        {"xfade", "5"},          {"future-status", "preserved"},
+        {"volume", "72"},      {"repeat", "1"},         {"random", "0"},
+        {"single", "oneshot"}, {"X-AlbumRandom", "1"},  {"consume", "0"},
+        {"playlist", "43"},    {"playlistlength", "8"}, {"state", "play"},
+        {"songid", "73"},      {"nextsongid", "74"},    {"elapsed", "12.125"},
+        {"duration", "220.9"}, {"xfade", "5"},          {"future-status", "preserved"},
     };
 
     const auto result = trackknife::mpd::project_status(pairs);
     require(result.has_value(), "valid status pairs must project");
+    require(result->album_random, "Melody album playback mode must project");
     require(result->state == trackknife::mpd::PlaybackState::playing && result->volume == 72U,
             "playback and volume state must project");
     require(result->elapsed == std::chrono::milliseconds{12125} &&

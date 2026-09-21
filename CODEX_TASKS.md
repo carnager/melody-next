@@ -16,8 +16,10 @@ numbers below. The three priorities are not complete.
    Melody's server-owned resume. ADR-0211 extends paused resume to interrupted
    Up Next requests in both authorities. ADR-0212 adds one-shot album-preserving
    shuffle for local lists; ADR-0213 extends Melody support to all lists, including
-   search results and the stashed queue. History queries and continuous
-   album-random playback remain open.
+   search results and the stashed queue. ADR-0214 adds continuous album playback
+   in both authorities; ADR-0215 adds explicit track/album history library queries.
+   History sorting, current-tab history scope, and calendar-relative operators
+   remain open.
 2. **Command discovery and staged-operation UX:** the curated command palette
    is available with Ctrl+Shift+P, with Settings retaining shortcut editing
    (ADR-0205). Parameter choices such as device names and numeric ratings are

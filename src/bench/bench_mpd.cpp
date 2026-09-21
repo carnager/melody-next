@@ -106,6 +106,14 @@ void BenchMainWindow::buildMpdStatusControls() {
     mpd_random_button_ = add_action_button(mpd_random_action_, QStringLiteral("bench-mpd-random"));
     connect(mpd_random_action_, &QAction::triggered, mpd_controller_,
             &quick::MpdProbeController::setRandomEnabled);
+    mpd_album_random_action_ = new QAction(tr("Album shuffle"), this);
+    mpd_album_random_action_->setObjectName(QStringLiteral("action-mpd-album-random"));
+    mpd_album_random_action_->setCheckable(true);
+    mpd_album_random_button_ =
+        add_action_button(mpd_album_random_action_, QStringLiteral("bench-mpd-album-random"));
+    mpd_album_random_button_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    connect(mpd_album_random_action_, &QAction::triggered, mpd_controller_,
+            &quick::MpdProbeController::setAlbumRandomEnabled);
 
     mpd_single_action_ = new QAction(QStringLiteral("Cycle MPD single mode"), this);
     mpd_single_action_->setObjectName(QStringLiteral("action-mpd-single"));
@@ -315,7 +323,16 @@ void BenchMainWindow::refreshMpdStatusControls() {
     mpd_random_button_->setVisible(visible);
     mpd_random_action_->setVisible(visible);
     mpd_random_action_->setEnabled(connected);
-    mpd_random_action_->setChecked(mpd_controller_->randomEnabled());
+    mpd_random_action_->setChecked(mpd_controller_->randomEnabled() &&
+                                   !mpd_controller_->albumRandomEnabled());
+    const auto albums_visible =
+        visible && mpd_controller_->supportsCommand(QStringLiteral("melody_album_random"));
+    mpd_album_random_action_->setVisible(albums_visible);
+    mpd_album_random_button_->setVisible(albums_visible);
+    mpd_album_random_action_->setEnabled(albums_visible && command_ready);
+    mpd_album_random_action_->setChecked(mpd_controller_->albumRandomEnabled());
+    mpd_album_random_action_->setToolTip(
+        tr("Shuffle albums during server playback without rearranging any list."));
     mpd_random_action_->setToolTip(
         QStringLiteral("Random: %1")
             .arg(mpd_controller_->randomEnabled() ? QStringLiteral("On") : QStringLiteral("Off")));

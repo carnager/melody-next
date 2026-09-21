@@ -1100,6 +1100,8 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
                            "action-convert-files",
                            "action-reverse-list",
                            "action-shuffle-albums",
+                           "action-local-album-random",
+                           "action-mpd-album-random",
                            "action-deduplicate-list",
                            "action-backup-workspace",
                            "action-restore-workspace"}) {

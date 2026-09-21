@@ -2,6 +2,7 @@
 
 #include "trackknife/persistence/local_library.hpp"
 
+#include "trackknife/core/sha256.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/core/unicode.hpp"
 #include "trackknife/formats/probe.hpp"
@@ -21,6 +22,7 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -504,7 +506,8 @@ translate_predicate(const query::TkqPredicate& predicate) {
     using query::TkqComparison;
     using query::TkqOperandKind;
     FilterClause clause;
-    if (predicate.operand == TkqOperandKind::expression) {
+    if (predicate.operand == TkqOperandKind::expression ||
+        predicate.operand == TkqOperandKind::history) {
         return std::nullopt;
     }
     if (predicate.operand == TkqOperandKind::any_field) {
@@ -1083,7 +1086,85 @@ void load_field_rows(Statement& statement, const std::string& raw_path, FilterRo
 [[nodiscard]] std::vector<FilterRow>
 collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const FilterPlan& plan,
                        const core::CancellationToken& cancellation) {
-    const auto need_rows = plan.residual || compiled.sort.has_value();
+    // Query-local snapshot: do not cache history between evaluations or infer
+    // identity from tags. The indexed raw path/revision must match a recorded
+    // observation; logical-track listens never count as whole-file listens.
+    std::map<std::string, std::array<std::int64_t, 6>> history;
+    std::optional<Transaction> history_snapshot;
+    if (std::ranges::any_of(compiled.predicates, [](const auto& p) {
+            return p.operand == query::TkqOperandKind::history;
+        })) {
+        history_snapshot.emplace(db, true);
+        std::map<std::string, std::pair<std::int64_t, std::int64_t>> statistics;
+        Statement stats{db,
+                        "SELECT track_hash,play_count,last_played_ms FROM local_listening_history"};
+        while (stats.next()) {
+            if (statistics.size() >= 1'000'000U)
+                fail("History exceeds one million records", core::ErrorCode::limit_exceeded);
+            statistics.emplace(stats.bytes(0), std::pair{stats.number(1), stats.number(2)});
+        }
+        std::map<std::string, std::string> identities;
+        Statement sources{db, "SELECT observation_hash,source_id FROM local_listening_sources"};
+        while (sources.next()) {
+            if (identities.size() >= 1'000'000U)
+                fail("History exceeds one million source observations",
+                     core::ErrorCode::limit_exceeded);
+            identities.emplace(sources.bytes(0), sources.bytes(1));
+        }
+        struct Entry {
+            std::string path, album;
+            std::int64_t count, last;
+        };
+        std::vector<Entry> entries;
+        std::map<std::string, std::pair<std::int64_t, std::int64_t>> albums;
+        Statement indexed{db, "SELECT raw_path,revision,album_rating_hash,album FROM "
+                              "local_library_tracks WHERE available=1"};
+        while (indexed.next()) {
+            if (cancellation.is_cancellation_requested())
+                fail("History query cancelled", core::ErrorCode::cancelled);
+            if (entries.size() >= 1'000'000U)
+                fail("History query exceeds one million indexed tracks",
+                     core::ErrorCode::limit_exceeded);
+            const auto path = indexed.bytes(0), revision = indexed.bytes(1);
+            if (!revision.starts_with("2:"))
+                fail("Refresh the local index before searching history", core::ErrorCode::conflict);
+            const auto observation = core::sha256_hex(std::to_string(path.size()) + ":" + path +
+                                                      ":" + revision.substr(2));
+            std::pair<std::int64_t, std::int64_t> value{};
+            if (const auto identity = identities.find(observation); identity != identities.end()) {
+                const auto key = core::sha256_hex("local-listen-1:" + identity->second +
+                                                  ":default:default:whole");
+                if (const auto found = statistics.find(key); found != statistics.end())
+                    value = found->second;
+            }
+            const auto album =
+                indexed.bytes(3).empty() ? "path:" + path : "album:" + indexed.bytes(2);
+            entries.push_back({path, album, value.first, value.second});
+            auto& aggregate = albums[album];
+            aggregate.first += value.first;
+            aggregate.second = std::max(aggregate.second, value.second);
+        }
+        statistics.clear();
+        identities.clear();
+        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count();
+        for (const auto& entry : entries) {
+            const auto album = albums.at(entry.album);
+            history[entry.path] = {
+                entry.count,
+                entry.last > 0 ? entry.last : -1,
+                entry.last > 0 ? std::max<std::int64_t>(0, now - entry.last) / 86'400'000 : -1,
+                album.first,
+                album.second > 0 ? album.second : -1,
+                album.second > 0 ? std::max<std::int64_t>(0, now - album.second) / 86'400'000 : -1};
+        }
+    }
+    const auto need_rows =
+        compiled.sort.has_value() ||
+        (plan.residual && std::ranges::any_of(compiled.predicates, [](const auto& p) {
+             return p.operand != query::TkqOperandKind::history;
+         }));
     Statement select{db, std::string{"SELECT "} + filter_columns + " FROM local_library_tracks t" +
                              filter_where(plan) + filter_order};
     if (plan.pushed) {
@@ -1098,6 +1179,8 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
         }
         FilterRow row;
         row.raw_path = select.bytes(0);
+        if (const auto found = history.find(row.raw_path); found != history.end())
+            row.facts.history = found->second;
         row.facts.title = select.bytes(1);
         row.facts.artist = select.bytes(2);
         row.facts.album = select.bytes(3);
@@ -1152,6 +1235,8 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
         }
         matches = std::move(sorted);
     }
+    if (history_snapshot)
+        history_snapshot->commit();
     return matches;
 }
 

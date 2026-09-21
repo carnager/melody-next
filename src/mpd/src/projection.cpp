@@ -410,6 +410,9 @@ core::Result<PlaybackStatus> project_status(std::span<const Pair> pairs) {
             if (!parse_boolean(pair.value, status.repeat)) {
                 return std::unexpected(malformed("MPD returned an invalid repeat state"));
             }
+        } else if (ascii_case_equal(pair.name, "X-AlbumRandom")) {
+            if (!parse_boolean(pair.value, status.album_random))
+                return std::unexpected(malformed("Melody returned an invalid album random state"));
         } else if (ascii_case_equal(pair.name, "random")) {
             if (!parse_boolean(pair.value, status.random)) {
                 return std::unexpected(malformed("MPD returned an invalid random state"));

@@ -220,6 +220,7 @@ class BenchMainWindowTest final : public QObject {
     void localPlaybackRestoresPausedWithoutOutput();
     void localRequestRestoresPaused_data();
     void albumShuffleIsCapabilityGated();
+    void continuousAlbumShuffleKeepsListOrder();
     void localRequestRestoresPaused();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
@@ -659,6 +660,40 @@ void BenchMainWindowTest::albumShuffleIsCapabilityGated() {
         QStringLiteral("melody_list_shuffle_albums"));
     window.refreshListHistoryActions();
     QVERIFY(!window.shuffle_albums_action_->isVisible());
+    window.mpd_controller_->connected_ = false;
+}
+
+void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
+    BenchMainWindow window;
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab);
+    LocalTrackRow a, b;
+    a.raw_path = "/album-a.flac";
+    a.album = "A";
+    a.artist = "Artist";
+    a.probed = true;
+    b = a;
+    b.raw_path = "/album-b.flac";
+    b.album = "B";
+    tab->model->replaceRows({a, b, a, b});
+    window.playback_document_id_ = QString::fromStdString(tab->document.id.to_string());
+    window.playback_index_ = tab->model->index(0, 0);
+    window.local_album_random_ = true;
+    window.resetPlaybackOrder();
+    QTRY_VERIFY(!window.album_order_preparing_);
+    QCOMPARE(window.playback_order_.adjacent(1, false), std::optional<int>{2});
+    QCOMPARE(tab->model->rows()[1].album, std::string{"B"});
+    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
+    window.mpd_controller_->connected_ = true;
+    window.mpd_controller_->advertised_commands_.clear();
+    window.refreshMpdStatusControls();
+    QVERIFY(!window.mpd_album_random_action_->isVisible());
+    window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_album_random"));
+    window.refreshMpdStatusControls();
+    QVERIFY(window.mpd_album_random_action_->isVisible());
+    window.local_album_random_ = false;
+    window.saveLocalPlaybackModes();
     window.mpd_controller_->connected_ = false;
 }
 

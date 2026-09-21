@@ -267,6 +267,8 @@ class MpdProbeController final : public QObject {
     Q_INVOKABLE void setRepeatEnabled(bool enabled);
     Q_INVOKABLE void setRandomEnabled(bool enabled);
     void shuffleAlbums(const QString& name = {});
+    void setAlbumRandomEnabled(bool enabled);
+    [[nodiscard]] bool albumRandomEnabled() const noexcept { return album_random_enabled_; }
     Q_INVOKABLE void setSingleMode(int mode);
     Q_INVOKABLE void setConsumeMode(int mode);
     Q_INVOKABLE void setReplayGainMode(const QString& mode);
@@ -343,6 +345,7 @@ class MpdProbeController final : public QObject {
     std::optional<mpd::PlaybackState> optimistic_playback_state_;
     bool repeat_enabled_{false};
     bool random_enabled_{false};
+    bool album_random_enabled_{false};
     mpd::PlaybackModeState single_mode_{mpd::PlaybackModeState::unknown};
     mpd::PlaybackModeState consume_mode_{mpd::PlaybackModeState::unknown};
     mpd::ReplayGainMode replay_gain_mode_{mpd::ReplayGainMode::unknown};

@@ -99,7 +99,8 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     query_mode_->setObjectName(QStringLiteral("bench-search-query-mode"));
     query_mode_->setToolTip(
         QStringLiteral("Interpret the input as a tkq query, e.g. genre HAS jazz AND date "
-                       "GREATER 1990"));
+                       "GREATER 1990. Library history: HISTORY(albumplaycount) EQUAL 0, or "
+                       "HISTORY(albumdayssinceplayed) GREATER 180."));
     query_mode_->setChecked(QSettings{}.value(QStringLiteral("search/query-mode"), false).toBool());
     top->addWidget(query_mode_);
     layout->addLayout(top);
@@ -489,6 +490,13 @@ void SearchDialog::startSearch() {
     result_query_ = input_->text().trimmed();
     if (serverScope()) {
         startServerSearch(std::move(*compiled));
+        return;
+    }
+    if (!databaseScope() && std::ranges::any_of(compiled->predicates, [](const auto& p) {
+            return p.operand == query::TkqOperandKind::history;
+        })) {
+        error_->setText(tr("History searches require Library or Server scope."));
+        error_->show();
         return;
     }
     if (databaseScope()) {

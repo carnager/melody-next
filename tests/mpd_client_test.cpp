@@ -214,7 +214,8 @@ class FakeMpdServer final {
         } else if (command == R"(melody_list_shuffle_albums "Year 2024" "abc123")" ||
                    command == R"(melody_list_shuffle_albums "" "abc123")") {
             write_all(client, "OK\n");
-        } else if (command == "melody_shuffle_albums 42" || command == "melody_upnext append 42" ||
+        } else if (command == "melody_album_random 1" || command == "melody_album_random 0" ||
+                   command == "melody_shuffle_albums 42" || command == "melody_upnext append 42" ||
                    command == "melody_upnext move 42 21 0" ||
                    command == "melody_upnext return 42" ||
                    command == "melody_upnext_edit 42 21 20") {
@@ -507,6 +508,8 @@ void client_negotiates_and_preserves_extensions() {
     require(client.set_volume(31U).has_value(), "absolute volume must use the command connection");
     require(client.set_repeat(true).has_value() && client.set_random(true).has_value(),
             "repeat and random modes must use typed command methods");
+    require(client.set_album_random(true).has_value() && client.set_album_random(false).has_value(),
+            "album playback mode must use the advertised server command");
     require(client.shuffle_albums(42).has_value(),
             "album shuffle must transmit the captured queue revision");
     require(!client.shuffle_albums(41), "stale album shuffle must report the server rejection");

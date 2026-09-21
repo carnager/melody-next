@@ -1579,6 +1579,13 @@ void MpdProbeController::setRandomEnabled(const bool enabled) {
     emit stateChanged();
 }
 
+void MpdProbeController::setAlbumRandomEnabled(const bool enabled) {
+    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("melody_album_random")))
+        return;
+    pending_commands_.insert(session_->set_album_random(enabled));
+    emit stateChanged();
+}
+
 void MpdProbeController::setSingleMode(const int mode) {
     if (!session_ || !connected_) {
         return;
@@ -1785,6 +1792,7 @@ void MpdProbeController::applySnapshot(const std::uint64_t token, mpd::SessionSn
     queue_model_.setCurrentSongId(queue_stashed_ ? std::nullopt : current_song_id_);
     repeat_enabled_ = snapshot.status.repeat;
     random_enabled_ = snapshot.status.random;
+    album_random_enabled_ = snapshot.status.album_random;
     single_mode_ = snapshot.status.single;
     consume_mode_ = snapshot.status.consume;
     replay_gain_mode_ = snapshot.replay_gain_mode;
@@ -2513,6 +2521,7 @@ void MpdProbeController::clearSessionState() {
     advertised_tag_types_.clear();
     repeat_enabled_ = false;
     random_enabled_ = false;
+    album_random_enabled_ = false;
     single_mode_ = mpd::PlaybackModeState::unknown;
     consume_mode_ = mpd::PlaybackModeState::unknown;
     replay_gain_mode_ = mpd::ReplayGainMode::unknown;

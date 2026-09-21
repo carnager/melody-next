@@ -193,6 +193,24 @@ class RowFactsContext final : public titleformat::EvaluationContext {
             return false;
         });
     }
+    if (predicate.operand == TkqOperandKind::history) {
+        constexpr std::array names{"playcount",      "lastplayed",      "dayssinceplayed",
+                                   "albumplaycount", "albumlastplayed", "albumdayssinceplayed"};
+        const auto found = std::ranges::find(names, predicate.field);
+        const auto value = row.history && found != names.end()
+                               ? (*row.history)[static_cast<std::size_t>(found - names.begin())]
+                               : -1;
+        const bool present = value >= 0;
+        if (predicate.comparison == TkqComparison::present)
+            return present;
+        if (predicate.comparison == TkqComparison::missing)
+            return !present;
+        if (!present)
+            return false;
+        if (predicate.comparison == TkqComparison::is || predicate.comparison == TkqComparison::has)
+            return evaluate_text_comparison(std::to_string(value), predicate);
+        return compare_number(value, predicate.comparison, predicate.number);
+    }
     const auto canonical = internal::tkq_canonical_field(predicate.field);
     if (canonical == "rating" || canonical == "albumrating") {
         // ADR-0179: the rating store shadows same-named tags, exactly like

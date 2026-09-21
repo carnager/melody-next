@@ -492,7 +492,8 @@ struct Session::Impl {
         case SessionCommandKind::repeat:
             return without_payload(client.set_repeat(command.enabled));
         case SessionCommandKind::random:
-            return without_payload(client.set_random(command.enabled));
+            return without_payload(command.embedded ? client.set_album_random(command.enabled)
+                                                    : client.set_random(command.enabled));
         case SessionCommandKind::single:
             return without_payload(client.set_single(command.playback_mode));
         case SessionCommandKind::consume:
@@ -1324,6 +1325,14 @@ std::uint64_t Session::set_random(const bool enabled) {
     command.kind = SessionCommandKind::random;
     command.enabled = enabled;
     return implementation_->enqueue(command);
+}
+
+std::uint64_t Session::set_album_random(const bool enabled) {
+    Impl::PendingCommand command;
+    command.kind = SessionCommandKind::random;
+    command.enabled = enabled;
+    command.embedded = true;
+    return implementation_->enqueue(std::move(command));
 }
 
 std::uint64_t Session::set_single(const PlaybackModeState state) {

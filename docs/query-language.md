@@ -33,6 +33,7 @@ predicate   = lhs "HAS" string
             | lhs ("PRESENT" | "MISSING")
 sort-clause = "SORT" [ "ASCENDING" | "DESCENDING" ] "BY" tkfmt-source
 lhs         = word | quoted-string
+            | "HISTORY" "(" statistic-name ")"
 string      = word | quoted-string
 ```
 
@@ -105,6 +106,39 @@ per the operator (`MISSING` means the expression produced empty text).
 
 ## Server library scope
 
+### Listening history (ADR-0215)
+
+Library and Server scope support explicit `HISTORY(...)` operands. Enable
+**Query** in Search. These also work in saved searches and dynamic playlist
+rules. Ordinary bare fields still refer to file metadata, not listening history.
+
+- `HISTORY(playcount)` counts qualified listens; unplayed tracks have zero.
+- `HISTORY(lastplayed)` is a UTC Unix timestamp in milliseconds, or missing.
+- `HISTORY(dayssinceplayed)` is age in complete 24-hour days, or missing.
+- `HISTORY(albumplaycount)` sums track counts across the indexed album.
+- `HISTORY(albumlastplayed)` and `HISTORY(albumdayssinceplayed)` use the most
+  recent qualified listen to any track on that album.
+
+Use GREATER, LESS, EQUAL, PRESENT, or MISSING; HAS and IS are rejected. Missing
+timestamps/ages never satisfy numeric comparisons. Album statistics cover the
+whole indexed album before other predicates are applied. Unnamed albums are
+single-track groups. Local and server statistics are independent.
+
+```
+HISTORY(albumplaycount) EQUAL 0
+HISTORY(playcount) GREATER 4
+HISTORY(albumplaycount) EQUAL 0 OR HISTORY(albumdayssinceplayed) GREATER 180
+```
+
+The last example includes never-played albums and albums last played over 180
+complete days ago; it does not mean six calendar months. Local queries use
+revision-qualified whole-file index identities, without rescanning files;
+logical/subsong listens are not attributed to their containing whole file.
+Current-tab history queries fail with a scope explanation. History sort keys
+are not implemented. Melody must advertise `melody_history_filters`.
+
+### Metadata translation
+
 The Search dialog runs the same dialect against a connected Melody server
 that advertises `searchalbums`: supported queries translate mechanically to
 the server's filter grammar (word search, tag HAS/IS terms, numeric
@@ -146,8 +180,8 @@ tiebreak.
 ## Deferred beyond v1
 
 Recorded so the spec stays honest: time operators
-(`AFTER`/`BEFORE`/`SINCE`/`DURING`, `DURING LAST n <unit>`) until
-playback statistics exist in the index; diacritic folding; regular
+(`AFTER`/`BEFORE`/`SINCE`/`DURING`, `DURING LAST n <unit>`), calendar-relative
+history comparisons, history sorting; diacritic folding; regular
 expressions; path-targeted operators; autoplaylists,
 and the query builder UI (separate Area 2 packages).
 

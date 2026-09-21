@@ -19,8 +19,10 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-22, through ADR-0213 and database schema 40.
+Updated on 2026-09-22, through ADR-0215 and database schema 40.
 
+- [ADR-0215: Listening-history queries](adr/0215-history-library-queries.md).
+- [ADR-0214: Continuous album playback](adr/0214-continuous-album-playback.md).
 - [ADR-0213: Album shuffle for every Melody list](adr/0213-melody-list-album-shuffle.md).
 - [ADR-0212: One-shot album shuffle](adr/0212-one-shot-album-shuffle.md).
 

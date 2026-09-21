@@ -274,6 +274,7 @@ struct PlaybackStatus {
     std::optional<std::uint32_t> next_song_id;
     bool repeat{false};
     bool random{false};
+    bool album_random{false};
     PlaybackModeState single{PlaybackModeState::unknown};
     PlaybackModeState consume{PlaybackModeState::unknown};
     std::optional<unsigned> crossfade_seconds;

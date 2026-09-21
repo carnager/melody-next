@@ -21,6 +21,7 @@
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
@@ -37,6 +38,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <array>
@@ -468,6 +470,8 @@ void BenchMainWindow::buildTransport() {
     playback_menu->addSeparator();
 
     buildLocalPlaybackControls(playback_menu);
+    if (mpd_album_random_action_)
+        playback_menu->addAction(mpd_album_random_action_);
 
     // ADR-0144: quiet, opt-in track-change notifications while the
     // window is in the background.
@@ -726,6 +730,10 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     const QSettings settings;
     local_repeat_ = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
     local_random_ = settings.value(QStringLiteral("playback/local-random"), false).toBool();
+    local_album_random_ =
+        settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
+    if (local_album_random_)
+        local_random_ = false;
     local_single_ =
         std::clamp(settings.value(QStringLiteral("playback/local-single"), 0).toInt(), 0, 2);
     local_consume_ =
@@ -770,6 +778,16 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     local_random_action_ = add_mode(QStringLiteral("random"), QStringLiteral("Random"),
                                     QStringLiteral("media-playlist-shuffle"));
     local_single_action_ = add_mode(QStringLiteral("single"), QStringLiteral("Single"), {});
+    local_album_random_action_ = add_mode(QStringLiteral("album-random"), tr("Album shuffle"), {});
+    connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
+        if (isMpdContext())
+            return;
+        local_album_random_ = on;
+        if (on)
+            local_random_ = false;
+        resetPlaybackOrder();
+        applyLocalPlaybackModes();
+    });
     local_consume_action_ = add_mode(QStringLiteral("consume"), QStringLiteral("Consume"), {});
     connect(local_repeat_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext()) {
@@ -783,6 +801,8 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
             return;
         }
         local_random_ = on;
+        if (on)
+            local_album_random_ = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
     });
@@ -847,6 +867,7 @@ void BenchMainWindow::saveLocalPlaybackModes() {
     QSettings settings;
     settings.setValue(QStringLiteral("playback/local-repeat"), local_repeat_);
     settings.setValue(QStringLiteral("playback/local-random"), local_random_);
+    settings.setValue(QStringLiteral("playback/local-album-random"), local_album_random_);
     settings.setValue(QStringLiteral("playback/local-single"), local_single_);
     settings.setValue(QStringLiteral("playback/local-consume"), local_consume_);
     settings.setValue(QStringLiteral("playback/local-replaygain"), local_replaygain_);
@@ -894,6 +915,10 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     }
     local_repeat_action_->setChecked(local_repeat_);
     local_random_action_->setChecked(local_random_);
+    local_album_random_action_->setChecked(local_album_random_);
+    local_album_random_action_->setToolTip(
+        tr("Shuffle albums during playback without rearranging the list. Tracks within each album "
+           "keep their list order."));
     local_repeat_action_->setToolTip(
         QStringLiteral("Repeat: %1")
             .arg(local_repeat_ ? QStringLiteral("On") : QStringLiteral("Off")));
@@ -935,14 +960,84 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
 }
 
 void BenchMainWindow::resetPlaybackOrder() {
+    ++album_order_generation_;
+    album_order_preparing_ = false;
+    album_order_keys_.clear();
+    album_order_groups_.clear();
     auto* tab = tabForDocument(playback_document_id_);
     playback_row_ = playback_index_.isValid() ? playback_index_.row() : -1;
     playback_order_.reset(tab != nullptr ? tab->model->rowCount() : 0, playback_row_,
                           local_random_);
+    if (local_album_random_ && tab && tab->model->rowCount() > 0) {
+        album_order_preparing_ = true;
+        album_order_build_row_ = 0;
+        album_order_key_bytes_ = 0;
+        playback_order_.reset(0, -1, false);
+        QTimer::singleShot(0, this, [this, generation = album_order_generation_] {
+            prepareAlbumPlaybackOrder(generation);
+        });
+    }
     last_requested_next_.reset();
     if (player_ != nullptr) {
         static_cast<void>(player_->clear_gapless_next());
     }
+}
+
+void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) {
+    if (generation != album_order_generation_ || !album_order_preparing_)
+        return;
+    auto* tab = tabForDocument(playback_document_id_);
+    if (!tab) {
+        album_order_preparing_ = false;
+        return;
+    }
+    const auto& rows = tab->model->rows();
+    const auto end = std::min(static_cast<int>(rows.size()), album_order_build_row_ + 128);
+    for (; album_order_build_row_ < end; ++album_order_build_row_) {
+        const auto& row = rows[static_cast<std::size_t>(album_order_build_row_)];
+        const auto& artist = row.album_artist.empty() ? row.artist : row.album_artist;
+        const auto bytes = artist.size() + row.album.size() + row.date.size();
+        album_order_key_bytes_ += bytes;
+        if (bytes > 65536U || album_order_key_bytes_ > 64U * 1024U * 1024U ||
+            rows.size() > 1'000'000U) {
+            local_album_random_ = false;
+            resetPlaybackOrder();
+            applyLocalPlaybackModes();
+            statusBar()->showMessage(tr("Album shuffle exceeds the grouping limits."), 8000);
+            return;
+        }
+        auto group = album_order_groups_.size();
+        if (!row.album.empty()) {
+            const auto [found, inserted] =
+                album_order_keys_.try_emplace(std::tuple{artist, row.album, row.date}, group);
+            group = found->second;
+            static_cast<void>(inserted);
+        }
+        if (group == album_order_groups_.size())
+            album_order_groups_.emplace_back();
+        album_order_groups_[group].push_back(album_order_build_row_);
+    }
+    if (album_order_build_row_ < static_cast<int>(rows.size())) {
+        QTimer::singleShot(0, this, [this, generation] { prepareAlbumPlaybackOrder(generation); });
+        return;
+    }
+    album_order_keys_.clear();
+    auto* watcher = new QFutureWatcher<audio::PlaybackOrder>(this);
+    connect(watcher, &QFutureWatcher<audio::PlaybackOrder>::finished, this,
+            [this, watcher, generation] {
+                if (generation == album_order_generation_) {
+                    playback_order_ = watcher->future().takeResult();
+                    album_order_preparing_ = false;
+                }
+                watcher->deleteLater();
+            });
+    watcher->setFuture(QtConcurrent::run(
+        [groups = std::move(album_order_groups_),
+         current = playback_index_.isValid() ? playback_index_.row() : -1]() mutable {
+            audio::PlaybackOrder order;
+            order.resetAlbums(std::move(groups), current);
+            return order;
+        }));
 }
 
 void BenchMainWindow::consumePlaybackRow(ListTab& tab, const QPersistentModelIndex& index) {
@@ -953,7 +1048,7 @@ void BenchMainWindow::consumePlaybackRow(ListTab& tab, const QPersistentModelInd
     tab.model->removeRowIndexes({index.row()}, false);
     consuming_row_ = false;
     playback_row_ = playback_index_.isValid() ? playback_index_.row() : -1;
-    playback_order_.reset(tab.model->rowCount(), playback_row_, local_random_);
+    resetPlaybackOrder();
     if (!playback_index_.isValid()) {
         tab.model->setCurrentSource({}, -1);
     }
@@ -1093,6 +1188,8 @@ void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entr
 }
 
 bool BenchMainWindow::playLocalRequest(std::optional<std::int64_t> restore_position_ms) {
+    if (album_order_preparing_)
+        return false;
     if (!player_ || local_requests_.pending().empty())
         return false;
     const auto entry = local_requests_.pending().front();
@@ -1447,7 +1544,7 @@ void BenchMainWindow::refreshTransport() {
         // The guard stays set until the worker actually leaves "ended";
         // resetting it on dispatch would re-fire every timer tick while the
         // next source is still loading and race through the list.
-        if (!advance_pending_) {
+        if (!advance_pending_ && !album_order_preparing_) {
             advance_pending_ = true;
             const bool request_started = local_single_ == 0 && playLocalRequest();
             const auto next = request_started ? std::nullopt : automaticPlaybackRow();

@@ -352,8 +352,9 @@ history; distinct logical tracks remain separate. External changes are not
 automatically reconciled. In a local list, right-click a column header and enable
 **Columns → Play count / Last played** to display stored history (ADR-0208).
 These columns update in the background; unplayed tracks show `0` / `Never`,
-while unavailable history shows a dash with an explanation. Statistics queries,
-and continuous album-random playback remain follow-ups. See [ADR-0207](adr/0207-local-playback-listen-collection.md)
+while unavailable history shows a dash with an explanation. ADR-0215 adds
+explicit `HISTORY(...)` library predicates in both authorities; see
+[query syntax](query-language.md#listening-history-adr-0215). See [ADR-0207](adr/0207-local-playback-listen-collection.md)
 for counting, identity, and failure semantics.
 
 **Trackknife decision — paused resume (ADR-0210):** Settings → Playback offers
@@ -527,6 +528,16 @@ causes but retain individual rows. Logs are exportable with private paths
 redacted on request.
 
 ## Local playback options
+
+**Album shuffle** (ADR-0214) is a playback mode in the status bar, Playback menu,
+and command palette for both local lists and capable Melody servers. Unlike
+Edit → Shuffle albums, it never rearranges the list. It finishes the current
+album in existing list order, then chooses the next album randomly. Repeat
+starts a complete new cycle; Previous retraces the cycle. Unknown albums are
+singleton tracks. Track Random and Album shuffle are mutually exclusive.
+Up Next returns to the normal album traversal. A Melody mode change controls
+server playback, whichever named or unnamed list is playing; it does not start
+an inactive tab. Grouping uses the same keys as one-shot album shuffle.
 
 Local tabs show Repeat, Random, Single (`1`), Consume (`C`), and ReplayGain in
 the status bar, also available through Playback. These settings are remembered

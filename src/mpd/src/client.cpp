@@ -334,6 +334,11 @@ core::Result<void> Client::shuffle_albums(const std::uint32_t revision) {
                                          "melody_shuffle_albums");
 }
 
+core::Result<void> Client::set_album_random(const bool enabled) {
+    return implementation_->run_composed(
+        std::string{"melody_album_random "} + (enabled ? "1" : "0"), "melody_album_random");
+}
+
 core::Result<void> Client::shuffle_list_albums(std::string_view name) {
     if (name.find_first_of("\r\n") != std::string_view::npos ||
         name.find('\0') != std::string_view::npos)

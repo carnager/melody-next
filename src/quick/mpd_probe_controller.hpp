@@ -21,6 +21,10 @@
 
 class QTimer;
 
+namespace trackknife::bench {
+class BenchMainWindowTest;
+}
+
 namespace trackknife::quick {
 
 enum class QueueAddMode { append, next, replace };
@@ -293,6 +297,7 @@ class MpdProbeController final : public QObject {
                                    const QString& error);
     void serverDatabaseChanged();
     void storedPlaylistsChanged();
+    void listeningStatisticsChanged();
     void storedPlaylistListLoaded(const QStringList& names);
     void scratchListsLoaded(const QStringList& names);
     void artworkLoaded(const QString& uri, const QByteArray& data);
@@ -300,6 +305,7 @@ class MpdProbeController final : public QObject {
   private:
     void applyState(std::uint64_t token, mpd::SessionState state);
     friend class MpdQueueModelTest;
+    friend class trackknife::bench::BenchMainWindowTest;
     void applySnapshot(std::uint64_t token, mpd::SessionSnapshot snapshot);
     void applyCommandResult(std::uint64_t token, mpd::SessionCommandResult result);
     void submitTransport(mpd::TransportAction action);

@@ -659,6 +659,11 @@ void BenchMainWindow::buildMpdWorkspace() {
         if (!connected && was_connected) {
             acceptMpdStoredPlaylistNames({});
         }
+        if (connected != was_connected) {
+            applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, mpd_view_layout_);
+            for (auto& tab : mpd_playlist_tabs_)
+                applyTrackViewLayout(tab->view, tab->view_layout, tab->view_layout);
+        }
         // The Melody endpoint belongs to the MPD session, not to whichever
         // authority tab happens to be visible when auto-connect completes.
         refreshMelodyEndpoint();

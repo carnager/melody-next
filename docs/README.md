@@ -19,7 +19,9 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-21, through ADR-0208 and database schema 40.
+Updated on 2026-09-21, through ADR-0209 and database schema 40.
+
+- [ADR-0209: Melody listening statistics](adr/0209-melody-listening-statistics.md).
 
 The application is built as `trackknife` from `src/bench`. Older development
 documents call this workspace **Trackbench**. It combines the MPD client and

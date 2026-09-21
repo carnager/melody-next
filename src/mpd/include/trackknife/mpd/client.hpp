@@ -29,6 +29,7 @@ enum class IdleEvent : std::uint32_t {
     update = 1U << 7U,
     sticker = 1U << 8U,
     partition = 1U << 9U,
+    listening_statistics = 1U << 10U,
 };
 
 struct IdleEvents {

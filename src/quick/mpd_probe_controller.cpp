@@ -291,16 +291,20 @@ void MpdProbeController::probeProfile(const QString& profile_id, const QString& 
                 const auto database_changed = events.contains(mpd::IdleEvent::database) ||
                                               events.contains(mpd::IdleEvent::update);
                 const auto playlists_changed = events.contains(mpd::IdleEvent::stored_playlist);
-                if (!database_changed && !playlists_changed) {
+                const auto stats_changed = events.contains(mpd::IdleEvent::listening_statistics);
+                if (!database_changed && !playlists_changed && !stats_changed) {
                     return;
                 }
                 QMetaObject::invokeMethod(
                     self.data(),
-                    [self, token, database_changed, playlists_changed] {
+                    [self, token, database_changed, playlists_changed, stats_changed] {
                         auto* controller = self.data();
                         if (controller == nullptr || token != controller->connection_token_) {
                             return;
                         }
+                        if (stats_changed &&
+                            controller->supportsCommand(QStringLiteral("melody_stats")))
+                            emit controller->listeningStatisticsChanged();
                         if (database_changed) {
                             controller->newest_order_cache_.clear();
                             controller->pending_newest_order_.reset();

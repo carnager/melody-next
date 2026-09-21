@@ -158,6 +158,9 @@ struct Track {
     // database song id that the rate command addresses. Absent on stock MPD.
     std::optional<unsigned> rating;
     std::optional<std::uint64_t> melody_song_id;
+    // Server-owned statistics; absent is unknown, not an unplayed track.
+    std::optional<std::uint64_t> play_count = std::nullopt;
+    std::optional<std::int64_t> last_played_ms = std::nullopt;
     std::vector<Pair> unknown_structural_pairs;
 
     friend bool operator==(const Track&, const Track&) = default;

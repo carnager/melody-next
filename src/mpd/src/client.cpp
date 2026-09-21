@@ -2294,12 +2294,24 @@ core::Result<IdleEvents> Client::wait_for_idle(const core::CancellationToken& ca
     while (!cancellation.is_cancellation_requested()) {
         const auto result = ::poll(&descriptor, 1, 100);
         if (result > 0) {
-            const auto events = mpd_recv_idle(implementation_->connection.get(), false);
-            if (events == 0 &&
-                mpd_connection_get_error(implementation_->connection.get()) != MPD_ERROR_SUCCESS) {
-                return std::unexpected(implementation_->take_error("receive idle"));
+            // Generic pairs retain advertised extensions that libmpdclient's
+            // fixed idle enum cannot represent. Unknown names stay ignored.
+            auto pairs = implementation_->receive_pairs("receive idle");
+            if (!pairs) {
+                return std::unexpected(pairs.error());
             }
-            return project_idle_events(events);
+            IdleEvents events;
+            for (const auto& pair : *pairs) {
+                if (pair.name != "changed")
+                    continue;
+                if (pair.value == "stats") {
+                    events.mask |= static_cast<std::uint32_t>(IdleEvent::listening_statistics);
+                } else {
+                    events.mask |=
+                        project_idle_events(mpd_idle_name_parse(pair.value.c_str())).mask;
+                }
+            }
+            return events;
         }
         if (result < 0 && errno != EINTR) {
             return std::unexpected(core::Error{

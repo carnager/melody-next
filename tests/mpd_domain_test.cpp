@@ -361,9 +361,37 @@ void malformed_responses_fail() {
         "database fields without an entry identity must fail");
 }
 
+void listening_statistics_are_typed_and_strict() {
+    using trackknife::mpd::Pair;
+    const auto tracks =
+        trackknife::mpd::project_tracks(std::vector<Pair>{{"file", "played.flac"},
+                                                          {"X-PlayCount", "7"},
+                                                          {"X-LastPlayed", "1700000000000"},
+                                                          {"file", "never.flac"},
+                                                          {"X-PlayCount", "0"},
+                                                          {"X-LastPlayed", "0"},
+                                                          {"file", "stock.flac"}});
+    require(tracks && tracks->size() == 3, "Melody statistics listing projects");
+    require((*tracks)[0].play_count == 7 && (*tracks)[0].last_played_ms == 1700000000000LL,
+            "statistics retain count and millisecond precision");
+    require((*tracks)[1].play_count == 0 && (*tracks)[1].last_played_ms == 0,
+            "zero is an explicit unplayed track");
+    require(!(*tracks)[2].play_count && !(*tracks)[2].last_played_ms,
+            "stock MPD must not invent zero statistics");
+    require((*tracks)[0].metadata.values("X-PlayCount").empty(), "statistics are not tags");
+    for (const auto& pair : std::vector<Pair>{{"X-PlayCount", "-1"},
+                                              {"X-PlayCount", "18446744073709551616"},
+                                              {"X-LastPlayed", "tomorrow"},
+                                              {"X-LastPlayed", "253402300800000"}}) {
+        require(!trackknife::mpd::project_tracks(std::vector<Pair>{{"file", "a.flac"}, pair}),
+                "malformed statistics must fail projection");
+    }
+}
+
 } // namespace
 
 int main() {
+    listening_statistics_are_typed_and_strict();
     metadata_and_musicbrainz_are_ordered();
     song_pairs_project_without_flattening();
     database_entries_keep_kind_order_and_extensions();

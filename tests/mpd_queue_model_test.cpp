@@ -6,6 +6,8 @@
 #include "quick/mpd_queue_model.hpp"
 #include "quick/mpd_search_result_model.hpp"
 #include "uicommon/rating_stars.hpp"
+#include <QDateTime>
+#include <QLocale>
 
 #include <QBrush>
 #include <QItemSelectionModel>
@@ -76,6 +78,7 @@ class MpdQueueModelTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void displaysServerListeningStatistics();
     void reusedStatusDoesNotRewindPlayback();
     void projectsOrderedMetadataAndQueueIdentity();
     void avoidsResetForAnUnchangedSnapshot();
@@ -525,6 +528,39 @@ void MpdQueueModelTest::groupsLiveSearchAlbumsAndTracks() {
         {search_track("only-track-page-result.flac", "Album 0", "Only track", "1", "release-0")});
     QCOMPARE(model.data(model.index(0, 0)).toString(), QStringLiteral("Albums (34)"));
     QCOMPARE(model.rowCount(), 37);
+}
+
+void MpdQueueModelTest::displaysServerListeningStatistics() {
+    MpdQueueModel model;
+    auto played = search_track("played.flac", "Album", "Played", "1", "", "2024");
+    played.play_count = 1234;
+    played.last_played_ms = 1700000000000LL;
+    auto never = played;
+    never.uri = "never.flac";
+    never.play_count = 0;
+    never.last_played_ms = 0;
+    auto unknown = played;
+    unknown.uri = "stock.flac";
+    unknown.play_count.reset();
+    unknown.last_played_ms.reset();
+    model.replaceTracks({played, never, unknown});
+    QCOMPARE(model.index(0, ui::track_play_count_column).data().toString(),
+             QLocale{}.toString(1234));
+    QCOMPARE(
+        model.index(0, ui::track_last_played_column).data().toString(),
+        QLocale{}.toString(QDateTime::fromMSecsSinceEpoch(1700000000000LL), QLocale::ShortFormat));
+    QCOMPARE(model.index(1, ui::track_play_count_column).data().toString(), QStringLiteral("0"));
+    QCOMPARE(model.index(1, ui::track_last_played_column).data().toString(),
+             QStringLiteral("Never"));
+    QCOMPARE(model.index(2, ui::track_play_count_column).data().toString(), QStringLiteral("—"));
+    QVERIFY(model.index(0, ui::track_play_count_column)
+                .data(Qt::TextAlignmentRole)
+                .value<Qt::Alignment>()
+                .testFlag(Qt::AlignRight));
+    QVERIFY(model.index(0, ui::track_play_count_column)
+                .data(Qt::ToolTipRole)
+                .toString()
+                .contains(QStringLiteral("server")));
 }
 
 } // namespace trackknife::quick

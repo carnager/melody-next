@@ -337,6 +337,13 @@ metadata or statistics invalidates affected membership incrementally.
 
 ## Playback statistics
 
+**Trackknife decision — Melody support (ADR-0209):** servers advertising
+`melody_stats` also offer Columns → Play count / Last played on server queue/list
+tabs. Melody collects these independently of Last.fm and Trackbench. They update
+when the server reports a qualified listen. Server and local history are separate;
+stock MPD has no client-emulated counts. Melody's metadata-based identity survives
+moves/rescans with unchanged tags, but retagging identity fields detaches history.
+
 **Trackknife decision — implemented collection (ADR-0207):** local playback
 stores a play count and last-played time after advancing through half a track
 or four minutes, whichever is less, for tracks longer than 30 seconds. This

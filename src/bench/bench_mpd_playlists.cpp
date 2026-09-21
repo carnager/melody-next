@@ -148,6 +148,8 @@ void BenchMainWindow::buildMpdPlaylists() {
             });
     connect(mpd_controller_, &quick::MpdProbeController::storedPlaylistsChanged, this,
             &BenchMainWindow::refreshMpdPlaylistsSoon);
+    connect(mpd_controller_, &quick::MpdProbeController::listeningStatisticsChanged, this,
+            &BenchMainWindow::refreshMpdPlaylistsSoon);
 }
 
 BenchMainWindow::MpdPlaylistTab* BenchMainWindow::mpdPlaylistTabForWidget(QWidget* widget) const {

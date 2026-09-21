@@ -610,6 +610,9 @@ struct Session::Impl {
     [[nodiscard]] core::Result<void> refresh(Client& client, SessionSnapshot& snapshot,
                                              std::uint32_t requested) {
         const bool all = (requested & full_refresh) != 0U;
+        const bool stats_forced =
+            (requested & static_cast<std::uint32_t>(IdleEvent::listening_statistics)) != 0U &&
+            snapshot.capabilities.supports_command("melody_stats");
         const auto previous_queue_version = snapshot.status.queue_version;
         if (all) {
             auto capabilities = client.capabilities();
@@ -643,7 +646,8 @@ struct Session::Impl {
             snapshot.status = std::move(*status);
             snapshot.status_sample_time = std::chrono::steady_clock::now();
         }
-        if (all || (requested & static_cast<std::uint32_t>(IdleEvent::player)) != 0U) {
+        if (all || stats_forced ||
+            (requested & static_cast<std::uint32_t>(IdleEvent::player)) != 0U) {
             auto current = client.current_song();
             if (!current) {
                 return std::unexpected(std::move(current.error()));
@@ -661,7 +665,8 @@ struct Session::Impl {
         // ADR-0187: which stored playlist is materialized as the playback
         // context. Refreshed with the queue, since a switch replaces it.
         if (snapshot.capabilities.supports_command("melody_context") &&
-            (all || (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U)) {
+            (all || stats_forced ||
+             (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U)) {
             auto context = client.melody_active_context();
             if (!context) {
                 return std::unexpected(std::move(context.error()));
@@ -679,8 +684,9 @@ struct Session::Impl {
         }
         // Melody ratings ride on listing lines without bumping the queue
         // version, so a rating refresh must bypass the reconcile shortcuts.
-        const bool rating_forced = (requested & rating_refresh) != 0U &&
-                                   snapshot.capabilities.supports_command("getrating");
+        const bool rating_forced =
+            stats_forced || ((requested & rating_refresh) != 0U &&
+                             snapshot.capabilities.supports_command("getrating"));
         if (all || rating_forced ||
             (requested & static_cast<std::uint32_t>(IdleEvent::queue)) != 0U) {
             std::optional<std::vector<Track>> reconciled;

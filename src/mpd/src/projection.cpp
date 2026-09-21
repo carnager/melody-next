@@ -158,6 +158,17 @@ core::Result<std::vector<Track>> project_tracks(std::span<const Pair> pairs) {
             if (!current.rating || *current.rating > 10U) {
                 return std::unexpected(malformed("Melody returned an invalid track rating"));
             }
+        } else if (ascii_case_equal(pair.name, "X-PlayCount")) {
+            current.play_count = parse_unsigned<std::uint64_t>(pair.value);
+            if (!current.play_count) {
+                return std::unexpected(malformed("Melody returned an invalid play count"));
+            }
+        } else if (ascii_case_equal(pair.name, "X-LastPlayed")) {
+            const auto value = parse_unsigned<std::uint64_t>(pair.value);
+            if (!value || *value > 253402300799999ULL) {
+                return std::unexpected(malformed("Melody returned an invalid last-played time"));
+            }
+            current.last_played_ms = static_cast<std::int64_t>(*value);
         } else if (ascii_case_equal(pair.name, "X-SongId")) {
             current.melody_song_id = parse_unsigned<std::uint64_t>(pair.value);
             if (!current.melody_song_id) {

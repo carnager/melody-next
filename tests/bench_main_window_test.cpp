@@ -216,6 +216,7 @@ class BenchMainWindowTest final : public QObject {
     void commandPaletteTracksAvailabilityAndLifetime();
     void localListeningCountsPlaybackWithoutLastFm();
     void localListeningColumnsLoadRefreshAndRespectAuthority();
+    void melodyListeningColumnsRequireCapability();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -586,6 +587,34 @@ void BenchMainWindowTest::localListeningColumnsLoadRefreshAndRespectAuthority() 
         QCoreApplication::processEvents();
         QVERIFY(window.grab().save(directory + QStringLiteral("/listening-history.png")));
     }
+}
+
+void BenchMainWindowTest::melodyListeningColumnsRequireCapability() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
+    auto* controller = window.mpd_controller_;
+    controller->connected_ = true;
+    controller->advertised_commands_.insert(QStringLiteral("melody_stats"));
+    window.refreshTrackViewActions();
+    QVERIFY(window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
+    window.setTrackColumnVisible(QStringLiteral("play-count"), true);
+    window.setTrackColumnVisible(QStringLiteral("last-played"), true);
+    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
+    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_last_played_column));
+    QCOMPARE(window.mpd_queue_view_->columnWidth(local_last_played_column), 170);
+    controller->advertised_commands_.clear();
+    window.applyTrackViewLayout(window.mpd_queue_view_, window.mpd_view_layout_,
+                                window.mpd_view_layout_);
+    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_play_count_column));
+    QVERIFY(!window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
+    // Reconnecting to a capable server restores the stored visible preference.
+    controller->advertised_commands_.insert(QStringLiteral("melody_stats"));
+    window.applyTrackViewLayout(window.mpd_queue_view_, window.mpd_view_layout_,
+                                window.mpd_view_layout_);
+    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
+    controller->connected_ = false;
 }
 
 void BenchMainWindowTest::localListeningCacheIsBoundedAndRejectsStaleResults() {

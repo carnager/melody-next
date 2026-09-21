@@ -154,6 +154,7 @@ resume does not. Server statistics remain owned by the server.
   content-identity store that survives rescans and moves.
 - [x] Collect local play counts and last-played timestamps (ADR-0207).
 - [x] Display local play counts and last-played timestamps in track views (ADR-0208).
+- [x] Display independently collected Melody server statistics behind `melody_stats` (ADR-0209).
 - [x] Ratings as a search target: `rating`/`albumrating` tkq pseudo-fields in
   local queries and saved searches, and Melody rating filter terms in the
   server search box.

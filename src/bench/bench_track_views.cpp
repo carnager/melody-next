@@ -108,11 +108,13 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         if (logical < 0) {
             continue;
         }
-        const bool local_only =
+        const bool history_column =
             logical == local_play_count_column || logical == local_last_played_column;
-        view->setColumnHidden(logical,
-                              !column.visible ||
-                                  (local_only && !qobject_cast<LocalListModel*>(view->model())));
+        view->setColumnHidden(
+            logical, !column.visible ||
+                         (history_column && !qobject_cast<LocalListModel*>(view->model()) &&
+                          !(mpd_controller_ && mpd_controller_->connected() &&
+                            mpd_controller_->supportsCommand(QStringLiteral("melody_stats")))));
         view->setColumnWidth(logical, column.width);
     }
     queue_view->setAlbumArtworkColumn(side_artwork ? local_artwork_column : -1);
@@ -187,7 +189,7 @@ void BenchMainWindow::setTrackViewPresentation(const ui::TrackViewPresentation p
 }
 
 void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool visible) {
-    if (isMpdContext() &&
+    if (isMpdContext() && !mpd_controller_->supportsCommand(QStringLiteral("melody_stats")) &&
         (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
         return;
     if (isMpdContext()) {
@@ -207,6 +209,17 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
         mpd_view_layout_persistence_protected_ = false;
         preserved_mpd_view_layout_.clear();
         applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, layout);
+        if (column_id == QStringLiteral("play-count") ||
+            column_id == QStringLiteral("last-played")) {
+            for (auto& tab : mpd_playlist_tabs_) {
+                auto playlist_layout = captureTrackViewLayout(tab->view, tab->view_layout);
+                const auto column = std::ranges::find(playlist_layout.columns, column_id,
+                                                      &ui::TrackViewColumnLayout::id);
+                if (column != playlist_layout.columns.end())
+                    column->visible = visible;
+                applyTrackViewLayout(tab->view, tab->view_layout, playlist_layout);
+            }
+        }
         schedulePersist();
         return;
     }
@@ -282,10 +295,14 @@ void BenchMainWindow::refreshTrackViewActions() {
         action->setEnabled(available);
     }
     for (auto it = track_column_actions_.begin(); it != track_column_actions_.end(); ++it) {
-        const bool local_only =
+        const bool history_column =
             it.key() == QStringLiteral("play-count") || it.key() == QStringLiteral("last-played");
-        it.value()->setVisible(!local_only || (available && !isMpdContext()));
-        it.value()->setEnabled(available && (!local_only || !isMpdContext()));
+        const bool history_available =
+            available &&
+            (!isMpdContext() || (mpd_controller_->connected() &&
+                                 mpd_controller_->supportsCommand(QStringLiteral("melody_stats"))));
+        it.value()->setVisible(!history_column || history_available);
+        it.value()->setEnabled(available && (!history_column || history_available));
     }
     if (!available) {
         return;

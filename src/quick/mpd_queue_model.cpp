@@ -5,6 +5,8 @@
 #include "uicommon/rating_stars.hpp"
 
 #include <QBrush>
+#include <QDateTime>
+#include <QLocale>
 #include <QStringList>
 
 #include <algorithm>
@@ -210,6 +212,27 @@ QVariant MpdQueueModel::data(const QModelIndex& index, const int role) const {
         return {};
     }
     const auto& track = tracks_.at(static_cast<std::size_t>(index.row()));
+    if (index.column() == ui::track_play_count_column ||
+        index.column() == ui::track_last_played_column) {
+        const bool count = index.column() == ui::track_play_count_column;
+        if (role == Qt::TextAlignmentRole)
+            return QVariant::fromValue(
+                Qt::Alignment{(count ? Qt::AlignRight : Qt::AlignLeft) | Qt::AlignVCenter});
+        if (role == Qt::DisplayRole) {
+            if (count)
+                return track.play_count
+                           ? QLocale{}.toString(static_cast<qulonglong>(*track.play_count))
+                           : QStringLiteral("—");
+            if (!track.last_played_ms)
+                return QStringLiteral("—");
+            return *track.last_played_ms == 0
+                       ? tr("Never")
+                       : QLocale{}.toString(QDateTime::fromMSecsSinceEpoch(*track.last_played_ms),
+                                            QLocale::ShortFormat);
+        }
+        if (role == Qt::ToolTipRole)
+            return tr("Melody server listening history. Separate from local playback history.");
+    }
     switch (role) {
     case Qt::DisplayRole:
         if (index.column() == ui::track_rating_column) {

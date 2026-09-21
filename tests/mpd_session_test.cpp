@@ -112,6 +112,10 @@ class SessionServer final {
     [[nodiscard]] std::size_t queueSnapshotCommandCount() const noexcept {
         return queue_snapshot_commands_.load(std::memory_order_acquire);
     }
+    void qualifyListen() {
+        play_count_.fetch_add(1U, std::memory_order_release);
+        notifyChanged("stats");
+    }
     [[nodiscard]] std::size_t optionCommandCount() const noexcept {
         return option_commands_.load(std::memory_order_acquire);
     }
@@ -232,6 +236,7 @@ class SessionServer final {
                               "command: prioid\n"
                               "command: sticker\ncommand: rate\ncommand: getrating\n"
                               "command: albumrate\ncommand: getalbumrating\n"
+                              "command: melody_stats\n"
                               "command: idle\ncommand: noidle\nOK\n");
         } else if (command == "tagtypes") {
             write_all(client, "tagtype: Artist\ntagtype: MusicBrainzTrackId\nOK\n");
@@ -253,6 +258,9 @@ class SessionServer final {
             write_all(client, "file: Slayer/Divine Intervention/01.flac\nTitle: Killing Fields\n"
                               "Pos: 0\nId: 7\nX-SongId: 501\nX-Rating: " +
                                   std::to_string(melody_rating_.load(std::memory_order_acquire)) +
+                                  "\nX-PlayCount: " +
+                                  std::to_string(play_count_.load(std::memory_order_acquire)) +
+                                  "\nX-LastPlayed: 1700000000000" +
                                   "\nfile: Slayer/Divine Intervention/02.flac\n"
                                   "Title: Sex. Murder. Art.\nPos: 1\nId: 9\n");
             if (queue_version_.load(std::memory_order_acquire) >= 3U) {
@@ -417,6 +425,7 @@ class SessionServer final {
     std::atomic_size_t rate_commands_{0U};
     std::atomic_uint sticker_rating_{6U};
     std::atomic_uint melody_rating_{4U};
+    std::atomic_uint play_count_{0U};
     std::atomic_bool drop_next_queue_add_response_{false};
     std::mutex sockets_mutex_;
     std::vector<int> sockets_;
@@ -764,6 +773,17 @@ void session_publishes_initial_and_idle_refreshed_snapshots() {
         });
         require(melody_rated, "a Melody rating must bypass the queue-version shortcut so the "
                               "snapshot reflects the new listing rating");
+        lock.unlock();
+
+        const auto before_stats = server.queueSnapshotCommandCount();
+        server.qualifyListen();
+        lock.lock();
+        const auto stats_refreshed = changed.wait_for(lock, std::chrono::seconds{2}, [&] {
+            return latest.queue.front().play_count == 1U &&
+                   server.queueSnapshotCommandCount() > before_stats;
+        });
+        require(stats_refreshed,
+                "Melody stats idle must refresh even at an unchanged queue version");
         lock.unlock();
 
         static_cast<void>(session.set_melody_album_rating(

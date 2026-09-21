@@ -627,12 +627,17 @@ void BenchMainWindow::showMetadataProperties() {
         selected_rows.emplace_back(index);
     }
     const auto selected_row_count = selected_rows.size();
-    const QPointer model{tab->model};
+    openMetadataProperties(selected_row_count,
+                           selectionSourceReader(*tab, std::move(selected_rows)));
+}
+
+void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_count,
+                                             MetadataPropertiesSourceReader reader) {
     auto* const persistence_service = persistence_;
     const auto database_path = database_path_;
     auto* properties = new MetadataPropertiesDialog(
-        selected_row_count, selectionSourceReader(*tab, std::move(selected_rows)),
-        std::span{default_metadata_fields}, metadataPlanApplierFactory(), metadataApplyObserver(),
+        selected_row_count, std::move(reader), std::span{default_metadata_fields},
+        metadataPlanApplierFactory(), metadataApplyObserver(),
         MetadataTransformationStore{
             .load =
                 [persistence_service](MetadataTransformationStore::LoadCompletion completion) {

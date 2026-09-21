@@ -114,9 +114,8 @@ class BenchMainWindow final : public QMainWindow {
     void importM3u8Path(std::string raw_path);
     void openLocalPaths(std::vector<std::string> raw_paths);
     void loadMpdUrisAsLocalFiles(const QStringList& uris);
-    // ADR-0180: file-operation sugar on mapped MPD selections — materialize
-    // through the load-as-local-files bridge, then open the named dialog on
-    // the created tab once its asynchronous discovery finishes.
+    // Mapped Edit tags opens directly (ADR-0203). ReplayGain and Convert
+    // retain the asynchronous local-list bridge from ADR-0180.
     enum class MaterializedDialog : std::uint8_t { none, edit_tags, replay_gain, convert };
     void materializeMpdSelectionForDialog(const QStringList& uris, MaterializedDialog dialog);
 
@@ -315,6 +314,8 @@ class BenchMainWindow final : public QMainWindow {
     void completeMpdLibraryGoTo(const QString& artist, const QString& album);
     void playCurrentRow();
     void showMetadataProperties();
+    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader);
+    void showMpdMetadataProperties(const QStringList& uris);
     void showConvertDialog();
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     [[nodiscard]] OutputProfileStore buildOutputProfileStore();

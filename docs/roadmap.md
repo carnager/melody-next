@@ -193,8 +193,14 @@ next release.
   is complete in ADR-0174; its multi-machine stress campaigns belong to M10.
   Explicitly updating MPD after local file changes also remains open. Loading
   mapped server files into a local tab is available, and the MPD context
-  menus' Edit tags/ReplayGain/Convert actions run that materialization and
-  open the dialog directly (ADR-0180).
+  menus' ReplayGain/Convert actions run that materialization (ADR-0180).
+  Edit tags now opens the standard editor tab and sidebar file list directly
+  over mapped files, without an intermediate local queue tab (ADR-0203).
+  **Proposal:** let Melody read complete file metadata on demand on the server,
+  with revision evidence for
+  conflict-safe Apply. A later server-owned write path could remove the mount
+  requirement while retaining preview and recovery guarantees. See
+  [Task 8](../CODEX_TASKS.md#task-8--direct-melody-tag-editing-and-server-side-metadata--todo).
 
 ## Scope and maintenance
 

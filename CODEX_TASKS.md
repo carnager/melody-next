@@ -192,6 +192,38 @@ modify playback or enable Auto-DJ.
 
 ---
 
+# Task 8 — Direct Melody tag editing and server-side metadata — TODO
+
+Direct mapped editing is implemented in ADR-0203; server-side metadata and
+writes remain proposals.
+
+- [x] With a configured music-path mapping, resolve the selected files and open
+  the standard editor tab and sidebar file list directly, without creating an
+  intermediate local queue tab. Keep local file mutation explicit and separate from MPD
+  queue operations; reuse the existing preview, conflict, and recovery workflow.
+- [ ] Add a capability-gated Melody operation that reads actual file metadata
+  on demand on the server and returns a complete editing snapshot, including
+  arbitrary/multi-value tags, artwork inventory, relevant container information,
+  and file revision evidence. Do not substitute the indexed library metadata.
+- [ ] Load snapshots asynchronously with cancellation and bounded concurrency,
+  avoiding full metadata reads through a potentially slow network mount.
+- [ ] Revalidate the actual file against the snapshot before Apply; refuse stale
+  edits and preserve unknown tags and container data. Specify revision evidence
+  usable across server reads and mapped client writes before implementing.
+- [ ] Refresh affected Melody library entries after successful saves so lists,
+  searches, artwork, and other clients see the changes.
+- [ ] **Later proposal:** perform reviewed writes on Melody itself, removing the
+  music-mount requirement. Retain explicit commit, conflict detection, progress,
+  cancellation, safe metadata preservation, and recoverable journals/undo.
+
+Record the protocol, authority boundary, access controls, and fallback for
+stock MPD/older Melody in an ADR before implementation. Test complete real-file
+snapshots, concurrent modifications, mapping failures, recovery, and unchanged
+playback/tab selection. Server-side metadata reads and writes are not implemented;
+the immediate workflow still reads and writes mapped files on the client.
+
+---
+
 # Shipped
 
 Kept short: the reasoning lives in the ADRs, the detail in the commits.

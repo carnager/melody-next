@@ -4088,9 +4088,8 @@ void BenchMainWindowTest::settingsControlStartupContextAndMusicRoot() {
     settings.sync();
 }
 
-// ADR-0180: Edit tags / ReplayGain / Convert on a mapped MPD selection
-// materialize through the load-as-local-files bridge and open the dialog on
-// the created tab once discovery lands. Exercises the global-root fallback of
+// Mapped Edit tags opens directly; ReplayGain / Convert retain ADR-0180
+// materialization through the local-files bridge. Exercises the global-root fallback of
 // effectiveMpdMusicRoot; the per-profile branch reuses the melody-endpoint
 // profile lookup covered elsewhere.
 void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
@@ -4117,26 +4116,67 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-replaygain")) != nullptr);
         QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-convert")) != nullptr);
 
+        tabs->setCurrentWidget(window.mpd_queue_view_);
         const auto tabs_before = tabs->count();
+        const auto local_lists_before = window.list_tabs_.size();
         window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
                                                 BenchMainWindow::MaterializedDialog::edit_tags);
-        QTRY_COMPARE(tabs->count(), tabs_before + 2); // materialized tab + dialog tab
-        QDialog* properties = nullptr;
-        QTRY_VERIFY((properties = window.findChild<QDialog*>(
-                         QStringLiteral("bench-metadata-properties"))) != nullptr);
+        QCOMPARE(tabs->count(), tabs_before + 1);
+        auto* properties = window.findChild<MetadataPropertiesDialog*>(
+            QStringLiteral("bench-metadata-properties"));
+        QVERIFY(properties);
+        QVERIFY(!properties->isWindow());
+        QVERIFY(!properties->isModal());
         QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
-        // The dialog must wait for the probe: its baseline carries the
-        // file's real tags, never an empty unprobed snapshot.
-        auto* materialized_view = qobject_cast<QTableView*>(tabs->widget(tabs_before));
-        QVERIFY(materialized_view != nullptr);
-        auto* materialized_model = qobject_cast<LocalListModel*>(materialized_view->model());
-        QVERIFY(materialized_model != nullptr);
-        QCOMPARE(materialized_model->rowCount(), 1);
-        QVERIFY(materialized_model->rows().front().probed);
-        QVERIFY(!materialized_model->rows().front().artist.empty());
-        properties->close();
+        QCOMPARE(window.list_tabs_.size(), local_lists_before);
+        QVERIFY(!window.discovery_running_);
+        MetadataGridModel* grid = nullptr;
+        QTRY_VERIFY((grid = properties->findChild<MetadataGridModel*>()) != nullptr);
+        QCOMPARE(grid->rowCount(), 1);
+        QVERIFY(grid->selection().source(0).source_revision.has_value());
+        const auto artist_column = grid->fieldColumn(QStringLiteral("ARTIST"));
+        QVERIFY(artist_column.has_value());
+        QVERIFY(!grid->data(grid->index(0, *artist_column), Qt::DisplayRole).toString().isEmpty());
+        QVERIFY(properties->fileListView()->isVisible());
+        auto* files_page = window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
+        QVERIFY(files_page && files_page->isAncestorOf(properties->fileListView()));
+        auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+        QCOMPARE(source_tabs->tabText(source_tabs->currentIndex()), QStringLiteral("Files"));
+        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        auto* fields = properties->findChild<QTableView*>(QStringLiteral("bench-metadata-fields"));
+        auto* aggregate = qobject_cast<MetadataAggregateModel*>(fields->model());
+        QVERIFY(aggregate);
+        const auto title = aggregate->fieldRow(QStringLiteral("title"));
+        QVERIFY(title);
+        QVERIFY(aggregate->setData(aggregate->index(*title, 2),
+                                  QStringLiteral("Edited without a local list"), Qt::EditRole));
+        auto* apply = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+        QTRY_VERIFY(apply->isEnabled());
+        apply->click();
         QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) ==
                     nullptr);
+
+        const auto reread = metadata::read_local_metadata(QFile::encodeName(flac).toStdString());
+        QVERIFY(reread);
+        QCOMPARE(reread->document.effective_values("title"),
+                 (std::vector<std::string>{"Edited without a local list"}));
+        QCOMPARE(tabs->count(), tabs_before);
+        QCOMPARE(window.list_tabs_.size(), local_lists_before);
+
+        window.materializeMpdSelectionForDialog({QStringLiteral("../escape.flac")},
+                                                BenchMainWindow::MaterializedDialog::edit_tags);
+        QVERIFY(!window.findChild<MetadataPropertiesDialog*>());
+        QCOMPARE(tabs->count(), tabs_before);
+        window.materializeMpdSelectionForDialog({QStringLiteral("missing.flac")},
+                                                BenchMainWindow::MaterializedDialog::edit_tags);
+        properties = window.findChild<MetadataPropertiesDialog*>();
+        QVERIFY(properties);
+        auto* summary = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-summary"));
+        QTRY_COMPARE(summary->text(), QStringLiteral("Properties unavailable"));
+        QCOMPARE(tabs->count(), tabs_before + 1);
+        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        properties->close();
+        QTRY_VERIFY(!window.findChild<MetadataPropertiesDialog*>());
 
         // A second flavor proves the dispatch switch.
         window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},

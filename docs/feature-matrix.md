@@ -181,3 +181,8 @@ Use the real fixtures and feature-specific specifications for exact claims.
 Playback tabs distinguish browsing from playback: the selected tab has a lighter
 background and accent underline; an accent speaker icon identifies each active
 playback queue, including while paused or stopped. Titles use normal text color.
+
+Mapped server Edit tags opens the standard editor tab with its sidebar file list,
+without an intermediate local queue tab (ADR-0203). Real-file metadata and revisions are captured
+asynchronously on the client; server-side reads/writes remain proposed. The
+mapped-action UI regression covers metadata capture and invalid/missing paths.

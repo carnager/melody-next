@@ -2249,12 +2249,22 @@ ListRepository::refresh_local_metadata(const LocalMetadataRefresh& refresh) {
         return std::unexpected(std::move(error));
     }
     if (occurrences.empty()) {
-        rollback();
-        return std::unexpected(core::Error{
-            .code = core::ErrorCode::not_found,
-            .message = "Committed metadata source has no persisted list occurrence",
-            .context = {{"source_path", refresh.source_reference}},
-        });
+        // A mapped-file editor need not create a list occurrence. There is no
+        // list snapshot to reconcile or record, but the optional library may
+        // still contain this source. Invalidate its scan revision (retaining
+        // displayed tags until rescan) rather than publishing possibly stale
+        // document data on a recovery retry. The operation journal owns commit
+        // evidence; there is no list-refresh record for zero affected rows.
+        if (auto result = refresh_library_source(database, refresh.source_reference,
+                                                 refresh.source_reference, nullptr); !result) {
+            rollback();
+            return std::unexpected(std::move(result.error()));
+        }
+        if (auto result = execute(database, "COMMIT"); !result) {
+            rollback();
+            return std::unexpected(std::move(result.error()));
+        }
+        return LocalMetadataRefreshResult{.affected_occurrences = 0U, .already_applied = false};
     }
 
     auto retained_query =

@@ -5,8 +5,19 @@
 This document specifies Trackbench's Local Queue authority. Per ADR-0058, all
 tagging, artwork, MusicBrainz, file rename/move/copy, ReplayGain, and conversion
 work remains structurally limited to local-file rows. Trackbench's MPD Queue
-authority and the compatibility Trackknife shell only read metadata reported by
-the server and cannot reach local file operations.
+authority does not mutate server queue rows as local files. Explicit mapped-file
+editing resolves a server selection into an independent local-file editor as
+described below; this does not turn server queue entries into local queue rows.
+
+## Editing mapped server files
+
+With a configured MPD music folder, **Edit tags** on a server selection opens
+the standard editor tab directly, with its file selector in the sidebar.
+No intermediate local queue tab is created. The editor reads the actual mapped
+files in the background and uses the same preview and safe
+Apply workflow as local editing. Missing files produce an error; no local list
+is created. Melody does not yet supply these reads or perform these writes.
+See [ADR-0203](adr/0203-direct-mapped-tag-editor.md).
 
 ## Publication while playing or editing
 

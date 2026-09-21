@@ -19,7 +19,7 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-20, through ADR-0202 and database schema 38.
+Updated on 2026-09-20, through ADR-0203 and database schema 38.
 
 The application is built as `trackknife` from `src/bench`. Older development
 documents call this workspace **Trackbench**. It combines the MPD client and
@@ -93,3 +93,5 @@ In specifications, **Trackknife decision** means behavior chosen for this app,
 research or a decision.
 
 - [ADR-0202: Automatic Last.fm authorization](adr/0202-lastfm-automatic-authorization.md).
+
+- [ADR-0203: Direct mapped tag editor](adr/0203-direct-mapped-tag-editor.md).

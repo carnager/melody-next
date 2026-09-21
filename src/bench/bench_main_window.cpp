@@ -85,11 +85,8 @@ void BenchMainWindow::stopBackgroundWork() {
 
 void BenchMainWindow::closeEvent(QCloseEvent* event) {
     std::vector<QPointer<MetadataPropertiesDialog>> properties_tabs;
-    for (auto index = 0; index < tabs_->count(); ++index) {
-        if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
-            properties_tabs.emplace_back(properties);
-        }
-    }
+    for (auto* properties : findChildren<MetadataPropertiesDialog*>())
+        properties_tabs.emplace_back(properties);
     for (const auto& properties : properties_tabs) {
         if (properties != nullptr && !properties->close()) {
             event->ignore();

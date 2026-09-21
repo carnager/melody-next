@@ -1470,8 +1470,56 @@ BenchMainWindow::materializeMpdSelectionAsLocalTab(const QStringList& uris) {
     return tab;
 }
 
+void BenchMainWindow::showMpdMetadataProperties(const QStringList& uris) {
+    if (uris.isEmpty())
+        return;
+    const auto root = effectiveMpdMusicRoot();
+    if (root.isEmpty()) {
+        statusBar()->showMessage(QStringLiteral("Set the MPD music folder in Settings first"),
+                                 5000);
+        return;
+    }
+    const auto encoded = QFile::encodeName(root);
+    const std::filesystem::path root_path{
+        std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
+    std::vector<std::string> paths;
+    for (const auto& uri : uris) {
+        const auto bytes = uri.toUtf8();
+        const auto path = mpd::resolve_below_music_root(
+            root_path, std::string_view{bytes.constData(), static_cast<std::size_t>(bytes.size())});
+        if (!path) {
+            statusBar()->showMessage(
+                QStringLiteral(
+                    "The selection contains a URI that cannot be mapped to the MPD music folder"),
+                5000);
+            return;
+        }
+        paths.push_back(path->native());
+    }
+    const auto count = paths.size();
+    // Mapping is lexical only. The editor captures files and revisions on its worker;
+    // even checking existence here could stall the UI on a network mount.
+    openMetadataProperties(
+        count,
+        [paths = std::move(paths)](std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            if (index >= paths.size())
+                return std::nullopt;
+            return MetadataPropertiesSource{
+                .source = {.raw_path = paths[index],
+                           .source_revision = {},
+                           .baseline = {},
+                           .needs_metadata_capture = true},
+                .track_label = QFile::decodeName(QByteArray::fromStdString(paths[index])),
+            };
+        });
+}
+
 void BenchMainWindow::materializeMpdSelectionForDialog(const QStringList& uris,
                                                        const MaterializedDialog dialog) {
+    if (dialog == MaterializedDialog::edit_tags) {
+        showMpdMetadataProperties(uris);
+        return;
+    }
     auto* tab = materializeMpdSelectionAsLocalTab(uris);
     if (tab == nullptr) {
         return;

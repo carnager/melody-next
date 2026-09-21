@@ -19,7 +19,9 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-21, through ADR-0209 and database schema 40.
+Updated on 2026-09-21, through ADR-0210 and database schema 40.
+
+- [ADR-0210: Paused playback resume](adr/0210-paused-playback-resume.md).
 
 - [ADR-0209: Melody listening statistics](adr/0209-melody-listening-statistics.md).
 

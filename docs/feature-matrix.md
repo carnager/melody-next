@@ -13,7 +13,8 @@ An implemented feature does not by itself close a milestone.
 
 Development update (2026-09-21): ADRs 0204–0208 add local listening-history
 collection and optional columns, a curated workspace command palette, and dynamic-rule
-invalidation on local index changes. Resume, album shuffle,
+invalidation on local index changes. ADR-0210 adds bounded paused resume for
+local lists and hardens Melody's server-owned resume. Album shuffle,
 persistent autoplaylist tabs, and custom library grouping remain open.
 
 ## Status vocabulary
@@ -83,7 +84,7 @@ Evidence: [workspace specification](ui-workspace.md),
 | Local playback modes | Implemented | Repeat, track Random, Single/Consume including one-shot modes, and persistent local settings. Background progression continues in its original list. Metadata/path publication preserves row identity and advancement (ADRs 0119–0121). |
 | Server-side structured search | Implemented | Against Melody servers advertising `searchalbums`: album-record search results with rating overlays, and the Search dialog's Server library scope running translated tkq queries (AND-only subset; refusals are explicit). |
 | Track and album ratings | Implemented | Shared 0-10 star scale (ADR-0179): MPD rating stickers, Melody's native rating commands with album ratings, and a local content-identity store. Yellow star ratings show in an optional column, as overlays on album covers (track views and the library tree), and in five-star Rate menus in both authorities. Tag storage remains a recorded opt-in follow-up. |
-| Album shuffle, history, and resume | Partial | ADR-0207 collects qualified local listens with durable occurrence deduplication and source identity preserved by app-managed publications. ADR-0208 displays optional local Play count / Last played columns with bounded asynchronous loading. ADR-0209 displays separately owned Melody statistics when `melody_stats` is advertised, including live stats invalidation. Stock MPD has no emulated history. Runtime resume, history query/sort fields, and album shuffle remain open. See [roadmap 7](roadmap.md#7-listening-history-and-album-oriented-playback). |
+| Album shuffle, history, and resume | Partial | ADR-0207 collects qualified local listens with durable occurrence deduplication and source identity preserved by app-managed publications. ADR-0208 displays optional local Play count / Last played columns with bounded asynchronous loading. ADR-0209 displays separately owned Melody statistics when `melody_stats` is advertised, including live stats invalidation. Stock MPD has no emulated history. ADR-0210 adds opt-in paused local list resume and identity-checked Melody resume. Interrupted Up Next positions, history query/sort fields, and album shuffle remain open. See [roadmap 7](roadmap.md#7-listening-history-and-album-oriented-playback). |
 | MPRIS/media keys/notifications | Partial | `org.mpris.MediaPlayer2.trackknife` exposes the active authority's transport, typed metadata, position/Seeked, and volume, and routes desktop commands (including media keys) through the same transport actions as the visible controls (ADR-0135). ADR-0144 adds opt-in track-change notifications fed by the same now-playing snapshot. ADR-0195 makes background-only suppression optional and adds an explicit Settings test, normal-urgency silent delivery, and visible delivery failures. Notification artwork, MPRIS artwork URLs, and LoopStatus/Shuffle mapping remain open. |
 
 Evidence: [MPD](mpd-client.md), [local library](local-library.md),

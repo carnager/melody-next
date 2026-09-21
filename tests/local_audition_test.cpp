@@ -185,6 +185,44 @@ int main() {
         std::filesystem::temp_directory_path() /
         ("trackknife-local-audition-" + trackknife::core::StableId::random().to_string() + ".wav");
     write_silent_wave(path, 480'000U);
+    const auto resume_revision = trackknife::core::observe_local_source_revision(path.native());
+    CHECK(resume_revision.has_value());
+    if (resume_revision) {
+        CHECK(
+            (*service)->restore_paused(path.native(), *resume_revision, {}, {}, 1250).has_value());
+        auto restored = wait_for(**service, [](const auto& snapshot) {
+            return snapshot.state == LocalAuditionState::paused ||
+                   snapshot.state == LocalAuditionState::failed;
+        });
+        CHECK(restored.state == LocalAuditionState::paused);
+        CHECK(restored.position_sample == 60'000);
+        CHECK(restored.output.state == trackknife::audio::PipeWireOutputState::unconnected);
+        std::this_thread::sleep_for(30ms);
+        CHECK((*service)->snapshot().position_sample == 60'000);
+        CHECK((*service)
+                  ->restore_paused(path.native(), *resume_revision, {},
+                                   trackknife::formats::SampleRange{48'000, 144'000}, 500)
+                  .has_value());
+        restored = wait_for(**service, [](const auto& snapshot) {
+            return snapshot.state == LocalAuditionState::paused ||
+                   snapshot.state == LocalAuditionState::failed;
+        });
+        CHECK(restored.state == LocalAuditionState::paused);
+        CHECK(restored.position_sample == 24'000); // relative to logical range
+        auto stale = *resume_revision;
+        ++stale.size;
+        CHECK((*service)->restore_paused(path.native(), stale, {}, {}, 1).has_value());
+        CHECK(wait_for(**service, [](const auto& s) {
+                  return s.state == LocalAuditionState::failed;
+              }).state == LocalAuditionState::failed);
+        CHECK((*service)
+                  ->restore_paused(path.native(), *resume_revision, {}, {}, 10'000)
+                  .has_value());
+        CHECK(wait_for(**service, [](const auto& s) {
+                  return s.state == LocalAuditionState::failed;
+              }).state == LocalAuditionState::failed);
+        CHECK(!(*service)->restore_paused(path.native(), *resume_revision, {}, {}, -1));
+    }
     CHECK((*service)->load_and_play(path.native()).has_value());
     auto active = wait_for(**service, [](const auto& snapshot) {
         return snapshot.state == LocalAuditionState::playing ||

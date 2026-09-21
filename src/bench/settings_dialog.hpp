@@ -61,6 +61,7 @@ class SettingsDialog final : public QDialog {
     // QSettings keys shared with the consumers.
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
     static constexpr auto startup_context_key = "startup/context";
+    static constexpr auto restore_playback_key = "playback/restore-paused";
     static constexpr auto music_root_key = "mpd/music-root";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
@@ -76,6 +77,7 @@ class SettingsDialog final : public QDialog {
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
     QComboBox* startup_{nullptr};
+    QCheckBox* restore_playback_{nullptr};
     QCheckBox* panel_animations_{nullptr};
     QCheckBox* notifications_{nullptr};
     QCheckBox* notifications_background_{nullptr};

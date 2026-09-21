@@ -12,8 +12,9 @@ numbers below. The three priorities are not complete.
    (ADR-0207, schema 40). Optional local Play count / Last played columns load
    asynchronously (ADR-0208). Melody now collects its own statistics; capability-gated
    server columns and stats invalidation are supported (ADR-0209), separately from
-   local history. Next: optional paused resume and album-preserving
-   shuffle. Resume storage exists but is not connected yet.
+   local history. ADR-0210 adds opt-in paused local list resume and hardens
+   Melody's server-owned resume. Interrupted Up Next position restoration,
+   history queries, and album-preserving shuffle remain open.
 2. **Command discovery and staged-operation UX:** the curated command palette
    is available with Ctrl+Shift+P, with Settings retaining shortcut editing
    (ADR-0205). Parameter choices such as device names and numeric ratings are

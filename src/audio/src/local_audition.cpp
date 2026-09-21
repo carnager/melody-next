@@ -56,6 +56,8 @@ struct Command {
     std::shared_ptr<std::promise<core::Result<LocalAuditionSourceRelocationResult>>>
         relocation_completion;
     std::uint64_t occurrence_token{0U};
+    std::optional<core::LocalSourceRevision> restore_revision{};
+    std::int64_t restore_position_ms{0};
 };
 
 // Sliders are perceptual: PipeWire's stream mixer is linear amplitude, so the
@@ -554,6 +556,10 @@ struct LocalAuditionService::Impl {
                 return;
             }
             observed_revision = *observed;
+            if (command.restore_revision && *observed_revision != *command.restore_revision) {
+                fail(invalid_config("saved playback source has changed; select it to play afresh"));
+                return;
+            }
         }
         if (local_source && command.relocation.target_raw_path == current_path &&
             *observed_revision != command.relocation.target_revision) {
@@ -616,6 +622,26 @@ struct LocalAuditionService::Impl {
         current_duration_samples = opened_snapshot.end_sample
                                        ? std::optional{*opened_snapshot.end_sample - track_base}
                                        : std::nullopt;
+        if (command.restore_revision) {
+            const auto rate = source->output_format().sample_rate;
+            const auto relative = command.restore_position_ms / 1000 * rate +
+                                  command.restore_position_ms % 1000 * rate / 1000;
+            if (!current_duration_samples || relative >= *current_duration_samples) {
+                fail(invalid_config("saved playback position is outside the restored track"));
+                return;
+            }
+            if (auto sought = source->seek_to_sample(track_base + relative); !sought) {
+                fail(std::move(sought.error()));
+                return;
+            }
+            if (auto prepared = source->play(); !prepared) {
+                fail(std::move(prepared.error()));
+                return;
+            }
+            source->pause();
+            publish();
+            return;
+        }
         if (device_state_initialized && !output_available) {
             output_suspended_for_device = true;
             publish();
@@ -1275,6 +1301,25 @@ LocalAuditionSnapshot LocalAuditionService::snapshot() const { return implementa
 
 core::Result<void> LocalAuditionService::load_and_play(std::string raw_path) {
     return load_selected_and_play(std::move(raw_path), {});
+}
+
+core::Result<void> LocalAuditionService::restore_paused(
+    std::string raw_path, core::LocalSourceRevision expected_revision,
+    formats::AudioSourceSelection selection, std::optional<formats::SampleRange> segment,
+    std::int64_t position_ms, std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    if (raw_path.empty() || expected_revision.inode == 0 || position_ms < 0 ||
+        position_ms > 365LL * 24 * 60 * 60 * 1000) {
+        return std::unexpected(invalid_config("invalid saved playback source or position"));
+    }
+    Command command;
+    command.kind = CommandKind::load_and_play;
+    command.raw_path = std::move(raw_path);
+    command.selection = selection;
+    command.segment = segment;
+    command.restore_revision = expected_revision;
+    command.restore_position_ms = position_ms;
+    command.replay_gain_override = replay_gain_override;
+    return implementation_->enqueue(std::move(command));
 }
 
 core::Result<void> LocalAuditionService::load_selected_and_play(

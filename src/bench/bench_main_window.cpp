@@ -43,6 +43,7 @@ extern "C" void __tsan_acquire(void* address);
 namespace trackknife::bench {
 
 void BenchMainWindow::stopBackgroundWork() {
+    ++resume_intent_generation_;
     if (playlist_transfer_bar_)
         playlist_transfer_bar_->stop();
     if (list_edit_bar_ != nullptr) {
@@ -79,6 +80,8 @@ void BenchMainWindow::stopBackgroundWork() {
     if (transport_timer_ != nullptr) {
         transport_timer_->stop();
     }
+    if (player_)
+        checkpointLocalResume(player_->snapshot(), true);
     player_ = nullptr;
     player_storage_.reset();
 }

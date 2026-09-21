@@ -190,6 +190,18 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         playback);
     playback_note->setWordWrap(true);
     playback_layout->addWidget(playback_note);
+    restore_playback_ = new QCheckBox(
+        QStringLiteral("Restore local track and position on startup (paused)"), playback);
+    restore_playback_->setObjectName(QStringLiteral("bench-settings-restore-playback"));
+    restore_playback_->setChecked(
+        settings.value(QLatin1String(restore_playback_key), false).toBool());
+    playback_layout->addWidget(restore_playback_);
+    auto* resume_note =
+        new QLabel(QStringLiteral("Melody restores its own queue paused when the server restarts. "
+                                  "Reconnecting this app never interrupts server playback."),
+                   playback);
+    resume_note->setWordWrap(true);
+    playback_layout->addWidget(resume_note);
     auto* buffer_form = new QFormLayout;
     buffer_form->setVerticalSpacing(12);
     buffer_profile_ = new QComboBox(playback);
@@ -538,6 +550,7 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("desktop/notifications-background-only"),
                       notifications_background_->isChecked());
     settings.setValue(QStringLiteral("playback/buffer-profile"), buffer_profile_->currentData());
+    settings.setValue(QLatin1String(restore_playback_key), restore_playback_->isChecked());
     settings.setValue(QStringLiteral("playback/buffer-capacity-ms"), buffer_capacity_->value());
     settings.setValue(QStringLiteral("playback/buffer-start-threshold-ms"),
                       buffer_threshold_->value());

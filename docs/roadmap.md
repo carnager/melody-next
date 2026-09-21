@@ -145,9 +145,9 @@ Reference: [desktop integration](feature-matrix.md).
 ADR-0207 collects qualified local listens through the serialized persistence
 worker, deduplicates occurrences durably, and preserves physical/logical
 identity across app-managed publications. ADR-0208 adds optional local Play count
-and Last played columns. Next: implement opt-in paused resume, then album shuffle.
-Resume storage exists but runtime
-resume does not. Server statistics remain owned by the server.
+and Last played columns. ADR-0210 adds opt-in paused local list resume and
+identity-checked Melody resume. Interrupted Up Next position restoration and
+album shuffle remain open. Server statistics and resume remain server-owned.
 
 - [x] Track and album ratings on the shared 0-10 star scale (ADR-0179):
   MPD rating stickers, Melody's native rating commands, and a local

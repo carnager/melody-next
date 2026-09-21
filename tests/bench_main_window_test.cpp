@@ -217,6 +217,7 @@ class BenchMainWindowTest final : public QObject {
     void localListeningCountsPlaybackWithoutLastFm();
     void localListeningColumnsLoadRefreshAndRespectAuthority();
     void melodyListeningColumnsRequireCapability();
+    void localPlaybackRestoresPausedWithoutOutput();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -615,6 +616,60 @@ void BenchMainWindowTest::melodyListeningColumnsRequireCapability() {
                                 window.mpd_view_layout_);
     QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
     controller->connected_ = false;
+}
+
+void BenchMainWindowTest::localPlaybackRestoresPausedWithoutOutput() {
+    QTemporaryDir media;
+    const auto file = media.filePath(QStringLiteral("resume.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto path = QFile::encodeName(file).toStdString();
+    const auto revision = core::observe_local_source_revision(path);
+    QVERIFY(revision);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), true);
+    QString document;
+    {
+        BenchMainWindow window;
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(!window.resume_restore_pending_);
+        auto* tab = window.currentListTab();
+        QVERIFY(tab);
+        LocalTrackRow row;
+        row.raw_path = path;
+        row.source_revision = *revision;
+        row.title = "Resume fixture";
+        row.probed = true;
+        tab->model->replaceRows({row, row});
+        document = QString::fromStdString(tab->document.id.to_string());
+        window.playRow(*tab, 1, 20);
+        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
+        window.checkpointLocalResume(window.player_->snapshot(), true);
+        QTRY_VERIFY(!window.resume_save_pending_);
+        window.close();
+    }
+    QVERIFY(!QSettings{}.value(QStringLiteral("playback/local-resume-v1")).toByteArray().isEmpty());
+    {
+        BenchMainWindow window;
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(!window.resume_restore_pending_);
+        QTRY_VERIFY2(window.player_->snapshot().state == audio::LocalAuditionState::paused,
+                     qPrintable(window.statusBar()->currentMessage()));
+        QCOMPARE(window.playback_document_id_, document);
+        QCOMPARE(window.playback_index_.row(), 1);
+        QCOMPARE(window.player_->snapshot().position_sample, 882);
+        QCOMPARE(window.player_->snapshot().output.state, audio::PipeWireOutputState::unconnected);
+        QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), false);
+        window.checkpointLocalResume(window.player_->snapshot(), true);
+        QTRY_VERIFY(!window.resume_save_pending_);
+        QVERIFY(
+            QSettings{}.value(QStringLiteral("playback/local-resume-v1")).toByteArray().isEmpty());
+        window.close();
+    }
+    {
+        BenchMainWindow window;
+        QTRY_VERIFY(window.lists_restored_);
+        QCOMPARE(window.player_->snapshot().state, audio::LocalAuditionState::empty);
+        window.close();
+    }
 }
 
 void BenchMainWindowTest::localListeningCacheIsBoundedAndRejectsStaleResults() {

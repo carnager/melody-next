@@ -294,6 +294,7 @@ void BenchMainWindow::buildTransport() {
         if (isMpdContext()) {
             mpd_controller_->stop();
         } else if (player_ != nullptr) {
+            ++resume_intent_generation_;
             static_cast<void>(player_->stop());
         }
     });
@@ -988,7 +989,9 @@ std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlayba
     return adjacentPlaybackRow(1);
 }
 
-void BenchMainWindow::playRow(ListTab& tab, const int row) {
+void BenchMainWindow::playRow(ListTab& tab, const int row,
+                              std::optional<std::int64_t> restore_position_ms) {
+    ++resume_intent_generation_;
     if (player_ == nullptr) {
         return;
     }
@@ -996,8 +999,17 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
     if (source.raw_path.empty()) {
         return;
     }
-    if (auto result = load_and_play(*player_, source, local_replay_gain_override(*tab.model, row));
-        !result) {
+    if (restore_position_ms && !tab.model->rows().at(static_cast<std::size_t>(row)).source_revision)
+        return;
+    const auto result =
+        restore_position_ms
+            ? player_->restore_paused(
+                  source.raw_path,
+                  *tab.model->rows().at(static_cast<std::size_t>(row)).source_revision,
+                  source.selection, source.segment, *restore_position_ms,
+                  local_replay_gain_override(*tab.model, row))
+            : load_and_play(*player_, source, local_replay_gain_override(*tab.model, row));
+    if (!result) {
         statusBar()->showMessage(
             QStringLiteral("Playback failed: %1").arg(displayText(result.error().message)), 5'000);
         return;
@@ -1006,7 +1018,8 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
         detached_playback_->model->deleteLater();
         detached_playback_.reset();
     }
-    local_requests_.abandon();
+    if (!restore_position_ms)
+        local_requests_.abandon();
     requested_request_.reset();
     queued_request_.reset();
     persistUpNext();
@@ -1140,6 +1153,7 @@ void BenchMainWindow::togglePlayPause() {
     if (player_ == nullptr) {
         return;
     }
+    ++resume_intent_generation_;
     const auto snapshot = player_->snapshot();
     if (playerActive(snapshot.state)) {
         static_cast<void>(player_->pause());
@@ -1330,6 +1344,7 @@ void BenchMainWindow::refreshTransport() {
     }
     const auto snapshot = player_->snapshot();
     sampleLastFm(snapshot);
+    checkpointLocalResume(snapshot);
     if (!local_history_clock_.isValid())
         local_history_clock_.start();
     sampleListeningHistory(snapshot, local_history_clock_.elapsed(),

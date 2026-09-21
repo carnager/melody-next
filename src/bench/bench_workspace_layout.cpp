@@ -8,6 +8,7 @@
 #include "bench/playback_tab_widget.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "trackknife/audio/local_audition.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
@@ -1148,6 +1149,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     });
     connect(dialog, &QDialog::accepted, this, [this] {
         reloadPlaybackPreferences();
+        if (player_)
+            checkpointLocalResume(player_->snapshot(), true);
         for (auto* section : findChildren<MetadataArtworkSection*>())
             section->refreshStoragePolicy();
     });

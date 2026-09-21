@@ -22,6 +22,13 @@ struct PersistedWorkspace {
     std::vector<persistence::TrackViewPreset> view_presets;
 };
 
+struct LocalResumeCheckpoint {
+    QString list_id;
+    int row{0};
+    persistence::ListItem source;
+    qint64 position_ms{0};
+};
+
 class ListPersistenceService final : public QObject {
     Q_OBJECT
 
@@ -68,6 +75,10 @@ class ListPersistenceService final : public QObject {
     void removeEncoderPreset(core::StableId id, CompletionCallback callback = {});
     void loadUiState(QString key, UiStateCallback callback);
     void saveUiState(QString key, QByteArray value, CompletionCallback callback = {});
+    void saveLocalResume(std::optional<LocalResumeCheckpoint> checkpoint,
+                         CompletionCallback callback = {});
+    void verifyLocalResumeSource(persistence::ListItem source, QString expected_key,
+                                 CompletionCallback callback);
     void backupDatabase(std::filesystem::path destination, CompletionCallback callback);
     void recordLocalListen(persistence::ListItem source, core::StableId occurrence_id,
                            std::int64_t played_at_ms, CompletionCallback callback);
@@ -96,6 +107,7 @@ class ListPersistenceService final : public QObject {
     std::shared_ptr<State> state_;
     unsigned pending_listens_{0};
     unsigned pending_history_reads_{0};
+    unsigned pending_resume_writes_{0};
 };
 
 } // namespace trackknife::ui

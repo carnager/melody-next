@@ -110,8 +110,15 @@ void BenchMainWindow::initializePersistence() {
                     7'000);
             }
         }
+        // Tab creation emits transport refreshes. Do not let their empty player
+        // snapshot overwrite the checkpoint before it has been read.
+        resume_restore_pending_ = true;
         restoreLists(std::move(workspace.lists));
         restoreUpNext();
+        if (error.isEmpty())
+            restoreLocalResume();
+        else
+            resume_restore_pending_ = false;
         if (error.isEmpty()) {
             local_library_ = new LocalLibraryPanel(database_path_, source_stack_);
             connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,

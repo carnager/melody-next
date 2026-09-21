@@ -151,6 +151,13 @@ class LocalAuditionService final {
     [[nodiscard]] LocalAuditionSnapshot snapshot() const;
 
     [[nodiscard]] core::Result<void> load_and_play(std::string raw_path);
+    // Revision-checked restoration: open and seek on the worker, without
+    // connecting or activating an output. Play remains an explicit command.
+    [[nodiscard]] core::Result<void>
+    restore_paused(std::string raw_path, core::LocalSourceRevision expected_revision,
+                   formats::AudioSourceSelection selection,
+                   std::optional<formats::SampleRange> segment, std::int64_t position_ms,
+                   std::optional<formats::ReplayGainInfo> replay_gain_override = {});
     [[nodiscard]] core::Result<void>
     load_selected_and_play(std::string raw_path, formats::AudioSourceSelection selection,
                            std::optional<formats::ReplayGainInfo> replay_gain_override = {});

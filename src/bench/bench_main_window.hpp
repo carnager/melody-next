@@ -167,6 +167,8 @@ class BenchMainWindow final : public QMainWindow {
     void editUpNextSelection(int operation, int destination = -1);
     void persistUpNext();
     void restoreUpNext();
+    void restoreLocalResume();
+    void checkpointLocalResume(const audio::LocalAuditionSnapshot& snapshot, bool force = false);
     [[nodiscard]] bool playLocalRequest();
     void adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry);
 
@@ -405,7 +407,7 @@ class BenchMainWindow final : public QMainWindow {
                           int direction = 1);
     void consumePlaybackRow(ListTab& tab, const QPersistentModelIndex& index);
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
-    void playRow(ListTab& tab, int row);
+    void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>>
     adjacentPlaybackRow(int direction);
@@ -677,6 +679,10 @@ class BenchMainWindow final : public QMainWindow {
     // and flushed into the initial tab once it exists.
     std::vector<std::string> pending_open_paths_;
     bool lists_restored_{false};
+    bool resume_restore_pending_{false};
+    bool resume_save_pending_{false};
+    std::uint64_t resume_intent_generation_{0};
+    QElapsedTimer resume_save_clock_;
 
     QAction* local_repeat_action_{nullptr};
     QAction* local_random_action_{nullptr};

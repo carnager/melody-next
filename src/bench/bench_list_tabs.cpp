@@ -152,7 +152,7 @@ void BenchMainWindow::initializePersistence() {
                         entries.size() == 1U ? entries.front().label : "Library selection";
                     int insertion = -1;
                     if (action == LocalLibraryAction::next) {
-                        insertion = document_text(playback_document_) == id ? playback_row_ + 1
+                        insertion = document_text(anchors_.document) == id ? playback_row_ + 1
                                     : target->view->currentIndex().isValid()
                                         ? target->view->currentIndex().row() + 1
                                         : 0;
@@ -578,7 +578,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         if (!consuming_row_) {
             // The model identity check the persistent index used to provide is
             // now exactly the document check below, so one branch covers both.
-            const auto* playing = tabForDocument(playback_document_);
+            const auto* playing = tabForDocument(anchors_.document);
             if (playing != nullptr && playing->model == model) {
                 resetPlaybackOrder();
             }
@@ -980,7 +980,7 @@ void BenchMainWindow::openSearchDialog() {
                     schedulePersist();
                 } else if (destination != nullptr && action == LocalLibraryAction::next) {
                     const auto id = QString::fromStdString(destination->document.id.to_string());
-                    insertion = document_text(playback_document_) == id ? playback_row_ + 1
+                    insertion = document_text(anchors_.document) == id ? playback_row_ + 1
                                 : destination->view->currentIndex().isValid()
                                     ? destination->view->currentIndex().row() + 1
                                     : 0;
@@ -1473,7 +1473,7 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     tabs_->removeTab(index);
     view->deleteLater();
-    if (local_requests_.active() && tab->document.id == playback_document_) {
+    if (local_requests_.active() && tab->document.id == anchors_.document) {
         if (detached_playback_)
             detached_playback_->model->deleteLater();
         detached_playback_ = *tab;

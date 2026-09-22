@@ -7,6 +7,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
+#include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/audio/request_queue.hpp"
@@ -447,11 +448,6 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
-    // The gapless-queued and handed-to-the-player anchors describe a
-    // transition in flight. They are always abandoned together -- every one
-    // of the six sites that dropped them did both -- so the pairing is an
-    // invariant rather than a coincidence.
-    void forgetPlaybackTransition();
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
@@ -770,12 +766,11 @@ class BenchMainWindow final : public QMainWindow {
     unsigned up_next_remote_revision_{0};
     QString up_next_remote_profile_;
 
-    // ADR-0221: playback position is an entry identity plus the document
-    // holding it, not a pointer into a view model. playback_row_ below is a
-    // derived cache and doubles as the lookup hint.
-    core::StableId playback_entry_;
-    core::StableId queued_playback_entry_;
-    core::StableId requested_playback_entry_;
+    // ADR-0220 Phase 0: everything about where playback is, in a form that
+    // survives leaving this process. playback_row_ below is deliberately not
+    // part of it -- a row is a client-side projection, and doubles here as the
+    // lookup hint for resolving anchors_.current.
+    audio::PlaybackAnchors anchors_;
     bool consuming_row_{false};
     LastFmService* lastfm_{};
     QElapsedTimer lastfm_clock_;
@@ -790,11 +785,7 @@ class BenchMainWindow final : public QMainWindow {
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
-    // ADR-0220 Phase 0: which list is playing, as an identity rather than a
-    // rendered string, so the anchor can leave the widget layer.
-    core::StableId playback_document_;
     int playback_row_{-1};
-    LocalTrackSource playback_source_;
     bool advance_pending_{false};
     // Gapless continuation upkeep: the last takeover count seen, the last
     // requested next path, and a throttle for re-requests after the engine
@@ -802,7 +793,6 @@ class BenchMainWindow final : public QMainWindow {
     quint64 last_chain_transitions_{0U};
     std::optional<LocalTrackSource> last_requested_next_;
     std::uint64_t last_requested_token_{0U};
-    core::StableId request_return_entry_;
     QElapsedTimer next_request_timer_;
     bool seeking_{false};
     QToolButton* mute_button_{nullptr};

@@ -310,7 +310,7 @@ void BenchMainWindow::refreshUpNext() {
                 up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = local_requests_.revision();
         }
-        auto* tab = tabForDocument(playback_document_);
+        auto* tab = tabForDocument(anchors_.document);
         QString playing;
         if (local_requests_.active())
             playing = QString::fromStdString(local_requests_.active()->source.artist + " — " +
@@ -615,13 +615,13 @@ void BenchMainWindow::persistUpNext() {
     QJsonObject state{
         {QStringLiteral("version"), 1},
         {QStringLiteral("rows"), rows},
-        {QStringLiteral("document"), document_text(playback_document_)},
-        {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_document_))}};
+        {QStringLiteral("document"), document_text(anchors_.document)},
+        {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(anchors_.document))}};
     state[QStringLiteral("anchor")] =
-        QString::fromLatin1(QByteArray::fromStdString(playback_source_.raw_path).toBase64());
-    if (!request_return_entry_.is_nil()) {
-        if (auto* tab = tabForDocument(playback_document_); tab != nullptr) {
-            if (const auto row = tab->model->rowOfEntry(request_return_entry_, -1); row >= 0) {
+        QString::fromLatin1(QByteArray::fromStdString(anchors_.source.raw_path).toBase64());
+    if (!anchors_.request_return.is_nil()) {
+        if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
+            if (const auto row = tab->model->rowOfEntry(anchors_.request_return, -1); row >= 0) {
                 state[QStringLiteral("returnRow")] = row;
                 state[QStringLiteral("returnSource")] =
                     continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(row)));
@@ -779,7 +779,7 @@ void BenchMainWindow::restoreUpNext() {
                     return;
                 }
             }
-            if (playback_document_.is_nil() && !local_requests_.pending().empty()) {
+            if (anchors_.document.is_nil() && !local_requests_.pending().empty()) {
                 const auto id = state.value(QStringLiteral("document")).toString();
                 const auto anchor = QByteArray::fromBase64(
                                         state.value(QStringLiteral("anchor")).toString().toLatin1())
@@ -788,11 +788,11 @@ void BenchMainWindow::restoreUpNext() {
                     const auto row = state.value(QStringLiteral("row")).toInt(-1);
                     if (row >= 0 && row < tab->model->rowCount() &&
                         tab->model->rawPath(row) == anchor) {
-                        playback_document_ = document_identity(id);
-                        playback_entry_ =
+                        anchors_.document = document_identity(id);
+                        anchors_.current =
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
                         playback_row_ = row;
-                        playback_source_ = tab->model->source(row);
+                        anchors_.source = tab->model->source(row);
                         resetPlaybackOrder();
                     }
                 }
@@ -806,11 +806,11 @@ void BenchMainWindow::restoreUpNext() {
                     if (row >= 0 && row < tab->model->rowCount() &&
                         continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(
                             row))) == state.value(QStringLiteral("returnSource")).toArray()) {
-                        playback_document_ = document_identity(id);
-                        request_return_entry_ =
+                        anchors_.document = document_identity(id);
+                        anchors_.request_return =
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
-                        if (playback_source_.empty())
-                            playback_source_ = tab->model->source(row);
+                        if (anchors_.source.empty())
+                            anchors_.source = tab->model->source(row);
                     }
                 }
                 refreshUpNext();

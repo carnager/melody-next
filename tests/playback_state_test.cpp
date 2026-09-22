@@ -5,6 +5,7 @@
 // widgets -- which is the property the phase is actually after. The behaviour
 // itself is unchanged; it simply lives somewhere a headless engine can reach.
 
+#include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/track_source.hpp"
 
@@ -113,9 +114,56 @@ void a_track_source_reports_emptiness_and_compares_by_value() {
     require(ranged == ranged, "a source equals itself");
 }
 
+void anchors_describe_position_without_rows() {
+    namespace audio = trackknife::audio;
+    namespace core = trackknife::core;
+
+    audio::PlaybackAnchors anchors;
+    require(!anchors.playing(), "default anchors mean nothing is playing");
+
+    // A current entry alone is not playback: without a document there is no
+    // list to resolve it against.
+    anchors.current = core::StableId::random();
+    require(!anchors.playing(), "an entry without a document is not playback");
+    anchors.document = core::StableId::random();
+    require(anchors.playing(), "an entry in a document is playback");
+
+    // The two in-flight anchors are abandoned as a unit, which is the
+    // invariant forget_transition exists to hold.
+    anchors.queued = core::StableId::random();
+    anchors.requested = core::StableId::random();
+    anchors.request_return = core::StableId::random();
+    const auto return_point = anchors.request_return;
+    anchors.forget_transition();
+    require(anchors.queued.is_nil() && anchors.requested.is_nil(),
+            "forgetting a transition must drop both halves");
+    require(anchors.request_return == return_point,
+            "a transition is not the return point; forgetting one must not drop the other");
+    require(anchors.playing(), "forgetting a transition must not stop playback");
+
+    anchors.source.raw_path = "/music/track.flac";
+    anchors.clear();
+    require(!anchors.playing() && anchors.source.empty() && anchors.request_return.is_nil(),
+            "clearing must leave nothing behind");
+}
+
+void anchors_compare_by_value() {
+    namespace audio = trackknife::audio;
+    namespace core = trackknife::core;
+    audio::PlaybackAnchors left;
+    left.document = core::StableId::random();
+    left.current = core::StableId::random();
+    auto right = left;
+    require(left == right, "a copy equals its source");
+    right.current = core::StableId::random();
+    require(!(left == right), "a different current entry is a different position");
+}
+
 } // namespace
 
 int main() {
+    anchors_describe_position_without_rows();
+    anchors_compare_by_value();
     a_track_source_reports_emptiness_and_compares_by_value();
     modes_default_to_off();
     cycling_visits_off_on_oneshot_and_wraps();

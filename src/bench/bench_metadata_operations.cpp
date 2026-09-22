@@ -1229,8 +1229,8 @@ void BenchMainWindow::applyCommittedRelocation(
         update_request(queued_request_->source);
     persistUpNext();
     refreshUpNext();
-    if (playback_source_.raw_path == result.source_raw_path) {
-        playback_source_.raw_path = result.target_raw_path;
+    if (anchors_.source.raw_path == result.source_raw_path) {
+        anchors_.source.raw_path = result.target_raw_path;
     }
     if (last_requested_next_ && last_requested_next_->raw_path == result.source_raw_path) {
         last_requested_next_->raw_path = result.target_raw_path;

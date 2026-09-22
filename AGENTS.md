@@ -48,9 +48,12 @@ repeatedly.
 - **Do not add authority-gated feature code.** No new `supportsCommand()`-style
   branching, no new `*Mpd*`-suffixed parallel to a local method, no new
   duplicated list/history/shuffle/resume path. A feature is implemented once.
-- **Local versus remote is a connection profile**, not a branch. It is which
-  engine the client is pointed at, and the difference belongs at the connection
-  boundary rather than in feature code.
+- **Local versus remote is a connection, not a branch.** In the end state
+  there is no local-versus-remote axis, only which engine a tab's list came
+  from, with the same operations on every one. The client may hold several
+  connections open at once — a desktop library and a NAS engine side by side —
+  so "the active authority" stops being something the workspace has. The MPD
+  Queue tab is that idea's current form and is removed, not generalised.
 - **Tabs are tabs.** A tab is a set of track references, an order, and a view
   layout, distinguished only by how the set was produced and whether it
   re-evaluates. Search results are not a special kind of tab. The tagger is the

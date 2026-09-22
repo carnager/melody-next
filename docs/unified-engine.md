@@ -379,9 +379,23 @@ and the engine survives the UI exiting mid-playback.
   Today these read files directly from the UI thread's workers.
 - Profiles gain an endpoint. A local profile spawns a loopback engine if none is
   running; a remote profile connects.
+- **Several engines at once, not one at a time.** A profile is a connection,
+  and the client may hold more than one open — a desktop library and the engine
+  on the NAS side by side. This replaces what the MPD Queue tab did: the
+  workspace stops having *an* authority and instead has connections, each of
+  which is an engine speaking protocol v1. A tab belongs to a connection the
+  way it belongs to a document today.
+
+  This bears on the tab work. "Local versus remote is a connection profile"
+  understates it: there is no local-versus-remote axis left, only which engine
+  a tab's list came from, with the same operations available on all of them.
+  Playback, though, is owned by one engine at a time — the one holding the
+  queue — so the client has to be explicit about which connection a transport
+  command addresses.
 
 Done when: the desktop UI runs against an engine on another machine with no
-filesystem access to the library, including artwork, waveforms and a tag edit.
+filesystem access to the library, including artwork, waveforms and a tag edit,
+and two connections can be open at once without either becoming "the" authority.
 
 ### Phase 4 — Output agents
 

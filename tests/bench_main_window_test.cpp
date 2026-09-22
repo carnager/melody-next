@@ -699,7 +699,7 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     window.playback_document_id_ = QString::fromStdString(tab->document.id.to_string());
     window.playback_entry_ = tab->model->rows().at(0).entry_id;
     window.playback_row_ = 0;
-    window.local_album_random_ = true;
+    window.local_modes_.album_random = true;
     window.resetPlaybackOrder();
     QTRY_VERIFY(!window.album_order_preparing_);
     QCOMPARE(window.playback_order_.adjacent(1, false), std::optional<int>{2});
@@ -712,7 +712,7 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_album_random"));
     window.refreshMpdStatusControls();
     QVERIFY(window.mpd_album_random_action_->isVisible());
-    window.local_album_random_ = false;
+    window.local_modes_.album_random = false;
     window.saveLocalPlaybackModes();
     window.mpd_controller_->connected_ = false;
 }
@@ -760,7 +760,7 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
         window.enqueueLocalRequests(
             std::vector<LocalTrackRow>(static_cast<std::size_t>(pending_count), row));
         if (consume) {
-            window.local_consume_ = 1;
+            window.local_modes_.consume = audio::ModeState::on;
             window.consumePlaybackRow(*tab, window.playback_entry_, window.playback_row_);
             QCOMPARE(tab->model->rowCount(), 1);
         }
@@ -6016,7 +6016,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     window.openLocalPaths({QFile::encodeName(a).toStdString(), QFile::encodeName(b).toStdString()});
     QTRY_VERIFY(window.currentListTab() != nullptr &&
                 window.currentListTab()->model->rowCount() == 2);
-    window.local_consume_ = consume ? 1 : 0;
+    window.local_modes_.consume = consume ? audio::ModeState::on : audio::ModeState::off;
     auto* tab = window.currentListTab();
     window.playRow(*tab, 0);
     QTRY_VERIFY(window.property("trackknife-player-state").toInt() >= 3);

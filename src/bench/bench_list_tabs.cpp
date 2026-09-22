@@ -591,7 +591,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     connect(model, &QAbstractItemModel::layoutChanged, this, reset_order);
     connect(model, &QAbstractItemModel::dataChanged, this,
             [this, reset_order](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
-                if (local_album_random_ && roles.empty())
+                if (local_modes_.album_random && roles.empty())
                     reset_order();
             });
     view->setProperty("trackknife-hover-row", -1);

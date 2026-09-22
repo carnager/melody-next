@@ -7,6 +7,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
+#include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
@@ -719,17 +720,15 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<QToolButton*> local_mode_buttons_;
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
-    bool local_repeat_{false};
-    bool local_random_{false};
-    bool local_album_random_{false};
+    // ADR-0220 Phase 0: the mode policy itself is Qt-free and owned by
+    // audio::PlaybackModes; the actions above are only its view.
+    audio::PlaybackModes local_modes_;
     bool album_order_preparing_{false};
     std::uint64_t album_order_generation_{0};
     int album_order_build_row_{0};
     std::size_t album_order_key_bytes_{0};
     std::map<std::tuple<std::string, std::string, std::string>, std::size_t> album_order_keys_;
     std::vector<std::vector<int>> album_order_groups_;
-    int local_single_{0};
-    int local_consume_{0};
     QString local_replaygain_{QStringLiteral("off")};
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};

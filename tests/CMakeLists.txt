@@ -302,6 +302,15 @@ target_link_libraries(
 )
 add_test(NAME cue-sheet COMMAND trackknife_cue_sheet_tests)
 
+# ADR-0220 Phase 0: links Trackknife::Audio only -- no Qt, no widgets -- which
+# is the property this suite exists to hold.
+add_executable(trackknife_playback_modes_tests playback_modes_test.cpp)
+target_link_libraries(
+    trackknife_playback_modes_tests
+    PRIVATE Trackknife::Audio trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME playback-modes COMMAND trackknife_playback_modes_tests)
+
 add_executable(trackknife_local_playback_tests local_playback_test.cpp)
 target_link_libraries(
     trackknife_local_playback_tests

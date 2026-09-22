@@ -728,16 +728,16 @@ void BenchMainWindow::rebuildDeviceMenu() {
 
 void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     const QSettings settings;
-    local_repeat_ = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
-    local_random_ = settings.value(QStringLiteral("playback/local-random"), false).toBool();
-    local_album_random_ =
+    local_modes_.repeat = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
+    local_modes_.random = settings.value(QStringLiteral("playback/local-random"), false).toBool();
+    local_modes_.album_random =
         settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
-    if (local_album_random_)
-        local_random_ = false;
-    local_single_ =
-        std::clamp(settings.value(QStringLiteral("playback/local-single"), 0).toInt(), 0, 2);
-    local_consume_ =
-        std::clamp(settings.value(QStringLiteral("playback/local-consume"), 0).toInt(), 0, 2);
+    if (local_modes_.album_random)
+        local_modes_.random = false;
+    local_modes_.single = audio::mode_state_from_int(
+        settings.value(QStringLiteral("playback/local-single"), 0).toInt());
+    local_modes_.consume = audio::mode_state_from_int(
+        settings.value(QStringLiteral("playback/local-consume"), 0).toInt());
     local_replaygain_ =
         settings.value(QStringLiteral("playback/local-replaygain"), QStringLiteral("off"))
             .toString();
@@ -784,9 +784,9 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext())
             return;
-        local_album_random_ = on;
+        local_modes_.album_random = on;
         if (on)
-            local_random_ = false;
+            local_modes_.random = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
     });
@@ -795,16 +795,16 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         if (isMpdContext()) {
             return;
         }
-        local_repeat_ = on;
+        local_modes_.repeat = on;
         applyLocalPlaybackModes();
     });
     connect(local_random_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext()) {
             return;
         }
-        local_random_ = on;
+        local_modes_.random = on;
         if (on)
-            local_album_random_ = false;
+            local_modes_.album_random = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
     });
@@ -812,14 +812,14 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         if (isMpdContext()) {
             return;
         }
-        local_single_ = (local_single_ + 1) % 3;
+        local_modes_.single = audio::next_mode_state(local_modes_.single);
         applyLocalPlaybackModes();
     });
     connect(local_consume_action_, &QAction::triggered, this, [this] {
         if (isMpdContext()) {
             return;
         }
-        local_consume_ = (local_consume_ + 1) % 3;
+        local_modes_.consume = audio::next_mode_state(local_modes_.consume);
         applyLocalPlaybackModes();
     });
     local_replaygain_button_ = new QToolButton(statusBar());
@@ -867,11 +867,13 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
 
 void BenchMainWindow::saveLocalPlaybackModes() {
     QSettings settings;
-    settings.setValue(QStringLiteral("playback/local-repeat"), local_repeat_);
-    settings.setValue(QStringLiteral("playback/local-random"), local_random_);
-    settings.setValue(QStringLiteral("playback/local-album-random"), local_album_random_);
-    settings.setValue(QStringLiteral("playback/local-single"), local_single_);
-    settings.setValue(QStringLiteral("playback/local-consume"), local_consume_);
+    settings.setValue(QStringLiteral("playback/local-repeat"), local_modes_.repeat);
+    settings.setValue(QStringLiteral("playback/local-random"), local_modes_.random);
+    settings.setValue(QStringLiteral("playback/local-album-random"), local_modes_.album_random);
+    settings.setValue(QStringLiteral("playback/local-single"),
+                      static_cast<int>(local_modes_.single));
+    settings.setValue(QStringLiteral("playback/local-consume"),
+                      static_cast<int>(local_modes_.consume));
     settings.setValue(QStringLiteral("playback/local-replaygain"), local_replaygain_);
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), local_rg_preamp_with_);
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), local_rg_preamp_without_);
@@ -884,7 +886,7 @@ void BenchMainWindow::applyLocalPlaybackModes() {
         static_cast<void>(player_->clear_gapless_next());
         auto mode = audio::ReplayGainMode::off;
         if (local_replaygain_ == QStringLiteral("track") ||
-            (local_replaygain_ == QStringLiteral("auto") && local_random_)) {
+            (local_replaygain_ == QStringLiteral("auto") && local_modes_.random)) {
             mode = audio::ReplayGainMode::track;
         } else if (local_replaygain_ == QStringLiteral("album") ||
                    local_replaygain_ == QStringLiteral("auto")) {
@@ -915,32 +917,33 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         button->defaultAction()->setVisible(visible);
         button->defaultAction()->setEnabled(visible && player_ != nullptr);
     }
-    local_repeat_action_->setChecked(local_repeat_);
-    local_random_action_->setChecked(local_random_);
-    local_album_random_action_->setChecked(local_album_random_);
+    local_repeat_action_->setChecked(local_modes_.repeat);
+    local_random_action_->setChecked(local_modes_.random);
+    local_album_random_action_->setChecked(local_modes_.album_random);
     local_album_random_action_->setToolTip(
         tr("Shuffle albums during playback without rearranging the list. Tracks within each album "
            "keep their list order."));
     local_repeat_action_->setToolTip(
         QStringLiteral("Repeat: %1")
-            .arg(local_repeat_ ? QStringLiteral("On") : QStringLiteral("Off")));
+            .arg(local_modes_.repeat ? QStringLiteral("On") : QStringLiteral("Off")));
     local_random_action_->setToolTip(
         QStringLiteral("Random: %1")
-            .arg(local_random_ ? QStringLiteral("On") : QStringLiteral("Off")));
-    const auto cycle = [](QAction* action, const int mode, const QString& name,
+            .arg(local_modes_.random ? QStringLiteral("On") : QStringLiteral("Off")));
+    const auto cycle = [](QAction* action, const audio::ModeState mode, const QString& name,
                           const QString& symbol, const QString& help) {
-        const auto state = mode == 0   ? QStringLiteral("Off")
-                           : mode == 1 ? QStringLiteral("On")
-                                       : QStringLiteral("One-shot");
-        action->setChecked(mode != 0);
-        action->setIconText(mode == 2 ? symbol + QStringLiteral("×") : symbol);
+        const auto state = mode == audio::ModeState::off  ? QStringLiteral("Off")
+                           : mode == audio::ModeState::on ? QStringLiteral("On")
+                                                          : QStringLiteral("One-shot");
+        action->setChecked(mode != audio::ModeState::off);
+        action->setIconText(mode == audio::ModeState::oneshot ? symbol + QStringLiteral("×")
+                                                              : symbol);
         action->setText(QStringLiteral("%1: %2").arg(name, state));
         action->setToolTip(QStringLiteral("%1: %2\n%3").arg(name, state, help));
     };
-    cycle(local_single_action_, local_single_, QStringLiteral("Single"), QStringLiteral("1"),
+    cycle(local_single_action_, local_modes_.single, QStringLiteral("Single"), QStringLiteral("1"),
           QStringLiteral("Stop after this track; with Repeat, repeat this track. Click to cycle "
                          "Off / On / One-shot."));
-    cycle(local_consume_action_, local_consume_, QStringLiteral("Consume"), QStringLiteral("C"),
+    cycle(local_consume_action_, local_modes_.consume, QStringLiteral("Consume"), QStringLiteral("C"),
           QStringLiteral("Remove finished or skipped entries from the local list. Files stay on "
                          "disk. Click to cycle Off / On / One-shot."));
     local_replaygain_button_->setVisible(visible);
@@ -973,8 +976,8 @@ void BenchMainWindow::resetPlaybackOrder() {
     auto* tab = tabForDocument(playback_document_id_);
     playback_row_ = resolvePlaybackRow(tab);
     playback_order_.reset(tab != nullptr ? tab->model->rowCount() : 0, playback_row_,
-                          local_random_);
-    if (local_album_random_ && tab && tab->model->rowCount() > 0) {
+                          local_modes_.random);
+    if (local_modes_.album_random && tab && tab->model->rowCount() > 0) {
         album_order_preparing_ = true;
         album_order_build_row_ = 0;
         album_order_key_bytes_ = 0;
@@ -1006,7 +1009,7 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
         album_order_key_bytes_ += bytes;
         if (bytes > 65536U || album_order_key_bytes_ > 64U * 1024U * 1024U ||
             rows.size() > 1'000'000U) {
-            local_album_random_ = false;
+            local_modes_.album_random = false;
             resetPlaybackOrder();
             applyLocalPlaybackModes();
             statusBar()->showMessage(tr("Album shuffle exceeds the grouping limits."), 8000);
@@ -1049,7 +1052,7 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
 void BenchMainWindow::consumePlaybackRow(ListTab& tab, const core::StableId& entry,
                                          const int hint_row) {
     const auto row = tab.model->rowOfEntry(entry, hint_row);
-    if (local_consume_ == 0 || row < 0) {
+    if (!local_modes_.consume_active() || row < 0) {
         return;
     }
     consuming_row_ = true;
@@ -1064,8 +1067,7 @@ void BenchMainWindow::consumePlaybackRow(ListTab& tab, const core::StableId& ent
         tab.model->setCurrentSource({}, -1);
     }
     markTabDirty(tab);
-    if (local_consume_ == 2) {
-        local_consume_ = 0;
+    if (local_modes_.expire_consume()) {
         saveLocalPlaybackModes();
         refreshLocalPlaybackControls();
     }
@@ -1086,8 +1088,9 @@ void BenchMainWindow::adoptPlaybackRow(ListTab& tab, const int row, const LocalT
 }
 
 std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlaybackRow() {
-    if (local_single_ != 0) {
-        if (local_repeat_ && local_consume_ == 0 && local_requests_.pending().empty() &&
+    if (local_modes_.single_active()) {
+        if (local_modes_.repeat && !local_modes_.consume_active() &&
+            local_requests_.pending().empty() &&
             !local_requests_.active()) {
             // A valid QPersistentModelIndex always had a row; an identity can
             // outlive its row, so the lookup is checked rather than assumed.
@@ -1172,8 +1175,8 @@ BenchMainWindow::adjacentPlaybackRow(const int direction) {
     if (playing_row < 0) {
         return std::nullopt;
     }
-    const auto adjacent = playback_order_.adjacent(direction, local_repeat_);
-    if (!adjacent || (local_consume_ != 0 && *adjacent == playing_row)) {
+    const auto adjacent = playback_order_.adjacent(direction, local_modes_.repeat);
+    if (!adjacent || (local_modes_.consume_active() && *adjacent == playing_row)) {
         return std::nullopt;
     }
     return std::make_pair(*adjacent, tab->model->source(*adjacent));
@@ -1530,8 +1533,7 @@ void BenchMainWindow::refreshTransport() {
             }
             queued_playback_entry_ = core::StableId{};
             requested_playback_entry_ = core::StableId{};
-            if (local_single_ == 2) {
-                local_single_ = 0;
+            if (local_modes_.expire_single()) {
                 saveLocalPlaybackModes();
                 refreshLocalPlaybackControls();
             }
@@ -1573,7 +1575,7 @@ void BenchMainWindow::refreshTransport() {
         // next source is still loading and race through the list.
         if (!advance_pending_ && !album_order_preparing_) {
             advance_pending_ = true;
-            const bool request_started = local_single_ == 0 && playLocalRequest();
+            const bool request_started = !local_modes_.single_active() && playLocalRequest();
             const auto next = request_started ? std::nullopt : automaticPlaybackRow();
             if (!request_started) {
                 if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
@@ -1598,13 +1600,12 @@ void BenchMainWindow::refreshTransport() {
                             consumePlaybackRow(*tab, playback_entry_, playback_row_);
                     }
                 }
-                if (local_single_ == 0) {
+                if (!local_modes_.single_active()) {
                     local_requests_.finished();
                     persistUpNext();
                 }
             }
-            if (local_single_ == 2) {
-                local_single_ = 0;
+            if (local_modes_.expire_single()) {
                 saveLocalPlaybackModes();
                 refreshLocalPlaybackControls();
             }
@@ -1677,7 +1678,8 @@ void BenchMainWindow::refreshTransport() {
         snapshot.state != audio::LocalAuditionState::loading &&
         snapshot.state != audio::LocalAuditionState::ended && !advance_pending_) {
         const auto next = automaticPlaybackRow();
-        const auto next_request = local_single_ == 0 && !local_requests_.pending().empty()
+        const auto next_request = !local_modes_.single_active() &&
+                                          !local_requests_.pending().empty()
                                       ? std::optional{local_requests_.pending().front()}
                                       : std::nullopt;
         const auto desired = next_request

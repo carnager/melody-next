@@ -614,6 +614,52 @@ void a_request_returns_to_where_the_list_was(engine::Player& player,
     player.replace_queue({});
 }
 
+// Consume removes what has been played. The engine decides it, because the
+// engine owns the queue -- and it reports which entry went, so a client
+// mirrors the same drop onto its list instead of deducing it from a mode that
+// may already have expired.
+void consume_drops_what_has_been_played(engine::Player& player,
+                                        const std::filesystem::path& audio) {
+    audio::PlaybackModes modes;
+    modes.consume = audio::ModeState::on;
+    player.set_modes(modes);
+    const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
+                                                  entry(audio.string())};
+    player.replace_queue(entries);
+    if (!player.play_entry(entries[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping consume\n";
+        player.set_modes({});
+        player.replace_queue({});
+        return;
+    }
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.queue().size() == 3U, "nothing is dropped before anything is played");
+    require(player.state().consumed.is_nil(), "and nothing is reported as dropped");
+
+    require(player.step(1).has_value(), "next moves on");
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.queue().size() == 2U, "the entry that was left is dropped");
+    require(player.state().consumed == entries[0].entry_id, "and is named, so a client can mirror");
+    require(player.state().entry == entries[1].entry_id, "while the new one plays");
+    require(player.queue()[0].entry_id == entries[1].entry_id, "the queue closes up");
+
+    // One-shot fires once and reverts, and the mode the client sees is the
+    // engine's rather than whatever it last sent.
+    modes.consume = audio::ModeState::oneshot;
+    player.set_modes(modes);
+    require(player.step(1).has_value(), "next moves on again");
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.queue().size() == 1U, "the one-shot consumed its track");
+    require(player.modes().consume == audio::ModeState::off, "and then reverted");
+
+    require(player.step(1).has_value() == false, "nothing follows the last entry");
+    require(player.queue().size() == 1U, "and a refused step drops nothing");
+
+    static_cast<void>(player.stop());
+    player.set_modes({});
+    player.replace_queue({});
+}
+
 void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesystem::path& audio) {
     const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
                                                   entry(audio.string())};
@@ -763,12 +809,13 @@ int main(int argc, char** argv) {
     a_continuation_is_actually_armed(**player, longer);
     a_selection_and_segment_survive_the_wire(**player);
     a_request_returns_to_where_the_list_was(**player, audio);
+    consume_drops_what_has_been_played(**player, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 17 scenarios\n";
+    std::cout << "engine player: 18 scenarios\n";
     return EXIT_SUCCESS;
 }

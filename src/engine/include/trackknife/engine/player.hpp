@@ -163,6 +163,12 @@ class Player final {
         // -- which is the difference between gapless working and the engine
         // merely starting the next track quickly, and it was invisible.
         core::StableId gapless_entry;
+        // The entry consume most recently dropped from the queue, which a
+        // client mirrors onto its own list. Reported rather than left for the
+        // client to deduce: it would have to remember whether consume was
+        // active during the track that just ended, and a one-shot has already
+        // expired by then.
+        core::StableId consumed;
         // Which playback this is, not which track: replaying the same file is
         // a new instance. A client that credits listening needs to tell those
         // apart, and a path cannot.
@@ -202,6 +208,9 @@ class Player final {
     // The two facts the advance rules need about the request queue.
     [[nodiscard]] audio::RequestQueueState request_state_locked() const;
     void reset_order_locked();
+    // Removes an entry the queue is done with, keeping the playing row
+    // derived from its identity rather than from its old position.
+    void consume_locked(const core::StableId& entry_id);
     // Offers the audition service whatever should follow the current track,
     // so an album plays without a gap between its tracks. Recomputed rather
     // than remembered, because a queue edit or a mode change can make the
@@ -233,6 +242,7 @@ class Player final {
     // Whether what is playing was an explicit ask rather than the list's own
     // order. The return point only applies while it is.
     bool playing_request_{false};
+    core::StableId consumed_;
     std::uint64_t seen_transitions_{0U};
 };
 

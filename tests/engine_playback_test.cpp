@@ -121,6 +121,7 @@ class EnginePlaybackTest final : public QObject {
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
+    void consumeDropsTheRowFromTheList();
     void listeningIsCreditedWhileTheEnginePlays();
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
     void anEngineQueueNoListHoldsBecomesATab();
@@ -405,6 +406,67 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     jump->trigger();
     QCOMPARE(tabs->currentWidget(), playing);
     QCOMPARE(playing->currentIndex().row(), 0);
+
+    (*server)->stop();
+}
+
+// Consume is the engine's decision, and the list it came from has to follow
+// or the window keeps showing a track the engine no longer holds.
+void EnginePlaybackTest::consumeDropsTheRowFromTheList() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    std::vector<std::string> raw_paths;
+    for (const auto* name : {"one.flac", "two.flac"}) {
+        const auto media = directory.filePath(QString::fromLatin1(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+        const auto encoded = QFile::encodeName(media);
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths(raw_paths);
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
+    const auto first = model->rows().front().entry_id;
+
+    auto* consume = window.findChild<QAction*>(QStringLiteral("action-local-consume"));
+    QVERIFY(consume != nullptr);
+    consume->trigger();
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->modes().consume_active(), 5'000);
+
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
+    if ((*player)->state().entry.is_nil()) {
+        (*server)->stop();
+        QSKIP("no audio output here, so nothing is played and nothing is consumed");
+    }
+
+    auto* next = window.findChild<QAction*>(QStringLiteral("action-next-track"));
+    QVERIFY(next != nullptr);
+    QTRY_VERIFY(next->isEnabled());
+    next->trigger();
+
+    QTRY_VERIFY2_WITH_TIMEOUT(model->rowOfEntry(first, -1) < 0,
+                              "the list still holds a track the engine has dropped", 5'000);
+    QCOMPARE(model->rowCount(), 1);
 
     (*server)->stop();
 }

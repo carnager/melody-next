@@ -721,6 +721,9 @@ class BenchMainWindow final : public QMainWindow {
     // The request order last stated to the engine, so an unchanged panel does
     // not re-send it on every refresh.
     QString engine_requests_;
+    // The last entry the engine reported consuming, so one drop is mirrored
+    // once however often the state is sampled.
+    QString engine_consumed_;
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

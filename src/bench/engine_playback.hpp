@@ -64,13 +64,18 @@ class EnginePlayback final : public QObject {
         qint64 duration_ms{-1};
         std::size_t queue_size{0};
         std::size_t requests{0};
-        bool repeat{false};
-        bool random{false};
+        // The engine's, not this client's. A one-shot expires where playback
+        // happens, so the buttons follow the engine rather than the other way
+        // round once a track has gone by.
+        audio::PlaybackModes modes;
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         int volume_percent{100};
         // Which playback this is: replaying a track is a new instance, and
         // crediting a listen has to tell those apart.
         quint64 instance{0};
+        // The entry the engine's consume mode last dropped, so this client
+        // can drop the same row from the list it came from.
+        QString consumed;
     };
     [[nodiscard]] State state() const;
 

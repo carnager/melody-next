@@ -188,9 +188,15 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.requests = payload.value("requests", std::size_t{0});
     state_.volume_percent = payload.value("volume_percent", 100);
     state_.instance = payload.value("instance", std::uint64_t{0});
+    state_.consumed = payload.contains("consumed") && payload.at("consumed").is_string()
+                          ? QString::fromStdString(payload.at("consumed").get<std::string>())
+                          : QString{};
     if (const auto modes = payload.find("modes"); modes != payload.end() && modes->is_object()) {
-        state_.repeat = modes->value("repeat", false);
-        state_.random = modes->value("random", false);
+        state_.modes.repeat = modes->value("repeat", false);
+        state_.modes.random = modes->value("random", false);
+        state_.modes.album_random = modes->value("album_random", false);
+        state_.modes.single = audio::mode_state_from_int(modes->value("single", 0));
+        state_.modes.consume = audio::mode_state_from_int(modes->value("consume", 0));
     }
     state_.replay_gain_mode = audio::ReplayGainMode::off;
     if (const auto gain = payload.find("replay_gain"); gain != payload.end() && gain->is_object()) {

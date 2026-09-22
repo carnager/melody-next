@@ -1677,6 +1677,33 @@ void BenchMainWindow::refreshEngineTransport() {
         now_playing_->setToolTip(state.path);
         now_playing_context_->setToolTip(state.path);
     }
+    if (state.modes != playback_.modes) {
+        // The engine owns the modes while it owns playback: a one-shot
+        // expires where the track actually ended. Adopted rather than pushed
+        // back, or the two would argue.
+        playback_.modes = state.modes;
+        saveLocalPlaybackModes();
+        refreshLocalPlaybackControls();
+    }
+    if (!state.consumed.isEmpty() && state.consumed != engine_consumed_) {
+        engine_consumed_ = state.consumed;
+        // The engine dropped it from its queue; the list it came from drops it
+        // too. Told rather than deduced, so the two cannot disagree.
+        if (const auto dropped = core::StableId::parse(state.consumed.toStdString())) {
+            for (const auto& tab : list_tabs_) {
+                const auto row = tab->model->rowOfEntry(*dropped, -1);
+                if (row < 0) {
+                    continue;
+                }
+                consuming_row_ = true;
+                tab->model->removeRowIndexes({row}, false);
+                consuming_row_ = false;
+                markTabDirty(*tab);
+                schedulePersist();
+                break;
+            }
+        }
+    }
     if (state.entry != engine_entry_) {
         engine_entry_ = state.entry;
         // The engine consumes a request by playing it, so the panel has to let

@@ -460,8 +460,12 @@ one and the audition service holding one are different facts, and only the
 second is gapless working -- a distinction nothing could see before, which is
 how a stale belief about it went unnoticed.
 
-Consume mode is the known gap in the engine's queue: it decides what plays
-next but does not remove a played entry, which the window does locally.
+Consume is the engine's, and it names the entry it dropped. A client mirrors
+that onto its own list rather than deducing it: deducing means remembering
+whether consume was active during the track that just ended, and a one-shot
+has already expired by then. The modes in the state document are likewise the
+engine's, so the buttons follow a one-shot expiring where playback actually
+happened.
 
 A window attaches to whatever the engine is already playing. The engine
 outlives the window, so a window that only learns about playback by having

@@ -82,10 +82,18 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
     if (!started) {
         return std::unexpected(std::move(started.error()));
     }
+    const auto left = anchors_.current;
     anchors_.current = entry.entry_id;
     anchors_.source = entry.source;
     row_ = static_cast<int>(row);
     playing_request_ = from_request;
+    // Consume drops the entry playback just left. Done after the new one is
+    // anchored, because erasing moves rows and the anchor is what survives
+    // that (ADR-0221). `entry` is a reference into the queue and must not be
+    // touched afterwards.
+    if (modes_.consume_active() && !left.is_nil() && left != anchors_.current) {
+        consume_locked(left);
+    }
     if (!from_request) {
         // Ordinary playback resumed, so there is nothing to return to.
         anchors_.request_return = core::StableId{};
@@ -96,6 +104,27 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
     gapless_entry_.reset();
     refresh_gapless_locked();
     return {};
+}
+
+void Player::consume_locked(const core::StableId& entry_id) {
+    const QueueView view{queue_};
+    const auto row = view.row_of_entry(entry_id, -1);
+    if (row < 0) {
+        return;
+    }
+    queue_.erase(queue_.begin() + row);
+    consumed_ = entry_id;
+    std::erase(requests_, entry_id);
+    // Rows moved, so the playing row is re-derived from its identity rather
+    // than adjusted by hand.
+    const QueueView remaining{queue_};
+    row_ = remaining.row_of_entry(anchors_.current, -1);
+    reset_order_locked();
+    if (modes_.expire_consume()) {
+        // A one-shot fires once. Clients learn the new mode from the state
+        // document rather than being told separately.
+        reset_order_locked();
+    }
 }
 
 void Player::refresh_gapless_locked() {
@@ -465,6 +494,7 @@ Player::State Player::state() const {
     current.volume_percent = snapshot.volume_percent;
     current.gapless_entry = gapless_entry_.value_or(core::StableId{});
     current.instance = snapshot.playback_instance;
+    current.consumed = consumed_;
     current.replay_gain_mode = snapshot.replay_gain_mode;
     current.replay_gain_preamps = snapshot.replay_gain_preamps;
     return current;

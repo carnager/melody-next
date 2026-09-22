@@ -14,12 +14,21 @@ persisted.
 
 ## Evaluation scope
 
-Queries evaluate against the cached local library index only. Query
-evaluation never scans the filesystem (ADR-0116); rows written before
-migration 30 carry field rows and technical columns only after their
-next explicit Refresh.
+Library scope evaluates the cached local index without filesystem scans
+(ADR-0116); rows written before migration 30 carry field rows and technical
+columns only after their next explicit Refresh. Current tab evaluates captured
+occurrences; technical queries may probe missing technicals through the existing
+worker, while history queries never require a filesystem probe. Server scopes
+use capability-gated protocol translation and server-owned library/history.
 
 ## Grammar
+
+For ready-made starting points, open **Workspace → Search → Browse presets**.
+Explore, Favourites, Listening, Audio properties, and Library maintenance contain
+25 presets. Choose a preset, enter its value if requested, then inspect or edit
+the generated query in the input field. **Save as…** keeps your adjusted query
+separately from the built-ins. The selected scope is preserved; unsupported
+server presets are hidden. This is not a general visual query builder.
 
 ```text
 query       = "ALL" | simple-words | expression [ sort-clause ]
@@ -31,7 +40,8 @@ predicate   = lhs "HAS" string
             | "*" "HAS" string
             | lhs ("GREATER" | "LESS" | "EQUAL") integer
             | lhs ("PRESENT" | "MISSING")
-sort-clause = "SORT" [ "ASCENDING" | "DESCENDING" ] "BY" tkfmt-source
+sort-clause = "SORT" [ "ASCENDING" | "DESCENDING" ]
+              ( "BY" tkfmt-source | "HISTORY" "(" statistic-name ")" )
 lhs         = word | quoted-string
             | "HISTORY" "(" statistic-name ")"
 string      = word | quoted-string
@@ -108,7 +118,7 @@ per the operator (`MISSING` means the expression produced empty text).
 
 ### Listening history (ADR-0215)
 
-Library and Server scope support explicit `HISTORY(...)` operands. Enable
+Library, Server, and Current tab scope support explicit `HISTORY(...)` operands. Enable
 **Query** in Search. These also work in saved searches and dynamic playlist
 rules. Ordinary bare fields still refer to file metadata, not listening history.
 
@@ -134,8 +144,34 @@ The last example includes never-played albums and albums last played over 180
 complete days ago; it does not mean six calendar months. Local queries use
 revision-qualified whole-file index identities, without rescanning files;
 logical/subsong listens are not attributed to their containing whole file.
-Current-tab history queries fail with a scope explanation. History sort keys
-are not implemented. Melody must advertise `melody_history_filters`.
+Current-tab searches preserve duplicate occurrences. Local queries read a
+consistent history snapshot qualified by the tab's source revisions, including
+logical tracks and files outside the index, without filesystem probes. Album
+aggregates include the whole indexed album and any additional distinct sources
+in the tab; duplicate occurrences never inflate the aggregate. Unqualified local
+rows report that a source revision is required rather than pretending to be
+unplayed. Melody must advertise `melody_history_filters`; Current tab additionally
+requires `melody_list_search`, which evaluates the named list or stashed unnamed
+queue on the server. Stock MPD/older Melody report unsupported scope explicitly.
+
+### History ordering (ADR-0216)
+
+Use `SORT HISTORY(name)` for ascending numeric order, or
+`SORT DESCENDING HISTORY(name)` for descending order. All six statistics above
+are supported. Missing timestamps/ages come first ascending, last descending;
+equal keys retain source order (the deterministic library order for Library
+scope, occurrence order for Current tab).
+
+```
+ALL SORT DESCENDING HISTORY(playcount)
+ALL SORT HISTORY(lastplayed)
+HISTORY(playcount) EQUAL 0 SORT HISTORY(albumplaycount)
+```
+
+This orders search results, not the source list. Open results to obtain a
+separate ordered list. Existing `SORT BY` remains tkfmt-1; `%playcount%` is still
+a metadata tag, not a history accessor. Melody history ordering requires the
+separately advertised `melody_history_sort` capability.
 
 ### Metadata translation
 
@@ -181,7 +217,7 @@ tiebreak.
 
 Recorded so the spec stays honest: time operators
 (`AFTER`/`BEFORE`/`SINCE`/`DURING`, `DURING LAST n <unit>`), calendar-relative
-history comparisons, history sorting; diacritic folding; regular
+history comparisons; diacritic folding; regular
 expressions; path-targeted operators; autoplaylists,
 and the query builder UI (separate Area 2 packages).
 

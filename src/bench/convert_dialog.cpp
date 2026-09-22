@@ -17,6 +17,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
@@ -322,16 +323,32 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     gain_ = new QComboBox(this);
     gain_->setObjectName(QStringLiteral("bench-convert-gain"));
-    gain_->addItem(QStringLiteral("Do not apply gain"), 0);
-    gain_->addItem(QStringLiteral("Apply track ReplayGain"), 1);
-    gain_->addItem(QStringLiteral("Apply album ReplayGain"), 2);
-    const auto saved_gain = settings.value(QStringLiteral("convert/gain"), 0).toInt();
-    if (const auto position = gain_->findData(saved_gain); position >= 0) {
-        gain_->setCurrentIndex(position);
-    }
+    gain_->addItem(QStringLiteral("Off — do not change volume"), 0);
+    gain_->addItem(QStringLiteral("Permanently change volume using track ReplayGain"), 1);
+    gain_->addItem(QStringLiteral("Permanently change volume using album ReplayGain"), 2);
+    // Never restore a destructive signal-processing choice from last use or a preset.
+    gain_->setCurrentIndex(0);
     gain_->setToolTip(QStringLiteral(
         "Permanently changes PCM before encoding; stale ReplayGain tags are removed"));
-    form->addRow(QStringLiteral("Gain:"), gain_);
+    form->addRow(QStringLiteral("Permanent volume adjustment:"), gain_);
+    auto* gain_warning = new QLabel(this);
+    gain_warning->setObjectName(QStringLiteral("bench-convert-gain-warning"));
+    gain_warning->setWordWrap(true);
+    gain_warning->setTextFormat(Qt::RichText);
+    const auto update_gain_warning = [this, gain_warning] {
+        gain_warning->setText(
+            gain_->currentData().toInt() == 0
+                ? QStringLiteral(
+                      "No permanent volume adjustment. This does not calculate ReplayGain tags.")
+                : QStringLiteral(
+                      "<b>Warning: permanently changes the audio samples in the converted "
+                      "files.</b> "
+                      "Uses existing ReplayGain values; does not calculate or write new gain tags. "
+                      "Removing tags cannot undo this. Source files are not changed."));
+    };
+    connect(gain_, &QComboBox::currentIndexChanged, this, update_gain_warning);
+    update_gain_warning();
+    form->addRow(QString{}, gain_warning);
 
     embed_artwork_ = new QCheckBox(QStringLiteral("Embed cover art"), this);
     embed_artwork_->setObjectName(QStringLiteral("bench-convert-artwork"));
@@ -413,6 +430,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     apply_mirror_mode();
     connect(preset_, &QComboBox::currentIndexChanged, this, schedule);
     connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
+        gain_->setCurrentIndex(0);
         const auto chosen = preset_->currentData().toString().toStdString();
         const auto saved = std::ranges::any_of(
             saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
@@ -459,6 +477,8 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 // presets; unavailable encoders stay visible but disabled with the probe
 // detail as tooltip.
 void ConvertDialog::rebuildPresetCombo(const QString& select_data) {
+    if (gain_)
+        gain_->setCurrentIndex(0);
     const QSignalBlocker blocker{preset_};
     preset_->clear();
     const auto add_preset = [this](const convert::EncoderPreset& preset) {
@@ -593,7 +613,7 @@ void ConvertDialog::saveJobSettings(const QString& preset_id) const {
     settings.setValue(QStringLiteral("resample"), resample_->currentData());
     settings.setValue(QStringLiteral("bit-depth"), bit_depth_->currentData());
     settings.setValue(QStringLiteral("channels"), channels_->currentData());
-    settings.setValue(QStringLiteral("gain"), gain_->currentData());
+    settings.remove(QStringLiteral("gain"));
     settings.setValue(QStringLiteral("artwork"), embed_artwork_->isChecked());
     settings.setValue(QStringLiteral("parallelism"), parallelism_->value());
     settings.endGroup();
@@ -620,7 +640,7 @@ void ConvertDialog::applyJobSettings(const QString& preset_id) {
     select(resample_, "resample");
     select(bit_depth_, "bit-depth");
     select(channels_, "channels");
-    select(gain_, "gain");
+    gain_->setCurrentIndex(0);
     embed_artwork_->setChecked(settings.value(QStringLiteral("artwork"), true).toBool());
     parallelism_->setValue(settings.value(QStringLiteral("parallelism"), 2).toInt());
     settings.endGroup();
@@ -817,6 +837,26 @@ void ConvertDialog::startConversion() {
         return;
     }
 
+    if (gain_->currentData().toInt() != 0) {
+        QMessageBox confirmation{
+            QMessageBox::Warning, QStringLiteral("Permanently change audio volume?"),
+            QStringLiteral(
+                "This will bake %1 ReplayGain into the audio samples of the converted files. "
+                "It does not calculate or write ReplayGain tags. Removing tags cannot undo "
+                "the change; recreate the outputs from the original sources instead.\n\n"
+                "Source files will not be changed.")
+                .arg(gain_->currentData().toInt() == 2
+                         ? QStringLiteral("album (with track fallback)")
+                         : QStringLiteral("track")),
+            QMessageBox::Yes | QMessageBox::Cancel, this};
+        confirmation.setObjectName(QStringLiteral("bench-convert-gain-confirmation"));
+        confirmation.button(QMessageBox::Yes)->setText(QStringLiteral("Convert and change volume"));
+        confirmation.setDefaultButton(QMessageBox::Cancel);
+        confirmation.setEscapeButton(QMessageBox::Cancel);
+        if (confirmation.exec() != QMessageBox::Yes)
+            return;
+    }
+
     QSettings settings;
     settings.setValue(QStringLiteral("convert/preset"), preset_->currentData().toString());
     settings.setValue(QStringLiteral("convert/destination-root"), destination_->text());
@@ -827,7 +867,7 @@ void ConvertDialog::startConversion() {
     settings.setValue(QStringLiteral("convert/resample-rate"), resample_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/bit-depth"), bit_depth_->currentData().toInt());
     settings.setValue(QStringLiteral("convert/channels"), channels_->currentData().toInt());
-    settings.setValue(QStringLiteral("convert/gain"), gain_->currentData().toInt());
+    settings.remove(QStringLiteral("convert/gain"));
     settings.setValue(QStringLiteral("convert/embed-artwork"), embed_artwork_->isChecked());
     settings.setValue(QStringLiteral("convert/mirror-structure"), mirror_structure_->isChecked());
 

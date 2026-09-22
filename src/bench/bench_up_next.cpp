@@ -367,8 +367,12 @@ void BenchMainWindow::addUpNextActions(QMenu* menu, QTableView* source) {
                                                    : QStringLiteral("action-queue-end"));
         if (!action)
             continue;
-        menu->addAction(action);
-        action->setEnabled(
+        auto* scoped = menu->addAction(action->text());
+        scoped->setObjectName(action->objectName());
+        scoped->setShortcuts(action->shortcuts());
+        connect(scoped, &QAction::triggered, source,
+                [this, source, prepend] { enqueueUpNext(source, prepend); });
+        scoped->setEnabled(
             !source->selectionModel()->selectedRows().isEmpty() &&
             (!remote || (mpd_controller_->connected() &&
                          mpd_controller_->supportsCommand(QStringLiteral("melody_upnext")))));

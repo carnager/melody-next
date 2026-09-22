@@ -18,6 +18,7 @@
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/replaygain_dialog.hpp"
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
@@ -39,6 +40,7 @@
 #include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/persistence/local_library.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 #include "trackknife/query/tkq_melody.hpp"
 #include "ui/server_library_tree_model.hpp"
@@ -91,6 +93,7 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -250,8 +253,11 @@ class BenchMainWindowTest final : public QObject {
     void propertiesShowTechnicalSummary();
     void savedSearchesCanBeManagedAndReopened();
     void searchDialogFiltersTabAndOpensResults();
+    void searchResultTabLoadsCovers();
+    void serverArtworkRetriesCongestedRequests();
     void searchDialogProbesMissingTechnicalsOnDemand();
     void searchDialogServerScopeRunsTranslatedQueries();
+    void searchPresetsAreGroupedAndCapabilityGated();
     void musicBrainzStagesFromCachedSearchMetadata();
     void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
@@ -267,6 +273,9 @@ class BenchMainWindowTest final : public QObject {
     void dynamicPlaylistsShareRulesAndRecommendationMatching();
     void dynamicPlaylistCatalogAndEditor();
     void dynamicPlaylistRetainsChangesDuringRefresh();
+    void dynamicResultSelectionSurvivesRefresh();
+    void dynamicResultActionsUseTheirOwnSources();
+    void currentTabHistoryPreservesOccurrences();
     void lastFmRefreshSelectsFreshTracksFromLargerPool();
     void replayGainScanPreservesLogicalSources_data();
     void replayGainScanPreservesLogicalSources();
@@ -925,6 +934,162 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
     stop->click();
     QTest::qWait(600);
     QCOMPARE(pending.size(), 2U);
+}
+
+void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
+    using Service = DynamicPlaylistService;
+    for (const bool remote : {false, true}) {
+        Service::Completion pending;
+        DynamicPlaylistDialog dialog(remote ? QStringLiteral("mpd/refresh-test")
+                                            : QStringLiteral("local"),
+                                     QStringLiteral("Test"),
+                                     [&](query::CompiledTkq, core::CancellationToken,
+                                         Service::Completion done) { pending = std::move(done); });
+        dialog.setAttribute(Qt::WA_DeleteOnClose, false);
+        dialog.show();
+        auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
+        const auto deliver = [&](const std::vector<std::string>& paths) {
+            if (remote) {
+                std::vector<mpd::Track> tracks;
+                for (const auto& path : paths) {
+                    mpd::Track track;
+                    track.uri = path;
+                    tracks.push_back(track);
+                }
+                pending(Service::Tracks{std::move(tracks)});
+            } else {
+                std::vector<LocalTrackRow> rows;
+                for (const auto& path : paths) {
+                    LocalTrackRow row;
+                    row.raw_path = path;
+                    rows.push_back(row);
+                }
+                pending(Service::Tracks{std::move(rows)});
+            }
+        };
+        refresh->click();
+        QVERIFY(pending);
+        deliver({"a", "b", "a"});
+        auto* view = dialog.view();
+        QTRY_COMPARE(view->model()->rowCount(), 3);
+        view->selectRow(2);
+        view->setCurrentIndex(view->model()->index(2, ui::track_title_column));
+        QSignalSpy played(&dialog, &DynamicPlaylistDialog::playRequested);
+        refresh->click();
+        QCOMPARE(view->model()->rowCount(), 3);
+        deliver({"a", "a", "b"});
+        QTRY_COMPARE(view->currentIndex().row(), 1);
+        QCOMPARE(view->selectionModel()->selectedRows().size(), 1);
+        QCOMPARE(view->selectionModel()->selectedRows().front().row(), 1);
+        QCOMPARE(played.count(), 0);
+        QVERIFY(view->dragEnabled());
+        QVERIFY(!view->acceptDrops());
+        QCOMPARE(view->defaultDropAction(), Qt::CopyAction);
+        view->setFocus();
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(played.count(), 1);
+        QCOMPARE(played.front().front().toInt(), 1);
+        std::vector<std::string> many;
+        for (int i = 0; i < 80; ++i)
+            many.push_back("track-" + std::to_string(i));
+        refresh->click();
+        deliver(many);
+        QTRY_COMPARE(view->model()->rowCount(), 80);
+        view->scrollTo(view->model()->index(40, ui::track_title_column),
+                       QAbstractItemView::PositionAtTop);
+        const auto anchor = view->indexAt(QPoint{1, 1}).data(ui::track_source_role).toString();
+        QVERIFY(!anchor.isEmpty());
+        many.insert(many.begin(), "new-track");
+        refresh->click();
+        deliver(many);
+        QTRY_COMPARE(view->model()->rowCount(), 81);
+        QTRY_COMPARE(view->indexAt(QPoint{1, 1}).data(ui::track_source_role).toString(), anchor);
+    }
+}
+
+void BenchMainWindowTest::dynamicResultActionsUseTheirOwnSources() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    window.tabs_->setCurrentWidget(window.list_tabs_.front()->view);
+    window.showDynamicPlaylists();
+    auto* dialog = window.findChild<DynamicPlaylistDialog*>();
+    QVERIFY(dialog);
+    LocalTrackRow row;
+    row.raw_path = "/dynamic/source.flac";
+    row.title = "Dynamic source";
+    auto* service = dialog->findChild<DynamicPlaylistService*>();
+    QVERIFY(service);
+    emit service->finished(DynamicPlaylistService::Tracks{std::vector{row}}, 0, {});
+    auto* view = dialog->view();
+    view->selectRow(0);
+    QMenu menu;
+    window.addUpNextActions(&menu, view);
+    QVERIFY(!menu.actions().empty());
+    menu.actions().front()->trigger();
+    QCOMPARE(window.local_requests_.pending().size(), 1U);
+    QCOMPARE(window.local_requests_.pending().front().source.raw_path, row.raw_path);
+    auto* target = window.currentListTab();
+    QVERIFY(target);
+    const auto count = target->model->rowCount();
+    const auto id = QString::fromStdString(target->document.id.to_string());
+    QVERIFY(!window.transferRows(view, {0}, id, true, -1));
+    QVERIFY(window.transferRows(view, {0}, id, false, -1));
+    QCOMPARE(target->model->rowCount(), count + 1);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    LocalTrackRow other = row;
+    other.raw_path = "/dynamic/other.flac";
+    target->model->replaceRows({row, other, row});
+    window.playback_document_id_ = id;
+    window.playback_row_ = 2;
+    window.playback_source_ = target->model->source(2);
+    dialog->setProperty("playback-context", id);
+    model->replaceRows({row, row, other});
+    emit dialog->resultsChanged();
+    QVERIFY(!model->index(0, 0).data(ui::track_current_role).toBool());
+    QVERIFY(model->index(1, 0).data(ui::track_current_role).toBool());
+    const auto reader =
+        window.selectionSourceReader(model, {QPersistentModelIndex{model->index(0, 0)}});
+    model->replaceRows({});
+    QVERIFY(reader(0));
+    QCOMPARE(reader(0)->source.raw_path, row.raw_path);
+    dialog->close();
+}
+
+void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {
+    QTemporaryDir directory;
+    const auto database = std::filesystem::path{directory.path().toStdString()} / "history.sqlite";
+    auto repository = persistence::ListRepository::open(database);
+    QVERIFY(repository);
+    LocalTrackRow played, unplayed;
+    played.raw_path = std::string{"/not-mounted/raw-"} + char(0xff) + ".flac";
+    played.title = "Played";
+    played.source_revision = core::LocalSourceRevision{.device = 1, .inode = 2};
+    unplayed.raw_path = "/not-mounted/unplayed.flac";
+    unplayed.title = "Unplayed";
+    unplayed.source_revision = core::LocalSourceRevision{.device = 1, .inode = 3};
+    persistence::ListItem source;
+    source.source = persistence::ListSource::local;
+    source.source_reference = played.raw_path;
+    source.source_revision = played.source_revision;
+    QVERIFY(repository->record_local_listen(source, core::StableId::random(), 1000));
+    SearchDialog dialog(database,
+                        [&]() -> std::optional<SearchDialog::TabSnapshot> {
+                            return SearchDialog::TabSnapshot{QStringLiteral("Current"),
+                                                             {played, unplayed, played}};
+                        },
+                        {});
+    dialog.show();
+    dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"))->setCurrentIndex(1);
+    dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"))->setChecked(true);
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    input->setText(QStringLiteral("HISTORY(playcount) EQUAL 1"));
+    QTRY_COMPARE(results->count(), 2);
+    input->setText(QStringLiteral("ALL SORT HISTORY(lastplayed)"));
+    QTRY_COMPARE(results->count(), 3);
+    QVERIFY(results->item(0)->text().contains(QStringLiteral("Unplayed")));
+    QVERIFY(results->item(1)->text().contains(QStringLiteral("Played")));
 }
 
 void BenchMainWindowTest::metadataGridDisplaysUnicodePaths() {
@@ -4678,8 +4843,7 @@ void BenchMainWindowTest::settingsControlStartupContextAndMusicRoot() {
     settings.sync();
 }
 
-// Mapped Edit tags opens directly; ReplayGain / Convert retain ADR-0180
-// materialization through the local-files bridge. Exercises the global-root fallback of
+// Mapped tools open directly without an intermediate list. Exercises the global-root fallback of
 // effectiveMpdMusicRoot; the per-profile branch reuses the melody-endpoint
 // profile lookup covered elsewhere.
 void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
@@ -4771,12 +4935,74 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         QTRY_VERIFY(!window.findChild<MetadataPropertiesDialog*>());
 
         // A second flavor proves the dispatch switch.
+        const auto original_widget = tabs->currentWidget();
         window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
                                                 BenchMainWindow::MaterializedDialog::convert);
         QDialog* convert = nullptr;
         QTRY_VERIFY((convert = window.findChild<QDialog*>(
                          QStringLiteral("bench-convert-dialog"))) != nullptr);
+        QCOMPARE(tabs->count(), tabs_before);
+        QCOMPARE(window.list_tabs_.size(), local_lists_before);
+        QCOMPARE(tabs->currentWidget(), original_widget);
+        QVERIFY(!window.discovery_running_);
         convert->close();
+        QTRY_VERIFY(!window.findChild<ConvertDialog*>());
+
+        window.materializeMpdSelectionForDialog(
+            {QStringLiteral("Artist/Album/one.flac"), QStringLiteral("missing.flac")},
+            BenchMainWindow::MaterializedDialog::convert);
+        QTRY_VERIFY(!window.mapped_tool_loading_);
+        QVERIFY(!window.findChild<ConvertDialog*>());
+        QCOMPARE(tabs->count(), tabs_before);
+        QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("missing.flac")));
+        window.materializeMpdSelectionForDialog({QStringLiteral("../escape.flac")},
+                                                BenchMainWindow::MaterializedDialog::convert);
+        QVERIFY(!window.mapped_tool_loading_);
+        QVERIFY(!window.findChild<ConvertDialog*>());
+
+        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
+                                                BenchMainWindow::MaterializedDialog::convert);
+        auto* preparation =
+            window.findChild<QProgressDialog*>(QStringLiteral("bench-mapped-convert-progress"));
+        QVERIFY(preparation);
+        QVERIFY(QMetaObject::invokeMethod(preparation, "canceled"));
+        QTRY_VERIFY(!window.mapped_tool_loading_);
+        QVERIFY(!window.findChild<ConvertDialog*>());
+
+        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
+                                                BenchMainWindow::MaterializedDialog::replay_gain);
+        auto* replaygain = window.findChild<ReplayGainDialog*>();
+        QVERIFY(replaygain);
+        QCOMPARE(tabs->count(), tabs_before);
+        QCOMPARE(window.list_tabs_.size(), local_lists_before);
+        QCOMPARE(tabs->currentWidget(), original_widget);
+        auto* rg_run =
+            replaygain->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));
+        auto* rg_preview =
+            replaygain->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-preview"));
+        auto* rg_status =
+            replaygain->findChild<QLabel*>(QStringLiteral("bench-replaygain-dialog-status"));
+        QVERIFY(rg_run && rg_preview && rg_status);
+        const auto before_preview =
+            metadata::read_local_metadata(QFile::encodeName(flac).toStdString());
+        QVERIFY(before_preview);
+        rg_preview->click();
+        QTRY_VERIFY(rg_run->isEnabled());
+        QVERIFY2(rg_status->text().startsWith(QStringLiteral("1 tracks ready")),
+                 qPrintable(rg_status->text()));
+        auto* groups =
+            replaygain->findChild<QListWidget*>(QStringLiteral("bench-replaygain-dialog-groups"));
+        QVERIFY(groups && groups->count() == 1);
+        QCOMPARE(
+            metadata::read_local_metadata(QFile::encodeName(flac).toStdString())->source_revision,
+            before_preview->source_revision);
+        rg_run->click();
+        QTRY_VERIFY_WITH_TIMEOUT(rg_run->isEnabled(), 30000);
+        QVERIFY2(rg_status->text().startsWith(QStringLiteral("Saved ReplayGain tags to 1")),
+                 qPrintable(rg_status->text()));
+        QCOMPARE(window.list_tabs_.size(), local_lists_before);
+        replaygain->close();
+        QTRY_VERIFY(!window.findChild<ReplayGainDialog*>());
 
         // The hardened bridge rejects traversal URIs instead of joining them.
         auto* status_bar = window.findChild<QStatusBar*>();
@@ -5182,23 +5408,25 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     QTRY_COMPARE(preset->count(), builtin_count + 2);
     QCOMPARE(preset->currentText(), QStringLiteral("Phone Opus"));
     QTRY_VERIFY(preset_delete->isVisible());
-    // A saved encoder preset also snapshots the complete conversion job.
-    // Switching away, changing processing, then returning restores it.
+    // Job settings restore, but permanent gain is never restored (including
+    // legacy presets that still contain a gain field).
+    const auto gain_key =
+        QStringLiteral("convert/job-presets/%1/gain").arg(preset->currentData().toString());
+    QVERIFY(!QSettings{}.contains(gain_key));
+    QSettings{}.setValue(gain_key, 2);
     preset->setCurrentIndex(0);
     channels->setCurrentIndex(0);
-    gain_mode->setCurrentIndex(0);
+    gain_mode->setCurrentIndex(1);
     preset->setCurrentIndex(preset->count() - 1);
     QCOMPARE(channels->currentData().toInt(), 1);
-    QCOMPARE(gain_mode->currentData().toInt(), 1);
+    QCOMPARE(gain_mode->currentData().toInt(), 0);
     QTest::mouseClick(preset_delete, Qt::LeftButton);
     QTRY_VERIFY(preset_catalog.empty());
     QTRY_COMPARE(preset->count(), builtin_count);
     QTRY_VERIFY(!preset_delete->isVisible());
 
     preset->setCurrentIndex(preset->findData(QStringLiteral("opus-192")));
-    // The deleted preset's restored job left permanent gain enabled; these
-    // items carry no ReplayGain, and a gain request without a value now
-    // fails closed instead of converting silently at unity.
+    // Preset selection cannot enable permanent gain.
     gain_mode->setCurrentIndex(gain_mode->findData(0));
     root->setText(destination.path());
     directories->setText(QStringLiteral("%album%"));
@@ -5292,6 +5520,7 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
 // ADR-0173: the dialog's Gain choice permanently applies the item's
 // ReplayGain metadata to the encoded PCM, exactly like the core path.
 void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
+    QSettings{}.setValue(QStringLiteral("convert/gain"), 2);
     QTemporaryDir media;
     QTemporaryDir destination;
     QVERIFY(media.isValid());
@@ -5346,13 +5575,33 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
     auto* mirror = dialog->findChild<QCheckBox*>(QStringLiteral("bench-convert-mirror"));
     QVERIFY(preset != nullptr && root != nullptr && names != nullptr && gain_mode != nullptr);
     QVERIFY(run != nullptr && status != nullptr && directories != nullptr && mirror != nullptr);
+    QCOMPARE(gain_mode->currentData().toInt(), 0);
+    auto* warning = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-gain-warning"));
+    QVERIFY(warning);
     mirror->setChecked(false);
     preset->setCurrentIndex(preset->findData(QStringLiteral("flac")));
     root->setText(destination.path());
     directories->setText(QString{});
     names->setText(QStringLiteral("%title%"));
     gain_mode->setCurrentIndex(gain_mode->findData(1));
+    QVERIFY(warning->text().contains(QStringLiteral("permanently changes the audio samples")));
     QTRY_VERIFY(run->isEnabled());
+    QTimer::singleShot(0, dialog, [dialog] {
+        auto* confirmation =
+            dialog->findChild<QMessageBox*>(QStringLiteral("bench-convert-gain-confirmation"));
+        QVERIFY(confirmation);
+        QCOMPARE(confirmation->standardButton(confirmation->defaultButton()), QMessageBox::Cancel);
+        confirmation->button(QMessageBox::Cancel)->click();
+    });
+    QTest::mouseClick(run, Qt::LeftButton);
+    QVERIFY(!QFileInfo::exists(destination.filePath(QStringLiteral("Gained.flac"))));
+    QVERIFY(run->isVisible());
+    QTimer::singleShot(0, dialog, [dialog] {
+        auto* confirmation =
+            dialog->findChild<QMessageBox*>(QStringLiteral("bench-convert-gain-confirmation"));
+        QVERIFY(confirmation);
+        confirmation->button(QMessageBox::Yes)->click();
+    });
     QTest::mouseClick(run, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Converted 1 of 1 files.")),
                              15'000);
@@ -5377,6 +5626,10 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
     // 0.8 means the dialog's gain option silently did nothing.
     QVERIFY2(peak > 0.17F && peak < 0.23F, qPrintable(QString::number(peak)));
     delete dialog;
+    ConvertDialog reopened{{}};
+    QCOMPARE(
+        reopened.findChild<QComboBox*>(QStringLiteral("bench-convert-gain"))->currentData().toInt(),
+        0);
 }
 
 // ADR-0144: notifications fire only for track changes while playing in
@@ -6626,6 +6879,130 @@ void BenchMainWindowTest::searchDialogFiltersTabAndOpensResults() {
     dialog->close();
 }
 
+// A tab opened from the search dialog must show album covers like any other
+// track tab: the rows carry the same files, so the shared artwork queue has
+// to reach the new tab's model.
+void BenchMainWindowTest::searchResultTabLoadsCovers() {
+    QTemporaryDir media;
+    QTemporaryDir other;
+    QVERIFY(media.isValid() && other.isValid());
+    const auto flac_path = media.filePath(QStringLiteral("tone.flac"));
+    const auto opus_path = other.filePath(QStringLiteral("tone.opus"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), flac_path));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("loudness-tone-opus.b64"), opus_path));
+    {
+        QImage cover{32, 32, QImage::Format_RGB32};
+        cover.fill(Qt::darkGreen);
+        QVERIFY(cover.save(media.filePath(QStringLiteral("cover.png")), "PNG"));
+    }
+
+    BenchMainWindow window;
+    window.show();
+    // A local tab from a different folder keeps the window in local context
+    // without priming the shared artwork cache for the indexed album.
+    window.openLocalPaths({QFile::encodeName(opus_path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE(model->rowCount(), 1);
+    QTRY_VERIFY(model->rows().front().probed);
+    const auto artwork_of = [](LocalListModel* target) {
+        return target->data(target->index(0, 0), static_cast<int>(ui::track_album_artwork_role))
+            .value<QImage>();
+    };
+
+    {
+        auto library = persistence::LocalLibrary::open(window.database_path_);
+        QVERIFY(library.has_value());
+        const auto root = QFile::encodeName(media.path());
+        QVERIFY(
+            library->add_root(std::string{root.constData(), static_cast<std::size_t>(root.size())})
+                .has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(library->scan({}, progress).has_value());
+    }
+
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-search-dialog"));
+    QVERIFY(action != nullptr);
+    action->trigger();
+    QDialog* dialog = nullptr;
+    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
+                nullptr);
+    auto* scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* input = dialog->findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* mode = dialog->findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* results = dialog->findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* open_button = dialog->findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
+    QVERIFY(scope && input && mode && results && open_button);
+
+    // Scope 0 is the library database: the rows never passed through a tab,
+    // so their covers must be loaded for the opened result tab.
+    scope->setCurrentIndex(0);
+    mode->setChecked(true);
+    input->setText(QStringLiteral("codec IS flac"));
+    QTRY_COMPARE(results->count(), 1);
+    const auto tabs_before = tabs->count();
+    QTRY_VERIFY(open_button->isEnabled());
+    open_button->click();
+    QTRY_COMPARE(tabs->count(), tabs_before + 1);
+    auto* opened = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(opened != nullptr);
+    auto* opened_model = qobject_cast<LocalListModel*>(opened->model());
+    QVERIFY(opened_model != nullptr);
+    QTRY_COMPARE(opened_model->rowCount(), 1);
+    QTRY_VERIFY(!artwork_of(opened_model).isNull());
+
+    mode->setChecked(false);
+    dialog->close();
+}
+
+// ADR-0209/0184: opening a long server list floods the session command
+// queue with album-rating queries, and the artwork requests it refuses
+// never reach the server. Reporting that congestion as an empty cover
+// spent the model's attempts and left the albums on their placeholder
+// for the rest of the session, which is what a search-results tab is
+// made of. Congestion is retried; a real refusal still resolves.
+void BenchMainWindowTest::serverArtworkRetriesCongestedRequests() {
+    quick::MpdProbeController controller;
+    QSignalSpy resolved{&controller, &quick::MpdProbeController::serverLibraryArtworkLoaded};
+    controller.connected_ = true;
+    const auto answer = [&controller](const quint64 command_id, const quint64 token,
+                                      const core::ErrorCode code) {
+        controller.pending_library_tree_artwork_.insert(
+            command_id, quick::MpdProbeController::PendingArtworkRequest{
+                            .token = token,
+                            .uri = QStringLiteral("album/track.flac"),
+                            .congestion_retries = 0});
+        controller.applyCommandResult(
+            controller.connection_token_,
+            mpd::SessionCommandResult{
+                .id = command_id,
+                .generation = 0U,
+                .kind = mpd::SessionCommandKind::artwork,
+                .action = mpd::TransportAction::play,
+                .payload = {},
+                .error = core::Error{.code = code, .message = "rejected", .context = {}}});
+    };
+
+    answer(1U, 11U, core::ErrorCode::limit_exceeded);
+    QCOMPARE(resolved.count(), 0);
+
+    // A refusal the server actually made resolves the album at once.
+    answer(2U, 12U, core::ErrorCode::not_found);
+    QCOMPARE(resolved.count(), 1);
+    QCOMPARE(resolved.front().front().toULongLong(), 12U);
+
+    // The retry is reissued once the queue has had a moment to drain. With
+    // no session behind it the album resolves rather than stalling the
+    // model's one-at-a-time pump.
+    QTRY_COMPARE(resolved.count(), 2);
+    QCOMPARE(resolved.back().front().toULongLong(), 11U);
+}
+
 // ADR-0153: a technical query against rows without retained technicals
 // probes exactly those files once and reports the facts back.
 void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
@@ -6692,6 +7069,101 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
 // The Server library scope translates tkq for the connected server,
 // previews the result labels, refuses untranslatable queries with the
 // translator's message, and opens results through the window callback.
+void BenchMainWindowTest::searchPresetsAreGroupedAndCapabilityGated() {
+    bool connected = true;
+    bool full = true;
+    bool history = true;
+    bool current_supported = true;
+    QString executed;
+    const auto run = [&](const query::CompiledTkq& compiled,
+                         std::function<void(QStringList, int, QString)> completion) {
+        executed = displayText(compiled.source);
+        completion({}, 0, {});
+    };
+    SearchDialog dialog{
+        std::filesystem::path{},
+        {},
+        {},
+        SearchDialog::ServerScope{
+            .available = [&] { return connected; },
+            .run = run,
+            .open = [](const query::CompiledTkq&, const QString&) {},
+            .current_available = [] { return true; },
+            .run_current = run,
+            .unsupported_reason =
+                [&](const query::CompiledTkq& compiled, bool current) {
+                    if (current && !current_supported)
+                        return QStringLiteral("Unsupported list search");
+                    const auto translated =
+                        query::translate_tkq_to_melody(compiled, full, history, history);
+                    return translated ? QString{} : displayText(translated.error().message);
+                },
+        }};
+    dialog.show();
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* menu = dialog.findChild<QMenu*>(QStringLiteral("bench-search-presets-menu"));
+    QVERIFY(input && scope && mode && menu);
+    QTRY_VERIFY(input->hasFocus());
+    scope->setFocus();
+    dialog.hide();
+    dialog.show();
+    dialog.activateWindow();
+    // The offscreen platform need not reactivate a hidden native window;
+    // its remembered focus target must still be the input, not the scope.
+    QTRY_COMPARE(dialog.focusWidget(), input);
+    const auto populate = [&] { QVERIFY(QMetaObject::invokeMethod(menu, "aboutToShow")); };
+    populate();
+    QCOMPARE(menu->actions().size(), 5);
+    QCOMPARE(menu->actions().first()->text(), QStringLiteral("Explore"));
+    auto* missing = menu->findChild<QAction*>(QStringLiteral("search-preset-missing-album"));
+    QVERIFY(missing);
+    missing->trigger();
+    QCOMPARE(input->text(), QStringLiteral("album MISSING"));
+    QVERIFY(mode->isChecked());
+    auto* year = menu->findChild<QAction*>(QStringLiteral("search-preset-year"));
+    QVERIFY(year);
+    QTimer::singleShot(0, &dialog, [&] {
+        auto* prompt = dialog.findChild<QInputDialog*>();
+        QVERIFY(prompt);
+        prompt->setIntValue(2001);
+        prompt->accept();
+    });
+    year->trigger();
+    QCOMPARE(input->text(), QStringLiteral("date EQUAL 2001"));
+    QTimer::singleShot(0, &dialog, [&] {
+        auto* prompt = dialog.findChild<QInputDialog*>();
+        QVERIFY(prompt);
+        prompt->reject();
+    });
+    year->trigger();
+    QCOMPARE(input->text(), QStringLiteral("date EQUAL 2001"));
+    dialog.preferServerScope();
+    populate();
+    QCOMPARE(menu->actions().size(), 5);
+    menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums"))->trigger();
+    QTRY_COMPARE(executed, QStringLiteral("HISTORY(albumplaycount) EQUAL 0"));
+    history = false;
+    full = false;
+    populate();
+    QVERIFY(!menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums")));
+    QVERIFY(!menu->findChild<QAction*>(QStringLiteral("search-preset-year")));
+    QVERIFY(menu->findChild<QAction*>(QStringLiteral("search-preset-artist")));
+    scope->setCurrentIndex(1);
+    current_supported = false;
+    populate();
+    QCOMPARE(menu->actions().size(), 1);
+    QVERIFY(!menu->actions().front()->isEnabled());
+    connected = false;
+    scope->setCurrentIndex(2);
+    populate();
+    QCOMPARE(menu->actions().size(), 1);
+    scope->setCurrentIndex(0);
+    populate();
+    QCOMPARE(menu->actions().size(), 5);
+}
+
 void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
     QString ran_expression;
     QString ran_sort;
@@ -6942,7 +7414,7 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     run->click();
     QTRY_VERIFY_WITH_TIMEOUT(run->isEnabled(), 30'000);
     const auto problems = dialog->findChild<QPlainTextEdit*>();
-    QVERIFY2(status->text().startsWith(QStringLiteral("Applied gains to 2")),
+    QVERIFY2(status->text().startsWith(QStringLiteral("Saved ReplayGain tags to 2")),
              qPrintable(status->text() + QStringLiteral(" · ") +
                         (problems ? problems->toPlainText() : QString{})));
 
@@ -11340,6 +11812,14 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
             window.findChild<QAction*>(QStringLiteral("action-local-replaygain-auto"));
         auto* rg = window.findChild<QToolButton*>(QStringLiteral("bench-local-replaygain"));
         QVERIFY(repeat && random && single && consume && automatic && rg);
+        for (const auto* name : {"bench-local-album-random", "bench-mpd-album-random"}) {
+            auto* album_mode = window.findChild<QToolButton*>(QString::fromLatin1(name));
+            QVERIFY(album_mode);
+            QCOMPARE(album_mode->toolButtonStyle(), Qt::ToolButtonIconOnly);
+            QVERIFY(!album_mode->icon().isNull());
+            QVERIFY(album_mode->defaultAction()->isCheckable());
+            QCOMPARE(album_mode->defaultAction()->text(), QStringLiteral("Album shuffle"));
+        }
         QVERIFY(rg->isVisible());
         QVERIFY(!repeat->isChecked());
         repeat->trigger();

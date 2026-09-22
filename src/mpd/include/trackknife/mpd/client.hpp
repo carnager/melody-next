@@ -112,7 +112,7 @@ class Client final {
     // "-date"; limit bounds the window. Callers gate on server capability.
     [[nodiscard]] core::Result<std::vector<Track>>
     search_expression(std::string_view filter_expression, std::string_view sort = {},
-                      unsigned limit = 0U);
+                      unsigned limit = 0U, std::optional<std::string> list = {});
     // Raw Melody album search with an already-built filter expression
     // (docs in the melody repo: docs/protocol.md). Callers gate on the
     // advertised `searchalbums` command.

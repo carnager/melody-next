@@ -11,6 +11,14 @@ describes Trackbench unless stated otherwise.
 
 ## Product contract
 
+**Tools → ReplayGain…** opens directly from local selections and mapped
+MPD/Melody selections, without creating a second list (ADR-0219). Choose the scan
+mode, use **Preview groups** to check album boundaries without writing anything,
+then **Scan and write tags**. Storage/peak options, phase-labelled progress and
+Stop are in the same dialog. Audio samples remain unchanged. Stopping before
+the write phase saves no tags; already committed targets are retained if stopped
+during writing.
+
 Trackbench must analyze ReplayGain for every format it can decode. Scanning and
 storing are separate capabilities:
 
@@ -323,6 +331,14 @@ fixes gain plus matching stored-peak protection as the M7 policy; the additional
 processing preferences above remain optional DSP expansion.
 
 ## Conversion and permanent gain
+
+**Implemented safety policy (ADR-0218):** Permanent volume adjustment starts
+off in every conversion dialog and whenever a preset is selected. Enabling it
+shows a warning and requires confirmation before conversion. It uses existing
+gain values to change the output audio samples, not to write gain tags; source
+files remain untouched. Old remembered/preset gain settings cannot enable it.
+Automatic output analysis/tagging is still not implemented; the possibilities
+below are design directions, not a claim that an output scan currently runs.
 
 The converter may:
 

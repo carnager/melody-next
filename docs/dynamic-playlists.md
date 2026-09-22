@@ -29,6 +29,27 @@ that snapshot stays stable as the dynamic definition changes. Results and
 snapshot tabs show one line per track, without album grouping. Server results
 also offer **Add to queue**. Refresh never replaces your playing queue.
 
+Results support row/multi-selection, keyboard navigation, Enter/double-click
+playback, ratings, Go to artist/album, local or explicitly mapped file tools,
+Last.fm, Up Next, and copying/dragging into ordinary lists. Up Next shortcuts
+act on the result selection, not the tab behind the editor. Outward drag is
+copy-only; dropping into or manually reordering/removing dynamic results is
+not a definition edit. Choose **Open editable snapshot…** for those operations.
+
+Play captures a stable playback list. Melody owns a fresh scratch-list playback
+context; stock MPD uses its ordinary queue replacement fallback. Local playback
+uses an ordinary local scratch list. Subsequent refreshes never rewrite those
+lists. Selection, current row, and scroll anchors survive refresh by raw source
+identity and duplicate ordinal. Playing markers follow the source, including
+duplicate occurrences within the captured playback context. Editing metadata
+captures the selected inputs so a result refresh cannot retarget the operation.
+Closed dynamic editors do not keep refreshing; persistent live autoplaylist tabs
+remain future work.
+
+History rules may also order results, for example
+`ALL SORT DESCENDING HISTORY(playcount)`. Turn off **Shuffle results on refresh**
+to retain query ordering. See [history ordering](query-language.md#history-ordering-adr-0216).
+
 For Last.fm, add an API key under **Settings → Metadata services** using its
 registration link. Choose similar tracks, a user's loved/top tracks, or a tag.
 Enter the seed artist/title, username, or tag, then Refresh. These details are

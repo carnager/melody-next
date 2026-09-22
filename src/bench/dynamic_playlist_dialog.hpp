@@ -28,7 +28,12 @@ class DynamicPlaylistDialog final : public QDialog {
     void libraryChanged();
     void invalidateAuthority();
     bool authorityValid() const { return authority_valid_; }
+    const DynamicPlaylistService::Tracks& tracks() const { return tracks_; }
+    QString playlistName() const;
+    void playCurrent();
   signals:
+    void playRequested(int row);
+    void resultsChanged();
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
     void appendRequested(const DynamicPlaylistService::Tracks& tracks);
 

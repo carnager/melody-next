@@ -209,18 +209,25 @@ modify playback or enable Auto-DJ.
 
 ---
 
-# Task 7 — Dynamic playlist tab interaction parity — TODO
+# Task 7 — Dynamic playlist result interaction parity — implemented, bounded
 
-- [ ] Make dynamic playlist results behave like ordinary track tabs for
+- [x] Make dynamic playlist results behave like ordinary track tabs for
   applicable right-click actions, playback, now-playing indicators, selection,
   keyboard navigation, drag/drop, ratings, and Up Next requests.
-- [ ] Reuse shared track actions and playback identity tracking for local and
+- [x] Reuse shared track actions and playback identity tracking for local and
   MPD/Melody results instead of maintaining a reduced preview-only interaction.
-- [ ] Keep result membership owned by the definition. Specify whether manual
+- [x] Keep result membership owned by the definition. Specify whether manual
   removal creates an exclusion or requires opening an editable snapshot; do
   not silently rewrite rules or let the next refresh undo an apparent edit.
-- [ ] Preserve selection, scroll position, and playing markers across refreshes;
+- [x] Preserve selection, scroll position, and playing markers across refreshes;
   distinguish source identity from duplicate playback occurrences.
+
+ADR-0216 keeps the live result surface in the dynamic editor, with explicit
+editable/playback snapshots rather than persistent autoplaylist tabs. Outward
+drag copies; result membership/order cannot be manually mutated. Track actions
+target the result selection, and source-qualified metadata inputs survive refresh.
+History ordering and Current tab filtering work locally and through advertised
+Melody `melody_history_sort`/`melody_list_search` capabilities.
 
 ---
 

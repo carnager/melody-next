@@ -19,6 +19,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QShowEvent>
 #include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -71,6 +72,11 @@ constexpr int result_display_limit = 20'000;
 } // namespace
 
 SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+                           TechnicalsSink technicals_sink, QWidget* parent)
+    : SearchDialog(std::move(database_path), std::move(tab_access), std::move(technicals_sink),
+                   ServerScope{}, parent) {}
+
+SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
                            TechnicalsSink technicals_sink, ServerScope server_scope,
                            QWidget* parent)
     : QDialog(parent), database_path_(std::move(database_path)), tab_access_(std::move(tab_access)),
@@ -105,7 +111,19 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
     top->addWidget(query_mode_);
     layout->addLayout(top);
 
+    auto* presets = new QPushButton(QStringLiteral("Browse presets"), this);
+    presets->setAutoDefault(false);
+    presets->setObjectName(QStringLiteral("bench-search-presets"));
+    presets->setToolTip(
+        QStringLiteral("Choose a starting point; adjust the query and Save as… to keep it"));
+    auto* preset_menu = new QMenu(presets);
+    preset_menu->setObjectName(QStringLiteral("bench-search-presets-menu"));
+    presets->setMenu(preset_menu);
+    connect(preset_menu, &QMenu::aboutToShow, this,
+            [this, preset_menu] { populatePresets(preset_menu); });
+
     auto* saved = new QHBoxLayout;
+    saved->addWidget(presets);
     saved_searches_ = new QComboBox(this);
     saved_searches_->setObjectName(QStringLiteral("bench-search-saved"));
     saved_searches_->setAccessibleName(QStringLiteral("Saved searches"));
@@ -211,6 +229,85 @@ SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_ac
                     !serverScope());
     });
     loadSavedSearches();
+}
+
+void SearchDialog::focusInput() { input_->setFocus(Qt::ShortcutFocusReason); }
+
+void SearchDialog::showEvent(QShowEvent* event) {
+    QDialog::showEvent(event);
+    focusInput();
+    // QDialog may restore the previous focus widget after showEvent returns.
+    QTimer::singleShot(0, this, &SearchDialog::focusInput);
+}
+
+void SearchDialog::populatePresets(QMenu* menu) {
+    // clear() removes menu actions but can retain their owned submenus.
+    const auto groups = menu->findChildren<QMenu*>(QString{}, Qt::FindDirectChildrenOnly);
+    for (auto* group : groups)
+        delete group;
+    menu->clear();
+    QString topic;
+    QMenu* group = nullptr;
+    int available = 0;
+    for (const auto& preset : query::search_presets()) {
+        const auto source = query::preset_query(preset, preset.example);
+        if (!source)
+            continue;
+        const auto compiled = query::compile_tkq(*source);
+        if (!compiled)
+            continue;
+        if (serverScope() || serverCurrentScope()) {
+            if (!server_scope_.available || !server_scope_.available() ||
+                !server_scope_.unsupported_reason ||
+                !server_scope_.unsupported_reason(*compiled, serverCurrentScope()).isEmpty())
+                continue;
+        }
+        const auto label = displayText(std::string{preset.topic});
+        if (topic != label) {
+            group = menu->addMenu(label);
+            topic = label;
+        }
+        auto* action = group->addAction(displayText(std::string{preset.title}));
+        action->setObjectName(
+            QStringLiteral("search-preset-%1").arg(displayText(std::string{preset.id})));
+        connect(action, &QAction::triggered, this, [this, preset] { usePreset(preset); });
+        ++available;
+    }
+    if (available == 0) {
+        menu->addAction(QStringLiteral("No presets supported in this scope"))->setEnabled(false);
+    }
+}
+
+void SearchDialog::usePreset(const query::SearchPreset& preset) {
+    QString value = displayText(std::string{preset.example});
+    if (preset.input != query::PresetInput::none) {
+        bool accepted = false;
+        if (preset.input == query::PresetInput::integer) {
+            const int number = QInputDialog::getInt(this, displayText(std::string{preset.title}),
+                                                    displayText(std::string{preset.prompt}),
+                                                    value.toInt(), preset.minimum, preset.maximum,
+                                                    preset.id == "decade" ? 10 : 1, &accepted);
+            value = QString::number(number);
+        } else {
+            value = QInputDialog::getText(this, displayText(std::string{preset.title}),
+                                          displayText(std::string{preset.prompt}),
+                                          QLineEdit::Normal, value, &accepted);
+        }
+        if (!accepted)
+            return;
+    }
+    const auto source = query::preset_query(preset, utf8Bytes(value));
+    if (!source) {
+        error_->setText(displayText(source.error().message));
+        error_->show();
+        return;
+    }
+    // A built-in is a starting point, never an implicit edit to a saved search.
+    saved_searches_->setCurrentIndex(0);
+    updateSavedSearchButtons();
+    query_mode_->setChecked(true);
+    input_->setText(displayText(*source));
+    focusInput();
 }
 
 SearchDialog::~SearchDialog() {
@@ -400,9 +497,43 @@ void SearchDialog::preferServerScope() {
     }
 }
 
+void SearchDialog::watchCurrentModel(QAbstractItemModel* model) {
+    for (const auto& connection : current_model_connections_)
+        disconnect(connection);
+    current_model_connections_.clear();
+    const auto changed = [this] {
+        if (scope_->currentIndex() == 1)
+            scheduleSearch();
+    };
+    if (model) {
+        current_model_connections_.push_back(
+            connect(model, &QAbstractItemModel::modelReset, this, changed));
+        current_model_connections_.push_back(
+            connect(model, &QAbstractItemModel::rowsInserted, this, changed));
+        current_model_connections_.push_back(
+            connect(model, &QAbstractItemModel::rowsRemoved, this, changed));
+        current_model_connections_.push_back(
+            connect(model, &QAbstractItemModel::layoutChanged, this, changed));
+        current_model_connections_.push_back(connect(
+            model, &QAbstractItemModel::dataChanged, this,
+            [changed](const QModelIndex& first, const QModelIndex&, const QList<int>& roles) {
+                // Playback markers and lazy history-cell repaints are not source edits.
+                if (roles.empty() || roles.contains(ui::track_rating_role) ||
+                    (roles.contains(Qt::DisplayRole) &&
+                     first.column() < ui::track_play_count_column))
+                    changed();
+            }));
+    }
+    changed();
+}
+
 bool SearchDialog::databaseScope() const { return scope_->currentIndex() == 0; }
 
 bool SearchDialog::serverScope() const { return scope_->currentIndex() == 2; }
+bool SearchDialog::serverCurrentScope() const {
+    return scope_->currentIndex() == 1 && server_scope_.current_available &&
+           server_scope_.current_available();
+}
 
 void SearchDialog::scheduleSearch() {
     updateSavedSearchButtons();
@@ -431,13 +562,23 @@ void SearchDialog::startServerSearch(query::CompiledTkq compiled) {
         return;
     }
     searching_ = true;
-    status_->setText(QStringLiteral("Searching the server library…"));
     const auto generation = generation_;
-    server_scope_.run(compiled, [this, generation, compiled](const QStringList& labels,
-                                                             const int total,
-                                                             const QString& error) {
+    const bool current = serverCurrentScope();
+    status_->setText(current ? tr("Searching the current server list…")
+                             : tr("Searching the server library…"));
+    const auto& run = current ? server_scope_.run_current : server_scope_.run;
+    if (!run) {
         searching_ = false;
-        if (generation != generation_ || !serverScope()) {
+        status_->setText(tr("Current server tab cannot be searched."));
+        return;
+    }
+    const QPointer self{this};
+    run(compiled, [this, self, generation, compiled,
+                   current](const QStringList& labels, const int total, const QString& error) {
+        if (!self)
+            return;
+        searching_ = false;
+        if (generation != generation_ || (current ? !serverCurrentScope() : !serverScope())) {
             return;
         }
         results_->clear();
@@ -488,15 +629,8 @@ void SearchDialog::startSearch() {
         return;
     }
     result_query_ = input_->text().trimmed();
-    if (serverScope()) {
+    if (serverScope() || serverCurrentScope()) {
         startServerSearch(std::move(*compiled));
-        return;
-    }
-    if (!databaseScope() && std::ranges::any_of(compiled->predicates, [](const auto& p) {
-            return p.operand == query::TkqOperandKind::history;
-        })) {
-        error_->setText(tr("History searches require Library or Server scope."));
-        error_->show();
         return;
     }
     if (databaseScope()) {
@@ -541,104 +675,149 @@ void SearchDialog::startSearch() {
     }
     searching_ = true;
     const auto needs_technicals = references_technicals(*compiled);
-    watcher_.setFuture(QtConcurrent::run([rows = std::move(snapshot->rows),
-                                          shared = std::make_shared<query::CompiledTkq>(
-                                              std::move(*compiled)),
-                                          needs_technicals,
-                                          token = cancellation_.token()]() mutable {
-        Outcome outcome;
-        // ADR-0153: probe exactly the rows a technical query needs and
-        // report the results back so the next search is instant.
-        std::map<std::string, std::optional<LocalTrackTechnicals>> probed;
-        if (needs_technicals) {
-            for (auto& row : rows) {
-                if (row.technicals || token.is_cancellation_requested()) {
-                    continue;
-                }
-                auto cached = probed.find(row.raw_path);
-                if (cached == probed.end()) {
-                    std::optional<LocalTrackTechnicals> technicals;
-                    if (auto probe = formats::probe_local_media(row.raw_path, token);
-                        probe && probe->best_audio_stream) {
-                        const auto found =
-                            std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
-                                              &formats::AudioStreamInfo::stream_index);
-                        if (found != probe->audio_streams.end()) {
-                            technicals = LocalTrackTechnicals{
-                                .codec = found->codec_name,
-                                .sample_rate = found->sample_rate,
-                                .bits = formats::bits_per_sample_hint(found->sample_format),
-                                .channels = found->channels,
-                                .bit_rate = found->bit_rate > 0 ? found->bit_rate : probe->bit_rate,
-                            };
-                        }
-                    }
-                    cached = probed.emplace(row.raw_path, std::move(technicals)).first;
-                    ++outcome.scanned;
-                }
-                if (cached->second) {
-                    row.technicals = *cached->second;
-                }
-            }
-            for (auto& [path, technicals] : probed) {
-                if (technicals) {
-                    outcome.probed.emplace_back(path, *technicals);
-                }
-            }
-        }
-        struct Keyed {
-            std::string key;
-            std::size_t position;
-        };
-        std::vector<Keyed> keyed;
-        for (std::size_t position = 0U; position < rows.size(); ++position) {
-            if (token.is_cancellation_requested()) {
-                outcome.error = QStringLiteral("Search cancelled");
+    watcher_.setFuture(
+        QtConcurrent::run([database = database_path_, rows = std::move(snapshot->rows),
+                           shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
+                           needs_technicals, token = cancellation_.token()]() mutable {
+            Outcome outcome;
+            if (rows.size() > 100'000U) {
+                outcome.error =
+                    QStringLiteral("Current-tab searches support at most 100,000 rows.");
                 return outcome;
             }
-            const auto& row = rows[position];
-            auto facts = persistence::make_tkq_row_facts(
-                row.metadata, row.title, row.artist, row.album, row.duration_ms,
-                row.technicals ? std::optional{persistence::TkqRowTechnicals{
-                                     .codec = row.technicals->codec,
-                                     .sample_rate = row.technicals->sample_rate,
-                                     .bits = row.technicals->bits,
-                                     .channels = row.technicals->channels}}
-                               : std::nullopt);
-            // ADR-0179: tab rows carry their loaded content-identity ratings;
-            // an unrated row keeps the facts' unrated default.
-            if (row.rating > 0U) {
-                facts.rating = row.rating;
-            }
-            if (row.album_rating > 0U) {
-                facts.album_rating = row.album_rating;
-            }
-            if (!persistence::tkq_matches(*shared, facts, token)) {
-                continue;
-            }
-            std::string key;
-            if (shared->sort) {
-                auto sort_key = persistence::tkq_sort_key(*shared, facts, token);
-                if (!sort_key) {
-                    outcome.error = displayText(sort_key.error().message);
+            const bool needs_history = (shared->sort && !shared->sort->history.empty()) ||
+                                       std::ranges::any_of(shared->predicates, [](const auto& p) {
+                                           return p.operand == query::TkqOperandKind::history;
+                                       });
+            std::vector<std::array<std::int64_t, 6>> histories;
+            if (needs_history) {
+                auto library = persistence::LocalLibrary::open(database);
+                if (!library) {
+                    outcome.error = QStringLiteral("Cannot open listening history.");
                     return outcome;
                 }
-                key = std::move(*sort_key);
+                std::vector<persistence::LibraryHistorySource> sources;
+                for (const auto& row : rows) {
+                    if (token.is_cancellation_requested()) {
+                        outcome.error = QStringLiteral("Search cancelled");
+                        return outcome;
+                    }
+                    persistence::ListItem source;
+                    source.source = persistence::ListSource::local;
+                    source.source_reference = row.raw_path;
+                    source.source_revision = row.source_revision;
+                    source.source_selection = persistence::ListItemSourceSelection{
+                        row.selection.stream_index, row.selection.subsong_index};
+                    if (row.segment)
+                        source.segment = persistence::ListItemSegment{row.segment->start_sample,
+                                                                      row.segment->end_sample};
+                    sources.push_back({std::move(source),
+                                       row.album.empty() ? std::string{} : row.album_rating_hash});
+                }
+                auto loaded = library->history_facts(sources, token);
+                if (!loaded) {
+                    outcome.error = displayText(loaded.error().message);
+                    return outcome;
+                }
+                histories = std::move(*loaded);
             }
-            keyed.push_back({std::move(key), position});
-        }
-        if (shared->sort) {
-            const auto descending = shared->sort->direction == query::TkqSortDirection::descending;
-            std::ranges::stable_sort(keyed, [descending](const Keyed& left, const Keyed& right) {
-                return descending ? right.key < left.key : left.key < right.key;
-            });
-        }
-        for (const auto& entry : keyed) {
-            outcome.rows.push_back(std::move(rows[entry.position]));
-            outcome.labels.push_back(result_label(outcome.rows.back()));
-        }
-        return outcome;
-    }));
+            // ADR-0153: probe exactly the rows a technical query needs and
+            // report the results back so the next search is instant.
+            std::map<std::string, std::optional<LocalTrackTechnicals>> probed;
+            if (needs_technicals) {
+                for (auto& row : rows) {
+                    if (row.technicals || token.is_cancellation_requested()) {
+                        continue;
+                    }
+                    auto cached = probed.find(row.raw_path);
+                    if (cached == probed.end()) {
+                        std::optional<LocalTrackTechnicals> technicals;
+                        if (auto probe = formats::probe_local_media(row.raw_path, token);
+                            probe && probe->best_audio_stream) {
+                            const auto found =
+                                std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
+                                                  &formats::AudioStreamInfo::stream_index);
+                            if (found != probe->audio_streams.end()) {
+                                technicals = LocalTrackTechnicals{
+                                    .codec = found->codec_name,
+                                    .sample_rate = found->sample_rate,
+                                    .bits = formats::bits_per_sample_hint(found->sample_format),
+                                    .channels = found->channels,
+                                    .bit_rate =
+                                        found->bit_rate > 0 ? found->bit_rate : probe->bit_rate,
+                                };
+                            }
+                        }
+                        cached = probed.emplace(row.raw_path, std::move(technicals)).first;
+                        ++outcome.scanned;
+                    }
+                    if (cached->second) {
+                        row.technicals = *cached->second;
+                    }
+                }
+                for (auto& [path, technicals] : probed) {
+                    if (technicals) {
+                        outcome.probed.emplace_back(path, *technicals);
+                    }
+                }
+            }
+            struct Keyed {
+                std::string key;
+                std::size_t position;
+            };
+            std::vector<Keyed> keyed;
+            for (std::size_t position = 0U; position < rows.size(); ++position) {
+                if (token.is_cancellation_requested()) {
+                    outcome.error = QStringLiteral("Search cancelled");
+                    return outcome;
+                }
+                const auto& row = rows[position];
+                auto facts = persistence::make_tkq_row_facts(
+                    row.metadata, row.title, row.artist, row.album, row.duration_ms,
+                    row.technicals ? std::optional{persistence::TkqRowTechnicals{
+                                         .codec = row.technicals->codec,
+                                         .sample_rate = row.technicals->sample_rate,
+                                         .bits = row.technicals->bits,
+                                         .channels = row.technicals->channels}}
+                                   : std::nullopt);
+                // ADR-0179: tab rows carry their loaded content-identity ratings;
+                // an unrated row keeps the facts' unrated default.
+                if (row.rating > 0U) {
+                    facts.rating = row.rating;
+                }
+                if (row.album_rating > 0U) {
+                    facts.album_rating = row.album_rating;
+                }
+                if (needs_history)
+                    facts.history = histories[position];
+                if (!persistence::tkq_matches(*shared, facts, token)) {
+                    continue;
+                }
+                std::string key;
+                if (shared->sort) {
+                    auto sort_key = persistence::tkq_sort_key(*shared, facts, token);
+                    if (!sort_key) {
+                        outcome.error = displayText(sort_key.error().message);
+                        return outcome;
+                    }
+                    key = std::move(*sort_key);
+                }
+                keyed.push_back({std::move(key), position});
+            }
+            if (shared->sort) {
+                const auto descending =
+                    shared->sort->direction == query::TkqSortDirection::descending;
+                std::ranges::stable_sort(
+                    keyed, [descending](const Keyed& left, const Keyed& right) {
+                        return descending ? right.key < left.key : left.key < right.key;
+                    });
+            }
+            for (const auto& entry : keyed) {
+                outcome.rows.push_back(std::move(rows[entry.position]));
+                outcome.labels.push_back(result_label(outcome.rows.back()));
+            }
+            return outcome;
+        }));
 }
 
 void SearchDialog::finishSearch() {
@@ -682,11 +861,12 @@ void SearchDialog::finishSearch() {
 }
 
 void SearchDialog::openResults(const LocalLibraryAction action, const bool selection_only) {
-    if (serverScope()) {
+    if (serverScope() || serverCurrentScope()) {
         // Server results live in the MPD authority; the window opens them as
         // a committed server search tab.
-        if (server_result_query_ && server_scope_.open) {
-            server_scope_.open(*server_result_query_, result_query_);
+        const auto& open = serverCurrentScope() ? server_scope_.open_current : server_scope_.open;
+        if (server_result_query_ && open) {
+            open(*server_result_query_, result_query_);
         }
         return;
     }

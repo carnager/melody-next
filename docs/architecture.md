@@ -549,6 +549,15 @@ consume a consistent local-library/history snapshot or translate to advertised
 Melody history filters. Whole-album aggregates precede predicate narrowing;
 history invalidations refresh open dynamic-rule previews in their own authority.
 
+ADR-0216 adds numeric `SORT HISTORY` keys and current-tab history evaluation.
+Local source observations, statistics, and album aggregates share one SQLite
+read transaction on the query worker. Melody owns bounded `melody_list_search`
+evaluation over captured list occurrences and library-wide history; the client
+does not intersect a truncated library response. Capability gates distinguish
+history filtering, ordering, and list scope. Dynamic result actions reuse
+source-qualified tools and transfer helpers. Definition-owned views copy outward
+only; playback and manual membership edits use stable ordinary-list snapshots.
+
 `DynamicPlaylistService` owns definition evaluation, provider requests, bounded
 matching, cancellation generations, limits, and shuffle. The editor uses the
 same service for both authorities. Adapters evaluate typed `CompiledTkq`
@@ -557,6 +566,12 @@ homogeneous local or remote vectors; presentation uses the existing local and
 MPD track models and shared track-view engine. The service never mutates a
 queue. Opening a snapshot crosses into the existing authority-specific list
 creation path only after an explicit user action.
+
+ADR-0217's built-in search catalog and parameter-to-tkq generation live in the
+Qt-free query module. Search presents grouped actions and typed prompts, then
+uses the unchanged asynchronous search/saved-query pipeline. Remote menu
+availability reuses the execution translator and advertised scope capabilities;
+presets never own library facts or playback state.
 
 ## Up Next (ADR-0196)
 

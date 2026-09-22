@@ -26,6 +26,17 @@
 namespace trackknife::quick {
 namespace {
 
+// A congested session queue clears as its commands drain, so a refused
+// artwork request is worth a few spaced-out attempts before the album is
+// reported as having no cover.
+constexpr int maximum_artwork_congestion_retries = 6;
+constexpr std::chrono::milliseconds artwork_congestion_retry_delay{250};
+// Album ratings for a long list must not take the queue over: they are
+// issued a couple at a time so artwork and everything else keep their
+// slots. One connection carries all of it, so this is what decides how
+// soon the covers on screen arrive.
+constexpr qsizetype maximum_album_rating_queries_in_flight = 2;
+
 [[nodiscard]] QString from_utf8(std::string_view value) {
     return QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size()));
 }
@@ -773,19 +784,21 @@ void MpdProbeController::setTracksRating(const std::vector<mpd::Track>& tracks, 
 }
 
 void MpdProbeController::searchServerExpression(const QString& expression, const QString& sort,
-                                                ServerQueryCompletion completion) {
+                                                ServerQueryCompletion completion,
+                                                std::optional<std::string> list) {
     if (!completion) {
         return;
     }
-    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("search"))) {
+    if (!session_ || !connected_ || !supportsCommand(QStringLiteral("search")) ||
+        (list && !supportsCommand(QStringLiteral("melody_list_search")))) {
         completion(std::unexpected(
             core::Error{.code = core::ErrorCode::unsupported,
                         .message = "the connected server does not support structured queries",
                         .context = {}}));
         return;
     }
-    const auto id =
-        session_->search_expression(expression.toUtf8().toStdString(), sort.toUtf8().toStdString());
+    const auto id = session_->search_expression(
+        expression.toUtf8().toStdString(), sort.toUtf8().toStdString(), 20'000U, std::move(list));
     pending_commands_.insert(id);
     pending_expression_searches_.insert(id, std::move(completion));
     emit stateChanged();
@@ -799,6 +812,9 @@ void MpdProbeController::requestMelodyAlbumRatings(const std::vector<mpd::Track>
     QSet<QString> in_flight;
     for (const auto& key : pending_album_rating_queries_) {
         in_flight.insert(key);
+    }
+    for (const auto& queued : queued_album_rating_queries_) {
+        in_flight.insert(queued.group_key);
     }
     QSet<QString> seen;
     for (const auto& track : queue) {
@@ -819,10 +835,29 @@ void MpdProbeController::requestMelodyAlbumRatings(const std::vector<mpd::Track>
         if (seen.size() > maximum_album_queries) {
             break;
         }
-        const auto id = session_->melody_album_rating(
-            mpd::MelodyAlbumKey{.album_artist = album_artist, .album = album, .date = date});
+        queued_album_rating_queries_.push_back(QueuedAlbumRatingQuery{
+            .group_key = group_key,
+            .key =
+                mpd::MelodyAlbumKey{.album_artist = album_artist, .album = album, .date = date}});
+    }
+    pumpMelodyAlbumRatings();
+}
+
+void MpdProbeController::pumpMelodyAlbumRatings() {
+    if (!session_ || !supportsAlbumRatings()) {
+        queued_album_rating_queries_.clear();
+        return;
+    }
+    while (!queued_album_rating_queries_.empty() &&
+           pending_album_rating_queries_.size() < maximum_album_rating_queries_in_flight) {
+        auto queued = std::move(queued_album_rating_queries_.front());
+        queued_album_rating_queries_.pop_front();
+        if (melody_album_ratings_.contains(queued.group_key)) {
+            continue;
+        }
+        const auto id = session_->melody_album_rating(queued.key);
         pending_commands_.insert(id);
-        pending_album_rating_queries_.insert(id, group_key);
+        pending_album_rating_queries_.insert(id, queued.group_key);
     }
 }
 
@@ -1274,8 +1309,17 @@ void MpdProbeController::loadServerLibraryArtwork(const quint64 token, const QSt
         emit serverLibraryArtworkLoaded(token, {});
         return;
     }
+    loadServerLibraryArtworkAttempt(token, uri, 0);
+}
+
+void MpdProbeController::loadServerLibraryArtworkAttempt(const quint64 token, const QString& uri,
+                                                         const int congestion_retries) {
+    const auto embedded = !supportsCommand(QStringLiteral("albumart")) &&
+                          supportsCommand(QStringLiteral("readpicture"));
     const auto command_id = session_->load_artwork(uri.toUtf8().toStdString(), embedded);
-    pending_library_tree_artwork_.insert(command_id, token);
+    pending_library_tree_artwork_.insert(
+        command_id, PendingArtworkRequest{
+                        .token = token, .uri = uri, .congestion_retries = congestion_retries});
 }
 
 void MpdProbeController::browseStoredPlaylists() {
@@ -1898,6 +1942,8 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
                 queue_model_.setAlbumRatings(melody_album_ratings_);
             }
         }
+        // A finished query frees a slot for the next album in the backlog.
+        pumpMelodyAlbumRatings();
         emit stateChanged();
         return;
     }
@@ -2063,8 +2109,25 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
     if (result.kind == mpd::SessionCommandKind::artwork) {
         const auto tree_query = pending_library_tree_artwork_.find(result.id);
         if (tree_query != pending_library_tree_artwork_.end()) {
-            const auto request_token = *tree_query;
+            const auto request = *tree_query;
             pending_library_tree_artwork_.erase(tree_query);
+            // Opening a large list floods the session queue, and a request it
+            // refuses never reached the server. Reporting that as an empty
+            // cover would spend the model's attempts and leave the album on
+            // its placeholder for good, so congestion is retried instead.
+            if (result.error && result.error->code == core::ErrorCode::limit_exceeded &&
+                request.congestion_retries < maximum_artwork_congestion_retries && connected_) {
+                QTimer::singleShot(artwork_congestion_retry_delay, this, [this, request] {
+                    if (!session_ || !connected_) {
+                        emit serverLibraryArtworkLoaded(request.token, {});
+                        return;
+                    }
+                    loadServerLibraryArtworkAttempt(request.token, request.uri,
+                                                    request.congestion_retries + 1);
+                });
+                emit stateChanged();
+                return;
+            }
             QByteArray data;
             if (!result.error) {
                 if (const auto* bytes = std::get_if<std::vector<std::byte>>(&result.payload)) {
@@ -2072,7 +2135,7 @@ void MpdProbeController::applyCommandResult(const std::uint64_t token,
                                       static_cast<qsizetype>(bytes->size())};
                 }
             }
-            emit serverLibraryArtworkLoaded(request_token, data);
+            emit serverLibraryArtworkLoaded(request.token, data);
             emit stateChanged();
             return;
         }
@@ -2540,6 +2603,7 @@ void MpdProbeController::clearSessionState() {
     melody_album_ratings_.clear();
     melody_album_stored_ratings_.clear();
     pending_album_rating_queries_.clear();
+    queued_album_rating_queries_.clear();
     const auto orphaned = std::exchange(pending_expression_searches_, {});
     for (const auto& completion : orphaned) {
         completion(std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
@@ -2563,7 +2627,13 @@ void MpdProbeController::clearSessionState() {
     pending_library_tree_branches_.clear();
     pending_library_album_counts_.clear();
     pending_library_tree_filters_.clear();
-    pending_library_tree_artwork_.clear();
+    // Models keep one artwork request in flight at a time, so a dropped
+    // request would stop their pump for the rest of the session. Answer
+    // every orphan with an empty cover instead.
+    const auto orphaned_artwork = std::exchange(pending_library_tree_artwork_, {});
+    for (const auto& request : orphaned_artwork) {
+        emit serverLibraryArtworkLoaded(request.token, {});
+    }
     pending_stored_playlists_query_.reset();
     pending_tag_name_.clear();
     pending_artwork_query_.reset();

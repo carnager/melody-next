@@ -4760,6 +4760,19 @@ core::Result<std::string> ListRepository::local_listening_key(const ListItem& so
     return listening_track_key(*id, source);
 }
 
+core::Result<std::string> local_listening_observation(const ListItem& source) {
+    if (!valid_listening_source(source))
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "Listening history requires a qualified local source",
+                        .context = {}});
+    return listening_observation(source.source_reference, *source.source_revision);
+}
+
+std::string local_listening_track_hash(const std::string& source_id, const ListItem& source) {
+    return listening_track_key(source_id, source);
+}
+
 core::Result<std::optional<LocalListeningHistory>>
 ListRepository::lookup_local_listening_history(const ListItem& source) const {
     if (!valid_listening_source(source))

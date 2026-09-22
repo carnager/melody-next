@@ -81,6 +81,13 @@ The [query reference](query-language.md) describes all operators and limits.
 
 ## Saved searches
 
+**Browse presets** in the Search window offers grouped starting points for years,
+decades, artists, genres, ratings, listening, audio properties and missing tags.
+Parameterized presets ask for a value and fill the editable Query field. They
+work in local and supported Melody scopes; unsupported server choices are hidden.
+Choosing a built-in does not update a saved search. Use **Save as…** to keep your
+own version. Missing ReplayGain presets check cached tags, not sidecar analysis.
+
 Open **Workspace → Search…** (**Ctrl+Shift+F**), enter a word search or enable
 **Query** for a `tkq-1` expression, choose **Library database** or **Current tab**,
 and press **Save as…**. Selecting its name in **Saved searches…** restores the

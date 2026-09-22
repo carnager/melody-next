@@ -200,15 +200,17 @@ bool BenchMainWindow::handleTabTrackDrop(QAbstractItemView* source, QDropEvent* 
     auto* target_tab = target == nullptr
                            ? nullptr
                            : tabForDocument(target->property("bench-document-id").toString());
-    if (source_tab == nullptr || source_tab->view != source ||
+    const bool dynamic = source && source->property("definition-owned").toBool() &&
+                         qobject_cast<LocalListModel*>(source->model());
+    if ((!dynamic && (source_tab == nullptr || source_tab->view != source)) ||
         source->selectionModel() == nullptr || source->selectionModel()->selectedRows().isEmpty() ||
         (tab_index >= 0 &&
          (target_tab == nullptr || target_tab->view != target || source == target))) {
         drop->ignore();
         return true;
     }
-    const auto action =
-        drop->modifiers().testFlag(Qt::ControlModifier) ? Qt::CopyAction : Qt::MoveAction;
+    const auto action = dynamic || drop->modifiers().testFlag(Qt::ControlModifier) ? Qt::CopyAction
+                                                                                   : Qt::MoveAction;
     if (!drop->possibleActions().testFlag(action)) {
         drop->ignore();
         return true;

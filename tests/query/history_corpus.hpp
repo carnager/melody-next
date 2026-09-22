@@ -27,4 +27,16 @@ inline constexpr std::array cases{
          "((playcount >= 3) AND (playcount <= 3))",
          "Bare names retain their prior file-tag semantics."},
 };
+inline constexpr std::array sort_cases{
+    Case{"tkq-1", "Melody history-sort capability", "ALL SORT HISTORY(playcount)",
+         "history-playcount", "Counts sort numerically, not as display strings."},
+    Case{"tkq-1", "Melody history-sort capability", "ALL SORT DESCENDING HISTORY(lastplayed)",
+         "-history-lastplayed", "Newest first puts missing timestamps last."},
+    Case{"tkq-1", "Melody history-sort capability",
+         "HISTORY(playcount) EQUAL 0 SORT HISTORY(albumplaycount)", "history-albumplaycount",
+         "Album keys aggregate before predicate narrowing."},
+    Case{"tkq-1", "Melody history-sort capability",
+         "ALL SORT ASCENDING HISTORY(albumdayssinceplayed)", "history-albumdayssinceplayed",
+         "Explicit ascending retains typed day-age ordering."},
+};
 } // namespace history_corpus

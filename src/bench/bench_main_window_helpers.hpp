@@ -5,6 +5,8 @@
 #include "bench/local_list_model.hpp"
 #include "trackknife/persistence/local_library.hpp"
 
+#include <QIcon>
+#include <QPalette>
 #include <QString>
 #include <QStringList>
 
@@ -15,6 +17,8 @@
 #include <string_view>
 
 namespace trackknife::bench {
+
+[[nodiscard]] QIcon albumShuffleIcon(const QPalette& palette);
 
 struct TrackColumnSpec {
     int logical;

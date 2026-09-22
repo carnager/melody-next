@@ -169,13 +169,15 @@ and resume remain server-owned.
   and every Melody list (ADRs 0212–0213).
 - [x] Continuous album-random playback (ADR-0214), local and Melody.
 - [x] Use listening statistics in queries, such as finding unplayed albums (ADR-0215).
-- [ ] History sorting, current-tab history scope, and calendar-relative time operators.
+- [x] History result sorting and current-tab history scope, local and Melody (ADR-0216).
+- [ ] Calendar-relative time operators.
 - [ ] Optional autoplay when a list ends, choosing related tracks from the local
   or server library. Online similarity lookups need explicit opt-in, caching,
   and a clear indication of which tracks were added automatically.
 
 Statistics should follow a track when its file moves. Writing them into audio
-tags requires opt-in. The current Random mode shuffles tracks, not albums.
+tags requires opt-in. The separate Album shuffle mode preserves within-album
+order (ADR-0214).
 
 Reference: [playback statistics](playback-library-conversion.md#playback-statistics).
 

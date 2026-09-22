@@ -130,6 +130,23 @@ class Parser {
                                                                  : TkqSortDirection::ascending;
             ++index;
         }
+        if (index < tokens_.size() && tokens_[index].kind == TokenKind::word &&
+            tokens_[index].text == "HISTORY") {
+            if (index + 4U != tokens_.size() || tokens_[index + 1U].kind != TokenKind::open_paren ||
+                tokens_[index + 2U].kind != TokenKind::word ||
+                tokens_[index + 3U].kind != TokenKind::close_paren)
+                return std::unexpected(parse_error("SORT HISTORY needs one statistic name",
+                                                   tokens_[index].begin, source_.size()));
+            sort.history = lower(tokens_[index + 2U].text);
+            if (sort.history != "playcount" && sort.history != "lastplayed" &&
+                sort.history != "dayssinceplayed" && sort.history != "albumplaycount" &&
+                sort.history != "albumlastplayed" && sort.history != "albumdayssinceplayed")
+                return std::unexpected(
+                    parse_error("Unknown HISTORY statistic", tokens_[index].begin, source_.size()));
+            sort.source = std::string{source_.substr(tokens_[index].begin)};
+            output_.sort = std::move(sort);
+            return {};
+        }
         if (index >= tokens_.size() || !tokens_[index].keyword || tokens_[index].text != "BY") {
             return std::unexpected(parse_error("SORT needs BY and a format expression",
                                                tokens_[sort_index].begin, tokens_[sort_index].end));

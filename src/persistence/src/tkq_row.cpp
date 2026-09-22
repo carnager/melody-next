@@ -367,6 +367,20 @@ core::Result<std::string> tkq_sort_key(const query::CompiledTkq& compiled, const
     if (!compiled.sort) {
         return std::string{};
     }
+    if (!compiled.sort->history.empty()) {
+        constexpr std::array names{"playcount",      "lastplayed",      "dayssinceplayed",
+                                   "albumplaycount", "albumlastplayed", "albumdayssinceplayed"};
+        const auto found = std::ranges::find(names, compiled.sort->history);
+        if (!facts.history || found == names.end())
+            return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                               .message = "Listening history is unavailable",
+                                               .context = {}});
+        const auto value = (*facts.history)[static_cast<std::size_t>(found - names.begin())];
+        if (value < 0)
+            return std::string(20, '0');
+        const auto digits = std::to_string(value);
+        return "1" + std::string(19U - digits.size(), '0') + digits;
+    }
     const RowFactsContext context{facts, titleformat::FormatContextKind::sort};
     titleformat::EvaluationOptions options;
     options.cancellation = cancellation;

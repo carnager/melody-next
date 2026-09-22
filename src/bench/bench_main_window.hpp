@@ -80,6 +80,9 @@ class ServerLibraryTreeView;
 namespace trackknife::mpd {
 struct Track;
 } // namespace trackknife::mpd
+namespace trackknife::query {
+struct CompiledTkq;
+}
 
 namespace trackknife::quick {
 class MpdProbeController;
@@ -88,6 +91,7 @@ class MpdSearchResultModel;
 } // namespace trackknife::quick
 
 namespace trackknife::bench {
+struct ConvertDialogItem;
 
 struct MetadataOperationJobOutcome;
 class MusicBrainzFetchService;
@@ -117,8 +121,7 @@ class BenchMainWindow final : public QMainWindow {
     void importM3u8Path(std::string raw_path);
     void openLocalPaths(std::vector<std::string> raw_paths);
     void loadMpdUrisAsLocalFiles(const QStringList& uris);
-    // Mapped Edit tags opens directly (ADR-0203). ReplayGain and Convert
-    // retain the asynchronous local-list bridge from ADR-0180.
+    // Mapped file tools open directly; only explicit Load as local files creates a list.
     enum class MaterializedDialog : std::uint8_t { none, edit_tags, replay_gain, convert };
     void materializeMpdSelectionForDialog(const QStringList& uris, MaterializedDialog dialog);
 
@@ -213,6 +216,7 @@ class BenchMainWindow final : public QMainWindow {
     // debounced local rating reload from the content-identity store.
     void refreshMpdRateMenu();
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
+    void addLocalRateMenus(QMenu* menu, QTableView* view);
     void refreshLocalRatings();
 
     void buildMpdPlaylists();
@@ -262,6 +266,8 @@ class BenchMainWindow final : public QMainWindow {
     // compact context-menu ReplayGain dialog.
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
+    [[nodiscard]] MetadataPropertiesSourceReader
+    selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows);
     [[nodiscard]] MetadataWritePlanApplierFactory metadataPlanApplierFactory();
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
@@ -309,6 +315,9 @@ class BenchMainWindow final : public QMainWindow {
     void renameCurrentList();
     void showTabContextMenu(const QPoint& position);
     void showTrackContextMenu(QTableView* view, const QPoint& position);
+    void
+    searchCurrentServerTab(const query::CompiledTkq& compiled,
+                           std::function<void(core::Result<std::vector<mpd::Track>>)> completion);
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();
@@ -322,7 +331,14 @@ class BenchMainWindow final : public QMainWindow {
     void showMetadataProperties();
     void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader);
     void showMpdMetadataProperties(const QStringList& uris);
+    [[nodiscard]] MetadataPropertiesSourceReader mappedMpdSourceReader(const QStringList& uris);
+    void showMappedFileTool(const QStringList& uris, MaterializedDialog tool);
+    bool mapped_tool_loading_{false};
     void showConvertDialog();
+    void showConvertForView(QTableView* view);
+    void openConvertItems(std::vector<ConvertDialogItem> items);
+    void showMetadataForView(QTableView* view);
+    void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     [[nodiscard]] OutputProfileStore buildOutputProfileStore();
     void applyLibraryOrder(bool persist);

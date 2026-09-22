@@ -6,6 +6,7 @@
 #include "bench/local_list_model.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/query/search_presets.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <QDialog>
@@ -25,6 +26,7 @@ class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QTimer;
+class QMenu;
 
 namespace trackknife::bench {
 
@@ -53,22 +55,36 @@ class SearchDialog final : public QDialog {
                            std::function<void(QStringList labels, int total, QString error)>)>
             run;
         std::function<void(query::CompiledTkq compiled, QString query_text)> open;
+        std::function<bool()> current_available{};
+        std::function<void(query::CompiledTkq, std::function<void(QStringList, int, QString)>)>
+            run_current{};
+        std::function<void(query::CompiledTkq, QString)> open_current{};
+        std::function<QString(const query::CompiledTkq&, bool current)> unsupported_reason{};
     };
 
     SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
-                 TechnicalsSink technicals_sink, ServerScope server_scope = {},
+                 TechnicalsSink technicals_sink, ServerScope server_scope,
                  QWidget* parent = nullptr);
+    SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+                 TechnicalsSink technicals_sink, QWidget* parent = nullptr);
     ~SearchDialog() override;
 
     // Opens on the scope that matches where the search was started: a
     // server-side tab searches the server library.
     void preferServerScope();
+    void watchCurrentModel(QAbstractItemModel* model);
+    void focusInput();
+
+  protected:
+    void showEvent(QShowEvent* event) override;
 
   signals:
     // Both scopes carry cached rows directly; opening never starts file discovery.
     void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action);
 
   private:
+    void populatePresets(QMenu* menu);
+    void usePreset(const query::SearchPreset& preset);
     struct Outcome {
         std::vector<std::string> labels;
         std::vector<LocalTrackRow> rows;
@@ -94,12 +110,14 @@ class SearchDialog final : public QDialog {
     [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
     [[nodiscard]] bool databaseScope() const;
     [[nodiscard]] bool serverScope() const;
+    [[nodiscard]] bool serverCurrentScope() const;
     void startServerSearch(query::CompiledTkq compiled);
 
     std::filesystem::path database_path_;
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
     ServerScope server_scope_;
+    std::vector<QMetaObject::Connection> current_model_connections_;
     std::optional<query::CompiledTkq> server_result_query_;
     QComboBox* saved_searches_{nullptr};
     QPushButton* save_search_{nullptr};

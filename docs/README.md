@@ -19,7 +19,15 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-22, through ADR-0215 and database schema 40.
+Updated on 2026-09-22, through ADR-0219 and database schema 40.
+
+- [ADR-0219: Direct mapped Convert and ReplayGain](adr/0219-direct-mapped-conversion-and-replaygain.md).
+
+- [ADR-0218: Explicit permanent conversion gain](adr/0218-explicit-permanent-conversion-gain.md).
+
+- [ADR-0217: Grouped search presets](adr/0217-grouped-search-presets.md).
+
+- [ADR-0216: History ordering and dynamic result interactions](adr/0216-history-sorting-and-dynamic-result-interactions.md).
 
 - [ADR-0215: Listening-history queries](adr/0215-history-library-queries.md).
 - [ADR-0214: Continuous album playback](adr/0214-continuous-album-playback.md).

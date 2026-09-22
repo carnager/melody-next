@@ -3,6 +3,8 @@
 #include "bench/bench_main_window_helpers.hpp"
 
 #include "trackknife/persistence/rating_identity.hpp"
+#include <QPainter>
+#include <QPainterPath>
 
 #include <algorithm>
 #include <charconv>
@@ -10,6 +12,46 @@
 #include <unordered_set>
 
 namespace trackknife::bench {
+
+QIcon albumShuffleIcon(const QPalette& palette) {
+    QIcon icon;
+    for (const auto mode : {QIcon::Normal, QIcon::Disabled, QIcon::Active}) {
+        for (const int size : {24, 48}) {
+            QPixmap pixmap(size, size);
+            pixmap.fill(Qt::transparent);
+            QPainter painter(&pixmap);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.scale(static_cast<double>(size) / 24.0, static_cast<double>(size) / 24.0);
+            painter.setPen(
+                QPen(palette.color(mode == QIcon::Disabled ? QPalette::Disabled : QPalette::Active,
+                                   QPalette::ButtonText),
+                     1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            // Stacked album sleeves above two crossing shuffle arrows.
+            painter.drawRoundedRect(QRectF(4, 2, 10, 8), 1, 1);
+            painter.drawPolyline(QPolygonF{QPointF(16, 4), QPointF(18, 4), QPointF(18, 12)});
+            painter.drawEllipse(QPointF(9, 6), 2, 2);
+            QPainterPath arrows;
+            arrows.moveTo(3, 14);
+            arrows.lineTo(7, 14);
+            arrows.lineTo(15, 21);
+            arrows.lineTo(21, 21);
+            arrows.moveTo(3, 21);
+            arrows.lineTo(7, 21);
+            arrows.lineTo(15, 14);
+            arrows.lineTo(21, 14);
+            arrows.moveTo(18, 12);
+            arrows.lineTo(21, 14);
+            arrows.lineTo(18, 16);
+            arrows.moveTo(18, 19);
+            arrows.lineTo(21, 21);
+            arrows.lineTo(18, 23);
+            painter.drawPath(arrows);
+            painter.end();
+            icon.addPixmap(pixmap, mode);
+        }
+    }
+    return icon;
+}
 
 QString trackColumnId(const int logical) {
     const auto found = std::ranges::find(track_column_specs, logical, &TrackColumnSpec::logical);

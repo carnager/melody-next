@@ -175,6 +175,14 @@ class FakeMpdServer final {
             }
             write_all(client, "file: Jazz/A/01.flac\nArtist: Jazz Artist\n"
                               "Title: Structured hit\nOK\n");
+        } else if (command.starts_with("melody_list_search ")) {
+            if (command.find("Road") == std::string_view::npos ||
+                command.find("history-playcount") == std::string_view::npos) {
+                write_all(client, "ACK [2@0] {melody_list_search} expected list history search\n");
+                return;
+            }
+            write_all(client, "file: Jazz/A/01.flac\nTitle: First occurrence\n"
+                              "file: Jazz/A/01.flac\nTitle: Second occurrence\nOK\n");
         } else if (command.starts_with("searchalbums ")) {
             if (command.find("albumrating >= 8") == std::string_view::npos) {
                 write_all(client, "ACK [2@0] {searchalbums} expected album rating filter\n");
@@ -221,7 +229,8 @@ class FakeMpdServer final {
                    command == "melody_upnext_edit 42 21 20") {
             write_all(client, "OK\n");
         } else if (command == "melody_shuffle_albums 41") {
-            write_all(client, "ACK [2@0] {melody_shuffle_albums} queue changed; refresh and retry\n");
+            write_all(client,
+                      "ACK [2@0] {melody_shuffle_albums} queue changed; refresh and retry\n");
         } else if (command == "melody_upnext clear 41") {
             write_all(client,
                       "ACK [2@0] {melody_upnext} request queue changed; refresh before retrying\n");
@@ -650,6 +659,11 @@ void client_negotiates_and_preserves_extensions() {
     require(expression_search.has_value() && expression_search->size() == 1U &&
                 expression_search->front().metadata.first("Title") == "Structured hit",
             "expression search must send the filter with sort and window");
+    const auto list_search =
+        client.search_expression("(history-playcount == 0)", "-history-playcount", 20'000U, "Road");
+    require(list_search && list_search->size() == 2U &&
+                (*list_search)[0].uri == (*list_search)[1].uri,
+            "list search must route its exact list and preserve duplicate occurrences");
 
     require(client.set_sticker_rating("Artist/Release/01.flac", 8U).has_value(),
             "track rating must store the interoperable rating sticker");

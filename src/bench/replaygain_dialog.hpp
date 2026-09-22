@@ -22,6 +22,8 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QTimer;
+class QListWidget;
+class QProgressBar;
 
 namespace trackknife::bench {
 
@@ -43,6 +45,7 @@ class ReplayGainDialog final : public QDialog {
         core::Result<metadata::StagedMetadataSelection> selection{
             metadata::StagedMetadataSelection{}};
         std::vector<MetadataPropertiesAudioSource> audio;
+        QStringList groups;
     };
     struct ApplyOutcome {
         core::Result<operations::MetadataApplyResult> result{operations::MetadataApplyResult{}};
@@ -51,6 +54,7 @@ class ReplayGainDialog final : public QDialog {
     };
 
     void startRun();
+    void startCapture();
     void finishCapture();
     void finishScan();
     void finishApply();
@@ -69,6 +73,11 @@ class ReplayGainDialog final : public QDialog {
     QLabel* status_{nullptr};
     QPlainTextEdit* problems_{nullptr};
     QPushButton* run_{nullptr};
+    QPushButton* preview_{nullptr};
+    QPushButton* stop_{nullptr};
+    QListWidget* groups_{nullptr};
+    QProgressBar* progress_{nullptr};
+    bool preview_only_{false};
 
     QFutureWatcher<std::shared_ptr<Capture>> capture_watcher_;
     QFutureWatcher<std::shared_ptr<ReplayGainScanOutcome>> scan_watcher_;

@@ -245,6 +245,9 @@ namespace {
 }
 
 [[nodiscard]] core::Result<std::string> translate_sort(const TkqSort& sort) {
+    if (!sort.history.empty())
+        return (sort.direction == TkqSortDirection::descending ? "-history-" : "history-") +
+               sort.history;
     auto source = sort.source;
     const auto begin = source.find_first_not_of(" \t");
     const auto end = source.find_last_not_of(" \t");
@@ -282,7 +285,10 @@ namespace {
 
 core::Result<MelodyTranslatedQuery> translate_tkq_to_melody(const CompiledTkq& compiled,
                                                             const bool full_grammar,
-                                                            const bool history_filters) {
+                                                            const bool history_filters,
+                                                            const bool history_sort) {
+    if (compiled.sort && !compiled.sort->history.empty() && !history_sort)
+        return std::unexpected(unsupported("This server does not advertise history sorting"));
     if (!history_filters && std::ranges::any_of(compiled.predicates, [](const auto& p) {
             return p.operand == TkqOperandKind::history;
         }))

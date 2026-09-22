@@ -31,6 +31,6 @@ struct MelodyTranslatedQuery {
 // silently broadened query.
 [[nodiscard]] core::Result<MelodyTranslatedQuery>
 translate_tkq_to_melody(const CompiledTkq& compiled, bool full_grammar = false,
-                        bool history_filters = false);
+                        bool history_filters = false, bool history_sort = false);
 
 } // namespace trackknife::query

@@ -64,6 +64,8 @@ struct TkqSort {
     // Exact tkfmt-1 source, compiled in the sort context.
     std::string source;
     titleformat::Program program;
+    // Explicit SORT HISTORY(name), distinct from existing literal tkfmt source.
+    std::string history;
 };
 
 struct CompiledTkq {

@@ -2,6 +2,7 @@
 
 add_library(
     trackknife_query STATIC
+    src/search_presets.cpp
     src/tkq_lexer.cpp
     src/tkq_melody.cpp
     src/tkq_parser.cpp

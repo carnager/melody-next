@@ -5,6 +5,7 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
+#include "trackknife/persistence/rating_identity.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <taglib/flacfile.h>
@@ -249,6 +250,40 @@ int main(const int argc, char** argv) {
     CHECK(paths_of("title IS Companion AND HISTORY(albumplaycount) EQUAL 1") ==
           std::vector{companion});
     CHECK(paths_of("HISTORY(dayssinceplayed) GREATER -2") == std::vector{jazz});
+    CHECK(paths_of("ALL SORT DESCENDING HISTORY(playcount)").front() == jazz);
+    CHECK(paths_of("ALL SORT HISTORY(lastplayed)").back() == jazz);
+    CHECK(paths_of("ALL SORT DESCENDING HISTORY(albumplaycount)").size() == 4U);
+    const auto album_hash = persistence::album_rating_hash("Miles Davis", "Kind of Blue", "1959");
+    auto companion_source = listened;
+    companion_source.source_reference = companion;
+    companion_source.source_revision = *core::observe_local_source_revision(companion);
+    const auto whole_album = library->history_facts({{companion_source, album_hash},
+                                                     {companion_source, album_hash},
+                                                     {listened, album_hash},
+                                                     {listened, album_hash}});
+    CHECK(whole_album && (*whole_album)[0][0] == 0 && (*whole_album)[0][3] == 1 &&
+          (*whole_album)[3][3] == 1);
+    // Tab history comes from a consistent snapshot and does not count duplicate occurrences twice.
+    const auto indexed_tracks = library->history_facts({{listened, ""}, {listened, ""}});
+    CHECK(indexed_tracks && indexed_tracks->size() == 2U);
+    CHECK(indexed_tracks && (*indexed_tracks)[0][0] == 1 && (*indexed_tracks)[1][3] == 1);
+    auto logical = listened;
+    logical.source_selection = persistence::ListItemSourceSelection{std::nullopt, 1};
+    CHECK(repository->record_local_listen(logical, core::StableId::random(), 2000).has_value());
+    const auto logical_history = library->history_facts({{logical, ""}, {listened, ""}});
+    CHECK(logical_history && (*logical_history)[0][1] == 2000 && (*logical_history)[1][1] == 1000);
+    auto missing_revision = listened;
+    missing_revision.source_revision.reset();
+    CHECK(!library->history_facts({{missing_revision, ""}}));
+    core::CancellationSource stopped;
+    stopped.request_cancellation();
+    CHECK(!library->history_facts({{listened, ""}}, stopped.token()));
+    const auto numeric_sort = query::compile_tkq("ALL SORT HISTORY(playcount)");
+    persistence::TkqRowFacts two, ten;
+    two.history = std::array<std::int64_t, 6>{2, -1, -1, 2, -1, -1};
+    ten.history = std::array<std::int64_t, 6>{10, -1, -1, 10, -1, -1};
+    CHECK(*persistence::tkq_sort_key(*numeric_sort, two) <
+          *persistence::tkq_sort_key(*numeric_sort, ten));
     std::filesystem::remove_all(base, fs_error);
     return failures == 0 ? 0 : 1;
 }

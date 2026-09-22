@@ -778,7 +778,9 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     local_random_action_ = add_mode(QStringLiteral("random"), QStringLiteral("Random"),
                                     QStringLiteral("media-playlist-shuffle"));
     local_single_action_ = add_mode(QStringLiteral("single"), QStringLiteral("Single"), {});
-    local_album_random_action_ = add_mode(QStringLiteral("album-random"), tr("Album shuffle"), {});
+    local_album_random_action_ = add_mode(QStringLiteral("album-random"), tr("Album shuffle"),
+                                          QStringLiteral("media-playlist-shuffle"));
+    local_album_random_action_->setIcon(albumShuffleIcon(palette()));
     connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext())
             return;

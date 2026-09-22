@@ -16,6 +16,7 @@
 #include <QVariantList>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
 
@@ -212,7 +213,8 @@ class MpdProbeController final : public QObject {
     // Runs a raw filter expression; the completion fires on the UI thread
     // with the bounded track list or the failure.
     void searchServerExpression(const QString& expression, const QString& sort,
-                                ServerQueryCompletion completion);
+                                ServerQueryCompletion completion,
+                                std::optional<std::string> list = {});
     Q_INVOKABLE void searchLibrary(const QString& query);
     Q_INVOKABLE void continueSearch();
     Q_INVOKABLE void addLibraryItem(int row);
@@ -313,6 +315,8 @@ class MpdProbeController final : public QObject {
     void applyCommandResult(std::uint64_t token, mpd::SessionCommandResult result);
     void submitTransport(mpd::TransportAction action);
     void requestMelodyAlbumRatings(const std::vector<mpd::Track>& queue);
+    void pumpMelodyAlbumRatings();
+    void loadServerLibraryArtworkAttempt(quint64 token, const QString& uri, int congestion_retries);
     void beginOptimisticPlayback(std::uint64_t command_id, mpd::PlaybackState state);
     void enqueueUri(std::string uri, bool next);
     void enqueueUris(std::vector<std::string> uris, bool next);
@@ -378,6 +382,14 @@ class MpdProbeController final : public QObject {
     QHash<QString, unsigned> melody_album_ratings_;
     QHash<QString, unsigned> melody_album_stored_ratings_;
     QHash<std::uint64_t, QString> pending_album_rating_queries_;
+    // Albums still waiting for a rating query. A long list would otherwise
+    // put hundreds of them on the session queue at once and crowd out the
+    // artwork requests behind them.
+    struct QueuedAlbumRatingQuery {
+        QString group_key;
+        mpd::MelodyAlbumKey key;
+    };
+    std::deque<QueuedAlbumRatingQuery> queued_album_rating_queries_;
     QHash<std::uint64_t, ServerQueryCompletion> pending_expression_searches_;
     QHash<quint64, quint64> pending_search_albums_;
     QString pending_library_query_text_;
@@ -399,7 +411,14 @@ class MpdProbeController final : public QObject {
     QHash<quint64, quint64> pending_library_tree_branches_;
     QHash<quint64, quint64> pending_library_album_counts_;
     QHash<quint64, PendingLibraryTreeRoot> pending_library_tree_filters_;
-    QHash<quint64, quint64> pending_library_tree_artwork_;
+    // Artwork requests carry their uri so a request the session refused for
+    // congestion can be reissued; the model must not see that as "no cover".
+    struct PendingArtworkRequest {
+        quint64 token{0U};
+        QString uri;
+        int congestion_retries{0};
+    };
+    QHash<quint64, PendingArtworkRequest> pending_library_tree_artwork_;
     std::optional<std::uint64_t> pending_artwork_query_;
     QString current_artwork_uri_;
     QHash<quint64, QString> pending_playlist_queries_;

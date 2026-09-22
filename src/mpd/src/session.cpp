@@ -141,6 +141,7 @@ struct Session::Impl {
         std::optional<unsigned> queue_position;
         unsigned query_offset{0U};
         unsigned query_limit{200U};
+        std::optional<std::string> query_list;
         unsigned rating{0U};
         std::vector<std::uint64_t> melody_song_ids;
         MelodyAlbumKey album_rating_key;
@@ -267,7 +268,9 @@ struct Session::Impl {
                                         .message = "MPD transport is not connected",
                                         .context = {}};
             } else if (pending_commands.size() >= maximum_pending_commands) {
-                rejection = core::Error{.code = core::ErrorCode::backend,
+                // A full queue is congestion, not a server verdict: the code
+                // lets callers tell "ask again shortly" apart from a refusal.
+                rejection = core::Error{.code = core::ErrorCode::limit_exceeded,
                                         .message = "MPD command queue is full",
                                         .context = {}};
             } else {
@@ -522,8 +525,8 @@ struct Session::Impl {
             return SessionCommandPayload{*result};
         }
         case SessionCommandKind::database_expression_search: {
-            auto result =
-                client.search_expression(command.uri, command.secondary_uri, command.query_limit);
+            auto result = client.search_expression(command.uri, command.secondary_uri,
+                                                   command.query_limit, command.query_list);
             if (!result) {
                 return std::unexpected(std::move(result.error()));
             }
@@ -1132,12 +1135,13 @@ std::uint64_t Session::set_melody_album_rating(MelodyAlbumKey key, const unsigne
 }
 
 std::uint64_t Session::search_expression(std::string filter_expression, std::string sort,
-                                         const unsigned limit) {
+                                         const unsigned limit, std::optional<std::string> list) {
     Impl::PendingCommand command;
     command.kind = SessionCommandKind::database_expression_search;
     command.uri = std::move(filter_expression);
     command.secondary_uri = std::move(sort);
     command.query_limit = limit;
+    command.query_list = std::move(list);
     return implementation_->enqueue(std::move(command));
 }
 

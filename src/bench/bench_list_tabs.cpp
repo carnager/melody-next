@@ -754,6 +754,62 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     return raw_tab;
 }
 
+void BenchMainWindow::searchCurrentServerTab(
+    const query::CompiledTkq& compiled,
+    std::function<void(core::Result<std::vector<mpd::Track>>)> completion) {
+    auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+    auto* model = view ? qobject_cast<quick::MpdQueueModel*>(view->model()) : nullptr;
+    if (!isMpdContext() || !model) {
+        completion(std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                               .message = "No server track tab is active",
+                                               .context = {}}));
+        return;
+    }
+    auto translated = query::translate_tkq_to_melody(
+        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
+        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
+        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
+    if (!translated) {
+        completion(std::unexpected(translated.error()));
+        return;
+    }
+    auto snapshot = model->tracksSnapshot();
+    if (snapshot.size() > 100'000U) {
+        completion(std::unexpected(
+            core::Error{.code = core::ErrorCode::limit_exceeded,
+                        .message = "Current-tab searches support at most 100,000 rows",
+                        .context = {}}));
+        return;
+    }
+    const auto* tab = mpdPlaylistTabForWidget(view);
+    const auto list = tab ? utf8Bytes(tab->name) : std::string{};
+    if (!mpd_controller_->supportsCommand(QStringLiteral("melody_list_search"))) {
+        completion(std::unexpected(core::Error{
+            .code = core::ErrorCode::unsupported,
+            .message = "Current-tab server queries require Melody's list-search capability",
+            .context = {}}));
+        return;
+    }
+    mpd_controller_->searchServerExpression(
+        displayText(translated->filter_expression), displayText(translated->sort),
+        [model = QPointer{model}, snapshot = std::move(snapshot),
+         completion = std::move(completion)](core::Result<std::vector<mpd::Track>> result) mutable {
+            if (!result) {
+                completion(std::unexpected(result.error()));
+                return;
+            }
+            if (!model || model->tracksSnapshot() != snapshot) {
+                completion(
+                    std::unexpected(core::Error{.code = core::ErrorCode::conflict,
+                                                .message = "The source list changed; search again",
+                                                .context = {}}));
+                return;
+            }
+            completion(std::move(*result));
+        },
+        list);
+}
+
 void BenchMainWindow::openSearchDialog() {
     // Search where you are: a server-side tab means the server library.
     const auto server_context = isMpdContext();
@@ -761,12 +817,10 @@ void BenchMainWindow::openSearchDialog() {
         if (server_context) {
             search_dialog_->preferServerScope();
         }
-        if (server_context) {
-            search_dialog_->preferServerScope();
-        }
         search_dialog_->show();
         search_dialog_->raise();
         search_dialog_->activateWindow();
+        search_dialog_->focusInput();
         return;
     }
     // ADR-0153: database scope reads the workspace index; tab scope
@@ -794,7 +848,8 @@ void BenchMainWindow::openSearchDialog() {
                        std::function<void(QStringList, int, QString)> completion) {
                     auto translated = query::translate_tkq_to_melody(
                         compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")));
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
                     if (!translated) {
                         completion({}, 0, displayText(translated.error().message));
                         return;
@@ -835,7 +890,8 @@ void BenchMainWindow::openSearchDialog() {
                 [this](const query::CompiledTkq& compiled, const QString& query_text) {
                     auto translated = query::translate_tkq_to_melody(
                         compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")));
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
                     if (!translated) {
                         return;
                     }
@@ -853,9 +909,56 @@ void BenchMainWindow::openSearchDialog() {
                                              std::move(*result), true);
                         });
                 },
+            .current_available = [this] { return isMpdContext(); },
+            .run_current =
+                [this](const query::CompiledTkq& compiled,
+                       std::function<void(QStringList, int, QString)> completion) {
+                    searchCurrentServerTab(compiled, [completion =
+                                                          std::move(completion)](auto result) {
+                        if (!result) {
+                            completion({}, 0, displayText(result.error().message));
+                            return;
+                        }
+                        QStringList labels;
+                        for (const auto& track : *result)
+                            labels.push_back(displayText(
+                                std::string{track.metadata.first("Title").value_or(track.uri)}));
+                        completion(labels, static_cast<int>(result->size()), {});
+                    });
+                },
+            .open_current =
+                [this](const query::CompiledTkq& compiled, const QString& text) {
+                    searchCurrentServerTab(compiled, [this, text](auto result) {
+                        if (!result) {
+                            statusBar()->showMessage(displayText(result.error().message), 8000);
+                            return;
+                        }
+                        openMpdSearchTab(QStringLiteral("tkq: %1").arg(text), std::move(*result),
+                                         true);
+                    });
+                },
+            .unsupported_reason =
+                [this](const query::CompiledTkq& compiled, bool current) {
+                    if (current &&
+                        !mpd_controller_->supportsCommand(QStringLiteral("melody_list_search")))
+                        return QStringLiteral("This server does not support current-list search");
+                    const auto translated = query::translate_tkq_to_melody(
+                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
+                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
+                    return translated ? QString{} : displayText(translated.error().message);
+                },
         },
         this);
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    const auto watch_tab = [this, dialog = search_dialog_] {
+        if (!dialog)
+            return;
+        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
+        dialog->watchCurrentModel(view ? view->model() : nullptr);
+    };
+    connect(tabs_, &QTabWidget::currentChanged, search_dialog_, watch_tab);
+    watch_tab();
     connect(search_dialog_, &SearchDialog::rowsRequested, this,
             [this](const QString& name, std::vector<LocalTrackRow> rows,
                    const LocalLibraryAction action) {
@@ -1079,7 +1182,9 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
         return false;
     }
     auto* source_tab = static_cast<ListTab*>(source->property("bench-tab-pointer").value<void*>());
-    if (source_tab == nullptr || source_tab == target) {
+    auto* source_model = qobject_cast<LocalListModel*>(source->model());
+    const bool dynamic = source->property("definition-owned").toBool();
+    if (!source_model || source_tab == target || (!source_tab && !dynamic) || (dynamic && move)) {
         return false;
     }
     std::vector<LocalTrackRow> transferred;
@@ -1088,10 +1193,10 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
     source_rows.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
         const auto row_index = row.toInt();
-        if (row_index < 0 || row_index >= static_cast<int>(source_tab->model->rows().size())) {
+        if (row_index < 0 || row_index >= static_cast<int>(source_model->rows().size())) {
             continue;
         }
-        transferred.push_back(source_tab->model->rows()[static_cast<std::size_t>(row_index)]);
+        transferred.push_back(source_model->rows()[static_cast<std::size_t>(row_index)]);
         source_rows.push_back(row_index);
     }
     if (transferred.empty()) {
@@ -1163,11 +1268,14 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
     const auto* source_tab = source == nullptr
                                  ? nullptr
                                  : tabForDocument(source->property("bench-document-id").toString());
-    if (source_tab == nullptr || source_tab->view != source || rows.isEmpty() ||
-        std::ranges::any_of(rows, [source_tab](const QVariant& row) {
+    auto* source_model = source ? qobject_cast<LocalListModel*>(source->model()) : nullptr;
+    const bool dynamic = source && source->property("definition-owned").toBool();
+    if (!source_model || (!dynamic && (!source_tab || source_tab->view != source)) ||
+        (dynamic && move) || rows.isEmpty() ||
+        std::ranges::any_of(rows, [source_model](const QVariant& row) {
             bool valid = false;
             const auto index = row.toInt(&valid);
-            return !valid || index < 0 || index >= source_tab->model->rowCount();
+            return !valid || index < 0 || index >= source_model->rowCount();
         })) {
         return false;
     }
@@ -1754,11 +1862,16 @@ void BenchMainWindow::refreshLocalRatings() {
 }
 
 void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
-    if (view == nullptr || view->selectionModel() == nullptr || source_tab == nullptr ||
-        track_context_menu_ == nullptr) {
+    if (source_tab)
+        addLocalRateMenus(track_context_menu_, view);
+}
+
+void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (!menu || !model || !view->selectionModel()) {
         return;
     }
-    const auto& rows = source_tab->model->rows();
+    const auto& rows = model->rows();
     QStringList track_hashes;
     QStringList album_hashes;
     QSet<QString> unique_tracks;
@@ -1797,40 +1910,43 @@ void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
         return;
     }
     const auto store_ready = local_library_ != nullptr;
-    track_context_menu_->addSeparator();
-    auto* rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate"));
+    menu->addSeparator();
+    auto* rate_menu = menu->addMenu(QStringLiteral("Rate"));
     rate_menu->setObjectName(QStringLiteral("bench-local-rate-menu"));
     rate_menu->setEnabled(store_ready);
-    auto* album_rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate album"));
+    auto* album_rate_menu = menu->addMenu(QStringLiteral("Rate album"));
     album_rate_menu->setObjectName(QStringLiteral("bench-local-album-rate-menu"));
     album_rate_menu->setEnabled(store_ready && !album_hashes.isEmpty());
-    const auto make_rating_action = [](QMenu* menu, const unsigned rating) -> QAction* {
+    const auto make_rating_action = [](QMenu* target_menu, const unsigned rating) -> QAction* {
         if (rating == 0U) {
-            auto* unrate = menu->addAction(ui::ratingMenuLabel(rating));
+            auto* unrate = target_menu->addAction(ui::ratingMenuLabel(rating));
             unrate->setCheckable(true);
             return unrate;
         }
-        auto* stars = new ui::RatingMenuAction(rating, menu);
-        menu->addAction(stars);
+        auto* stars = new ui::RatingMenuAction(rating, target_menu);
+        target_menu->addAction(stars);
         return stars;
     };
     for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
         auto* rate = make_rating_action(rate_menu, rating);
         rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
         rate->setChecked(ratings_match && common_rating == rating);
-        connect(rate, &QAction::triggered, this, [this, track_hashes, rating] {
-            if (local_library_ == nullptr) {
-                return;
-            }
-            QHash<QString, unsigned> applied;
-            for (const auto& hash : track_hashes) {
-                local_library_->storeRating(hash.toStdString(), false, rating);
-                applied.insert(hash, rating);
-            }
-            for (const auto& tab : list_tabs_) {
-                tab->model->applyRatings(applied);
-            }
-        });
+        connect(rate, &QAction::triggered, this,
+                [this, model = QPointer{model}, track_hashes, rating] {
+                    if (local_library_ == nullptr) {
+                        return;
+                    }
+                    QHash<QString, unsigned> applied;
+                    for (const auto& hash : track_hashes) {
+                        local_library_->storeRating(hash.toStdString(), false, rating);
+                        applied.insert(hash, rating);
+                    }
+                    for (const auto& tab : list_tabs_) {
+                        tab->model->applyRatings(applied);
+                    }
+                    if (model)
+                        model->applyRatings(applied);
+                });
         auto* album_rate = make_rating_action(album_rate_menu, rating);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
         album_rate->setChecked(album_ratings_match && common_album_rating == rating);

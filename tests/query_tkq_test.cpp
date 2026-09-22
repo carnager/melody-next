@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "query/history_corpus.hpp"
+#include "query/search_preset_corpus.hpp"
+#include "trackknife/query/search_presets.hpp"
 #include "trackknife/query/tkq.hpp"
 #include "trackknife/query/tkq_melody.hpp"
 
+#include <algorithm>
 #include <iostream>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -266,6 +270,64 @@ void melodyFullGrammarTranslatesStructuredQueries() {
 }
 
 int main() {
+    std::set<std::string_view> ids;
+    std::set<std::string_view> topics;
+    for (const auto& preset : trackknife::query::search_presets()) {
+        CHECK(ids.insert(preset.id).second);
+        topics.insert(preset.topic);
+        const auto source = trackknife::query::preset_query(preset, preset.example);
+        CHECK(source.has_value());
+        if (!source)
+            continue;
+        const auto compiled = compile_tkq(*source);
+        CHECK(compiled.has_value());
+        CHECK(compiled && trackknife::query::translate_tkq_to_melody(*compiled, true, true, true));
+        if (preset.input == trackknife::query::PresetInput::integer) {
+            CHECK(!trackknife::query::preset_query(preset, ""));
+            CHECK(!trackknife::query::preset_query(preset, "1 OR ALL"));
+            CHECK(!trackknife::query::preset_query(preset, std::to_string(preset.minimum - 1)));
+            CHECK(!trackknife::query::preset_query(preset, std::to_string(preset.maximum + 1)));
+        }
+        if (preset.input == trackknife::query::PresetInput::text) {
+            CHECK(!trackknife::query::preset_query(preset, ""));
+            CHECK(!trackknife::query::preset_query(preset, std::string(1025, 'x')));
+            const auto escaped =
+                trackknife::query::preset_query(preset, "a\" OR artist PRESENT OR \"b");
+            CHECK(escaped && compile_tkq(*escaped)->predicates.size() == 1U);
+        }
+        if (preset.id == "decade")
+            CHECK(!trackknife::query::preset_query(preset, "1991"));
+    }
+    CHECK(topics.size() == 5U);
+    for (const auto& test : search_preset_corpus::cases) {
+        const auto presets = trackknife::query::search_presets();
+        const auto found =
+            std::ranges::find(presets, test.input_context, &trackknife::query::SearchPreset::id);
+        CHECK(found != presets.end());
+        if (found == presets.end())
+            continue;
+        const auto result = trackknife::query::preset_query(*found, test.source);
+        CHECK(result && *result == test.expected);
+    }
+    for (const auto& test : history_corpus::sort_cases) {
+        const auto compiled = compile_tkq(test.source);
+        CHECK(compiled.has_value());
+        if (!compiled)
+            continue;
+        CHECK(!trackknife::query::translate_tkq_to_melody(*compiled, true, true));
+        const auto translated_sort =
+            trackknife::query::translate_tkq_to_melody(*compiled, true, true, true);
+        CHECK(translated_sort.has_value());
+        if (translated_sort)
+            CHECK(translated_sort->sort == test.expected);
+    }
+    const auto literal_sort = compile_tkq("ALL SORT BY HISTORY");
+    CHECK(literal_sort && literal_sort->sort->history.empty());
+    const auto tag_sort = compile_tkq("ALL SORT BY %playcount%");
+    CHECK(tag_sort && tag_sort->sort->history.empty());
+    CHECK(!compile_tkq("ALL SORT HISTORY(unknown)"));
+    CHECK(!compile_tkq("ALL SORT HISTORY(playcount) trailing"));
+    CHECK(!compile_tkq("ALL SORT HISTORY(playcount"));
     for (const auto& test : history_corpus::cases) {
         const auto compiled = compile_tkq(test.source);
         CHECK(compiled.has_value());

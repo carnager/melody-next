@@ -6,6 +6,7 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/document.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/tkq_row.hpp"
 #include "trackknife/query/tkq.hpp"
 
@@ -24,6 +25,12 @@ struct LibraryRoot {
     std::string raw_path;
     bool available{false};
     std::string error;
+};
+
+struct LibraryHistorySource {
+    ListItem source;
+    // Empty for unnamed albums, which remain singleton source groups.
+    std::string album_hash;
 };
 
 enum class LibraryEntryKind { artist, album, track };
@@ -104,6 +111,9 @@ class LocalLibrary final {
     core::Result<std::vector<std::string>>
     filter_paths(const query::CompiledTkq& compiled,
                  const core::CancellationToken& cancellation = {}) const;
+    core::Result<std::vector<std::array<std::int64_t, 6>>>
+    history_facts(const std::vector<LibraryHistorySource>& sources,
+                  const core::CancellationToken& cancellation = {}) const;
     // Reads cached fields/technicals in input order, preserving raw paths and duplicates.
     // No filesystem access; missing index records fail rather than trigger discovery.
     core::Result<std::vector<LibraryTrackSnapshot>>

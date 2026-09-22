@@ -106,12 +106,11 @@ void BenchMainWindow::buildMpdStatusControls() {
     mpd_random_button_ = add_action_button(mpd_random_action_, QStringLiteral("bench-mpd-random"));
     connect(mpd_random_action_, &QAction::triggered, mpd_controller_,
             &quick::MpdProbeController::setRandomEnabled);
-    mpd_album_random_action_ = new QAction(tr("Album shuffle"), this);
+    mpd_album_random_action_ = new QAction(albumShuffleIcon(palette()), tr("Album shuffle"), this);
     mpd_album_random_action_->setObjectName(QStringLiteral("action-mpd-album-random"));
     mpd_album_random_action_->setCheckable(true);
     mpd_album_random_button_ =
         add_action_button(mpd_album_random_action_, QStringLiteral("bench-mpd-album-random"));
-    mpd_album_random_button_->setToolButtonStyle(Qt::ToolButtonTextOnly);
     connect(mpd_album_random_action_, &QAction::triggered, mpd_controller_,
             &quick::MpdProbeController::setAlbumRandomEnabled);
 
@@ -1493,13 +1492,19 @@ BenchMainWindow::materializeMpdSelectionAsLocalTab(const QStringList& uris) {
 }
 
 void BenchMainWindow::showMpdMetadataProperties(const QStringList& uris) {
+    auto reader = mappedMpdSourceReader(uris);
+    if (reader)
+        openMetadataProperties(static_cast<std::size_t>(uris.size()), std::move(reader));
+}
+
+MetadataPropertiesSourceReader BenchMainWindow::mappedMpdSourceReader(const QStringList& uris) {
     if (uris.isEmpty())
-        return;
+        return {};
     const auto root = effectiveMpdMusicRoot();
     if (root.isEmpty()) {
         statusBar()->showMessage(QStringLiteral("Set the MPD music folder in Settings first"),
                                  5000);
-        return;
+        return {};
     }
     const auto encoded = QFile::encodeName(root);
     const std::filesystem::path root_path{
@@ -1514,15 +1519,13 @@ void BenchMainWindow::showMpdMetadataProperties(const QStringList& uris) {
                 QStringLiteral(
                     "The selection contains a URI that cannot be mapped to the MPD music folder"),
                 5000);
-            return;
+            return {};
         }
         paths.push_back(path->native());
     }
-    const auto count = paths.size();
     // Mapping is lexical only. The editor captures files and revisions on its worker;
     // even checking existence here could stall the UI on a network mount.
-    openMetadataProperties(
-        count,
+    return
         [paths = std::move(paths)](std::size_t index) -> std::optional<MetadataPropertiesSource> {
             if (index >= paths.size())
                 return std::nullopt;
@@ -1533,13 +1536,17 @@ void BenchMainWindow::showMpdMetadataProperties(const QStringList& uris) {
                            .needs_metadata_capture = true},
                 .track_label = QFile::decodeName(QByteArray::fromStdString(paths[index])),
             };
-        });
+        };
 }
 
 void BenchMainWindow::materializeMpdSelectionForDialog(const QStringList& uris,
                                                        const MaterializedDialog dialog) {
     if (dialog == MaterializedDialog::edit_tags) {
         showMpdMetadataProperties(uris);
+        return;
+    }
+    if (dialog == MaterializedDialog::convert || dialog == MaterializedDialog::replay_gain) {
+        showMappedFileTool(uris, dialog);
         return;
     }
     auto* tab = materializeMpdSelectionAsLocalTab(uris);

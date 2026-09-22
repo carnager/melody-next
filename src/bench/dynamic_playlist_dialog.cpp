@@ -4,11 +4,13 @@
 #include "uicommon/queue_table_view.hpp"
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDataStream>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSpinBox>
 #include <QTimer>
@@ -16,6 +18,31 @@
 #include <QVBoxLayout>
 
 namespace trackknife::bench {
+namespace {
+// Raw source identity plus duplicate ordinal, never a mutable row number or title.
+QList<QByteArray> resultKeys(QAbstractItemModel* model) {
+    QList<QByteArray> keys;
+    QHash<QByteArray, int> occurrences;
+    for (int i = 0; i < model->rowCount(); ++i) {
+        QByteArray key;
+        QDataStream stream(&key, QIODevice::WriteOnly);
+        if (auto* local = qobject_cast<LocalListModel*>(model)) {
+            const auto& row = local->rows()[static_cast<std::size_t>(i)];
+            stream << QByteArray::fromStdString(row.raw_path)
+                   << row.selection.stream_index.value_or(-1)
+                   << row.selection.subsong_index.value_or(-1)
+                   << static_cast<qint64>(row.segment ? row.segment->start_sample : -1)
+                   << static_cast<qint64>(row.segment ? row.segment->end_sample.value_or(-1) : -1);
+        } else if (auto* remote = qobject_cast<quick::MpdQueueModel*>(model)) {
+            stream << QByteArray::fromStdString(remote->trackAt(i)->uri);
+        }
+        const auto ordinal = occurrences[key]++;
+        stream << ordinal;
+        keys.push_back(std::move(key));
+    }
+    return keys;
+}
+} // namespace
 DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_label,
                                              DynamicPlaylistService::Search search, QWidget* parent)
     : QDialog(parent), profile_(std::move(profile)),
@@ -104,16 +131,25 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     view_ = new ui::QueueTableView(this);
     view_->setObjectName(QStringLiteral("dynamic-tracks"));
     view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    view_->setDragEnabled(false);
+    view_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    view_->setProperty("definition-owned", true);
+    view_->setDragDropMode(QAbstractItemView::DragOnly);
+    view_->setDefaultDropAction(Qt::CopyAction);
+    view_->setDragEnabled(true);
     view_->setAcceptDrops(false);
+    view_->setActivateCallback([this](const QModelIndex&) { playCurrent(); });
+    connect(view_, &QTableView::doubleClicked, this, [this](const QModelIndex&) { playCurrent(); });
     if (profile_ == QStringLiteral("local")) {
         local_model_ = new LocalListModel(this);
+        local_model_->setProperty("definition-owned", true);
         view_->setModel(local_model_);
     } else {
         mpd_model_ = new quick::MpdQueueModel(this);
+        mpd_model_->setProperty("definition-owned", true);
         view_->setModel(mpd_model_);
     }
-    // The preview is not a persisted local list and has no history loader.
+    // Hidden by default; the owning window supplies the authority's history service.
     view_->setColumnHidden(ui::track_play_count_column, true);
     view_->setColumnHidden(ui::track_last_played_column, true);
     layout->addWidget(view_, 1);
@@ -149,6 +185,15 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
                 status_->setText(error);
                 return;
             }
+            const auto old_keys = resultKeys(view_->model());
+            QSet<QByteArray> selected;
+            for (const auto& index : view_->selectionModel()->selectedRows())
+                selected.insert(old_keys.value(index.row()));
+            const auto current_key = old_keys.value(view_->currentIndex().row());
+            const auto top = view_->indexAt(QPoint{1, 1});
+            const auto top_key = old_keys.value(top.row());
+            const auto offset = top.isValid() ? view_->visualRect(top).top() : 0;
+            const auto horizontal = view_->horizontalScrollBar()->value();
             tracks_ = tracks;
             if (local_model_) {
                 const auto& rows = std::get<std::vector<LocalTrackRow>>(tracks_);
@@ -163,6 +208,24 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
                     local_model_->replaceRows(rows);
             } else
                 mpd_model_->replaceTracks(std::get<std::vector<mpd::Track>>(tracks_));
+            const auto keys = resultKeys(view_->model());
+            view_->selectionModel()->clearSelection();
+            for (int i = 0; i < keys.size(); ++i) {
+                const auto index = view_->model()->index(i, 0);
+                if (selected.contains(keys[i]))
+                    view_->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                               QItemSelectionModel::Rows);
+                if (!current_key.isEmpty() && keys[i] == current_key)
+                    view_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+                if (!top_key.isEmpty() && keys[i] == top_key) {
+                    view_->scrollTo(index, QAbstractItemView::PositionAtTop);
+                    if (view_->verticalScrollMode() == QAbstractItemView::ScrollPerPixel)
+                        view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->value() -
+                                                             offset);
+                }
+            }
+            view_->horizontalScrollBar()->setValue(horizontal);
+            emit resultsChanged();
             const auto count = std::visit([](const auto& rows) { return rows.size(); }, tracks_);
             open_->setEnabled(count > 0);
             append_->setEnabled(count > 0);
@@ -261,6 +324,11 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
         status_->setText(QString::fromStdString(loaded.error().message));
 }
 DynamicPlaylistDialog::~DynamicPlaylistDialog() { service_->cancel(); }
+QString DynamicPlaylistDialog::playlistName() const { return name_->text().trimmed(); }
+void DynamicPlaylistDialog::playCurrent() {
+    if (authority_valid_ && view_->currentIndex().isValid())
+        emit playRequested(view_->currentIndex().row());
+}
 void DynamicPlaylistDialog::refill(const QString& selected) {
     catalog_->clear();
     catalog_->addItem(QStringLiteral("New dynamic playlist…"), QString{});
@@ -338,17 +406,14 @@ void DynamicPlaylistDialog::discardResults() {
     else
         mpd_model_->replaceTracks({});
 }
-void DynamicPlaylistDialog::refresh(const bool preserve_results) {
+void DynamicPlaylistDialog::refresh(const bool) {
     if (!authority_valid_)
         return;
-    if (preserve_results) {
-        refresh_timer_->stop();
-        service_->cancel();
-        open_->setEnabled(false);
-        append_->setEnabled(false);
-    } else {
-        discardResults();
-    }
+    // Definition edits discard explicitly; refresh retains presentation anchors.
+    refresh_timer_->stop();
+    service_->cancel();
+    open_->setEnabled(false);
+    append_->setEnabled(false);
     auto_refresh_ = true;
     refresh_pending_ = false;
     busy_ = true;

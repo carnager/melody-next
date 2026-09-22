@@ -733,7 +733,8 @@ core::Result<std::vector<Track>> Client::search_any(const std::string_view query
 
 core::Result<std::vector<Track>> Client::search_expression(const std::string_view filter_expression,
                                                            const std::string_view sort,
-                                                           const unsigned limit) {
+                                                           const unsigned limit,
+                                                           std::optional<std::string> list) {
     // A query like "date IS 1992" legitimately matches thousands of tracks;
     // the window bounds one response, it does not decide what a search may
     // return.
@@ -746,6 +747,24 @@ core::Result<std::vector<Track>> Client::search_expression(const std::string_vie
                                            .context = {}});
     }
     auto* connection = implementation_->connection.get();
+    if (list) {
+        if (list->contains('\0') || sort.find('\0') != std::string_view::npos)
+            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                               .message = "Invalid list search argument",
+                                               .context = {}});
+        const std::string sort_text{sort};
+        const bool sent =
+            sort.empty() ? mpd_send_command(connection, "melody_list_search", list->c_str(),
+                                            expression.c_str(), nullptr)
+                         : mpd_send_command(connection, "melody_list_search", list->c_str(),
+                                            expression.c_str(), "sort", sort_text.c_str(), nullptr);
+        if (!sent)
+            return std::unexpected(implementation_->take_error("send list search"));
+        auto pairs = implementation_->receive_pairs("receive list search");
+        if (!pairs)
+            return std::unexpected(pairs.error());
+        return project_tracks(*pairs);
+    }
     if (!mpd_search_db_songs(connection, false)) {
         return std::unexpected(implementation_->take_error("begin expression search"));
     }

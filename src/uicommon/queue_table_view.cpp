@@ -775,8 +775,10 @@ void QueueTableView::startDrag(const Qt::DropActions supported_actions) {
     drag.setMimeData(mime_data);
     const auto row_count =
         selectionModel() == nullptr ? 0 : selectionModel()->selectedRows(0).size();
-    const auto summary = row_count == 1 ? QStringLiteral("Move 1 track")
-                                        : QStringLiteral("Move %1 tracks").arg(row_count);
+    const bool copy_only = property("definition-owned").toBool();
+    const auto summary = copy_only        ? QStringLiteral("Copy %1 tracks").arg(row_count)
+                         : row_count == 1 ? QStringLiteral("Move 1 track")
+                                          : QStringLiteral("Move %1 tracks").arg(row_count);
     auto summary_font = font();
     summary_font.setBold(true);
     const QFontMetrics summary_metrics{summary_font};
@@ -797,6 +799,8 @@ void QueueTableView::startDrag(const Qt::DropActions supported_actions) {
     drag.setHotSpot(QPoint{12, summary_pixmap.height() / 2});
 
     auto actions = supported_actions;
+    if (copy_only)
+        actions &= Qt::CopyAction;
     if (dragDropMode() == QAbstractItemView::InternalMove) {
         actions &= ~Qt::CopyAction;
     }

@@ -159,6 +159,11 @@ struct LocalListeningHistory {
     friend bool operator==(const LocalListeningHistory&, const LocalListeningHistory&) = default;
 };
 
+// Pure identity projection shared by repository and consistent query snapshots.
+[[nodiscard]] core::Result<std::string> local_listening_observation(const ListItem& source);
+[[nodiscard]] std::string local_listening_track_hash(const std::string& source_id,
+                                                     const ListItem& source);
+
 struct LocalMetadataRefresh {
     core::StableId operation_id;
     std::string source_reference;

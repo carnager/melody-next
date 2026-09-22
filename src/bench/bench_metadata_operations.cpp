@@ -27,6 +27,8 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPointer>
+#include <QProgressDialog>
+#include <QPromise>
 #include <QPushButton>
 #include <QSet>
 #include <QSettings>
@@ -280,10 +282,15 @@ run_metadata_operation_job(const std::filesystem::path& database_path,
 
 void BenchMainWindow::showConvertDialog() {
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
+    showConvertForView(tab ? tab->view : nullptr);
+}
+
+void BenchMainWindow::showConvertForView(QTableView* view) {
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (!model || !view->selectionModel()) {
         return;
     }
-    auto selected = tab->view->selectionModel()->selectedRows();
+    auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
     if (selected.empty()) {
         return;
@@ -292,11 +299,11 @@ void BenchMainWindow::showConvertDialog() {
     items.reserve(static_cast<std::size_t>(selected.size()));
     for (const auto& index : selected) {
         const auto row_index = index.row();
-        if (row_index < 0 || row_index >= static_cast<int>(tab->model->rows().size())) {
+        if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
             continue;
         }
-        const auto& row = tab->model->rows()[static_cast<std::size_t>(row_index)];
-        auto label = tab->model->index(row_index, local_title_column).data().toString();
+        const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
+        auto label = model->index(row_index, local_title_column).data().toString();
         if (!row.artist.empty()) {
             label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
         }
@@ -312,6 +319,104 @@ void BenchMainWindow::showConvertDialog() {
     if (items.empty()) {
         return;
     }
+    openConvertItems(std::move(items));
+}
+
+void BenchMainWindow::showMappedFileTool(const QStringList& uris, MaterializedDialog tool) {
+    if (uris.size() > 20000) {
+        statusBar()->showMessage(tr("Select at most 20,000 files for this operation."), 8000);
+        return;
+    }
+    auto reader = mappedMpdSourceReader(uris);
+    if (!reader)
+        return;
+    const auto count = static_cast<std::size_t>(uris.size());
+    if (tool == MaterializedDialog::replay_gain) {
+        auto* dialog = new ReplayGainDialog(count, std::move(reader), metadataPlanApplierFactory(),
+                                            metadataApplyObserver(), this);
+        dialog->show();
+        return;
+    }
+    if (mapped_tool_loading_) {
+        statusBar()->showMessage(tr("A conversion selection is already being prepared."), 5000);
+        return;
+    }
+    mapped_tool_loading_ = true;
+    auto cancellation = std::make_shared<core::CancellationSource>();
+    auto* progress = new QProgressDialog(tr("Reading selected files for conversion…"), tr("Cancel"),
+                                         0, static_cast<int>(count), this);
+    progress->setObjectName(QStringLiteral("bench-mapped-convert-progress"));
+    progress->setWindowModality(Qt::NonModal);
+    progress->setAutoClose(false);
+    progress->setAutoReset(false);
+    progress->setMinimumDuration(0);
+    progress->setValue(0);
+    connect(progress, &QProgressDialog::canceled, this,
+            [cancellation] { cancellation->request_cancellation(); });
+    using Captured = core::Result<std::vector<ConvertDialogItem>>;
+    auto* watcher = new QFutureWatcher<Captured>(this);
+    connect(this, &QObject::destroyed, watcher,
+            [cancellation] { cancellation->request_cancellation(); });
+    connect(watcher, &QFutureWatcherBase::progressValueChanged, progress,
+            &QProgressDialog::setValue);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, progress, cancellation] {
+        mapped_tool_loading_ = false;
+        progress->deleteLater();
+        auto result = watcher->result();
+        watcher->deleteLater();
+        if (cancellation->is_cancellation_requested())
+            return;
+        if (!result) {
+            statusBar()->showMessage(displayText(result.error().message), 10000);
+            return;
+        }
+        openConvertItems(std::move(*result));
+    });
+    watcher->setFuture(QtConcurrent::run([reader = std::move(reader), count, cancellation,
+                                          closing = probe_cancellation_.token()](
+                                             QPromise<Captured>& promise) {
+        promise.setProgressRange(0, static_cast<int>(count));
+        std::vector<ConvertDialogItem> items;
+        items.reserve(count);
+        for (std::size_t index = 0; index < count; ++index) {
+            if (cancellation->is_cancellation_requested() || closing.is_cancellation_requested()) {
+                promise.addResult(Captured{
+                    std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                                .message = "Conversion preparation cancelled",
+                                                .context = {}})});
+                return;
+            }
+            const auto source = reader(index);
+            if (!source) {
+                promise.addResult(Captured{std::unexpected(
+                    core::Error{.code = core::ErrorCode::not_found,
+                                .message = "The conversion selection is no longer available",
+                                .context = {}})});
+                return;
+            }
+            auto captured = metadata::capture_uncached_metadata_sources({source->source},
+                                                                        cancellation->token());
+            if (!captured) {
+                auto error = captured.error();
+                error.message =
+                    core::escape_raw_path(source->source.raw_path) + ": " + error.message;
+                promise.addResult(Captured{std::unexpected(std::move(error))});
+                return;
+            }
+            auto& file = captured->front();
+            items.push_back(ConvertDialogItem{.raw_path = file.raw_path,
+                                              .selection = source->audio.selection,
+                                              .segment = source->audio.range,
+                                              .source_revision = file.source_revision,
+                                              .metadata = std::move(file.baseline),
+                                              .label = source->track_label});
+            promise.setProgressValue(static_cast<int>(index + 1));
+        }
+        promise.addResult(Captured{std::move(items)});
+    }));
+}
+
+void BenchMainWindow::openConvertItems(std::vector<ConvertDialogItem> items) {
     auto* const persistence_service = persistence_;
     auto* dialog = new ConvertDialog(
         std::move(items),
@@ -365,20 +470,39 @@ void BenchMainWindow::showConvertDialog() {
 
 MetadataPropertiesSourceReader
 BenchMainWindow::selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows) {
-    const QPointer model{tab.model};
+    return selectionSourceReader(tab.model, std::move(rows));
+}
+
+MetadataPropertiesSourceReader
+BenchMainWindow::selectionSourceReader(LocalListModel* source_model,
+                                       std::vector<QPersistentModelIndex> rows) {
+    const QPointer model{source_model};
+    std::shared_ptr<const std::vector<LocalTrackRow>> frozen;
+    if (source_model && source_model->property("definition-owned").toBool()) {
+        auto snapshot = std::make_shared<std::vector<LocalTrackRow>>();
+        for (const auto& index : rows) {
+            if (!index.isValid())
+                return {};
+            snapshot->push_back(source_model->rows().at(static_cast<std::size_t>(index.row())));
+        }
+        frozen = std::move(snapshot);
+    }
     auto selected_rows = std::move(rows);
-    return [model, selected_rows = std::move(selected_rows)](
+    return [model, frozen, selected_rows = std::move(selected_rows)](
                const std::size_t selected_index) -> std::optional<MetadataPropertiesSource> {
-        if (model == nullptr || selected_index >= selected_rows.size() ||
-            !selected_rows[selected_index].isValid()) {
+        if (selected_index >= selected_rows.size() ||
+            (!frozen && (model == nullptr || !selected_rows[selected_index].isValid()))) {
             return std::nullopt;
         }
-        const auto row_index = selected_rows[selected_index].row();
-        if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
+        const auto row_index =
+            frozen ? static_cast<int>(selected_index) : selected_rows[selected_index].row();
+        if (!frozen && (row_index < 0 || row_index >= static_cast<int>(model->rows().size()))) {
             return std::nullopt;
         }
-        const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
-        auto label = model->index(row_index, local_title_column).data().toString();
+        const auto& row =
+            frozen ? (*frozen)[selected_index] : model->rows()[static_cast<std::size_t>(row_index)];
+        auto label = frozen ? displayText(row.title.empty() ? row.raw_path : row.title)
+                            : model->index(row_index, local_title_column).data().toString();
         if (!row.artist.empty()) {
             label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
         }
@@ -541,10 +665,15 @@ MetadataApplyObserver BenchMainWindow::metadataApplyObserver() {
 
 void BenchMainWindow::showReplayGainDialog() {
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
+    showReplayGainForView(tab ? tab->view : nullptr);
+}
+
+void BenchMainWindow::showReplayGainForView(QTableView* view) {
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (!model || !view->selectionModel()) {
         return;
     }
-    auto selected = tab->view->selectionModel()->selectedRows();
+    auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
     if (selected.empty()) {
         return;
@@ -556,7 +685,7 @@ void BenchMainWindow::showReplayGainDialog() {
     }
     const auto count = selected_rows.size();
     auto* dialog =
-        new ReplayGainDialog(count, selectionSourceReader(*tab, std::move(selected_rows)),
+        new ReplayGainDialog(count, selectionSourceReader(model, std::move(selected_rows)),
                              metadataPlanApplierFactory(), metadataApplyObserver(), this);
     dialog->show();
 }
@@ -613,10 +742,15 @@ OutputProfileStore BenchMainWindow::buildOutputProfileStore() {
 
 void BenchMainWindow::showMetadataProperties() {
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
+    showMetadataForView(tab ? tab->view : nullptr);
+}
+
+void BenchMainWindow::showMetadataForView(QTableView* view) {
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (!model || !view->selectionModel()) {
         return;
     }
-    auto selected = tab->view->selectionModel()->selectedRows();
+    auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
     if (selected.empty()) {
         return;
@@ -628,7 +762,7 @@ void BenchMainWindow::showMetadataProperties() {
     }
     const auto selected_row_count = selected_rows.size();
     openMetadataProperties(selected_row_count,
-                           selectionSourceReader(*tab, std::move(selected_rows)));
+                           selectionSourceReader(model, std::move(selected_rows)));
 }
 
 void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_count,

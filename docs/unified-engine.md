@@ -380,7 +380,11 @@ held-open response, and binary on a separate channel.
 - Long operations (scan, ReplayGain, convert, metadata apply) are **jobs**:
   submit, stream progress, cancel, deliver a result document. They never occupy
   the control path. This is the direct lesson of ADR-0219's cover starvation.
-- Transport: unix socket first, TCP in Phase 3.
+- Transport: unix socket first, TCP in Phase 3. Worth stating plainly because
+  it is easy to lose: until Phase 3 an "engine" is always another process on
+  the same host. A path the engine returns therefore still resolves for the
+  client, which makes a shared filesystem an accidental dependency rather than
+  a designed one. Phase 3's byte access is what removes it.
 - **Stable queue identity on the wire.** A playback position and a queue entry
   must be expressible without reference to a client-side row, because rows
   move. This is the same identity Phase 0 introduces to replace

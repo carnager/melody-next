@@ -169,6 +169,11 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     // ADR-0220: an engine socket is opt-in. Unset -- which is the default and
     // what every existing install has -- means the library is opened in this
     // process exactly as before.
+    //
+    // The socket is a unix socket, so the engine is another process on this
+    // host rather than another machine; TCP arrives in Phase 3. That is why
+    // paths it returns still resolve here, and why they will not once the
+    // transport can cross a network.
     const auto configured =
         QSettings{}
             .value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
@@ -1372,7 +1377,7 @@ void LocalLibraryPanel::updateArtwork() {
                 // ADR-0220: ask the core, do not open its database.
                 //
                 // The artwork pool is separate from the query pool, so with a
-                // remote engine both share one connection and their calls
+                // engine connection both share one connection and their calls
                 // serialise. Acceptable while covers are the only thing on
                 // that pool; it is the first place a second connection would
                 // be worth having.

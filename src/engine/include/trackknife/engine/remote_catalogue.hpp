@@ -9,6 +9,12 @@ namespace trackknife::engine {
 
 // The catalogue of an engine reached over a socket.
 //
+// "Remote" here means another process, not another machine. The transport is
+// a unix socket and nothing else: TCP and the authentication it requires are
+// Phase 3. Until then every engine is on this host, which is why a path this
+// returns still resolves for the caller -- a coincidence that stops holding
+// the moment the socket can cross a network.
+//
 // ADR-0220: a connection profile chooses between this and LocalCatalogue, and
 // the workspace cannot tell which it has. Every call blocks on a round trip,
 // which is only affordable because callers are already on worker threads --

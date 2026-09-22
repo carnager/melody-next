@@ -38,6 +38,9 @@ pkg_check_modules(OPENMPT REQUIRED IMPORTED_TARGET "libopenmpt>=0.7")
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET "taglib>=2.0")
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET "libpipewire-0.3>=0.3.50")
 pkg_check_modules(EBUR128 REQUIRED IMPORTED_TARGET "libebur128>=1.2")
+# ADR-0222: protocol v1 is line-delimited JSON. MIT licensed, so GPLv3
+# compatible; header-only, and its notice ships with the package.
+find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(trackknife_project_options INTERFACE)
 trackknife_enable_sanitizers(trackknife_project_options)
@@ -61,6 +64,7 @@ add_subdirectory(src/operations)
 add_subdirectory(src/persistence)
 # ADR-0220: the core's front door. Depends on persistence and query; nothing
 # in the UI may reach past it to open a database itself.
+add_subdirectory(src/protocol)
 add_subdirectory(src/engine)
 add_subdirectory(src/mpd)
 add_subdirectory(src/formats)

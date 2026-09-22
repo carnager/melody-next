@@ -35,52 +35,46 @@ class Workspace final {
 
     [[nodiscard]] unsigned schema_version() const;
 
-    [[nodiscard]] core::Result<std::vector<persistence::ListDocument>>
-    load_all() const;
+    [[nodiscard]] core::Result<std::vector<persistence::ListDocument>> load_all() const;
     [[nodiscard]] core::Result<void>
     replace_all(std::span<const persistence::ListDocument> documents);
     [[nodiscard]] core::Result<persistence::LocalMetadataRefreshResult>
     refresh_local_metadata(const persistence::LocalMetadataRefresh& refresh);
     [[nodiscard]] core::Result<persistence::LocalSourceRelocationResult>
     relocate_local_source(const persistence::LocalSourceRelocation& relocation);
-    [[nodiscard]] core::Result<std::vector<persistence::ConnectionProfile>>
-    load_profiles() const;
+    [[nodiscard]] core::Result<std::vector<persistence::ConnectionProfile>> load_profiles() const;
     [[nodiscard]] core::Result<void>
     replace_profiles(std::span<const persistence::ConnectionProfile> profiles);
-    [[nodiscard]] core::Result<std::vector<persistence::TrackViewPreset>>
-    load_view_presets() const;
+    [[nodiscard]] core::Result<std::vector<persistence::TrackViewPreset>> load_view_presets() const;
     [[nodiscard]] core::Result<void>
     replace_view_presets(std::span<const persistence::TrackViewPreset> presets);
     [[nodiscard]] core::Result<std::vector<persistence::SavedMetadataTransformationChain>>
     load_metadata_transformation_chains() const;
-    [[nodiscard]] core::Result<void>
-    upsert_metadata_transformation_chain(const persistence::SavedMetadataTransformationChain& saved_chain);
-    [[nodiscard]] core::Result<void>
-    remove_metadata_transformation_chain(const core::StableId& id);
+    [[nodiscard]] core::Result<void> upsert_metadata_transformation_chain(
+        const persistence::SavedMetadataTransformationChain& saved_chain);
+    [[nodiscard]] core::Result<void> remove_metadata_transformation_chain(const core::StableId& id);
     [[nodiscard]] core::Result<std::vector<persistence::SavedOutputLayoutProfile>>
     load_output_layout_profiles() const;
     [[nodiscard]] core::Result<void>
     upsert_output_layout_profile(const persistence::SavedOutputLayoutProfile& saved_profile);
-    [[nodiscard]] core::Result<void>
-    remove_output_layout_profile(const core::StableId& id);
+    [[nodiscard]] core::Result<void> remove_output_layout_profile(const core::StableId& id);
     [[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>>
     load_destination_profiles() const;
     [[nodiscard]] core::Result<void>
     upsert_destination_profile(const persistence::SavedDestinationProfile& saved_profile);
-    [[nodiscard]] core::Result<void>
-    remove_destination_profile(const core::StableId& id);
+    [[nodiscard]] core::Result<void> remove_destination_profile(const core::StableId& id);
     [[nodiscard]] core::Result<std::vector<persistence::SavedEncoderPreset>>
     load_encoder_presets() const;
     [[nodiscard]] core::Result<void>
     upsert_encoder_preset(const persistence::SavedEncoderPreset& saved_preset);
-    [[nodiscard]] core::Result<void>
-    remove_encoder_preset(const core::StableId& id);
+    [[nodiscard]] core::Result<void> remove_encoder_preset(const core::StableId& id);
     [[nodiscard]] core::Result<std::optional<persistence::LocalListeningHistory>>
     lookup_local_listening_history(const persistence::ListItem& source) const;
     [[nodiscard]] core::Result<std::string>
     local_listening_key(const persistence::ListItem& source);
-    [[nodiscard]] core::Result<void>
-    record_local_listen(const persistence::ListItem& source, core::StableId occurrence_id, std::int64_t played_at_ms);
+    [[nodiscard]] core::Result<void> record_local_listen(const persistence::ListItem& source,
+                                                         core::StableId occurrence_id,
+                                                         std::int64_t played_at_ms);
 
     // Saved searches. A saved search is user-authored, so removal is checked
     // against the expected definition rather than a bare name.

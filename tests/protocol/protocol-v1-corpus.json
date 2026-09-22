@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "protocol": { "name": "trackknife", "version": 1 },
+  "note": "ADR-0222. Each case is one framed line and the message it must parse to. Both the C++ and Go implementations run this file; that is what stops them drifting.",
+  "cases": [
+    {
+      "id": "request.minimal",
+      "line": "{\"id\":1,\"method\":\"playback.state\"}",
+      "expect": { "kind": "request", "id": 1, "method": "playback.state", "params": {} },
+      "rationale": "params is optional and absent means empty, so a caller never has to send a placeholder object."
+    },
+    {
+      "id": "request.with-params",
+      "line": "{\"id\":42,\"method\":\"catalogue.filter\",\"params\":{\"query\":\"genre HAS jazz\",\"limit\":200}}",
+      "expect": { "kind": "request", "id": 42, "method": "catalogue.filter", "params": { "query": "genre HAS jazz", "limit": 200 } },
+      "rationale": "The ordinary shape."
+    },
+    {
+      "id": "notification.no-id",
+      "line": "{\"method\":\"client.goodbye\"}",
+      "expect": { "kind": "notification", "method": "client.goodbye", "params": {} },
+      "rationale": "A method with no id is fire and forget; the absence of id is the whole distinction, so it must not be inferred from the method name."
+    },
+    {
+      "id": "response.result",
+      "line": "{\"id\":42,\"result\":{\"paths\":[\"L211c2ljL2EuZmxhYw==\"]}}",
+      "expect": { "kind": "response", "id": 42, "result": { "paths": ["L211c2ljL2EuZmxhYw=="] } },
+      "rationale": "Raw paths travel base64 because JSON strings must be valid UTF-8 and paths are bytes."
+    },
+    {
+      "id": "response.result-null",
+      "line": "{\"id\":9,\"result\":null}",
+      "expect": { "kind": "response", "id": 9, "result": null },
+      "rationale": "A void operation still answers. Null result is present-and-empty, not absent, and must not be confused with an error."
+    },
+    {
+      "id": "response.error-with-context",
+      "line": "{\"id\":5,\"error\":{\"code\":\"not_found\",\"message\":\"no such entry\",\"context\":{\"entry\":\"7f3a\"}}}",
+      "expect": { "kind": "response", "id": 5, "error": { "code": "not_found", "message": "no such entry", "context": { "entry": "7f3a" } } },
+      "rationale": "code is machine-readable and stable; message is human text clients must not parse; context carries what the code cannot say."
+    },
+    {
+      "id": "response.error-minimal",
+      "line": "{\"id\":5,\"error\":{\"code\":\"cancelled\"}}",
+      "expect": { "kind": "response", "id": 5, "error": { "code": "cancelled", "message": "", "context": {} } },
+      "rationale": "Only the code is required, so an engine is never forced to invent prose to report a failure."
+    },
+    {
+      "id": "event.playback",
+      "line": "{\"event\":\"playback.changed\",\"data\":{\"state\":\"playing\"}}",
+      "expect": { "kind": "event", "event": "playback.changed", "data": { "state": "playing" } },
+      "rationale": "Events carry no id. They are not ordered against responses, so a client reconciles on state rather than sequence."
+    },
+    {
+      "id": "event.job-progress",
+      "line": "{\"event\":\"job.progress\",\"data\":{\"job_id\":\"a1\",\"visited\":120,\"indexed\":118}}",
+      "expect": { "kind": "event", "event": "job.progress", "data": { "job_id": "a1", "visited": 120, "indexed": 118 } },
+      "rationale": "Job progress is an event stream, so a running job occupies no request slot -- the answer to ADR-0219's cover scan starving the control path."
+    },
+    {
+      "id": "reject.embedded-newline",
+      "line": "{\"id\":1,\"method\":\"a\"}\n{\"id\":2,\"method\":\"b\"}",
+      "expect": { "kind": "error" },
+      "rationale": "Framing is one object per line. A newline inside a frame means the boundary was already lost, so it is refused rather than parsed as the first message."
+    },
+    {
+      "id": "reject.not-json",
+      "line": "not json at all",
+      "expect": { "kind": "error" },
+      "rationale": "An unparseable line is reported, never silently dropped."
+    },
+    {
+      "id": "reject.not-an-object",
+      "line": "[1,2,3]",
+      "expect": { "kind": "error" },
+      "rationale": "Every message is an object; an array has no shape to dispatch on."
+    },
+    {
+      "id": "reject.no-shape",
+      "line": "{\"params\":{}}",
+      "expect": { "kind": "error" },
+      "rationale": "Without method, result, error or event there is nothing to do with the message."
+    },
+    {
+      "id": "reject.result-and-error",
+      "line": "{\"id\":3,\"result\":{},\"error\":{\"code\":\"io\"}}",
+      "expect": { "kind": "error" },
+      "rationale": "A response is one or the other. Accepting both would let a sender express success and failure at once."
+    },
+    {
+      "id": "reject.event-with-id",
+      "line": "{\"id\":3,\"event\":\"playback.changed\"}",
+      "expect": { "kind": "error" },
+      "rationale": "An event is unsolicited by definition; an id would imply it answers something."
+    },
+    {
+      "id": "reject.response-without-id",
+      "line": "{\"result\":{}}",
+      "expect": { "kind": "error" },
+      "rationale": "A response with no id cannot be matched to a request, which defeats multiplexing."
+    },
+    {
+      "id": "reject.zero-id",
+      "line": "{\"id\":0,\"method\":\"a\"}",
+      "expect": { "kind": "error" },
+      "rationale": "Ids are positive so that zero stays available as an unmistakable not-a-request sentinel in implementations."
+    },
+    {
+      "id": "reject.params-not-object",
+      "line": "{\"id\":1,\"method\":\"a\",\"params\":7}",
+      "expect": { "kind": "error" },
+      "rationale": "Coercing a scalar into an object hides a caller's mistake until it surfaces as a missing field."
+    }
+  ],
+  "raw_path_cases": [
+    {
+      "id": "path.ascii",
+      "raw_bytes_hex": "2f6d757369632f612e666c6163",
+      "encoded": "L211c2ljL2EuZmxhYw==",
+      "rationale": "The ordinary case, and the padding boundary for a 13 byte input."
+    },
+    {
+      "id": "path.utf8",
+      "raw_bytes_hex": "2f6d757369632f426ac3b6726b2e666c6163",
+      "encoded": "L211c2ljL0Jqw7Zyay5mbGFj",
+      "rationale": "Valid UTF-8 survives the round trip unchanged; 18 bytes needs no padding."
+    },
+    {
+      "id": "path.invalid-utf8",
+      "raw_bytes_hex": "2f6d757369632fff2e666c6163",
+      "encoded": "L211c2ljL/8uZmxhYw==",
+      "rationale": "A raw path is bytes, not text. 0xff is not valid UTF-8 and could not appear in a JSON string, which is why paths are encoded at all."
+    },
+    {
+      "id": "path.empty",
+      "raw_bytes_hex": "",
+      "encoded": "",
+      "rationale": "An empty path encodes to nothing rather than to padding."
+    },
+    {
+      "id": "path.one-byte",
+      "raw_bytes_hex": "2f",
+      "encoded": "Lw==",
+      "rationale": "Two padding characters, the shortest non-empty encoding."
+    },
+    {
+      "id": "path.two-bytes",
+      "raw_bytes_hex": "2f61",
+      "encoded": "L2E=",
+      "rationale": "One padding character."
+    }
+  ]
+}

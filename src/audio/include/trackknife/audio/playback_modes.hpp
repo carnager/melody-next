@@ -43,9 +43,7 @@ struct PlaybackModes final {
     ModeState single{ModeState::off};
     ModeState consume{ModeState::off};
 
-    [[nodiscard]] constexpr bool single_active() const noexcept {
-        return single != ModeState::off;
-    }
+    [[nodiscard]] constexpr bool single_active() const noexcept { return single != ModeState::off; }
     [[nodiscard]] constexpr bool consume_active() const noexcept {
         return consume != ModeState::off;
     }

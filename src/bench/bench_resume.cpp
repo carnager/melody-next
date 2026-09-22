@@ -35,13 +35,12 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     if (!persistence_ || !lists_restored_ || resume_restore_pending_)
         return;
     if (!audio::should_write_resume(
-            snapshot,
-            {.forced = force,
-             .enabled = resumeEnabled(),
-             .write_in_flight = resume_save_pending_,
-             .since_last_write_ms = resume_save_clock_.isValid()
-                                        ? std::optional{resume_save_clock_.elapsed()}
-                                        : std::nullopt})) {
+            snapshot, {.forced = force,
+                       .enabled = resumeEnabled(),
+                       .write_in_flight = resume_save_pending_,
+                       .since_last_write_ms = resume_save_clock_.isValid()
+                                                  ? std::optional{resume_save_clock_.elapsed()}
+                                                  : std::nullopt})) {
         return;
     }
     resume_save_clock_.start();
@@ -60,10 +59,9 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
                 source.source_revision == snapshot.source_revision &&
                 tab->model->source(row).selection == snapshot.selection &&
                 tab->model->source(row).segment == snapshot.segment) {
-                checkpoint =
-                    ui::LocalResumeCheckpoint{document_text(playback_.anchors.document), row,
-                                              std::move(source),
-                                              audio::resume_position_ms(snapshot)};
+                checkpoint = ui::LocalResumeCheckpoint{document_text(playback_.anchors.document),
+                                                       row, std::move(source),
+                                                       audio::resume_position_ms(snapshot)};
             }
         }
     }

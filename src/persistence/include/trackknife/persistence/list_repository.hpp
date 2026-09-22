@@ -83,9 +83,9 @@ struct ListItem {
 
     // Value equality over everything but entry_id; see the note above.
     friend bool operator==(const ListItem& left, const ListItem& right) {
-        return std::tie(left.source, left.profile_id, left.source_reference,
-                        left.logical_reference, left.segment, left.source_selection,
-                        left.duration_ms, left.source_revision, left.fields) ==
+        return std::tie(left.source, left.profile_id, left.source_reference, left.logical_reference,
+                        left.segment, left.source_selection, left.duration_ms, left.source_revision,
+                        left.fields) ==
                std::tie(right.source, right.profile_id, right.source_reference,
                         right.logical_reference, right.segment, right.source_selection,
                         right.duration_ms, right.source_revision, right.fields);

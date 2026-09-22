@@ -1239,7 +1239,8 @@ void BenchMainWindow::applyCommittedRelocation(
     if (playback_.anchors.source.raw_path == result.source_raw_path) {
         playback_.anchors.source.raw_path = result.target_raw_path;
     }
-    if (playback_.last_requested_next && playback_.last_requested_next->raw_path == result.source_raw_path) {
+    if (playback_.last_requested_next &&
+        playback_.last_requested_next->raw_path == result.source_raw_path) {
         playback_.last_requested_next->raw_path = result.target_raw_path;
     }
 }

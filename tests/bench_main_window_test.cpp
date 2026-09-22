@@ -764,7 +764,8 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
             window.consumePlaybackRow(*tab, window.playback_.anchors.current, window.playback_.row);
             QCOMPARE(tab->model->rowCount(), 1);
         }
-        QCOMPARE(window.playback_.requests.pending().size(), static_cast<std::size_t>(pending_count));
+        QCOMPARE(window.playback_.requests.pending().size(),
+                 static_cast<std::size_t>(pending_count));
         window.close();
     }
     QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), enabled);
@@ -2581,7 +2582,8 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     QCOMPARE(selection->selectedRows().size(), 1);
     if (const auto screenshots = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !screenshots.isEmpty()) {
-        QVERIFY(properties->grab().save(screenshots + QStringLiteral("/tag-window-checkboxes.png")));
+        QVERIFY(
+            properties->grab().save(screenshots + QStringLiteral("/tag-window-checkboxes.png")));
     }
 
     // The breadcrumb carries the common folder and belongs to the tagger.
@@ -2597,8 +2599,8 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     QTRY_VERIFY(properties_action->isEnabled());
     properties_action->trigger();
     MetadataPropertiesDialog* second = nullptr;
-    for (auto* candidate :
-         window.findChildren<MetadataPropertiesDialog*>(QStringLiteral("bench-metadata-properties"))) {
+    for (auto* candidate : window.findChildren<MetadataPropertiesDialog*>(
+             QStringLiteral("bench-metadata-properties"))) {
         if (candidate != properties) {
             second = candidate;
         }
@@ -6033,11 +6035,13 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     window.enqueueLocalRequests({request, request});
     const auto first = window.playback_.requests.pending()[0].id;
     const auto second = window.playback_.requests.pending()[1].id;
-    QTRY_VERIFY_WITH_TIMEOUT(
-        window.playback_.requests.active() && window.playback_.requests.active()->id == first, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
+                                 window.playback_.requests.active()->id == first,
+                             5000);
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
-    QTRY_VERIFY_WITH_TIMEOUT(
-        window.playback_.requests.active() && window.playback_.requests.active()->id == second, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
+                                 window.playback_.requests.active()->id == second,
+                             5000);
     QTRY_VERIFY_WITH_TIMEOUT(!window.playback_.requests.active() &&
                                  row_of(window.tabForDocument(window.playback_.anchors.document),
                                         window.playback_.anchors.current) == (consume ? 0 : 1),

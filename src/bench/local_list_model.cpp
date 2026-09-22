@@ -893,9 +893,7 @@ int LocalListModel::rowOfPath(const std::string& raw_path, const int hint_row) c
     return static_cast<int>(std::distance(rows_.begin(), found));
 }
 
-int LocalListPlaybackView::row_count() const {
-    return model_->rowCount();
-}
+int LocalListPlaybackView::row_count() const { return model_->rowCount(); }
 
 int LocalListPlaybackView::row_of_entry(const core::StableId& entry, const int hint_row) const {
     return model_->rowOfEntry(entry, hint_row);

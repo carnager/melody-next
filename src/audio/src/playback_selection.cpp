@@ -42,8 +42,7 @@ automatic_playback_row(const PlaybackList& list, const PlaybackAnchors& anchors,
         // Single alone stops. Single with Repeat repeats this track -- but only
         // when nothing else is waiting: a pending or active request is a
         // explicit ask, and Consume is about to remove this row.
-        if (modes.repeat && !modes.consume_active() && requests.pending_empty &&
-            !requests.active) {
+        if (modes.repeat && !modes.consume_active() && requests.pending_empty && !requests.active) {
             // An identity can outlive its row, so the lookup is checked.
             if (const auto row = list.row_of_entry(anchors.current, current_row_hint); row >= 0) {
                 return PlaybackChoice{.row = row, .source = anchors.source};

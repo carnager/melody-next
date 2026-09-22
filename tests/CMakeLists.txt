@@ -304,6 +304,19 @@ add_test(NAME cue-sheet COMMAND trackknife_cue_sheet_tests)
 
 # ADR-0220 Phase 0: links Trackknife::Audio only -- no Qt, no widgets -- which
 # is the property this suite exists to hold.
+# ADR-0222: the protocol v1 golden corpus. Links no Qt; the same corpus file is
+# meant to be run by the Go implementation.
+add_executable(trackknife_protocol_message_tests protocol_message_test.cpp)
+target_link_libraries(
+    trackknife_protocol_message_tests
+    PRIVATE Trackknife::Protocol trackknife_project_options trackknife_project_warnings
+)
+add_test(
+    NAME protocol-message
+    COMMAND trackknife_protocol_message_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/protocol/protocol-v1-corpus.json"
+)
+
 add_executable(trackknife_playback_state_tests playback_state_test.cpp)
 target_link_libraries(
     trackknife_playback_state_tests

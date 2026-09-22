@@ -536,10 +536,10 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     // schema before the app re-migrates forward.
     for (const auto* name :
          {"0041_list_entry_identity.down", "0040_local_listening_occurrences.down",
-          "0039_local_listening_history.down",
-          "0038_folder_image_journal.down", "0037_mpd_list_documents.down",
-          "0036_server_search_scope.down", "0035_local_ratings.down",
-          "0034_metadata_field_filters.down", "0033_complete_library_fields.down"}) {
+          "0039_local_listening_history.down", "0038_folder_image_journal.down",
+          "0037_mpd_list_documents.down", "0036_server_search_scope.down",
+          "0035_local_ratings.down", "0034_metadata_field_filters.down",
+          "0033_complete_library_fields.down"}) {
         QFile downgrade{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));

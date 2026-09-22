@@ -2,10 +2,10 @@
 
 #pragma once
 
+#include "bench/local_list_model.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
-#include "bench/local_list_model.hpp"
 #include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/request_queue.hpp"
 
@@ -59,8 +59,8 @@ struct LocalPlaybackService final {
     }
 
     // The row `direction` away, or nothing when playback should stop.
-    [[nodiscard]] std::optional<audio::PlaybackChoice>
-    adjacentRow(const audio::PlaybackList& list, const int direction) {
+    [[nodiscard]] std::optional<audio::PlaybackChoice> adjacentRow(const audio::PlaybackList& list,
+                                                                   const int direction) {
         return audio::adjacent_playback_row(list, anchors, modes, order, requestState(), direction,
                                             row);
     }

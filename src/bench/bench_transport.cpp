@@ -729,8 +729,10 @@ void BenchMainWindow::rebuildDeviceMenu() {
 
 void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     const QSettings settings;
-    playback_.modes.repeat = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
-    playback_.modes.random = settings.value(QStringLiteral("playback/local-random"), false).toBool();
+    playback_.modes.repeat =
+        settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
+    playback_.modes.random =
+        settings.value(QStringLiteral("playback/local-random"), false).toBool();
     playback_.modes.album_random =
         settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
     if (playback_.modes.album_random)
@@ -941,10 +943,12 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         action->setText(QStringLiteral("%1: %2").arg(name, state));
         action->setToolTip(QStringLiteral("%1: %2\n%3").arg(name, state, help));
     };
-    cycle(local_single_action_, playback_.modes.single, QStringLiteral("Single"), QStringLiteral("1"),
+    cycle(local_single_action_, playback_.modes.single, QStringLiteral("Single"),
+          QStringLiteral("1"),
           QStringLiteral("Stop after this track; with Repeat, repeat this track. Click to cycle "
                          "Off / On / One-shot."));
-    cycle(local_consume_action_, playback_.modes.consume, QStringLiteral("Consume"), QStringLiteral("C"),
+    cycle(local_consume_action_, playback_.modes.consume, QStringLiteral("Consume"),
+          QStringLiteral("C"),
           QStringLiteral("Remove finished or skipped entries from the local list. Files stay on "
                          "disk. Click to cycle Off / On / One-shot."));
     local_replaygain_button_->setVisible(visible);
@@ -1039,8 +1043,8 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
                 }
                 watcher->deleteLater();
             });
-    watcher->setFuture(QtConcurrent::run(
-        [groups = album_grouper_.take(), current = playback_.row]() mutable {
+    watcher->setFuture(
+        QtConcurrent::run([groups = album_grouper_.take(), current = playback_.row]() mutable {
             audio::PlaybackOrder order;
             order.resetAlbums(std::move(groups), current);
             return order;
@@ -1177,7 +1181,8 @@ void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entr
         playback_.anchors.request_return = core::StableId{};
         const auto next = adjacentPlaybackRow(1);
         if (auto* tab = tabForDocument(playback_.anchors.document); tab && next)
-            playback_.anchors.request_return = tab->model->rows().at(static_cast<std::size_t>(next->first)).entry_id;
+            playback_.anchors.request_return =
+                tab->model->rows().at(static_cast<std::size_t>(next->first)).entry_id;
         if (auto* tab = tabForDocument(playback_.anchors.document))
             consumePlaybackRow(*tab, playback_.anchors.current, playback_.row);
     }
@@ -1640,10 +1645,10 @@ void BenchMainWindow::refreshTransport() {
         snapshot.state != audio::LocalAuditionState::loading &&
         snapshot.state != audio::LocalAuditionState::ended && !advance_pending_) {
         const auto next = automaticPlaybackRow();
-        const auto next_request = !playback_.modes.single_active() &&
-                                          !playback_.requests.pending().empty()
-                                      ? std::optional{playback_.requests.pending().front()}
-                                      : std::nullopt;
+        const auto next_request =
+            !playback_.modes.single_active() && !playback_.requests.pending().empty()
+                ? std::optional{playback_.requests.pending().front()}
+                : std::nullopt;
         const auto desired = next_request
                                  ? std::optional{LocalTrackSource{next_request->source.raw_path,
                                                                   next_request->source.selection,
@@ -1652,7 +1657,8 @@ void BenchMainWindow::refreshTransport() {
         const auto desired_marker = desired.value_or(LocalTrackSource{});
         const auto queued = queued_source_from_snapshot(snapshot);
         const auto desired_token = next_request ? next_request->id : 0U;
-        const bool changed = !playback_.last_requested_next || *playback_.last_requested_next != desired_marker ||
+        const bool changed = !playback_.last_requested_next ||
+                             *playback_.last_requested_next != desired_marker ||
                              desired_token != last_requested_token_;
         const bool stale =
             (desired != queued || desired_token != snapshot.next_occurrence_token) &&
@@ -1968,7 +1974,8 @@ void BenchMainWindow::publishMprisState() {
         const bool source_ready = snapshot.format.has_value() &&
                                   snapshot.state != audio::LocalAuditionState::loading &&
                                   snapshot.state != audio::LocalAuditionState::failed;
-        state.can_next = !playback_.requests.pending().empty() || adjacentPlaybackRow(1).has_value();
+        state.can_next =
+            !playback_.requests.pending().empty() || adjacentPlaybackRow(1).has_value();
         state.can_previous =
             playback_.requests.active().has_value() || adjacentPlaybackRow(-1).has_value();
         state.can_play = (source_ready || !playback_.requests.pending().empty()) &&

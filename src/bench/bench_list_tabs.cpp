@@ -152,7 +152,8 @@ void BenchMainWindow::initializePersistence() {
                         entries.size() == 1U ? entries.front().label : "Library selection";
                     int insertion = -1;
                     if (action == LocalLibraryAction::next) {
-                        insertion = document_text(playback_.anchors.document) == id ? playback_.row + 1
+                        insertion = document_text(playback_.anchors.document) == id
+                                        ? playback_.row + 1
                                     : target->view->currentIndex().isValid()
                                         ? target->view->currentIndex().row() + 1
                                         : 0;

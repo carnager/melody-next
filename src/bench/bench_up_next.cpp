@@ -406,8 +406,8 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
 void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position) {
     const auto count = rows.size();
     if (!playback_.requests.insert(std::move(rows), position < 0
-                                                     ? playback_.requests.pending().size()
-                                                     : static_cast<std::size_t>(position))) {
+                                                        ? playback_.requests.pending().size()
+                                                        : static_cast<std::size_t>(position))) {
         statusBar()->showMessage(QStringLiteral("Up Next holds at most 500 tracks."), 5000);
         return;
     }
@@ -617,11 +617,12 @@ void BenchMainWindow::persistUpNext() {
         {QStringLiteral("rows"), rows},
         {QStringLiteral("document"), document_text(playback_.anchors.document)},
         {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_.anchors.document))}};
-    state[QStringLiteral("anchor")] =
-        QString::fromLatin1(QByteArray::fromStdString(playback_.anchors.source.raw_path).toBase64());
+    state[QStringLiteral("anchor")] = QString::fromLatin1(
+        QByteArray::fromStdString(playback_.anchors.source.raw_path).toBase64());
     if (!playback_.anchors.request_return.is_nil()) {
         if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-            if (const auto row = tab->model->rowOfEntry(playback_.anchors.request_return, -1); row >= 0) {
+            if (const auto row = tab->model->rowOfEntry(playback_.anchors.request_return, -1);
+                row >= 0) {
                 state[QStringLiteral("returnRow")] = row;
                 state[QStringLiteral("returnSource")] =
                     continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(row)));
@@ -759,7 +760,8 @@ void BenchMainWindow::restoreUpNext() {
             }
             const bool untouched = generation == resume_intent_generation_ &&
                                    request_revision == playback_.requests.revision() &&
-                                   playback_.requests.pending().empty() && !playback_.requests.active();
+                                   playback_.requests.pending().empty() &&
+                                   !playback_.requests.active();
             const bool resume_request =
                 untouched && resume_position && !rows.empty() && player_ &&
                 player_->snapshot().state == audio::LocalAuditionState::empty &&
@@ -816,7 +818,8 @@ void BenchMainWindow::restoreUpNext() {
                 refreshUpNext();
                 static_cast<void>(playLocalRequest(*resume_position));
                 if (!remaining.empty())
-                    playback_.requests.insert(std::move(remaining), playback_.requests.pending().size());
+                    playback_.requests.insert(std::move(remaining),
+                                              playback_.requests.pending().size());
             }
         }
         playback_.requests.forgetUndo();

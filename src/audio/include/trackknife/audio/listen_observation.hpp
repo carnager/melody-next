@@ -19,9 +19,7 @@ struct ListenObservation final {
     double position_seconds{0};
     bool playing{false};
 
-    [[nodiscard]] bool qualified() const noexcept {
-        return !identity.empty();
-    }
+    [[nodiscard]] bool qualified() const noexcept { return !identity.empty(); }
 
     friend bool operator==(const ListenObservation&, const ListenObservation&) = default;
 };

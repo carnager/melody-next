@@ -2,9 +2,9 @@
 
 #pragma once
 
-#include "trackknife/core/local_sources.hpp"
 #include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/track_source.hpp"
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/persistence/list_repository.hpp"

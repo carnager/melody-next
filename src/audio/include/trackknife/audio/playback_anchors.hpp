@@ -30,9 +30,7 @@ struct PlaybackAnchors final {
     // What is actually being decoded: path, selection within it, and span.
     TrackSource source;
 
-    [[nodiscard]] bool playing() const noexcept {
-        return !current.is_nil() && !document.is_nil();
-    }
+    [[nodiscard]] bool playing() const noexcept { return !current.is_nil() && !document.is_nil(); }
 
     // A transition is abandoned as a unit. Keeping the pair together here is
     // what stops one half being cleared without the other.
@@ -43,9 +41,7 @@ struct PlaybackAnchors final {
 
     // Playback stopped entirely: nothing is playing, nothing is in flight, and
     // there is nowhere to return to.
-    void clear() noexcept {
-        *this = PlaybackAnchors{};
-    }
+    void clear() noexcept { *this = PlaybackAnchors{}; }
 
     friend bool operator==(const PlaybackAnchors&, const PlaybackAnchors&) = default;
 };

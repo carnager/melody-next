@@ -29,9 +29,7 @@ struct TrackSource final {
     // An empty path is how "nothing is playing" is spelled throughout the
     // workspace. Naming it keeps that convention explicit rather than leaving
     // callers to remember which field carries the signal.
-    [[nodiscard]] bool empty() const noexcept {
-        return raw_path.empty();
-    }
+    [[nodiscard]] bool empty() const noexcept { return raw_path.empty(); }
 
     friend bool operator==(const TrackSource&, const TrackSource&) = default;
 };

@@ -54,7 +54,8 @@ void BenchMainWindow::sampleLastFm(const audio::LocalAuditionSnapshot& snapshot)
             track = tab->model->rows()[static_cast<std::size_t>(row)];
     }
     if (snapshot.occurrence_token != 0) {
-        if (playback_.requests.active() && playback_.requests.active()->id == snapshot.occurrence_token)
+        if (playback_.requests.active() &&
+            playback_.requests.active()->id == snapshot.occurrence_token)
             track = playback_.requests.active()->source;
         else
             for (const auto& request : playback_.requests.pending())

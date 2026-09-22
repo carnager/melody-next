@@ -17,13 +17,11 @@ unsigned Workspace::schema_version() const {
     return version ? *version : 0U;
 }
 
-core::Result<std::vector<persistence::ListDocument>>
-Workspace::load_all() const {
+core::Result<std::vector<persistence::ListDocument>> Workspace::load_all() const {
     return repository_.load_all();
 }
 
-core::Result<void>
-Workspace::replace_all(std::span<const persistence::ListDocument> documents) {
+core::Result<void> Workspace::replace_all(std::span<const persistence::ListDocument> documents) {
     return repository_.replace_all(documents);
 }
 
@@ -37,8 +35,7 @@ Workspace::relocate_local_source(const persistence::LocalSourceRelocation& reloc
     return repository_.relocate_local_source(relocation);
 }
 
-core::Result<std::vector<persistence::ConnectionProfile>>
-Workspace::load_profiles() const {
+core::Result<std::vector<persistence::ConnectionProfile>> Workspace::load_profiles() const {
     return repository_.load_profiles();
 }
 
@@ -47,8 +44,7 @@ Workspace::replace_profiles(std::span<const persistence::ConnectionProfile> prof
     return repository_.replace_profiles(profiles);
 }
 
-core::Result<std::vector<persistence::TrackViewPreset>>
-Workspace::load_view_presets() const {
+core::Result<std::vector<persistence::TrackViewPreset>> Workspace::load_view_presets() const {
     return repository_.load_view_presets();
 }
 
@@ -62,13 +58,12 @@ Workspace::load_metadata_transformation_chains() const {
     return repository_.load_metadata_transformation_chains();
 }
 
-core::Result<void>
-Workspace::upsert_metadata_transformation_chain(const persistence::SavedMetadataTransformationChain& saved_chain) {
+core::Result<void> Workspace::upsert_metadata_transformation_chain(
+    const persistence::SavedMetadataTransformationChain& saved_chain) {
     return repository_.upsert_metadata_transformation_chain(saved_chain);
 }
 
-core::Result<void>
-Workspace::remove_metadata_transformation_chain(const core::StableId& id) {
+core::Result<void> Workspace::remove_metadata_transformation_chain(const core::StableId& id) {
     return repository_.remove_metadata_transformation_chain(id);
 }
 
@@ -77,13 +72,12 @@ Workspace::load_output_layout_profiles() const {
     return repository_.load_output_layout_profiles();
 }
 
-core::Result<void>
-Workspace::upsert_output_layout_profile(const persistence::SavedOutputLayoutProfile& saved_profile) {
+core::Result<void> Workspace::upsert_output_layout_profile(
+    const persistence::SavedOutputLayoutProfile& saved_profile) {
     return repository_.upsert_output_layout_profile(saved_profile);
 }
 
-core::Result<void>
-Workspace::remove_output_layout_profile(const core::StableId& id) {
+core::Result<void> Workspace::remove_output_layout_profile(const core::StableId& id) {
     return repository_.remove_output_layout_profile(id);
 }
 
@@ -97,13 +91,11 @@ Workspace::upsert_destination_profile(const persistence::SavedDestinationProfile
     return repository_.upsert_destination_profile(saved_profile);
 }
 
-core::Result<void>
-Workspace::remove_destination_profile(const core::StableId& id) {
+core::Result<void> Workspace::remove_destination_profile(const core::StableId& id) {
     return repository_.remove_destination_profile(id);
 }
 
-core::Result<std::vector<persistence::SavedEncoderPreset>>
-Workspace::load_encoder_presets() const {
+core::Result<std::vector<persistence::SavedEncoderPreset>> Workspace::load_encoder_presets() const {
     return repository_.load_encoder_presets();
 }
 
@@ -112,8 +104,7 @@ Workspace::upsert_encoder_preset(const persistence::SavedEncoderPreset& saved_pr
     return repository_.upsert_encoder_preset(saved_preset);
 }
 
-core::Result<void>
-Workspace::remove_encoder_preset(const core::StableId& id) {
+core::Result<void> Workspace::remove_encoder_preset(const core::StableId& id) {
     return repository_.remove_encoder_preset(id);
 }
 
@@ -122,13 +113,13 @@ Workspace::lookup_local_listening_history(const persistence::ListItem& source) c
     return repository_.lookup_local_listening_history(source);
 }
 
-core::Result<std::string>
-Workspace::local_listening_key(const persistence::ListItem& source) {
+core::Result<std::string> Workspace::local_listening_key(const persistence::ListItem& source) {
     return repository_.local_listening_key(source);
 }
 
-core::Result<void>
-Workspace::record_local_listen(const persistence::ListItem& source, core::StableId occurrence_id, std::int64_t played_at_ms) {
+core::Result<void> Workspace::record_local_listen(const persistence::ListItem& source,
+                                                  core::StableId occurrence_id,
+                                                  std::int64_t played_at_ms) {
     return repository_.record_local_listen(source, std::move(occurrence_id), played_at_ms);
 }
 

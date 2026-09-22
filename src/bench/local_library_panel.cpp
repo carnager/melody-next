@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_library_panel.hpp"
-#include "trackknife/engine/catalogue.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
@@ -695,58 +695,57 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
 void LocalLibraryPanel::loadFilterChildren(const QPersistentModelIndex& parent,
                                            std::shared_ptr<const query::CompiledTkq> compiled) {
     const auto generation = generation_;
-    enqueue(
-        {[compiled, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
-             Outcome outcome;
-             auto result = library.filter(*compiled, 0U, 200U, cancellation);
-             if (result) {
-                 outcome.page = std::move(*result);
-             } else {
-                 outcome.error = text(result.error().message);
-             }
-             return outcome;
-         },
-         [this, parent, generation](Outcome outcome) {
-             if (generation != generation_ || !parent.isValid()) {
-                 return;
-             }
-             auto* target = model_->itemFromIndex(parent);
-             if (target == nullptr) {
-                 return;
-             }
-             if (!outcome.error.isEmpty()) {
-                 status_->setText(outcome.error);
-                 return;
-             }
-             if (!scanning_ && status_->text() == tr("Searching…")) {
-                 status_->setText(tr("Query results"));
-             }
-             for (const auto& entry : outcome.page.entries) {
-                 auto label = text(entry.label);
-                 auto* item = new QStandardItem(label);
-                 item->setEditable(false);
-                 item->setDragEnabled(true);
-                 item->setDropEnabled(false);
-                 item->setIcon(QIcon::fromTheme(QStringLiteral("audio-x-generic")));
-                 item->setData(QVariant::fromValue(entry), entry_role);
-                 item->setToolTip(pathLabel(entry.key));
-                 target->appendRow(item);
-             }
-             if (outcome.page.more) {
-                 // Package-1 paging: the tree shows the first page; Enter
-                 // keeps the complete bounded result set as a tab.
-                 auto* more = new QStandardItem(
-                     tr("Showing the first %1 matches — press Enter to keep them all")
-                         .arg(outcome.page.entries.size()));
-                 more->setEnabled(false);
-                 target->appendRow(more);
-             } else if (target->rowCount() == 0) {
-                 auto* empty = new QStandardItem(tr("No matches"));
-                 empty->setEnabled(false);
-                 target->appendRow(empty);
-             }
-         },
-         true});
+    enqueue({[compiled, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
+                 Outcome outcome;
+                 auto result = library.filter(*compiled, 0U, 200U, cancellation);
+                 if (result) {
+                     outcome.page = std::move(*result);
+                 } else {
+                     outcome.error = text(result.error().message);
+                 }
+                 return outcome;
+             },
+             [this, parent, generation](Outcome outcome) {
+                 if (generation != generation_ || !parent.isValid()) {
+                     return;
+                 }
+                 auto* target = model_->itemFromIndex(parent);
+                 if (target == nullptr) {
+                     return;
+                 }
+                 if (!outcome.error.isEmpty()) {
+                     status_->setText(outcome.error);
+                     return;
+                 }
+                 if (!scanning_ && status_->text() == tr("Searching…")) {
+                     status_->setText(tr("Query results"));
+                 }
+                 for (const auto& entry : outcome.page.entries) {
+                     auto label = text(entry.label);
+                     auto* item = new QStandardItem(label);
+                     item->setEditable(false);
+                     item->setDragEnabled(true);
+                     item->setDropEnabled(false);
+                     item->setIcon(QIcon::fromTheme(QStringLiteral("audio-x-generic")));
+                     item->setData(QVariant::fromValue(entry), entry_role);
+                     item->setToolTip(pathLabel(entry.key));
+                     target->appendRow(item);
+                 }
+                 if (outcome.page.more) {
+                     // Package-1 paging: the tree shows the first page; Enter
+                     // keeps the complete bounded result set as a tab.
+                     auto* more = new QStandardItem(
+                         tr("Showing the first %1 matches — press Enter to keep them all")
+                             .arg(outcome.page.entries.size()));
+                     more->setEnabled(false);
+                     target->appendRow(more);
+                 } else if (target->rowCount() == 0) {
+                     auto* empty = new QStandardItem(tr("No matches"));
+                     empty->setEnabled(false);
+                     target->appendRow(empty);
+                 }
+             },
+             true});
 }
 
 void LocalLibraryPanel::activate(const QModelIndex& index) {
@@ -985,37 +984,36 @@ void LocalLibraryPanel::commitSearch() {
             return;
         }
         query_error_->hide();
-        enqueue(
-            {[shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
-              cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
-                 Outcome outcome;
-                 auto paths = library.filter_paths(*shared, cancellation);
-                 if (paths) {
-                     auto cached = library.cached_tracks(*paths, cancellation);
-                     if (!cached) {
-                         outcome.error = text(cached.error().message);
-                         return outcome;
+        enqueue({[shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
+                  cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
+                     Outcome outcome;
+                     auto paths = library.filter_paths(*shared, cancellation);
+                     if (paths) {
+                         auto cached = library.cached_tracks(*paths, cancellation);
+                         if (!cached) {
+                             outcome.error = text(cached.error().message);
+                             return outcome;
+                         }
+                         for (auto& track : *cached) {
+                             outcome.rows.push_back(cached_library_row(std::move(track)));
+                         }
+                     } else {
+                         outcome.error = text(paths.error().message);
                      }
-                     for (auto& track : *cached) {
-                         outcome.rows.push_back(cached_library_row(std::move(track)));
+                     return outcome;
+                 },
+                 [this, query_text](Outcome outcome) {
+                     if (!outcome.error.isEmpty()) {
+                         status_->setText(outcome.error);
+                         return;
                      }
-                 } else {
-                     outcome.error = text(paths.error().message);
-                 }
-                 return outcome;
-             },
-             [this, query_text](Outcome outcome) {
-                 if (!outcome.error.isEmpty()) {
-                     status_->setText(outcome.error);
-                     return;
-                 }
-                 if (outcome.rows.empty()) {
-                     status_->setText(tr("No search results to keep."));
-                     return;
-                 }
-                 status_->setText(tr("Search kept as a new tab."));
-                 emit searchCommitted(query_text, std::move(outcome.rows));
-             }});
+                     if (outcome.rows.empty()) {
+                         status_->setText(tr("No search results to keep."));
+                         return;
+                     }
+                     status_->setText(tr("Search kept as a new tab."));
+                     emit searchCommitted(query_text, std::move(outcome.rows));
+                 }});
         return;
     }
     enqueue({[query = bytes(query_text),

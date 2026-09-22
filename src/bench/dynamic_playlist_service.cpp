@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/dynamic_playlist_service.hpp"
-#include "trackknife/engine/catalogue.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq_melody.hpp"
 #include <QCryptographicHash>

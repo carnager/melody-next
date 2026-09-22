@@ -4,10 +4,10 @@
 
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
+#include "bench/local_playback_service.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
-#include "bench/local_playback_service.hpp"
 #include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"

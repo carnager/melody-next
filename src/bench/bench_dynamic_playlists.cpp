@@ -227,7 +227,8 @@ void BenchMainWindow::showDynamicPlaylists() {
         } else {
             auto* model = qobject_cast<LocalListModel*>(dialog->view()->model());
             int occurrence = 0;
-            if (dialog->property("playback-context").toString() == document_text(playback_.anchors.document)) {
+            if (dialog->property("playback-context").toString() ==
+                document_text(playback_.anchors.document)) {
                 if (const auto* tab = tabForDocument(playback_.anchors.document);
                     tab && tab->model->rowCount() <= 500)
                     for (int i = 0; i < playback_.row && i < tab->model->rowCount(); ++i)
@@ -240,7 +241,8 @@ void BenchMainWindow::showDynamicPlaylists() {
                     hint = i;
                     break;
                 }
-            model->setCurrentSource(hint >= 0 ? playback_.anchors.source : LocalTrackSource{}, hint);
+            model->setCurrentSource(hint >= 0 ? playback_.anchors.source : LocalTrackSource{},
+                                    hint);
         }
     };
     connect(dialog, &DynamicPlaylistDialog::resultsChanged, dialog, markers);

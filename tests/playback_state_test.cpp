@@ -8,9 +8,9 @@
 #include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
+#include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/resume_checkpoint.hpp"
-#include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/track_source.hpp"
 
 #include <cstdlib>
@@ -31,8 +31,7 @@ void require(const bool condition, const std::string_view message) {
 void modes_default_to_off() {
     namespace audio = trackknife::audio;
     const audio::PlaybackModes modes;
-    require(!modes.repeat && !modes.random && !modes.album_random,
-            "toggles must default to off");
+    require(!modes.repeat && !modes.random && !modes.album_random, "toggles must default to off");
     require(!modes.single_active() && !modes.consume_active(),
             "tri-state modes must default to inactive");
 }
@@ -171,9 +170,7 @@ class FakeList final : public trackknife::audio::PlaybackList {
     explicit FakeList(std::vector<trackknife::core::StableId> entries)
         : entries_(std::move(entries)) {}
 
-    [[nodiscard]] int row_count() const override {
-        return static_cast<int>(entries_.size());
-    }
+    [[nodiscard]] int row_count() const override { return static_cast<int>(entries_.size()); }
     [[nodiscard]] int row_of_entry(const trackknife::core::StableId& entry,
                                    const int hint_row) const override {
         if (hint_row >= 0 && hint_row < row_count() &&
@@ -193,9 +190,7 @@ class FakeList final : public trackknife::audio::PlaybackList {
         return source;
     }
 
-    void drop(const int row) {
-        entries_.erase(entries_.begin() + row);
-    }
+    void drop(const int row) { entries_.erase(entries_.begin() + row); }
 
   private:
     std::vector<trackknife::core::StableId> entries_;
@@ -208,8 +203,7 @@ struct Fixture {
     trackknife::audio::PlaybackModes modes;
     trackknife::audio::PlaybackOrder order{7U};
 
-    explicit Fixture(const int count)
-        : ids(make_ids(count)), list(ids) {
+    explicit Fixture(const int count) : ids(make_ids(count)), list(ids) {
         anchors.document = trackknife::core::StableId::random();
         anchors.current = ids.front();
         anchors.source.raw_path = "/music/0.flac";
@@ -313,12 +307,12 @@ void single_stops_unless_repeat_turns_it_into_a_loop() {
     // So does anything waiting in the request queue: a request is an explicit
     // ask and single+repeat must not starve it.
     require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
-                                           fixture.order,
-                                           {.active = false, .pending_empty = false}, 0),
+                                           fixture.order, {.active = false, .pending_empty = false},
+                                           0),
             "a pending request outranks single+repeat");
     require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
-                                           fixture.order,
-                                           {.active = true, .pending_empty = true}, 0),
+                                           fixture.order, {.active = true, .pending_empty = true},
+                                           0),
             "an active request outranks single+repeat");
 }
 
@@ -349,8 +343,9 @@ void only_live_measurable_playback_is_resumable() {
     auto snapshot = playing_snapshot();
     require(audio::resumable(snapshot), "ordinary playback is resumable");
 
-    for (const auto state : {audio::LocalAuditionState::paused, audio::LocalAuditionState::buffering,
-                             audio::LocalAuditionState::draining}) {
+    for (const auto state :
+         {audio::LocalAuditionState::paused, audio::LocalAuditionState::buffering,
+          audio::LocalAuditionState::draining}) {
         snapshot.state = state;
         require(audio::resumable(snapshot), "every live state is resumable");
     }
@@ -564,45 +559,51 @@ void resume_writes_are_rate_limited_but_forcing_overrides_policy_not_arithmetic(
     auto snapshot = playing_snapshot();
 
     // Off means off.
-    require(!audio::should_write_resume(snapshot, {.enabled = false, .since_last_write_ms = std::nullopt}),
+    require(!audio::should_write_resume(snapshot,
+                                        {.enabled = false, .since_last_write_ms = std::nullopt}),
             "resume switched off writes nothing");
 
     // The first write of a session has nothing to wait for.
-    require(audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = std::nullopt}),
+    require(audio::should_write_resume(snapshot,
+                                       {.enabled = true, .since_last_write_ms = std::nullopt}),
             "the first write is not rate limited");
 
     // Then the rate limit applies.
     require(!audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = 0}),
             "a write straight after another is refused");
     require(!audio::should_write_resume(
-                snapshot, {.enabled = true,
-                           .since_last_write_ms = audio::minimum_resume_interval_ms - 1}),
-            "just inside the interval is refused");
-    require(audio::should_write_resume(
                 snapshot,
-                {.enabled = true, .since_last_write_ms = audio::minimum_resume_interval_ms}),
-            "the interval boundary is allowed");
+                {.enabled = true, .since_last_write_ms = audio::minimum_resume_interval_ms - 1}),
+            "just inside the interval is refused");
+    require(
+        audio::should_write_resume(
+            snapshot, {.enabled = true, .since_last_write_ms = audio::minimum_resume_interval_ms}),
+        "the interval boundary is allowed");
 
     // A write already in flight is not raced.
-    require(!audio::should_write_resume(
-                snapshot, {.enabled = true, .write_in_flight = true, .since_last_write_ms = 60'000}),
-            "an in-flight write blocks another however long it has been");
+    require(
+        !audio::should_write_resume(
+            snapshot, {.enabled = true, .write_in_flight = true, .since_last_write_ms = 60'000}),
+        "an in-flight write blocks another however long it has been");
 
     // Forcing skips the policy: off, in flight, and inside the interval.
-    require(audio::should_write_resume(snapshot, {.forced = true, .enabled = false, .since_last_write_ms = std::nullopt}),
-            "forcing writes even when resume is off");
     require(audio::should_write_resume(
-                snapshot,
-                {.forced = true, .enabled = true, .write_in_flight = true,
-                 .since_last_write_ms = 0}),
-            "forcing skips the rate limit and the in-flight guard");
+                snapshot, {.forced = true, .enabled = false, .since_last_write_ms = std::nullopt}),
+            "forcing writes even when resume is off");
+    require(
+        audio::should_write_resume(
+            snapshot,
+            {.forced = true, .enabled = true, .write_in_flight = true, .since_last_write_ms = 0}),
+        "forcing skips the rate limit and the in-flight guard");
 
     // But not the arithmetic: a loading snapshot has no offset to record, and
     // forcing cannot invent one.
     snapshot.state = audio::LocalAuditionState::loading;
-    require(!audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = std::nullopt}),
+    require(!audio::should_write_resume(snapshot,
+                                        {.enabled = true, .since_last_write_ms = std::nullopt}),
             "a loading snapshot has no position to save");
-    require(!audio::should_write_resume(snapshot, {.forced = true, .enabled = true, .since_last_write_ms = std::nullopt}),
+    require(!audio::should_write_resume(
+                snapshot, {.forced = true, .enabled = true, .since_last_write_ms = std::nullopt}),
             "forcing does not make a loading snapshot writable");
 }
 

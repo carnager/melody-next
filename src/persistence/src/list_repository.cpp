@@ -2259,7 +2259,8 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
             // invariant at the persistence boundary instead of asking every
             // caller to remember it.
             auto resolved_entry_id = item.entry_id;
-            while (resolved_entry_id.is_nil() || !document_entry_ids.insert(resolved_entry_id).second) {
+            while (resolved_entry_id.is_nil() ||
+                   !document_entry_ids.insert(resolved_entry_id).second) {
                 resolved_entry_id = core::StableId::random();
             }
             const auto entry_id = resolved_entry_id.to_string();

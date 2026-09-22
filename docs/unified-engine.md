@@ -223,8 +223,35 @@ several openable at once. Phase 2 confirms the shape, where it becomes a job
 submitter — stage, submit, stream progress, handle partial failure — which is a
 window with a task, not a view of a collection.
 
-Done when: no `src/bench` translation unit includes a persistence or operations
-header directly, and one tab type serves every list.
+**Measured, and the shape is not what the check above implies.** List
+persistence already has its client-facing service: `ui::ListPersistenceService`
+(767 lines) wraps `ListRepository` behind async callbacks, and exactly one
+`src/bench` site still opens a repository directly
+(`search_dialog.cpp:357`). What is *not* behind a service is the catalogue:
+
+```sh
+grep -rn 'LocalLibrary::open' src/bench    # 6 sites, 3 files
+```
+
+`local_library_panel.cpp`, `dynamic_playlist_service.cpp` and
+`search_dialog.cpp` each open the SQLite database **by path** on a worker
+thread and query it. That is the UI owning the catalogue in the most literal
+sense, and it is precisely what cannot survive a process boundary: a remote
+client has no database path. Phase 1's real work is a library query service
+alongside the list one, not an abstract API in general.
+
+The twenty `src/bench` translation units that include a persistence or
+operations header are mostly *type* coupling — `ListDocument`, `ListItem`,
+`LocalSourceRevision` crossing the boundary as values. That coupling has to go
+eventually, but it is benign in-process and says nothing about who owns the
+data. Counting it as the phase's gate overstates the work and understates the
+six opens.
+
+Done when: no `src/bench` translation unit opens a `LocalLibrary` or
+`ListRepository` directly, the catalogue is reached through a service the way
+lists already are, and one tab type serves every list. The header-include
+sweep follows once types stop crossing the boundary, and is tracked separately
+rather than gating this phase.
 
 ### Phase 2 — Protocol v1
 

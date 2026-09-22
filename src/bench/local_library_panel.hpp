@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/catalogue_source.hpp"
 #include "bench/local_list_model.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/remote_catalogue.hpp"
@@ -40,7 +41,7 @@ enum class LocalLibraryAction { append, next, replace, new_list, request_next, r
 class LocalLibraryPanel final : public QWidget {
     Q_OBJECT
   public:
-    explicit LocalLibraryPanel(std::filesystem::path database_path, QWidget* parent = nullptr);
+    explicit LocalLibraryPanel(const CatalogueSource& catalogues, QWidget* parent = nullptr);
     ~LocalLibraryPanel() override;
     void addRoot(std::string raw_path);
     QWidget* createFoldersWidget(QWidget* parent);
@@ -111,22 +112,11 @@ class LocalLibraryPanel final : public QWidget {
     void invalidateArtwork();
     [[nodiscard]] QModelIndexList visibleAlbums() const;
 
-    std::filesystem::path database_path_;
-
-    // ADR-0220: when a socket is configured the panel asks an engine instead of
-
-    // opening the database. One client is shared by the task pool, which
-
-    // protocol::Client permits; calls on it therefore serialise, which is
-
-    // acceptable for a two-thread pool and would not be for a larger one.
-
-    std::filesystem::path engine_socket_;
-
-    std::unique_ptr<protocol::Client> engine_client_;
-    // Reported once rather than swallowed: a configured engine that could
-    // not be reached is something the user asked for and did not get.
-    QString engine_failure_;
+    // ADR-0220: the one place that decides whether a catalogue is this
+    // process or an engine. The panel never holds a database path, so it
+    // cannot accidentally open the wrong thing -- which is how its scan and
+    // its artwork loader each stayed local after the query pool was routed.
+    const CatalogueSource* catalogues_{nullptr};
     // Always present and never overwritten by transient status, so "which
     // library am I looking at" is answerable by looking rather than by
     // asking. A silent fallback to the local database is otherwise

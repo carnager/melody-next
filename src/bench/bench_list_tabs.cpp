@@ -70,6 +70,9 @@ void BenchMainWindow::initializePersistence() {
     const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
+    // Built once, before anything that needs a catalogue: the panel, the
+    // search dialog and dynamic playlists all take this rather than a path.
+    catalogue_source_ = std::make_unique<CatalogueSource>(database_path_);
     persistence_ = new ui::ListPersistenceService(database_path_, this);
     persistence_timer_ = new QTimer(this);
     persistence_timer_->setSingleShot(true);
@@ -118,7 +121,7 @@ void BenchMainWindow::initializePersistence() {
         if (!error.isEmpty())
             resume_restore_pending_ = false;
         if (error.isEmpty()) {
-            local_library_ = new LocalLibraryPanel(database_path_, source_stack_);
+            local_library_ = new LocalLibraryPanel(*catalogue_source_, source_stack_);
             connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,
                     [this] { showSettingsDialog(SettingsDialog::Page::library); });
             source_stack_->addWidget(local_library_);
@@ -832,7 +835,7 @@ void BenchMainWindow::openSearchDialog() {
     // snapshots the current local tab's rows and reports on-demand
     // technicals back onto every tab holding the probed file.
     search_dialog_ = new SearchDialog(
-        database_path_,
+        *catalogue_source_,
         [this]() -> std::optional<SearchDialog::TabSnapshot> {
             auto* tab = currentListTab();
             if (tab == nullptr) {

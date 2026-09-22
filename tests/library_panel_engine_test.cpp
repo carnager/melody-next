@@ -6,7 +6,9 @@
 // reroutes the panel and that an unreachable engine does not cost the user
 // their library.
 
+#include "bench/catalogue_source.hpp"
 #include "bench/local_library_panel.hpp"
+#include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -14,8 +16,10 @@
 
 #include <QAbstractButton>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSettings>
 #include <QtTest>
+#include <atomic>
 
 #include <filesystem>
 
@@ -33,6 +37,7 @@ class LibraryPanelEngineTest final : public QObject {
     void everyPathReachesTheEngineNotTheDatabase();
     void anUnreachableEngineFallsBackAndSaysSo();
     void thePanelSaysWhichLibraryItIsShowing();
+    void theSearchDialogAsksTheEngineToo();
 };
 
 void LibraryPanelEngineTest::init() {
@@ -62,7 +67,8 @@ void LibraryPanelEngineTest::aConfiguredEngineServesThePanel() {
     // instead of asking the engine, the connection count below stays zero.
     const std::filesystem::path unused{
         (directory.path() + QStringLiteral("/never-opened.sqlite3")).toStdString()};
-    LocalLibraryPanel panel{unused};
+    CatalogueSource catalogues{unused};
+    LocalLibraryPanel panel{catalogues};
     panel.show();
 
     QTRY_COMPARE((*server)->connections(), std::size_t{1});
@@ -105,7 +111,8 @@ void LibraryPanelEngineTest::everyPathReachesTheEngineNotTheDatabase() {
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
-    LocalLibraryPanel panel{forbidden};
+    CatalogueSource catalogues{forbidden};
+    LocalLibraryPanel panel{catalogues};
     panel.show();
     QTRY_COMPARE((*server)->connections(), std::size_t{1});
 
@@ -135,7 +142,8 @@ void LibraryPanelEngineTest::anUnreachableEngineFallsBackAndSaysSo() {
 
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), absent);
 
-    LocalLibraryPanel panel{database};
+    CatalogueSource catalogues{database};
+    LocalLibraryPanel panel{catalogues};
     panel.show();
 
     // An engine that is not there costs the user the engine, not the library:
@@ -157,7 +165,8 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
 
     // No engine configured.
     {
-        LocalLibraryPanel panel{database};
+        CatalogueSource catalogues{database};
+        LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
         QVERIFY(source != nullptr);
@@ -169,7 +178,8 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
     {
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                              directory.path() + QStringLiteral("/absent.sock"));
-        LocalLibraryPanel panel{database};
+        CatalogueSource catalogues{database};
+        LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
         QVERIFY(source != nullptr);
@@ -191,7 +201,8 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
 
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                              QString::fromStdString(socket.string()));
-        LocalLibraryPanel panel{database};
+        CatalogueSource catalogues{database};
+        LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
         QVERIFY(source != nullptr);
@@ -202,6 +213,61 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
 
         (*server)->stop();
     }
+}
+
+// The search dialog is a separate surface with its own catalogue access, and
+// it stayed local after the panel was routed -- which is why searching an
+// engine-backed library returned zero matches while browsing it worked. One
+// CatalogueSource is what stops a fourth surface repeating it.
+//
+// Asserted by watching the engine receive the search rather than by watching
+// a file not appear: the workspace and the catalogue share one database file,
+// so loading saved searches touches it legitimately.
+void LibraryPanelEngineTest::theSearchDialogAsksTheEngineToo() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path engine_database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    const std::filesystem::path workspace{
+        (directory.path() + QStringLiteral("/workspace.sqlite3")).toStdString()};
+
+    engine::LocalCatalogue catalogue{engine_database};
+    QVERIFY(catalogue.prepare().has_value());
+
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    // Wrap the method the search runs, so the engine can say whether it was
+    // asked. Registering again replaces the handler.
+    std::atomic_int searched{0};
+    dispatcher.on("catalogue.filter_paths",
+                  [&](const protocol::Json& params) -> core::Result<protocol::Json> {
+                      searched.fetch_add(1);
+                      static_cast<void>(params);
+                      return protocol::Json{{"paths", protocol::Json::array()}};
+                  });
+
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    CatalogueSource catalogues{workspace};
+    QVERIFY(catalogues.usingEngine());
+    SearchDialog dialog{catalogues, {}, {}};
+    dialog.show();
+
+    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    QVERIFY(input != nullptr);
+    input->setText(QStringLiteral("anything"));
+
+    QTRY_VERIFY2(searched.load() > 0,
+                 "the search dialog never asked the engine; it searched locally");
+
+    (*server)->stop();
 }
 
 } // namespace trackknife::bench

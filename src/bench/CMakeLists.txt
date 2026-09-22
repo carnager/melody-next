@@ -37,6 +37,8 @@ qt_add_library(
     file_scope_view.hpp
     convert_dialog.cpp
     convert_dialog.hpp
+    catalogue_source.cpp
+    catalogue_source.hpp
     local_list_model.cpp
     local_list_history.cpp
     bench_resume.cpp

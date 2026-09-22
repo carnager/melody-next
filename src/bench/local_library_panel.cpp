@@ -164,32 +164,8 @@ class LibraryModel final : public QStandardItemModel {
 
 } // namespace
 
-LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidget* parent)
-    : QWidget(parent), database_path_(std::move(database_path)) {
-    // ADR-0220: an engine socket is opt-in. Unset -- which is the default and
-    // what every existing install has -- means the library is opened in this
-    // process exactly as before.
-    //
-    // The socket is a unix socket, so the engine is another process on this
-    // host rather than another machine; TCP arrives in Phase 3. That is why
-    // paths it returns still resolve here, and why they will not once the
-    // transport can cross a network.
-    const auto configured =
-        QSettings{}
-            .value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
-            .toString();
-    if (!configured.isEmpty()) {
-        engine_socket_ = configured.toStdString();
-        auto client = protocol::Client::connect(engine_socket_);
-        if (client) {
-            engine_client_ = std::move(*client);
-        } else {
-            // Falling back to the local database rather than leaving the
-            // panel dead: an unreachable engine should cost the user the
-            // engine, not their library.
-            engine_failure_ = text(client.error().message);
-        }
-    }
+LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget* parent)
+    : QWidget(parent), catalogues_(&catalogues) {
     setObjectName(QStringLiteral("bench-local-library"));
     pool_.setMaxThreadCount(2);
     artwork_pool_.setMaxThreadCount(1);
@@ -429,13 +405,15 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     reloadTree();
     loadRoots();
     refreshSourceLabel();
-    // The failure is also said once in the status line, where a user is
-    // actually looking when a folder they added does not appear. The source
-    // label below keeps saying it afterwards.
-    if (!engine_failure_.isEmpty()) {
+    // Said once in the status line too, where a user is actually looking when
+    // a folder they added does not appear. The source label keeps saying it
+    // afterwards.
+    if (catalogues_ != nullptr && !catalogues_->usingEngine() &&
+        !catalogues_->failure().isEmpty()) {
         QTimer::singleShot(0, this, [this] {
-            status_->setText(tr("Using the local library: the engine at %1 is unreachable (%2)")
-                                 .arg(pathLabel(engine_socket_.string()), engine_failure_));
+            status_->setText(
+                tr("Using the local library: the engine at %1 is unreachable (%2)")
+                    .arg(pathLabel(catalogues_->socket().string()), catalogues_->failure()));
         });
     }
 }
@@ -445,23 +423,17 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
 // invisible -- a configured engine that is not answering looks identical to
 // no engine at all.
 void LocalLibraryPanel::refreshSourceLabel() {
-    if (source_label_ == nullptr) {
+    if (source_label_ == nullptr || catalogues_ == nullptr) {
         return;
     }
-    if (engine_client_ != nullptr) {
-        source_label_->setText(tr("Library: engine at %1").arg(pathLabel(engine_socket_.string())));
-        source_label_->setToolTip(
-            tr("Folders, scanning and covers come from that engine, not from this process."));
-        return;
-    }
-    if (!engine_socket_.empty()) {
-        source_label_->setText(tr("Library: this process — engine at %1 is unreachable")
-                                   .arg(pathLabel(engine_socket_.string())));
-        source_label_->setToolTip(engine_failure_);
-        return;
-    }
-    source_label_->setText(tr("Library: this process"));
-    source_label_->setToolTip(tr("No engine is configured. Set library/engine-socket to use one."));
+    source_label_->setText(catalogues_->describe());
+    source_label_->setToolTip(catalogues_->usingEngine()
+                                  ? tr("Folders, scanning, search and covers come from that "
+                                       "engine, not from this process.")
+                              : catalogues_->failure().isEmpty()
+                                  ? tr("No engine is configured. Set library/engine-socket to "
+                                       "use one.")
+                                  : catalogues_->failure());
 }
 
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }
@@ -505,16 +477,11 @@ void LocalLibraryPanel::pump() {
     completion_ = std::move(task.done);
     querying_ = true;
     query_watcher_.setFuture(
-        QtConcurrent::run(&pool_, [path = database_path_, client = engine_client_.get(),
-                                   work = std::move(task.work)] {
+        QtConcurrent::run(&pool_, [catalogues = catalogues_, work = std::move(task.work)] {
             // ADR-0220: the task is given the core's front door, never the
             // database, and never learns which side of a socket it is on.
-            if (client != nullptr) {
-                engine::RemoteCatalogue catalogue{*client};
-                return work(catalogue);
-            }
-            engine::LocalCatalogue catalogue{path};
-            return work(catalogue);
+            auto catalogue = catalogues->open();
+            return work(*catalogue);
         }));
 }
 
@@ -1311,31 +1278,23 @@ void LocalLibraryPanel::startScan() {
     scan_button_->setText(tr("Stop"));
     poll_timer_->start();
     updateProgress();
-    scan_watcher_.setFuture(QtConcurrent::run(
-        &pool_, [path = database_path_, client = engine_client_.get(),
-                 cancellation = scan_cancellation_.token(), progress = progress_] {
-            ScanOutcome outcome;
-            // ADR-0220: ask the core, do not open its database. The job shape
-            // around this call -- pool, poll timer, token, watcher -- is
-            // unchanged whichever side answers; remotely it becomes a job,
-            // and the same counters are fed from its progress events.
-            const auto run = [&](engine::Catalogue& catalogue) {
-                auto result = catalogue.scan(cancellation, *progress);
-                if (result) {
-                    outcome.result = *result;
-                } else {
-                    outcome.error = text(result.error().message);
-                }
-            };
-            if (client != nullptr) {
-                engine::RemoteCatalogue catalogue{*client};
-                run(catalogue);
-            } else {
-                engine::LocalCatalogue catalogue{path};
-                run(catalogue);
-            }
-            return outcome;
-        }));
+    scan_watcher_.setFuture(QtConcurrent::run(&pool_, [catalogues = catalogues_,
+                                                       cancellation = scan_cancellation_.token(),
+                                                       progress = progress_] {
+        ScanOutcome outcome;
+        // ADR-0220: ask the core, do not open its database. The job shape
+        // around this call -- pool, poll timer, token, watcher -- is
+        // unchanged whichever side answers; remotely it becomes a job,
+        // and the same counters are fed from its progress events.
+        auto catalogue = catalogues->open();
+        auto result = catalogue->scan(cancellation, *progress);
+        if (result) {
+            outcome.result = *result;
+        } else {
+            outcome.error = text(result.error().message);
+        }
+        return outcome;
+    }));
 }
 
 bool LocalLibraryPanel::eventFilter(QObject* watched, QEvent* event) {
@@ -1401,8 +1360,8 @@ void LocalLibraryPanel::updateArtwork() {
         artwork_cancellation_ = core::CancellationSource{};
         artwork_running_ = true;
         artwork_watcher_.setFuture(
-            QtConcurrent::run(&artwork_pool_, [path = database_path_, client = engine_client_.get(),
-                                               key, cancellation = artwork_cancellation_.token()] {
+            QtConcurrent::run(&artwork_pool_, [catalogues = catalogues_, key,
+                                               cancellation = artwork_cancellation_.token()] {
                 if (cancellation.is_cancellation_requested()) {
                     return QImage{};
                 }
@@ -1413,18 +1372,10 @@ void LocalLibraryPanel::updateArtwork() {
                 // serialise. Acceptable while covers are the only thing on
                 // that pool; it is the first place a second connection would
                 // be worth having.
-                const auto fetch = [&](engine::Catalogue& catalogue) {
-                    const auto source = catalogue.artwork_source(key.toStdString(), cancellation);
-                    return source && source->has_value()
-                               ? ui::loadLocalArtwork(**source, cancellation)
-                               : QImage{};
-                };
-                if (client != nullptr) {
-                    engine::RemoteCatalogue catalogue{*client};
-                    return fetch(catalogue);
-                }
-                engine::LocalCatalogue catalogue{path};
-                return fetch(catalogue);
+                auto catalogue = catalogues->open();
+                const auto source = catalogue->artwork_source(key.toStdString(), cancellation);
+                return source && source->has_value() ? ui::loadLocalArtwork(**source, cancellation)
+                                                     : QImage{};
             }));
         return;
     }

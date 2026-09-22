@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/catalogue_source.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_library_panel.hpp"
@@ -904,7 +905,8 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
 
-    LocalLibraryPanel panel{database};
+    CatalogueSource catalogues{database};
+    LocalLibraryPanel panel{catalogues};
     auto* button = panel.findChild<QToolButton*>(QStringLiteral("local-library-scan"));
     QVERIFY(button);
     QVERIFY(!panel.property("scanning").toBool());
@@ -984,7 +986,8 @@ void LocalLibraryTest::locateLoadsAdditionalTreePages() {
     )SQL";
     QCOMPARE(sqlite3_exec(db, insert, nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
-    LocalLibraryPanel panel{database};
+    CatalogueSource catalogues{database};
+    LocalLibraryPanel panel{catalogues};
     panel.show();
     panel.locatePath(path, true);
     auto* tree = panel.findChild<QTreeView*>();
@@ -1107,7 +1110,8 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
             completion(queryDynamicLocalLibrary(database, compiled, cancellation));
         }};
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
-    LocalLibraryPanel panel(database);
+    CatalogueSource catalogues{database};
+    LocalLibraryPanel panel(catalogues);
     connect(&panel, &LocalLibraryPanel::libraryContentChanged, &dialog,
             &DynamicPlaylistDialog::libraryChanged);
     dialog.show();
@@ -1175,7 +1179,8 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     const auto cancelled = library->cached_tracks({alpha}, cancellation.token());
     QVERIFY(!cancelled && cancelled.error().code == core::ErrorCode::cancelled);
 
-    SearchDialog dialog{database, {}, {}};
+    CatalogueSource search_catalogues{database};
+    SearchDialog dialog{search_catalogues, {}, {}};
     dialog.show();
     auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
     auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
@@ -1230,7 +1235,8 @@ void LocalLibraryTest::queryModeFiltersAndCommitsResults() {
     QVERIFY(library->scan({}, progress).has_value());
     QCOMPARE(progress.indexed.load(), 2U);
 
-    LocalLibraryPanel panel{database};
+    CatalogueSource catalogues{database};
+    LocalLibraryPanel panel{catalogues};
     panel.show();
     auto* search = panel.findChild<QLineEdit*>(QStringLiteral("local-library-search"));
     auto* toggle = panel.findChild<QCheckBox*>(QStringLiteral("local-library-query-toggle"));
@@ -1487,7 +1493,8 @@ void LocalLibraryTest::dragResolvesUnloadedPagesAndRawPaths() {
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
-    LocalLibraryPanel panel{base / "state.sqlite"};
+    CatalogueSource catalogues{base / "state.sqlite"};
+    LocalLibraryPanel panel{catalogues};
     panel.resize(420, 400);
     panel.show();
     auto* tree = panel.findChild<QTreeView*>();
@@ -1614,7 +1621,8 @@ void LocalLibraryTest::albumCoversLoadAndRefresh() {
     const auto representative = library->artwork_source(album_key);
     QVERIFY(representative && representative->has_value());
     QCOMPARE(**representative, source);
-    LocalLibraryPanel panel{base / "state.sqlite"};
+    CatalogueSource catalogues{base / "state.sqlite"};
+    LocalLibraryPanel panel{catalogues};
     panel.resize(420, 400);
     auto* tree = panel.findChild<QTreeView*>();
     auto* search = panel.findChild<QLineEdit*>();

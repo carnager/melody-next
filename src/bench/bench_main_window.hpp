@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/catalogue_source.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
@@ -681,6 +682,9 @@ class BenchMainWindow final : public QMainWindow {
     QAction* notifications_action_{nullptr};
     ui::ListPersistenceService* persistence_{nullptr};
     std::filesystem::path database_path_;
+    // ADR-0220: one place decides whether a catalogue is this process or an
+    // engine, and everything that needs one asks here.
+    std::unique_ptr<CatalogueSource> catalogue_source_;
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

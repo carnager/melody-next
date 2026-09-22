@@ -73,15 +73,15 @@ constexpr int result_display_limit = 20'000;
 
 } // namespace
 
-SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                            TechnicalsSink technicals_sink, QWidget* parent)
-    : SearchDialog(std::move(database_path), std::move(tab_access), std::move(technicals_sink),
-                   ServerScope{}, parent) {}
+    : SearchDialog(catalogues, std::move(tab_access), std::move(technicals_sink), ServerScope{},
+                   parent) {}
 
-SearchDialog::SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                            TechnicalsSink technicals_sink, ServerScope server_scope,
                            QWidget* parent)
-    : QDialog(parent), database_path_(std::move(database_path)), tab_access_(std::move(tab_access)),
+    : QDialog(parent), catalogues_(&catalogues), tab_access_(std::move(tab_access)),
       technicals_sink_(std::move(technicals_sink)), server_scope_(std::move(server_scope)) {
     setWindowTitle(QStringLiteral("Search"));
     setObjectName(QStringLiteral("bench-search-dialog"));
@@ -354,7 +354,7 @@ void SearchDialog::loadSavedSearches(std::optional<persistence::SavedSearch> wri
                                  : QStringLiteral("Loading saved searches…"));
     updateSavedSearchButtons();
     catalog_watcher_.setFuture(
-        QtConcurrent::run([database = database_path_, write = std::move(write),
+        QtConcurrent::run([database = catalogues_->database(), write = std::move(write),
                            remove]() -> core::Result<std::vector<persistence::SavedSearch>> {
             // ADR-0220: ask the core, do not open its database.
             auto workspace = engine::Workspace::open(database);
@@ -639,12 +639,13 @@ void SearchDialog::startSearch() {
     if (databaseScope()) {
         searching_ = true;
         watcher_.setFuture(
-            QtConcurrent::run([database = database_path_,
+            QtConcurrent::run([catalogues = catalogues_,
                                shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
                                token = cancellation_.token()]() {
                 Outcome outcome;
                 // ADR-0220: ask the core, do not open its database.
-                const engine::LocalCatalogue catalogue{database};
+                auto handle = catalogues->open();
+                auto& catalogue = *handle;
                 auto paths = catalogue.filter_paths(*shared, token);
                 if (!paths) {
                     outcome.error = displayText(paths.error().message);
@@ -676,7 +677,7 @@ void SearchDialog::startSearch() {
     searching_ = true;
     const auto needs_technicals = references_technicals(*compiled);
     watcher_.setFuture(
-        QtConcurrent::run([database = database_path_, rows = std::move(snapshot->rows),
+        QtConcurrent::run([catalogues = catalogues_, rows = std::move(snapshot->rows),
                            shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
                            needs_technicals, token = cancellation_.token()]() mutable {
             Outcome outcome;
@@ -692,7 +693,8 @@ void SearchDialog::startSearch() {
             std::vector<std::array<std::int64_t, 6>> histories;
             if (needs_history) {
                 // ADR-0220: ask the core, do not open its database.
-                const engine::LocalCatalogue catalogue{database};
+                auto handle = catalogues->open();
+                auto& catalogue = *handle;
                 std::vector<persistence::LibraryHistorySource> sources;
                 for (const auto& row : rows) {
                     if (token.is_cancellation_requested()) {

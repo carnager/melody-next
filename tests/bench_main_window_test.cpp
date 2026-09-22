@@ -3,6 +3,7 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/catalogue_source.hpp"
 #include "bench/connection_profiles_widget.hpp"
 #include "bench/convert_dialog.hpp"
 #include "bench/cover_thumbnail.hpp"
@@ -1089,7 +1090,8 @@ void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {
     source.source_reference = played.raw_path;
     source.source_revision = played.source_revision;
     QVERIFY(repository->record_local_listen(source, core::StableId::random(), 1000));
-    SearchDialog dialog(database,
+    CatalogueSource catalogues{database};
+    SearchDialog dialog(catalogues,
                         [&]() -> std::optional<SearchDialog::TabSnapshot> {
                             return SearchDialog::TabSnapshot{QStringLiteral("Current"),
                                                              {played, unplayed, played}};
@@ -6759,7 +6761,8 @@ void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
         });
     };
     {
-        SearchDialog dialog{database, access, {}};
+        CatalogueSource catalogues{database};
+        SearchDialog dialog{catalogues, access, {}};
         dialog.show();
         auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
         auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
@@ -6808,7 +6811,8 @@ void BenchMainWindowTest::savedSearchesCanBeManagedAndReopened() {
     }
     // A new dialog reruns the saved definition against the current tab, not old hits.
     current.push_back(second);
-    SearchDialog reopened{database, access, {}};
+    CatalogueSource reopened_catalogues{database};
+    SearchDialog reopened{reopened_catalogues, access, {}};
     reopened.show();
     auto* saved = reopened.findChild<QComboBox*>(QStringLiteral("bench-search-saved"));
     auto* input = reopened.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
@@ -7056,7 +7060,8 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     row.probed = true;
 
     std::vector<std::pair<std::string, LocalTrackTechnicals>> reported;
-    SearchDialog dialog{std::filesystem::path{},
+    CatalogueSource catalogues{std::filesystem::path{}};
+    SearchDialog dialog{catalogues,
                         [&row]() -> std::optional<SearchDialog::TabSnapshot> {
                             return SearchDialog::TabSnapshot{QStringLiteral("Fixture"), {row}};
                         },
@@ -7113,8 +7118,9 @@ void BenchMainWindowTest::searchPresetsAreGroupedAndCapabilityGated() {
         executed = displayText(compiled.source);
         completion({}, 0, {});
     };
+    CatalogueSource catalogues{std::filesystem::path{}};
     SearchDialog dialog{
-        std::filesystem::path{},
+        catalogues,
         {},
         {},
         SearchDialog::ServerScope{
@@ -7201,7 +7207,8 @@ void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
     QString ran_expression;
     QString ran_sort;
     QString opened_query;
-    SearchDialog dialog{std::filesystem::path{},
+    CatalogueSource catalogues{std::filesystem::path{}};
+    SearchDialog dialog{catalogues,
                         {},
                         {},
                         SearchDialog::ServerScope{
@@ -7252,7 +7259,7 @@ void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
     // A server advertising filtergrammar takes the same query structured.
     QString structured_expression;
     SearchDialog structured{
-        std::filesystem::path{},
+        catalogues,
         {},
         {},
         SearchDialog::ServerScope{
@@ -7286,7 +7293,7 @@ void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
              QStringLiteral("((genre contains \"jazz\") OR (genre contains \"blues\"))"));
 
     // Without a server scope the combo keeps its two local scopes.
-    SearchDialog local_only{std::filesystem::path{}, {}, {}};
+    SearchDialog local_only{catalogues, {}, {}};
     auto* local_scope = local_only.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
     QVERIFY(local_scope != nullptr);
     QCOMPARE(local_scope->count(), 2);

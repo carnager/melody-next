@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/catalogue_source.hpp"
+
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_model.hpp"
 #include "trackknife/core/cancellation.hpp"
@@ -62,10 +64,10 @@ class SearchDialog final : public QDialog {
         std::function<QString(const query::CompiledTkq&, bool current)> unsupported_reason{};
     };
 
-    SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+    SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                  TechnicalsSink technicals_sink, ServerScope server_scope,
                  QWidget* parent = nullptr);
-    SearchDialog(std::filesystem::path database_path, TabAccess tab_access,
+    SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                  TechnicalsSink technicals_sink, QWidget* parent = nullptr);
     ~SearchDialog() override;
 
@@ -113,7 +115,7 @@ class SearchDialog final : public QDialog {
     [[nodiscard]] bool serverCurrentScope() const;
     void startServerSearch(query::CompiledTkq compiled);
 
-    std::filesystem::path database_path_;
+    const CatalogueSource* catalogues_{nullptr};
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
     ServerScope server_scope_;

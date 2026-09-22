@@ -5,6 +5,7 @@
 #include "trackknife/audio/local_audition.hpp"
 
 #include <cstdint>
+#include <optional>
 
 namespace trackknife::audio {
 
@@ -32,6 +33,44 @@ namespace trackknife::audio {
 [[nodiscard]] inline std::int64_t resume_position_ms(const LocalAuditionSnapshot& snapshot) {
     const auto rate = static_cast<std::int64_t>(snapshot.format->sample_rate);
     return snapshot.position_sample / rate * 1000 + snapshot.position_sample % rate * 1000 / rate;
+}
+
+// A resume position is rewritten continuously while a track plays, so it is
+// rate limited rather than saved on every tick.
+inline constexpr std::int64_t minimum_resume_interval_ms = 5'000;
+
+// Everything outside the snapshot that bears on whether to write now.
+struct ResumeWriteConditions final {
+    // Set when the caller needs this write to happen regardless of the rate
+    // limit -- shutdown, or the user turning resume on.
+    bool forced{false};
+    // Whether resume is switched on at all.
+    bool enabled{false};
+    // A previous write has not completed; a second would race it.
+    bool write_in_flight{false};
+    // Absent when nothing has been written yet this session.
+    std::optional<std::int64_t> since_last_write_ms;
+};
+
+// Whether to write a resume checkpoint for this snapshot now.
+//
+// Note what `forced` does and does not bypass: it skips the enabled check, the
+// in-flight guard and the rate limit, but a loading snapshot is still refused,
+// because it has no meaningful offset to record yet. Forcing overrides policy,
+// not arithmetic.
+[[nodiscard]] inline bool should_write_resume(const LocalAuditionSnapshot& snapshot,
+                                              const ResumeWriteConditions& conditions) noexcept {
+    if (snapshot.state == LocalAuditionState::loading) {
+        return false;
+    }
+    if (conditions.forced) {
+        return true;
+    }
+    if (!conditions.enabled || conditions.write_in_flight) {
+        return false;
+    }
+    return !conditions.since_last_write_ms ||
+           *conditions.since_last_write_ms >= minimum_resume_interval_ms;
 }
 
 } // namespace trackknife::audio

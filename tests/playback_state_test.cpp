@@ -559,9 +559,57 @@ void only_audible_playback_counts_as_listening() {
     }
 }
 
+void resume_writes_are_rate_limited_but_forcing_overrides_policy_not_arithmetic() {
+    namespace audio = trackknife::audio;
+    auto snapshot = playing_snapshot();
+
+    // Off means off.
+    require(!audio::should_write_resume(snapshot, {.enabled = false, .since_last_write_ms = std::nullopt}),
+            "resume switched off writes nothing");
+
+    // The first write of a session has nothing to wait for.
+    require(audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = std::nullopt}),
+            "the first write is not rate limited");
+
+    // Then the rate limit applies.
+    require(!audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = 0}),
+            "a write straight after another is refused");
+    require(!audio::should_write_resume(
+                snapshot, {.enabled = true,
+                           .since_last_write_ms = audio::minimum_resume_interval_ms - 1}),
+            "just inside the interval is refused");
+    require(audio::should_write_resume(
+                snapshot,
+                {.enabled = true, .since_last_write_ms = audio::minimum_resume_interval_ms}),
+            "the interval boundary is allowed");
+
+    // A write already in flight is not raced.
+    require(!audio::should_write_resume(
+                snapshot, {.enabled = true, .write_in_flight = true, .since_last_write_ms = 60'000}),
+            "an in-flight write blocks another however long it has been");
+
+    // Forcing skips the policy: off, in flight, and inside the interval.
+    require(audio::should_write_resume(snapshot, {.forced = true, .enabled = false, .since_last_write_ms = std::nullopt}),
+            "forcing writes even when resume is off");
+    require(audio::should_write_resume(
+                snapshot,
+                {.forced = true, .enabled = true, .write_in_flight = true,
+                 .since_last_write_ms = 0}),
+            "forcing skips the rate limit and the in-flight guard");
+
+    // But not the arithmetic: a loading snapshot has no offset to record, and
+    // forcing cannot invent one.
+    snapshot.state = audio::LocalAuditionState::loading;
+    require(!audio::should_write_resume(snapshot, {.enabled = true, .since_last_write_ms = std::nullopt}),
+            "a loading snapshot has no position to save");
+    require(!audio::should_write_resume(snapshot, {.forced = true, .enabled = true, .since_last_write_ms = std::nullopt}),
+            "forcing does not make a loading snapshot writable");
+}
+
 } // namespace
 
 int main() {
+    resume_writes_are_rate_limited_but_forcing_overrides_policy_not_arithmetic();
     only_audible_playback_counts_as_listening();
     album_grouping_follows_the_album_artist_and_keeps_list_order();
     a_track_artist_stands_in_for_a_missing_album_artist();

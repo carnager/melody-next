@@ -34,13 +34,16 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
                                             bool force) {
     if (!persistence_ || !lists_restored_ || resume_restore_pending_)
         return;
-    if (!force && !resumeEnabled())
+    if (!audio::should_write_resume(
+            snapshot,
+            {.forced = force,
+             .enabled = resumeEnabled(),
+             .write_in_flight = resume_save_pending_,
+             .since_last_write_ms = resume_save_clock_.isValid()
+                                        ? std::optional{resume_save_clock_.elapsed()}
+                                        : std::nullopt})) {
         return;
-    if (!force && (resume_save_pending_ ||
-                   (resume_save_clock_.isValid() && resume_save_clock_.elapsed() < 5000)))
-        return;
-    if (snapshot.state == audio::LocalAuditionState::loading)
-        return;
+    }
     resume_save_clock_.start();
     // Keep an active request's offset in the same payload as its exact source
     // and pending FIFO, never in the normal-list checkpoint.

@@ -3,6 +3,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "trackknife/audio/resume_checkpoint.hpp"
 #include "uicommon/list_persistence_service.hpp"
 
 #include <QJsonDocument>
@@ -46,14 +47,8 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     if (local_requests_.active())
         persistUpNext();
     std::optional<ui::LocalResumeCheckpoint> checkpoint;
-    const bool resumable = snapshot.state == audio::LocalAuditionState::paused ||
-                           snapshot.state == audio::LocalAuditionState::playing ||
-                           snapshot.state == audio::LocalAuditionState::buffering ||
-                           snapshot.state == audio::LocalAuditionState::draining;
-    if (resumeEnabled() && resumable && snapshot.source_revision && snapshot.format &&
-        snapshot.format->sample_rate > 0 && snapshot.position_sample >= 0 &&
-        (!snapshot.end_sample || snapshot.position_sample < *snapshot.end_sample) &&
-        anchors_.playing() && !local_requests_.active()) {
+    if (resumeEnabled() && audio::resumable(snapshot) && anchors_.playing() &&
+        !local_requests_.active()) {
         auto* tab = tabForDocument(anchors_.document);
         const auto row = resolvePlaybackRow(tab);
         if (tab != nullptr && row >= 0) {
@@ -62,11 +57,10 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
                 source.source_revision == snapshot.source_revision &&
                 tab->model->source(row).selection == snapshot.selection &&
                 tab->model->source(row).segment == snapshot.segment) {
-                const auto rate = snapshot.format->sample_rate;
-                const auto position_ms = snapshot.position_sample / rate * 1000 +
-                                         snapshot.position_sample % rate * 1000 / rate;
-                checkpoint = ui::LocalResumeCheckpoint{document_text(anchors_.document), row,
-                                                       std::move(source), position_ms};
+                checkpoint =
+                    ui::LocalResumeCheckpoint{document_text(anchors_.document), row,
+                                              std::move(source),
+                                              audio::resume_position_ms(snapshot)};
             }
         }
     }

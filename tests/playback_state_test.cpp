@@ -7,6 +7,7 @@
 
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_selection.hpp"
+#include "trackknife/audio/resume_checkpoint.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/track_source.hpp"
 
@@ -328,9 +329,99 @@ void nothing_playing_chooses_nothing() {
             "with no source there is nothing to advance from");
 }
 
+trackknife::audio::LocalAuditionSnapshot playing_snapshot() {
+    namespace audio = trackknife::audio;
+    namespace formats = trackknife::formats;
+    audio::LocalAuditionSnapshot snapshot;
+    snapshot.state = audio::LocalAuditionState::playing;
+    snapshot.source_revision = trackknife::core::LocalSourceRevision{};
+    formats::PcmFormat format;
+    format.sample_rate = 44'100;
+    snapshot.format = format;
+    snapshot.position_sample = 0;
+    return snapshot;
+}
+
+void only_live_measurable_playback_is_resumable() {
+    namespace audio = trackknife::audio;
+    auto snapshot = playing_snapshot();
+    require(audio::resumable(snapshot), "ordinary playback is resumable");
+
+    for (const auto state : {audio::LocalAuditionState::paused, audio::LocalAuditionState::buffering,
+                             audio::LocalAuditionState::draining}) {
+        snapshot.state = state;
+        require(audio::resumable(snapshot), "every live state is resumable");
+    }
+    for (const auto state : {audio::LocalAuditionState::loading, audio::LocalAuditionState::empty,
+                             audio::LocalAuditionState::ended, audio::LocalAuditionState::failed}) {
+        snapshot.state = state;
+        require(!audio::resumable(snapshot), "a state with no offset is not resumable");
+    }
+
+    // Without a revision a restore could seek into a file that changed.
+    snapshot = playing_snapshot();
+    snapshot.source_revision.reset();
+    require(!audio::resumable(snapshot), "an unrevisioned source is not resumable");
+
+    snapshot = playing_snapshot();
+    snapshot.format.reset();
+    require(!audio::resumable(snapshot), "an unknown format is not resumable");
+
+    snapshot = playing_snapshot();
+    snapshot.format->sample_rate = 0;
+    require(!audio::resumable(snapshot), "a zero rate would divide by zero downstream");
+
+    snapshot = playing_snapshot();
+    snapshot.position_sample = -1;
+    require(!audio::resumable(snapshot), "a negative offset is not a position");
+
+    // At or past a segment end is a finished track, not a place to return to.
+    snapshot = playing_snapshot();
+    snapshot.position_sample = 1'000;
+    snapshot.end_sample = 1'000;
+    require(!audio::resumable(snapshot), "a position at the segment end is finished");
+    snapshot.position_sample = 999;
+    require(audio::resumable(snapshot), "a position inside the segment is resumable");
+}
+
+void resume_position_matches_the_direct_computation() {
+    namespace audio = trackknife::audio;
+    auto snapshot = playing_snapshot();
+
+    require(audio::resume_position_ms(snapshot) == 0, "the start is zero");
+    snapshot.position_sample = 44'100;
+    require(audio::resume_position_ms(snapshot) == 1'000, "one second is a thousand milliseconds");
+    snapshot.position_sample = 22'050;
+    require(audio::resume_position_ms(snapshot) == 500, "half a second is five hundred");
+
+    // Truncation, not rounding: 44 samples is 0.997ms.
+    snapshot.position_sample = 44;
+    require(audio::resume_position_ms(snapshot) == 0, "sub-millisecond offsets truncate to zero");
+
+    // The split form is exactly the direct computation, just without forming
+    // the large intermediate product. Check that across awkward remainders.
+    for (const auto rate : {8'000, 44'100, 48'000, 96'000, 192'000}) {
+        snapshot.format->sample_rate = rate;
+        for (const auto samples : {0, 1, 7, 999, 44'099, 44'100, 123'457, 7'654'321}) {
+            snapshot.position_sample = samples;
+            const auto direct = static_cast<std::int64_t>(samples) * 1'000 / rate;
+            require(audio::resume_position_ms(snapshot) == direct,
+                    "the split form must equal the direct computation");
+        }
+    }
+
+    // A long file: three hours at 192 kHz is still exact.
+    snapshot.format->sample_rate = 192'000;
+    snapshot.position_sample = 192'000LL * 60 * 60 * 3;
+    require(audio::resume_position_ms(snapshot) == 3LL * 60 * 60 * 1'000,
+            "a long offset stays exact");
+}
+
 } // namespace
 
 int main() {
+    only_live_measurable_playback_is_resumable();
+    resume_position_matches_the_direct_computation();
     advancing_walks_the_list_and_stops_at_the_end();
     an_entry_that_left_the_list_stops_playback();
     a_request_return_point_outranks_the_order();

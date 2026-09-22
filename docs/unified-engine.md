@@ -120,11 +120,13 @@ mechanical once that is done, and impossible before.
 **This is the same problem in three places, none of them MPD.** Stable
 queue-entry identity is what Phase 0 needs internally, what Phase 2 must put on
 the wire, and what tab unification needs so an entry is addressable
-independently of its row. It is also the nearest relative of Phase 6's content
-identity — that one identifies a *file across mutations*, this one identifies an
-*entry across reordering*, and they should be designed together. Settle it here;
-getting it wrong is expensive in every later phase. If the Phase 5 bridge is
-ever built it derives MPD song IDs from this, but it is not a reason to have it.
+independently of its row. If the Phase 5 bridge is ever built it derives MPD
+song IDs from this, but that is not a reason to have it.
+
+Settled in [ADR-0221](adr/0221-entry-and-track-identity.md): an opaque
+`core::StableId` per entry, and a separate metadata-derived track identity that
+the entry carries. Phase 0 implements the entry half; Phase 6 migrates the
+existing rating and listening schemes onto the track half.
 
 Done when: the playback service is exercised by tests without constructing
 `BenchMainWindow`, and the existing local playback, resume, up-next and album

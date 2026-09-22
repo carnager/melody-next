@@ -322,6 +322,15 @@ add_test(
 # format. Links no Qt.
 # ADR-0219/0222: jobs, including the fault injection proving a long job cannot
 # starve the control path.
+# ADR-0220 Phase 2: playback owned by the engine.
+add_executable(trackknife_engine_player_tests engine_player_test.cpp)
+target_link_libraries(
+    trackknife_engine_player_tests
+    PRIVATE Trackknife::Engine Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME engine-player COMMAND trackknife_engine_player_tests)
+
 # ADR-0220: tkengine as a process, exercised the way an init system would.
 add_test(
     NAME engine-daemon

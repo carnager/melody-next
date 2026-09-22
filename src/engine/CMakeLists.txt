@@ -2,7 +2,7 @@
 
 find_package(Threads REQUIRED)
 
-add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/job_registry.cpp src/workspace.cpp)
+add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/job_registry.cpp src/player.cpp src/workspace.cpp)
 add_library(Trackknife::Engine ALIAS trackknife_engine)
 
 target_include_directories(
@@ -12,7 +12,8 @@ target_include_directories(
 )
 target_link_libraries(
     trackknife_engine
-    PUBLIC Trackknife::Core Trackknife::Persistence Trackknife::Protocol Trackknife::Query
+    PUBLIC Trackknife::Audio Trackknife::Core Trackknife::Persistence Trackknife::Protocol
+           Trackknife::Query
            trackknife_project_options
     PRIVATE Threads::Threads trackknife_project_warnings
 )

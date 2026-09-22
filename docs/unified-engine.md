@@ -377,6 +377,11 @@ and the engine survives the UI exiting mid-playback.
 - Byte access for clients that cannot read the library: artwork, waveform peaks,
   audition. Prefer engine-side rendering for peaks; range requests for artwork.
   Today these read files directly from the UI thread's workers.
+- **An engine may be a client of another engine.** Nothing in byte access
+  should assume the requester is a UI. Melody's agent already streams audio to
+  players without file access, so the machinery exists; the requirement here is
+  only that the protocol not rule it out. See "Two things to leave possible"
+  below for what it buys.
 - Profiles gain an endpoint. A local profile spawns a loopback engine if none is
   running; a remote profile connects.
 - **Several engines at once, not one at a time.** A profile is a connection,
@@ -396,6 +401,34 @@ and the engine survives the UI exiting mid-playback.
 Done when: the desktop UI runs against an engine on another machine with no
 filesystem access to the library, including artwork, waveforms and a tag edit,
 and two connections can be open at once without either becoming "the" authority.
+
+### Two things to leave possible
+
+Neither is scheduled. Both become expensive to retrofit, so the protocol should
+not preclude them.
+
+**Handing playback between engines.** With every connection speaking the same
+protocol, playing from a tab on connection B while A is playing is just stop-A,
+play-B — client policy, no protocol feature. Two consequences are easy to miss.
+The audio moves with it: playback happens on the engine and sound comes from an
+agent, so unless both engines target the same agent, handing over also changes
+which speakers play. And if they *do* share an agent, it must be released by one
+before the other takes it — a contention point the output selection has to name.
+Second, a listen is recorded by whichever engine served the track, so history
+fragments across machines. That may be right, since the file lives there too,
+but it should be a decision rather than a discovery.
+
+**Tabs holding entries from several engines.** Displaying them is easy: carry a
+connection alongside the entry identity. Playing them is the question, because
+the engine owns the queue and engine A cannot address engine B's tracks. The
+clean answer is the byte-access note above — if an engine can be a client, A
+holds the mixed queue and streams B's entries, so queue ownership stays with one
+engine and playback still survives the UI closing. What is lost is gapless
+across the boundary, and any entry whose engine is unreachable mid-queue.
+
+The concrete requirement both impose on Phase 2: **an entry reference is
+addressable with a connection**, not against a single implicit one. That costs
+nothing to allow for now.
 
 ### Phase 4 — Output agents
 

@@ -2,6 +2,7 @@
 
 add_library(
     trackknife_audio STATIC
+    src/album_grouping.cpp
     src/local_audition.cpp
     src/local_playback.cpp
     src/melody_agent.cpp

@@ -5,6 +5,7 @@
 // widgets -- which is the property the phase is actually after. The behaviour
 // itself is unchanged; it simply lives somewhere a headless engine can reach.
 
+#include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/resume_checkpoint.hpp"
@@ -417,9 +418,96 @@ void resume_position_matches_the_direct_computation() {
             "a long offset stays exact");
 }
 
+trackknife::audio::AlbumRowKey album_row(std::string album_artist, std::string artist,
+                                         std::string album, std::string date = "2001") {
+    return {.album_artist = std::move(album_artist),
+            .artist = std::move(artist),
+            .album = std::move(album),
+            .date = std::move(date)};
+}
+
+void album_grouping_follows_the_album_artist_and_keeps_list_order() {
+    namespace audio = trackknife::audio;
+    audio::AlbumGrouper grouper;
+    require(grouper.admits(10), "an ordinary list may be grouped");
+
+    // Rows 0 and 2 are one release, row 1 another; grouping must not disturb
+    // the order within a group.
+    require(grouper.add(album_row("Credit", "First", "A"), 0), "row 0");
+    require(grouper.add(album_row("Credit", "First", "B"), 1), "row 1");
+    require(grouper.add(album_row("Credit", "Second", "A"), 2), "row 2");
+    const auto groups = grouper.take();
+    require(groups.size() == 2U, "two distinct albums make two groups");
+    require(groups[0] == std::vector<int>{0, 2}, "a group keeps its rows in list order");
+    require(groups[1] == std::vector<int>{1}, "the second album holds its own row");
+}
+
+void a_track_artist_stands_in_for_a_missing_album_artist() {
+    namespace audio = trackknife::audio;
+    audio::AlbumGrouper grouper;
+    // Tagged only per-track: the release must still group.
+    require(grouper.add(album_row("", "Only Artist", "Record"), 0), "row 0");
+    require(grouper.add(album_row("", "Only Artist", "Record"), 1), "row 1");
+    // And a row that does carry the album artist joins the same release only
+    // when that artist matches the fallback.
+    require(grouper.add(album_row("Only Artist", "Guest", "Record"), 2), "row 2");
+    const auto groups = grouper.take();
+    require(groups.size() == 1U, "the album artist fallback must group the release");
+    require(groups[0] == std::vector<int>{0, 1, 2}, "all three rows belong to it");
+}
+
+void untitled_rows_each_stand_alone() {
+    namespace audio = trackknife::audio;
+    audio::AlbumGrouper grouper;
+    require(grouper.add(album_row("Artist", "Artist", ""), 0), "row 0");
+    require(grouper.add(album_row("Artist", "Artist", ""), 1), "row 1");
+    const auto groups = grouper.take();
+    // Unrelated untagged files sharing an empty album name are not a release.
+    require(groups.size() == 2U, "rows with no album must not be merged into one");
+    require(groups[0] == std::vector<int>{0} && groups[1] == std::vector<int>{1},
+            "each untitled row is its own group");
+}
+
+void the_date_separates_editions() {
+    namespace audio = trackknife::audio;
+    audio::AlbumGrouper grouper;
+    require(grouper.add(album_row("Artist", "Artist", "Record", "1994"), 0), "row 0");
+    require(grouper.add(album_row("Artist", "Artist", "Record", "2011"), 1), "row 1");
+    const auto groups = grouper.take();
+    require(groups.size() == 2U, "a reissue is a different release");
+}
+
+void grouping_is_refused_rather_than_truncated() {
+    namespace audio = trackknife::audio;
+    const audio::AlbumGroupingLimits tight{
+        .max_row_key_bytes = 16U, .max_total_key_bytes = 64U, .max_rows = 4U};
+
+    require(!audio::AlbumGrouper{tight}.admits(5), "a list beyond the row limit is refused");
+    require(audio::AlbumGrouper{tight}.admits(4), "a list at the row limit is allowed");
+
+    // One row carrying an enormous key is refused on its own.
+    audio::AlbumGrouper single{tight};
+    require(!single.add(album_row("", "", std::string(100U, 'x'), ""), 0),
+            "a single oversized key is refused");
+
+    // So is an accumulation of individually acceptable ones. A truncated album
+    // order would silently play the tail of the list in the wrong order.
+    audio::AlbumGrouper accumulating{tight};
+    bool refused = false;
+    for (int row = 0; row < 20 && !refused; ++row) {
+        refused = !accumulating.add(album_row("", "", "album" + std::to_string(row), ""), row);
+    }
+    require(refused, "an accumulated budget overrun must be refused");
+}
+
 } // namespace
 
 int main() {
+    album_grouping_follows_the_album_artist_and_keeps_list_order();
+    a_track_artist_stands_in_for_a_missing_album_artist();
+    untitled_rows_each_stand_alone();
+    the_date_separates_editions();
+    grouping_is_refused_rather_than_truncated();
     only_live_measurable_playback_is_resumable();
     resume_position_matches_the_direct_computation();
     advancing_walks_the_list_and_stops_at_the_end();

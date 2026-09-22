@@ -971,8 +971,7 @@ int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
 void BenchMainWindow::resetPlaybackOrder() {
     ++album_order_generation_;
     album_order_preparing_ = false;
-    album_order_keys_.clear();
-    album_order_groups_.clear();
+    album_grouper_ = audio::AlbumGrouper{};
     auto* tab = tabForDocument(anchors_.document);
     playback_row_ = resolvePlaybackRow(tab);
     playback_order_.reset(tab != nullptr ? tab->model->rowCount() : 0, playback_row_,
@@ -980,7 +979,6 @@ void BenchMainWindow::resetPlaybackOrder() {
     if (local_modes_.album_random && tab && tab->model->rowCount() > 0) {
         album_order_preparing_ = true;
         album_order_build_row_ = 0;
-        album_order_key_bytes_ = 0;
         playback_order_.reset(0, -1, false);
         QTimer::singleShot(0, this, [this, generation = album_order_generation_] {
             prepareAlbumPlaybackOrder(generation);
@@ -1001,36 +999,32 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
         return;
     }
     const auto& rows = tab->model->rows();
+    const auto abandon = [this] {
+        local_modes_.album_random = false;
+        resetPlaybackOrder();
+        applyLocalPlaybackModes();
+        statusBar()->showMessage(tr("Album shuffle exceeds the grouping limits."), 8000);
+    };
+    if (!album_grouper_.admits(rows.size())) {
+        abandon();
+        return;
+    }
     const auto end = std::min(static_cast<int>(rows.size()), album_order_build_row_ + 128);
     for (; album_order_build_row_ < end; ++album_order_build_row_) {
         const auto& row = rows[static_cast<std::size_t>(album_order_build_row_)];
-        const auto& artist = row.album_artist.empty() ? row.artist : row.album_artist;
-        const auto bytes = artist.size() + row.album.size() + row.date.size();
-        album_order_key_bytes_ += bytes;
-        if (bytes > 65536U || album_order_key_bytes_ > 64U * 1024U * 1024U ||
-            rows.size() > 1'000'000U) {
-            local_modes_.album_random = false;
-            resetPlaybackOrder();
-            applyLocalPlaybackModes();
-            statusBar()->showMessage(tr("Album shuffle exceeds the grouping limits."), 8000);
+        if (!album_grouper_.add({.album_artist = row.album_artist,
+                                 .artist = row.artist,
+                                 .album = row.album,
+                                 .date = row.date},
+                                album_order_build_row_)) {
+            abandon();
             return;
         }
-        auto group = album_order_groups_.size();
-        if (!row.album.empty()) {
-            const auto [found, inserted] =
-                album_order_keys_.try_emplace(std::tuple{artist, row.album, row.date}, group);
-            group = found->second;
-            static_cast<void>(inserted);
-        }
-        if (group == album_order_groups_.size())
-            album_order_groups_.emplace_back();
-        album_order_groups_[group].push_back(album_order_build_row_);
     }
     if (album_order_build_row_ < static_cast<int>(rows.size())) {
         QTimer::singleShot(0, this, [this, generation] { prepareAlbumPlaybackOrder(generation); });
         return;
     }
-    album_order_keys_.clear();
     auto* watcher = new QFutureWatcher<audio::PlaybackOrder>(this);
     connect(watcher, &QFutureWatcher<audio::PlaybackOrder>::finished, this,
             [this, watcher, generation] {
@@ -1041,8 +1035,7 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
                 watcher->deleteLater();
             });
     watcher->setFuture(QtConcurrent::run(
-        [groups = std::move(album_order_groups_),
-         current = playback_row_]() mutable {
+        [groups = album_grouper_.take(), current = playback_row_]() mutable {
             audio::PlaybackOrder order;
             order.resetAlbums(std::move(groups), current);
             return order;

@@ -7,6 +7,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
+#include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
@@ -745,9 +746,9 @@ class BenchMainWindow final : public QMainWindow {
     bool album_order_preparing_{false};
     std::uint64_t album_order_generation_{0};
     int album_order_build_row_{0};
-    std::size_t album_order_key_bytes_{0};
-    std::map<std::tuple<std::string, std::string, std::string>, std::size_t> album_order_keys_;
-    std::vector<std::vector<int>> album_order_groups_;
+    // ADR-0220 Phase 0: the grouping rule and its limits are Qt-free policy;
+    // the chunked walk and the timers driving it stay here.
+    audio::AlbumGrouper album_grouper_;
     QString local_replaygain_{QStringLiteral("off")};
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};

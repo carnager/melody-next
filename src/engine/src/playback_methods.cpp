@@ -145,6 +145,13 @@ Json to_json(const Player::State& state) {
     rendered["requests"] = state.requests;
     rendered["modes"] = modes_to_json(state.modes);
     rendered["volume_percent"] = state.volume_percent;
+    Json gain = Json::object();
+    gain["mode"] = state.replay_gain_mode == audio::ReplayGainMode::track   ? "track"
+                   : state.replay_gain_mode == audio::ReplayGainMode::album ? "album"
+                                                                            : "off";
+    gain["preamp_with_gain_db"] = state.replay_gain_preamps.with_gain_db;
+    gain["preamp_without_gain_db"] = state.replay_gain_preamps.without_gain_db;
+    rendered["replay_gain"] = std::move(gain);
     return rendered;
 }
 
@@ -252,6 +259,51 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
         auto sought = player.seek_ms(position->get<std::int64_t>());
         if (!sought) {
             return std::unexpected(std::move(sought.error()));
+        }
+        return to_json(player.state());
+    });
+
+    dispatcher.on("playback.set_replay_gain", [&player](const Json& params) -> core::Result<Json> {
+        if (const auto value = params.find("mode"); value != params.end()) {
+            if (!value->is_string()) {
+                return std::unexpected(bad_params("mode must be a string", "mode"));
+            }
+            const auto name = value->get<std::string>();
+            // "auto" is deliberately not accepted: it is a client's policy
+            // about its own modes, and an engine asked to be "auto" would have
+            // to know which client's shuffle to consult.
+            const auto mode = name == "off"     ? audio::ReplayGainMode::off
+                              : name == "track" ? audio::ReplayGainMode::track
+                              : name == "album" ? audio::ReplayGainMode::album
+                                                : std::optional<audio::ReplayGainMode>{};
+            if (!mode) {
+                return std::unexpected(bad_params("mode is off, track or album", "mode"));
+            }
+            auto set = player.set_replay_gain_mode(*mode);
+            if (!set) {
+                return std::unexpected(std::move(set.error()));
+            }
+        }
+        // Preamps arrive together or not at all: they are one setting with two
+        // halves, and the audition service takes them as a pair.
+        const auto with = params.find("preamp_with_gain_db");
+        const auto without = params.find("preamp_without_gain_db");
+        if (with != params.end() || without != params.end()) {
+            auto preamps = player.state().replay_gain_preamps;
+            for (const auto& [found, slot] : {std::pair{with, &preamps.with_gain_db},
+                                              std::pair{without, &preamps.without_gain_db}}) {
+                if (found == params.end()) {
+                    continue;
+                }
+                if (!found->is_number()) {
+                    return std::unexpected(bad_params("a preamp must be a number", "preamp"));
+                }
+                *slot = found->get<float>();
+            }
+            auto set = player.set_replay_gain_preamps(preamps);
+            if (!set) {
+                return std::unexpected(std::move(set.error()));
+            }
         }
         return to_json(player.state());
     });

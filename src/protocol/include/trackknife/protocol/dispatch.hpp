@@ -9,6 +9,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace trackknife::protocol {
 
@@ -42,6 +43,11 @@ class Dispatcher final {
     void on(std::string method, Handler handler);
 
     [[nodiscard]] bool knows(std::string_view method) const;
+
+    // Every registered method name, sorted. For a caller that has to wrap or
+    // mirror the whole surface: listing the names by hand means a method
+    // added later is silently missing from the wrapper.
+    [[nodiscard]] std::vector<std::string> methods() const;
 
     // Always produces a response, because a request always gets exactly one.
     // An unknown method answers `unsupported` rather than going unanswered,

@@ -95,6 +95,15 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
         state_.repeat = modes->value("repeat", false);
         state_.random = modes->value("random", false);
     }
+    state_.replay_gain_mode = audio::ReplayGainMode::off;
+    if (const auto gain = payload.find("replay_gain"); gain != payload.end() && gain->is_object()) {
+        const auto name = gain->value("mode", std::string{"off"});
+        if (name == "track") {
+            state_.replay_gain_mode = audio::ReplayGainMode::track;
+        } else if (name == "album") {
+            state_.replay_gain_mode = audio::ReplayGainMode::album;
+        }
+    }
 }
 
 EnginePlayback::State EnginePlayback::state() const {
@@ -210,9 +219,24 @@ void EnginePlayback::setVolume(const int percent) {
     send(QStringLiteral("playback.set_volume"), protocol::Json{{"percent", percent}});
 }
 
-void EnginePlayback::setModes(const bool repeat, const bool random) {
+void EnginePlayback::setModes(const audio::PlaybackModes& modes) {
     send(QStringLiteral("playback.set_modes"),
-         protocol::Json{{"repeat", repeat}, {"random", random}});
+         protocol::Json{{"repeat", modes.repeat},
+                        {"random", modes.random},
+                        {"album_random", modes.album_random},
+                        {"single", static_cast<int>(modes.single)},
+                        {"consume", static_cast<int>(modes.consume)}});
+}
+
+void EnginePlayback::setReplayGain(const audio::ReplayGainMode mode,
+                                   const audio::ReplayGainPreamps preamps) {
+    const auto* name = mode == audio::ReplayGainMode::track   ? "track"
+                       : mode == audio::ReplayGainMode::album ? "album"
+                                                              : "off";
+    send(QStringLiteral("playback.set_replay_gain"),
+         protocol::Json{{"mode", name},
+                        {"preamp_with_gain_db", preamps.with_gain_db},
+                        {"preamp_without_gain_db", preamps.without_gain_db}});
 }
 
 } // namespace trackknife::bench

@@ -897,21 +897,30 @@ void BenchMainWindow::saveLocalPlaybackModes() {
 void BenchMainWindow::applyLocalPlaybackModes() {
     saveLocalPlaybackModes();
     playback_.last_requested_next.reset();
-    if (player_ != nullptr) {
+    // "Auto" is this window's policy about its own shuffle, so it resolves
+    // here whichever player is listening.
+    auto mode = audio::ReplayGainMode::off;
+    if (local_replaygain_ == QStringLiteral("track") ||
+        (local_replaygain_ == QStringLiteral("auto") && playback_.modes.random)) {
+        mode = audio::ReplayGainMode::track;
+    } else if (local_replaygain_ == QStringLiteral("album") ||
+               local_replaygain_ == QStringLiteral("auto")) {
+        mode = audio::ReplayGainMode::album;
+    }
+    const audio::ReplayGainPreamps preamps{
+        .with_gain_db = static_cast<float>(local_rg_preamp_with_),
+        .without_gain_db = static_cast<float>(local_rg_preamp_without_),
+    };
+    if (playingOnEngine()) {
+        // The engine decides what plays next and how loud it is, so every one
+        // of these is its business. Sending them to the idle local player
+        // instead is why the buttons appeared to do nothing.
+        engine_playback_->setModes(playback_.modes);
+        engine_playback_->setReplayGain(mode, preamps);
+    } else if (player_ != nullptr) {
         static_cast<void>(player_->clear_gapless_next());
-        auto mode = audio::ReplayGainMode::off;
-        if (local_replaygain_ == QStringLiteral("track") ||
-            (local_replaygain_ == QStringLiteral("auto") && playback_.modes.random)) {
-            mode = audio::ReplayGainMode::track;
-        } else if (local_replaygain_ == QStringLiteral("album") ||
-                   local_replaygain_ == QStringLiteral("auto")) {
-            mode = audio::ReplayGainMode::album;
-        }
         static_cast<void>(player_->set_replay_gain_mode(mode));
-        static_cast<void>(player_->set_replay_gain_preamps(audio::ReplayGainPreamps{
-            .with_gain_db = static_cast<float>(local_rg_preamp_with_),
-            .without_gain_db = static_cast<float>(local_rg_preamp_without_),
-        }));
+        static_cast<void>(player_->set_replay_gain_preamps(preamps));
     }
     refreshLocalPlaybackControls();
 }
@@ -930,7 +939,9 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     for (auto* button : local_mode_buttons_) {
         button->setVisible(visible);
         button->defaultAction()->setVisible(visible);
-        button->defaultAction()->setEnabled(visible && player_ != nullptr);
+        // An engine can act on these even when this process has no audio
+        // device of its own, which is the whole point of it owning playback.
+        button->defaultAction()->setEnabled(visible && (player_ != nullptr || playingOnEngine()));
     }
     local_repeat_action_->setChecked(playback_.modes.repeat);
     local_random_action_->setChecked(playback_.modes.random);

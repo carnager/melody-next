@@ -87,6 +87,16 @@ class Player final {
     // the same volume, and a client that exits must not take its setting with
     // it.
     [[nodiscard]] core::Result<void> set_volume_percent(int percent);
+
+    // ADR-0138: how a gain is chosen, and the two preamps that apply while it
+    // is active. Engine state for the same reason volume is: it decides how
+    // loud the output is, and two clients must not disagree about it.
+    //
+    // "Auto" is not here. Choosing album gain unless shuffling is a client's
+    // policy about its own modes, and it resolves to track or album before it
+    // is sent -- the engine is told what to do, not what the user picked.
+    [[nodiscard]] core::Result<void> set_replay_gain_mode(audio::ReplayGainMode mode);
+    [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps preamps);
     // Direction is +1 or -1. Answers not_found when the modes and order say
     // there is nowhere to go, which is how repeat-off at the end reports.
     [[nodiscard]] core::Result<void> step(int direction);
@@ -133,6 +143,8 @@ class Player final {
         std::size_t requests{0};
         audio::PlaybackModes modes;
         int volume_percent{100};
+        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
+        audio::ReplayGainPreamps replay_gain_preamps;
     };
     [[nodiscard]] State state() const;
 

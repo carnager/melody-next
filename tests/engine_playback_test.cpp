@@ -64,11 +64,10 @@ class RecordingEngine final {
   public:
     explicit RecordingEngine(engine::Player& player) {
         engine::register_playback_methods(inner_, player);
-        for (const auto* method :
-             {"playback.state", "playback.replace_queue", "playback.play", "playback.resume",
-              "playback.pause", "playback.stop", "playback.next", "playback.previous",
-              "playback.seek", "playback.request", "playback.set_modes", "playback.set_volume"}) {
-            const std::string name{method};
+        // Asked of the dispatcher rather than listed here. A hand-written list
+        // silently drops a method added later, which reads as the feature not
+        // working -- twice while this was being built.
+        for (const auto& name : inner_.methods()) {
             outer_.on(name, [this, name](const protocol::Json& params) {
                 record(name);
                 const protocol::Request forwarded{.id = 1, .method = name, .params = params};
@@ -119,6 +118,7 @@ class EnginePlaybackTest final : public QObject {
     void playingATrackDrivesTheEnginesPlayer();
     void transportControlsDriveTheEngine();
     void jumpToPlayingFindsTheEnginesTrack();
+    void modesAndReplayGainReachTheEngine();
     void withoutAnEngineNothingChanges();
 
   private:
@@ -277,6 +277,66 @@ void EnginePlaybackTest::transportControlsDriveTheEngine() {
     QVERIFY(volume != nullptr);
     volume->setValue(42);
     QTRY_VERIFY_WITH_TIMEOUT(asked(QStringLiteral("playback.set_volume")), 5'000);
+
+    (*server)->stop();
+}
+
+// The mode buttons and the ReplayGain menu decide what plays next and how
+// loud it is, which is the engine's business once it owns playback. They were
+// still being sent to this process's idle player, so changing them did
+// nothing audible.
+void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    // A list tab, because the mode buttons belong to local playback and are
+    // hidden while an MPD tab is on screen.
+    const auto media = directory.filePath(QStringLiteral("played.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths(
+        {std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+
+    auto* repeat = window.findChild<QAction*>(QStringLiteral("action-local-repeat"));
+    QVERIFY(repeat != nullptr);
+    QVERIFY2(repeat->isEnabled(), "an engine can repeat even with no local device");
+    repeat->trigger();
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->modes().repeat, 5'000);
+
+    auto* consume = window.findChild<QAction*>(QStringLiteral("action-local-consume"));
+    QVERIFY(consume != nullptr);
+    consume->trigger();
+    // The tri-states travel too: sending only repeat and random is how a mode
+    // the window shows as on stays off in the engine.
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->modes().consume != audio::ModeState::off, 5'000);
+
+    auto* album_gain = window.findChild<QAction*>(QStringLiteral("action-local-replaygain-album"));
+    QVERIFY(album_gain != nullptr);
+    album_gain->trigger();
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().replay_gain_mode, audio::ReplayGainMode::album,
+                              5'000);
+
+    auto* off = window.findChild<QAction*>(QStringLiteral("action-local-replaygain-off"));
+    QVERIFY(off != nullptr);
+    off->trigger();
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().replay_gain_mode, audio::ReplayGainMode::off,
+                              5'000);
 
     (*server)->stop();
 }

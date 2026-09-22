@@ -4,6 +4,8 @@
 
 #include "bench/catalogue_source.hpp"
 #include "bench/local_list_model.hpp"
+#include "trackknife/audio/local_playback.hpp"
+#include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/protocol/client.hpp"
 
@@ -55,6 +57,7 @@ class EnginePlayback final : public QObject {
         std::size_t requests{0};
         bool repeat{false};
         bool random{false};
+        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         int volume_percent{100};
     };
     [[nodiscard]] State state() const;
@@ -78,8 +81,16 @@ class EnginePlayback final : public QObject {
     void previous();
     void seek(qint64 position_ms);
     void request(const core::StableId& entry);
-    void setModes(bool repeat, bool random);
+    // Every mode the workspace offers, because they all decide what the
+    // engine plays next. Sent together: the engine leaves absent members
+    // alone, and restating the set is what makes the buttons and the engine
+    // agree after a reconnect.
+    void setModes(const audio::PlaybackModes& modes);
     void setVolume(int percent);
+    // ADR-0138. `mode` is already resolved to off/track/album -- "auto" is
+    // this client's policy about its own shuffle, not something to ask the
+    // engine to interpret.
+    void setReplayGain(audio::ReplayGainMode mode, audio::ReplayGainPreamps preamps);
 
   signals:
     // The engine's state changed. Emitted on this object's thread.

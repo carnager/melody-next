@@ -61,6 +61,15 @@ bool Dispatcher::knows(const std::string_view method) const {
     return handlers_.find(method) != handlers_.end();
 }
 
+std::vector<std::string> Dispatcher::methods() const {
+    std::vector<std::string> names;
+    names.reserve(handlers_.size());
+    for (const auto& [name, handler] : handlers_) {
+        names.push_back(name);
+    }
+    return names;
+}
+
 Response Dispatcher::dispatch(const Request& request) const {
     const auto found = handlers_.find(request.method);
     if (found == handlers_.end()) {

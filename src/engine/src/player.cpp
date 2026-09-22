@@ -208,6 +208,16 @@ core::Result<void> Player::set_volume_percent(const int percent) {
     return audition_->set_volume_percent(percent);
 }
 
+core::Result<void> Player::set_replay_gain_mode(const audio::ReplayGainMode mode) {
+    const std::lock_guard guard{mutex_};
+    return audition_->set_replay_gain_mode(mode);
+}
+
+core::Result<void> Player::set_replay_gain_preamps(const audio::ReplayGainPreamps preamps) {
+    const std::lock_guard guard{mutex_};
+    return audition_->set_replay_gain_preamps(preamps);
+}
+
 core::Result<void> Player::resume() {
     const std::lock_guard guard{mutex_};
     return audition_->play();
@@ -339,6 +349,8 @@ Player::State Player::state() const {
     current.requests = requests_.size();
     current.modes = modes_;
     current.volume_percent = snapshot.volume_percent;
+    current.replay_gain_mode = snapshot.replay_gain_mode;
+    current.replay_gain_preamps = snapshot.replay_gain_preamps;
     return current;
 }
 

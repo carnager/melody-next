@@ -39,6 +39,10 @@ struct PipeWireOutputSnapshot {
     std::uint64_t source_frames{0U};
     std::uint64_t invalid_buffer_count{0U};
     double volume{1.0};
+    // What the server reports for the stream, which is not always what was
+    // asked for: a session manager restoring a remembered volume, or an
+    // external mixer, sets it too.
+    double server_volume{1.0};
     std::string error_message;
 
     friend bool operator==(const PipeWireOutputSnapshot&, const PipeWireOutputSnapshot&) = default;

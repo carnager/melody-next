@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -166,11 +167,29 @@ int main() {
         }
     }
 
+    // The volume asked for before streaming must still be in force once the
+    // stream is streaming. It is set while the node is only paused, and
+    // anything that sets it in between -- a session manager restoring a
+    // remembered value for this application -- would otherwise win, leaving
+    // the first track playing at somebody else's setting until the slider is
+    // touched.
+    CHECK(output->set_volume(0.5).has_value());
+
     CHECK(source->play().has_value());
     CHECK(source->fill_buffer().has_value());
     CHECK(source->snapshot().state == LocalPlaybackState::draining);
     CHECK(source->snapshot().buffered_frames == 800U);
     CHECK(output->activate().has_value());
+
+    // The server's own report, not what was asked for: the two can disagree,
+    // and only the server's value is what comes out of the speakers.
+    const auto streaming_deadline = std::chrono::steady_clock::now() + 2s;
+    while (std::abs(output->snapshot().server_volume - 0.5) > 0.01 &&
+           std::chrono::steady_clock::now() < streaming_deadline) {
+        std::this_thread::sleep_for(5ms);
+    }
+    CHECK(std::abs(output->snapshot().server_volume - 0.5) <= 0.01);
+    CHECK(output->set_volume(1.0).has_value());
 
     const auto playback_deadline = std::chrono::steady_clock::now() + 3s;
     while (source->snapshot().state != LocalPlaybackState::ended &&

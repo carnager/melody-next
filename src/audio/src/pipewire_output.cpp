@@ -99,6 +99,8 @@ struct PipeWireOutput::Impl {
     std::atomic_uint64_t source_frames{0U};
     std::atomic_uint64_t invalid_buffer_count{0U};
     std::atomic<double> volume{1.0};
+    // Reported by the server, not asked for by us. See on_control_info.
+    std::atomic<double> server_volume{1.0};
     std::string error_message;
     std::atomic_bool loop_started{false};
     bool drained{false};
@@ -199,11 +201,26 @@ struct PipeWireOutput::Impl {
         output.active_callbacks.fetch_sub(1U, std::memory_order_release);
     }
 
+    // What the server says the stream's volume is, as opposed to what was
+    // asked for. The two diverge when something else sets it -- a session
+    // manager restoring a remembered value, or a mixer -- and with no handler
+    // here that divergence was invisible.
+    static void on_control_info(void* data, const std::uint32_t id,
+                                const pw_stream_control* control) {
+        if (id != SPA_PROP_volume || control == nullptr || control->n_values == 0U ||
+            control->values == nullptr) {
+            return;
+        }
+        auto& output = *static_cast<Impl*>(data);
+        output.server_volume.store(static_cast<double>(control->values[0]),
+                                   std::memory_order_release);
+    }
+
     static constexpr pw_stream_events events{
         .version = PW_VERSION_STREAM_EVENTS,
         .destroy = nullptr,
         .state_changed = on_state_changed,
-        .control_info = nullptr,
+        .control_info = on_control_info,
         .io_changed = nullptr,
         .param_changed = nullptr,
         .add_buffer = nullptr,
@@ -398,6 +415,7 @@ PipeWireOutputSnapshot PipeWireOutput::snapshot() const {
         .source_frames = output.source_frames.load(std::memory_order_acquire),
         .invalid_buffer_count = output.invalid_buffer_count.load(std::memory_order_acquire),
         .volume = output.volume.load(std::memory_order_acquire),
+        .server_volume = output.server_volume.load(std::memory_order_acquire),
         .error_message = output.error_message,
     };
     pw_thread_loop_unlock(output.loop);
@@ -963,6 +981,14 @@ core::Result<void> PipeWireOutput::activate() {
             pipewire_error("could not activate PipeWire playback stream", active_result));
     }
     auto streaming = output.wait_for_state(PipeWireOutputState::streaming, "activate");
+    if (streaming) {
+        // Ours must be the last word. The volume set at connect time lands
+        // before the node exists as far as the session manager is concerned,
+        // so a remembered value restored in between wins -- and the first
+        // track plays at somebody else's setting until the slider is touched.
+        auto value = static_cast<float>(output.volume.load(std::memory_order_acquire));
+        static_cast<void>(pw_stream_set_control(output.stream, SPA_PROP_volume, 1U, &value, 0));
+    }
     pw_thread_loop_unlock(output.loop);
     return streaming;
 }

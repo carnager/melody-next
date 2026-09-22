@@ -256,6 +256,20 @@ RemoteCatalogue::query(const persistence::LibraryQuery& request,
     return decode_page(*answer);
 }
 
+core::Result<persistence::LibraryPage>
+RemoteCatalogue::filter(const query::CompiledTkq& compiled, const std::size_t offset,
+                        const std::size_t limit, const core::CancellationToken&) const {
+    // As with filter_paths, the query crosses as its source and the engine
+    // compiles for itself; agreeing on a compiled form would be a second wire
+    // contract for no gain.
+    auto answer = client_->call(
+        "catalogue.filter", Json{{"query", compiled.source}, {"offset", offset}, {"limit", limit}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return decode_page(*answer);
+}
+
 core::Result<std::vector<std::string>>
 RemoteCatalogue::paths(const persistence::LibraryQuery& request,
                        const core::CancellationToken&) const {
@@ -264,12 +278,6 @@ RemoteCatalogue::paths(const persistence::LibraryQuery& request,
         return std::unexpected(std::move(answer.error()));
     }
     return decode_paths(*answer, "paths");
-}
-
-core::Result<persistence::LibraryPage>
-RemoteCatalogue::filter(const query::CompiledTkq&, std::size_t, std::size_t,
-                        const core::CancellationToken&) const {
-    return std::unexpected(not_exposed("catalogue.filter"));
 }
 
 core::Result<std::vector<persistence::LibraryTrackSnapshot>>

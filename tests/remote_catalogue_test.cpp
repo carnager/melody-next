@@ -98,6 +98,15 @@ void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std:
     // that finishes silently is indistinguishable from one that did nothing.
     require(progress.visited.load() > 0U, label + ": the scan visited something");
 
+    // Searching is what the library search box runs, and it is the step that
+    // finds results at all -- cached facts are only useful once something has
+    // been found.
+    auto search = query::compile_tkq("anthrax");
+    require(search.has_value(), label + ": the search must compile");
+    const auto found = catalogue.filter(*search, 0U, 50U);
+    require(found.has_value(), label + ": searching must succeed");
+    require(!found->more, label + ": a small library has no further page");
+
     // Cached facts must survive the crossing, or a search result against an
     // engine comes back as paths with no metadata -- which reads as a broken
     // library rather than a missing method.

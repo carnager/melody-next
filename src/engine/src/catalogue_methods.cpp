@@ -169,6 +169,26 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                       return Json{{"paths", encoded_paths(*paths)}};
                   });
 
+    // A page of a compiled query. This is what the library search box runs:
+    // filter_paths answers which tracks match, this answers what to show.
+    dispatcher.on(
+        "catalogue.filter", [&catalogue, render_page](const Json& params) -> core::Result<Json> {
+            auto source = required_string(params, "query");
+            if (!source) {
+                return std::unexpected(std::move(source.error()));
+            }
+            auto compiled = query::compile_tkq(*source);
+            if (!compiled) {
+                return std::unexpected(std::move(compiled.error()));
+            }
+            auto page = catalogue.filter(*compiled, params.value("offset", std::size_t{0}),
+                                         params.value("limit", std::size_t{200}));
+            if (!page) {
+                return std::unexpected(std::move(page.error()));
+            }
+            return render_page(*page);
+        });
+
     dispatcher.on("catalogue.filter_paths", [&catalogue](const Json& params) -> core::Result<Json> {
         auto source = required_string(params, "query");
         if (!source) {

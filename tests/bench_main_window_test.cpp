@@ -696,7 +696,7 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     b.raw_path = "/album-b.flac";
     b.album = "B";
     tab->model->replaceRows({a, b, a, b});
-    window.playback_document_id_ = QString::fromStdString(tab->document.id.to_string());
+    window.playback_document_ = tab->document.id;
     window.playback_entry_ = tab->model->rows().at(0).entry_id;
     window.playback_row_ = 0;
     window.local_modes_.album_random = true;
@@ -790,7 +790,7 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
             QCOMPARE(window.local_requests_.pending().size(),
                      static_cast<std::size_t>(pending_count));
             QCOMPARE(window.local_requests_.active()->source.raw_path, path);
-            QCOMPARE(row_of(window.tabForDocument(window.playback_document_id_),
+            QCOMPARE(row_of(window.tabForDocument(window.playback_document_),
                             window.request_return_entry_),
                      consume ? 0 : 1);
             if (!changed)
@@ -837,8 +837,8 @@ void BenchMainWindowTest::localPlaybackRestoresPausedWithoutOutput() {
         QTRY_VERIFY(!window.resume_restore_pending_);
         QTRY_VERIFY2(window.player_->snapshot().state == audio::LocalAuditionState::paused,
                      qPrintable(window.statusBar()->currentMessage()));
-        QCOMPARE(window.playback_document_id_, document);
-        QCOMPARE(row_of(window.tabForDocument(window.playback_document_id_),
+        QCOMPARE(document_text(window.playback_document_), document);
+        QCOMPARE(row_of(window.tabForDocument(window.playback_document_),
                         window.playback_entry_),
                  1);
         QCOMPARE(window.player_->snapshot().position_sample, 882);
@@ -1055,7 +1055,7 @@ void BenchMainWindowTest::dynamicResultActionsUseTheirOwnSources() {
     LocalTrackRow other = row;
     other.raw_path = "/dynamic/other.flac";
     target->model->replaceRows({row, other, row});
-    window.playback_document_id_ = id;
+    window.playback_document_ = document_identity(id);
     window.playback_row_ = 2;
     window.playback_source_ = target->model->source(2);
     dialog->setProperty("playback-context", id);
@@ -2011,7 +2011,7 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     playing.model->replaceRows({row, row});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     tabs->setCurrentWidget(playing.view);
-    window.playback_document_id_ = QString::fromStdString(playing.document.id.to_string());
+    window.playback_document_ = playing.document.id;
     window.playback_entry_ = playing.model->rows().at(0).entry_id;
     window.playback_row_ = 0;
     auto* follow = window.findChild<QAction*>(QStringLiteral("action-follow-playback"));
@@ -2032,7 +2032,7 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     other.name = "Browsing";
     auto* browsing = window.addListTab(std::move(other), true);
     QVERIFY(browsing);
-    window.playback_document_id_ = QString::fromStdString(playing.document.id.to_string());
+    window.playback_document_ = playing.document.id;
     window.playback_entry_ = playing.model->rows().at(0).entry_id;
     window.playback_row_ = 0;
     window.refreshPlaybackCursor();
@@ -2113,7 +2113,7 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
     tabs->setCurrentWidget(local.view);
     window.stop_action_->trigger();
-    window.playback_document_id_.clear();
+    window.playback_document_ = core::StableId{};
     window.refreshTransport();
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
     auto other = local.document;
@@ -6034,7 +6034,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QTRY_VERIFY_WITH_TIMEOUT(
         window.local_requests_.active() && window.local_requests_.active()->id == second, 5000);
     QTRY_VERIFY_WITH_TIMEOUT(!window.local_requests_.active() &&
-                                 row_of(window.tabForDocument(window.playback_document_id_),
+                                 row_of(window.tabForDocument(window.playback_document_),
                                         window.playback_entry_) == (consume ? 0 : 1),
                              4000);
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);

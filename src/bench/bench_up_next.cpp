@@ -310,7 +310,7 @@ void BenchMainWindow::refreshUpNext() {
                 up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = local_requests_.revision();
         }
-        auto* tab = tabForDocument(playback_document_id_);
+        auto* tab = tabForDocument(playback_document_);
         QString playing;
         if (local_requests_.active())
             playing = QString::fromStdString(local_requests_.active()->source.artist + " — " +
@@ -615,12 +615,12 @@ void BenchMainWindow::persistUpNext() {
     QJsonObject state{
         {QStringLiteral("version"), 1},
         {QStringLiteral("rows"), rows},
-        {QStringLiteral("document"), playback_document_id_},
-        {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_document_id_))}};
+        {QStringLiteral("document"), document_text(playback_document_)},
+        {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_document_))}};
     state[QStringLiteral("anchor")] =
         QString::fromLatin1(QByteArray::fromStdString(playback_source_.raw_path).toBase64());
     if (!request_return_entry_.is_nil()) {
-        if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
+        if (auto* tab = tabForDocument(playback_document_); tab != nullptr) {
             if (const auto row = tab->model->rowOfEntry(request_return_entry_, -1); row >= 0) {
                 state[QStringLiteral("returnRow")] = row;
                 state[QStringLiteral("returnSource")] =
@@ -779,7 +779,7 @@ void BenchMainWindow::restoreUpNext() {
                     return;
                 }
             }
-            if (playback_document_id_.isEmpty() && !local_requests_.pending().empty()) {
+            if (playback_document_.is_nil() && !local_requests_.pending().empty()) {
                 const auto id = state.value(QStringLiteral("document")).toString();
                 const auto anchor = QByteArray::fromBase64(
                                         state.value(QStringLiteral("anchor")).toString().toLatin1())
@@ -788,7 +788,7 @@ void BenchMainWindow::restoreUpNext() {
                     const auto row = state.value(QStringLiteral("row")).toInt(-1);
                     if (row >= 0 && row < tab->model->rowCount() &&
                         tab->model->rawPath(row) == anchor) {
-                        playback_document_id_ = id;
+                        playback_document_ = document_identity(id);
                         playback_entry_ =
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
                         playback_row_ = row;
@@ -806,7 +806,7 @@ void BenchMainWindow::restoreUpNext() {
                     if (row >= 0 && row < tab->model->rowCount() &&
                         continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(
                             row))) == state.value(QStringLiteral("returnSource")).toArray()) {
-                        playback_document_id_ = id;
+                        playback_document_ = document_identity(id);
                         request_return_entry_ =
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
                         if (playback_source_.empty())

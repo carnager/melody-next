@@ -227,8 +227,8 @@ void BenchMainWindow::showDynamicPlaylists() {
         } else {
             auto* model = qobject_cast<LocalListModel*>(dialog->view()->model());
             int occurrence = 0;
-            if (dialog->property("playback-context").toString() == playback_document_id_) {
-                if (const auto* tab = tabForDocument(playback_document_id_);
+            if (dialog->property("playback-context").toString() == document_text(playback_document_)) {
+                if (const auto* tab = tabForDocument(playback_document_);
                     tab && tab->model->rowCount() <= 500)
                     for (int i = 0; i < playback_row_ && i < tab->model->rowCount(); ++i)
                         if (tab->model->source(i) == playback_source_)

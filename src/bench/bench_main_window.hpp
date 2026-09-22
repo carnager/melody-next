@@ -109,6 +109,18 @@ class PlaylistTransferBar;
 // Trackknife main window: composed Folders/Track Lists panels, configurable
 // local working-list views, and one transport over the serialized playback worker
 // (ADR-0021/0023/0024, promoted to first-class playback by ADR-0025).
+// Widget properties, persisted UI state and JSON all carry a document identity
+// as text. ADR-0220 Phase 0 makes the playback anchor hold the identity itself,
+// so these two are the only places the two spellings meet.
+[[nodiscard]] inline QString document_text(const core::StableId& id) {
+    return id.is_nil() ? QString{} : QString::fromStdString(id.to_string());
+}
+
+[[nodiscard]] inline core::StableId document_identity(const QString& text) {
+    auto parsed = core::StableId::parse(text.toStdString());
+    return parsed ? *parsed : core::StableId{};
+}
+
 class BenchMainWindow final : public QMainWindow {
     Q_OBJECT
 
@@ -273,6 +285,10 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
+    // ADR-0220 Phase 0: playback state names its document by identity, not
+    // by a rendered QString. Widget properties still carry the text form, so
+    // both spellings resolve to the same tab.
+    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id);
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
@@ -431,6 +447,11 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    // The gapless-queued and handed-to-the-player anchors describe a
+    // transition in flight. They are always abandoned together -- every one
+    // of the six sites that dropped them did both -- so the pairing is an
+    // invariant rather than a coincidence.
+    void forgetPlaybackTransition();
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
@@ -769,7 +790,9 @@ class BenchMainWindow final : public QMainWindow {
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
-    QString playback_document_id_;
+    // ADR-0220 Phase 0: which list is playing, as an identity rather than a
+    // rendered string, so the anchor can leave the widget layer.
+    core::StableId playback_document_;
     int playback_row_{-1};
     LocalTrackSource playback_source_;
     bool advance_pending_{false};

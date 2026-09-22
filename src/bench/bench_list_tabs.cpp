@@ -152,7 +152,7 @@ void BenchMainWindow::initializePersistence() {
                         entries.size() == 1U ? entries.front().label : "Library selection";
                     int insertion = -1;
                     if (action == LocalLibraryAction::next) {
-                        insertion = playback_document_id_ == id ? playback_row_ + 1
+                        insertion = document_text(playback_document_) == id ? playback_row_ + 1
                                     : target->view->currentIndex().isValid()
                                         ? target->view->currentIndex().row() + 1
                                         : 0;
@@ -578,7 +578,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         if (!consuming_row_) {
             // The model identity check the persistent index used to provide is
             // now exactly the document check below, so one branch covers both.
-            const auto* playing = tabForDocument(playback_document_id_);
+            const auto* playing = tabForDocument(playback_document_);
             if (playing != nullptr && playing->model == model) {
                 resetPlaybackOrder();
             }
@@ -980,7 +980,7 @@ void BenchMainWindow::openSearchDialog() {
                     schedulePersist();
                 } else if (destination != nullptr && action == LocalLibraryAction::next) {
                     const auto id = QString::fromStdString(destination->document.id.to_string());
-                    insertion = playback_document_id_ == id ? playback_row_ + 1
+                    insertion = document_text(playback_document_) == id ? playback_row_ + 1
                                 : destination->view->currentIndex().isValid()
                                     ? destination->view->currentIndex().row() + 1
                                     : 0;
@@ -1163,6 +1163,13 @@ void BenchMainWindow::refreshActiveContext() {
     if (seek_ != nullptr) {
         refreshTransport();
     }
+}
+
+BenchMainWindow::ListTab* BenchMainWindow::tabForDocument(const core::StableId& document_id) {
+    if (document_id.is_nil()) {
+        return nullptr;
+    }
+    return tabForDocument(QString::fromStdString(document_id.to_string()));
 }
 
 BenchMainWindow::ListTab* BenchMainWindow::tabForDocument(const QString& document_id) {
@@ -1466,8 +1473,7 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     tabs_->removeTab(index);
     view->deleteLater();
-    if (local_requests_.active() &&
-        QString::fromStdString(tab->document.id.to_string()) == playback_document_id_) {
+    if (local_requests_.active() && tab->document.id == playback_document_) {
         if (detached_playback_)
             detached_playback_->model->deleteLater();
         detached_playback_ = *tab;

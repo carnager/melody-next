@@ -55,7 +55,46 @@ class LocalListEditTest final : public QObject {
     void asynchronousCancellationAndStaleSnapshots();
     void limitsRejectIncompleteEdits();
     void entryIdentitiesStayDistinctAndSurviveReordering();
+    void probingPreservesEntryIdentity();
 };
+
+// ADR-0221: a probe refreshes what a row says about its track. It must not
+// change which entry the row is, or anything anchored to it -- playback
+// position, the request return point -- silently stops resolving the moment
+// background enrichment completes.
+void LocalListEditTest::probingPreservesEntryIdentity() {
+    Workspace workspace{{row("Provisional", "/a.flac"), row("Other", "/b.flac")}};
+    auto before = workspace.model.rows();
+    // A probe result is a freshly built row, not a copy of the existing one.
+    LocalTrackRow probed;
+    probed.raw_path = "/a.flac";
+    probed.title = "Probed";
+    QVERIFY(probed.entry_id != before[0].entry_id);
+    QVERIFY(workspace.model.applyMetadata("/a.flac", 0, probed));
+    const auto after = workspace.model.rows();
+    QCOMPARE(after.size(), 2U);
+    QCOMPARE(after[0].title, std::string{"Probed"});
+    QCOMPARE(after[0].entry_id, before[0].entry_id);
+    QCOMPARE(after[1].entry_id, before[1].entry_id);
+
+    // A probe that discovers several playable entries keeps the identity on
+    // the row it replaces; the extra rows are new entries.
+    // applyProbeRows only targets an unprobed row, which is what a freshly
+    // added path looks like before enrichment runs.
+    LocalTrackRow provisional;
+    provisional.raw_path = "/c.flac";
+    Workspace split{{provisional}};
+    const auto original = split.model.rows().at(0).entry_id;
+    LocalTrackRow first;
+    first.raw_path = "/c.flac";
+    LocalTrackRow second;
+    second.raw_path = "/c.flac";
+    QVERIFY(split.model.applyProbeRows("/c.flac", 0, {first, second}));
+    const auto expanded = split.model.rows();
+    QCOMPARE(expanded.size(), 2U);
+    QCOMPARE(expanded[0].entry_id, original);
+    QVERIFY(expanded[1].entry_id != original);
+}
 
 // ADR-0221: an entry identity addresses a slot in the list. It must be unique
 // within the model however rows arrive, and must travel with its row when the

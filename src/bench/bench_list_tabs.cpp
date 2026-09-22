@@ -575,9 +575,9 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { refreshSelectionStatus(); });
     connect(model, &QAbstractItemModel::modelReset, this, [this] { refreshSelectionStatus(); });
     const auto reset_order = [this, model] {
-        if (!consuming_row_ && playback_index_.model() == model) {
-            resetPlaybackOrder();
-        } else if (!consuming_row_) {
+        if (!consuming_row_) {
+            // The model identity check the persistent index used to provide is
+            // now exactly the document check below, so one branch covers both.
             const auto* playing = tabForDocument(playback_document_id_);
             if (playing != nullptr && playing->model == model) {
                 resetPlaybackOrder();

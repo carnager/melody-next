@@ -53,10 +53,10 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     if (resumeEnabled() && resumable && snapshot.source_revision && snapshot.format &&
         snapshot.format->sample_rate > 0 && snapshot.position_sample >= 0 &&
         (!snapshot.end_sample || snapshot.position_sample < *snapshot.end_sample) &&
-        playback_index_.isValid() && !local_requests_.active()) {
+        !playback_entry_.is_nil() && !local_requests_.active()) {
         auto* tab = tabForDocument(playback_document_id_);
-        if (tab && playback_index_.model() == tab->model) {
-            const auto row = playback_index_.row();
+        const auto row = resolvePlaybackRow(tab);
+        if (tab != nullptr && row >= 0) {
             auto source = resumeSource(tab->model->rows().at(static_cast<std::size_t>(row)));
             if (source.source_reference == snapshot.raw_path &&
                 source.source_revision == snapshot.source_revision &&

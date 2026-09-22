@@ -209,6 +209,12 @@ class LocalListModel final : public QAbstractTableModel {
     // occurrences re-anchor to the same position after edits.
     [[nodiscard]] int rowOfPath(const std::string& raw_path, int hint_row) const;
     [[nodiscard]] int rowOfSource(const LocalTrackSource& source, int hint_row) const;
+    // ADR-0221: resolve an entry identity to its current row. The hint makes
+    // the common case -- the row has not moved -- a single comparison, the
+    // same shape as rowOfSource above. Returns -1 when the entry is no longer
+    // in this list, which is how a consumed or removed row reports itself now
+    // that a QPersistentModelIndex is not silently tracking it.
+    [[nodiscard]] int rowOfEntry(const core::StableId& entry, int hint_row) const;
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;

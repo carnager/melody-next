@@ -616,15 +616,16 @@ void BenchMainWindow::persistUpNext() {
         {QStringLiteral("version"), 1},
         {QStringLiteral("rows"), rows},
         {QStringLiteral("document"), playback_document_id_},
-        {QStringLiteral("row"), playback_index_.isValid() ? playback_index_.row() : -1}};
+        {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_document_id_))}};
     state[QStringLiteral("anchor")] =
         QString::fromLatin1(QByteArray::fromStdString(playback_source_.raw_path).toBase64());
-    if (request_return_index_.isValid()) {
-        if (auto* tab = tabForDocument(playback_document_id_);
-            tab && request_return_index_.model() == tab->model) {
-            state[QStringLiteral("returnRow")] = request_return_index_.row();
-            state[QStringLiteral("returnSource")] = continuationIdentity(
-                tab->model->rows().at(static_cast<std::size_t>(request_return_index_.row())));
+    if (!request_return_entry_.is_nil()) {
+        if (auto* tab = tabForDocument(playback_document_id_); tab != nullptr) {
+            if (const auto row = tab->model->rowOfEntry(request_return_entry_, -1); row >= 0) {
+                state[QStringLiteral("returnRow")] = row;
+                state[QStringLiteral("returnSource")] =
+                    continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(row)));
+            }
         }
     }
     persistence_->saveUiState(
@@ -788,7 +789,9 @@ void BenchMainWindow::restoreUpNext() {
                     if (row >= 0 && row < tab->model->rowCount() &&
                         tab->model->rawPath(row) == anchor) {
                         playback_document_id_ = id;
-                        playback_index_ = tab->model->index(row, 0);
+                        playback_entry_ =
+                            tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
+                        playback_row_ = row;
                         playback_source_ = tab->model->source(row);
                         resetPlaybackOrder();
                     }
@@ -804,7 +807,8 @@ void BenchMainWindow::restoreUpNext() {
                         continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(
                             row))) == state.value(QStringLiteral("returnSource")).toArray()) {
                         playback_document_id_ = id;
-                        request_return_index_ = tab->model->index(row, 0);
+                        request_return_entry_ =
+                            tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
                         if (playback_source_.raw_path.empty())
                             playback_source_ = tab->model->source(row);
                     }

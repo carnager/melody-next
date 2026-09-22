@@ -424,7 +424,12 @@ class BenchMainWindow final : public QMainWindow {
     void prepareAlbumPlaybackOrder(std::uint64_t generation);
     void adoptPlaybackRow(ListTab& tab, int row, const LocalTrackSource& source, bool consume,
                           int direction = 1);
-    void consumePlaybackRow(ListTab& tab, const QPersistentModelIndex& index);
+    // ADR-0221: the entry to consume is named by identity, with the row it
+    // last occupied as a lookup hint.
+    void consumePlaybackRow(ListTab& tab, const core::StableId& entry, int hint_row);
+    // Resolve the playing entry to its current row in `tab`, or -1 when the
+    // entry is no longer there. playback_row_ serves as the lookup hint.
+    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
@@ -745,9 +750,12 @@ class BenchMainWindow final : public QMainWindow {
     unsigned up_next_remote_revision_{0};
     QString up_next_remote_profile_;
 
-    QPersistentModelIndex playback_index_;
-    QPersistentModelIndex queued_playback_index_;
-    QPersistentModelIndex requested_playback_index_;
+    // ADR-0221: playback position is an entry identity plus the document
+    // holding it, not a pointer into a view model. playback_row_ below is a
+    // derived cache and doubles as the lookup hint.
+    core::StableId playback_entry_;
+    core::StableId queued_playback_entry_;
+    core::StableId requested_playback_entry_;
     bool consuming_row_{false};
     LastFmService* lastfm_{};
     QElapsedTimer lastfm_clock_;
@@ -772,7 +780,7 @@ class BenchMainWindow final : public QMainWindow {
     quint64 last_chain_transitions_{0U};
     std::optional<LocalTrackSource> last_requested_next_;
     std::uint64_t last_requested_token_{0U};
-    QPersistentModelIndex request_return_index_;
+    core::StableId request_return_entry_;
     QElapsedTimer next_request_timer_;
     bool seeking_{false};
     QToolButton* mute_button_{nullptr};

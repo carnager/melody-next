@@ -553,6 +553,12 @@ bool LocalListModel::applyMetadata(const std::string& raw_path, const int hint_r
     if (row < 0) {
         return false;
     }
+    // ADR-0221: a probe refreshes what a row says about its track, not which
+    // entry it is. The identity is preserved alongside the other fields that
+    // outlive a probe, or anything anchored to this row -- playback position,
+    // the request return point -- would stop resolving the moment enrichment
+    // completed.
+    metadata.entry_id = rows_[static_cast<std::size_t>(row)].entry_id;
     metadata.logical_reference = rows_[static_cast<std::size_t>(row)].logical_reference;
     metadata.selection = rows_[static_cast<std::size_t>(row)].selection;
     metadata.segment = rows_[static_cast<std::size_t>(row)].segment;
@@ -589,6 +595,11 @@ bool LocalListModel::applyProbeRows(const std::string& raw_path, const int hint_
         row.raw_path = raw_path;
         row.probed = true;
     }
+    // The first probed row replaces the provisional entry and keeps its
+    // identity; any further rows are genuinely new entries -- subsongs or
+    // chapters discovered by the probe -- and keep the fresh ones they were
+    // constructed with.
+    rows.front().entry_id = rows_[static_cast<std::size_t>(target)].entry_id;
     rows_[static_cast<std::size_t>(target)] = std::move(rows.front());
     emitRowChanged(target);
     if (rows.size() > 1U) {
@@ -880,6 +891,19 @@ int LocalListModel::rowOfPath(const std::string& raw_path, const int hint_row) c
         return -1;
     }
     return static_cast<int>(std::distance(rows_.begin(), found));
+}
+
+int LocalListModel::rowOfEntry(const core::StableId& entry, const int hint_row) const {
+    if (entry.is_nil()) {
+        return -1;
+    }
+    if (hint_row >= 0 && hint_row < static_cast<int>(rows_.size()) &&
+        rows_[static_cast<std::size_t>(hint_row)].entry_id == entry) {
+        return hint_row;
+    }
+    const auto found = std::ranges::find_if(
+        rows_, [&entry](const LocalTrackRow& row) { return row.entry_id == entry; });
+    return found == rows_.end() ? -1 : static_cast<int>(std::distance(rows_.begin(), found));
 }
 
 int LocalListModel::rowOfSource(const LocalTrackSource& source, const int hint_row) const {

@@ -607,6 +607,17 @@ if(TRACKKNIFE_BUILD_UI)
     target_compile_definitions(trackknife_m3u8_tests PRIVATE
         TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME m3u8 COMMAND trackknife_m3u8_tests)
+    # ADR-0220 Phase 2: the Qt side against a real engine over a real socket.
+    qt_add_executable(trackknife_engine_connection_tests engine_connection_test.cpp)
+    target_link_libraries(
+        trackknife_engine_connection_tests
+        PRIVATE Trackknife::UiCommon Trackknife::Engine Trackknife::Protocol Qt6::Test
+                trackknife_project_options trackknife_project_warnings
+    )
+    add_test(NAME engine-connection COMMAND trackknife_engine_connection_tests)
+    set_tests_properties(engine-connection PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+
     qt_add_executable(trackknife_local_list_edit_tests local_list_edit_test.cpp)
     target_link_libraries(trackknife_local_list_edit_tests PRIVATE Trackknife::BenchUi Qt6::Test
         trackknife_project_options trackknife_project_warnings)

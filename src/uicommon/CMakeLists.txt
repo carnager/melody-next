@@ -21,6 +21,8 @@ qt_add_library(
     queue_item_delegate.hpp
     debug_log.cpp
     debug_log.hpp
+    engine_connection.cpp
+    engine_connection.hpp
     queue_table_view.cpp
     queue_table_view.hpp
     rating_stars.cpp
@@ -34,7 +36,7 @@ add_library(Trackknife::UiCommon ALIAS trackknife_ui_common)
 target_link_libraries(
     trackknife_ui_common
     PUBLIC Qt6::Widgets Trackknife::Core Trackknife::Engine Trackknife::Persistence
-           trackknife_project_options
+           Trackknife::Protocol trackknife_project_options
     PRIVATE Qt6::Concurrent Trackknife::Formats trackknife_project_warnings
 )
 target_include_directories(trackknife_ui_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

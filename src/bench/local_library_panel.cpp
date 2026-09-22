@@ -1274,19 +1274,28 @@ void LocalLibraryPanel::startScan() {
     scan_button_->setText(tr("Stop"));
     poll_timer_->start();
     updateProgress();
-    scan_watcher_.setFuture(
-        QtConcurrent::run(&pool_, [path = database_path_, cancellation = scan_cancellation_.token(),
-                                   progress = progress_] {
+    scan_watcher_.setFuture(QtConcurrent::run(
+        &pool_, [path = database_path_, client = engine_client_.get(),
+                 cancellation = scan_cancellation_.token(), progress = progress_] {
             ScanOutcome outcome;
             // ADR-0220: ask the core, do not open its database. The job shape
             // around this call -- pool, poll timer, token, watcher -- is
-            // unchanged; only the database path stops crossing the boundary.
-            engine::LocalCatalogue catalogue{path};
-            auto result = catalogue.scan(cancellation, *progress);
-            if (result) {
-                outcome.result = *result;
+            // unchanged whichever side answers; remotely it becomes a job,
+            // and the same counters are fed from its progress events.
+            const auto run = [&](engine::Catalogue& catalogue) {
+                auto result = catalogue.scan(cancellation, *progress);
+                if (result) {
+                    outcome.result = *result;
+                } else {
+                    outcome.error = text(result.error().message);
+                }
+            };
+            if (client != nullptr) {
+                engine::RemoteCatalogue catalogue{*client};
+                run(catalogue);
             } else {
-                outcome.error = text(result.error().message);
+                engine::LocalCatalogue catalogue{path};
+                run(catalogue);
             }
             return outcome;
         }));
@@ -1355,16 +1364,30 @@ void LocalLibraryPanel::updateArtwork() {
         artwork_cancellation_ = core::CancellationSource{};
         artwork_running_ = true;
         artwork_watcher_.setFuture(
-            QtConcurrent::run(&artwork_pool_, [path = database_path_, key,
-                                               cancellation = artwork_cancellation_.token()] {
+            QtConcurrent::run(&artwork_pool_, [path = database_path_, client = engine_client_.get(),
+                                               key, cancellation = artwork_cancellation_.token()] {
                 if (cancellation.is_cancellation_requested()) {
                     return QImage{};
                 }
                 // ADR-0220: ask the core, do not open its database.
-                const engine::LocalCatalogue catalogue{path};
-                const auto source = catalogue.artwork_source(key.toStdString(), cancellation);
-                return source && source->has_value() ? ui::loadLocalArtwork(**source, cancellation)
-                                                     : QImage{};
+                //
+                // The artwork pool is separate from the query pool, so with a
+                // remote engine both share one connection and their calls
+                // serialise. Acceptable while covers are the only thing on
+                // that pool; it is the first place a second connection would
+                // be worth having.
+                const auto fetch = [&](engine::Catalogue& catalogue) {
+                    const auto source = catalogue.artwork_source(key.toStdString(), cancellation);
+                    return source && source->has_value()
+                               ? ui::loadLocalArtwork(**source, cancellation)
+                               : QImage{};
+                };
+                if (client != nullptr) {
+                    engine::RemoteCatalogue catalogue{*client};
+                    return fetch(catalogue);
+                }
+                engine::LocalCatalogue catalogue{path};
+                return fetch(catalogue);
             }));
         return;
     }

@@ -8,6 +8,14 @@ core::Result<persistence::LocalLibrary> Catalogue::open() const {
     return persistence::LocalLibrary::open(database_);
 }
 
+core::Result<void> Catalogue::prepare() const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return {};
+}
+
 core::Result<std::vector<std::string>>
 Catalogue::filter_paths(const query::CompiledTkq& compiled,
                         const core::CancellationToken& cancellation) const {

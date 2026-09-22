@@ -61,6 +61,7 @@ class Server final {
     void accept_loop();
     void serve(std::shared_ptr<Connection> connection);
     void broadcast(const std::string& line);
+    void reap();
 
     int listener_{-1};
     // A self-pipe, so a blocking accept can be woken for shutdown without

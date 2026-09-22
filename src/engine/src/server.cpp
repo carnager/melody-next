@@ -231,7 +231,17 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             break;
         }
         if (received == 0) {
-            break;
+            // The peer half-closed: it will send nothing more, but it is very
+            // likely still reading. That is exactly the `nc` idiom -- pipe a
+            // request in, stdin reaches EOF, and the answer plus any job
+            // events are still wanted. Stop reading, keep writing.
+            //
+            // The connection stays in the broadcast set and is reaped when a
+            // write finally fails, or at shutdown. A client that half-closes
+            // and never closes therefore holds one entry until the engine
+            // stops, which is acceptable for a local socket whose peers are
+            // the user's own programs.
+            return;
         }
         pending.append(buffer.data(), static_cast<std::size_t>(received));
 
@@ -281,14 +291,26 @@ void Server::serve(std::shared_ptr<Connection> connection) {
     std::erase(connections_, connection);
 }
 
+void Server::reap() {
+    const std::lock_guard guard{mutex_};
+    std::erase_if(connections_,
+                  [](const std::shared_ptr<Connection>& held) { return !held->open.load(); });
+}
+
 void Server::broadcast(const std::string& line) {
     std::vector<std::shared_ptr<Connection>> targets;
     {
         const std::lock_guard guard{mutex_};
         targets = connections_;
     }
+    bool lost = false;
     for (const auto& connection : targets) {
-        connection->write_line(line);
+        lost = !connection->write_line(line) || lost;
+    }
+    if (lost) {
+        // A half-closed peer is only discovered by writing to it, so this is
+        // where those connections are finally let go.
+        reap();
     }
 }
 

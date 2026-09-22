@@ -31,6 +31,13 @@ class Catalogue final {
   public:
     explicit Catalogue(std::filesystem::path database) : database_(std::move(database)) {}
 
+    // Opens the catalogue once, creating and migrating it. Callers do not
+    // need this -- every operation opens for itself -- but a daemon does: a
+    // migration failure should surface at startup rather than in the response
+    // to some client's first request, and the store should exist on disk from
+    // the moment the engine says it is listening.
+    [[nodiscard]] core::Result<void> prepare() const;
+
     // The configured library roots, and adding or removing one. Mutating the
     // root set does not scan; that is a separate ask.
     [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const;

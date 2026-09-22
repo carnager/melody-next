@@ -73,6 +73,7 @@ add_subdirectory(src/audio)
 add_subdirectory(src/loudness)
 add_subdirectory(src/convert)
 add_subdirectory(src/tools)
+add_subdirectory(src/daemon)
 
 if(TRACKKNIFE_BUILD_UI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Test Widgets)

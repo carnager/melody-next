@@ -322,6 +322,14 @@ add_test(
 # format. Links no Qt.
 # ADR-0219/0222: jobs, including the fault injection proving a long job cannot
 # starve the control path.
+# ADR-0220: tkengine as a process, exercised the way an init system would.
+add_test(
+    NAME engine-daemon
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_daemon_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>"
+)
+set_tests_properties(engine-daemon PROPERTIES TIMEOUT 60)
+
 # ADR-0222: the unix socket, talked to with plain POSIX calls and plain lines.
 add_executable(trackknife_engine_server_tests engine_server_test.cpp)
 target_link_libraries(

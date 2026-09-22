@@ -123,6 +123,12 @@ core::Result<void> Workspace::record_local_listen(const persistence::ListItem& s
     return repository_.record_local_listen(source, std::move(occurrence_id), played_at_ms);
 }
 
+core::Result<void> Workspace::save_local_resume(const std::string_view track_hash,
+                                                const std::int64_t position_ms,
+                                                const std::int64_t updated_at_ms) {
+    return repository_.save_local_resume(track_hash, position_ms, updated_at_ms);
+}
+
 core::Result<std::vector<persistence::SavedSearch>> Workspace::load_saved_searches() const {
     return repository_.load_saved_searches();
 }

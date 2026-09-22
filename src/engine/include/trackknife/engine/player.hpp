@@ -117,6 +117,9 @@ class Player final {
         std::int64_t position_ms{0};
         std::int64_t duration_ms{-1};
         std::size_t queue_size{0};
+        // How many explicit asks are outstanding. A client renders up-next
+        // from playback.requests; this is enough to show that there are any.
+        std::size_t requests{0};
         audio::PlaybackModes modes;
     };
     [[nodiscard]] State state() const;

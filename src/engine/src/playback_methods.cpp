@@ -74,6 +74,7 @@ Json to_json(const Player::State& state) {
     rendered["position_ms"] = state.position_ms;
     rendered["duration_ms"] = state.duration_ms;
     rendered["queue_size"] = state.queue_size;
+    rendered["requests"] = state.requests;
     rendered["modes"] = modes_to_json(state.modes);
     return rendered;
 }
@@ -125,6 +126,37 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
         if (!played) {
             return std::unexpected(std::move(played.error()));
         }
+        return to_json(player.state());
+    });
+
+    // Up-next. A request names an entry the engine already holds, so the
+    // client sends an identity rather than a source.
+    dispatcher.on("playback.request", [&player](const Json& params) -> core::Result<Json> {
+        const auto identity = params.find("entry");
+        if (identity == params.end() || !identity->is_string()) {
+            return std::unexpected(bad_params("an entry identity is required", "entry"));
+        }
+        auto entry_id = core::StableId::parse(identity->get<std::string>());
+        if (!entry_id) {
+            return std::unexpected(bad_params("entry is not an identity", "entry"));
+        }
+        auto requested = player.request(*entry_id);
+        if (!requested) {
+            return std::unexpected(std::move(requested.error()));
+        }
+        return to_json(player.state());
+    });
+
+    dispatcher.on("playback.requests", [&player](const Json&) -> core::Result<Json> {
+        auto entries = Json::array();
+        for (const auto& entry_id : player.requests()) {
+            entries.push_back(entry_id.to_string());
+        }
+        return Json{{"entries", std::move(entries)}};
+    });
+
+    dispatcher.on("playback.clear_requests", [&player](const Json&) -> core::Result<Json> {
+        player.clear_requests();
         return to_json(player.state());
     });
 

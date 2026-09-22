@@ -328,6 +328,7 @@ Player::State Player::state() const {
         current.duration_ms = queue_[static_cast<std::size_t>(row_)].duration_ms.value_or(-1);
     }
     current.queue_size = queue_.size();
+    current.requests = requests_.size();
     current.modes = modes_;
     return current;
 }

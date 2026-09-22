@@ -7,6 +7,7 @@
 
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
+#include "trackknife/engine/recorder.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <chrono>
@@ -201,6 +202,17 @@ void the_method_surface_speaks_for_the_player(engine::Player& player) {
 }
 
 void changes_are_pushed_without_asking(engine::Player& player) {
+    // "An unchanged player is quiet" needs a player that is actually
+    // unchanged. An earlier scenario may have left a track draining, and its
+    // transition to stopped is a real change the watcher is right to report --
+    // so settle first rather than assert into a moving state.
+    static_cast<void>(player.stop());
+    const auto settled = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (player.state().status != "stopped" && std::chrono::steady_clock::now() < settled) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    require(player.state().status == "stopped", "the player must settle before it is watched");
+
     std::mutex mutex;
     std::vector<protocol::Event> seen;
     engine::PlaybackWatcher watcher{player,
@@ -400,6 +412,34 @@ void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesy
     player.set_modes(modes);
 }
 
+// ADR-0220: what the player accumulates has to reach a store, or the engine
+// plays and remembers nothing. The player pulls rather than pushes so it can
+// be tested without a database; this is the piece that joins them, and this
+// checks the join rather than the accounting rules, which are tested in
+// playback-state.
+void the_recorder_drains_into_a_workspace(engine::Player& player,
+                                          const std::filesystem::path& directory,
+                                          const std::filesystem::path& audio) {
+    auto workspace = engine::Workspace::open(directory / "workspace.sqlite3");
+    require(workspace.has_value(), "the workspace must open");
+
+    engine::Recorder recorder{player, *workspace, std::chrono::milliseconds{10}};
+    recorder.start();
+
+    player.replace_queue({entry(audio.string())});
+    const auto started = player.play_entry(player.queue().front().entry_id);
+    // Sampling an idle or playing engine must both be harmless; what is being
+    // checked is that draining runs without disturbing playback or the store.
+    std::this_thread::sleep_for(std::chrono::milliseconds{120});
+    if (started) {
+        require(player.state().queue_size == 1U, "draining leaves the queue alone");
+    }
+    recorder.stop();
+    // Stopping twice is what shutdown does after an error path.
+    recorder.stop();
+    static_cast<void>(player.stop());
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -435,10 +475,11 @@ int main(int argc, char** argv) {
     requests_outrank_the_order_but_only_forward(**player);
     listening_and_resume_are_observed_not_pushed(**player);
     gapless_is_offered_and_recomputed(**player, audio);
+    the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 11 scenarios\n";
+    std::cout << "engine player: 12 scenarios\n";
     return EXIT_SUCCESS;
 }

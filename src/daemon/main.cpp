@@ -11,6 +11,7 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/playback_methods.hpp"
+#include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -141,9 +142,15 @@ int main(int argc, char** argv) {
 
     // Pushed state, so a client learns a track changed without asking.
     std::optional<trackknife::engine::PlaybackWatcher> watcher;
+    // And the counters the player accumulates are written down, rather than
+    // computed and discarded. Without this the engine plays but remembers
+    // nothing -- no play counts, no resume.
+    std::optional<trackknife::engine::Recorder> recorder;
     if (player) {
         watcher.emplace(**player, (*server)->sink());
         watcher->start();
+        recorder.emplace(**player, *workspace);
+        recorder->start();
     }
 
     std::signal(SIGINT, request_stop);
@@ -160,7 +167,11 @@ int main(int argc, char** argv) {
     }
 
     std::cerr << "tkengine: stopping\n";
-    // The watcher writes to the server's sink, so it stops first.
+    // Both sample the player, so they stop before it and before the server
+    // the watcher writes to.
+    if (recorder) {
+        recorder->stop();
+    }
     if (watcher) {
         watcher->stop();
     }

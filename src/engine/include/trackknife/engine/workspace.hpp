@@ -76,6 +76,12 @@ class Workspace final {
                                                          core::StableId occurrence_id,
                                                          std::int64_t played_at_ms);
 
+    // Where a track was left, keyed by content identity so it survives the
+    // file being re-encoded.
+    [[nodiscard]] core::Result<void> save_local_resume(std::string_view track_hash,
+                                                       std::int64_t position_ms,
+                                                       std::int64_t updated_at_ms);
+
     // Saved searches. A saved search is user-authored, so removal is checked
     // against the expected definition rather than a bare name.
     [[nodiscard]] core::Result<std::vector<persistence::SavedSearch>> load_saved_searches() const;

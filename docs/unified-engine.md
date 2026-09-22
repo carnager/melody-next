@@ -369,6 +369,11 @@ multiplexing, pushed state events, job progress streams, cancellation, binary
 side-channel. Human-readable framing (JSON-RPC-shaped over a socket) so `nc`
 and a shell script remain debugging tools.
 
+Framing and envelope are settled in
+[ADR-0222](adr/0222-protocol-v1-framing.md): one JSON object per line, four
+message shapes, out-of-order answering, jobs as an event stream rather than a
+held-open response, and binary on a separate channel.
+
 - One schema artifact checked into the repo, plus a golden corpus exercised by
   both the C++ and Go implementations. Follow the existing pattern in
   `tests/query/history_corpus.hpp` and `tests/titleformat/tkfmt-corpus/`.
@@ -460,9 +465,12 @@ would cost is gapless across the boundary, and any entry whose engine goes
 unreachable mid-queue — and "a NAS sleeps halfway through an album" is the case
 such a design has to answer first.
 
-The one requirement this leaves on Phase 2, worth honouring because it is free
-now and expensive later: **an entry reference is addressable with a
-connection**, not against a single implicit one.
+This leaves one requirement, and it is on the **client**, not the protocol:
+a client holding several connections must track which engine a tab's entries
+belong to. On the wire nothing changes, because the connection is the socket —
+`entry 47` sent to engine A is unambiguous. See
+[ADR-0222](adr/0222-protocol-v1-framing.md), which corrects an earlier note here
+that placed this requirement on the protocol.
 
 ### Phase 4 — Output agents
 

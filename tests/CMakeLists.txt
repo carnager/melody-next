@@ -320,6 +320,16 @@ add_test(
 
 # ADR-0222: the catalogue methods against a real database, over the wire
 # format. Links no Qt.
+# ADR-0219/0222: jobs, including the fault injection proving a long job cannot
+# starve the control path.
+add_executable(trackknife_job_registry_tests job_registry_test.cpp)
+target_link_libraries(
+    trackknife_job_registry_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME job-registry COMMAND trackknife_job_registry_tests)
+
 add_executable(trackknife_engine_methods_tests engine_methods_test.cpp)
 target_link_libraries(
     trackknife_engine_methods_tests

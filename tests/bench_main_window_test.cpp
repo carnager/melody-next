@@ -293,7 +293,7 @@ class BenchMainWindowTest final : public QObject {
     void convertDialogAppliesPermanentReplayGain();
     void settingsControlStartupContextAndMusicRoot();
     void mpdSugarActionsMaterializeAndOpenDialog();
-    void propertiesFileListHostsInSidebar();
+    void propertiesFileListLivesInTheTaggerWindow();
     void serverWorkingTabCreationGestures();
     void libraryDragResolvesUnexpandedBranch();
     void selectionActionsFollowTheActiveTab();
@@ -2518,12 +2518,16 @@ void BenchMainWindowTest::committedMetadataRefreshesDuplicatesAndPreservesCueOve
 // ADR-0183 addendum: while a tag editor tab is active, its file list is
 // hosted as a temporary Files page in the local sources sidebar; leaving
 // or closing the editor returns the widget and the sidebar state.
-void BenchMainWindowTest::propertiesFileListHostsInSidebar() {
-    QTemporaryDir media;
-    QVERIFY(media.isValid());
-    const auto source_path = media.filePath(QStringLiteral("hosted.flac"));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), source_path));
-    const auto encoded = QFile::encodeName(source_path);
+void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
+    // ADR-0221: the tagger is a window and owns its file list. The list sits
+    // beside the field table rather than above it, shows paths relative to the
+    // selection's common folder, and keeps the checkbox selection that scopes
+    // edits. None of that depends on the workspace sidebar any more.
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto file = directory.filePath(QStringLiteral("hosted.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
+    const auto encoded = QFile::encodeName(file);
 
     BenchMainWindow window;
     window.show();
@@ -2532,9 +2536,7 @@ void BenchMainWindowTest::propertiesFileListHostsInSidebar() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
     auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
-    auto* files_page = window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
-    QVERIFY(tabs != nullptr && properties_action != nullptr && source_tabs != nullptr &&
-            files_page != nullptr);
+    QVERIFY(tabs != nullptr && properties_action != nullptr && source_tabs != nullptr);
     QTRY_COMPARE(tabs->count(), 2);
     auto* list_view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(list_view != nullptr);
@@ -2545,81 +2547,82 @@ void BenchMainWindowTest::propertiesFileListHostsInSidebar() {
     list_view->selectionModel()->select(
         list_model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTRY_VERIFY(properties_action->isEnabled());
-    const auto stored_view = QSettings{}.value(QStringLiteral("local-library/view")).toInt();
+    const auto sidebar_tabs_before = source_tabs->count();
     properties_action->trigger();
     auto* properties =
         window.findChild<MetadataPropertiesDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
 
-    // Hosted: third sidebar tab, file list living inside the sidebar page.
-    QTRY_COMPARE(source_tabs->count(), 3);
-    QCOMPARE(source_tabs->tabText(2), QStringLiteral("Files"));
-    QCOMPARE(source_tabs->currentIndex(), 2);
+    // The workspace is untouched: no extra sidebar page, no extra tab.
+    QCOMPARE(source_tabs->count(), sidebar_tabs_before);
+    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(list_view));
+
+    // The grid, and with it the file list, builds asynchronously.
+    QTRY_VERIFY(properties->fileListView() != nullptr);
     auto* files_view = properties->fileListView();
-    QVERIFY(files_view != nullptr);
-    QVERIFY(files_page->isAncestorOf(files_view));
-    QVERIFY(files_view->isVisible());
-    QCOMPARE(window.findChildren<QTableView*>(QStringLiteral("bench-metadata-files")).size(), 1);
-    auto* selection = files_view->selectionModel();
-    // The visible sidebar uses the same checkbox selection as the editor.
+    QVERIFY(properties->isAncestorOf(files_view));
     QTRY_VERIFY(files_view->isVisible());
-    QCOMPARE(files_view->selectionModel()->selectedRows().size(), 1);
+    QCOMPARE(window.findChildren<QTableView*>(QStringLiteral("bench-metadata-files")).size(), 1);
+
+    // Beside the fields, not above them, so the field table gets full height.
+    auto* splitter = properties->findChild<QSplitter*>(QStringLiteral("bench-metadata-splitter"));
+    QVERIFY(splitter != nullptr);
+    QCOMPARE(splitter->orientation(), Qt::Horizontal);
+
+    // Checkbox selection scopes the edit: click the indicator or press Space.
+    auto* selection = files_view->selectionModel();
+    QCOMPARE(selection->selectedRows().size(), 1);
     const auto cell = files_view->visualRect(files_view->model()->index(0, 0));
     QTest::mouseClick(files_view->viewport(), Qt::LeftButton, Qt::NoModifier,
                       QPoint(cell.left() + 14, cell.center().y()));
-    QCOMPARE(files_view->selectionModel()->selectedRows().size(), 0);
+    QCOMPARE(selection->selectedRows().size(), 0);
     QTest::keyClick(files_view, Qt::Key_Space);
-    QCOMPARE(files_view->selectionModel()->selectedRows().size(), 1);
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
-        !directory.isEmpty()) {
-        QVERIFY(window.grab().save(directory + QStringLiteral("/tag-sidebar-checkboxes.png")));
+    QCOMPARE(selection->selectedRows().size(), 1);
+    if (const auto screenshots = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !screenshots.isEmpty()) {
+        QVERIFY(properties->grab().save(screenshots + QStringLiteral("/tag-window-checkboxes.png")));
     }
-    // Breadcrumb carries the common folder; rows render relative to it.
-    auto* crumb = window.findChild<QLabel*>(QStringLiteral("bench-properties-files-dir"));
+
+    // The breadcrumb carries the common folder and belongs to the tagger.
+    auto* crumb = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-files-dir"));
     QVERIFY(crumb != nullptr);
-    QVERIFY(crumb->text().endsWith(QLatin1Char('/')));
+    QVERIFY(properties->isAncestorOf(crumb));
+    QTRY_VERIFY(crumb->text().endsWith(QLatin1Char('/')));
     QVERIFY(!crumb->text().contains(QStringLiteral("hosted.flac")));
-    // The temporary page never becomes the persisted default view.
-    QCOMPARE(QSettings{}.value(QStringLiteral("local-library/view")).toInt(), stored_view);
 
-    // Leaving the editor returns its sole view; the selection stays editor-owned.
-    tabs->setCurrentWidget(list_view);
-    QTRY_COMPARE(source_tabs->count(), 2);
-    QVERIFY(properties->isAncestorOf(files_view));
-    QCOMPARE(files_view->selectionModel(), selection);
-    QVERIFY(source_tabs->currentIndex() < 2);
-
-    // Each editor owns one view and an independent selection across tab switches.
+    // A second tagger stands alongside the first, each owning its own view and
+    // an independent selection -- which is what windows buy over a single tab.
     selection->clearSelection();
     QTRY_VERIFY(properties_action->isEnabled());
     properties_action->trigger();
-    auto* second = qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget());
-    QVERIFY(second && second != properties);
+    MetadataPropertiesDialog* second = nullptr;
+    for (auto* candidate :
+         window.findChildren<MetadataPropertiesDialog*>(QStringLiteral("bench-metadata-properties"))) {
+        if (candidate != properties) {
+            second = candidate;
+        }
+    }
+    QVERIFY(second != nullptr);
+    QVERIFY(second->isWindow());
     QTRY_VERIFY(second->fileListView());
     auto* second_view = second->fileListView();
-    QTRY_VERIFY(files_page->isAncestorOf(second_view));
+    QVERIFY(second->isAncestorOf(second_view));
     QCOMPARE(second_view->selectionModel()->selectedRows().size(), 1);
     QCOMPARE(window.findChildren<QTableView*>(QStringLiteral("bench-metadata-files")).size(), 2);
-    tabs->setCurrentWidget(properties);
-    QTRY_VERIFY(files_page->isAncestorOf(files_view));
     QCOMPARE(selection->selectedRows().size(), 0);
-    QVERIFY(second->isAncestorOf(second_view));
-    tabs->setCurrentWidget(second);
-    QTRY_VERIFY(files_page->isAncestorOf(second_view));
-    QCOMPARE(second_view->selectionModel()->selectedRows().size(), 1);
+
+    // Closing one tears down only its own view; the other is unaffected.
     QPointer<QTableView> second_lifetime = second_view;
     QVERIFY(second->close());
     QTRY_VERIFY(second_lifetime.isNull());
-
-    // Re-selecting the editor hosts again; closing tears everything down.
-    tabs->setCurrentWidget(properties);
-    QTRY_COMPARE(source_tabs->count(), 3);
-    QTRY_VERIFY(files_page->isAncestorOf(files_view));
+    QVERIFY(properties->isAncestorOf(files_view));
     QCOMPARE(files_view->selectionModel(), selection);
+
     QPointer<QTableView> lifetime = files_view;
     QVERIFY(properties->close());
-    QTRY_COMPARE(source_tabs->count(), 2);
     QTRY_VERIFY(lifetime.isNull());
+    QCOMPARE(source_tabs->count(), sidebar_tabs_before);
 }
 
 void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
@@ -2652,10 +2655,12 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
 
     auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
-    QTRY_COMPARE(tabs->count(), 3);
-    QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
-    QVERIFY(!properties->isWindow());
-    QVERIFY(tabs->tabText(tabs->currentIndex()).startsWith(QStringLiteral("Tags · 1 track")));
+    // ADR-0221: a window, so the tab strip is untouched and the list the
+    // selection came from stays current.
+    QVERIFY(properties->isWindow());
+    QCOMPARE(tabs->count(), 2);
+    QVERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) == nullptr);
+    QVERIFY(properties->windowTitle().startsWith(QStringLiteral("Edit tags · 1 track")));
     QTableView* fields = nullptr;
     QTRY_VERIFY((fields = properties->findChild<QTableView*>(
                      QStringLiteral("bench-metadata-fields"))) != nullptr);
@@ -4898,13 +4903,13 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         const auto local_lists_before = window.list_tabs_.size();
         window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
                                                 BenchMainWindow::MaterializedDialog::edit_tags);
-        QCOMPARE(tabs->count(), tabs_before + 1);
+        QCOMPARE(tabs->count(), tabs_before);
         auto* properties = window.findChild<MetadataPropertiesDialog*>(
             QStringLiteral("bench-metadata-properties"));
         QVERIFY(properties);
-        QVERIFY(!properties->isWindow());
+        QVERIFY(properties->isWindow());
         QVERIFY(!properties->isModal());
-        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(window.mpd_queue_view_));
         QCOMPARE(window.list_tabs_.size(), local_lists_before);
         QVERIFY(!window.discovery_running_);
         MetadataGridModel* grid = nullptr;
@@ -4915,12 +4920,11 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         QVERIFY(artist_column.has_value());
         QVERIFY(!grid->data(grid->index(0, *artist_column), Qt::DisplayRole).toString().isEmpty());
         QVERIFY(properties->fileListView()->isVisible());
-        auto* files_page =
-            window.findChild<QWidget*>(QStringLiteral("bench-properties-files-page"));
-        QVERIFY(files_page && files_page->isAncestorOf(properties->fileListView()));
+        // ADR-0221: the file list belongs to the tagger window, and the
+        // workspace sidebar is left alone.
+        QVERIFY(properties->isAncestorOf(properties->fileListView()));
         auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
-        QCOMPARE(source_tabs->tabText(source_tabs->currentIndex()), QStringLiteral("Files"));
-        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        QVERIFY(source_tabs->tabText(source_tabs->currentIndex()) != QStringLiteral("Files"));
         auto* fields = properties->findChild<QTableView*>(QStringLiteral("bench-metadata-fields"));
         auto* aggregate = qobject_cast<MetadataAggregateModel*>(fields->model());
         QVERIFY(aggregate);
@@ -4952,8 +4956,9 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
         QVERIFY(properties);
         auto* summary = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-summary"));
         QTRY_COMPARE(summary->text(), QStringLiteral("Properties unavailable"));
-        QCOMPARE(tabs->count(), tabs_before + 1);
-        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(properties));
+        // ADR-0221: even an editor that cannot read its sources is a window.
+        QCOMPARE(tabs->count(), tabs_before);
+        QVERIFY(properties->isWindow());
         properties->close();
         QTRY_VERIFY(!window.findChild<MetadataPropertiesDialog*>());
 
@@ -9909,8 +9914,12 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     QVERIFY(properties_action != nullptr);
     QTRY_VERIFY(properties_action->isEnabled());
     properties_action->trigger();
-    QTRY_VERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) != nullptr);
-    QVERIFY(!find->isEnabled() && !next->isEnabled() && !previous->isEnabled());
+    // ADR-0221: opening the tagger no longer replaces the active tab, so the
+    // list stays current and its find actions stay available.
+    QTRY_VERIFY(window.findChild<MetadataPropertiesDialog*>(
+                    QStringLiteral("bench-metadata-properties")) != nullptr);
+    QVERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) == nullptr);
+    QVERIFY(find->isEnabled());
     QVERIFY(bar->isHidden());
 }
 
@@ -10843,12 +10852,13 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
         window.findChild<MetadataPropertiesDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(dialog != nullptr);
     QVERIFY(dialog->isVisible());
+    // ADR-0221: a window, and still non-modal so the workspace stays usable
+    // while edits are staged.
     QVERIFY(!dialog->isModal());
-    QVERIFY(!dialog->isWindow());
-    QTRY_COMPARE(tabs->count(), 3);
-    QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(dialog));
-    QVERIFY(tabs->tabText(tabs->currentIndex()).startsWith(QStringLiteral("Tags · 2 tracks")));
-    QCOMPARE(dialog->windowTitle(), QStringLiteral("Edit tags"));
+    QVERIFY(dialog->isWindow());
+    QCOMPARE(tabs->count(), 2);
+    QVERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) == nullptr);
+    QCOMPARE(dialog->windowTitle(), QStringLiteral("Edit tags · 2 tracks"));
     QVERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-metadata-loading")) != nullptr);
 
     QTableView* files = nullptr;
@@ -11250,9 +11260,12 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY(edit_values->isEnabled());
     QVERIFY(!summary->text().contains(QStringLiteral("staged change")));
     QVERIFY(!discard->isEnabled());
-    QVERIFY(QMetaObject::invokeMethod(tabs, "tabCloseRequested", Qt::DirectConnection,
-                                      Q_ARG(int, tabs->currentIndex())));
-    QTRY_COMPARE(tabs->count(), 2);
+    // ADR-0221: the tagger is closed as a window. Asking the tab strip to
+    // close its current tab would now close a list, not the editor.
+    QPointer<MetadataPropertiesDialog> lifetime = dialog;
+    QVERIFY(dialog->close());
+    QTRY_VERIFY(lifetime.isNull());
+    QCOMPARE(tabs->count(), 2);
 }
 
 void BenchMainWindowTest::metadataPropertiesArtworkSectionShowsProvenanceAndCapabilities() {

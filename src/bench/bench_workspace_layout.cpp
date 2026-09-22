@@ -214,18 +214,6 @@ void BenchMainWindow::buildWorkspace() {
         openLocalPaths({folder_model_->rawPath(index)});
     });
     source_stack_->addWidget(folder_view_);
-    properties_files_page_ = new QWidget(source_stack_);
-    properties_files_page_->setObjectName(QStringLiteral("bench-properties-files-page"));
-    auto* files_page_layout = new QVBoxLayout(properties_files_page_);
-    files_page_layout->setContentsMargins(0, 0, 0, 0);
-    files_page_layout->setSpacing(0);
-    properties_files_dir_ = new QLabel(properties_files_page_);
-    properties_files_dir_->setObjectName(QStringLiteral("bench-properties-files-dir"));
-    properties_files_dir_->setTextFormat(Qt::PlainText);
-    properties_files_dir_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    properties_files_dir_->setContentsMargins(6, 4, 6, 2);
-    files_page_layout->addWidget(properties_files_dir_);
-    source_stack_->addWidget(properties_files_page_);
     folders_layout->addWidget(source_stack_, 1);
 
     buildMpdWorkspace();

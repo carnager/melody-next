@@ -480,11 +480,6 @@ class BenchMainWindow final : public QMainWindow {
     QTabBar* local_source_tabs_{nullptr};
     // ADR-0183 addendum: temporary sidebar page hosting the active tag
     // editor's file list.
-    QWidget* properties_files_page_{nullptr};
-    QLabel* properties_files_dir_{nullptr};
-    QPointer<MetadataPropertiesDialog> hosted_properties_;
-    int previous_local_source_index_{-1};
-    void updatePropertiesFileHosting();
     QTabBar* mpd_source_tabs_{nullptr};
     QStackedWidget* mpd_source_pages_{nullptr};
     QTreeView* folder_view_{nullptr};

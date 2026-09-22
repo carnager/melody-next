@@ -1046,16 +1046,22 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
         });
     connect(properties, &MetadataPropertiesDialog::openSettingsRequested, this,
             [this](const SettingsDialog::Page page) { showSettingsDialog(page); });
-    properties->setWindowFlags(Qt::Widget);
-    properties->setProperty("bench-special-tab", QStringLiteral("metadata-properties"));
-    const auto tab_title =
-        QStringLiteral("Tags · %1 %2")
+    // ADR-0221: the tagger is a window, not a tab. Every tab is a list of
+    // playable tracks; this is an editing surface holding staged, uncommitted
+    // state with its own commit/cancel lifecycle, and tabs get closed
+    // casually. As a window it keeps its own file list in its splitter, several
+    // can stand open over different selections, and it survives being pointed
+    // at a remote engine in Phase 2, where applying tags becomes a job rather
+    // than a local write.
+    properties->setWindowFlags(Qt::Window);
+    // The dialog titles itself "Edit tags"; the selection size is appended so
+    // several open taggers stay tellable apart in a window list.
+    properties->setWindowTitle(
+        QStringLiteral("%1 · %2 %3")
+            .arg(properties->windowTitle())
             .arg(selected_row_count)
-            .arg(selected_row_count == 1U ? QStringLiteral("track") : QStringLiteral("tracks"));
-    const auto properties_index = tabs_->addTab(properties, tab_title);
-    tabs_->setTabToolTip(
-        properties_index,
-        QStringLiteral("Temporary tagging workspace · close after applying or discarding"));
+            .arg(selected_row_count == 1U ? QStringLiteral("track") : QStringLiteral("tracks")));
+    properties->setAttribute(Qt::WA_DeleteOnClose);
     connect(properties, &QObject::destroyed, this, [this] {
         QTimer::singleShot(0, this, [this] {
             if (list_tabs_.empty()) {
@@ -1075,8 +1081,9 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
             refreshSelectionStatus();
         });
     });
-    tabs_->setCurrentIndex(properties_index);
     properties->show();
+    properties->raise();
+    properties->activateWindow();
 }
 
 MusicBrainzLookupService BenchMainWindow::musicBrainzLookupService() {

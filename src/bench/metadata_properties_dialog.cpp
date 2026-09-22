@@ -978,11 +978,29 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
                                   .arg(item_count - revision_count);
     updateDraftState(0, false, false);
 
-    metadata_splitter_ = new QSplitter(Qt::Vertical, this);
+    // ADR-0221: the tagger is its own window, so its file list lives beside
+    // the field table rather than stacked above it. A vertical split spent
+    // scarce height on a narrow path column; horizontal gives the paths a tall
+    // column and the fields the full height, which is what the sidebar hosting
+    // used to buy by moving the widget out of the dialog entirely.
+    metadata_splitter_ = new QSplitter(Qt::Horizontal, this);
     metadata_splitter_->setObjectName(QStringLiteral("bench-metadata-splitter"));
     metadata_splitter_->setChildrenCollapsible(false);
 
-    file_list_ = new FileScopeView(metadata_splitter_);
+    // The file list and its breadcrumb travel together as one splitter pane.
+    auto* file_pane = new QWidget(metadata_splitter_);
+    file_pane->setObjectName(QStringLiteral("bench-metadata-files-pane"));
+    auto* file_pane_layout = new QVBoxLayout(file_pane);
+    file_pane_layout->setContentsMargins(0, 0, 0, 0);
+    file_pane_layout->setSpacing(0);
+    file_list_dir_ = new QLabel(file_pane);
+    file_list_dir_->setObjectName(QStringLiteral("bench-metadata-files-dir"));
+    file_list_dir_->setTextFormat(Qt::PlainText);
+    file_list_dir_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    file_list_dir_->setContentsMargins(6, 4, 6, 2);
+    file_list_dir_->hide();
+    file_pane_layout->addWidget(file_list_dir_);
+    file_list_ = new FileScopeView(file_pane);
     file_list_->setObjectName(QStringLiteral("bench-metadata-files"));
     file_list_->setAccessibleName(QStringLiteral("Files included in metadata edit"));
     grid_model_ = new MetadataGridModel(std::move(selection), std::move(track_labels_), this);
@@ -994,18 +1012,31 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     file_list_->setAlternatingRowColors(true);
     file_list_->setShowGrid(false);
     file_list_->setWordWrap(false);
-    file_list_->setTextElideMode(Qt::ElideMiddle);
+    // Paths render relative to the selection's common folder, so a
+    // single-album edit shows plain filenames; the folder itself is the
+    // breadcrumb above. Eliding right keeps the start of the name visible.
+    file_list_->setTextElideMode(Qt::ElideRight);
     file_list_->setSelectionBehavior(QAbstractItemView::SelectRows);
     file_list_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     file_list_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     file_list_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     file_list_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     file_list_->verticalHeader()->hide();
-    file_list_->setMinimumHeight(120);
+    file_list_->horizontalHeader()->hide();
+    file_list_->setMinimumWidth(180);
     file_list_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     for (auto column = 1; column < grid_model_->columnCount(); ++column) {
         file_list_->hideColumn(column);
     }
+    file_pane_layout->addWidget(file_list_, 1);
+    // The grid fills asynchronously; the breadcrumb follows whatever arrives.
+    connect(grid_model_, &QAbstractItemModel::modelReset, this,
+            &MetadataPropertiesDialog::refreshFileListScope);
+    connect(grid_model_, &QAbstractItemModel::rowsInserted, this,
+            &MetadataPropertiesDialog::refreshFileListScope);
+    connect(grid_model_, &QAbstractItemModel::rowsRemoved, this,
+            &MetadataPropertiesDialog::refreshFileListScope);
+    refreshFileListScope();
     connect(grid_model_, &QAbstractItemModel::columnsInserted, file_list_,
             [this](const QModelIndex& parent, const int first, const int last) {
                 if (parent.isValid()) {
@@ -1860,19 +1891,38 @@ void MetadataPropertiesDialog::reloadOutputProfiles() { loadOutputProfiles(); }
 
 QTableView* MetadataPropertiesDialog::fileListView() { return file_list_; }
 
-// The workspace moves this one view into its sidebar; state stays editor-owned.
-void MetadataPropertiesDialog::setFileListHosted(const bool hosted) {
-    if (!file_list_ || hosted == file_list_hosted_)
+// ADR-0221: the file list belongs to this window. Rows render relative to the
+// selection's common folder, which is shown once as a breadcrumb above them --
+// a one-album edit then reads as plain filenames instead of repeating the same
+// long path on every row. Previously the workspace computed this while hosting
+// the view in its sidebar; it is the editor's own presentation now.
+void MetadataPropertiesDialog::refreshFileListScope() {
+    if (file_list_ == nullptr) {
         return;
-    file_list_hosted_ = hosted;
-    field_review_bar_->setFilesToggleVisible(!hosted);
-    file_list_->horizontalHeader()->setVisible(!hosted);
-    file_list_->setTextElideMode(hosted ? Qt::ElideRight : Qt::ElideMiddle);
-    if (!hosted) {
-        file_list_->itemDelegate()->setProperty("relative-prefix", QString{});
-        metadata_splitter_->insertWidget(0, file_list_);
     }
-    file_list_->setVisible(hosted || field_review_bar_->filesToggleChecked());
+    QString common_dir;
+    if (const auto* model = file_list_->model()) {
+        for (int row = 0; row < model->rowCount(); ++row) {
+            const auto path = model->index(row, 0).data(Qt::DisplayRole).toString();
+            const auto slash = path.lastIndexOf(QLatin1Char('/'));
+            auto directory = slash >= 0 ? path.left(slash + 1) : QString{};
+            if (row == 0) {
+                common_dir = directory;
+                continue;
+            }
+            while (!common_dir.isEmpty() && !directory.startsWith(common_dir)) {
+                const auto parent = common_dir.lastIndexOf(QLatin1Char('/'), common_dir.size() - 2);
+                common_dir = parent >= 0 ? common_dir.left(parent + 1) : QString{};
+            }
+        }
+    }
+    if (file_list_dir_ != nullptr) {
+        file_list_dir_->setText(common_dir);
+        file_list_dir_->setToolTip(common_dir);
+        file_list_dir_->setVisible(!common_dir.isEmpty());
+    }
+    file_list_->itemDelegate()->setProperty("relative-prefix", common_dir);
+    file_list_->viewport()->update();
 }
 
 // ADR-0183: with the apply options folded into the Apply & Scripts tab,

@@ -185,13 +185,13 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0183 addendum: sidebar hosting of the file list by the bench
     // window; the dialog reclaims the widget on close.
     [[nodiscard]] QTableView* fileListView();
-    void setFileListHosted(bool hosted);
+    void refreshFileListScope();
     // ADR-0185: refreshes the layout/destination selectors after Settings
     // edits profiles.
     void reloadOutputProfiles();
 
   private:
-    bool file_list_hosted_{false};
+    QLabel* file_list_dir_{nullptr};
     void invalidateWritePlan();
     void startProposals();
     void finishProposals();

@@ -322,6 +322,15 @@ add_test(
 # format. Links no Qt.
 # ADR-0219/0222: jobs, including the fault injection proving a long job cannot
 # starve the control path.
+# ADR-0222: the unix socket, talked to with plain POSIX calls and plain lines.
+add_executable(trackknife_engine_server_tests engine_server_test.cpp)
+target_link_libraries(
+    trackknife_engine_server_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME engine-server COMMAND trackknife_engine_server_tests)
+
 add_executable(trackknife_job_registry_tests job_registry_test.cpp)
 target_link_libraries(
     trackknife_job_registry_tests

@@ -38,16 +38,30 @@ them in strings, so this only binds encoders, which must not pretty-print.
 
 ## Multiplexing and ordering
 
-Requests are answered out of order. A client may have many outstanding, and the
-engine may answer a cheap one while an expensive one is still running. That is
-the point: ADR-0219 records a cover-art scan starving the control path, and the
-fix is not politeness but a protocol where a slow answer cannot block a fast
-one.
+Ids make responses independent of arrival order, so **nothing may be inferred
+from ordering** except within a single `id`. Events in particular are not
+ordered against responses: a `playback.changed` may arrive before the response
+to the request that caused it. Clients reconcile on state, not sequence.
 
-Consequently **nothing may be inferred from ordering** except within a single
-`id`. Events in particular are not ordered against responses: a
-`playback.changed` may arrive before the response to the request that caused it.
-Clients reconcile on state, not sequence.
+**What the protocol permits and what the first server does differ, and the
+difference is deliberate.** The envelope allows an engine to answer a cheap
+request while an expensive one is still running. The server here does not: it
+dispatches on the connection's own thread, so requests on one connection are
+served in order and a slow handler delays the next one behind it.
+
+That is a constraint on *handlers*, not a gap in the framing. Long work is a
+job, which answers immediately and reports through events, so a correct handler
+is always fast — and ADR-0219's starvation cannot happen because the scan never
+occupied a request slot to begin with. A handler slow enough to be noticed is a
+handler that should have been a job.
+
+A client that genuinely needs concurrent calls opens a second connection, which
+is served by its own thread. Both behaviours are covered by
+`tests/protocol-roundtrip`, including the timing that distinguishes them.
+
+If a future engine wants true per-request concurrency it can dispatch onto a
+pool without any protocol change, because the ids are already there. Nothing a
+client can observe today would become wrong.
 
 ## Jobs
 

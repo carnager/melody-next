@@ -322,6 +322,16 @@ add_test(
 # format. Links no Qt.
 # ADR-0219/0222: jobs, including the fault injection proving a long job cannot
 # starve the control path.
+# ADR-0222: the real client against the real server.
+add_executable(trackknife_protocol_roundtrip_tests protocol_roundtrip_test.cpp)
+target_link_libraries(
+    trackknife_protocol_roundtrip_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME protocol-roundtrip COMMAND trackknife_protocol_roundtrip_tests)
+set_tests_properties(protocol-roundtrip PROPERTIES TIMEOUT 60)
+
 # ADR-0220 Phase 2: playback owned by the engine.
 add_executable(trackknife_engine_player_tests engine_player_test.cpp)
 target_link_libraries(

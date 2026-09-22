@@ -77,6 +77,14 @@ void BenchMainWindow::initializePersistence() {
     // transport command behind a library query would wait for it.
     engine_playback_ = new EnginePlayback(*catalogue_source_, this);
     connect(engine_playback_, &EnginePlayback::changed, this, [this] { refreshTransport(); });
+    if (engine_playback_->active()) {
+        // An engine starts with its own defaults and has never heard of this
+        // window's settings, so they are handed over the moment the connection
+        // exists. This runs after the transport is built, which is why sending
+        // them there reached nothing and the first track played with no gain
+        // applied until a mode was toggled.
+        applyLocalPlaybackModes();
+    }
     persistence_ = new ui::ListPersistenceService(database_path_, this);
     persistence_timer_ = new QTimer(this);
     persistence_timer_->setSingleShot(true);

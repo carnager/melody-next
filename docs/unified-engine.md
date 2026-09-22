@@ -432,6 +432,12 @@ and fight over the queue. Reproducing them as *views* of engine state is what
 remains. MPRIS and desktop notifications likewise still follow the local
 player; they move with the authority collapse.
 
+A new connection is handed this window's settings at once. An engine starts
+with its own defaults and has never heard of them, so a client that only
+sends a setting when the user changes it leaves the engine playing by its
+defaults -- which is a bug that looks like the setting doing nothing until it
+is toggled.
+
 Whether a continuation is armed is reported in the state document. Offering
 one and the audition service holding one are different facts, and only the
 second is gapless working -- a distinction nothing could see before, which is

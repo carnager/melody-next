@@ -195,13 +195,18 @@ void EnginePlaybackTest::playingATrackDrivesTheEnginesPlayer() {
              "the engine invented its own identity for the entry");
 
     // And in this order. A play naming an entry the engine has not been given
-    // yet is answered not_found, which loses the track silently.
-    // The play follows the queue on the same worker, so it may still be in
-    // flight when the queue lands.
-    QTRY_VERIFY_WITH_TIMEOUT(recorder.commands().size() >= 2, 5'000);
-    const auto commands = recorder.commands();
-    QCOMPARE(QString::fromStdString(commands[0]), QStringLiteral("playback.replace_queue"));
-    QCOMPARE(QString::fromStdString(commands[1]), QStringLiteral("playback.play"));
+    // yet is answered not_found, which loses the track silently. Positions
+    // rather than indices, because the window also hands over its settings
+    // when it connects.
+    const auto position = [&recorder](const char* method) {
+        const auto seen = recorder.commands();
+        const auto found = std::find(seen.begin(), seen.end(), std::string{method});
+        return found == seen.end() ? -1 : static_cast<int>(std::distance(seen.begin(), found));
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(position("playback.play") >= 0, 5'000);
+    QVERIFY(position("playback.replace_queue") >= 0);
+    QVERIFY2(position("playback.replace_queue") < position("playback.play"),
+             "the engine was asked to play an entry before it was given the queue");
 
     (*server)->stop();
 }
@@ -298,6 +303,8 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     (*server)->start();
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                          QString::fromStdString(socket.string()));
+    // As if the user had chosen album gain in an earlier session.
+    QSettings{}.setValue(QStringLiteral("playback/local-replaygain"), QStringLiteral("album"));
 
     // A list tab, because the mode buttons belong to local playback and are
     // hidden while an MPD tab is on screen.
@@ -312,6 +319,13 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
     QTRY_COMPARE(tabs->count(), 2);
+
+    // The saved settings reach the engine without the user touching anything.
+    // A window that only sends them when a menu is used leaves the first
+    // track playing with no gain applied, which is what "toggling it off and
+    // on fixes it" means.
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().replay_gain_mode, audio::ReplayGainMode::album,
+                              5'000);
 
     auto* repeat = window.findChild<QAction*>(QStringLiteral("action-local-repeat"));
     QVERIFY(repeat != nullptr);

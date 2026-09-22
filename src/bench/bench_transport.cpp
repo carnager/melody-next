@@ -992,6 +992,25 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
             .arg(local_replaygain_button_->text().mid(4)));
 }
 
+void BenchMainWindow::syncEngineRequests() {
+    if (!playingOnEngine()) {
+        return;
+    }
+    std::vector<LocalTrackRow> rows;
+    std::vector<std::optional<formats::ReplayGainInfo>> gains;
+    QString stated;
+    for (const auto& entry : playback_.requests.pending()) {
+        stated += QString::fromStdString(entry.source.entry_id.to_string());
+        gains.push_back(local_replay_gain_override(entry.source));
+        rows.push_back(entry.source);
+    }
+    if (stated == engine_requests_) {
+        return;
+    }
+    engine_requests_ = stated;
+    engine_playback_->setRequests(rows, gains);
+}
+
 void BenchMainWindow::reattachToEngine() {
     if (!playingOnEngine()) {
         return;
@@ -1659,6 +1678,28 @@ void BenchMainWindow::refreshEngineTransport() {
     }
     if (state.entry != engine_entry_) {
         engine_entry_ = state.entry;
+        // The engine consumes a request by playing it, so the panel has to let
+        // go of it too or it would be re-stated on the next sync and play
+        // twice. The return-point the local path keeps is the engine's
+        // business now: it continues from the row it played, which is a
+        // difference worth knowing rather than papering over.
+        const auto started = core::StableId::parse(state.entry.toStdString());
+        if (started) {
+            const auto& pending = playback_.requests.pending();
+            const auto match = std::ranges::find_if(pending, [&started](const auto& entry) {
+                return entry.source.entry_id == *started;
+            });
+            if (match != pending.end()) {
+                playback_.requests.started(*match);
+                engine_requests_.clear();
+                persistUpNext();
+                refreshUpNext();
+            } else if (playback_.requests.active()) {
+                playback_.requests.finished();
+                persistUpNext();
+                refreshUpNext();
+            }
+        }
         if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
             const auto& rows = tab->model->rows();
             const auto match = std::find_if(rows.begin(), rows.end(), [&state](const auto& row) {

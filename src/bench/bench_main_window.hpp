@@ -461,6 +461,10 @@ class BenchMainWindow final : public QMainWindow {
     // window, so a window that only learns about playback by having started it
     // shows nothing after a restart while the music is still going.
     void reattachToEngine();
+    // Mirrors the up-next panel onto the engine, which is what makes Next
+    // play a requested track rather than the next row of the list. Cheap when
+    // nothing changed.
+    void syncEngineRequests();
     // Points the workspace at an entry the engine is playing.
     void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
     // True when playback belongs to an engine rather than to this process.
@@ -711,6 +715,9 @@ class BenchMainWindow final : public QMainWindow {
     // so without following it the highlighted row would stay on whatever was
     // double-clicked while something else played.
     QString engine_entry_;
+    // The request order last stated to the engine, so an unchanged panel does
+    // not re-send it on every refresh.
+    QString engine_requests_;
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

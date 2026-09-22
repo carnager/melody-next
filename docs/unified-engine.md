@@ -426,7 +426,15 @@ seek, a queue edit, single mode expiring -- used to leave the output stopped,
 which from the outside is playback stalling at every track boundary. The
 window used to notice that and act, and an engine has to do it for itself.
 
-The workspace's own up-next, resume, listening and gapless do not run on that
+Up Next is mirrored onto the engine. The panel stays where it is -- it also
+shows the MPD queue, so it branches on authority -- but the order it holds is
+stated to the engine, which is what makes Next play a requested track. Entries
+that were never in the playing list are added to the engine's queue first,
+because an engine only plays what it holds. One difference is worth knowing:
+the local path returns to where it was after a request, and the engine
+continues from the row it played instead.
+
+The workspace's own resume, listening and gapless do not run on that
 path — the engine performs them, and doing both would double-count listening
 and fight over the queue. Reproducing them as *views* of engine state is what
 remains. MPRIS and desktop notifications likewise still follow the local

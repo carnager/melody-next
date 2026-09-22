@@ -120,6 +120,7 @@ class EnginePlaybackTest final : public QObject {
     void transportControlsDriveTheEngine();
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
+    void upNextDecidesWhatTheEnginePlaysNext();
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
     void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
@@ -403,6 +404,71 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     jump->trigger();
     QCOMPARE(tabs->currentWidget(), playing);
     QCOMPARE(playing->currentIndex().row(), 0);
+
+    (*server)->stop();
+}
+
+// Up Next has to reach the engine, because the engine decides what follows.
+// A panel that only fills a list in this process changes nothing about what
+// plays, which is what "hitting next does not play those" means.
+void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    std::vector<std::string> raw_paths;
+    for (const auto* name : {"first.flac", "second.flac", "third.flac"}) {
+        const auto media = directory.filePath(QString::fromLatin1(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+        const auto encoded = QFile::encodeName(media);
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    // Two in the playing list, one that never enters it.
+    window.openLocalPaths({raw_paths[0], raw_paths[1]});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
+
+    const auto wanted = model->rows().at(1).entry_id;
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
+
+    // Queue the second row ahead of the order.
+    view->selectionModel()->select(model->index(1, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    auto* queue_next = window.findChild<QAction*>(QStringLiteral("action-queue-next"));
+    QVERIFY(queue_next != nullptr);
+    queue_next->trigger();
+
+    const auto requested = [&player, &wanted] {
+        const auto asked = (*player)->requests();
+        return std::find(asked.begin(), asked.end(), wanted) != asked.end();
+    };
+    QTRY_VERIFY2_WITH_TIMEOUT(requested(), "the engine was never told about the request", 5'000);
+
+    // And Next honours it rather than walking the list.
+    auto* next = window.findChild<QAction*>(QStringLiteral("action-next-track"));
+    QVERIFY(next != nullptr);
+    QTRY_VERIFY(next->isEnabled());
+    next->trigger();
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().entry, wanted, 5'000);
 
     (*server)->stop();
 }

@@ -83,6 +83,13 @@ class EnginePlayback final : public QObject {
               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
               const core::StableId& entry);
 
+    // The up-next order, stated rather than rebuilt one request at a time.
+    // Entries not already in the engine's queue are added to it: an engine
+    // only plays what it holds, and up-next can carry a track that was never
+    // in the playing list.
+    void setRequests(const std::vector<LocalTrackRow>& rows,
+                     const std::vector<std::optional<formats::ReplayGainInfo>>& gains);
+
     void resume();
     void pause();
     void stop();
@@ -115,6 +122,8 @@ class EnginePlayback final : public QObject {
     // Drops a dead connection and tries again. Cheap when connected.
     void maintain();
 
+    [[nodiscard]] static protocol::Json
+    entryJson(const LocalTrackRow& row, const std::optional<formats::ReplayGainInfo>& gain);
     // One worker, so commands reach the socket in the order they were made.
     // Two threads racing would let playback.play arrive before the queue it
     // names -- and the engine, serving one connection in order, would faithfully

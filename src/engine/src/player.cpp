@@ -194,6 +194,37 @@ std::vector<core::StableId> Player::requests() const {
     return requests_;
 }
 
+core::Result<void> Player::set_requests(const std::vector<core::StableId>& entries) {
+    const std::lock_guard guard{mutex_};
+    const QueueView view{queue_};
+    for (const auto& wanted : entries) {
+        if (view.row_of_entry(wanted, -1) < 0) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::not_found,
+                            .message = "no such entry in the queue",
+                            .context = {{.key = "entry", .value = wanted.to_string()}}});
+        }
+    }
+    requests_ = entries;
+    refresh_gapless_locked();
+    return {};
+}
+
+void Player::enqueue(std::vector<QueueEntry> entries) {
+    const std::lock_guard guard{mutex_};
+    const QueueView view{queue_};
+    for (auto& entry : entries) {
+        if (view.row_of_entry(entry.entry_id, -1) >= 0) {
+            continue;
+        }
+        queue_.push_back(std::move(entry));
+    }
+    // The order describes a queue that just changed size, and whatever was
+    // queued to follow was chosen under the old one.
+    reset_order_locked();
+    refresh_gapless_locked();
+}
+
 void Player::clear_requests() {
     const std::lock_guard guard{mutex_};
     requests_.clear();

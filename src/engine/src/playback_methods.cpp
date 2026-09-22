@@ -311,6 +311,48 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
         return to_json(player.state());
     });
 
+    dispatcher.on("playback.enqueue", [&player](const Json& params) -> core::Result<Json> {
+        const auto entries = params.find("entries");
+        if (entries == params.end() || !entries->is_array()) {
+            return std::unexpected(bad_params("an array of entries is required", "entries"));
+        }
+        std::vector<QueueEntry> appended;
+        appended.reserve(entries->size());
+        for (const auto& value : *entries) {
+            auto entry = entry_from_json(value);
+            if (!entry) {
+                return std::unexpected(std::move(entry.error()));
+            }
+            appended.push_back(std::move(*entry));
+        }
+        player.enqueue(std::move(appended));
+        return to_json(player.state());
+    });
+
+    dispatcher.on("playback.set_requests", [&player](const Json& params) -> core::Result<Json> {
+        const auto entries = params.find("entries");
+        if (entries == params.end() || !entries->is_array()) {
+            return std::unexpected(bad_params("an array of identities is required", "entries"));
+        }
+        std::vector<core::StableId> wanted;
+        wanted.reserve(entries->size());
+        for (const auto& value : *entries) {
+            if (!value.is_string()) {
+                return std::unexpected(bad_params("each request is an identity", "entries"));
+            }
+            auto parsed = core::StableId::parse(value.get<std::string>());
+            if (!parsed) {
+                return std::unexpected(bad_params("each request is an identity", "entries"));
+            }
+            wanted.push_back(*parsed);
+        }
+        auto set = player.set_requests(wanted);
+        if (!set) {
+            return std::unexpected(std::move(set.error()));
+        }
+        return to_json(player.state());
+    });
+
     dispatcher.on("playback.requests", [&player](const Json&) -> core::Result<Json> {
         auto entries = Json::array();
         for (const auto& entry_id : player.requests()) {

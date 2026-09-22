@@ -74,6 +74,21 @@ class Player final {
     // mistake worth reporting, not a second way to add tracks.
     [[nodiscard]] core::Result<void> request(const core::StableId& entry_id);
     [[nodiscard]] std::vector<core::StableId> requests() const;
+
+    // Replaces the whole request list in one go. A client that owns the
+    // up-next order -- the window's panel does -- has to be able to state it,
+    // rather than reproducing it by cancelling and re-asking one at a time and
+    // being visibly wrong in between.
+    //
+    // Refuses the lot if any entry is unknown: a partially applied order is
+    // worse than a rejected one, because nothing then says which half took.
+    [[nodiscard]] core::Result<void> set_requests(const std::vector<core::StableId>& entries);
+
+    // Appends entries that are not already in the queue, by identity. This is
+    // how something that was never in the list -- a track sent to up-next from
+    // the library -- becomes playable by an engine that only plays what it
+    // holds.
+    void enqueue(std::vector<QueueEntry> entries);
     void clear_requests();
 
     [[nodiscard]] core::Result<void> play_entry(const core::StableId& entry_id);

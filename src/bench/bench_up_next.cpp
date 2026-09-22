@@ -310,6 +310,9 @@ void BenchMainWindow::refreshUpNext() {
                 up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = playback_.requests.revision();
         }
+        // The engine decides what plays next, so it has to be told. Guarded on
+        // the order actually changing, because this runs on every refresh.
+        syncEngineRequests();
         auto* tab = tabForDocument(playback_.anchors.document);
         QString playing;
         if (playback_.requests.active())

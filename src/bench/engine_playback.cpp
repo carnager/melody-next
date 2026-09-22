@@ -252,57 +252,80 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
     }));
 }
 
+protocol::Json EnginePlayback::entryJson(const LocalTrackRow& row,
+                                         const std::optional<formats::ReplayGainInfo>& gain) {
+    protocol::Json item = protocol::Json::object();
+    item["path"] = protocol::encode_raw_path(row.raw_path);
+    // ADR-0221: the row's own identity, so the engine's queue and this
+    // model agree about which entry is which with no second mapping.
+    item["entry"] = row.entry_id.to_string();
+    if (row.duration_ms) {
+        item["duration_ms"] = *row.duration_ms;
+    }
+    // Which audio in the container, and which range of it. A CUE album is one
+    // file and many segments, so an entry without these plays the whole file
+    // from the start.
+    if (row.selection.stream_index || row.selection.subsong_index) {
+        protocol::Json selection = protocol::Json::object();
+        if (row.selection.stream_index) {
+            selection["stream_index"] = *row.selection.stream_index;
+        }
+        if (row.selection.subsong_index) {
+            selection["subsong_index"] = *row.selection.subsong_index;
+        }
+        item["selection"] = std::move(selection);
+    }
+    if (row.segment) {
+        protocol::Json segment = protocol::Json::object();
+        segment["start_sample"] = row.segment->start_sample;
+        if (row.segment->end_sample) {
+            segment["end_sample"] = *row.segment->end_sample;
+        }
+        item["segment"] = std::move(segment);
+    }
+    if (gain) {
+        protocol::Json rendered = protocol::Json::object();
+        const auto number = [&rendered](const char* member, const std::optional<double>& value) {
+            if (value) {
+                rendered[member] = *value;
+            }
+        };
+        number("track_gain_db", gain->track_gain_db);
+        number("track_peak", gain->track_peak);
+        number("album_gain_db", gain->album_gain_db);
+        number("album_peak", gain->album_peak);
+        item["replay_gain"] = std::move(rendered);
+    }
+    return item;
+}
+
+void EnginePlayback::setRequests(const std::vector<LocalTrackRow>& rows,
+                                 const std::vector<std::optional<formats::ReplayGainInfo>>& gains) {
+    auto entries = protocol::Json::array();
+    auto identities = protocol::Json::array();
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        entries.push_back(
+            entryJson(rows[index], index < gains.size() ? gains[index] : std::nullopt));
+        identities.push_back(rows[index].entry_id.to_string());
+    }
+    // Enqueue first: a request names an entry the engine holds, and up-next
+    // can carry a track that was never in the playing list. The two travel as
+    // one sequence, so the engine never sees the second without the first.
+    std::vector<std::pair<QString, protocol::Json>> calls;
+    calls.emplace_back(QStringLiteral("playback.enqueue"),
+                       protocol::Json{{"entries", std::move(entries)}});
+    calls.emplace_back(QStringLiteral("playback.set_requests"),
+                       protocol::Json{{"entries", std::move(identities)}});
+    send(std::move(calls));
+}
+
 void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
                           const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
                           const core::StableId& entry) {
     auto entries = protocol::Json::array();
     for (std::size_t index = 0; index < rows.size(); ++index) {
-        const auto& row = rows[index];
-        protocol::Json item = protocol::Json::object();
-        item["path"] = protocol::encode_raw_path(row.raw_path);
-        // ADR-0221: the row's own identity, so the engine's queue and this
-        // model agree about which entry is which with no second mapping.
-        item["entry"] = row.entry_id.to_string();
-        if (row.duration_ms) {
-            item["duration_ms"] = *row.duration_ms;
-        }
-        // Which audio in the container, and which range of it. A CUE album is
-        // one file and many segments, so an entry without these plays the
-        // whole file from the start.
-        if (row.selection.stream_index || row.selection.subsong_index) {
-            protocol::Json selection = protocol::Json::object();
-            if (row.selection.stream_index) {
-                selection["stream_index"] = *row.selection.stream_index;
-            }
-            if (row.selection.subsong_index) {
-                selection["subsong_index"] = *row.selection.subsong_index;
-            }
-            item["selection"] = std::move(selection);
-        }
-        if (row.segment) {
-            protocol::Json segment = protocol::Json::object();
-            segment["start_sample"] = row.segment->start_sample;
-            if (row.segment->end_sample) {
-                segment["end_sample"] = *row.segment->end_sample;
-            }
-            item["segment"] = std::move(segment);
-        }
-        if (index < overrides.size() && overrides[index]) {
-            const auto& gain = *overrides[index];
-            protocol::Json rendered = protocol::Json::object();
-            const auto number = [&rendered](const char* member,
-                                            const std::optional<double>& value) {
-                if (value) {
-                    rendered[member] = *value;
-                }
-            };
-            number("track_gain_db", gain.track_gain_db);
-            number("track_peak", gain.track_peak);
-            number("album_gain_db", gain.album_gain_db);
-            number("album_peak", gain.album_peak);
-            item["replay_gain"] = std::move(rendered);
-        }
-        entries.push_back(std::move(item));
+        entries.push_back(
+            entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
     }
     std::vector<std::pair<QString, protocol::Json>> calls;
     calls.emplace_back(QStringLiteral("playback.replace_queue"),

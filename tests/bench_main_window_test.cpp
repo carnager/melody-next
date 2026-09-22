@@ -4851,7 +4851,12 @@ void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
     QVERIFY(media.isValid());
     QDir{media.path()}.mkpath(QStringLiteral("Artist/Album"));
     const auto flac = media.filePath(QStringLiteral("Artist/Album/one.flac"));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), flac));
+    // This test scans ReplayGain, so the fixture must be long enough to
+    // produce a gated integrated loudness. EBU R128 has no measurement for
+    // material shorter than one 400 ms gating block, and the shared
+    // rich-metadata fixture is 100 ms; the long variant carries identical
+    // tags over one second of audio.
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), flac));
     write_sine_wav_fixture(media.filePath(QStringLiteral("Artist/Album/one.wav")), 0.5);
     {
         QSettings settings;

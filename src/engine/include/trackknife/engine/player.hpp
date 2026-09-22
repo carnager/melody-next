@@ -33,6 +33,11 @@ struct QueueEntry final {
     core::StableId entry_id{core::StableId::random()};
     audio::TrackSource source;
     std::optional<std::int64_t> duration_ms;
+    // ADR-0139/0141: the explicit playback override, when the client has one.
+    // The decoder's own tags apply otherwise and need not be sent -- the
+    // engine opens the file and reads them for itself. What it cannot know is
+    // a sidecar value or a CUE sheet's REM lines, which is what this carries.
+    std::optional<formats::ReplayGainInfo> replay_gain;
 
     friend bool operator==(const QueueEntry&, const QueueEntry&) = default;
 };

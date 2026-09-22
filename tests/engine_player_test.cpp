@@ -137,6 +137,63 @@ namespace protocol = trackknife::protocol;
     return dispatcher.dispatch(protocol::Request{.id = 1, .method = method, .params = params});
 }
 
+// ADR-0139/0141: the decoder's own tags the engine can read for itself; a
+// sidecar value or a CUE sheet's REM lines it cannot, so they travel with the
+// entry. Losing them means a normalised library plays unnormalised through the
+// engine and sounds different from the same track played locally.
+void an_explicit_replay_gain_travels_with_the_entry(engine::Player& player) {
+    protocol::Dispatcher dispatcher;
+    engine::register_playback_methods(dispatcher, player);
+
+    protocol::Json gain = protocol::Json::object();
+    gain["track_gain_db"] = -7.5;
+    gain["album_peak"] = 0.98;
+    protocol::Json one = protocol::Json::object();
+    one["path"] = protocol::encode_raw_path("/music/normalised.flac");
+    one["replay_gain"] = gain;
+    protocol::Json entries = protocol::Json::array();
+    entries.push_back(one);
+
+    const auto replaced =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", entries}});
+    require(replaced.result.has_value(), "an entry carrying a gain is accepted");
+    const auto held = player.queue();
+    require(held.size() == 1U, "and lands in the queue");
+    require(held[0].replay_gain.has_value(), "carrying its override");
+    require(held[0].replay_gain->track_gain_db == -7.5, "with the gain it was sent");
+    require(held[0].replay_gain->album_peak == 0.98, "and the peak");
+    require(!held[0].replay_gain->album_gain_db.has_value(),
+            "members that were not sent stay absent rather than becoming zero");
+
+    const auto listed = invoke(dispatcher, "playback.queue", protocol::Json::object());
+    require(listed.result.has_value(), "the queue reads back");
+    require(listed.result->at("entries")[0].at("replay_gain").at("track_gain_db") == -7.5,
+            "and reports the override, so a second client sees the same decision");
+
+    // No override is not an override of nothing: the decoder's tags must still
+    // apply, so an empty object is the same as sending none.
+    protocol::Json bare = protocol::Json::object();
+    bare["path"] = protocol::encode_raw_path("/music/plain.flac");
+    bare["replay_gain"] = protocol::Json::object();
+    protocol::Json second = protocol::Json::array();
+    second.push_back(bare);
+    const auto plain =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", second}});
+    require(plain.result.has_value(), "an empty override is accepted");
+    require(!player.queue()[0].replay_gain.has_value(), "and means the decoder's own tags apply");
+
+    protocol::Json wrong = protocol::Json::object();
+    wrong["path"] = protocol::encode_raw_path("/music/plain.flac");
+    wrong["replay_gain"] = protocol::Json{{"track_gain_db", "loud"}};
+    protocol::Json third = protocol::Json::array();
+    third.push_back(wrong);
+    const auto refused =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", third}});
+    require(refused.error.has_value(), "a gain that is not a number is refused");
+
+    player.replace_queue({});
+}
+
 void the_method_surface_speaks_for_the_player(engine::Player& player) {
     protocol::Dispatcher dispatcher;
     engine::register_playback_methods(dispatcher, player);
@@ -477,9 +534,10 @@ int main(int argc, char** argv) {
     gapless_is_offered_and_recomputed(**player, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
+    an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 12 scenarios\n";
+    std::cout << "engine player: 13 scenarios\n";
     return EXIT_SUCCESS;
 }

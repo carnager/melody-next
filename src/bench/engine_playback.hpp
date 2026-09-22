@@ -4,6 +4,7 @@
 
 #include "bench/catalogue_source.hpp"
 #include "bench/local_list_model.hpp"
+#include "trackknife/formats/decoder.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <QObject>
@@ -61,7 +62,14 @@ class EnginePlayback final : public QObject {
     // Hands the engine a queue and starts one of its entries. The rows carry
     // their own identities (ADR-0221), so the engine's queue and the model
     // agree about which entry is which without a second mapping.
-    void play(const std::vector<LocalTrackRow>& rows, const core::StableId& entry);
+    // `overrides` is one entry per row, in the same order: the explicit
+    // ReplayGain override where the client has one (ADR-0139/0141), and
+    // nothing where the decoder's own tags should apply. The engine opens the
+    // file and reads those for itself; what it cannot see is a sidecar value
+    // or a CUE sheet's REM lines, which is why they travel.
+    void play(const std::vector<LocalTrackRow>& rows,
+              const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+              const core::StableId& entry);
 
     void resume();
     void pause();

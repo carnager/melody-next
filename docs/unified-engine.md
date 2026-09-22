@@ -405,6 +405,17 @@ Volume belongs to the engine because the engine owns the output. Two clients
 watching one engine see the same number, and closing a window does not take its
 setting with it.
 
+An explicit ReplayGain override travels with the queue entry. The decoder's
+own tags the engine reads for itself; a sidecar value or a CUE sheet's REM
+lines it cannot see, so they are sent (ADR-0139/0141) and applied both to the
+track being started and to the gapless continuation.
+
+Engine ownership is deliberately not a question about the visible tab. Asking
+"is an MPD tab on screen" to decide who owns playback meant the local refresh
+saw its own idle player and wiped the anchors the engine was playing from, and
+jumping to the playing track looked for a local entry in the MPD queue. Both
+now ask where playback is; the header still follows the tab.
+
 The workspace's own up-next, resume, listening and gapless do not run on that
 path — the engine performs them, and doing both would double-count listening
 and fight over the queue. Reproducing them as *views* of engine state is what

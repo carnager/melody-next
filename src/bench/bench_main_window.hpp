@@ -452,6 +452,11 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    // Where playback actually is, as opposed to which tab is on screen.
+    // `isMpdContext` answers the second question, and using it for the first
+    // is why jumping to the playing track did nothing while an MPD tab was
+    // visible: it looked for a local track in the MPD queue.
+    [[nodiscard]] bool playbackIsMpd() const;
     // True when playback belongs to an engine rather than to this process.
     [[nodiscard]] bool playingOnEngine() const;
     // The transport view when the engine owns playback: the workspace's own

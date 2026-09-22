@@ -147,9 +147,12 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
     }));
 }
 
-void EnginePlayback::play(const std::vector<LocalTrackRow>& rows, const core::StableId& entry) {
+void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
+                          const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
+                          const core::StableId& entry) {
     auto entries = protocol::Json::array();
-    for (const auto& row : rows) {
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const auto& row = rows[index];
         protocol::Json item = protocol::Json::object();
         item["path"] = protocol::encode_raw_path(row.raw_path);
         // ADR-0221: the row's own identity, so the engine's queue and this
@@ -157,6 +160,21 @@ void EnginePlayback::play(const std::vector<LocalTrackRow>& rows, const core::St
         item["entry"] = row.entry_id.to_string();
         if (row.duration_ms) {
             item["duration_ms"] = *row.duration_ms;
+        }
+        if (index < overrides.size() && overrides[index]) {
+            const auto& gain = *overrides[index];
+            protocol::Json rendered = protocol::Json::object();
+            const auto number = [&rendered](const char* member,
+                                            const std::optional<double>& value) {
+                if (value) {
+                    rendered[member] = *value;
+                }
+            };
+            number("track_gain_db", gain.track_gain_db);
+            number("track_peak", gain.track_peak);
+            number("album_gain_db", gain.album_gain_db);
+            number("album_peak", gain.album_peak);
+            item["replay_gain"] = std::move(rendered);
         }
         entries.push_back(std::move(item));
     }

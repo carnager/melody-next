@@ -60,9 +60,11 @@ core::Result<void> Player::start_locked(const std::size_t row) {
     // separate calls rather than an optional parameter.
     auto started =
         entry.source.segment
-            ? audition_->load_selected_segment_and_play(
-                  entry.source.raw_path, entry.source.selection, *entry.source.segment)
-            : audition_->load_selected_and_play(entry.source.raw_path, entry.source.selection);
+            ? audition_->load_selected_segment_and_play(entry.source.raw_path,
+                                                        entry.source.selection,
+                                                        *entry.source.segment, entry.replay_gain)
+            : audition_->load_selected_and_play(entry.source.raw_path, entry.source.selection,
+                                                entry.replay_gain);
     if (!started) {
         return std::unexpected(std::move(started.error()));
     }
@@ -109,11 +111,12 @@ void Player::refresh_gapless_locked() {
     if (gapless_entry_ == entry.entry_id) {
         return;
     }
-    const auto queued =
-        entry.source.segment
-            ? audition_->queue_gapless_next_selected_segment(
-                  entry.source.raw_path, entry.source.selection, *entry.source.segment)
-            : audition_->queue_gapless_next_selected(entry.source.raw_path, entry.source.selection);
+    const auto queued = entry.source.segment
+                            ? audition_->queue_gapless_next_selected_segment(
+                                  entry.source.raw_path, entry.source.selection,
+                                  *entry.source.segment, entry.replay_gain)
+                            : audition_->queue_gapless_next_selected(
+                                  entry.source.raw_path, entry.source.selection, entry.replay_gain);
     // A rejected continuation is not an error: the formats may differ, and the
     // engine simply plays the next track the ordinary way.
     gapless_entry_ = queued ? std::optional{entry.entry_id} : std::nullopt;

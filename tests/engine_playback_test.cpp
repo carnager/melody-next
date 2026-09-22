@@ -118,6 +118,7 @@ class EnginePlaybackTest final : public QObject {
     void cleanup();
     void playingATrackDrivesTheEnginesPlayer();
     void transportControlsDriveTheEngine();
+    void jumpToPlayingFindsTheEnginesTrack();
     void withoutAnEngineNothingChanges();
 
   private:
@@ -276,6 +277,55 @@ void EnginePlaybackTest::transportControlsDriveTheEngine() {
     QVERIFY(volume != nullptr);
     volume->setValue(42);
     QTRY_VERIFY_WITH_TIMEOUT(asked(QStringLiteral("playback.set_volume")), 5'000);
+
+    (*server)->stop();
+}
+
+// Ctrl+J. The window knows where playback is only because it recorded the
+// anchors when it asked the engine to play; nothing else tells it.
+void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("played.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* playing = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(playing != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(playing->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+    emit playing->doubleClicked(model->index(0, 0));
+    QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
+
+    // The user looks somewhere else.
+    tabs->setCurrentIndex(0);
+    QVERIFY(tabs->currentWidget() != playing);
+
+    auto* jump = window.findChild<QAction*>(QStringLiteral("action-jump-to-playing"));
+    QVERIFY(jump != nullptr);
+    QCOMPARE(jump->shortcut(), QKeySequence(QStringLiteral("Ctrl+J")));
+    jump->trigger();
+    QCOMPARE(tabs->currentWidget(), playing);
+    QCOMPARE(playing->currentIndex().row(), 0);
 
     (*server)->stop();
 }

@@ -29,6 +29,67 @@ using protocol::Json;
     return rendered;
 }
 
+// ADR-0139/0141: an explicit override, sent only when the client has one.
+// Every member is optional on its own -- a sidecar may carry a track gain and
+// no album peak -- so each is read independently rather than demanding a
+// complete set.
+[[nodiscard]] core::Result<std::optional<formats::ReplayGainInfo>>
+replay_gain_from_json(const Json& value) {
+    if (value.is_null()) {
+        return std::optional<formats::ReplayGainInfo>{};
+    }
+    if (!value.is_object()) {
+        return std::unexpected(bad_params("replay_gain must be an object", "replay_gain"));
+    }
+    formats::ReplayGainInfo info;
+    const auto number = [&value](const char* member,
+                                 std::optional<double>& into) -> core::Result<void> {
+        const auto found = value.find(member);
+        if (found == value.end() || found->is_null()) {
+            return {};
+        }
+        if (!found->is_number()) {
+            return std::unexpected(
+                bad_params(std::string{member} + " must be a number", "replay_gain"));
+        }
+        into = found->get<double>();
+        return {};
+    };
+    if (auto read = number("track_gain_db", info.track_gain_db); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (auto read = number("track_peak", info.track_peak); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (auto read = number("album_gain_db", info.album_gain_db); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (auto read = number("album_peak", info.album_peak); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    // An object naming nothing is the same as sending nothing, rather than an
+    // override that overrides no value and suppresses the decoder's tags.
+    if (!info.track_gain_db && !info.track_peak && !info.album_gain_db && !info.album_peak) {
+        return std::optional<formats::ReplayGainInfo>{};
+    }
+    return std::optional{info};
+}
+
+[[nodiscard]] Json replay_gain_to_json(const std::optional<formats::ReplayGainInfo>& info) {
+    if (!info) {
+        return Json(nullptr);
+    }
+    Json rendered = Json::object();
+    const auto number = [&rendered](const char* member, const std::optional<double>& value) {
+        rendered[member] = value ? Json(*value) : Json(nullptr);
+    };
+    number("track_gain_db", info->track_gain_db);
+    number("track_peak", info->track_peak);
+    number("album_gain_db", info->album_gain_db);
+    number("album_peak", info->album_peak);
+    return rendered;
+}
+
 [[nodiscard]] core::Result<QueueEntry> entry_from_json(const Json& value) {
     if (!value.is_object()) {
         return std::unexpected(bad_params("each entry must be an object", "entries"));
@@ -58,6 +119,13 @@ using protocol::Json;
     if (const auto duration = value.find("duration_ms");
         duration != value.end() && duration->is_number_integer()) {
         entry.duration_ms = duration->get<std::int64_t>();
+    }
+    if (const auto gain = value.find("replay_gain"); gain != value.end()) {
+        auto parsed = replay_gain_from_json(*gain);
+        if (!parsed) {
+            return std::unexpected(std::move(parsed.error()));
+        }
+        entry.replay_gain = std::move(*parsed);
     }
     return entry;
 }
@@ -91,6 +159,7 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
             rendered["entry"] = entry.entry_id.to_string();
             rendered["path"] = protocol::encode_raw_path(entry.source.raw_path);
             rendered["duration_ms"] = entry.duration_ms.value_or(-1);
+            rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}};

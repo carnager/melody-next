@@ -2045,6 +2045,23 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     QCOMPARE(tabs->currentWidget(), playing.view);
     QCOMPARE(playing.view->currentIndex().row(), 0);
     QCOMPARE(jump->shortcut(), QKeySequence(QStringLiteral("Ctrl+J")));
+
+    // Browsing the MPD queue must not make the workspace forget where its own
+    // playback is. Choosing the branch from the visible tab meant jumping
+    // looked for a local track in the MPD queue and silently did nothing --
+    // and, once the engine owned playback, the same confusion let the local
+    // refresh wipe the anchors outright.
+    tabs->setCurrentWidget(window.mpd_queue_view_);
+    QVERIFY(tabs->currentWidget() != playing.view);
+    // Restated because no sound is actually being made here: an idle player
+    // legitimately drops the anchors, and what is under test is which
+    // authority the jump consults, not who keeps the anchors alive.
+    window.playback_.anchors.document = playing.document.id;
+    window.playback_.anchors.current = playing.model->rows().at(0).entry_id;
+    window.playback_.row = 0;
+    jump->trigger();
+    QCOMPARE(tabs->currentWidget(), playing.view);
+    QCOMPARE(playing.view->currentIndex().row(), 0);
     QVERIFY(!QSettings{}.value(QStringLiteral("workspace/follow-playback")).toBool());
 }
 

@@ -981,10 +981,35 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
             .arg(local_replaygain_button_->text().mid(4)));
 }
 
+bool BenchMainWindow::playbackIsMpd() const {
+    const auto mpd_playing =
+        mpd_controller_ != nullptr && mpd_controller_->connected() && mpd_controller_->playing();
+    // Whichever authority is actually making sound wins. One engine plays at
+    // a time, so this is a choice between two and never a merge.
+    if (playingOnEngine()) {
+        if (engine_playback_->state().status != QStringLiteral("stopped")) {
+            return false;
+        }
+    } else if (player_ != nullptr &&
+               player_->snapshot().state != audio::LocalAuditionState::empty &&
+               player_->snapshot().state != audio::LocalAuditionState::ended) {
+        return false;
+    }
+    if (mpd_playing) {
+        return true;
+    }
+    // Nothing is playing anywhere. Prefer the local anchors when there are
+    // any, so jumping after a stop still lands on the track that was playing.
+    return playback_.anchors.current.is_nil();
+}
+
 bool BenchMainWindow::playingOnEngine() const {
-    // Local context only. An MPD tab is still the MPD server's playback, and
-    // that stays true until the authority collapse removes it entirely.
-    return engine_playback_ != nullptr && engine_playback_->active() && !isMpdContext();
+    // Ownership, not visibility. This deliberately does not ask which tab is
+    // on screen: looking at the MPD queue does not hand the local player back
+    // its queue, and when it did, the local refresh saw an idle player and
+    // wiped the anchors the engine was playing from -- which is what broke
+    // jumping to the playing track.
+    return engine_playback_ != nullptr && engine_playback_->active();
 }
 
 int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
@@ -1129,7 +1154,12 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
         if (row < 0 || static_cast<std::size_t>(row) >= rows.size()) {
             return;
         }
-        engine_playback_->play(rows, rows[static_cast<std::size_t>(row)].entry_id);
+        std::vector<std::optional<formats::ReplayGainInfo>> overrides;
+        overrides.reserve(rows.size());
+        for (const auto& source_row : rows) {
+            overrides.push_back(local_replay_gain_override(source_row));
+        }
+        engine_playback_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id);
         playback_.anchors.document = tab.document.id;
         playback_.anchors.current = rows[static_cast<std::size_t>(row)].entry_id;
         playback_.row = row;
@@ -1389,7 +1419,7 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
         return;
     QTableView* view = nullptr;
     int row = -1;
-    if (isMpdContext()) {
+    if (playbackIsMpd()) {
         if (!mpd_controller_->connected())
             return;
         if (const auto& requests = mpd_controller_->requestQueue();
@@ -1575,6 +1605,14 @@ void BenchMainWindow::refreshTransport() {
         // The workspace's own up-next, resume, listening and gapless belong
         // to the engine now, so none of the 400 lines below run: doing both
         // would double-count listening and fight over the queue.
+        if (isMpdContext()) {
+            // An MPD tab is still the MPD server's, and the header follows the
+            // tab. The local path is skipped either way, because the local
+            // player is idle and its state means nothing here.
+            refreshMpdTransport();
+            refreshPlaybackCursor();
+            return;
+        }
         refreshEngineTransport();
         return;
     }

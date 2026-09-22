@@ -3,6 +3,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -319,7 +320,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 40U, "state repository schema must be explicit");
+        require(repository.schema_version() == 41U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -698,7 +699,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 40U,
+        require(repository.schema_version() == 41U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1434,7 +1435,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 40U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 41U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1759,6 +1760,88 @@ void legacy_logical_snapshots_block_refresh() {
 
 } // namespace
 
+// ADR-0221: an entry's identity addresses a slot in a list, independently of
+// the row it currently occupies and of the track it points at.
+void list_entry_identities_survive_reordering_and_separate_duplicates() {
+    namespace persistence = trackknife::persistence;
+    namespace core = trackknife::core;
+    const auto database_path =
+        std::filesystem::temp_directory_path() /
+        ("trackknife-entry-identity-" + core::StableId::random().to_string() + ".sqlite3");
+    const auto cleanup = [&database_path] {
+        std::error_code ignored;
+        std::filesystem::remove(database_path, ignored);
+        std::filesystem::remove(database_path.string() + "-wal", ignored);
+        std::filesystem::remove(database_path.string() + "-shm", ignored);
+    };
+    cleanup();
+
+    const auto document_id = core::StableId::random();
+    // The same track twice, by copy. Value-equal, and each is its own entry.
+    persistence::ListItem track;
+    track.source = persistence::ListSource::local;
+    track.source_reference = "Artist/Album/01.flac";
+    persistence::ListItem other;
+    other.source = persistence::ListSource::local;
+    other.source_reference = "Artist/Album/02.flac";
+
+    require(track == persistence::ListItem{track},
+            "a copied entry must stay value-equal to its source");
+
+    std::vector<persistence::ListDocument> documents{persistence::ListDocument{
+        .id = document_id,
+        .kind = persistence::ListKind::scratch,
+        .name = "Entries",
+        .pinned = false,
+        .dirty = false,
+        .items = {track, other, track},
+    }};
+
+    std::vector<core::StableId> stored;
+    {
+        auto repository = persistence::ListRepository::open(database_path);
+        require(repository.has_value(), "entry identity fixture must open");
+        require(repository->replace_all(documents).has_value(),
+                "a list holding the same track twice must persist");
+        auto loaded = repository->load_all();
+        require(loaded.has_value() && loaded->size() == 1U && (*loaded)[0].items.size() == 3U,
+                "the persisted list must load back whole");
+        for (const auto& item : (*loaded)[0].items) {
+            require(!item.entry_id.is_nil(), "every persisted entry must carry an identity");
+            stored.push_back(item.entry_id);
+        }
+        require(stored[0] != stored[2],
+                "duplicate entries for one track must hold distinct identities");
+        require((*loaded)[0].items[0] == (*loaded)[0].items[2],
+                "duplicate entries must remain value-equal despite distinct identities");
+    }
+
+    {
+        // Reverse the list and save it back. Ordering lives in the position
+        // column, so identities must travel with their entries.
+        auto repository = persistence::ListRepository::open(database_path);
+        require(repository.has_value(), "entry identity fixture must reopen");
+        auto loaded = repository->load_all();
+        require(loaded.has_value(), "the list must reload before reordering");
+        auto reordered = *loaded;
+        std::reverse(reordered[0].items.begin(), reordered[0].items.end());
+        require(repository->replace_all(reordered).has_value(), "a reordered list must persist");
+
+        auto after = repository->load_all();
+        require(after.has_value() && (*after)[0].items.size() == 3U,
+                "the reordered list must load back whole");
+        std::vector<core::StableId> observed;
+        for (const auto& item : (*after)[0].items) {
+            observed.push_back(item.entry_id);
+        }
+        std::vector<core::StableId> expected{stored.rbegin(), stored.rend()};
+        require(observed == expected,
+                "reordering must move entries without reassigning their identities");
+    }
+
+    cleanup();
+}
+
 int main() {
     saved_searches_are_persistent_and_conflict_checked();
     local_listening_history_is_monotonic_and_persistent();
@@ -1772,5 +1855,6 @@ int main() {
     unowned_target_metadata_cache_is_superseded_by_relocation();
     previously_resolved_target_reconciles_fresh_relocation();
     legacy_logical_snapshots_block_refresh();
+    list_entry_identities_survive_reordering_and_separate_duplicates();
     return EXIT_SUCCESS;
 }

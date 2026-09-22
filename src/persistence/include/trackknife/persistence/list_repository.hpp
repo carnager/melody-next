@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace trackknife::persistence {
@@ -53,6 +54,17 @@ struct ListItemSourceSelection {
 };
 
 struct ListItem {
+    // ADR-0221: identity of this entry within its list, distinct from the
+    // track it points at. Assigned on construction so every in-memory entry
+    // is addressable immediately, replaced by the persisted value on load,
+    // and preserved across reordering because ordering lives in the separate
+    // position column.
+    //
+    // Deliberately excluded from equality below: two entries for the same
+    // track are equal in value and distinct in identity. Comparisons in this
+    // codebase ask whether two rows describe the same track, and that meaning
+    // must not change.
+    core::StableId entry_id{core::StableId::random()};
     ListSource source{ListSource::mpd};
     std::optional<core::StableId> profile_id;
     // MPD URIs and local raw OS paths are stored as SQLite BLOBs. No UTF-8 or
@@ -69,7 +81,15 @@ struct ListItem {
     std::optional<core::LocalSourceRevision> source_revision{};
     std::vector<SnapshotField> fields;
 
-    friend bool operator==(const ListItem&, const ListItem&) = default;
+    // Value equality over everything but entry_id; see the note above.
+    friend bool operator==(const ListItem& left, const ListItem& right) {
+        return std::tie(left.source, left.profile_id, left.source_reference,
+                        left.logical_reference, left.segment, left.source_selection,
+                        left.duration_ms, left.source_revision, left.fields) ==
+               std::tie(right.source, right.profile_id, right.source_reference,
+                        right.logical_reference, right.segment, right.source_selection,
+                        right.duration_ms, right.source_revision, right.fields);
+    }
 };
 
 struct ListDocument {

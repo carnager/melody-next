@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -25,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 40U;
+constexpr unsigned current_schema_version = 41U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1230,6 +1231,66 @@ UPDATE schema_version SET version = 40;
             return result;
         }
     }
+    if (version <= 40) {
+        // ADR-0221: entries gain an identity independent of their row, so
+        // reordering becomes an UPDATE of position alone. Uniqueness is per
+        // document, not global: a ListItem copy carries its source's identity,
+        // and the same track legitimately appears in several lists. NULLs
+        // compare distinct in a SQLite unique index, so the index may be
+        // created before the existing rows are stamped.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE list_items ADD COLUMN entry_id TEXT;
+CREATE UNIQUE INDEX list_items_entry ON list_items(document_id, entry_id);
+UPDATE schema_version SET version = 41;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+        // Rows written before this migration are stamped from C++: SQLite
+        // cannot produce a StableId, and randomblob() in a subquery risks
+        // being folded to a single value for every row, which would silently
+        // give every entry the same identity. Addresses are collected before
+        // any write so the read is not invalidated by its own updates.
+        std::vector<std::pair<std::string, sqlite3_int64>> pending;
+        {
+            auto select =
+                prepare(database, "SELECT document_id, position FROM list_items "
+                                  "WHERE entry_id IS NULL ORDER BY document_id, position");
+            if (!select) {
+                rollback();
+                return std::unexpected(std::move(select.error()));
+            }
+            while (sqlite3_step(select->get()) == SQLITE_ROW) {
+                pending.emplace_back(column_text(select->get(), 0),
+                                     sqlite3_column_int64(select->get(), 1));
+            }
+        }
+        if (!pending.empty()) {
+            auto update = prepare(database, "UPDATE list_items SET entry_id = ? "
+                                            "WHERE document_id = ? AND position = ?");
+            if (!update) {
+                rollback();
+                return std::unexpected(std::move(update.error()));
+            }
+            for (const auto& [document_id, position] : pending) {
+                auto* statement = update->get();
+                const auto entry_id = core::StableId::random().to_string();
+                if (!bind_text(statement, 1, entry_id) || !bind_text(statement, 2, document_id) ||
+                    sqlite3_bind_int64(statement, 3, position) != SQLITE_OK) {
+                    auto error = database_error(database, "Could not bind list entry identity");
+                    rollback();
+                    return std::unexpected(std::move(error));
+                }
+                if (auto result =
+                        step_done(database, statement, "Could not assign list entry identity");
+                    !result) {
+                    rollback();
+                    return result;
+                }
+            }
+        }
+    }
     if (auto result = execute(database, "COMMIT"); !result) {
         rollback();
         return result;
@@ -1805,7 +1866,7 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
                 "SELECT document_id, position, source, profile_id, source_reference, duration_ms, "
                 "logical_reference, segment_start_sample, segment_end_sample, "
                 "selected_audio_stream, codec_subsong_index, observed_device, observed_inode, "
-                "observed_size, observed_mtime_seconds, observed_mtime_nanoseconds "
+                "observed_size, observed_mtime_seconds, observed_mtime_nanoseconds, entry_id "
                 "FROM list_items ORDER BY document_id, position");
     if (!items_query) {
         return std::unexpected(std::move(items_query.error()));
@@ -1895,7 +1956,23 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
                 return std::unexpected(std::move(resolved.error()));
             }
         }
+        // A row predating migration 41, or one written by an older build,
+        // carries no identity. The default-constructed fresh one stands in
+        // rather than failing the load; it is persisted by the next save.
+        auto entry_id = core::StableId::random();
+        if (sqlite3_column_type(items_query->get(), 16) != SQLITE_NULL) {
+            auto parsed = core::StableId::parse(column_text(items_query->get(), 16));
+            if (!parsed) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::database,
+                    .message = "Invalid persisted list entry identity",
+                    .context = {{"document_id", document_id}},
+                });
+            }
+            entry_id = *parsed;
+        }
         documents[found->second].items.push_back(ListItem{
+            .entry_id = entry_id,
             .source = static_cast<ListSource>(source),
             .profile_id = profile_id,
             .source_reference = std::move(source_reference),
@@ -2091,8 +2168,8 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
         "INSERT INTO list_items(document_id, position, source, profile_id, source_reference, "
         "duration_ms, logical_reference, segment_start_sample, segment_end_sample, "
         "selected_audio_stream, codec_subsong_index, observed_device, observed_inode, "
-        "observed_size, observed_mtime_seconds, observed_mtime_nanoseconds) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        "observed_size, observed_mtime_seconds, observed_mtime_nanoseconds, entry_id) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     auto insert_field = prepare(
         database, "INSERT INTO list_item_fields(document_id, item_position, position, name, value, "
                   "native_name, provenance, language, description) VALUES(?,?,?,?,?,?,?,?,?)");
@@ -2126,6 +2203,9 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
             return std::unexpected(std::move(result.error()));
         }
 
+        // Entry identities are unique within a document; see the stamping
+        // note below.
+        std::set<core::StableId> document_entry_ids;
         for (std::size_t item_position = 0U; item_position < document.items.size();
              ++item_position) {
             const auto& item = document.items[item_position];
@@ -2169,6 +2249,20 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
                     ? sqlite3_bind_int(item_statement, 11, *item.source_selection->subsong_index) ==
                           SQLITE_OK
                     : sqlite3_bind_null(item_statement, 11) == SQLITE_OK;
+            // A nil identity means the entry was built by code predating
+            // ADR-0221; stamp one rather than writing a NULL that the unique
+            // index would tolerate and the loader would have to invent again.
+            //
+            // A repeat within this document means the entry was copied from
+            // another — `items = {item, item}` is ordinary — and a copy is a
+            // new entry that needs its own identity. Stamping here keeps the
+            // invariant at the persistence boundary instead of asking every
+            // caller to remember it.
+            auto resolved_entry_id = item.entry_id;
+            while (resolved_entry_id.is_nil() || !document_entry_ids.insert(resolved_entry_id).second) {
+                resolved_entry_id = core::StableId::random();
+            }
+            const auto entry_id = resolved_entry_id.to_string();
             if (!bind_text(item_statement, 1, id) ||
                 sqlite3_bind_int64(item_statement, 2, static_cast<sqlite3_int64>(item_position)) !=
                     SQLITE_OK ||
@@ -2176,7 +2270,8 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
                 !profile_bound || !bind_blob(item_statement, 5, source_reference) ||
                 !duration_bound || !logical_reference_bound || !segment_start_bound ||
                 !segment_end_bound || !audio_stream_bound || !subsong_bound ||
-                !bind_optional_revision(item_statement, 12, source_revision)) {
+                !bind_optional_revision(item_statement, 12, source_revision) ||
+                !bind_text(item_statement, 17, entry_id)) {
                 auto error = database_error(database, "Could not bind list item");
                 rollback();
                 return std::unexpected(std::move(error));

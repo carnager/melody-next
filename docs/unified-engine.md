@@ -201,6 +201,25 @@ protocol v1 to a remote engine, Trackknife is never an MPD client again and
 that half is **deleted**, not abstracted. Local versus remote stops being a
 branch in feature code and becomes which profile the connection points at.
 
+**But that deletion cannot happen in this phase.** MPD is how a remote library
+is reached today — 295 `mpd_controller_->` call sites — and protocol v1 does
+not exist until Phase 2, with remote transport arriving in Phase 3. Deleting
+the MPD client half now would remove remote access with nothing to replace it,
+which violates the rule that every phase leaves a working application.
+
+So tab unification splits across phases:
+
+- **Now**: the parts that do not depend on a protocol. The tagger stops being
+  a tab (below). The structural groundwork — one tab type with a source
+  descriptor and a refresh policy — can be prepared with both models still
+  behind it.
+- **After Phase 3**: the deletion, once a remote profile can reach an engine
+  over the wire and the MPD client half has a replacement.
+
+Phase 1's "done when" is amended accordingly: it does not include *one tab
+type serves every list*, because that outcome depends on transport this phase
+does not deliver.
+
 A tab is then one thing: **a set of track references, an order, and a view
 layout.** Static lists, saved searches, dynamic playlists, one-shot search
 results and browse results differ only in how the set was produced and whether
@@ -320,8 +339,10 @@ Still open in this phase: the type coupling (twenty translation units passing
 unification. Neither gates the ownership move that just landed.
 
 Done when: nothing outside the engine opens a `LocalLibrary` or
-`ListRepository`, the UI reaches both only by asking the core, and one tab type
-serves every list. The header-include sweep is tracked separately.
+`ListRepository`, and the UI reaches both only by asking the core. One tab type
+serving every list is **not** part of this phase — see the sequencing note
+above; it needs transport that arrives in Phase 3. The header-include sweep is
+tracked separately.
 
 ### Phase 2 — Protocol v1
 

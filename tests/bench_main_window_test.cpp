@@ -764,7 +764,7 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
             window.consumePlaybackRow(*tab, window.playback_.anchors.current, window.playback_.row);
             QCOMPARE(tab->model->rowCount(), 1);
         }
-        QCOMPARE(window.local_requests_.pending().size(), static_cast<std::size_t>(pending_count));
+        QCOMPARE(window.playback_.requests.pending().size(), static_cast<std::size_t>(pending_count));
         window.close();
     }
     QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), enabled);
@@ -779,17 +779,17 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
         QTRY_VERIFY(window.up_next_restored_ && !window.resume_restore_pending_);
         if (!enabled) {
             QCOMPARE(window.player_->snapshot().state, audio::LocalAuditionState::empty);
-            QVERIFY(!window.local_requests_.active());
-            QCOMPARE(window.local_requests_.pending().size(),
+            QVERIFY(!window.playback_.requests.active());
+            QCOMPARE(window.playback_.requests.pending().size(),
                      static_cast<std::size_t>(pending_count + 1));
         } else {
             QTRY_COMPARE(window.player_->snapshot().state, changed
                                                                ? audio::LocalAuditionState::failed
                                                                : audio::LocalAuditionState::paused);
-            QVERIFY(window.local_requests_.active());
-            QCOMPARE(window.local_requests_.pending().size(),
+            QVERIFY(window.playback_.requests.active());
+            QCOMPARE(window.playback_.requests.pending().size(),
                      static_cast<std::size_t>(pending_count));
-            QCOMPARE(window.local_requests_.active()->source.raw_path, path);
+            QCOMPARE(window.playback_.requests.active()->source.raw_path, path);
             QCOMPARE(row_of(window.tabForDocument(window.playback_.anchors.document),
                             window.playback_.anchors.request_return),
                      consume ? 0 : 1);
@@ -1042,8 +1042,8 @@ void BenchMainWindowTest::dynamicResultActionsUseTheirOwnSources() {
     window.addUpNextActions(&menu, view);
     QVERIFY(!menu.actions().empty());
     menu.actions().front()->trigger();
-    QCOMPARE(window.local_requests_.pending().size(), 1U);
-    QCOMPARE(window.local_requests_.pending().front().source.raw_path, row.raw_path);
+    QCOMPARE(window.playback_.requests.pending().size(), 1U);
+    QCOMPARE(window.playback_.requests.pending().front().source.raw_path, row.raw_path);
     auto* target = window.currentListTab();
     QVERIFY(target);
     const auto count = target->model->rowCount();
@@ -5884,13 +5884,13 @@ void BenchMainWindowTest::upNextMultiSelectionEdits() {
                                          original[4]}));
     const auto moved = window.up_next_display_ids_;
     window.editUpNextSelection(1);
-    QCOMPARE(window.local_requests_.pending().size(), std::size_t{3});
-    QVERIFY(window.local_requests_.undo());
+    QCOMPARE(window.playback_.requests.pending().size(), std::size_t{3});
+    QVERIFY(window.playback_.requests.undo());
     window.refreshUpNext();
     QCOMPARE(window.up_next_display_ids_, moved);
-    const auto revision = window.local_requests_.revision();
-    QVERIFY(!window.local_requests_.retain({original[0], original[0]}));
-    QCOMPARE(window.local_requests_.revision(), revision);
+    const auto revision = window.playback_.requests.revision();
+    QVERIFY(!window.playback_.requests.retain({original[0], original[0]}));
+    QCOMPARE(window.playback_.requests.revision(), revision);
     QCOMPARE(window.up_next_display_ids_, moved);
 }
 
@@ -5973,7 +5973,7 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     row.raw_path = std::string{"/tmp/raw-"} + char(0xff) + ".flac";
     row.title = "Request";
     window.enqueueLocalRequests({row, row});
-    QCOMPARE(window.local_requests_.pending().size(), 2U);
+    QCOMPARE(window.playback_.requests.pending().size(), 2U);
     QVERIFY(!window.up_next_view_->albumGroupingEnabled());
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
@@ -5983,7 +5983,7 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
         QVERIFY(window.grab().save(directory + QStringLiteral("/up-next.png")));
     }
     window.editUpNext(1, 0);
-    QCOMPARE(window.local_requests_.pending().size(), 1U);
+    QCOMPARE(window.playback_.requests.pending().size(), 1U);
     bool saved = false;
     window.persistence_->loadUiState(QStringLiteral("playback/up-next/v1"),
                                      [&](QByteArray payload, QString error) {
@@ -5992,12 +5992,12 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
                                          saved = true;
                                      });
     QTRY_VERIFY(saved);
-    window.local_requests_.clear();
+    window.playback_.requests.clear();
     window.up_next_restored_ = false;
     window.restoreUpNext();
     QTRY_VERIFY(window.up_next_restored_);
-    QCOMPARE(window.local_requests_.pending().size(), 1U);
-    QCOMPARE(window.local_requests_.pending()[0].source.raw_path, row.raw_path);
+    QCOMPARE(window.playback_.requests.pending().size(), 1U);
+    QCOMPARE(window.playback_.requests.pending()[0].source.raw_path, row.raw_path);
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {
@@ -6031,19 +6031,19 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     request.raw_path = QFile::encodeName(b).toStdString();
     request.title = "X";
     window.enqueueLocalRequests({request, request});
-    const auto first = window.local_requests_.pending()[0].id;
-    const auto second = window.local_requests_.pending()[1].id;
+    const auto first = window.playback_.requests.pending()[0].id;
+    const auto second = window.playback_.requests.pending()[1].id;
     QTRY_VERIFY_WITH_TIMEOUT(
-        window.local_requests_.active() && window.local_requests_.active()->id == first, 5000);
+        window.playback_.requests.active() && window.playback_.requests.active()->id == first, 5000);
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(
-        window.local_requests_.active() && window.local_requests_.active()->id == second, 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(!window.local_requests_.active() &&
+        window.playback_.requests.active() && window.playback_.requests.active()->id == second, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(!window.playback_.requests.active() &&
                                  row_of(window.tabForDocument(window.playback_.anchors.document),
                                         window.playback_.anchors.current) == (consume ? 0 : 1),
                              4000);
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
-    QVERIFY(window.local_requests_.pending().empty());
+    QVERIFY(window.playback_.requests.pending().empty());
 }
 
 void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() {

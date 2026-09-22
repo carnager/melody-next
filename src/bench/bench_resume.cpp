@@ -44,11 +44,11 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     resume_save_clock_.start();
     // Keep an active request's offset in the same payload as its exact source
     // and pending FIFO, never in the normal-list checkpoint.
-    if (local_requests_.active())
+    if (playback_.requests.active())
         persistUpNext();
     std::optional<ui::LocalResumeCheckpoint> checkpoint;
     if (resumeEnabled() && audio::resumable(snapshot) && playback_.anchors.playing() &&
-        !local_requests_.active()) {
+        !playback_.requests.active()) {
         auto* tab = tabForDocument(playback_.anchors.document);
         const auto row = resolvePlaybackRow(tab);
         if (tab != nullptr && row >= 0) {

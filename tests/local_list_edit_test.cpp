@@ -80,7 +80,7 @@ void LocalListEditTest::thePlaybackServiceDecidesWithoutAWindow() {
     QVERIFY(playback.anchors.playing());
     QCOMPARE(playback.resolveRow(list), 0);
 
-    const auto next = playback.adjacentRow(list, {}, 1);
+    const auto next = playback.adjacentRow(list, 1);
     QVERIFY(next.has_value());
     QCOMPARE(next->row, 1);
 
@@ -94,12 +94,33 @@ void LocalListEditTest::thePlaybackServiceDecidesWithoutAWindow() {
     // An entry that leaves the list stops playback rather than guessing.
     model.replaceRows({reversed[0], reversed[1]});
     QCOMPARE(playback.resolveRow(list), -1);
-    QVERIFY(!playback.adjacentRow(list, {}, 1).has_value());
+    QVERIFY(!playback.adjacentRow(list, 1).has_value());
 
     playback.stop();
     QVERIFY(!playback.anchors.playing());
     QVERIFY(playback.anchors.source.empty());
     QCOMPARE(playback.row, -1);
+
+    // The service owns the request queue, so it derives for itself the two
+    // facts the advance rules need rather than being told them.
+    LocalListModel fresh;
+    fresh.replaceRows({row("A", "/a.flac"), row("B", "/b.flac")});
+    const LocalListPlaybackView list2{fresh};
+    LocalPlaybackService serving;
+    serving.anchors.document = core::StableId::random();
+    serving.adopt(fresh.rows()[0].entry_id, 0, fresh.source(0));
+    serving.order.reset(2, 0, false);
+    QVERIFY(!serving.requestState().active);
+    QVERIFY(serving.requestState().pending_empty);
+
+    // Single + Repeat normally loops the current track, but a pending request
+    // is an explicit ask and outranks it.
+    serving.modes.single = audio::ModeState::on;
+    serving.modes.repeat = true;
+    QVERIFY(serving.automaticRow(list2).has_value());
+    QVERIFY(serving.requests.insert({fresh.rows()[1]}, 0));
+    QVERIFY(!serving.requestState().pending_empty);
+    QVERIFY(!serving.automaticRow(list2).has_value());
 }
 
 // ADR-0221: a probe refreshes what a row says about its track. It must not

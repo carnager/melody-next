@@ -123,9 +123,9 @@ void BenchMainWindow::buildUpNext() {
                 command.id = *track->queue_id;
                 mpd_controller_->editRequestQueue(std::move(command));
             }
-        } else if (index.row() < static_cast<int>(local_requests_.pending().size())) {
-            local_requests_.move(
-                local_requests_.pending()[static_cast<std::size_t>(index.row())].id, 0);
+        } else if (index.row() < static_cast<int>(playback_.requests.pending().size())) {
+            playback_.requests.move(
+                playback_.requests.pending()[static_cast<std::size_t>(index.row())].id, 0);
             refreshUpNext();
             static_cast<void>(playLocalRequest());
         }
@@ -160,8 +160,8 @@ void BenchMainWindow::buildUpNext() {
             command.operation = mpd::RequestQueueOperation::undo;
             mpd_controller_->editRequestQueue(std::move(command));
         } else {
-            local_requests_.undo();
-            last_requested_next_.reset();
+            playback_.requests.undo();
+            playback_.last_requested_next.reset();
             persistUpNext();
             refreshUpNext();
         }
@@ -179,8 +179,8 @@ void BenchMainWindow::buildUpNext() {
             command.operation = mpd::RequestQueueOperation::resume;
             mpd_controller_->editRequestQueue(std::move(command));
         } else {
-            local_requests_.clear();
-            if (local_requests_.active())
+            playback_.requests.clear();
+            if (playback_.requests.active())
                 playAdjacent(1);
             persistUpNext();
             refreshUpNext();
@@ -234,12 +234,12 @@ void BenchMainWindow::refreshUpNext() {
         undo->setEnabled(server
                              ? (mpd_controller_->connected() && mpd_controller_->requestQueue() &&
                                 mpd_controller_->requestQueue()->can_undo)
-                             : local_requests_.canUndo());
+                             : playback_.requests.canUndo());
     if (auto* resume = up_next_dock_->findChild<QPushButton*>(QStringLiteral("up-next-return")))
         resume->setEnabled(server
                                ? (mpd_controller_->connected() && mpd_controller_->requestQueue() &&
                                   mpd_controller_->requestQueue()->active_id != 0)
-                               : local_requests_.active().has_value());
+                               : playback_.requests.active().has_value());
     auto* model = server ? static_cast<QAbstractItemModel*>(up_next_mpd_model_)
                          : static_cast<QAbstractItemModel*>(up_next_local_model_);
     if (up_next_view_->model() != model) {
@@ -299,25 +299,25 @@ void BenchMainWindow::refreshUpNext() {
         }
     } else {
         up_next_view_->setEnabled(true);
-        if (up_next_local_revision_ != local_requests_.revision()) {
+        if (up_next_local_revision_ != playback_.requests.revision()) {
             std::vector<LocalTrackRow> rows;
-            for (const auto& entry : local_requests_.pending())
+            for (const auto& entry : playback_.requests.pending())
                 rows.push_back(entry.source);
             up_next_local_model_->replaceRows(std::move(rows));
             replaced = true;
             up_next_display_ids_.clear();
-            for (const auto& entry : local_requests_.pending())
+            for (const auto& entry : playback_.requests.pending())
                 up_next_display_ids_.push_back(entry.id);
-            up_next_local_revision_ = local_requests_.revision();
+            up_next_local_revision_ = playback_.requests.revision();
         }
         auto* tab = tabForDocument(playback_.anchors.document);
         QString playing;
-        if (local_requests_.active())
-            playing = QString::fromStdString(local_requests_.active()->source.artist + " — " +
-                                             local_requests_.active()->source.title);
+        if (playback_.requests.active())
+            playing = QString::fromStdString(playback_.requests.active()->source.artist + " — " +
+                                             playback_.requests.active()->source.title);
         up_next_status_->setText(
             QStringLiteral("Local · %1 pending%2\nReturn to: %3")
-                .arg(local_requests_.pending().size())
+                .arg(playback_.requests.pending().size())
                 .arg(playing.isEmpty() ? QString{} : QStringLiteral("\nPlaying: ") + playing)
                 .arg(tab ? QString::fromStdString(tab->document.name)
                          : QStringLiteral("No normal playback")));
@@ -405,13 +405,13 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
 
 void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position) {
     const auto count = rows.size();
-    if (!local_requests_.insert(std::move(rows), position < 0
-                                                     ? local_requests_.pending().size()
+    if (!playback_.requests.insert(std::move(rows), position < 0
+                                                     ? playback_.requests.pending().size()
                                                      : static_cast<std::size_t>(position))) {
         statusBar()->showMessage(QStringLiteral("Up Next holds at most 500 tracks."), 5000);
         return;
     }
-    last_requested_next_.reset();
+    playback_.last_requested_next.reset();
     persistUpNext();
     refreshUpNext();
     statusBar()->showMessage(QStringLiteral("Added %1 to Up Next").arg(count), 3000);
@@ -483,8 +483,8 @@ void BenchMainWindow::editUpNextSelection(int operation, int destination) {
         command.operation = mpd::RequestQueueOperation::retain;
         command.ids.assign(ids.begin(), ids.end());
         mpd_controller_->editRequestQueue(std::move(command));
-    } else if (local_requests_.retain(ids)) {
-        last_requested_next_.reset();
+    } else if (playback_.requests.retain(ids)) {
+        playback_.last_requested_next.reset();
         persistUpNext();
         refreshUpNext();
     }
@@ -514,20 +514,20 @@ void BenchMainWindow::editUpNext(int operation, int row, int destination) {
         mpd_controller_->editRequestQueue(std::move(command));
     } else {
         if (operation == 0)
-            local_requests_.clear();
+            playback_.requests.clear();
         else {
-            if (row < 0 || row >= static_cast<int>(local_requests_.pending().size()))
+            if (row < 0 || row >= static_cast<int>(playback_.requests.pending().size()))
                 return;
-            auto id = local_requests_.pending()[static_cast<std::size_t>(row)].id;
+            auto id = playback_.requests.pending()[static_cast<std::size_t>(row)].id;
             if (operation == 1)
-                local_requests_.remove(id);
+                playback_.requests.remove(id);
             else {
                 if (destination < 0)
                     return;
-                local_requests_.move(id, static_cast<std::size_t>(destination));
+                playback_.requests.move(id, static_cast<std::size_t>(destination));
             }
         }
-        last_requested_next_.reset();
+        playback_.last_requested_next.reset();
         persistUpNext();
         refreshUpNext();
     }
@@ -579,12 +579,12 @@ void BenchMainWindow::persistUpNext() {
         item[QStringLiteral("fields")] = fields;
         rows.push_back(item);
     };
-    if (local_requests_.active())
-        append(local_requests_.active()->source);
-    if (local_requests_.active() && player_ &&
+    if (playback_.requests.active())
+        append(playback_.requests.active()->source);
+    if (playback_.requests.active() && player_ &&
         QSettings{}.value(QLatin1String(SettingsDialog::restore_playback_key), false).toBool()) {
         const auto snapshot = player_->snapshot();
-        const auto& source = local_requests_.active()->source;
+        const auto& source = playback_.requests.active()->source;
         if ((snapshot.state == audio::LocalAuditionState::paused ||
              snapshot.state == audio::LocalAuditionState::playing ||
              snapshot.state == audio::LocalAuditionState::buffering ||
@@ -610,7 +610,7 @@ void BenchMainWindow::persistUpNext() {
             rows[0] = item;
         }
     }
-    for (const auto& entry : local_requests_.pending())
+    for (const auto& entry : playback_.requests.pending())
         append(entry.source);
     QJsonObject state{
         {QStringLiteral("version"), 1},
@@ -641,7 +641,7 @@ void BenchMainWindow::restoreUpNext() {
     if (!persistence_)
         return;
     const auto generation = resume_intent_generation_;
-    const auto request_revision = local_requests_.revision();
+    const auto request_revision = playback_.requests.revision();
     persistence_->loadUiState(QStringLiteral("playback/up-next/v1"), [this, generation,
                                                                       request_revision](
                                                                          QByteArray payload,
@@ -758,8 +758,8 @@ void BenchMainWindow::restoreUpNext() {
                 rows.push_back(std::move(row));
             }
             const bool untouched = generation == resume_intent_generation_ &&
-                                   request_revision == local_requests_.revision() &&
-                                   local_requests_.pending().empty() && !local_requests_.active();
+                                   request_revision == playback_.requests.revision() &&
+                                   playback_.requests.pending().empty() && !playback_.requests.active();
             const bool resume_request =
                 untouched && resume_position && !rows.empty() && player_ &&
                 player_->snapshot().state == audio::LocalAuditionState::empty &&
@@ -769,17 +769,17 @@ void BenchMainWindow::restoreUpNext() {
             std::vector<LocalTrackRow> remaining;
             if (untouched) {
                 if (resume_request) {
-                    local_requests_.insert({rows.front()}, 0);
+                    playback_.requests.insert({rows.front()}, 0);
                     remaining.assign(std::make_move_iterator(rows.begin() + 1),
                                      std::make_move_iterator(rows.end()));
-                } else if (!local_requests_.insert(std::move(rows), 0)) {
+                } else if (!playback_.requests.insert(std::move(rows), 0)) {
                     statusBar()->showMessage(
                         tr("Saved Up Next exceeds the pending queue limit; it has been preserved."),
                         8000);
                     return;
                 }
             }
-            if (playback_.anchors.document.is_nil() && !local_requests_.pending().empty()) {
+            if (playback_.anchors.document.is_nil() && !playback_.requests.pending().empty()) {
                 const auto id = state.value(QStringLiteral("document")).toString();
                 const auto anchor = QByteArray::fromBase64(
                                         state.value(QStringLiteral("anchor")).toString().toLatin1())
@@ -816,10 +816,10 @@ void BenchMainWindow::restoreUpNext() {
                 refreshUpNext();
                 static_cast<void>(playLocalRequest(*resume_position));
                 if (!remaining.empty())
-                    local_requests_.insert(std::move(remaining), local_requests_.pending().size());
+                    playback_.requests.insert(std::move(remaining), playback_.requests.pending().size());
             }
         }
-        local_requests_.forgetUndo();
+        playback_.requests.forgetUndo();
         up_next_restored_ = true;
         refreshUpNext();
     });

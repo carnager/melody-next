@@ -450,8 +450,6 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
-    // The two facts the advance rules need about the local request queue.
-    [[nodiscard]] audio::RequestQueueState requestQueueState() const;
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
@@ -746,7 +744,6 @@ class BenchMainWindow final : public QMainWindow {
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};
     std::optional<ListTab> detached_playback_;
-    audio::RequestQueue<LocalTrackRow> local_requests_;
     std::optional<audio::RequestQueue<LocalTrackRow>::Entry> requested_request_;
     std::optional<audio::RequestQueue<LocalTrackRow>::Entry> queued_request_;
     QDockWidget* up_next_dock_{nullptr};
@@ -783,7 +780,6 @@ class BenchMainWindow final : public QMainWindow {
     // requested next path, and a throttle for re-requests after the engine
     // dropped or rejected a queue.
     quint64 last_chain_transitions_{0U};
-    std::optional<LocalTrackSource> last_requested_next_;
     std::uint64_t last_requested_token_{0U};
     QElapsedTimer next_request_timer_;
     bool seeking_{false};

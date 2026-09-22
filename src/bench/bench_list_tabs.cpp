@@ -1380,7 +1380,7 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     tabs_->removeTab(index);
     view->deleteLater();
-    if (local_requests_.active() && tab->document.id == playback_.anchors.document) {
+    if (playback_.requests.active() && tab->document.id == playback_.anchors.document) {
         if (detached_playback_)
             detached_playback_->model->deleteLater();
         detached_playback_ = *tab;

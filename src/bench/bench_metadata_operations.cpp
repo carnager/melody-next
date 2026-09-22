@@ -1229,7 +1229,7 @@ void BenchMainWindow::applyCommittedRelocation(
             row.source_revision = result.target_revision;
         }
     };
-    local_requests_.updateSources(update_request);
+    playback_.requests.updateSources(update_request);
     if (requested_request_)
         update_request(requested_request_->source);
     if (queued_request_)
@@ -1239,8 +1239,8 @@ void BenchMainWindow::applyCommittedRelocation(
     if (playback_.anchors.source.raw_path == result.source_raw_path) {
         playback_.anchors.source.raw_path = result.target_raw_path;
     }
-    if (last_requested_next_ && last_requested_next_->raw_path == result.source_raw_path) {
-        last_requested_next_->raw_path = result.target_raw_path;
+    if (playback_.last_requested_next && playback_.last_requested_next->raw_path == result.source_raw_path) {
+        playback_.last_requested_next->raw_path = result.target_raw_path;
     }
 }
 

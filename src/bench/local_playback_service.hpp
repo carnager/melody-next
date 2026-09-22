@@ -5,7 +5,9 @@
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
+#include "bench/local_list_model.hpp"
 #include "trackknife/audio/playback_selection.hpp"
+#include "trackknife/audio/request_queue.hpp"
 
 #include <optional>
 
@@ -35,6 +37,20 @@ struct LocalPlaybackService final {
     // resolving it cheap. Deliberately not part of the anchors: rows move when
     // a list is reordered, which is the whole reason ADR-0221 exists.
     int row{-1};
+    // Explicit asks, which outrank the playback order. The up-next panel that
+    // displays and edits this still lives in the window, because it also shows
+    // the MPD queue and so branches on authority; the queue itself does not.
+    audio::RequestQueue<LocalTrackRow> requests;
+    // What was last handed to the player for gapless continuation, so an
+    // unchanged decision is not re-sent every tick.
+    std::optional<audio::TrackSource> last_requested_next;
+
+    // The two facts the advance rules need about the request queue. Derived
+    // here now that the queue lives here, rather than assembled by the caller.
+    [[nodiscard]] audio::RequestQueueState requestState() const {
+        return {.active = requests.active().has_value(),
+                .pending_empty = requests.pending().empty()};
+    }
 
     // Resolve the playing entry to its current row in `list`, or -1 when the
     // entry is no longer there.
@@ -44,15 +60,15 @@ struct LocalPlaybackService final {
 
     // The row `direction` away, or nothing when playback should stop.
     [[nodiscard]] std::optional<audio::PlaybackChoice>
-    adjacentRow(const audio::PlaybackList& list, const audio::RequestQueueState& requests,
-                const int direction) {
-        return audio::adjacent_playback_row(list, anchors, modes, order, requests, direction, row);
+    adjacentRow(const audio::PlaybackList& list, const int direction) {
+        return audio::adjacent_playback_row(list, anchors, modes, order, requestState(), direction,
+                                            row);
     }
 
     // What to play when a track ends by itself rather than being asked for.
     [[nodiscard]] std::optional<audio::PlaybackChoice>
-    automaticRow(const audio::PlaybackList& list, const audio::RequestQueueState& requests) {
-        return audio::automatic_playback_row(list, anchors, modes, order, requests, row);
+    automaticRow(const audio::PlaybackList& list) {
+        return audio::automatic_playback_row(list, anchors, modes, order, requestState(), row);
     }
 
     // Playback moved to `entry` at `at_row`, decoding `source`.

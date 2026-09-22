@@ -6,6 +6,7 @@
 // itself is unchanged; it simply lives somewhere a headless engine can reach.
 
 #include "trackknife/audio/playback_modes.hpp"
+#include "trackknife/audio/track_source.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -84,9 +85,38 @@ void active_predicates_cover_both_live_states() {
     require(!modes.single_active(), "off does not count as active");
 }
 
+void a_track_source_reports_emptiness_and_compares_by_value() {
+    namespace audio = trackknife::audio;
+    namespace formats = trackknife::formats;
+
+    const audio::TrackSource nothing;
+    require(nothing.empty(), "a default source means nothing is playing");
+
+    audio::TrackSource file;
+    file.raw_path = "/music/track.flac";
+    require(!file.empty(), "a source with a path is not empty");
+
+    // Raw OS bytes, not assumed to be UTF-8.
+    audio::TrackSource invalid_utf8;
+    invalid_utf8.raw_path = std::string{"/music/broken-\xff.flac", 22U};
+    require(!invalid_utf8.empty(), "an undecodable path is still a path");
+
+    // The selection and segment are part of identity: the same file, a
+    // different subsong, is a different source.
+    auto subsong = file;
+    subsong.selection.subsong_index = 2;
+    require(!(file == subsong), "a different subsong is a different source");
+
+    auto ranged = file;
+    ranged.segment = formats::SampleRange{.start_sample = 0, .end_sample = 44'100};
+    require(!(file == ranged), "a different span is a different source");
+    require(ranged == ranged, "a source equals itself");
+}
+
 } // namespace
 
 int main() {
+    a_track_source_reports_emptiness_and_compares_by_value();
     modes_default_to_off();
     cycling_visits_off_on_oneshot_and_wraps();
     one_shot_modes_expire_once_and_report_the_change();

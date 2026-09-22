@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/audio/track_source.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/persistence/list_repository.hpp"
@@ -109,13 +110,10 @@ struct LocalTrackRow {
     }
 };
 
-struct LocalTrackSource {
-    std::string raw_path;
-    formats::AudioSourceSelection selection;
-    std::optional<formats::SampleRange> segment;
-
-    friend bool operator==(const LocalTrackSource&, const LocalTrackSource&) = default;
-};
+// ADR-0220 Phase 0: the type itself is audio::TrackSource, which is Qt-free so
+// that playback state holding one can leave the widget layer. The alias keeps
+// the established spelling at the several hundred call sites in src/bench.
+using LocalTrackSource = audio::TrackSource;
 
 // Table model over one Trackknife working list, implementing the shared
 // album-grouped semantic role contract (uicommon/track_row_roles.hpp). Its

@@ -809,7 +809,7 @@ void BenchMainWindow::restoreUpNext() {
                         playback_document_id_ = id;
                         request_return_entry_ =
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
-                        if (playback_source_.raw_path.empty())
+                        if (playback_source_.empty())
                             playback_source_ = tab->model->source(row);
                     }
                 }

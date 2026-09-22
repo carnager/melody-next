@@ -1111,7 +1111,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
         return;
     }
     const auto source = tab.model->source(row);
-    if (source.raw_path.empty()) {
+    if (source.empty()) {
         return;
     }
     if (restore_position_ms && !tab.model->rows().at(static_cast<std::size_t>(row)).source_revision)
@@ -1163,7 +1163,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
 std::optional<std::pair<int, LocalTrackSource>>
 BenchMainWindow::adjacentPlaybackRow(const int direction) {
     auto* tab = tabForDocument(playback_document_id_);
-    if (tab == nullptr || playback_source_.raw_path.empty()) {
+    if (tab == nullptr || playback_source_.empty()) {
         return std::nullopt;
     }
     if (direction > 0 && local_requests_.active() && !request_return_entry_.is_nil()) {

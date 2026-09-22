@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_library_panel.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
@@ -1327,11 +1328,12 @@ void LocalLibraryPanel::updateArtwork() {
         artwork_watcher_.setFuture(
             QtConcurrent::run(&artwork_pool_, [path = database_path_, key,
                                                cancellation = artwork_cancellation_.token()] {
-                auto library = persistence::LocalLibrary::open(path);
-                if (!library || cancellation.is_cancellation_requested()) {
+                if (cancellation.is_cancellation_requested()) {
                     return QImage{};
                 }
-                const auto source = library->artwork_source(key.toStdString(), cancellation);
+                // ADR-0220: ask the core, do not open its database.
+                const engine::Catalogue catalogue{path};
+                const auto source = catalogue.artwork_source(key.toStdString(), cancellation);
                 return source && source->has_value() ? ui::loadLocalArtwork(**source, cancellation)
                                                      : QImage{};
             }));

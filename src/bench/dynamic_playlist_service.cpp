@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/dynamic_playlist_service.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq_melody.hpp"
@@ -423,13 +424,12 @@ void DynamicPlaylistService::complete() {
 DynamicPlaylistService::Result
 queryDynamicLocalLibrary(const std::filesystem::path& database, const query::CompiledTkq& compiled,
                          const core::CancellationToken& cancellation) {
-    auto library = persistence::LocalLibrary::open(database);
-    if (!library)
-        return std::unexpected(library.error());
-    auto paths = library->filter_paths(compiled, cancellation);
+    // ADR-0220: ask the core, do not open its database.
+    const engine::Catalogue catalogue{database};
+    auto paths = catalogue.filter_paths(compiled, cancellation);
     if (!paths)
         return std::unexpected(paths.error());
-    auto cached = library->cached_tracks(*paths, cancellation);
+    auto cached = catalogue.cached_tracks(*paths, cancellation);
     if (!cached)
         return std::unexpected(cached.error());
     std::vector<LocalTrackRow> rows;

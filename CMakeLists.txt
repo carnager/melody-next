@@ -59,6 +59,9 @@ add_subdirectory(src/query)
 add_subdirectory(src/metadata)
 add_subdirectory(src/operations)
 add_subdirectory(src/persistence)
+# ADR-0220: the core's front door. Depends on persistence and query; nothing
+# in the UI may reach past it to open a database itself.
+add_subdirectory(src/engine)
 add_subdirectory(src/mpd)
 add_subdirectory(src/formats)
 add_subdirectory(src/lists)

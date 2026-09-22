@@ -270,6 +270,27 @@ operations header are mostly *type* coupling — `ListDocument`, `ListItem`,
 benign in-process and says nothing about who owns the data, so it does not gate
 this phase.
 
+**Started.** `src/engine` exists with `engine::Catalogue` as the first front
+door: `filter_paths`, `cached_tracks`, `artwork_source`, `history_facts`. Four
+of the six catalogue opens now go through it, in `dynamic_playlist_service`,
+`search_dialog` and the panel's artwork loader. Calls are synchronous and
+each opens its own connection, exactly as the callers did inline; threading
+stays with the caller for now, and becomes the protocol's concern in Phase 2.
+Keeping the connection strategy behind the door is the point — it can become a
+pool, or a socket, with no caller changing.
+
+Two opens remain, and both want more than another wrapper:
+
+- `local_library_panel.cpp:442` is the panel's generic task runner: queued
+  tasks are `std::function<Outcome(LocalLibrary&)>`, so the database is handed
+  to arbitrary caller-supplied work. Moving it means naming those operations
+  on the door instead of passing the library out, which is the interesting
+  part of Phase 1 rather than a mechanical swap.
+- `local_library_panel.cpp:1251` is `scan`, a long mutating operation with
+  progress and cancellation. ADR-0220 calls these **jobs** — submit, stream
+  progress, cancel, deliver a result — and the first one should establish that
+  shape rather than be squeezed into a synchronous call.
+
 Done when: nothing outside the engine opens a `LocalLibrary` or
 `ListRepository`, the UI reaches both only by asking the core, and one tab type
 serves every list. The header-include sweep is tracked separately.

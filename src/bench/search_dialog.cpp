@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/search_dialog.hpp"
+#include "trackknife/engine/catalogue.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/formats/probe.hpp"
@@ -640,17 +641,14 @@ void SearchDialog::startSearch() {
                                shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
                                token = cancellation_.token()]() {
                 Outcome outcome;
-                auto library = persistence::LocalLibrary::open(database);
-                if (!library) {
-                    outcome.error = displayText(library.error().message);
-                    return outcome;
-                }
-                auto paths = library->filter_paths(*shared, token);
+                // ADR-0220: ask the core, do not open its database.
+                const engine::Catalogue catalogue{database};
+                auto paths = catalogue.filter_paths(*shared, token);
                 if (!paths) {
                     outcome.error = displayText(paths.error().message);
                     return outcome;
                 }
-                auto cached = library->cached_tracks(*paths, token);
+                auto cached = catalogue.cached_tracks(*paths, token);
                 if (!cached) {
                     outcome.error = displayText(cached.error().message);
                     return outcome;
@@ -691,11 +689,8 @@ void SearchDialog::startSearch() {
                                        });
             std::vector<std::array<std::int64_t, 6>> histories;
             if (needs_history) {
-                auto library = persistence::LocalLibrary::open(database);
-                if (!library) {
-                    outcome.error = QStringLiteral("Cannot open listening history.");
-                    return outcome;
-                }
+                // ADR-0220: ask the core, do not open its database.
+                const engine::Catalogue catalogue{database};
                 std::vector<persistence::LibraryHistorySource> sources;
                 for (const auto& row : rows) {
                     if (token.is_cancellation_requested()) {
@@ -714,7 +709,7 @@ void SearchDialog::startSearch() {
                     sources.push_back({std::move(source),
                                        row.album.empty() ? std::string{} : row.album_rating_hash});
                 }
-                auto loaded = library->history_facts(sources, token);
+                auto loaded = catalogue.history_facts(sources, token);
                 if (!loaded) {
                     outcome.error = displayText(loaded.error().message);
                     return outcome;

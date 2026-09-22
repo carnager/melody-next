@@ -4,11 +4,11 @@
 
 namespace trackknife::engine {
 
-core::Result<persistence::LocalLibrary> Catalogue::open() const {
+core::Result<persistence::LocalLibrary> LocalCatalogue::open() const {
     return persistence::LocalLibrary::open(database_);
 }
 
-core::Result<void> Catalogue::prepare() const {
+core::Result<void> LocalCatalogue::prepare() const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -17,8 +17,8 @@ core::Result<void> Catalogue::prepare() const {
 }
 
 core::Result<std::vector<std::string>>
-Catalogue::filter_paths(const query::CompiledTkq& compiled,
-                        const core::CancellationToken& cancellation) const {
+LocalCatalogue::filter_paths(const query::CompiledTkq& compiled,
+                             const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -27,8 +27,8 @@ Catalogue::filter_paths(const query::CompiledTkq& compiled,
 }
 
 core::Result<std::optional<std::string>>
-Catalogue::artwork_source(const std::string& album_key,
-                          const core::CancellationToken& cancellation) const {
+LocalCatalogue::artwork_source(const std::string& album_key,
+                               const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -37,8 +37,8 @@ Catalogue::artwork_source(const std::string& album_key,
 }
 
 core::Result<std::vector<persistence::LibraryTrackSnapshot>>
-Catalogue::cached_tracks(const std::vector<std::string>& raw_paths,
-                         const core::CancellationToken& cancellation) const {
+LocalCatalogue::cached_tracks(const std::vector<std::string>& raw_paths,
+                              const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -47,8 +47,8 @@ Catalogue::cached_tracks(const std::vector<std::string>& raw_paths,
 }
 
 core::Result<std::vector<std::array<std::int64_t, 6>>>
-Catalogue::history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
-                         const core::CancellationToken& cancellation) const {
+LocalCatalogue::history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
+                              const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -61,8 +61,8 @@ Catalogue::history_facts(const std::vector<persistence::LibraryHistorySource>& s
 namespace trackknife::engine {
 
 core::Result<persistence::LibraryScanResult>
-Catalogue::scan(const core::CancellationToken& cancellation,
-                persistence::LibraryScanProgress& progress) {
+LocalCatalogue::scan(const core::CancellationToken& cancellation,
+                     persistence::LibraryScanProgress& progress) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -74,7 +74,7 @@ Catalogue::scan(const core::CancellationToken& cancellation,
 
 namespace trackknife::engine {
 
-core::Result<std::vector<persistence::LibraryRoot>> Catalogue::roots() const {
+core::Result<std::vector<persistence::LibraryRoot>> LocalCatalogue::roots() const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -82,7 +82,7 @@ core::Result<std::vector<persistence::LibraryRoot>> Catalogue::roots() const {
     return library->roots();
 }
 
-core::Result<void> Catalogue::add_root(const std::string& raw_path) {
+core::Result<void> LocalCatalogue::add_root(const std::string& raw_path) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -90,7 +90,7 @@ core::Result<void> Catalogue::add_root(const std::string& raw_path) {
     return library->add_root(raw_path);
 }
 
-core::Result<void> Catalogue::remove_root(const std::string& raw_path) {
+core::Result<void> LocalCatalogue::remove_root(const std::string& raw_path) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -99,8 +99,8 @@ core::Result<void> Catalogue::remove_root(const std::string& raw_path) {
 }
 
 core::Result<persistence::LibraryPage>
-Catalogue::query(const persistence::LibraryQuery& request,
-                 const core::CancellationToken& cancellation) const {
+LocalCatalogue::query(const persistence::LibraryQuery& request,
+                      const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -109,8 +109,8 @@ Catalogue::query(const persistence::LibraryQuery& request,
 }
 
 core::Result<std::vector<std::string>>
-Catalogue::paths(const persistence::LibraryQuery& request,
-                 const core::CancellationToken& cancellation) const {
+LocalCatalogue::paths(const persistence::LibraryQuery& request,
+                      const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -119,8 +119,8 @@ Catalogue::paths(const persistence::LibraryQuery& request,
 }
 
 core::Result<persistence::LibraryPage>
-Catalogue::filter(const query::CompiledTkq& compiled, const std::size_t offset,
-                  const std::size_t limit, const core::CancellationToken& cancellation) const {
+LocalCatalogue::filter(const query::CompiledTkq& compiled, const std::size_t offset,
+                       const std::size_t limit, const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -129,8 +129,8 @@ Catalogue::filter(const query::CompiledTkq& compiled, const std::size_t offset,
 }
 
 core::Result<std::vector<unsigned>>
-Catalogue::ratings(const std::vector<std::string>& hashes,
-                   const core::CancellationToken& cancellation) const {
+LocalCatalogue::ratings(const std::vector<std::string>& hashes,
+                        const core::CancellationToken& cancellation) const {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
@@ -138,8 +138,8 @@ Catalogue::ratings(const std::vector<std::string>& hashes,
     return library->ratings(hashes, cancellation);
 }
 
-core::Result<void> Catalogue::set_rating(const std::string& hash, const bool album,
-                                         const unsigned rating) {
+core::Result<void> LocalCatalogue::set_rating(const std::string& hash, const bool album,
+                                              const unsigned rating) {
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));

@@ -53,7 +53,7 @@ void require(const bool condition, const std::string_view message) {
 }
 
 void catalogue_methods_answer_over_the_wire(const std::filesystem::path& database) {
-    engine::Catalogue catalogue{database};
+    engine::LocalCatalogue catalogue{database};
     protocol::Dispatcher dispatcher;
     engine::register_catalogue_methods(dispatcher, catalogue);
 
@@ -131,7 +131,7 @@ void catalogue_methods_answer_over_the_wire(const std::filesystem::path& databas
 }
 
 void jobs_submit_and_cancel_over_the_wire(const std::filesystem::path& database) {
-    engine::Catalogue catalogue{database};
+    engine::LocalCatalogue catalogue{database};
 
     std::mutex mutex;
     std::vector<protocol::Event> events;

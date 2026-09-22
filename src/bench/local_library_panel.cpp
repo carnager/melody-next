@@ -442,7 +442,7 @@ void LocalLibraryPanel::pump() {
             // ADR-0220: the task is given the core's front door, never the
             // database. Errors now surface from the individual call rather
             // than from opening, which is the caller's concern anyway.
-            engine::Catalogue catalogue{path};
+            engine::LocalCatalogue catalogue{path};
             return work(catalogue);
         }));
 }
@@ -1247,7 +1247,7 @@ void LocalLibraryPanel::startScan() {
             // ADR-0220: ask the core, do not open its database. The job shape
             // around this call -- pool, poll timer, token, watcher -- is
             // unchanged; only the database path stops crossing the boundary.
-            engine::Catalogue catalogue{path};
+            engine::LocalCatalogue catalogue{path};
             auto result = catalogue.scan(cancellation, *progress);
             if (result) {
                 outcome.result = *result;
@@ -1327,7 +1327,7 @@ void LocalLibraryPanel::updateArtwork() {
                     return QImage{};
                 }
                 // ADR-0220: ask the core, do not open its database.
-                const engine::Catalogue catalogue{path};
+                const engine::LocalCatalogue catalogue{path};
                 const auto source = catalogue.artwork_source(key.toStdString(), cancellation);
                 return source && source->has_value() ? ui::loadLocalArtwork(**source, cancellation)
                                                      : QImage{};

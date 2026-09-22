@@ -425,7 +425,7 @@ DynamicPlaylistService::Result
 queryDynamicLocalLibrary(const std::filesystem::path& database, const query::CompiledTkq& compiled,
                          const core::CancellationToken& cancellation) {
     // ADR-0220: ask the core, do not open its database.
-    const engine::Catalogue catalogue{database};
+    const engine::LocalCatalogue catalogue{database};
     auto paths = catalogue.filter_paths(compiled, cancellation);
     if (!paths)
         return std::unexpected(paths.error());

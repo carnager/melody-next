@@ -322,6 +322,15 @@ add_test(
 # format. Links no Qt.
 # ADR-0219/0222: jobs, including the fault injection proving a long job cannot
 # starve the control path.
+# ADR-0220: the same catalogue interface, local and remote, answering the same.
+add_executable(trackknife_remote_catalogue_tests remote_catalogue_test.cpp)
+target_link_libraries(
+    trackknife_remote_catalogue_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests)
+
 # ADR-0222: the real client against the real server.
 add_executable(trackknife_protocol_roundtrip_tests protocol_roundtrip_test.cpp)
 target_link_libraries(

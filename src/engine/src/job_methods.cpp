@@ -82,7 +82,7 @@ void register_job_methods(protocol::Dispatcher& dispatcher, JobRegistry& registr
     });
 }
 
-void register_catalogue_jobs(JobCatalog& jobs, Catalogue& catalogue) {
+void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
     jobs.on("catalogue.scan", [&catalogue](const Json&) -> core::Result<JobRegistry::Work> {
         return [&catalogue](const core::CancellationToken& token,
                             const JobRegistry::Reporter& report) {

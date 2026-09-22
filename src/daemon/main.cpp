@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     // The two stores the engine owns. Both are opened eagerly so a migration
     // failure surfaces now rather than in the response to some client's first
     // request, and so both exist on disk once the engine says it is listening.
-    trackknife::engine::Catalogue catalogue{state_directory / "library.sqlite3"};
+    trackknife::engine::LocalCatalogue catalogue{state_directory / "library.sqlite3"};
     if (const auto prepared = catalogue.prepare(); !prepared) {
         std::cerr << "tkengine: could not open the catalogue: " << prepared.error().message << "\n";
         return EXIT_FAILURE;

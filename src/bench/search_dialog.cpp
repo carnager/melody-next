@@ -644,7 +644,7 @@ void SearchDialog::startSearch() {
                                token = cancellation_.token()]() {
                 Outcome outcome;
                 // ADR-0220: ask the core, do not open its database.
-                const engine::Catalogue catalogue{database};
+                const engine::LocalCatalogue catalogue{database};
                 auto paths = catalogue.filter_paths(*shared, token);
                 if (!paths) {
                     outcome.error = displayText(paths.error().message);
@@ -692,7 +692,7 @@ void SearchDialog::startSearch() {
             std::vector<std::array<std::int64_t, 6>> histories;
             if (needs_history) {
                 // ADR-0220: ask the core, do not open its database.
-                const engine::Catalogue catalogue{database};
+                const engine::LocalCatalogue catalogue{database};
                 std::vector<persistence::LibraryHistorySource> sources;
                 for (const auto& row : rows) {
                     if (token.is_cancellation_requested()) {

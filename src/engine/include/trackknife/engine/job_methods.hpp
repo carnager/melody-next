@@ -36,6 +36,9 @@ void register_job_methods(protocol::Dispatcher& dispatcher, JobRegistry& registr
 
 // Registers catalogue.scan, the first real job: long, mutating, cancellable
 // and progress-reporting.
-void register_catalogue_jobs(JobCatalog& jobs, Catalogue& catalogue);
+// Takes a LocalCatalogue, not the interface: scanning is a local act by
+// definition -- an engine scans the files it can see, and a client asking a
+// remote engine to scan is submitting a job to that engine, not proxying one.
+void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 
 } // namespace trackknife::engine

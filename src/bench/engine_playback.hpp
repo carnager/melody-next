@@ -14,6 +14,7 @@
 #include <QThreadPool>
 #include <QTimer>
 
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -43,7 +44,15 @@ class EnginePlayback final : public QObject {
     explicit EnginePlayback(const CatalogueSource& catalogues, QObject* parent = nullptr);
     ~EnginePlayback() override;
 
-    [[nodiscard]] bool active() const noexcept { return client_ != nullptr; }
+    // Connected now, not "was connected once". An engine can be restarted
+    // under a running window, and a client that never notices keeps sending
+    // transport commands into a dead socket.
+    [[nodiscard]] bool active() const;
+
+    // The engine's queue, asked for rather than remembered. Used when a window
+    // attaches to an engine that is already playing: the queue is the engine's
+    // and this client has never seen it.
+    [[nodiscard]] std::vector<LocalTrackRow> queueEntries() const;
 
     // What the engine last told us. Cached so painting transport does not
     // make a blocking call on the UI thread, and refreshed by events.
@@ -95,8 +104,17 @@ class EnginePlayback final : public QObject {
   signals:
     // The engine's state changed. Emitted on this object's thread.
     void changed();
+    // A connection was established -- at startup, or again after the engine
+    // was restarted. Whoever owns this hands over the settings the engine
+    // cannot know and attaches to whatever it is already playing.
+    void connected();
 
   private:
+    // Connects if one is configured. Answers whether a connection now exists.
+    bool open();
+    // Drops a dead connection and tries again. Cheap when connected.
+    void maintain();
+
     // One worker, so commands reach the socket in the order they were made.
     // Two threads racing would let playback.play arrive before the queue it
     // names -- and the engine, serving one connection in order, would faithfully
@@ -105,7 +123,9 @@ class EnginePlayback final : public QObject {
     void send(const QString& method, protocol::Json params);
     void adopt(const protocol::Json& payload);
 
+    std::filesystem::path socket_;
     std::unique_ptr<protocol::Client> client_;
+    QTimer* reconnect_timer_{nullptr};
     QThreadPool pool_;
     // The engine does not broadcast position -- it moves continuously and
     // would be a storm of events carrying nothing (ADR-0222). A client that

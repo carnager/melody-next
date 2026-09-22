@@ -18,9 +18,33 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
     if (!catalogues.usingEngine()) {
         return;
     }
-    auto client = protocol::Client::connect(catalogues.socket());
+    socket_ = catalogues.socket();
+    static_cast<void>(open());
+
+    // An engine is a separate process with its own lifetime: it can be
+    // restarted, or started after the window. Without this the only way back
+    // is to restart the window.
+    reconnect_timer_ = new QTimer(this);
+    reconnect_timer_->setInterval(3'000);
+    connect(reconnect_timer_, &QTimer::timeout, this, [this] { maintain(); });
+    reconnect_timer_->start();
+
+    position_timer_ = new QTimer(this);
+    position_timer_->setInterval(500);
+    connect(position_timer_, &QTimer::timeout, this, [this] {
+        const auto status = state().status;
+        if (status != QStringLiteral("playing") && status != QStringLiteral("loading")) {
+            return;
+        }
+        send(QStringLiteral("playback.state"), protocol::Json::object());
+    });
+    position_timer_->start();
+}
+
+bool EnginePlayback::open() {
+    auto client = protocol::Client::connect(socket_);
     if (!client) {
-        return;
+        return false;
     }
     client_ = std::move(*client);
 
@@ -44,21 +68,93 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
         }
     });
 
-    // Ask once, so the workspace is correct before the first event arrives.
+    // Asked once, so the workspace is correct before the first event arrives.
     if (auto answer = client_->call("playback.state")) {
         adopt(*answer);
     }
+    return true;
+}
 
-    position_timer_ = new QTimer(this);
-    position_timer_->setInterval(500);
-    connect(position_timer_, &QTimer::timeout, this, [this] {
-        const auto status = state().status;
-        if (status != QStringLiteral("playing") && status != QStringLiteral("loading")) {
-            return;
+void EnginePlayback::maintain() {
+    if (client_ && client_->connected()) {
+        return;
+    }
+    if (client_) {
+        // Calls on a dead connection fail rather than block, so this does not
+        // hold the UI thread.
+        pool_.waitForDone();
+        client_->close();
+        client_.reset();
+        {
+            const std::lock_guard guard{mutex_};
+            state_ = State{};
         }
-        send(QStringLiteral("playback.state"), protocol::Json::object());
-    });
-    position_timer_->start();
+        emit changed();
+    }
+    if (!open()) {
+        return;
+    }
+    emit connected();
+    emit changed();
+}
+
+bool EnginePlayback::active() const { return client_ != nullptr && client_->connected(); }
+
+std::vector<LocalTrackRow> EnginePlayback::queueEntries() const {
+    if (!client_) {
+        return {};
+    }
+    auto answer = client_->call("playback.queue");
+    if (!answer || !answer->contains("entries")) {
+        return {};
+    }
+    std::vector<LocalTrackRow> rows;
+    for (const auto& item : answer->at("entries")) {
+        auto decoded = protocol::decode_raw_path(item.value("path", std::string{}));
+        if (!decoded) {
+            continue;
+        }
+        LocalTrackRow row;
+        row.raw_path = std::move(*decoded);
+        // The engine's identity, not a fresh one: the entry the engine says it
+        // is playing has to be findable in this list.
+        if (const auto identity = item.find("entry");
+            identity != item.end() && identity->is_string()) {
+            if (auto parsed = core::StableId::parse(identity->get<std::string>())) {
+                row.entry_id = *parsed;
+            }
+        }
+        if (const auto duration = item.find("duration_ms");
+            duration != item.end() && duration->is_number_integer()) {
+            const auto value = duration->get<std::int64_t>();
+            if (value >= 0) {
+                row.duration_ms = value;
+            }
+        }
+        if (const auto selection = item.find("selection");
+            selection != item.end() && selection->is_object()) {
+            if (const auto stream = selection->find("stream_index");
+                stream != selection->end() && stream->is_number_integer()) {
+                row.selection.stream_index = stream->get<int>();
+            }
+            if (const auto subsong = selection->find("subsong_index");
+                subsong != selection->end() && subsong->is_number_integer()) {
+                row.selection.subsong_index = subsong->get<int>();
+            }
+        }
+        if (const auto segment = item.find("segment");
+            segment != item.end() && segment->is_object()) {
+            formats::SampleRange range;
+            range.start_sample = segment->value("start_sample", std::int64_t{0});
+            if (const auto end = segment->find("end_sample");
+                end != segment->end() && end->is_number_integer()) {
+                range.end_sample = end->get<std::int64_t>();
+            }
+            row.segment = range;
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
 }
 
 EnginePlayback::~EnginePlayback() {

@@ -457,6 +457,12 @@ class BenchMainWindow final : public QMainWindow {
     // is why jumping to the playing track did nothing while an MPD tab was
     // visible: it looked for a local track in the MPD queue.
     [[nodiscard]] bool playbackIsMpd() const;
+    // Adopts whatever the engine is already playing. An engine outlives the
+    // window, so a window that only learns about playback by having started it
+    // shows nothing after a restart while the music is still going.
+    void reattachToEngine();
+    // Points the workspace at an entry the engine is playing.
+    void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
     // True when playback belongs to an engine rather than to this process.
     [[nodiscard]] bool playingOnEngine() const;
     // The transport view when the engine owns playback: the workspace's own

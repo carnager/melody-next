@@ -992,6 +992,74 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
             .arg(local_replaygain_button_->text().mid(4)));
 }
 
+void BenchMainWindow::reattachToEngine() {
+    if (!playingOnEngine()) {
+        return;
+    }
+    const auto state = engine_playback_->state();
+    if (state.entry.isEmpty()) {
+        return; // The engine holds nothing; there is nothing to attach to.
+    }
+    const auto playing = core::StableId::parse(state.entry.toStdString());
+    if (!playing) {
+        return;
+    }
+
+    // The list it came from is usually still open: identities are persisted
+    // with the document (ADR-0221), so the entry the engine names is findable
+    // without inventing a tab.
+    for (const auto& tab : list_tabs_) {
+        const auto row = tab->model->rowOfEntry(*playing, -1);
+        if (row < 0) {
+            continue;
+        }
+        adoptEngineRow(*tab, row, *playing);
+        return;
+    }
+
+    // Otherwise the queue is the only record of what is playing, so it becomes
+    // a list. The rows carry the engine's identities rather than fresh ones,
+    // or the anchor below would name an entry this list does not contain.
+    auto rows = engine_playback_->queueEntries();
+    if (rows.empty()) {
+        return;
+    }
+    for (auto& row : rows) {
+        row.title = core::escape_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+    }
+    auto* tab = addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                     .kind = persistence::ListKind::scratch,
+                                                     .name = "Playing on the engine",
+                                                     .pinned = false,
+                                                     .dirty = false,
+                                                     .items = {}},
+                           true);
+    if (tab == nullptr) {
+        return;
+    }
+    tab->model->replaceRows(std::move(rows), true);
+    // Titles are filenames until the files have been read; the ordinary probe
+    // queue fills them in rather than a second path for this case.
+    enqueueUnprobedRows(*tab);
+    const auto row = tab->model->rowOfEntry(*playing, -1);
+    if (row >= 0) {
+        adoptEngineRow(*tab, row, *playing);
+    }
+    markTabDirty(*tab);
+    schedulePersist();
+}
+
+void BenchMainWindow::adoptEngineRow(ListTab& tab, const int row, const core::StableId& entry) {
+    playback_.anchors.document = tab.document.id;
+    playback_.anchors.current = entry;
+    playback_.row = row;
+    engine_entry_ = QString::fromStdString(entry.to_string());
+    tab.model->setCurrentSource(tab.model->source(row), row);
+    setActiveLocalList(QString::fromStdString(tab.document.id.to_string()));
+    refreshTransport();
+    refreshPlaybackCursor(true);
+}
+
 bool BenchMainWindow::playbackIsMpd() const {
     const auto mpd_playing =
         mpd_controller_ != nullptr && mpd_controller_->connected() && mpd_controller_->playing();

@@ -20,6 +20,7 @@
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/protocol/message.hpp"
+#include "uicommon/track_row_roles.hpp"
 
 #include <QAction>
 #include <QDir>
@@ -119,6 +120,8 @@ class EnginePlaybackTest final : public QObject {
     void transportControlsDriveTheEngine();
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
+    void aNewWindowAttachesToWhatTheEngineIsPlaying();
+    void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
 
   private:
@@ -400,6 +403,139 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     jump->trigger();
     QCOMPARE(tabs->currentWidget(), playing);
     QCOMPARE(playing->currentIndex().row(), 0);
+
+    (*server)->stop();
+}
+
+// ADR-0220 Phase 2's whole point: the engine outlives the window. A window
+// that only learns about playback by having started it shows nothing after a
+// restart while the music is still going.
+void EnginePlaybackTest::aNewWindowAttachesToWhatTheEngineIsPlaying() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("played.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    core::StableId playing;
+    {
+        BenchMainWindow window;
+        window.show();
+        window.openLocalPaths({raw_path});
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_COMPARE(tabs->count(), 2);
+        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+        QVERIFY(view != nullptr);
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        QVERIFY(model != nullptr);
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+        playing = model->rows().front().entry_id;
+        emit view->doubleClicked(model->index(0, 0));
+        QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
+        // The play follows the queue on the same worker, so the queue landing
+        // does not mean the engine has started yet.
+        QTest::qWait(500);
+        if ((*player)->state().entry.is_nil()) {
+            (*server)->stop();
+            QSKIP("no audio output here, so the engine is not playing anything to attach to");
+        }
+        // The list has to be on disk for the next window to restore it, which
+        // is debounced.
+        QTest::qWait(1'500);
+    }
+
+    // The window is gone; the engine is still playing.
+    QVERIFY(!(*player)->state().entry.is_nil());
+
+    BenchMainWindow reopened;
+    reopened.show();
+    auto* tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    // The restored list is anchored to the engine's entry, without inventing a
+    // second tab for something already open.
+    // The tab holding the engine's entry becomes the current one, because
+    // attaching jumps to what is playing. Asserted on the anchor rather than
+    // on the status: the fixture is under a second long, so by now the engine
+    // has finished it, and "what was playing" is still what the window has to
+    // point at.
+    const auto anchored = [&reopened, &tabs, &playing] {
+        for (auto* view : tabs->findChildren<QTableView*>()) {
+            auto* model = qobject_cast<LocalListModel*>(view->model());
+            if (model == nullptr || model->rowOfEntry(playing, -1) < 0) {
+                continue;
+            }
+            // The row is marked as the playing occurrence, which only
+            // attaching to the engine can do: nothing in a restore knows
+            // which entry another process is playing.
+            const auto row = model->rowOfEntry(playing, -1);
+            return model->index(row, 0).data(ui::track_current_role).toBool() &&
+                   tabs->currentWidget() == view &&
+                   !reopened.property("trackknife-engine-playback").toString().isEmpty();
+        }
+        return false;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(anchored(), 10'000);
+
+    (*server)->stop();
+}
+
+// And when no open list holds it -- the list was deleted, or another client
+// queued it -- the queue is the only record of what is playing, so it becomes
+// one.
+void EnginePlaybackTest::anEngineQueueNoListHoldsBecomesATab() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("stranger.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    engine::QueueEntry queued;
+    queued.source.raw_path = raw_path;
+    (*player)->replace_queue({queued});
+    if (!(*player)->play_entry(queued.entry_id)) {
+        (*server)->stop();
+        QSKIP("no audio output here, so the engine is not playing anything to attach to");
+    }
+
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    const auto listed = [&tabs, &queued] {
+        for (auto* view : tabs->findChildren<QTableView*>()) {
+            auto* model = qobject_cast<LocalListModel*>(view->model());
+            if (model != nullptr && model->rowOfEntry(queued.entry_id, -1) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(listed(), 10'000);
 
     (*server)->stop();
 }

@@ -74,6 +74,13 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
 }
 
 void BenchMainWindow::restoreLocalResume() {
+    if (playingOnEngine()) {
+        // Resume belongs to whoever owns playback. Restoring it here would
+        // start this process's player alongside the engine's, which is the one
+        // thing the workspace must never do.
+        resume_restore_pending_ = false;
+        return;
+    }
     if (!persistence_ || !player_ || !resumeEnabled() ||
         player_->snapshot().state != audio::LocalAuditionState::empty) {
         resume_restore_pending_ = false;

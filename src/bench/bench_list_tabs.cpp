@@ -77,6 +77,12 @@ void BenchMainWindow::initializePersistence() {
     // transport command behind a library query would wait for it.
     engine_playback_ = new EnginePlayback(*catalogue_source_, this);
     connect(engine_playback_, &EnginePlayback::changed, this, [this] { refreshTransport(); });
+    connect(engine_playback_, &EnginePlayback::connected, this, [this] {
+        // A reconnection is a new engine as far as it is concerned: it knows
+        // none of this window's settings, and it may already be playing.
+        applyLocalPlaybackModes();
+        reattachToEngine();
+    });
     if (engine_playback_->active()) {
         // An engine starts with its own defaults and has never heard of this
         // window's settings, so they are handed over the moment the connection
@@ -130,6 +136,9 @@ void BenchMainWindow::initializePersistence() {
         resume_restore_pending_ = true;
         restoreLists(std::move(workspace.lists));
         restoreUpNext();
+        // After the lists, because the entry the engine names is looked for in
+        // them before a tab is invented for it.
+        reattachToEngine();
         if (!error.isEmpty())
             resume_restore_pending_ = false;
         if (error.isEmpty()) {

@@ -446,8 +446,17 @@ how a stale belief about it went unnoticed.
 Consume mode is the known gap in the engine's queue: it decides what plays
 next but does not remove a played entry, which the window does locally.
 
+A window attaches to whatever the engine is already playing. The engine
+outlives the window, so a window that only learns about playback by having
+started it shows nothing after a restart while the music is still going. The
+entry the engine names is looked for in the restored lists first -- identities
+are persisted with the document (ADR-0221), so the list it came from is
+usually still open -- and only when no list holds it does the engine's queue
+become a tab of its own. The connection is retried rather than made once, so
+an engine restarted under a running window is picked up.
+
 Done when: the desktop UI drives a same-machine engine process over the socket,
-and the engine survives the UI exiting mid-playback.
+and the engine survives the UI exiting mid-playback. **Met.**
 
 ### Phase 3 — Network, auth, and client byte access
 

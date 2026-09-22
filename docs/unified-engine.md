@@ -402,33 +402,49 @@ Done when: the desktop UI runs against an engine on another machine with no
 filesystem access to the library, including artwork, waveforms and a tag edit,
 and two connections can be open at once without either becoming "the" authority.
 
-### Two things to leave possible
+### One engine plays at a time
 
-Neither is scheduled. Both become expensive to retrofit, so the protocol should
-not preclude them.
+**Decided.** However many connections are open, exactly one engine is playing.
+Starting playback from a tab on connection B while A is playing stops A and
+starts B. No crossfade between engines, no two queues running, no ambiguity
+about what "next track" means.
 
-**Handing playback between engines.** With every connection speaking the same
-protocol, playing from a tab on connection B while A is playing is just stop-A,
-play-B — client policy, no protocol feature. Two consequences are easy to miss.
-The audio moves with it: playback happens on the engine and sound comes from an
-agent, so unless both engines target the same agent, handing over also changes
-which speakers play. And if they *do* share an agent, it must be released by one
-before the other takes it — a contention point the output selection has to name.
-Second, a listen is recorded by whichever engine served the track, so history
-fragments across machines. That may be right, since the file lives there too,
-but it should be a decision rather than a discovery.
+This is client policy — stop-A then play-B — and needs nothing from the
+protocol. It is chosen for being obvious rather than for being easy: the user
+clicked a track in another library and that library started playing, which is
+what clicking a track has always meant.
 
-**Tabs holding entries from several engines.** Displaying them is easy: carry a
-connection alongside the entry identity. Playing them is the question, because
-the engine owns the queue and engine A cannot address engine B's tracks. The
-clean answer is the byte-access note above — if an engine can be a client, A
-holds the mixed queue and streams B's entries, so queue ownership stays with one
-engine and playback still survives the UI closing. What is lost is gapless
-across the boundary, and any entry whose engine is unreachable mid-queue.
+It also settles two questions that would otherwise need answering:
 
-The concrete requirement both impose on Phase 2: **an entry reference is
-addressable with a connection**, not against a single implicit one. That costs
-nothing to allow for now.
+- **Which agent.** Playback happens on the engine and sound comes from an
+  agent, so a handover can change which speakers play. Because only one engine
+  ever plays, only one ever wants a given agent, and the contention that
+  simultaneous playback would create does not arise. A shared desktop agent is
+  released by A before B takes it, in that order, because the stop precedes the
+  start.
+- **Where history lands.** A listen is recorded by the engine that served the
+  track, so play counts live beside the files they describe. History is
+  therefore per-engine, and a track held on two machines accumulates two
+  separate counts. That is a consequence of the rule, not an oversight — the
+  alternative is an engine writing history for files it does not own.
+
+### Mixed tabs: not now
+
+A tab holding entries from several engines is **not** planned. Displaying them
+would be easy — carry a connection alongside the entry identity — but playing
+them is not, because the engine owns the queue and engine A cannot address
+engine B's tracks.
+
+There is a way out if it is ever wanted: the byte-access note above, letting an
+engine be a client of another engine, so A holds the mixed queue and streams B's
+entries. Melody's agent already streams to players without file access. What it
+would cost is gapless across the boundary, and any entry whose engine goes
+unreachable mid-queue — and "a NAS sleeps halfway through an album" is the case
+such a design has to answer first.
+
+The one requirement this leaves on Phase 2, worth honouring because it is free
+now and expensive later: **an entry reference is addressable with a
+connection**, not against a single implicit one.
 
 ### Phase 4 — Output agents
 

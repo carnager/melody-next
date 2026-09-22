@@ -61,6 +61,14 @@ struct LocalTrackTechnicals {
 };
 
 struct LocalTrackRow {
+    // ADR-0221: identity of this entry in its list, carried so a row stays
+    // addressable as the list is reordered and so saving does not mint a new
+    // identity on every pass. Fresh rows get one immediately; rows restored
+    // from a document adopt the persisted value.
+    //
+    // Excluded from equality below for the same reason as the track itself:
+    // comparisons here ask whether two rows describe the same track.
+    core::StableId entry_id{core::StableId::random()};
     std::string raw_path;
     std::optional<std::string> logical_reference;
     formats::AudioSourceSelection selection;

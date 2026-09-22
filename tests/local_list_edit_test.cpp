@@ -54,7 +54,52 @@ class LocalListEditTest final : public QObject {
     void editsPreserveOccurrencesAndUndo();
     void asynchronousCancellationAndStaleSnapshots();
     void limitsRejectIncompleteEdits();
+    void entryIdentitiesStayDistinctAndSurviveReordering();
 };
+
+// ADR-0221: an entry identity addresses a slot in the list. It must be unique
+// within the model however rows arrive, and must travel with its row when the
+// list is reordered, because ordering is no longer what identifies an entry.
+void LocalListEditTest::entryIdentitiesStayDistinctAndSurviveReordering() {
+    Workspace workspace{{row("A"), row("B"), row("C")}};
+    const auto initial = workspace.model.rows();
+    QCOMPARE(initial.size(), 3U);
+    std::set<core::StableId> distinct;
+    for (const auto& item : initial) {
+        QVERIFY(!item.entry_id.is_nil());
+        distinct.insert(item.entry_id);
+    }
+    QCOMPARE(distinct.size(), 3U);
+
+    // Appending copies of existing rows is ordinary -- duplicating a
+    // selection, or copying within a tab -- and a copy carries its source's
+    // identity. The model must stamp the arrivals instead of admitting a
+    // collision.
+    workspace.model.appendRows({initial[0], initial[0], initial[2]});
+    const auto grown = workspace.model.rows();
+    QCOMPARE(grown.size(), 6U);
+    std::set<core::StableId> all;
+    for (const auto& item : grown) {
+        all.insert(item.entry_id);
+    }
+    QCOMPARE(all.size(), 6U);
+    // The originals keep their identities; only the arrivals are restamped.
+    QCOMPARE(grown[0].entry_id, initial[0].entry_id);
+    QCOMPARE(grown[2].entry_id, initial[2].entry_id);
+    QVERIFY(grown[3].entry_id != initial[0].entry_id);
+    QVERIFY(grown[5].entry_id != initial[2].entry_id);
+    // A restamped copy still describes the same track.
+    QCOMPARE(grown[3], initial[0]);
+
+    auto reversed = grown;
+    std::reverse(reversed.begin(), reversed.end());
+    workspace.model.replaceRows(reversed);
+    const auto after = workspace.model.rows();
+    QCOMPARE(after.size(), 6U);
+    for (std::size_t position = 0; position < after.size(); ++position) {
+        QCOMPARE(after[position].entry_id, grown[grown.size() - 1U - position].entry_id);
+    }
+}
 void LocalListEditTest::albumShuffleRetainsOrderAndOccurrences() {
     std::vector<lists::Entry> entries(8);
     for (auto& item : entries)

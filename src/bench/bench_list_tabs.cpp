@@ -284,6 +284,9 @@ std::vector<persistence::ListDocument> BenchMainWindow::collectDocuments() {
         document.items.reserve(tab->model->rows().size());
         for (const auto& row : tab->model->rows()) {
             persistence::ListItem item{
+                // Carry the row's identity rather than letting ListItem mint a
+                // fresh one, which would reassign every entry on every save.
+                .entry_id = row.entry_id,
                 .source = persistence::ListSource::local,
                 .profile_id = std::nullopt,
                 .source_reference = row.raw_path,
@@ -492,6 +495,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
             continue;
         }
         LocalTrackRow row;
+        row.entry_id = item.entry_id;
         row.raw_path = item.source_reference;
         row.logical_reference = item.logical_reference;
         if (item.source_selection) {

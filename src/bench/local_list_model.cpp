@@ -16,12 +16,27 @@
 #include <cstddef>
 #include <iterator>
 #include <numeric>
+#include <set>
 #include <string_view>
 #include <utility>
 
 namespace trackknife::bench {
 
 namespace {
+
+// ADR-0221: entry identities address a slot, so they must be distinct within
+// one list. Rows arrive here by copy -- duplicating a selection, or copying
+// between tabs -- and a copy carries its source's identity. Stamping incoming
+// collisions keeps the invariant at the insertion boundary, mirroring what
+// ListRepository::replace_all does when the list is written.
+void stamp_distinct_entry_ids(std::vector<LocalTrackRow>& rows,
+                              std::set<trackknife::core::StableId> seen) {
+    for (auto& row : rows) {
+        while (row.entry_id.is_nil() || !seen.insert(row.entry_id).second) {
+            row.entry_id = trackknife::core::StableId::random();
+        }
+    }
+}
 
 [[nodiscard]] std::string file_name_of(const std::string& raw_path) {
     const auto slash = raw_path.find_last_of('/');
@@ -117,6 +132,7 @@ void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows, const bool rem
     } else {
         clearHistory();
     }
+    stamp_distinct_entry_ids(rows, {});
     beginResetModel();
     if (remember) {
         edit.detached = std::move(rows_);
@@ -206,6 +222,11 @@ void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int inser
     if (rows.empty()) {
         return;
     }
+    std::set<trackknife::core::StableId> existing;
+    for (const auto& row : rows_) {
+        existing.insert(row.entry_id);
+    }
+    stamp_distinct_entry_ids(rows, std::move(existing));
     const auto row_count = static_cast<int>(rows_.size());
     const auto target = insertion_row < 0 || insertion_row > row_count ? row_count : insertion_row;
     const auto count = static_cast<int>(rows.size());

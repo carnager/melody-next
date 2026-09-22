@@ -318,6 +318,16 @@ add_test(
             "${CMAKE_CURRENT_SOURCE_DIR}/protocol/protocol-v1-corpus.json"
 )
 
+# ADR-0222: the catalogue methods against a real database, over the wire
+# format. Links no Qt.
+add_executable(trackknife_engine_methods_tests engine_methods_test.cpp)
+target_link_libraries(
+    trackknife_engine_methods_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME engine-methods COMMAND trackknife_engine_methods_tests)
+
 add_executable(trackknife_playback_state_tests playback_state_test.cpp)
 target_link_libraries(
     trackknife_playback_state_tests

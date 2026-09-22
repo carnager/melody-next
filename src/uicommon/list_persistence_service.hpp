@@ -14,6 +14,10 @@
 
 class QThread;
 
+namespace trackknife::engine {
+class Workspace;
+}
+
 namespace trackknife::ui {
 
 struct PersistedWorkspace {

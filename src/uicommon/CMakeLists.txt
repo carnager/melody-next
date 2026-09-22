@@ -33,7 +33,7 @@ add_library(Trackknife::UiCommon ALIAS trackknife_ui_common)
 
 target_link_libraries(
     trackknife_ui_common
-    PUBLIC Qt6::Widgets Trackknife::Core Trackknife::Persistence
+    PUBLIC Qt6::Widgets Trackknife::Core Trackknife::Engine Trackknife::Persistence
            trackknife_project_options
     PRIVATE Qt6::Concurrent Trackknife::Formats trackknife_project_warnings
 )

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-add_library(trackknife_engine STATIC src/catalogue.cpp)
+add_library(trackknife_engine STATIC src/catalogue.cpp src/workspace.cpp)
 add_library(Trackknife::Engine ALIAS trackknife_engine)
 
 target_include_directories(

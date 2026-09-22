@@ -295,11 +295,29 @@ polled; it does not change the shape here. Building engine-owned threading now
 would duplicate the caller's pool and design the job machinery without the
 socket that is its actual requirement.
 
-Two `ListRepository` opens remain, and they are the other half of the door:
-`search_dialog.cpp:358`, and `ui::ListPersistenceService` itself, which owns
-the repository it should be asking. The service is the larger piece — it keeps
-its async callback surface and becomes a client of the engine rather than the
-owner of a database.
+**The gate is met.** No database open remains outside the engine:
+
+```sh
+grep -rn 'LocalLibrary::open\|ListRepository::open' src   # only src/engine, src/persistence
+```
+
+`engine::Workspace` is the other half of the door — lists, connection
+profiles, view presets, saved transformation/output/encoder settings, local
+listening history and saved searches. `ui::ListPersistenceService` now holds a
+`Workspace` rather than a `ListRepository`: it keeps the thread it serialises
+on and the callback surface the widgets above it expect, and has stopped being
+the owner of a database. Its 23 operations were already named and well chosen,
+which is why this was a relocation rather than a redesign.
+
+The two doors differ in one visible way. `Catalogue` opens a connection per
+call, matching what its callers did inline; `Workspace` holds one open,
+because it is written on nearly every user action. That is a choice behind the
+door, not something a caller sees — which is the property that lets either
+become a pool or a socket later.
+
+Still open in this phase: the type coupling (twenty translation units passing
+`ListDocument`, `ListItem` and friends across the boundary as values) and tab
+unification. Neither gates the ownership move that just landed.
 
 Done when: nothing outside the engine opens a `LocalLibrary` or
 `ListRepository`, the UI reaches both only by asking the core, and one tab type

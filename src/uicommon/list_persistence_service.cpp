@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "uicommon/list_persistence_service.hpp"
+#include "trackknife/engine/workspace.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 
 #include <QJsonDocument>
@@ -117,14 +118,16 @@ template <typename Callable> void invokeBlocking(QObject* receiver, Callable&& c
 
 struct ListPersistenceService::State {
     std::filesystem::path database_path;
-    std::optional<persistence::ListRepository> repository;
+    // ADR-0220: the engine owns the database; this service owns the thread it
+    // is reached on and the callback surface the widgets above expect.
+    std::optional<engine::Workspace> workspace;
     QString initialization_error;
 };
 
 ListPersistenceService::ListPersistenceService(std::filesystem::path database_path, QObject* parent)
     : QObject(parent), thread_(new QThread(this)), worker_(new QObject),
       state_(std::make_shared<State>(State{.database_path = std::move(database_path),
-                                           .repository = std::nullopt,
+                                           .workspace = std::nullopt,
                                            .initialization_error = {}})) {
     worker_->moveToThread(thread_);
     connect(thread_, &QThread::finished, worker_, &QObject::deleteLater);
@@ -136,7 +139,7 @@ ListPersistenceService::~ListPersistenceService() {
     if (thread_ == nullptr || worker_ == nullptr) {
         return;
     }
-    invokeBlocking(worker_, [state = state_] { state->repository.reset(); });
+    invokeBlocking(worker_, [state = state_] { state->workspace.reset(); });
     thread_->quit();
     thread_->wait();
 }
@@ -145,14 +148,14 @@ void ListPersistenceService::initialize(WorkspaceCallback callback) {
     const QPointer self{this};
     invokeQueued(worker_, [self, state = state_, callback = std::move(callback)]() mutable {
         PersistedWorkspace snapshot;
-        auto opened = persistence::ListRepository::open(state->database_path);
+        auto opened = engine::Workspace::open(state->database_path);
         if (!opened) {
             state->initialization_error = errorText(opened.error());
         } else {
-            state->repository.emplace(std::move(*opened));
-            auto lists = state->repository->load_all();
-            auto profiles = state->repository->load_profiles();
-            auto presets = state->repository->load_view_presets();
+            state->workspace.emplace(std::move(*opened));
+            auto lists = state->workspace->load_all();
+            auto profiles = state->workspace->load_profiles();
+            auto presets = state->workspace->load_view_presets();
             if (!lists) {
                 state->initialization_error = errorText(lists.error());
             } else if (!profiles) {
@@ -182,10 +185,10 @@ void ListPersistenceService::saveWorkspace(std::vector<persistence::ListDocument
     invokeQueued(worker_, [self, state = state_, lists = std::move(lists),
                            presets = std::move(presets), callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && state->repository) {
-            if (auto stored = state->repository->replace_all(lists); !stored) {
+        if (error.isEmpty() && state->workspace) {
+            if (auto stored = state->workspace->replace_all(lists); !stored) {
                 error = errorText(stored.error());
-            } else if (auto stored_presets = state->repository->replace_view_presets(presets);
+            } else if (auto stored_presets = state->workspace->replace_view_presets(presets);
                        !stored_presets) {
                 error = errorText(stored_presets.error());
             }
@@ -203,8 +206,8 @@ void ListPersistenceService::saveProfiles(std::vector<persistence::ConnectionPro
     invokeQueued(worker_, [self, state = state_, profiles = std::move(profiles),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && state->repository) {
-            if (auto stored = state->repository->replace_profiles(profiles); !stored) {
+        if (error.isEmpty() && state->workspace) {
+            if (auto stored = state->workspace->replace_profiles(profiles); !stored) {
                 error = errorText(stored.error());
             }
         }
@@ -221,7 +224,7 @@ void ListPersistenceService::backupDatabase(std::filesystem::path destination,
     invokeQueued(worker_, [self, state = state_, destination = std::move(destination),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
             auto backup =
@@ -251,11 +254,11 @@ void ListPersistenceService::recordLocalListen(persistence::ListItem source,
     invokeQueued(worker_, [self, state = state_, source = std::move(source), occurrence_id,
                            played_at_ms, callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository)
+        if (error.isEmpty() && !state->workspace)
             error = QStringLiteral("Listening history persistence is not initialized");
         else if (error.isEmpty()) {
             auto stored =
-                state->repository->record_local_listen(source, occurrence_id, played_at_ms);
+                state->workspace->record_local_listen(source, occurrence_id, played_at_ms);
             if (!stored)
                 error = errorText(stored.error());
         }
@@ -285,12 +288,12 @@ void ListPersistenceService::loadListeningHistory(std::vector<persistence::ListI
                            callback = std::move(callback)]() mutable {
         std::vector<std::optional<persistence::LocalListeningHistory>> results;
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository)
+        if (error.isEmpty() && !state->workspace)
             error = QStringLiteral("Listening history persistence is not initialized");
         if (error.isEmpty()) {
             results.reserve(sources.size());
             for (const auto& source : sources) {
-                auto loaded = state->repository->lookup_local_listening_history(source);
+                auto loaded = state->workspace->lookup_local_listening_history(source);
                 if (!loaded) {
                     error = errorText(loaded.error());
                     results.clear();
@@ -317,10 +320,10 @@ void ListPersistenceService::loadMetadataTransformationChains(
     invokeQueued(worker_, [self, state = state_, callback = std::move(callback)]() mutable {
         std::vector<persistence::SavedMetadataTransformationChain> chains;
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            auto loaded = state->repository->load_metadata_transformation_chains();
+            auto loaded = state->workspace->load_metadata_transformation_chains();
             if (!loaded) {
                 error = errorText(loaded.error());
             } else {
@@ -341,10 +344,10 @@ void ListPersistenceService::saveMetadataTransformationChain(
     invokeQueued(worker_, [self, state = state_, chain = std::move(chain),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto stored = state->repository->upsert_metadata_transformation_chain(chain);
+            if (auto stored = state->workspace->upsert_metadata_transformation_chain(chain);
                 !stored) {
                 error = errorText(stored.error());
             }
@@ -361,10 +364,10 @@ void ListPersistenceService::removeMetadataTransformationChain(core::StableId id
     const QPointer self{this};
     invokeQueued(worker_, [self, state = state_, id, callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto removed = state->repository->remove_metadata_transformation_chain(id);
+            if (auto removed = state->workspace->remove_metadata_transformation_chain(id);
                 !removed) {
                 error = errorText(removed.error());
             }
@@ -382,14 +385,14 @@ void ListPersistenceService::loadOutputProfiles(OutputProfilesCallback callback)
         std::vector<persistence::SavedOutputLayoutProfile> layouts;
         std::vector<persistence::SavedDestinationProfile> destinations;
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            auto loaded_layouts = state->repository->load_output_layout_profiles();
+            auto loaded_layouts = state->workspace->load_output_layout_profiles();
             if (!loaded_layouts) {
                 error = errorText(loaded_layouts.error());
             } else {
-                auto loaded_destinations = state->repository->load_destination_profiles();
+                auto loaded_destinations = state->workspace->load_destination_profiles();
                 if (!loaded_destinations) {
                     error = errorText(loaded_destinations.error());
                 } else {
@@ -413,10 +416,10 @@ void ListPersistenceService::loadEncoderPresets(EncoderPresetsCallback callback)
     invokeQueued(worker_, [self, state = state_, callback = std::move(callback)]() mutable {
         std::vector<persistence::SavedEncoderPreset> presets;
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto loaded = state->repository->load_encoder_presets(); loaded) {
+            if (auto loaded = state->workspace->load_encoder_presets(); loaded) {
                 presets = std::move(*loaded);
             } else {
                 error = errorText(loaded.error());
@@ -436,10 +439,10 @@ void ListPersistenceService::saveEncoderPreset(persistence::SavedEncoderPreset p
     invokeQueued(worker_, [self, state = state_, preset = std::move(preset),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto stored = state->repository->upsert_encoder_preset(preset); !stored) {
+            if (auto stored = state->workspace->upsert_encoder_preset(preset); !stored) {
                 error = errorText(stored.error());
             }
         }
@@ -454,10 +457,10 @@ void ListPersistenceService::removeEncoderPreset(core::StableId id, CompletionCa
     const QPointer self{this};
     invokeQueued(worker_, [self, state = state_, id, callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto removed = state->repository->remove_encoder_preset(id); !removed) {
+            if (auto removed = state->workspace->remove_encoder_preset(id); !removed) {
                 error = errorText(removed.error());
             }
         }
@@ -474,10 +477,10 @@ void ListPersistenceService::saveOutputLayoutProfile(persistence::SavedOutputLay
     invokeQueued(worker_, [self, state = state_, profile = std::move(profile),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto stored = state->repository->upsert_output_layout_profile(profile); !stored) {
+            if (auto stored = state->workspace->upsert_output_layout_profile(profile); !stored) {
                 error = errorText(stored.error());
             }
         }
@@ -493,10 +496,10 @@ void ListPersistenceService::removeOutputLayoutProfile(core::StableId id,
     const QPointer self{this};
     invokeQueued(worker_, [self, state = state_, id, callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto removed = state->repository->remove_output_layout_profile(id); !removed) {
+            if (auto removed = state->workspace->remove_output_layout_profile(id); !removed) {
                 error = errorText(removed.error());
             }
         }
@@ -513,10 +516,10 @@ void ListPersistenceService::saveDestinationProfile(persistence::SavedDestinatio
     invokeQueued(worker_, [self, state = state_, profile = std::move(profile),
                            callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto stored = state->repository->upsert_destination_profile(profile); !stored) {
+            if (auto stored = state->workspace->upsert_destination_profile(profile); !stored) {
                 error = errorText(stored.error());
             }
         }
@@ -532,10 +535,10 @@ void ListPersistenceService::removeDestinationProfile(core::StableId id,
     const QPointer self{this};
     invokeQueued(worker_, [self, state = state_, id, callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
-        if (error.isEmpty() && !state->repository) {
+        if (error.isEmpty() && !state->workspace) {
             error = QStringLiteral("List persistence is not initialized");
         } else if (error.isEmpty()) {
-            if (auto removed = state->repository->remove_destination_profile(id); !removed) {
+            if (auto removed = state->workspace->remove_destination_profile(id); !removed) {
                 error = errorText(removed.error());
             }
         }
@@ -576,10 +579,10 @@ void ListPersistenceService::saveLocalResume(std::optional<LocalResumeCheckpoint
         QString error;
         QByteArray payload;
         if (checkpoint) {
-            if (!state->repository)
+            if (!state->workspace)
                 error = QStringLiteral("Playback resume storage is unavailable");
             else {
-                auto key = state->repository->local_listening_key(checkpoint->source);
+                auto key = state->workspace->local_listening_key(checkpoint->source);
                 if (!key)
                     error = errorText(key.error());
                 else {
@@ -621,10 +624,10 @@ void ListPersistenceService::verifyLocalResumeSource(persistence::ListItem sourc
                            expected_key = std::move(expected_key),
                            callback = std::move(callback)]() mutable {
         QString error;
-        if (!state->repository)
+        if (!state->workspace)
             error = QStringLiteral("Playback resume storage is unavailable");
         else {
-            auto key = state->repository->local_listening_key(source);
+            auto key = state->workspace->local_listening_key(source);
             if (!key)
                 error = errorText(key.error());
             else if (QString::fromStdString(*key) != expected_key)
@@ -661,12 +664,12 @@ ListPersistenceService::saveWorkspaceAndWait(std::vector<persistence::ListDocume
     invokeBlocking(
         worker_, [state = state_, lists = std::move(lists), presets = std::move(presets), &error] {
             error = state->initialization_error;
-            if (!error.isEmpty() || !state->repository) {
+            if (!error.isEmpty() || !state->workspace) {
                 return;
             }
-            if (auto stored = state->repository->replace_all(lists); !stored) {
+            if (auto stored = state->workspace->replace_all(lists); !stored) {
                 error = errorText(stored.error());
-            } else if (auto stored_presets = state->repository->replace_view_presets(presets);
+            } else if (auto stored_presets = state->workspace->replace_view_presets(presets);
                        !stored_presets) {
                 error = errorText(stored_presets.error());
             }
@@ -684,7 +687,7 @@ ListPersistenceService::refreshLocalMetadataAndWait(persistence::LocalMetadataRe
         });
     }
     if (QThread::currentThread() == thread_) {
-        if (!state_->initialization_error.isEmpty() || !state_->repository) {
+        if (!state_->initialization_error.isEmpty() || !state_->workspace) {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = state_->initialization_error.isEmpty()
@@ -693,11 +696,11 @@ ListPersistenceService::refreshLocalMetadataAndWait(persistence::LocalMetadataRe
                 .context = {},
             });
         }
-        return state_->repository->refresh_local_metadata(refresh);
+        return state_->workspace->refresh_local_metadata(refresh);
     }
     std::optional<core::Result<persistence::LocalMetadataRefreshResult>> result;
     invokeBlocking(worker_, [state = state_, refresh = std::move(refresh), &result] {
-        if (!state->initialization_error.isEmpty() || !state->repository) {
+        if (!state->initialization_error.isEmpty() || !state->workspace) {
             result = std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = state->initialization_error.isEmpty()
@@ -707,7 +710,7 @@ ListPersistenceService::refreshLocalMetadataAndWait(persistence::LocalMetadataRe
             });
             return;
         }
-        result = state->repository->refresh_local_metadata(refresh);
+        result = state->workspace->refresh_local_metadata(refresh);
     });
     if (!result) {
         return std::unexpected(core::Error{
@@ -729,7 +732,7 @@ ListPersistenceService::relocateLocalSourceAndWait(persistence::LocalSourceReloc
         });
     }
     if (QThread::currentThread() == thread_) {
-        if (!state_->initialization_error.isEmpty() || !state_->repository) {
+        if (!state_->initialization_error.isEmpty() || !state_->workspace) {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = state_->initialization_error.isEmpty()
@@ -738,11 +741,11 @@ ListPersistenceService::relocateLocalSourceAndWait(persistence::LocalSourceReloc
                 .context = {},
             });
         }
-        return state_->repository->relocate_local_source(relocation);
+        return state_->workspace->relocate_local_source(relocation);
     }
     std::optional<core::Result<persistence::LocalSourceRelocationResult>> result;
     invokeBlocking(worker_, [state = state_, relocation = std::move(relocation), &result] {
-        if (!state->initialization_error.isEmpty() || !state->repository) {
+        if (!state->initialization_error.isEmpty() || !state->workspace) {
             result = std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = state->initialization_error.isEmpty()
@@ -752,7 +755,7 @@ ListPersistenceService::relocateLocalSourceAndWait(persistence::LocalSourceReloc
             });
             return;
         }
-        result = state->repository->relocate_local_source(relocation);
+        result = state->workspace->relocate_local_source(relocation);
     });
     if (!result) {
         return std::unexpected(core::Error{

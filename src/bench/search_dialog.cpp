@@ -2,6 +2,7 @@
 
 #include "bench/search_dialog.hpp"
 #include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/workspace.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/formats/probe.hpp"
@@ -355,18 +356,19 @@ void SearchDialog::loadSavedSearches(std::optional<persistence::SavedSearch> wri
     catalog_watcher_.setFuture(
         QtConcurrent::run([database = database_path_, write = std::move(write),
                            remove]() -> core::Result<std::vector<persistence::SavedSearch>> {
-            auto repository = persistence::ListRepository::open(database);
-            if (!repository) {
-                return std::unexpected(repository.error());
+            // ADR-0220: ask the core, do not open its database.
+            auto workspace = engine::Workspace::open(database);
+            if (!workspace) {
+                return std::unexpected(workspace.error());
             }
             if (write) {
                 auto result =
-                    remove ? repository->remove_search(*write) : repository->save_search(*write);
+                    remove ? workspace->remove_search(*write) : workspace->save_search(*write);
                 if (!result) {
                     return std::unexpected(result.error());
                 }
             }
-            return repository->load_saved_searches();
+            return workspace->load_saved_searches();
         }));
 }
 

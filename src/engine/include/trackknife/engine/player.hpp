@@ -76,6 +76,12 @@ class Player final {
     [[nodiscard]] core::Result<void> pause();
     [[nodiscard]] core::Result<void> stop();
     [[nodiscard]] core::Result<void> seek_ms(std::int64_t position_ms);
+
+    // Output volume in percent [0, 100]. It belongs to the engine because the
+    // engine owns the output: two clients watching the same engine must see
+    // the same volume, and a client that exits must not take its setting with
+    // it.
+    [[nodiscard]] core::Result<void> set_volume_percent(int percent);
     // Direction is +1 or -1. Answers not_found when the modes and order say
     // there is nowhere to go, which is how repeat-off at the end reports.
     [[nodiscard]] core::Result<void> step(int direction);
@@ -121,6 +127,7 @@ class Player final {
         // from playback.requests; this is enough to show that there are any.
         std::size_t requests{0};
         audio::PlaybackModes modes;
+        int volume_percent{100};
     };
     [[nodiscard]] State state() const;
 

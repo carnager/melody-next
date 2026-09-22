@@ -21,6 +21,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -282,6 +283,8 @@ void BenchMainWindow::buildTransport() {
     connect(previous_action_, &QAction::triggered, this, [this] {
         if (isMpdContext()) {
             mpd_controller_->previous();
+        } else if (playingOnEngine()) {
+            engine_playback_->previous();
         } else {
             playAdjacent(-1);
         }
@@ -296,6 +299,8 @@ void BenchMainWindow::buildTransport() {
     connect(stop_action_, &QAction::triggered, this, [this] {
         if (isMpdContext()) {
             mpd_controller_->stop();
+        } else if (playingOnEngine()) {
+            engine_playback_->stop();
         } else if (player_ != nullptr) {
             ++resume_intent_generation_;
             static_cast<void>(player_->stop());
@@ -306,6 +311,8 @@ void BenchMainWindow::buildTransport() {
     connect(next_action_, &QAction::triggered, this, [this] {
         if (isMpdContext()) {
             mpd_controller_->next();
+        } else if (playingOnEngine()) {
+            engine_playback_->next();
         } else {
             playAdjacent(1);
         }
@@ -435,6 +442,11 @@ void BenchMainWindow::buildTransport() {
     connect(volume_, &QSlider::valueChanged, this, [this](const int value) {
         if (isMpdContext()) {
             mpd_controller_->setVolume(value);
+        } else if (playingOnEngine()) {
+            // The engine owns the output, so the volume lives there: another
+            // client watching the same engine sees the same number, and it
+            // survives this window closing.
+            engine_playback_->setVolume(value);
         } else if (player_ != nullptr) {
             static_cast<void>(player_->set_volume_percent(value));
         }
@@ -969,6 +981,12 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
             .arg(local_replaygain_button_->text().mid(4)));
 }
 
+bool BenchMainWindow::playingOnEngine() const {
+    // Local context only. An MPD tab is still the MPD server's playback, and
+    // that stays true until the authority collapse removes it entirely.
+    return engine_playback_ != nullptr && engine_playback_->active() && !isMpdContext();
+}
+
 int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
     if (tab == nullptr) {
         return -1;
@@ -1103,6 +1121,22 @@ std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlayba
 void BenchMainWindow::playRow(ListTab& tab, const int row,
                               std::optional<std::int64_t> restore_position_ms) {
     ++resume_intent_generation_;
+    if (playingOnEngine()) {
+        // The engine owns the queue, so it is given the whole list rather
+        // than one track: skipping, shuffling and gapless are its decisions
+        // now, and it cannot make them from a single entry.
+        const auto& rows = tab.model->rows();
+        if (row < 0 || static_cast<std::size_t>(row) >= rows.size()) {
+            return;
+        }
+        engine_playback_->play(rows, rows[static_cast<std::size_t>(row)].entry_id);
+        playback_.anchors.document = tab.document.id;
+        playback_.anchors.current = rows[static_cast<std::size_t>(row)].entry_id;
+        playback_.row = row;
+        setActiveLocalList(QString::fromStdString(tab.document.id.to_string()));
+        tab.model->setCurrentSource(tab.model->source(row), row);
+        return;
+    }
     if (player_ == nullptr) {
         return;
     }
@@ -1264,6 +1298,16 @@ void BenchMainWindow::togglePlayPause() {
         mpd_controller_->playPause();
         return;
     }
+    if (playingOnEngine()) {
+        // What the engine last reported, rather than a local snapshot: the
+        // local player is idle here and would always answer "not playing".
+        if (engine_playback_->state().status == QStringLiteral("playing")) {
+            engine_playback_->pause();
+        } else {
+            engine_playback_->resume();
+        }
+        return;
+    }
     if (player_ == nullptr) {
         return;
     }
@@ -1283,6 +1327,10 @@ void BenchMainWindow::togglePlayPause() {
 void BenchMainWindow::seekToMs(const qint64 position_ms) {
     if (isMpdContext()) {
         mpd_controller_->seekTo(position_ms);
+        return;
+    }
+    if (playingOnEngine()) {
+        engine_playback_->seek(position_ms);
         return;
     }
     if (player_ == nullptr) {
@@ -1430,7 +1478,106 @@ void BenchMainWindow::sampleListeningHistory(const audio::LocalAuditionSnapshot&
         });
 }
 
+void BenchMainWindow::refreshEngineTransport() {
+    const auto state = engine_playback_->state();
+    const auto playing = state.status == QStringLiteral("playing");
+    const auto stopped = state.status == QStringLiteral("stopped");
+
+    // Anything the engine could act on enables the control. The local path
+    // gates on its own player's snapshot; here the authority is a process
+    // away, and this client's picture of it is a moment old.
+    play_pause_action_->setEnabled(!stopped || state.queue_size > 0U);
+    stop_action_->setEnabled(!stopped || state.queue_size > 0U);
+    next_action_->setEnabled(state.queue_size > 1U);
+    previous_action_->setEnabled(state.queue_size > 1U);
+    play_pause_action_->setText(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
+    if (transport_icon_playing_ != std::optional{playing}) {
+        transport_icon_playing_ = playing;
+        play_pause_action_->setIcon(
+            style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+    }
+
+    const auto duration_ms =
+        std::clamp<qint64>(state.duration_ms, 0, std::numeric_limits<int>::max());
+    seek_->setEnabled(duration_ms > 0);
+    seek_->setRange(0, static_cast<int>(duration_ms));
+    if (!seeking_) {
+        const QSignalBlocker blocker{seek_};
+        seek_->setValue(static_cast<int>(std::clamp<qint64>(state.position_ms, 0, duration_ms)));
+    }
+    elapsed_->setText(formatTime(state.position_ms));
+    duration_->setText(formatTime(duration_ms));
+
+    // The engine owns the output, so the slider shows what the engine has --
+    // including a change another client made.
+    volume_->setEnabled(true);
+    if (!changing_volume_) {
+        const QSignalBlocker blocker{volume_};
+        volume_->setValue(state.volume_percent);
+    }
+    refreshMuteButton();
+
+    if (stopped || state.path.isEmpty()) {
+        now_playing_->setText(QStringLiteral("Nothing playing"));
+        now_playing_context_->clear();
+        now_playing_->setToolTip({});
+        now_playing_context_->setToolTip({});
+    } else {
+        // Named from the list the entry came from when it is still open, so
+        // the header reads the same as the row; the file name is the fallback
+        // for an entry whose tab has been closed.
+        auto label = QFileInfo{state.path}.fileName();
+        QString context;
+        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+            const auto& rows = tab->model->rows();
+            const auto match = std::find_if(rows.begin(), rows.end(), [&state](const auto& row) {
+                return QString::fromStdString(row.entry_id.to_string()) == state.entry;
+            });
+            if (match != rows.end() && !match->title.empty()) {
+                label = QString::fromStdString(match->title);
+                if (!match->artist.empty()) {
+                    context = QString::fromStdString(match->artist);
+                }
+            }
+            if (context.isEmpty()) {
+                context = QString::fromStdString(tab->document.name);
+            }
+        }
+        now_playing_->setText(label);
+        now_playing_context_->setText(context);
+        now_playing_->setToolTip(state.path);
+        now_playing_context_->setToolTip(state.path);
+    }
+    if (state.entry != engine_entry_) {
+        engine_entry_ = state.entry;
+        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+            const auto& rows = tab->model->rows();
+            const auto match = std::find_if(rows.begin(), rows.end(), [&state](const auto& row) {
+                return QString::fromStdString(row.entry_id.to_string()) == state.entry;
+            });
+            if (match != rows.end()) {
+                const auto row = static_cast<int>(std::distance(rows.begin(), match));
+                playback_.anchors.current = match->entry_id;
+                playback_.row = row;
+                tab->model->setCurrentSource(tab->model->source(row), row);
+            }
+        }
+    }
+
+    // Observable for offscreen tests and diagnostics, the same way the local
+    // path publishes its state.
+    setProperty("trackknife-engine-playback", state.status);
+    refreshPlaybackCursor();
+}
+
 void BenchMainWindow::refreshTransport() {
+    if (playingOnEngine()) {
+        // The workspace's own up-next, resume, listening and gapless belong
+        // to the engine now, so none of the 400 lines below run: doing both
+        // would double-count listening and fight over the queue.
+        refreshEngineTransport();
+        return;
+    }
     refreshPlaybackCursor();
     if (player_ == nullptr) {
         if (isMpdContext()) {

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "bench/engine_playback.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
@@ -451,6 +452,12 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    // True when playback belongs to an engine rather than to this process.
+    [[nodiscard]] bool playingOnEngine() const;
+    // The transport view when the engine owns playback: the workspace's own
+    // up-next, resume, listening and gapless are the engine's job then, so
+    // this is only the controls and the cursor.
+    void refreshEngineTransport();
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);
@@ -685,6 +692,14 @@ class BenchMainWindow final : public QMainWindow {
     // ADR-0220: one place decides whether a catalogue is this process or an
     // engine, and everything that needs one asks here.
     std::unique_ptr<CatalogueSource> catalogue_source_;
+    // ADR-0220: when an engine is configured it owns playback, and the
+    // workspace drives it instead of its own player. Null when there is no
+    // engine, which is the unchanged local path.
+    EnginePlayback* engine_playback_{nullptr};
+    // The entry the engine last reported. The engine advances its own queue,
+    // so without following it the highlighted row would stay on whatever was
+    // double-clicked while something else played.
+    QString engine_entry_;
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

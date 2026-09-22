@@ -73,6 +73,10 @@ void BenchMainWindow::initializePersistence() {
     // Built once, before anything that needs a catalogue: the panel, the
     // search dialog and dynamic playlists all take this rather than a path.
     catalogue_source_ = std::make_unique<CatalogueSource>(database_path_);
+    // Its own connection: the engine serves one connection in order, so a
+    // transport command behind a library query would wait for it.
+    engine_playback_ = new EnginePlayback(*catalogue_source_, this);
+    connect(engine_playback_, &EnginePlayback::changed, this, [this] { refreshTransport(); });
     persistence_ = new ui::ListPersistenceService(database_path_, this);
     persistence_timer_ = new QTimer(this);
     persistence_timer_->setSingleShot(true);

@@ -200,6 +200,11 @@ core::Result<void> Player::play_entry(const core::StableId& entry_id) {
     return start_locked(static_cast<std::size_t>(row));
 }
 
+core::Result<void> Player::set_volume_percent(const int percent) {
+    const std::lock_guard guard{mutex_};
+    return audition_->set_volume_percent(percent);
+}
+
 core::Result<void> Player::resume() {
     const std::lock_guard guard{mutex_};
     return audition_->play();
@@ -330,6 +335,7 @@ Player::State Player::state() const {
     current.queue_size = queue_.size();
     current.requests = requests_.size();
     current.modes = modes_;
+    current.volume_percent = snapshot.volume_percent;
     return current;
 }
 

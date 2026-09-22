@@ -76,6 +76,7 @@ Json to_json(const Player::State& state) {
     rendered["queue_size"] = state.queue_size;
     rendered["requests"] = state.requests;
     rendered["modes"] = modes_to_json(state.modes);
+    rendered["volume_percent"] = state.volume_percent;
     return rendered;
 }
 
@@ -182,6 +183,22 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
         auto sought = player.seek_ms(position->get<std::int64_t>());
         if (!sought) {
             return std::unexpected(std::move(sought.error()));
+        }
+        return to_json(player.state());
+    });
+
+    dispatcher.on("playback.set_volume", [&player](const Json& params) -> core::Result<Json> {
+        const auto percent = params.find("percent");
+        if (percent == params.end() || !percent->is_number_integer()) {
+            return std::unexpected(bad_params("percent must be an integer", "percent"));
+        }
+        const auto value = percent->get<std::int64_t>();
+        if (value < 0 || value > 100) {
+            return std::unexpected(bad_params("percent must be within [0, 100]", "percent"));
+        }
+        auto set = player.set_volume_percent(static_cast<int>(value));
+        if (!set) {
+            return std::unexpected(std::move(set.error()));
         }
         return to_json(player.state());
     });

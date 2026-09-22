@@ -37,6 +37,8 @@ qt_add_library(
     file_scope_view.hpp
     convert_dialog.cpp
     convert_dialog.hpp
+    engine_playback.cpp
+    engine_playback.hpp
     catalogue_source.cpp
     catalogue_source.hpp
     local_list_model.cpp

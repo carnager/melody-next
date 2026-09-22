@@ -395,6 +395,22 @@ held-open response, and binary on a separate channel.
   checking the shape against `queuePosByMPDID` / `queueIDs` / `queueVersion`
   at design time, since it is free to allow for and expensive to retrofit.
 
+**What is built.** The catalogue is on the wire, and so is playback: starting a
+track in a list hands the engine the whole list and asks it to play one entry,
+and the transport buttons, the seek bar and the volume slider drive the engine
+rather than the window's own player. The window follows the engine's reported
+entry, so the highlighted row moves when the engine advances by itself.
+
+Volume belongs to the engine because the engine owns the output. Two clients
+watching one engine see the same number, and closing a window does not take its
+setting with it.
+
+The workspace's own up-next, resume, listening and gapless do not run on that
+path — the engine performs them, and doing both would double-count listening
+and fight over the queue. Reproducing them as *views* of engine state is what
+remains. MPRIS and desktop notifications likewise still follow the local
+player; they move with the authority collapse.
+
 Done when: the desktop UI drives a same-machine engine process over the socket,
 and the engine survives the UI exiting mid-playback.
 

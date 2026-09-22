@@ -400,6 +400,11 @@ void PlaybackWatcher::start() {
         Json previous;
         bool first = true;
         while (running_.load()) {
+            // The engine advances itself. This is the only thread sampling the
+            // player at a fixed interval, and a second clock for the same job
+            // would be two things to keep in step; an advance shows up in the
+            // very next comparison below, so the change is pushed at once.
+            static_cast<void>(player_->advance_if_ended());
             auto current = to_json(player_->state());
             // Position is dropped before comparing: it moves continuously and
             // emitting on it would be a broadcast storm carrying nothing a

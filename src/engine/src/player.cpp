@@ -289,6 +289,56 @@ void Player::set_modes(audio::PlaybackModes modes) {
     refresh_gapless_locked();
 }
 
+bool Player::advance_if_ended() {
+    const std::lock_guard guard{mutex_};
+    const auto snapshot = audition_->snapshot();
+    // A gapless takeover is already the next track playing, so the anchors
+    // follow it before anything decides the output is idle.
+    follow_gapless_locked(snapshot);
+    if (snapshot.state != audio::LocalAuditionState::ended) {
+        advanced_from_.reset();
+        refresh_gapless_locked();
+        return false;
+    }
+    // "Ended" persists until the next load, so without this the same finished
+    // track would dispatch an advance on every tick and race through the
+    // queue. Remembering which entry was advanced from is what makes it once.
+    if (advanced_from_ == anchors_.current) {
+        return false;
+    }
+    advanced_from_ = anchors_.current;
+
+    const QueueView view{queue_};
+    // An explicit ask outranks the order, exactly as it does when the user
+    // presses next -- unless single is active, where the point is to stop.
+    if (!modes_.single_active()) {
+        while (!requests_.empty()) {
+            const auto wanted = requests_.front();
+            requests_.erase(requests_.begin());
+            if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
+                return start_locked(static_cast<std::size_t>(row)).has_value();
+            }
+        }
+    }
+    const auto choice =
+        audio::automatic_playback_row(view, anchors_, modes_, order_,
+                                      {.active = false, .pending_empty = requests_.empty()}, row_);
+    if (!choice) {
+        // Nothing follows: the queue is done, or single mode says stop here.
+        // The anchors stay where they are so a client can still see what was
+        // playing, which is what the window shows after a list finishes.
+        if (modes_.expire_single()) {
+            reset_order_locked();
+        }
+        return false;
+    }
+    const auto started = start_locked(static_cast<std::size_t>(choice->row));
+    if (modes_.expire_single()) {
+        reset_order_locked();
+    }
+    return started.has_value();
+}
+
 Player::Observations Player::observe(const std::int64_t monotonic_ms) {
     const std::lock_guard guard{mutex_};
     const auto snapshot = audition_->snapshot();

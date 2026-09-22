@@ -148,6 +148,18 @@ class Player final {
     };
     [[nodiscard]] State state() const;
 
+    // A track that ended by itself is followed by the next one. Nothing else
+    // does this: a gapless handover covers the case where the continuation was
+    // accepted, and everything else -- a format change, a seek, a queue edit,
+    // single mode expiring -- leaves the output simply stopped. The window
+    // used to notice that and act; an engine that does not notice it stalls at
+    // the end of every track.
+    //
+    // Answers whether it started something, which is only of interest to a
+    // caller that wants to push an event immediately rather than at its next
+    // sample.
+    bool advance_if_ended();
+
   private:
     class QueueView;
 
@@ -180,6 +192,10 @@ class Player final {
     // What was last offered for gapless continuation, so an unchanged
     // decision is not re-sent on every observation.
     std::optional<core::StableId> gapless_entry_;
+    // Which entry an automatic advance was already made from. "Ended" persists
+    // until the next load, so without this the same finished track would
+    // advance on every tick and race through the queue.
+    std::optional<core::StableId> advanced_from_;
     std::uint64_t seen_transitions_{0U};
 };
 

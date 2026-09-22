@@ -399,6 +399,56 @@ void listening_and_resume_are_observed_not_pushed(engine::Player& player) {
 // continuation is offered, withdrawn and recomputed at the right moments --
 // because whether two buffers actually join is the audition service's job and
 // is tested there.
+// A track ends and the next one starts. Nothing in the engine did this: a
+// gapless handover covers the case where the continuation was accepted, and
+// everything else left the output stopped at the end of the track -- which
+// from the outside is playback stalling on every track boundary.
+//
+// The two sources are deliberately different formats, so the continuation is
+// refused and the ordinary advance is what has to run. Handing it two copies
+// of one file would prove the gapless path again and nothing else.
+void a_finished_track_is_followed_by_the_next(engine::Player& player,
+                                              const std::filesystem::path& first,
+                                              const std::filesystem::path& second) {
+    auto modes = player.modes();
+    modes = {};
+    player.set_modes(modes);
+    const std::vector<engine::QueueEntry> entries{entry(first.string()), entry(second.string())};
+    player.replace_queue(entries);
+    if (!player.play_entry(entries[0].entry_id)) {
+        // No output in this environment; the queue rules are covered without
+        // one elsewhere, and pretending to test an advance that cannot happen
+        // would be worse than saying so.
+        std::cerr << "engine player: could not start playback; skipping the advance\n";
+        return;
+    }
+
+    // Sampled the way the engine samples itself. Nothing here waits for a
+    // fixed duration: the fixture's length is not the contract.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    bool followed = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        static_cast<void>(player.advance_if_ended());
+        if (player.state().entry == entries[1].entry_id) {
+            followed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    require(followed, "a finished track is followed by the next one in the queue");
+
+    // And exactly once. "Ended" persists until the next load, so an advance
+    // that did not remember it had already acted would race through the queue
+    // on every tick.
+    for (int tick = 0; tick < 5; ++tick) {
+        static_cast<void>(player.advance_if_ended());
+    }
+    require(player.state().entry == entries[1].entry_id, "sampling again does not advance past it");
+
+    static_cast<void>(player.stop());
+    player.replace_queue({});
+}
+
 void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesystem::path& audio) {
     const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
                                                   entry(audio.string())};
@@ -514,6 +564,12 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    const auto other = directory / "second.opus";
+    if (!materialise(fixtures / "tagged-tone-opus.b64", other)) {
+        std::cerr << "engine player: could not materialise the second fixture\n";
+        return EXIT_FAILURE;
+    }
+
     auto player = engine::Player::create();
     if (!player) {
         // No audio device in this environment. The engine cannot be built
@@ -532,12 +588,13 @@ int main(int argc, char** argv) {
     requests_outrank_the_order_but_only_forward(**player);
     listening_and_resume_are_observed_not_pushed(**player);
     gapless_is_offered_and_recomputed(**player, audio);
+    a_finished_track_is_followed_by_the_next(**player, audio, other);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 13 scenarios\n";
+    std::cout << "engine player: 14 scenarios\n";
     return EXIT_SUCCESS;
 }

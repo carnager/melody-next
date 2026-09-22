@@ -223,35 +223,56 @@ several openable at once. Phase 2 confirms the shape, where it becomes a job
 submitter — stage, submit, stream progress, handle partial failure — which is a
 window with a task, not a view of a collection.
 
-**Measured, and the shape is not what the check above implies.** List
-persistence already has its client-facing service: `ui::ListPersistenceService`
-(767 lines) wraps `ListRepository` behind async callbacks, and exactly one
-`src/bench` site still opens a repository directly
-(`search_dialog.cpp:357`). What is *not* behind a service is the catalogue:
+**Measured, and the direction of the dependency is the whole point.** The rule
+is: *the UI asks the core to do something; the core owns the database, looks
+things up, and hands back what was asked for.* Today it runs the other way.
+
+`src/persistence` has no front door at all — `list_repository.hpp`,
+`local_library.hpp` and friends are the raw classes, and whoever wants data
+opens a database. Two kinds of caller do:
 
 ```sh
-grep -rn 'LocalLibrary::open' src/bench    # 6 sites, 3 files
+grep -rn 'LocalLibrary::open'   src/bench      # 6 sites, 3 files
+grep -rn 'ListRepository::open' src/bench      # 1 site
 ```
 
 `local_library_panel.cpp`, `dynamic_playlist_service.cpp` and
 `search_dialog.cpp` each open the SQLite database **by path** on a worker
-thread and query it. That is the UI owning the catalogue in the most literal
-sense, and it is precisely what cannot survive a process boundary: a remote
-client has no database path. Phase 1's real work is a library query service
-alongside the list one, not an abstract API in general.
+thread and query it. A remote client has no database path, so none of this can
+cross a process boundary.
+
+**`ui::ListPersistenceService` is not the pattern to copy.** It looks like the
+missing service — 767 lines, async callbacks, every list operation behind it —
+but it lives in `uicommon`, which links `Qt6::Widgets`, and it *holds the
+repository*: `std::optional<persistence::ListRepository> repository` opened
+from a `database_path` it owns, serialized on its own `QThread`. That is a
+threading wrapper around UI-owned persistence, not a client of a core-owned
+engine. Building a second one for the catalogue would double down on the wrong
+side of the boundary.
+
+So Phase 1 is not "add another service beside the existing one". It is:
+
+- **the core grows a front door** — an engine-side object owning
+  `ListRepository` and `LocalLibrary`, exposing operations as requests with
+  results, with no Qt in its interface;
+- **`ui::ListPersistenceService` becomes a client of it** rather than the owner
+  of the database, keeping its async callback surface so the widgets above it
+  do not change;
+- **the six catalogue opens become requests** through the same door.
+
+That ordering matters: the door has to exist before either caller can move, and
+its shape is what Phase 2 serialises. Getting it right here is the difference
+between a protocol that falls out of the interface and one bolted onto it.
 
 The twenty `src/bench` translation units that include a persistence or
 operations header are mostly *type* coupling — `ListDocument`, `ListItem`,
-`LocalSourceRevision` crossing the boundary as values. That coupling has to go
-eventually, but it is benign in-process and says nothing about who owns the
-data. Counting it as the phase's gate overstates the work and understates the
-six opens.
+`LocalSourceRevision` crossing as values. That has to go eventually, but it is
+benign in-process and says nothing about who owns the data, so it does not gate
+this phase.
 
-Done when: no `src/bench` translation unit opens a `LocalLibrary` or
-`ListRepository` directly, the catalogue is reached through a service the way
-lists already are, and one tab type serves every list. The header-include
-sweep follows once types stop crossing the boundary, and is tracked separately
-rather than gating this phase.
+Done when: nothing outside the engine opens a `LocalLibrary` or
+`ListRepository`, the UI reaches both only by asking the core, and one tab type
+serves every list. The header-include sweep is tracked separately.
 
 ### Phase 2 — Protocol v1
 

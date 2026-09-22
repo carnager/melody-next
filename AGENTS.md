@@ -59,6 +59,12 @@ repeatedly.
 - **`quick::MpdQueueModel` and its tab type are being deleted, not
   generalised.** They exist only because Trackknife is currently an MPD client
   when talking to the Go daemon. Do not build new abstractions over them.
+- **The UI asks; the core answers.** The UI tells the core what to do and the
+  core owns the database, looks things up, and returns what was asked for.
+  Nothing in `src/bench` or `src/uicommon` should open a `LocalLibrary` or a
+  `ListRepository`, or hold a database path. `ui::ListPersistenceService` does
+  both today and is being moved to the other side of that line, not copied --
+  do not model new code on it.
 - **Melody's daemon is not the place for new server-side features.** Its
   catalogue, scanner, tagging, query, history and Last.fm code are all retired
   in favour of the C++ engine, which already implements them at greater depth.

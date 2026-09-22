@@ -6,6 +6,7 @@
 // itself is unchanged; it simply lives somewhere a headless engine can reach.
 
 #include "trackknife/audio/album_grouping.hpp"
+#include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/resume_checkpoint.hpp"
@@ -500,9 +501,68 @@ void grouping_is_refused_rather_than_truncated() {
     require(refused, "an accumulated budget overrun must be refused");
 }
 
+void only_audible_playback_counts_as_listening() {
+    namespace audio = trackknife::audio;
+    auto snapshot = playing_snapshot();
+    snapshot.raw_path = "/music/track.flac";
+    snapshot.playback_instance = 7;
+    snapshot.position_sample = 22'050;
+    snapshot.end_sample = 44'100 * 200;
+
+    const auto base = audio::listen_observation(snapshot);
+    require(base.qualified(), "ordinary playback is creditable");
+    require(base.identity == "7", "the playback instance is the identity");
+    require(base.position_seconds == 0.5, "position converts to seconds");
+    require(base.duration_seconds == 200.0, "duration converts to seconds");
+    require(base.playing, "playing audible output counts");
+
+    // The instance distinguishes replaying a file from continuing it, so
+    // without one there is nothing to accumulate against.
+    auto anonymous = snapshot;
+    anonymous.playback_instance = 0;
+    require(!audio::listen_observation(anonymous).qualified(),
+            "a snapshot with no playback instance is not creditable");
+
+    auto unrevisioned = snapshot;
+    unrevisioned.source_revision.reset();
+    require(!audio::listen_observation(unrevisioned).qualified(),
+            "an unrevisioned source is not creditable");
+
+    auto pathless = snapshot;
+    pathless.raw_path.clear();
+    require(!audio::listen_observation(pathless).qualified(),
+            "a snapshot with no source is not creditable");
+
+    // Time only counts while the user can actually hear it.
+    auto unavailable = snapshot;
+    unavailable.output_target_available = false;
+    require(audio::listen_observation(unavailable).qualified(),
+            "an unavailable output does not make the snapshot uncreditable");
+    require(!audio::listen_observation(unavailable).playing,
+            "time does not accumulate while the output is unavailable");
+
+    auto suspended = snapshot;
+    suspended.output_suspended = true;
+    require(!audio::listen_observation(suspended).playing,
+            "time does not accumulate while the output is suspended");
+
+    // Draining still counts: the tail of a track is still being heard.
+    auto draining = snapshot;
+    draining.state = audio::LocalAuditionState::draining;
+    require(audio::listen_observation(draining).playing, "draining audio is still being heard");
+
+    for (const auto state : {audio::LocalAuditionState::paused, audio::LocalAuditionState::loading,
+                             audio::LocalAuditionState::buffering}) {
+        auto other = snapshot;
+        other.state = state;
+        require(!audio::listen_observation(other).playing, "silence does not accumulate");
+    }
+}
+
 } // namespace
 
 int main() {
+    only_audible_playback_counts_as_listening();
     album_grouping_follows_the_album_artist_and_keeps_list_order();
     a_track_artist_stands_in_for_a_missing_album_artist();
     untitled_rows_each_stand_alone();

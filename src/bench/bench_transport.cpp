@@ -7,6 +7,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "quick/mpd_probe_controller.hpp"
+#include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/melody_agent.hpp"
 #include "uicommon/line_slider.hpp"
@@ -1401,22 +1402,10 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
 
 void BenchMainWindow::sampleListeningHistory(const audio::LocalAuditionSnapshot& snapshot,
                                              const qint64 monotonic_ms, const qint64 wall_ms) {
-    const bool qualified_source = !snapshot.raw_path.empty() && snapshot.source_revision &&
-                                  snapshot.playback_instance != 0 && snapshot.format &&
-                                  snapshot.format->sample_rate > 0;
-    const auto identity =
-        qualified_source ? std::to_string(snapshot.playback_instance) : std::string{};
-    const double rate = qualified_source ? snapshot.format->sample_rate : 1;
-    const double duration = qualified_source && snapshot.end_sample
-                                ? static_cast<double>(*snapshot.end_sample) / rate
-                                : 0;
-    const double position =
-        qualified_source ? static_cast<double>(snapshot.position_sample) / rate : 0;
-    const bool playing = qualified_source &&
-                         (snapshot.state == audio::LocalAuditionState::playing ||
-                          snapshot.state == audio::LocalAuditionState::draining) &&
-                         snapshot.output_target_available && !snapshot.output_suspended;
-    if (!local_listen_accounting_.observe(identity, duration, position, playing, monotonic_ms) ||
+    const auto observation = audio::listen_observation(snapshot);
+    if (!local_listen_accounting_.observe(observation.identity, observation.duration_seconds,
+                                          observation.position_seconds, observation.playing,
+                                          monotonic_ms) ||
         !persistence_)
         return;
     persistence::ListItem source;

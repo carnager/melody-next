@@ -63,6 +63,11 @@ class SettingsDialog final : public QDialog {
     static constexpr auto startup_context_key = "startup/context";
     static constexpr auto restore_playback_key = "playback/restore-paused";
     static constexpr auto music_root_key = "mpd/music-root";
+    // ADR-0220: empty means the library is opened in this process, which is
+    // what it has always done. A socket path routes it through an engine
+    // instead, so pointing at one is a deliberate act and the default is
+    // unchanged behaviour.
+    static constexpr auto library_engine_socket_key = "library/engine-socket";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";

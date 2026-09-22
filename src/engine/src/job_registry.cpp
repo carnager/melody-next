@@ -19,7 +19,7 @@ JobRegistry::~JobRegistry() {
     wait_all();
 }
 
-void JobRegistry::emit(const protocol::Event& event) {
+void JobRegistry::publish(const protocol::Event& event) {
     // Serialised because jobs run concurrently and a sink is usually a single
     // socket. Holding the lock across the call also means a sink cannot
     // observe a half-written event.
@@ -46,7 +46,7 @@ core::StableId JobRegistry::submit(std::string name, Work work) {
     const Reporter reporter = [this, identity](protocol::Json progress) {
         protocol::Json data = progress.is_object() ? std::move(progress) : protocol::Json::object();
         data["job_id"] = identity;
-        emit(protocol::Event{.name = "job.progress", .data = std::move(data)});
+        publish(protocol::Event{.name = "job.progress", .data = std::move(data)});
     };
 
     std::thread worker{[this, job_id, identity, name = std::move(name), work = std::move(work),
@@ -61,7 +61,7 @@ core::StableId JobRegistry::submit(std::string name, Work work) {
         // Retire before the final event so a client acting on job.finished
         // cannot find the job still listed as running.
         retire(job_id);
-        emit(protocol::Event{.name = "job.finished", .data = std::move(data)});
+        publish(protocol::Event{.name = "job.finished", .data = std::move(data)});
     }};
 
     const std::lock_guard guard{mutex_};

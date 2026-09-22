@@ -2,6 +2,7 @@
 
 #include "bench/local_library_panel.hpp"
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/settings_dialog.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "ui/server_library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
@@ -165,6 +166,25 @@ class LibraryModel final : public QStandardItemModel {
 
 LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidget* parent)
     : QWidget(parent), database_path_(std::move(database_path)) {
+    // ADR-0220: an engine socket is opt-in. Unset -- which is the default and
+    // what every existing install has -- means the library is opened in this
+    // process exactly as before.
+    const auto configured =
+        QSettings{}
+            .value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
+            .toString();
+    if (!configured.isEmpty()) {
+        engine_socket_ = configured.toStdString();
+        auto client = protocol::Client::connect(engine_socket_);
+        if (client) {
+            engine_client_ = std::move(*client);
+        } else {
+            // Falling back to the local database rather than leaving the
+            // panel dead: an unreachable engine should cost the user the
+            // engine, not their library.
+            engine_failure_ = text(client.error().message);
+        }
+    }
     setObjectName(QStringLiteral("bench-local-library"));
     pool_.setMaxThreadCount(2);
     artwork_pool_.setMaxThreadCount(1);
@@ -395,6 +415,16 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     });
     reloadTree();
     loadRoots();
+    // Said once, after the first load has had a chance to set its own text.
+    // A configured engine that could not be reached is something the user
+    // asked for and did not get, so it is reported rather than silently
+    // becoming a local library that looks identical.
+    if (!engine_failure_.isEmpty()) {
+        QTimer::singleShot(0, this, [this] {
+            status_->setText(tr("Using the local library: the engine at %1 is unreachable (%2)")
+                                 .arg(pathLabel(engine_socket_.string()), engine_failure_));
+        });
+    }
 }
 
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }
@@ -438,10 +468,14 @@ void LocalLibraryPanel::pump() {
     completion_ = std::move(task.done);
     querying_ = true;
     query_watcher_.setFuture(
-        QtConcurrent::run(&pool_, [path = database_path_, work = std::move(task.work)] {
+        QtConcurrent::run(&pool_, [path = database_path_, client = engine_client_.get(),
+                                   work = std::move(task.work)] {
             // ADR-0220: the task is given the core's front door, never the
-            // database. Errors now surface from the individual call rather
-            // than from opening, which is the caller's concern anyway.
+            // database, and never learns which side of a socket it is on.
+            if (client != nullptr) {
+                engine::RemoteCatalogue catalogue{*client};
+                return work(catalogue);
+            }
             engine::LocalCatalogue catalogue{path};
             return work(catalogue);
         }));

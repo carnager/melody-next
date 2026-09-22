@@ -616,6 +616,17 @@ if(TRACKKNIFE_BUILD_UI)
     target_compile_definitions(trackknife_m3u8_tests PRIVATE
         TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME m3u8 COMMAND trackknife_m3u8_tests)
+    # ADR-0220: the library panel routed through an engine by a setting.
+    qt_add_executable(trackknife_library_panel_engine_tests library_panel_engine_test.cpp)
+    target_link_libraries(
+        trackknife_library_panel_engine_tests
+        PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
+                trackknife_project_options trackknife_project_warnings
+    )
+    add_test(NAME library-panel-engine COMMAND trackknife_library_panel_engine_tests)
+    set_tests_properties(library-panel-engine PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+
     # ADR-0220 Phase 2: the Qt side against a real engine over a real socket.
     qt_add_executable(trackknife_engine_connection_tests engine_connection_test.cpp)
     target_link_libraries(

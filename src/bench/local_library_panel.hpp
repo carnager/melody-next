@@ -4,7 +4,9 @@
 
 #include "bench/local_list_model.hpp"
 #include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/remote_catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
+#include "trackknife/protocol/client.hpp"
 
 #include <QCache>
 #include <QFutureWatcher>
@@ -109,6 +111,21 @@ class LocalLibraryPanel final : public QWidget {
     [[nodiscard]] QModelIndexList visibleAlbums() const;
 
     std::filesystem::path database_path_;
+
+    // ADR-0220: when a socket is configured the panel asks an engine instead of
+
+    // opening the database. One client is shared by the task pool, which
+
+    // protocol::Client permits; calls on it therefore serialise, which is
+
+    // acceptable for a two-thread pool and would not be for a larger one.
+
+    std::filesystem::path engine_socket_;
+
+    std::unique_ptr<protocol::Client> engine_client_;
+    // Reported once rather than swallowed: a configured engine that could
+    // not be reached is something the user asked for and did not get.
+    QString engine_failure_;
     QThreadPool pool_;
     QFutureWatcher<Outcome> query_watcher_;
     QFutureWatcher<ScanOutcome> scan_watcher_;

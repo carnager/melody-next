@@ -65,7 +65,9 @@ class JobRegistry final {
         std::thread worker;
     };
 
-    void emit(const protocol::Event& event);
+    // Not named emit: Qt defines that as a macro, and these headers must
+    // stay includable from Qt code even though they use none of it.
+    void publish(const protocol::Event& event);
     void retire(const core::StableId& job_id);
 
     EventSink sink_;

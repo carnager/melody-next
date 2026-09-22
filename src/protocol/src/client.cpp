@@ -87,6 +87,9 @@ void Client::fail_everything(const std::string& reason) {
     for (auto& [id, slot] : pending_) {
         slot->abandoned = true;
     }
+    for (auto& [job_id, job] : jobs_) {
+        job->abandoned = true;
+    }
     arrived_.notify_all();
 }
 
@@ -162,6 +165,34 @@ void Client::read_loop() {
                 continue;
             }
             if (const auto* event = std::get_if<Event>(&*parsed)) {
+                // A job event is delivered to whoever is waiting on that job
+                // as well as to the general handler: run_job must not depend
+                // on a caller having installed one, and a caller that did
+                // install one should still see everything.
+                if (event->name == "job.progress" || event->name == "job.finished") {
+                    const auto identity = event->data.find("job_id");
+                    if (identity != event->data.end() && identity->is_string()) {
+                        std::shared_ptr<RunningJob> waiting;
+                        {
+                            const std::lock_guard guard{mutex_};
+                            if (const auto found = jobs_.find(identity->get<std::string>());
+                                found != jobs_.end()) {
+                                waiting = found->second;
+                            }
+                        }
+                        if (waiting) {
+                            if (event->name == "job.progress") {
+                                if (waiting->on_progress) {
+                                    waiting->on_progress(event->data);
+                                }
+                            } else {
+                                const std::lock_guard guard{mutex_};
+                                waiting->outcome = event->data.value("outcome", Json::object());
+                                arrived_.notify_all();
+                            }
+                        }
+                    }
+                }
                 EventHandler handler;
                 {
                     const std::lock_guard guard{handler_mutex_};
@@ -232,6 +263,58 @@ core::Result<Json> Client::call(const std::string& method, const Json& params,
         return std::unexpected(std::move(error));
     }
     return response.result.value_or(Json{});
+}
+
+core::Result<Json> Client::run_job(const std::string& job, const Json& params,
+                                   const std::function<void(const Json&)>& on_progress,
+                                   const core::CancellationToken& cancellation) {
+    Json submission = Json::object();
+    submission["job"] = job;
+    if (!params.is_null() && !params.empty()) {
+        submission["params"] = params;
+    }
+    auto submitted = call("job.submit", submission);
+    if (!submitted) {
+        return std::unexpected(std::move(submitted.error()));
+    }
+    const auto identity = submitted->find("job_id");
+    if (identity == submitted->end() || !identity->is_string()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                           .message = "the engine did not name the job it started",
+                                           .context = {{.key = "job", .value = job}}});
+    }
+    const auto job_id = identity->get<std::string>();
+
+    auto slot = std::make_shared<RunningJob>();
+    slot->on_progress = on_progress;
+    {
+        const std::lock_guard guard{mutex_};
+        jobs_.emplace(job_id, slot);
+    }
+
+    // No overall timeout: a scan legitimately runs for minutes. What bounds
+    // the wait is the connection dying, which abandons the job, or the caller
+    // cancelling.
+    bool asked_to_stop = false;
+    std::unique_lock lock{mutex_};
+    while (!slot->outcome && !slot->abandoned) {
+        arrived_.wait_for(lock, std::chrono::milliseconds{100});
+        if (!asked_to_stop && cancellation.is_cancellation_requested()) {
+            asked_to_stop = true;
+            lock.unlock();
+            static_cast<void>(call("job.cancel", Json{{"job_id", job_id}}));
+            lock.lock();
+        }
+    }
+    const auto outcome = slot->outcome;
+    jobs_.erase(job_id);
+    if (!outcome) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = failure_.empty() ? "the connection was lost" : failure_,
+                        .context = {{.key = "job", .value = job}}});
+    }
+    return *outcome;
 }
 
 core::Result<void> Client::notify(const std::string& method, const Json& params) {

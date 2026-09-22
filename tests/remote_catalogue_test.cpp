@@ -6,12 +6,14 @@
 // the two implementations disagree about is a bug the workspace would see.
 
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/remote_catalogue.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/query/tkq.hpp"
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -22,6 +24,7 @@ namespace engine = trackknife::engine;
 namespace protocol = trackknife::protocol;
 namespace core = trackknife::core;
 namespace query = trackknife::query;
+namespace persistence = trackknife::persistence;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
@@ -65,6 +68,39 @@ void a_catalogue_behaves_the_same_either_side(engine::Catalogue& catalogue,
     const auto bad = catalogue.set_rating("too-short", false, 3);
     require(!bad, label + ": a short hash is refused");
     require(bad.error().code == core::ErrorCode::invalid_argument, label + ": as a bad argument");
+
+    // Browsing an empty library is a success with nothing in it.
+    const auto artists = catalogue.query({});
+    require(artists.has_value(), label + ": browsing must succeed");
+    require(artists->entries.empty(), label + ": an empty library has no artists");
+    require(!artists->more, label + ": and no further page");
+
+    const auto browse_paths = catalogue.paths({});
+    require(browse_paths.has_value(), label + ": listing paths must succeed");
+    require(browse_paths->empty(), label + ": with nothing to list");
+}
+
+// Adding a folder and scanning it, which is the whole point of pointing at an
+// engine: a remote scan must reach the engine's files, report progress from
+// its events, and leave the library populated.
+void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std::string& label,
+                                        const std::filesystem::path& music) {
+    require(catalogue.add_root(music.string()).has_value(), label + ": adding a root");
+    const auto roots = catalogue.roots();
+    require(roots.has_value() && roots->size() == 1U, label + ": the root is listed");
+    require((*roots)[0].raw_path == music.string(), label + ": with the path given");
+
+    persistence::LibraryScanProgress progress;
+    const auto scanned = catalogue.scan({}, progress);
+    require(scanned.has_value(), label + ": scanning must succeed");
+    require(!scanned->cancelled, label + ": and not report a cancellation nobody asked for");
+    // The counters the caller polls must be filled either way; a remote scan
+    // that finishes silently is indistinguishable from one that did nothing.
+    require(progress.visited.load() > 0U, label + ": the scan visited something");
+
+    require(catalogue.remove_root(music.string()).has_value(), label + ": removing a root");
+    const auto after = catalogue.roots();
+    require(after.has_value() && after->empty(), label + ": the root is gone");
 }
 
 void what_the_remote_does_not_expose_says_so(engine::RemoteCatalogue& remote) {
@@ -95,6 +131,14 @@ int main() {
     const auto socket = directory / "engine.sock";
     auto server = engine::Server::listen(socket, dispatcher);
     require(server.has_value(), "the engine must bind");
+
+    // A remote scan is a job, so the engine must actually offer jobs. Without
+    // these the submission answers `unsupported`, which is what a client
+    // talking to an engine that does not scan would correctly see.
+    engine::JobRegistry jobs{(*server)->sink()};
+    engine::JobCatalog job_catalogue;
+    engine::register_catalogue_jobs(job_catalogue, local);
+    engine::register_job_methods(dispatcher, jobs, job_catalogue);
     (*server)->start();
 
     auto client = protocol::Client::connect(socket);
@@ -103,6 +147,17 @@ int main() {
 
     a_catalogue_behaves_the_same_either_side(local, "local");
     a_catalogue_behaves_the_same_either_side(remote, "remote");
+
+    // A folder with one real file, so a scan has something to find.
+    const auto music = directory / "music";
+    std::filesystem::create_directory(music);
+    {
+        std::ofstream track{music / "track.flac", std::ios::binary};
+        track << "not really a flac, but a file the walk must visit";
+    }
+    adding_and_scanning_a_folder_works(local, "local", music);
+    adding_and_scanning_a_folder_works(remote, "remote", music);
+
     what_the_remote_does_not_expose_says_so(remote);
 
     (*client)->close();

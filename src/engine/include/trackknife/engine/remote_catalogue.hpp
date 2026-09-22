@@ -51,6 +51,13 @@ class RemoteCatalogue final : public Catalogue {
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const override;
 
+    // Submits catalogue.scan as a job and blocks until it finishes, feeding
+    // the caller's counters from its progress events. The caller sees the
+    // same blocking-call-with-atomics it sees locally.
+    [[nodiscard]] core::Result<persistence::LibraryScanResult>
+    scan(const core::CancellationToken& cancellation,
+         persistence::LibraryScanProgress& progress) override;
+
   private:
     protocol::Client* client_;
 };

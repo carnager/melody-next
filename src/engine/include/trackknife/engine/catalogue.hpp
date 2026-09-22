@@ -37,9 +37,13 @@ namespace trackknife::engine {
 // what lets a remote implementation simply block rather than forcing the
 // workspace to become asynchronous.
 //
-// `scan` is deliberately absent. It is long, mutating and progress-reporting,
-// which over a socket is a job rather than a call, and a shape that different
-// does not belong behind the same signature. It lives on LocalCatalogue.
+// `scan` is here despite being a job over a socket, and that is a correction
+// of an earlier decision. A job is submit/events/cancel, and a call is not --
+// but the caller this exists for is already on a worker thread, already polls
+// progress counters and already holds a cancellation token. That is the job
+// shape assembled from local parts, so a blocking call with progress atomics
+// is what it wants; the remote side adapts, rather than every caller
+// reassembling the same thing.
 class Catalogue {
   public:
     Catalogue() = default;
@@ -101,6 +105,12 @@ class Catalogue {
     [[nodiscard]] virtual core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const = 0;
+
+    // Walks the configured roots and updates the index. Blocks; `progress` is
+    // a set of atomic counters the caller reads while it runs.
+    [[nodiscard]] virtual core::Result<persistence::LibraryScanResult>
+    scan(const core::CancellationToken& cancellation,
+         persistence::LibraryScanProgress& progress) = 0;
 };
 
 // The catalogue as a database this process can open.
@@ -115,11 +125,9 @@ class LocalCatalogue final : public Catalogue {
     // the moment the engine says it is listening.
     [[nodiscard]] core::Result<void> prepare() const;
 
-    // Walks the configured roots and updates the index. Long, mutating and
-    // cancellable, which is why it is not on the interface: over a socket this
-    // is a job, and a job is not a call.
     [[nodiscard]] core::Result<persistence::LibraryScanResult>
-    scan(const core::CancellationToken& cancellation, persistence::LibraryScanProgress& progress);
+    scan(const core::CancellationToken& cancellation,
+         persistence::LibraryScanProgress& progress) override;
 
     [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const override;
     [[nodiscard]] core::Result<void> add_root(const std::string& raw_path) override;

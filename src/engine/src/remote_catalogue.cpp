@@ -135,6 +135,36 @@ RemoteCatalogue::artwork_source(const std::string& album_key,
     return std::optional<std::string>{std::move(*raw)};
 }
 
+core::Result<persistence::LibraryScanResult>
+RemoteCatalogue::scan(const core::CancellationToken& cancellation,
+                      persistence::LibraryScanProgress& progress) {
+    auto outcome = client_->run_job(
+        "catalogue.scan", Json::object(),
+        [&progress](const Json& reported) {
+            // The counters the caller is already polling are fed from the
+            // job's progress events, so a remote scan looks like a local one.
+            progress.visited.store(reported.value("visited", std::size_t{0}));
+            progress.indexed.store(reported.value("indexed", std::size_t{0}));
+            progress.failed.store(reported.value("failed", std::size_t{0}));
+        },
+        cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    // The job reports its own error in the outcome rather than failing the
+    // submission, since by then the caller has already been told it started.
+    if (const auto failed = outcome->find("error"); failed != outcome->end()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::backend,
+                                           .message = failed->get<std::string>(),
+                                           .context = {}});
+    }
+    progress.visited.store(outcome->value("visited", std::size_t{0}));
+    progress.indexed.store(outcome->value("indexed", std::size_t{0}));
+    progress.failed.store(outcome->value("failed", std::size_t{0}));
+    return persistence::LibraryScanResult{.cancelled = outcome->value("cancelled", false),
+                                          .incomplete = outcome->value("incomplete", false)};
+}
+
 namespace {
 
 // Methods the engine does not expose yet. Reported as unsupported with the
@@ -148,22 +178,92 @@ namespace {
 
 } // namespace
 
-core::Result<void> RemoteCatalogue::add_root(const std::string&) {
-    return std::unexpected(not_exposed("catalogue.add_root"));
+core::Result<void> RemoteCatalogue::add_root(const std::string& raw_path) {
+    auto answer =
+        client_->call("catalogue.add_root", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
 }
 
-core::Result<void> RemoteCatalogue::remove_root(const std::string&) {
-    return std::unexpected(not_exposed("catalogue.remove_root"));
+core::Result<void> RemoteCatalogue::remove_root(const std::string& raw_path) {
+    auto answer =
+        client_->call("catalogue.remove_root", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
 }
+
+namespace {
+
+[[nodiscard]] Json encode_query(const persistence::LibraryQuery& request) {
+    Json params = Json::object();
+    params["kind"] = static_cast<int>(request.kind);
+    params["text"] = request.text;
+    if (request.artist) {
+        params["artist"] = *request.artist;
+    }
+    if (request.album_key) {
+        params["album_key"] = *request.album_key;
+    }
+    if (request.raw_path) {
+        params["path"] = protocol::encode_raw_path(*request.raw_path);
+    }
+    params["offset"] = request.offset;
+    params["limit"] = request.limit;
+    return params;
+}
+
+[[nodiscard]] core::Result<persistence::LibraryPage> decode_page(const Json& answer) {
+    const auto entries = answer.find("entries");
+    if (entries == answer.end() || !entries->is_array()) {
+        return std::unexpected(malformed("entries"));
+    }
+    persistence::LibraryPage page;
+    page.more = answer.value("more", false);
+    for (const auto& value : *entries) {
+        if (!value.is_object()) {
+            return std::unexpected(malformed("entries"));
+        }
+        persistence::LibraryEntry entry;
+        entry.kind = static_cast<persistence::LibraryEntryKind>(value.value("kind", 0));
+        entry.key = value.value("key", std::string{});
+        entry.label = value.value("label", std::string{});
+        entry.artist = value.value("artist", std::string{});
+        entry.album = value.value("album", std::string{});
+        entry.tracks = value.value("tracks", std::size_t{0});
+        entry.available = value.value("available", std::size_t{0});
+        entry.track_number = value.value("track_number", 0);
+        entry.albums = value.value("albums", std::size_t{0});
+        entry.rating_hash = value.value("rating_hash", std::string{});
+        entry.rating = value.value("rating", 0U);
+        page.entries.push_back(std::move(entry));
+    }
+    return page;
+}
+
+} // namespace
 
 core::Result<persistence::LibraryPage>
-RemoteCatalogue::query(const persistence::LibraryQuery&, const core::CancellationToken&) const {
-    return std::unexpected(not_exposed("catalogue.query"));
+RemoteCatalogue::query(const persistence::LibraryQuery& request,
+                       const core::CancellationToken&) const {
+    auto answer = client_->call("catalogue.query", encode_query(request));
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return decode_page(*answer);
 }
 
 core::Result<std::vector<std::string>>
-RemoteCatalogue::paths(const persistence::LibraryQuery&, const core::CancellationToken&) const {
-    return std::unexpected(not_exposed("catalogue.paths"));
+RemoteCatalogue::paths(const persistence::LibraryQuery& request,
+                       const core::CancellationToken&) const {
+    auto answer = client_->call("catalogue.paths", encode_query(request));
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return decode_paths(*answer, "paths");
 }
 
 core::Result<persistence::LibraryPage>

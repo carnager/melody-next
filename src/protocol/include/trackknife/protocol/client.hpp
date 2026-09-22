@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/core/cancellation.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <chrono>
@@ -49,6 +50,21 @@ class Client final {
     call(const std::string& method, const Json& params = Json::object(),
          std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
+    // Submits a job, reports its progress, and waits for it to finish.
+    //
+    // ADR-0222 makes a job submit/events/cancel rather than a long call, but a
+    // caller that is already on a worker thread and already polls progress
+    // counters -- which is what the library panel does -- wants exactly a
+    // blocking call with a progress callback. This is that adaptation, and it
+    // belongs here because jobs are a protocol concept rather than something
+    // each caller should reassemble.
+    //
+    // on_progress runs on the reader thread. Cancelling asks the engine to
+    // stop; the job's own outcome reports whether it did.
+    [[nodiscard]] core::Result<Json> run_job(const std::string& job, const Json& params,
+                                             const std::function<void(const Json&)>& on_progress,
+                                             const core::CancellationToken& cancellation = {});
+
     // Fire and forget. No response is expected and none will come.
     [[nodiscard]] core::Result<void> notify(const std::string& method,
                                             const Json& params = Json::object());
@@ -59,6 +75,12 @@ class Client final {
   private:
     struct Pending final {
         std::optional<Response> response;
+        bool abandoned{false};
+    };
+
+    struct RunningJob final {
+        std::function<void(const Json&)> on_progress;
+        std::optional<Json> outcome;
         bool abandoned{false};
     };
 
@@ -84,6 +106,7 @@ class Client final {
     std::condition_variable arrived_;
     std::int64_t next_id_{1};
     std::map<std::int64_t, std::shared_ptr<Pending>> pending_;
+    std::map<std::string, std::shared_ptr<RunningJob>> jobs_;
     std::string failure_;
 
     std::mutex handler_mutex_;

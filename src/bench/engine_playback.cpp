@@ -170,6 +170,27 @@ void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,
         if (row.duration_ms) {
             item["duration_ms"] = *row.duration_ms;
         }
+        // Which audio in the container, and which range of it. A CUE album is
+        // one file and many segments, so an entry without these plays the
+        // whole file from the start.
+        if (row.selection.stream_index || row.selection.subsong_index) {
+            protocol::Json selection = protocol::Json::object();
+            if (row.selection.stream_index) {
+                selection["stream_index"] = *row.selection.stream_index;
+            }
+            if (row.selection.subsong_index) {
+                selection["subsong_index"] = *row.selection.subsong_index;
+            }
+            item["selection"] = std::move(selection);
+        }
+        if (row.segment) {
+            protocol::Json segment = protocol::Json::object();
+            segment["start_sample"] = row.segment->start_sample;
+            if (row.segment->end_sample) {
+                segment["end_sample"] = *row.segment->end_sample;
+            }
+            item["segment"] = std::move(segment);
+        }
         if (index < overrides.size() && overrides[index]) {
             const auto& gain = *overrides[index];
             protocol::Json rendered = protocol::Json::object();

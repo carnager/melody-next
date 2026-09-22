@@ -416,6 +416,10 @@ saw its own idle player and wiped the anchors the engine was playing from, and
 jumping to the playing track looked for a local entry in the MPD queue. Both
 now ask where playback is; the header still follows the tab.
 
+The queue entry carries its selection and its segment as well as its path: a
+CUE album is one file and many segments, and an entry without them plays the
+whole file from the start.
+
 The engine advances itself when a track ends. A gapless handover covers the
 case where the continuation was accepted; everything else -- a format change, a
 seek, a queue edit, single mode expiring -- used to leave the output stopped,
@@ -427,6 +431,11 @@ path — the engine performs them, and doing both would double-count listening
 and fight over the queue. Reproducing them as *views* of engine state is what
 remains. MPRIS and desktop notifications likewise still follow the local
 player; they move with the authority collapse.
+
+Whether a continuation is armed is reported in the state document. Offering
+one and the audition service holding one are different facts, and only the
+second is gapless working -- a distinction nothing could see before, which is
+how a stale belief about it went unnoticed.
 
 Consume mode is the known gap in the engine's queue: it decides what plays
 next but does not remove a played entry, which the window does locally.

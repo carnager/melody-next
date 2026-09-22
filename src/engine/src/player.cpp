@@ -108,7 +108,16 @@ void Player::refresh_gapless_locked() {
         return;
     }
     const auto& entry = queue_[*next_row];
-    if (gapless_entry_ == entry.entry_id) {
+    // Checked against what the audition service is actually holding, not
+    // against what this class remembers offering. The two disagree whenever
+    // something drops the queued continuation -- a seek does -- and trusting
+    // the memory means the rest of that track plays with nothing armed, so
+    // gapless silently stops working for every track the user seeks in.
+    const auto snapshot = audition_->snapshot();
+    const bool holding = !snapshot.next_raw_path.empty() &&
+                         snapshot.next_raw_path == entry.source.raw_path &&
+                         snapshot.next_segment == entry.source.segment;
+    if (gapless_entry_ == entry.entry_id && holding) {
         return;
     }
     const auto queued = entry.source.segment
@@ -289,6 +298,11 @@ void Player::set_modes(audio::PlaybackModes modes) {
     refresh_gapless_locked();
 }
 
+bool Player::armed_continuation() const {
+    const std::lock_guard guard{mutex_};
+    return !audition_->snapshot().next_raw_path.empty();
+}
+
 bool Player::advance_if_ended() {
     const std::lock_guard guard{mutex_};
     const auto snapshot = audition_->snapshot();
@@ -399,6 +413,7 @@ Player::State Player::state() const {
     current.requests = requests_.size();
     current.modes = modes_;
     current.volume_percent = snapshot.volume_percent;
+    current.gapless_entry = gapless_entry_.value_or(core::StableId{});
     current.replay_gain_mode = snapshot.replay_gain_mode;
     current.replay_gain_preamps = snapshot.replay_gain_preamps;
     return current;

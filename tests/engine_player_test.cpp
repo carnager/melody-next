@@ -449,6 +449,115 @@ void a_finished_track_is_followed_by_the_next(engine::Player& player,
     player.replace_queue({});
 }
 
+// Offering a continuation is not the same as one being accepted, and until
+// now nothing checked the difference: a refused offer looks exactly like
+// gapless working right up to the moment the track ends.
+void a_continuation_is_actually_armed(engine::Player& player, const std::filesystem::path& audio) {
+    player.set_modes({});
+    const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string())};
+    player.replace_queue(entries);
+    if (!player.play_entry(entries[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping the gapless arming\n";
+        return;
+    }
+
+    // The engine cannot arm a continuation before it knows the format it has
+    // to match, so this is sampled the way a running engine samples itself
+    // rather than asserted immediately.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    bool armed = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        static_cast<void>(player.advance_if_ended());
+        // The snapshot, not the engine's memory: offering a continuation and
+        // the audition service holding one are different facts, and only the
+        // second is gapless actually working.
+        if (player.state().gapless_entry == entries[1].entry_id && player.armed_continuation()) {
+            armed = true;
+            break;
+        }
+        if (player.state().entry != entries[0].entry_id) {
+            break; // Already moved on; the continuation was never armed.
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    require(armed, "the next entry is armed to follow without a gap");
+
+    // A seek drops the audition's queued continuation. The engine has to
+    // notice and offer it again, because believing its own memory means the
+    // rest of that track plays with nothing armed -- gapless silently stops
+    // working for every track the user seeks in.
+    require(player.seek_ms(10).has_value(), "seeking within the track succeeds");
+    bool rearmed = false;
+    const auto seek_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (std::chrono::steady_clock::now() < seek_deadline) {
+        static_cast<void>(player.advance_if_ended());
+        if (player.state().entry != entries[0].entry_id) {
+            break;
+        }
+        if (player.state().gapless_entry == entries[1].entry_id && player.armed_continuation()) {
+            rearmed = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    require(rearmed, "the continuation is offered again after a seek drops it");
+
+    // And the handover itself. advance_if_ended returns true only when it had
+    // to start the next track the ordinary way, so a transition it never
+    // reports is one the audition service made seamlessly -- which is the
+    // difference between gapless and a quick restart, and the only way to tell
+    // them apart without listening.
+    bool started_by_hand = false;
+    bool moved = false;
+    const auto hand_over = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    while (std::chrono::steady_clock::now() < hand_over) {
+        started_by_hand = player.advance_if_ended() || started_by_hand;
+        if (player.state().entry == entries[1].entry_id) {
+            moved = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    require(moved, "the queue moves on to the second entry");
+    require(!started_by_hand, "and it got there without an ordinary load -- that is the gap");
+
+    static_cast<void>(player.stop());
+    player.replace_queue({});
+}
+
+// A CUE album is one file and many segments; a container can hold several
+// streams. An entry that arrives without them plays the whole file from the
+// start, which is a different track from the one the client asked for.
+void a_selection_and_segment_survive_the_wire(engine::Player& player) {
+    protocol::Dispatcher dispatcher;
+    engine::register_playback_methods(dispatcher, player);
+
+    protocol::Json one = protocol::Json::object();
+    one["path"] = protocol::encode_raw_path("/music/album.flac");
+    one["selection"] = protocol::Json{{"stream_index", 2}, {"subsong_index", 5}};
+    one["segment"] = protocol::Json{{"start_sample", 441'000}, {"end_sample", 882'000}};
+    protocol::Json entries = protocol::Json::array();
+    entries.push_back(one);
+
+    const auto replaced =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", entries}});
+    require(replaced.result.has_value(), "an entry naming a segment is accepted");
+    const auto held = player.queue();
+    require(held.size() == 1U, "and lands in the queue");
+    require(held[0].source.selection.stream_index == 2, "with its stream");
+    require(held[0].source.selection.subsong_index == 5, "and its subsong");
+    require(held[0].source.segment.has_value(), "and its segment");
+    require(held[0].source.segment->start_sample == 441'000, "starting where it was told");
+    require(held[0].source.segment->end_sample == 882'000, "and ending there");
+
+    const auto listed = invoke(dispatcher, "playback.queue", protocol::Json::object());
+    require(listed.result.has_value(), "the queue reads back");
+    require(listed.result->at("entries")[0].at("segment").at("start_sample") == 441'000,
+            "and reports the segment, so a second client sees the same track");
+
+    player.replace_queue({});
+}
+
 void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesystem::path& audio) {
     const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
                                                   entry(audio.string())};
@@ -564,6 +673,12 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    const auto longer = directory / "long.flac";
+    if (!materialise(fixtures / "rich-metadata-long-flac.b64", longer)) {
+        std::cerr << "engine player: could not materialise the long fixture\n";
+        return EXIT_FAILURE;
+    }
+
     const auto other = directory / "second.opus";
     if (!materialise(fixtures / "tagged-tone-opus.b64", other)) {
         std::cerr << "engine player: could not materialise the second fixture\n";
@@ -589,12 +704,14 @@ int main(int argc, char** argv) {
     listening_and_resume_are_observed_not_pushed(**player);
     gapless_is_offered_and_recomputed(**player, audio);
     a_finished_track_is_followed_by_the_next(**player, audio, other);
+    a_continuation_is_actually_armed(**player, longer);
+    a_selection_and_segment_survive_the_wire(**player);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 14 scenarios\n";
+    std::cout << "engine player: 16 scenarios\n";
     return EXIT_SUCCESS;
 }

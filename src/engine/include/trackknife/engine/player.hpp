@@ -143,6 +143,11 @@ class Player final {
         std::size_t requests{0};
         audio::PlaybackModes modes;
         int volume_percent{100};
+        // What is armed to follow the current track without a gap, if
+        // anything. Nil when the continuation was refused or none was offered
+        // -- which is the difference between gapless working and the engine
+        // merely starting the next track quickly, and it was invisible.
+        core::StableId gapless_entry;
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         audio::ReplayGainPreamps replay_gain_preamps;
     };
@@ -159,6 +164,12 @@ class Player final {
     // caller that wants to push an event immediately rather than at its next
     // sample.
     bool advance_if_ended();
+
+    // Whether the audition service is actually holding a continuation, as
+    // opposed to the engine believing it offered one. For tests: the two can
+    // disagree, and that disagreement is exactly what silently disables
+    // gapless.
+    [[nodiscard]] bool armed_continuation() const;
 
   private:
     class QueueView;

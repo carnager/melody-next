@@ -90,6 +90,75 @@ replay_gain_from_json(const Json& value) {
     return rendered;
 }
 
+// A selection names which audio a container holds -- a stream, a subsong --
+// and a segment names a range within it, which is how one file carries a CUE
+// album. Without them a segmented entry plays the whole file from the start,
+// so they belong on the wire with the path rather than being a local detail.
+[[nodiscard]] core::Result<formats::AudioSourceSelection> selection_from_json(const Json& value) {
+    if (!value.is_object()) {
+        return std::unexpected(bad_params("selection must be an object", "selection"));
+    }
+    formats::AudioSourceSelection selection;
+    const auto index = [&value](const char* member,
+                                std::optional<int>& into) -> core::Result<void> {
+        const auto found = value.find(member);
+        if (found == value.end() || found->is_null()) {
+            return {};
+        }
+        if (!found->is_number_integer()) {
+            return std::unexpected(
+                bad_params(std::string{member} + " must be an integer", "selection"));
+        }
+        into = static_cast<int>(found->get<std::int64_t>());
+        return {};
+    };
+    if (auto read = index("stream_index", selection.stream_index); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (auto read = index("subsong_index", selection.subsong_index); !read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    return selection;
+}
+
+[[nodiscard]] Json selection_to_json(const formats::AudioSourceSelection& selection) {
+    Json rendered = Json::object();
+    rendered["stream_index"] =
+        selection.stream_index ? Json(*selection.stream_index) : Json(nullptr);
+    rendered["subsong_index"] =
+        selection.subsong_index ? Json(*selection.subsong_index) : Json(nullptr);
+    return rendered;
+}
+
+[[nodiscard]] core::Result<formats::SampleRange> segment_from_json(const Json& value) {
+    if (!value.is_object()) {
+        return std::unexpected(bad_params("segment must be an object", "segment"));
+    }
+    const auto start = value.find("start_sample");
+    if (start == value.end() || !start->is_number_integer()) {
+        return std::unexpected(bad_params("a segment needs start_sample", "segment"));
+    }
+    formats::SampleRange segment;
+    segment.start_sample = start->get<std::int64_t>();
+    if (const auto end = value.find("end_sample"); end != value.end() && !end->is_null()) {
+        if (!end->is_number_integer()) {
+            return std::unexpected(bad_params("end_sample must be an integer", "segment"));
+        }
+        segment.end_sample = end->get<std::int64_t>();
+    }
+    return segment;
+}
+
+[[nodiscard]] Json segment_to_json(const std::optional<formats::SampleRange>& segment) {
+    if (!segment) {
+        return Json(nullptr);
+    }
+    Json rendered = Json::object();
+    rendered["start_sample"] = segment->start_sample;
+    rendered["end_sample"] = segment->end_sample ? Json(*segment->end_sample) : Json(nullptr);
+    return rendered;
+}
+
 [[nodiscard]] core::Result<QueueEntry> entry_from_json(const Json& value) {
     if (!value.is_object()) {
         return std::unexpected(bad_params("each entry must be an object", "entries"));
@@ -120,6 +189,20 @@ replay_gain_from_json(const Json& value) {
         duration != value.end() && duration->is_number_integer()) {
         entry.duration_ms = duration->get<std::int64_t>();
     }
+    if (const auto found = value.find("selection"); found != value.end() && !found->is_null()) {
+        auto parsed = selection_from_json(*found);
+        if (!parsed) {
+            return std::unexpected(std::move(parsed.error()));
+        }
+        entry.source.selection = *parsed;
+    }
+    if (const auto found = value.find("segment"); found != value.end() && !found->is_null()) {
+        auto parsed = segment_from_json(*found);
+        if (!parsed) {
+            return std::unexpected(std::move(parsed.error()));
+        }
+        entry.source.segment = *parsed;
+    }
     if (const auto gain = value.find("replay_gain"); gain != value.end()) {
         auto parsed = replay_gain_from_json(*gain);
         if (!parsed) {
@@ -145,6 +228,8 @@ Json to_json(const Player::State& state) {
     rendered["requests"] = state.requests;
     rendered["modes"] = modes_to_json(state.modes);
     rendered["volume_percent"] = state.volume_percent;
+    rendered["gapless_entry"] =
+        state.gapless_entry.is_nil() ? Json(nullptr) : Json(state.gapless_entry.to_string());
     Json gain = Json::object();
     gain["mode"] = state.replay_gain_mode == audio::ReplayGainMode::track   ? "track"
                    : state.replay_gain_mode == audio::ReplayGainMode::album ? "album"
@@ -166,6 +251,8 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
             rendered["entry"] = entry.entry_id.to_string();
             rendered["path"] = protocol::encode_raw_path(entry.source.raw_path);
             rendered["duration_ms"] = entry.duration_ms.value_or(-1);
+            rendered["selection"] = selection_to_json(entry.source.selection);
+            rendered["segment"] = segment_to_json(entry.source.segment);
             rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);
             entries.push_back(std::move(rendered));
         }

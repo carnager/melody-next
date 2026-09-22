@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
+#include "bench/local_playback_service.hpp"
 #include "trackknife/lists/edit_plan.hpp"
 
 #include <QLabel>
@@ -56,7 +57,50 @@ class LocalListEditTest final : public QObject {
     void limitsRejectIncompleteEdits();
     void entryIdentitiesStayDistinctAndSurviveReordering();
     void probingPreservesEntryIdentity();
+    void thePlaybackServiceDecidesWithoutAWindow();
 };
+
+// ADR-0220 Phase 0: the service holds the playback state and the decisions
+// that need it, so both can be exercised without constructing
+// BenchMainWindow. This is the object the remaining orchestration migrates
+// into, and the one Phase 2 serialises.
+void LocalListEditTest::thePlaybackServiceDecidesWithoutAWindow() {
+    LocalListModel model;
+    model.replaceRows({row("A", "/a.flac"), row("B", "/b.flac"), row("C", "/c.flac")});
+    const LocalListPlaybackView list{model};
+    const auto rows = model.rows();
+
+    LocalPlaybackService playback;
+    QVERIFY(!playback.anchors.playing());
+    QCOMPARE(playback.resolveRow(list), -1);
+
+    playback.anchors.document = core::StableId::random();
+    playback.adopt(rows[0].entry_id, 0, model.source(0));
+    playback.order.reset(3, 0, false);
+    QVERIFY(playback.anchors.playing());
+    QCOMPARE(playback.resolveRow(list), 0);
+
+    const auto next = playback.adjacentRow(list, {}, 1);
+    QVERIFY(next.has_value());
+    QCOMPARE(next->row, 1);
+
+    // Reordering moves the row without disturbing the identity, and the
+    // cached row is only a hint: the service still finds the entry.
+    auto reversed = rows;
+    std::reverse(reversed.begin(), reversed.end());
+    model.replaceRows(reversed);
+    QCOMPARE(playback.resolveRow(list), 2);
+
+    // An entry that leaves the list stops playback rather than guessing.
+    model.replaceRows({reversed[0], reversed[1]});
+    QCOMPARE(playback.resolveRow(list), -1);
+    QVERIFY(!playback.adjacentRow(list, {}, 1).has_value());
+
+    playback.stop();
+    QVERIFY(!playback.anchors.playing());
+    QVERIFY(playback.anchors.source.empty());
+    QCOMPARE(playback.row, -1);
+}
 
 // ADR-0221: a probe refreshes what a row says about its track. It must not
 // change which entry the row is, or anything anchored to it -- playback

@@ -696,13 +696,13 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     b.raw_path = "/album-b.flac";
     b.album = "B";
     tab->model->replaceRows({a, b, a, b});
-    window.anchors_.document = tab->document.id;
-    window.anchors_.current = tab->model->rows().at(0).entry_id;
-    window.playback_row_ = 0;
-    window.local_modes_.album_random = true;
+    window.playback_.anchors.document = tab->document.id;
+    window.playback_.anchors.current = tab->model->rows().at(0).entry_id;
+    window.playback_.row = 0;
+    window.playback_.modes.album_random = true;
     window.resetPlaybackOrder();
     QTRY_VERIFY(!window.album_order_preparing_);
-    QCOMPARE(window.playback_order_.adjacent(1, false), std::optional<int>{2});
+    QCOMPARE(window.playback_.order.adjacent(1, false), std::optional<int>{2});
     QCOMPARE(tab->model->rows()[1].album, std::string{"B"});
     window.tabs_->setCurrentWidget(window.mpd_queue_view_);
     window.mpd_controller_->connected_ = true;
@@ -712,7 +712,7 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_album_random"));
     window.refreshMpdStatusControls();
     QVERIFY(window.mpd_album_random_action_->isVisible());
-    window.local_modes_.album_random = false;
+    window.playback_.modes.album_random = false;
     window.saveLocalPlaybackModes();
     window.mpd_controller_->connected_ = false;
 }
@@ -753,15 +753,15 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
         tab->model->replaceRows({row, row});
         window.playRow(*tab, 0, 0);
         QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
-        window.anchors_.request_return = tab->model->rows().at(1).entry_id;
+        window.playback_.anchors.request_return = tab->model->rows().at(1).entry_id;
         window.enqueueLocalRequests({row});
         QVERIFY(window.playLocalRequest(20));
         QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
         window.enqueueLocalRequests(
             std::vector<LocalTrackRow>(static_cast<std::size_t>(pending_count), row));
         if (consume) {
-            window.local_modes_.consume = audio::ModeState::on;
-            window.consumePlaybackRow(*tab, window.anchors_.current, window.playback_row_);
+            window.playback_.modes.consume = audio::ModeState::on;
+            window.consumePlaybackRow(*tab, window.playback_.anchors.current, window.playback_.row);
             QCOMPARE(tab->model->rowCount(), 1);
         }
         QCOMPARE(window.local_requests_.pending().size(), static_cast<std::size_t>(pending_count));
@@ -790,8 +790,8 @@ void BenchMainWindowTest::localRequestRestoresPaused() {
             QCOMPARE(window.local_requests_.pending().size(),
                      static_cast<std::size_t>(pending_count));
             QCOMPARE(window.local_requests_.active()->source.raw_path, path);
-            QCOMPARE(row_of(window.tabForDocument(window.anchors_.document),
-                            window.anchors_.request_return),
+            QCOMPARE(row_of(window.tabForDocument(window.playback_.anchors.document),
+                            window.playback_.anchors.request_return),
                      consume ? 0 : 1);
             if (!changed)
                 QCOMPARE(window.player_->snapshot().position_sample, 882);
@@ -837,9 +837,9 @@ void BenchMainWindowTest::localPlaybackRestoresPausedWithoutOutput() {
         QTRY_VERIFY(!window.resume_restore_pending_);
         QTRY_VERIFY2(window.player_->snapshot().state == audio::LocalAuditionState::paused,
                      qPrintable(window.statusBar()->currentMessage()));
-        QCOMPARE(document_text(window.anchors_.document), document);
-        QCOMPARE(row_of(window.tabForDocument(window.anchors_.document),
-                        window.anchors_.current),
+        QCOMPARE(document_text(window.playback_.anchors.document), document);
+        QCOMPARE(row_of(window.tabForDocument(window.playback_.anchors.document),
+                        window.playback_.anchors.current),
                  1);
         QCOMPARE(window.player_->snapshot().position_sample, 882);
         QCOMPARE(window.player_->snapshot().output.state, audio::PipeWireOutputState::unconnected);
@@ -1055,9 +1055,9 @@ void BenchMainWindowTest::dynamicResultActionsUseTheirOwnSources() {
     LocalTrackRow other = row;
     other.raw_path = "/dynamic/other.flac";
     target->model->replaceRows({row, other, row});
-    window.anchors_.document = document_identity(id);
-    window.playback_row_ = 2;
-    window.anchors_.source = target->model->source(2);
+    window.playback_.anchors.document = document_identity(id);
+    window.playback_.row = 2;
+    window.playback_.anchors.source = target->model->source(2);
     dialog->setProperty("playback-context", id);
     model->replaceRows({row, row, other});
     emit dialog->resultsChanged();
@@ -2011,9 +2011,9 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     playing.model->replaceRows({row, row});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     tabs->setCurrentWidget(playing.view);
-    window.anchors_.document = playing.document.id;
-    window.anchors_.current = playing.model->rows().at(0).entry_id;
-    window.playback_row_ = 0;
+    window.playback_.anchors.document = playing.document.id;
+    window.playback_.anchors.current = playing.model->rows().at(0).entry_id;
+    window.playback_.row = 0;
     auto* follow = window.findChild<QAction*>(QStringLiteral("action-follow-playback"));
     auto* jump = window.findChild<QAction*>(QStringLiteral("action-jump-to-playing"));
     QVERIFY(follow && jump);
@@ -2022,8 +2022,8 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     playing.view->selectRow(1);
     window.refreshPlaybackCursor();
     QCOMPARE(playing.view->currentIndex().row(), 1); // No reselection on every timer tick.
-    window.anchors_.current = playing.model->rows().at(1).entry_id;
-    window.playback_row_ = 1;
+    window.playback_.anchors.current = playing.model->rows().at(1).entry_id;
+    window.playback_.row = 1;
     playing.view->selectRow(0);
     window.refreshPlaybackCursor();
     QCOMPARE(playing.view->currentIndex().row(), 1);
@@ -2032,9 +2032,9 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     other.name = "Browsing";
     auto* browsing = window.addListTab(std::move(other), true);
     QVERIFY(browsing);
-    window.anchors_.document = playing.document.id;
-    window.anchors_.current = playing.model->rows().at(0).entry_id;
-    window.playback_row_ = 0;
+    window.playback_.anchors.document = playing.document.id;
+    window.playback_.anchors.current = playing.model->rows().at(0).entry_id;
+    window.playback_.row = 0;
     window.refreshPlaybackCursor();
     QCOMPARE(tabs->currentWidget(), browsing->view);
     follow->setChecked(false);
@@ -2113,7 +2113,7 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
     tabs->setCurrentWidget(local.view);
     window.stop_action_->trigger();
-    window.anchors_.document = core::StableId{};
+    window.playback_.anchors.document = core::StableId{};
     window.refreshTransport();
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
     auto other = local.document;
@@ -6021,7 +6021,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     window.openLocalPaths({QFile::encodeName(a).toStdString(), QFile::encodeName(b).toStdString()});
     QTRY_VERIFY(window.currentListTab() != nullptr &&
                 window.currentListTab()->model->rowCount() == 2);
-    window.local_modes_.consume = consume ? audio::ModeState::on : audio::ModeState::off;
+    window.playback_.modes.consume = consume ? audio::ModeState::on : audio::ModeState::off;
     auto* tab = window.currentListTab();
     window.playRow(*tab, 0);
     QTRY_VERIFY(window.property("trackknife-player-state").toInt() >= 3);
@@ -6039,8 +6039,8 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QTRY_VERIFY_WITH_TIMEOUT(
         window.local_requests_.active() && window.local_requests_.active()->id == second, 5000);
     QTRY_VERIFY_WITH_TIMEOUT(!window.local_requests_.active() &&
-                                 row_of(window.tabForDocument(window.anchors_.document),
-                                        window.anchors_.current) == (consume ? 0 : 1),
+                                 row_of(window.tabForDocument(window.playback_.anchors.document),
+                                        window.playback_.anchors.current) == (consume ? 0 : 1),
                              4000);
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QVERIFY(window.local_requests_.pending().empty());

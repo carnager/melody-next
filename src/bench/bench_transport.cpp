@@ -728,15 +728,15 @@ void BenchMainWindow::rebuildDeviceMenu() {
 
 void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     const QSettings settings;
-    local_modes_.repeat = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
-    local_modes_.random = settings.value(QStringLiteral("playback/local-random"), false).toBool();
-    local_modes_.album_random =
+    playback_.modes.repeat = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
+    playback_.modes.random = settings.value(QStringLiteral("playback/local-random"), false).toBool();
+    playback_.modes.album_random =
         settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
-    if (local_modes_.album_random)
-        local_modes_.random = false;
-    local_modes_.single = audio::mode_state_from_int(
+    if (playback_.modes.album_random)
+        playback_.modes.random = false;
+    playback_.modes.single = audio::mode_state_from_int(
         settings.value(QStringLiteral("playback/local-single"), 0).toInt());
-    local_modes_.consume = audio::mode_state_from_int(
+    playback_.modes.consume = audio::mode_state_from_int(
         settings.value(QStringLiteral("playback/local-consume"), 0).toInt());
     local_replaygain_ =
         settings.value(QStringLiteral("playback/local-replaygain"), QStringLiteral("off"))
@@ -784,9 +784,9 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext())
             return;
-        local_modes_.album_random = on;
+        playback_.modes.album_random = on;
         if (on)
-            local_modes_.random = false;
+            playback_.modes.random = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
     });
@@ -795,16 +795,16 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         if (isMpdContext()) {
             return;
         }
-        local_modes_.repeat = on;
+        playback_.modes.repeat = on;
         applyLocalPlaybackModes();
     });
     connect(local_random_action_, &QAction::triggered, this, [this](bool on) {
         if (isMpdContext()) {
             return;
         }
-        local_modes_.random = on;
+        playback_.modes.random = on;
         if (on)
-            local_modes_.album_random = false;
+            playback_.modes.album_random = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
     });
@@ -812,14 +812,14 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         if (isMpdContext()) {
             return;
         }
-        local_modes_.single = audio::next_mode_state(local_modes_.single);
+        playback_.modes.single = audio::next_mode_state(playback_.modes.single);
         applyLocalPlaybackModes();
     });
     connect(local_consume_action_, &QAction::triggered, this, [this] {
         if (isMpdContext()) {
             return;
         }
-        local_modes_.consume = audio::next_mode_state(local_modes_.consume);
+        playback_.modes.consume = audio::next_mode_state(playback_.modes.consume);
         applyLocalPlaybackModes();
     });
     local_replaygain_button_ = new QToolButton(statusBar());
@@ -867,13 +867,13 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
 
 void BenchMainWindow::saveLocalPlaybackModes() {
     QSettings settings;
-    settings.setValue(QStringLiteral("playback/local-repeat"), local_modes_.repeat);
-    settings.setValue(QStringLiteral("playback/local-random"), local_modes_.random);
-    settings.setValue(QStringLiteral("playback/local-album-random"), local_modes_.album_random);
+    settings.setValue(QStringLiteral("playback/local-repeat"), playback_.modes.repeat);
+    settings.setValue(QStringLiteral("playback/local-random"), playback_.modes.random);
+    settings.setValue(QStringLiteral("playback/local-album-random"), playback_.modes.album_random);
     settings.setValue(QStringLiteral("playback/local-single"),
-                      static_cast<int>(local_modes_.single));
+                      static_cast<int>(playback_.modes.single));
     settings.setValue(QStringLiteral("playback/local-consume"),
-                      static_cast<int>(local_modes_.consume));
+                      static_cast<int>(playback_.modes.consume));
     settings.setValue(QStringLiteral("playback/local-replaygain"), local_replaygain_);
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), local_rg_preamp_with_);
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), local_rg_preamp_without_);
@@ -886,7 +886,7 @@ void BenchMainWindow::applyLocalPlaybackModes() {
         static_cast<void>(player_->clear_gapless_next());
         auto mode = audio::ReplayGainMode::off;
         if (local_replaygain_ == QStringLiteral("track") ||
-            (local_replaygain_ == QStringLiteral("auto") && local_modes_.random)) {
+            (local_replaygain_ == QStringLiteral("auto") && playback_.modes.random)) {
             mode = audio::ReplayGainMode::track;
         } else if (local_replaygain_ == QStringLiteral("album") ||
                    local_replaygain_ == QStringLiteral("auto")) {
@@ -917,18 +917,18 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         button->defaultAction()->setVisible(visible);
         button->defaultAction()->setEnabled(visible && player_ != nullptr);
     }
-    local_repeat_action_->setChecked(local_modes_.repeat);
-    local_random_action_->setChecked(local_modes_.random);
-    local_album_random_action_->setChecked(local_modes_.album_random);
+    local_repeat_action_->setChecked(playback_.modes.repeat);
+    local_random_action_->setChecked(playback_.modes.random);
+    local_album_random_action_->setChecked(playback_.modes.album_random);
     local_album_random_action_->setToolTip(
         tr("Shuffle albums during playback without rearranging the list. Tracks within each album "
            "keep their list order."));
     local_repeat_action_->setToolTip(
         QStringLiteral("Repeat: %1")
-            .arg(local_modes_.repeat ? QStringLiteral("On") : QStringLiteral("Off")));
+            .arg(playback_.modes.repeat ? QStringLiteral("On") : QStringLiteral("Off")));
     local_random_action_->setToolTip(
         QStringLiteral("Random: %1")
-            .arg(local_modes_.random ? QStringLiteral("On") : QStringLiteral("Off")));
+            .arg(playback_.modes.random ? QStringLiteral("On") : QStringLiteral("Off")));
     const auto cycle = [](QAction* action, const audio::ModeState mode, const QString& name,
                           const QString& symbol, const QString& help) {
         const auto state = mode == audio::ModeState::off  ? QStringLiteral("Off")
@@ -940,10 +940,10 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         action->setText(QStringLiteral("%1: %2").arg(name, state));
         action->setToolTip(QStringLiteral("%1: %2\n%3").arg(name, state, help));
     };
-    cycle(local_single_action_, local_modes_.single, QStringLiteral("Single"), QStringLiteral("1"),
+    cycle(local_single_action_, playback_.modes.single, QStringLiteral("Single"), QStringLiteral("1"),
           QStringLiteral("Stop after this track; with Repeat, repeat this track. Click to cycle "
                          "Off / On / One-shot."));
-    cycle(local_consume_action_, local_modes_.consume, QStringLiteral("Consume"), QStringLiteral("C"),
+    cycle(local_consume_action_, playback_.modes.consume, QStringLiteral("Consume"), QStringLiteral("C"),
           QStringLiteral("Remove finished or skipped entries from the local list. Files stay on "
                          "disk. Click to cycle Off / On / One-shot."));
     local_replaygain_button_->setVisible(visible);
@@ -965,21 +965,25 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
 }
 
 int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
-    return tab == nullptr ? -1 : tab->model->rowOfEntry(anchors_.current, playback_row_);
+    if (tab == nullptr) {
+        return -1;
+    }
+    const LocalListPlaybackView list{*tab->model};
+    return playback_.resolveRow(list);
 }
 
 void BenchMainWindow::resetPlaybackOrder() {
     ++album_order_generation_;
     album_order_preparing_ = false;
     album_grouper_ = audio::AlbumGrouper{};
-    auto* tab = tabForDocument(anchors_.document);
-    playback_row_ = resolvePlaybackRow(tab);
-    playback_order_.reset(tab != nullptr ? tab->model->rowCount() : 0, playback_row_,
-                          local_modes_.random);
-    if (local_modes_.album_random && tab && tab->model->rowCount() > 0) {
+    auto* tab = tabForDocument(playback_.anchors.document);
+    playback_.row = resolvePlaybackRow(tab);
+    playback_.order.reset(tab != nullptr ? tab->model->rowCount() : 0, playback_.row,
+                          playback_.modes.random);
+    if (playback_.modes.album_random && tab && tab->model->rowCount() > 0) {
         album_order_preparing_ = true;
         album_order_build_row_ = 0;
-        playback_order_.reset(0, -1, false);
+        playback_.order.reset(0, -1, false);
         QTimer::singleShot(0, this, [this, generation = album_order_generation_] {
             prepareAlbumPlaybackOrder(generation);
         });
@@ -993,14 +997,14 @@ void BenchMainWindow::resetPlaybackOrder() {
 void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) {
     if (generation != album_order_generation_ || !album_order_preparing_)
         return;
-    auto* tab = tabForDocument(anchors_.document);
+    auto* tab = tabForDocument(playback_.anchors.document);
     if (!tab) {
         album_order_preparing_ = false;
         return;
     }
     const auto& rows = tab->model->rows();
     const auto abandon = [this] {
-        local_modes_.album_random = false;
+        playback_.modes.album_random = false;
         resetPlaybackOrder();
         applyLocalPlaybackModes();
         statusBar()->showMessage(tr("Album shuffle exceeds the grouping limits."), 8000);
@@ -1029,13 +1033,13 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
     connect(watcher, &QFutureWatcher<audio::PlaybackOrder>::finished, this,
             [this, watcher, generation] {
                 if (generation == album_order_generation_) {
-                    playback_order_ = watcher->future().takeResult();
+                    playback_.order = watcher->future().takeResult();
                     album_order_preparing_ = false;
                 }
                 watcher->deleteLater();
             });
     watcher->setFuture(QtConcurrent::run(
-        [groups = album_grouper_.take(), current = playback_row_]() mutable {
+        [groups = album_grouper_.take(), current = playback_.row]() mutable {
             audio::PlaybackOrder order;
             order.resetAlbums(std::move(groups), current);
             return order;
@@ -1045,7 +1049,7 @@ void BenchMainWindow::prepareAlbumPlaybackOrder(const std::uint64_t generation) 
 void BenchMainWindow::consumePlaybackRow(ListTab& tab, const core::StableId& entry,
                                          const int hint_row) {
     const auto row = tab.model->rowOfEntry(entry, hint_row);
-    if (!local_modes_.consume_active() || row < 0) {
+    if (!playback_.modes.consume_active() || row < 0) {
         return;
     }
     consuming_row_ = true;
@@ -1054,13 +1058,13 @@ void BenchMainWindow::consumePlaybackRow(ListTab& tab, const core::StableId& ent
     // A QPersistentModelIndex used to shuffle itself down after the removal.
     // Re-resolving the identity does the same thing explicitly, and reports -1
     // when the consumed row was the playing one.
-    playback_row_ = resolvePlaybackRow(&tab);
+    playback_.row = resolvePlaybackRow(&tab);
     resetPlaybackOrder();
-    if (playback_row_ < 0) {
+    if (playback_.row < 0) {
         tab.model->setCurrentSource({}, -1);
     }
     markTabDirty(tab);
-    if (local_modes_.expire_consume()) {
+    if (playback_.modes.expire_consume()) {
         saveLocalPlaybackModes();
         refreshLocalPlaybackControls();
     }
@@ -1068,26 +1072,23 @@ void BenchMainWindow::consumePlaybackRow(ListTab& tab, const core::StableId& ent
 
 void BenchMainWindow::adoptPlaybackRow(ListTab& tab, const int row, const LocalTrackSource& source,
                                        const bool consume, const int direction) {
-    const auto previous = anchors_.current;
-    const auto previous_row = playback_row_;
-    anchors_.current = tab.model->rows().at(static_cast<std::size_t>(row)).entry_id;
-    playback_row_ = row;
-    anchors_.source = source;
-    playback_order_.advance(row, direction);
-    if (consume && previous != anchors_.current) {
+    const auto previous = playback_.anchors.current;
+    const auto previous_row = playback_.row;
+    playback_.adopt(tab.model->rows().at(static_cast<std::size_t>(row)).entry_id, row, source);
+    playback_.order.advance(row, direction);
+    if (consume && previous != playback_.anchors.current) {
         consumePlaybackRow(tab, previous, previous_row);
     }
-    tab.model->setCurrentSource(source, playback_row_);
+    tab.model->setCurrentSource(source, playback_.row);
 }
 
 std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlaybackRow() {
-    auto* tab = tabForDocument(anchors_.document);
+    auto* tab = tabForDocument(playback_.anchors.document);
     if (tab == nullptr) {
         return std::nullopt;
     }
     const LocalListPlaybackView list{*tab->model};
-    const auto choice = audio::automatic_playback_row(list, anchors_, local_modes_, playback_order_,
-                                                      requestQueueState(), playback_row_);
+    const auto choice = playback_.automaticRow(list, requestQueueState());
     if (!choice) {
         return std::nullopt;
     }
@@ -1135,18 +1136,18 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
     persistUpNext();
     refreshUpNext();
     const auto id = QString::fromStdString(tab.document.id.to_string());
-    if (anchors_.document != tab.document.id) {
-        if (auto* previous = tabForDocument(anchors_.document); previous != nullptr) {
+    if (playback_.anchors.document != tab.document.id) {
+        if (auto* previous = tabForDocument(playback_.anchors.document); previous != nullptr) {
             previous->model->setCurrentSource({}, -1);
         }
     }
-    anchors_.document = tab.document.id;
+    playback_.anchors.document = tab.document.id;
     setActiveLocalList(id);
-    anchors_.current = tab.model->rows().at(static_cast<std::size_t>(row)).entry_id;
-    playback_row_ = row;
-    anchors_.source = source;
+    playback_.anchors.current = tab.model->rows().at(static_cast<std::size_t>(row)).entry_id;
+    playback_.row = row;
+    playback_.anchors.source = source;
     resetPlaybackOrder();
-    anchors_.forget_transition();
+    playback_.anchors.forget_transition();
     // A load was just dispatched; block auto-advance until the player state
     // leaves "ended" so the previous track's end cannot skip this one.
     advance_pending_ = true;
@@ -1156,13 +1157,12 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
 
 std::optional<std::pair<int, LocalTrackSource>>
 BenchMainWindow::adjacentPlaybackRow(const int direction) {
-    auto* tab = tabForDocument(anchors_.document);
+    auto* tab = tabForDocument(playback_.anchors.document);
     if (tab == nullptr) {
         return std::nullopt;
     }
     const LocalListPlaybackView list{*tab->model};
-    const auto choice = audio::adjacent_playback_row(list, anchors_, local_modes_, playback_order_,
-                                                     requestQueueState(), direction, playback_row_);
+    const auto choice = playback_.adjacentRow(list, requestQueueState(), direction);
     if (!choice) {
         return std::nullopt;
     }
@@ -1178,19 +1178,19 @@ void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entr
                 "This request was already handed to the player; your queue edits apply next."),
             5000);
     if (!local_requests_.active() && !restoring) {
-        anchors_.request_return = core::StableId{};
+        playback_.anchors.request_return = core::StableId{};
         const auto next = adjacentPlaybackRow(1);
-        if (auto* tab = tabForDocument(anchors_.document); tab && next)
-            anchors_.request_return = tab->model->rows().at(static_cast<std::size_t>(next->first)).entry_id;
-        if (auto* tab = tabForDocument(anchors_.document))
-            consumePlaybackRow(*tab, anchors_.current, playback_row_);
+        if (auto* tab = tabForDocument(playback_.anchors.document); tab && next)
+            playback_.anchors.request_return = tab->model->rows().at(static_cast<std::size_t>(next->first)).entry_id;
+        if (auto* tab = tabForDocument(playback_.anchors.document))
+            consumePlaybackRow(*tab, playback_.anchors.current, playback_.row);
     }
     local_requests_.started(std::move(entry));
-    if (auto* tab = tabForDocument(anchors_.document))
+    if (auto* tab = tabForDocument(playback_.anchors.document))
         tab->model->setCurrentSource({}, -1);
     requested_request_.reset();
     queued_request_.reset();
-    anchors_.forget_transition();
+    playback_.anchors.forget_transition();
     last_requested_next_.reset();
     persistUpNext();
     refreshUpNext();
@@ -1231,7 +1231,7 @@ void BenchMainWindow::playAdjacent(const int direction) {
         advance_pending_ = true;
         return;
     }
-    auto* tab = tabForDocument(anchors_.document);
+    auto* tab = tabForDocument(playback_.anchors.document);
     const auto next = adjacentPlaybackRow(direction);
     if (tab == nullptr || !next || player_ == nullptr) {
         if (direction > 0 && local_requests_.active() && player_) {
@@ -1251,7 +1251,7 @@ void BenchMainWindow::playAdjacent(const int direction) {
         adoptPlaybackRow(*tab, next->first, next->second, true, direction);
         advance_pending_ = true;
         last_requested_next_.reset();
-        anchors_.forget_transition();
+        playback_.anchors.forget_transition();
     } else {
         statusBar()->showMessage(
             QStringLiteral("Playback failed: %1").arg(displayText(result.error().message)), 5'000);
@@ -1380,7 +1380,7 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
             }
             return;
         }
-        if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
+        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
             if (const auto playing_row = resolvePlaybackRow(tab); playing_row >= 0) {
                 view = tab->view;
                 row = playing_row;
@@ -1471,11 +1471,11 @@ void BenchMainWindow::refreshTransport() {
     const auto queued_source = queued_source_from_snapshot(snapshot);
     if (requested_request_ && snapshot.next_occurrence_token == requested_request_->id)
         queued_request_ = requested_request_;
-    if (!anchors_.requested.is_nil() && queued_source) {
-        if (const auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
-            if (const auto row = tab->model->rowOfEntry(anchors_.requested, -1);
+    if (!playback_.anchors.requested.is_nil() && queued_source) {
+        if (const auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+            if (const auto row = tab->model->rowOfEntry(playback_.anchors.requested, -1);
                 row >= 0 && tab->model->source(row) == *queued_source) {
-                anchors_.queued = anchors_.requested;
+                playback_.anchors.queued = playback_.anchors.requested;
             }
         }
     }
@@ -1491,7 +1491,7 @@ void BenchMainWindow::refreshTransport() {
         if (transitioned_request && snapshot.occurrence_token != 0U &&
             transitioned_request->id == snapshot.occurrence_token) {
             adoptLocalRequest(*transitioned_request);
-        } else if (auto* tab = tabForDocument(anchors_.document);
+        } else if (auto* tab = tabForDocument(playback_.anchors.document);
                    tab != nullptr && !snapshot.raw_path.empty()) {
             local_requests_.finished();
             persistUpNext();
@@ -1504,20 +1504,20 @@ void BenchMainWindow::refreshTransport() {
                            ? candidate
                            : -1;
             };
-            auto row = anchored_row(anchors_.queued);
+            auto row = anchored_row(playback_.anchors.queued);
             if (row < 0) {
-                row = anchored_row(anchors_.requested);
+                row = anchored_row(playback_.anchors.requested);
             }
             if (row >= 0) {
                 adoptPlaybackRow(*tab, row, transitioned_source, true);
             } else {
-                anchors_.current = core::StableId{};
-                anchors_.source = transitioned_source;
+                playback_.anchors.current = core::StableId{};
+                playback_.anchors.source = transitioned_source;
                 resetPlaybackOrder();
                 tab->model->setCurrentSource({}, -1);
             }
-            anchors_.forget_transition();
-            if (local_modes_.expire_single()) {
+            playback_.anchors.forget_transition();
+            if (playback_.modes.expire_single()) {
                 saveLocalPlaybackModes();
                 refreshLocalPlaybackControls();
             }
@@ -1528,7 +1528,7 @@ void BenchMainWindow::refreshTransport() {
                 static_cast<double>(snapshot.replay_gain_preamps.with_gain_db));
     setProperty("trackknife-player-rg-preamp-without",
                 static_cast<double>(snapshot.replay_gain_preamps.without_gain_db));
-    setProperty("trackknife-player-row", playback_row_);
+    setProperty("trackknife-player-row", playback_.row);
     setProperty("trackknife-player-position", static_cast<qlonglong>(snapshot.position_sample));
     setProperty("trackknife-player-buffered", static_cast<qlonglong>(snapshot.buffered_frames));
     setProperty("trackknife-player-buffer-capacity-ms",
@@ -1559,10 +1559,10 @@ void BenchMainWindow::refreshTransport() {
         // next source is still loading and race through the list.
         if (!advance_pending_ && !album_order_preparing_) {
             advance_pending_ = true;
-            const bool request_started = !local_modes_.single_active() && playLocalRequest();
+            const bool request_started = !playback_.modes.single_active() && playLocalRequest();
             const auto next = request_started ? std::nullopt : automaticPlaybackRow();
             if (!request_started) {
-                if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
+                if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
                     if (next) {
                         if (auto result =
                                 load_and_play(*player_, next->second,
@@ -1572,7 +1572,7 @@ void BenchMainWindow::refreshTransport() {
                             persistUpNext();
                             adoptPlaybackRow(*tab, next->first, next->second, true);
                             last_requested_next_.reset();
-                            anchors_.forget_transition();
+                            playback_.anchors.forget_transition();
                         } else {
                             statusBar()->showMessage(QStringLiteral("Playback failed: %1")
                                                          .arg(displayText(result.error().message)),
@@ -1580,32 +1580,25 @@ void BenchMainWindow::refreshTransport() {
                         }
                     } else {
                         if (!local_requests_.active())
-                            consumePlaybackRow(*tab, anchors_.current, playback_row_);
+                            consumePlaybackRow(*tab, playback_.anchors.current, playback_.row);
                     }
                 }
-                if (!local_modes_.single_active()) {
+                if (!playback_.modes.single_active()) {
                     local_requests_.finished();
                     persistUpNext();
                 }
             }
-            if (local_modes_.expire_single()) {
+            if (playback_.modes.expire_single()) {
                 saveLocalPlaybackModes();
                 refreshLocalPlaybackControls();
             }
         }
     } else if (snapshot.state == audio::LocalAuditionState::empty) {
-        if (!anchors_.document.is_nil() && local_requests_.pending().empty()) {
-            if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
+        if (!playback_.anchors.document.is_nil() && local_requests_.pending().empty()) {
+            if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
                 tab->model->setCurrentSource({}, -1);
             }
-            // Not anchors_.clear(): request_return deliberately survives an
-            // empty player. It is only consulted while a request is active,
-            // and adoptLocalRequest recomputes it when the next one starts.
-            anchors_.current = core::StableId{};
-            anchors_.forget_transition();
-            anchors_.document = core::StableId{};
-            anchors_.source = {};
-            playback_row_ = -1;
+            playback_.stop();
         }
         advance_pending_ = false;
     } else if (snapshot.state != audio::LocalAuditionState::loading) {
@@ -1663,7 +1656,7 @@ void BenchMainWindow::refreshTransport() {
         snapshot.state != audio::LocalAuditionState::loading &&
         snapshot.state != audio::LocalAuditionState::ended && !advance_pending_) {
         const auto next = automaticPlaybackRow();
-        const auto next_request = !local_modes_.single_active() &&
+        const auto next_request = !playback_.modes.single_active() &&
                                           !local_requests_.pending().empty()
                                       ? std::optional{local_requests_.pending().front()}
                                       : std::nullopt;
@@ -1686,7 +1679,7 @@ void BenchMainWindow::refreshTransport() {
                 static_cast<void>(player_->clear_gapless_next());
                 requested_request_.reset();
             } else {
-                auto* tab = tabForDocument(anchors_.document);
+                auto* tab = tabForDocument(playback_.anchors.document);
                 auto override_info =
                     next_request ? local_replay_gain_override(*up_next_local_model_, 0)
                                  : (tab != nullptr && next
@@ -1696,10 +1689,10 @@ void BenchMainWindow::refreshTransport() {
                     result) {
                     requested_request_ = next_request;
                     if (tab != nullptr && next && !next_request) {
-                        anchors_.requested =
+                        playback_.anchors.requested =
                             tab->model->rows().at(static_cast<std::size_t>(next->first)).entry_id;
                     } else
-                        anchors_.requested = core::StableId{};
+                        playback_.anchors.requested = core::StableId{};
                 }
             }
             last_requested_token_ = desired_token;
@@ -1743,8 +1736,8 @@ void BenchMainWindow::refreshTransport() {
         const auto fallback = QString::fromStdString(core::escape_raw_path(name));
         auto label = fallback;
         auto context = QString{};
-        if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
-            const auto row = tab->model->rowOfSource(source_from_snapshot(snapshot), playback_row_);
+        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+            const auto row = tab->model->rowOfSource(source_from_snapshot(snapshot), playback_.row);
             if (row >= 0) {
                 const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
                 const auto title = track.title.empty() ? fallback : displayText(track.title);
@@ -1961,9 +1954,9 @@ void BenchMainWindow::publishMprisState() {
                                   ? snapshot.raw_path
                                   : snapshot.raw_path.substr(slash + 1U);
             state.title = QString::fromStdString(core::escape_raw_path(name));
-            if (auto* tab = tabForDocument(anchors_.document); tab != nullptr) {
+            if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
                 const auto row =
-                    tab->model->rowOfSource(source_from_snapshot(snapshot), playback_row_);
+                    tab->model->rowOfSource(source_from_snapshot(snapshot), playback_.row);
                 if (row >= 0) {
                     const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
                     if (!track.title.empty()) {

@@ -47,9 +47,9 @@ void BenchMainWindow::sampleLastFm(const audio::LocalAuditionSnapshot& snapshot)
         return;
     lastfm_sample_time_ = lastfm_clock_.elapsed();
     LocalTrackRow track;
-    if (auto* tab = tabForDocument(anchors_.document)) {
+    if (auto* tab = tabForDocument(playback_.anchors.document)) {
         const auto row = tab->model->rowOfSource(
-            {snapshot.raw_path, snapshot.selection, snapshot.segment}, playback_row_);
+            {snapshot.raw_path, snapshot.selection, snapshot.segment}, playback_.row);
         if (row >= 0)
             track = tab->model->rows()[static_cast<std::size_t>(row)];
     }

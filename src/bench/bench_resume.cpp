@@ -47,9 +47,9 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
     if (local_requests_.active())
         persistUpNext();
     std::optional<ui::LocalResumeCheckpoint> checkpoint;
-    if (resumeEnabled() && audio::resumable(snapshot) && anchors_.playing() &&
+    if (resumeEnabled() && audio::resumable(snapshot) && playback_.anchors.playing() &&
         !local_requests_.active()) {
-        auto* tab = tabForDocument(anchors_.document);
+        auto* tab = tabForDocument(playback_.anchors.document);
         const auto row = resolvePlaybackRow(tab);
         if (tab != nullptr && row >= 0) {
             auto source = resumeSource(tab->model->rows().at(static_cast<std::size_t>(row)));
@@ -58,7 +58,7 @@ void BenchMainWindow::checkpointLocalResume(const audio::LocalAuditionSnapshot& 
                 tab->model->source(row).selection == snapshot.selection &&
                 tab->model->source(row).segment == snapshot.segment) {
                 checkpoint =
-                    ui::LocalResumeCheckpoint{document_text(anchors_.document), row,
+                    ui::LocalResumeCheckpoint{document_text(playback_.anchors.document), row,
                                               std::move(source),
                                               audio::resume_position_ms(snapshot)};
             }

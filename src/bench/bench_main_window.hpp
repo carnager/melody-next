@@ -7,6 +7,7 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
+#include "bench/local_playback_service.hpp"
 #include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
@@ -735,9 +736,6 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<QToolButton*> local_mode_buttons_;
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
-    // ADR-0220 Phase 0: the mode policy itself is Qt-free and owned by
-    // audio::PlaybackModes; the actions above are only its view.
-    audio::PlaybackModes local_modes_;
     bool album_order_preparing_{false};
     std::uint64_t album_order_generation_{0};
     int album_order_build_row_{0};
@@ -748,7 +746,6 @@ class BenchMainWindow final : public QMainWindow {
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};
     std::optional<ListTab> detached_playback_;
-    audio::PlaybackOrder playback_order_;
     audio::RequestQueue<LocalTrackRow> local_requests_;
     std::optional<audio::RequestQueue<LocalTrackRow>::Entry> requested_request_;
     std::optional<audio::RequestQueue<LocalTrackRow>::Entry> queued_request_;
@@ -764,11 +761,9 @@ class BenchMainWindow final : public QMainWindow {
     unsigned up_next_remote_revision_{0};
     QString up_next_remote_profile_;
 
-    // ADR-0220 Phase 0: everything about where playback is, in a form that
-    // survives leaving this process. playback_row_ below is deliberately not
-    // part of it -- a row is a client-side projection, and doubles here as the
-    // lookup hint for resolving anchors_.current.
-    audio::PlaybackAnchors anchors_;
+    // ADR-0220 Phase 0: the playback service. The mode actions, transport
+    // buttons and up-next view above are its views.
+    LocalPlaybackService playback_;
     bool consuming_row_{false};
     LastFmService* lastfm_{};
     QElapsedTimer lastfm_clock_;
@@ -783,7 +778,6 @@ class BenchMainWindow final : public QMainWindow {
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
-    int playback_row_{-1};
     bool advance_pending_{false};
     // Gapless continuation upkeep: the last takeover count seen, the last
     // requested next path, and a throttle for re-requests after the engine

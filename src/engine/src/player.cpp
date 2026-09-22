@@ -79,6 +79,9 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
     // ADR-0221: the playing entry is followed by identity. If it has gone,
     // playback is not silently handed to whatever now sits at its old row.
     const QueueView view{queue_};
+    std::erase_if(requests_, [&view](const core::StableId& wanted) {
+        return view.row_of_entry(wanted, -1) < 0;
+    });
     row_ = view.row_of_entry(anchors_.current, -1);
     if (row_ < 0 && !anchors_.current.is_nil()) {
         anchors_.current = core::StableId{};
@@ -89,6 +92,29 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
 std::vector<QueueEntry> Player::queue() const {
     const std::lock_guard guard{mutex_};
     return queue_;
+}
+
+core::Result<void> Player::request(const core::StableId& entry_id) {
+    const std::lock_guard guard{mutex_};
+    const QueueView view{queue_};
+    if (view.row_of_entry(entry_id, -1) < 0) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::not_found,
+                        .message = "no such entry in the queue",
+                        .context = {{.key = "entry", .value = entry_id.to_string()}}});
+    }
+    requests_.push_back(entry_id);
+    return {};
+}
+
+std::vector<core::StableId> Player::requests() const {
+    const std::lock_guard guard{mutex_};
+    return requests_;
+}
+
+void Player::clear_requests() {
+    const std::lock_guard guard{mutex_};
+    requests_.clear();
 }
 
 core::Result<void> Player::play_entry(const core::StableId& entry_id) {
@@ -136,6 +162,20 @@ core::Result<void> Player::seek_ms(const std::int64_t position_ms) {
 core::Result<void> Player::step(const int direction) {
     const std::lock_guard guard{mutex_};
     const QueueView view{queue_};
+    // A request is an explicit ask and outranks the order, but only going
+    // forward: stepping back means "the track before this one", not "undo a
+    // request nobody has heard yet".
+    if (direction > 0) {
+        while (!requests_.empty()) {
+            const auto wanted = requests_.front();
+            requests_.erase(requests_.begin());
+            if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
+                return start_locked(static_cast<std::size_t>(row));
+            }
+            // A request whose entry has left the queue is dropped rather than
+            // stopping playback: the user asked for something that is gone.
+        }
+    }
     const auto choice =
         audio::adjacent_playback_row(view, anchors_, modes_, order_, {}, direction, row_);
     if (!choice) {
@@ -157,6 +197,30 @@ void Player::set_modes(audio::PlaybackModes modes) {
     // Random and album-random change the traversal, so the order is rebuilt
     // rather than left describing the previous mode.
     reset_order_locked();
+}
+
+Player::Observations Player::observe(const std::int64_t monotonic_ms) {
+    const std::lock_guard guard{mutex_};
+    const auto snapshot = audition_->snapshot();
+    Observations observations;
+
+    // ADR-0220 Phase 0's rules, unchanged: a moment counts only while the
+    // output is actually carrying audio, and only against a playback instance
+    // that distinguishes replaying a file from continuing it.
+    const auto observation = audio::listen_observation(snapshot);
+    if (listening_.observe(observation.identity, observation.duration_seconds,
+                           observation.position_seconds, observation.playing, monotonic_ms) &&
+        !anchors_.current.is_nil()) {
+        observations.listened_entry = anchors_.current;
+        observations.listened_source = anchors_.source;
+    }
+
+    if (audio::resumable(snapshot) && !anchors_.current.is_nil()) {
+        observations.resume_entry = anchors_.current;
+        observations.resume_source = anchors_.source;
+        observations.resume_position_ms = audio::resume_position_ms(snapshot);
+    }
+    return observations;
 }
 
 Player::State Player::state() const {

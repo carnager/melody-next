@@ -249,6 +249,55 @@ void changes_are_pushed_without_asking(engine::Player& player) {
     watcher.stop();
 }
 
+// ADR-0220: these have to exist in the engine before playback can move, or
+// switching the workspace over would silently cost the user up-next, play
+// counts and resume -- features it has had since ADR-0196 and ADR-0204.
+void requests_outrank_the_order_but_only_forward(engine::Player& player) {
+    const std::vector<engine::QueueEntry> entries{entry("/music/a.flac"), entry("/music/b.flac"),
+                                                  entry("/music/c.flac")};
+    player.replace_queue(entries);
+    require(player.requests().empty(), "a fresh player has no requests");
+
+    // A request must name something the engine has: asking for what it does
+    // not hold is a mistake worth reporting, not a second way to add tracks.
+    const auto absent = player.request(core::StableId::random());
+    require(!absent, "requesting an entry not in the queue fails");
+    require(absent.error().code == core::ErrorCode::not_found, "as not_found");
+
+    require(player.request(entries[2].entry_id).has_value(), "requesting a held entry");
+    require(player.requests().size() == 1U, "and it is queued");
+
+    // A request whose entry leaves the queue goes with it, rather than
+    // lingering to be skipped over later.
+    player.replace_queue({entries[0], entries[1]});
+    require(player.requests().empty(), "a request for a removed entry is forgotten");
+
+    player.replace_queue(entries);
+    require(player.request(entries[2].entry_id).has_value(), "requesting again");
+    // Stepping back is "the track before this one", not "undo a request".
+    static_cast<void>(player.step(-1));
+    require(player.requests().size() == 1U, "stepping back leaves a request alone");
+    player.clear_requests();
+    require(player.requests().empty(), "requests can be abandoned");
+}
+
+void listening_and_resume_are_observed_not_pushed(engine::Player& player) {
+    player.replace_queue({entry("/music/a.flac")});
+    // Nothing is playing, so there is nothing to credit and nowhere to resume
+    // to. Both must be absent rather than zeroed: a resume position of zero
+    // means the start of a track, not the absence of one.
+    const auto idle = player.observe(1000);
+    require(!idle.listened_entry.has_value(), "silence credits no listening");
+    require(!idle.resume_entry.has_value(), "and offers no resume point");
+
+    // Observing repeatedly must stay quiet rather than accumulating against
+    // nothing.
+    for (std::int64_t at = 2000; at <= 6000; at += 1000) {
+        const auto again = player.observe(at);
+        require(!again.listened_entry.has_value(), "still nothing to credit");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -267,8 +316,10 @@ int main() {
     an_entry_leaving_the_queue_drops_the_anchor(*player);
     modes_are_engine_state(*player);
     stepping_past_the_end_reports_rather_than_wrapping(*player);
+    requests_outrank_the_order_but_only_forward(**player);
+    listening_and_resume_are_observed_not_pushed(**player);
     the_method_surface_speaks_for_the_player(**player);
     changes_are_pushed_without_asking(**player);
-    std::cout << "engine player: 8 scenarios\n";
+    std::cout << "engine player: 10 scenarios\n";
     return EXIT_SUCCESS;
 }

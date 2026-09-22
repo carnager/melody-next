@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/audio/playback_selection.hpp"
+#include "trackknife/audio/resume_checkpoint.hpp"
+#include "trackknife/core/listen_accounting.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/core/stable_id.hpp"
 
@@ -56,6 +59,18 @@ class Player final {
     void replace_queue(std::vector<QueueEntry> entries);
     [[nodiscard]] std::vector<QueueEntry> queue() const;
 
+    // Explicit asks, which outrank the queue's own order. ADR-0220 calls this
+    // up-next; the workspace has had it locally since ADR-0196 and it has to
+    // exist here before playback can move, or switching would silently lose
+    // it.
+    //
+    // A request names an entry already in the queue rather than carrying its
+    // own source: a client asking for something the engine does not have is a
+    // mistake worth reporting, not a second way to add tracks.
+    [[nodiscard]] core::Result<void> request(const core::StableId& entry_id);
+    [[nodiscard]] std::vector<core::StableId> requests() const;
+    void clear_requests();
+
     [[nodiscard]] core::Result<void> play_entry(const core::StableId& entry_id);
     [[nodiscard]] core::Result<void> resume();
     [[nodiscard]] core::Result<void> pause();
@@ -67,6 +82,30 @@ class Player final {
 
     [[nodiscard]] audio::PlaybackModes modes() const;
     void set_modes(audio::PlaybackModes modes);
+
+    // What the engine has decided to record about playback since it was last
+    // asked. Pulling rather than pushing keeps the player free of a
+    // persistence dependency: whoever owns a database drains this.
+    struct Observations final {
+        // Set when a track has been listened to long enough to count. The
+        // entry is the one it was credited to, which may no longer be playing
+        // by the time anyone reads this.
+        std::optional<core::StableId> listened_entry;
+        audio::TrackSource listened_source;
+        // Where playback is, for a resume checkpoint. Absent when there is
+        // nothing worth remembering -- see audio::resumable.
+        std::optional<core::StableId> resume_entry;
+        audio::TrackSource resume_source;
+        std::int64_t resume_position_ms{0};
+    };
+
+    // Samples the player and accumulates listening time. Called on a timer by
+    // whoever owns the engine; the counters it keeps need regular observation
+    // rather than a callback, which is the same shape the workspace used.
+    //
+    // `monotonic_ms` must advance monotonically; wall time would credit or
+    // lose listening whenever the clock is adjusted.
+    [[nodiscard]] Observations observe(std::int64_t monotonic_ms);
 
     // A snapshot of everything a client needs to render transport.
     struct State final {
@@ -91,11 +130,15 @@ class Player final {
 
     mutable std::mutex mutex_;
     std::unique_ptr<audio::LocalAuditionService> audition_;
+    core::ListenAccounting listening_;
     std::vector<QueueEntry> queue_;
     audio::PlaybackAnchors anchors_;
     audio::PlaybackModes modes_;
     audio::PlaybackOrder order_;
     int row_{-1};
+    // Identities rather than sources, so a request survives the queue being
+    // reordered for the same reason playback does.
+    std::vector<core::StableId> requests_;
 };
 
 } // namespace trackknife::engine

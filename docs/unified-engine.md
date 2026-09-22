@@ -83,12 +83,30 @@ comparison.
   `local_audition.cpp` as-is.
 - `bench_transport` and friends become thin views over it, keeping their
   existing signals so the UI is unchanged.
-- **MPRIS moves with it.** `src/bench/mpris_service.cpp` (347 lines, `QObject`
-  only, no widget coupling) attaches to the playback service rather than the
-  window. Cheap now, and required later: once the engine owns playback and the
-  UI can close, media keys, `playerctl` and status-bar modules must keep
-  working with no window open. MPRIS is the integration surface that matters on
-  a current desktop, and Melody has no D-Bus code at all.
+- **MPRIS does not move here.** The requirement is real — once the engine owns
+  playback and the UI can close, media keys, `playerctl` and status-bar modules
+  must keep working with no window open, and MPRIS is the integration surface
+  that matters on a current desktop while Melody has no D-Bus code at all. But
+  it cannot happen in this phase, and the earlier claim that it was "cheap now"
+  was wrong.
+
+  `mpris_service.cpp` is already clean: 347 lines, `QObject` only, no widget
+  coupling. The coupling is in how the window *binds* it — MPRIS commands
+  trigger `QAction`s, because the actions are where the authority branch lives.
+  `bench_transport.cpp` tests `isMpdContext()` 21 times, and every transport
+  action forks on it:
+
+  ```cpp
+  connect(stop_action_, &QAction::triggered, this, [this] {
+      if (isMpdContext()) { mpd_controller_->stop(); }
+      else if (player_ != nullptr) { ... player_->stop(); }
+  });
+  ```
+
+  Binding MPRIS to the playback service instead would mean duplicating that
+  branch inside the service — which is precisely the tax ADR-0220 exists to
+  end. So MPRIS follows the authority collapse rather than preceding it, and
+  becomes straightforward once there is one implementation to call.
 - Still one process. No protocol yet.
 
 **The seam, measured.** `BenchMainWindow` carries 260 members; the three

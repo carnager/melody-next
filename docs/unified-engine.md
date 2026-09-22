@@ -91,6 +91,41 @@ comparison.
   a current desktop, and Melody has no D-Bus code at all.
 - Still one process. No protocol yet.
 
+**The seam, measured.** `BenchMainWindow` carries 260 members; the three
+playback translation units touch 98 of them. 33 are widget-typed and stay
+(`QAction`, `QToolButton`, `QLabel`, `QSlider`, the up-next dock). The
+remainder is the service: `local_requests_` (`audio::RequestQueue`),
+`playback_order_`, `playback_source_`, `playback_document_id_`,
+`playback_row_`, the `album_order_*` set, the local mode flags
+(`local_random_`, `local_repeat_`, `local_single_`, `local_consume_`,
+`local_album_random_`), `local_listen_accounting_`, the `resume_*` pair,
+`advance_pending_`, `last_requested_next_`, `queued_request_` /
+`requested_request_`, plus the device and audio members (`player_`,
+`melody_endpoint_`, `selected_device_`, ReplayGain preamps, buffer profile).
+There is no `bench_transport.hpp` — these are all `BenchMainWindow::` methods
+split across files, which is why the coupling never got noticed.
+
+**The real blocker is how playback position is stored.** Five members hold it
+as `QPersistentModelIndex` — `playback_index_`, `queued_playback_index_`,
+`requested_playback_index_`, `request_return_index_`,
+`followed_playback_index_` — assigned straight off the view model
+(`playback_index_ = tab.model->index(row, 0)`) and read back as `.row()` in 23
+places. A `QPersistentModelIndex` *is* a pointer into a Qt model: it survives
+row insertion and removal precisely because the model maintains it. A
+core-owned service cannot hold one, and it certainly cannot send one over a
+socket. Phase 0 therefore starts with replacing model-index positions with a
+stable queue-entry identity, before any code is moved — the extraction is
+mechanical once that is done, and impossible before.
+
+**This is the same problem in three places, none of them MPD.** Stable
+queue-entry identity is what Phase 0 needs internally, what Phase 2 must put on
+the wire, and what tab unification needs so an entry is addressable
+independently of its row. It is also the nearest relative of Phase 6's content
+identity — that one identifies a *file across mutations*, this one identifies an
+*entry across reordering*, and they should be designed together. Settle it here;
+getting it wrong is expensive in every later phase. If the Phase 5 bridge is
+ever built it derives MPD song IDs from this, but it is not a reason to have it.
+
 Done when: the playback service is exercised by tests without constructing
 `BenchMainWindow`, and the existing local playback, resume, up-next and album
 shuffle suites pass unchanged.
@@ -107,8 +142,53 @@ shuffle suites pass unchanged.
 - `src/bench/local_list_model.cpp` becomes a client-side projection fed by that
   API rather than an owner of rows.
 
+**Tabs become one kind of thing.** Today there are two parallel structures with
+the same shape and different model types:
+
+```cpp
+struct ListTab {                        struct MpdPlaylistTab {
+    persistence::ListDocument document;     QString name;
+    LocalListModel* model;                  quick::MpdQueueModel* model;
+    QTableView* view;                       QTableView* view;
+    ui::TrackViewLayout view_layout;        ui::TrackViewLayout view_layout;
+};                                      };
+```
+
+— held in separate vectors (`list_tabs_`, `mpd_playlist_tabs_`), fed by
+separate tab bars (`local_source_tabs_`, `mpd_source_tabs_`), built by separate
+code paths (`buildWorkspace` / `buildMpdWorkspace`), and served by 54 distinct
+`*Mpd*`-suffixed methods shadowing local equivalents.
+
+This is not a merge. `MpdQueueModel` exists only because Trackknife is
+currently an *MPD client* when talking to the Go daemon; once remote means
+protocol v1 to a remote engine, Trackknife is never an MPD client again and
+that half is **deleted**, not abstracted. Local versus remote stops being a
+branch in feature code and becomes which profile the connection points at.
+
+A tab is then one thing: **a set of track references, an order, and a view
+layout.** Static lists, saved searches, dynamic playlists, one-shot search
+results and browse results differ only in how the set was produced and whether
+it re-evaluates — a source descriptor and a refresh policy on one struct, not
+five tab types. Search results in particular are not special: they are tracks
+in a tab and play like any other.
+
+This depends on the Phase 0 entry identity, because a tab entry must be
+addressable independently of its row.
+
+**The tagger is the exception, and stays a window.** It is already a non-modal
+`QDialog` (`metadata_properties_dialog.cpp`, 3,778 lines, plus a 1,514-line
+grid model). It should not become a tab: every other tab is a list of playable
+tracks, while the tagger is an editing surface holding staged uncommitted state
+with its own commit/cancel lifecycle, and tabs get closed casually. It should
+also stop being a `QDialog` — Esc-closes-and-discards and button-box semantics
+are wrong for staged edits across a multi-track selection. Target: a top-level
+window with its own toolbar, explicit apply/revert, remembered geometry, and
+several openable at once. Phase 2 confirms the shape, where it becomes a job
+submitter — stage, submit, stream progress, handle partial failure — which is a
+window with a task, not a view of a collection.
+
 Done when: no `src/bench` translation unit includes a persistence or operations
-header directly.
+header directly, and one tab type serves every list.
 
 ### Phase 2 — Protocol v1
 
@@ -124,14 +204,15 @@ and a shell script remain debugging tools.
   submit, stream progress, cancel, deliver a result document. They never occupy
   the control path. This is the direct lesson of ADR-0219's cover starvation.
 - Transport: unix socket first, TCP in Phase 3.
-- **Stable queue identity**, if the MPD bridge is being kept. The bridge
-  maintains MPD song IDs and `plchanges` versioning
-  (`queuePosByMPDID`, `queueIDs`, `queueVersion`), which are MPD-specific and
-  have no reason to exist in the engine — but protocol v1 must expose enough
-  stable per-entry queue identity and a monotonic queue version for the bridge
-  to derive them. Discovered from Phase 5, settled here, because a bridge
-  written against a protocol that cannot express this has to change the
-  protocol. Drop this requirement if Phase 5 is dropped.
+- **Stable queue identity on the wire.** A playback position and a queue entry
+  must be expressible without reference to a client-side row, because rows
+  move. This is the same identity Phase 0 introduces to replace
+  `QPersistentModelIndex`; here it simply has to survive serialisation. The
+  requirement is internal and holds even if nothing else is ever built on it.
+  If the Phase 5 bridge does get built it derives MPD song IDs and
+  `plchanges` versions from this plus a monotonic queue version — worth
+  checking the shape against `queuePosByMPDID` / `queueIDs` / `queueVersion`
+  at design time, since it is free to allow for and expensive to retrofit.
 
 Done when: the desktop UI drives a same-machine engine process over the socket,
 and the engine survives the UI exiting mid-playback.

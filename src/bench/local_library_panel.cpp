@@ -468,8 +468,12 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
              return outcome;
          },
          [this, generation, album](Outcome outcome) {
-             if (generation != generation_)
-                 return;
+             // A failed or empty lookup is a fact about the queried path, true
+             // however the tree changed while the query ran. Report it before
+             // the staleness check, which guards the navigation below: a
+             // background refreshLibrary() bumps generation_ through
+             // reloadTree(), and dropping the whole result left the panel
+             // stuck on "Locating in library…" with no outcome.
              if (!outcome.error.isEmpty()) {
                  status_->setText(outcome.error);
                  return;
@@ -479,6 +483,8 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
                      "This file is not in the local library. Add its folder and Refresh first."));
                  return;
              }
+             if (generation != generation_)
+                 return;
              auto entry = outcome.page.entries.front();
              {
                  const QSignalBlocker blocker{search_};

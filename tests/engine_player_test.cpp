@@ -5,12 +5,17 @@
 // is required to check the queue, the anchors and the advance rules -- what is
 // being tested is who owns the state, not whether PipeWire is present.
 
+#include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
+#include "trackknife/protocol/message.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -121,6 +126,129 @@ void stepping_past_the_end_reports_rather_than_wrapping(std::unique_ptr<engine::
             "as not_found rather than silently starting the first entry");
 }
 
+namespace protocol = trackknife::protocol;
+
+[[nodiscard]] protocol::Response invoke(const protocol::Dispatcher& dispatcher,
+                                        const std::string& method, const protocol::Json& params) {
+    return dispatcher.dispatch(protocol::Request{.id = 1, .method = method, .params = params});
+}
+
+void the_method_surface_speaks_for_the_player(engine::Player& player) {
+    protocol::Dispatcher dispatcher;
+    engine::register_playback_methods(dispatcher, player);
+
+    // Paths cross as base64, because a path is bytes.
+    const std::string raw{"/music/broken-\xff.flac", 22U};
+    protocol::Json entries = protocol::Json::array();
+    protocol::Json one = protocol::Json::object();
+    one["path"] = protocol::encode_raw_path(raw);
+    one["duration_ms"] = 1234;
+    entries.push_back(one);
+
+    const auto replaced =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", entries}});
+    require(replaced.result.has_value(), "replacing the queue succeeds");
+    require(replaced.result->at("queue_size") == 1, "and reports the new size");
+
+    const auto listed = invoke(dispatcher, "playback.queue", protocol::Json::object());
+    require(listed.result.has_value(), "the queue can be read back");
+    const auto& listed_entries = listed.result->at("entries");
+    require(listed_entries.size() == 1U, "with what was put in it");
+    auto decoded = protocol::decode_raw_path(listed_entries[0].at("path").get<std::string>());
+    require(decoded.has_value() && *decoded == raw,
+            "an undecodable path survives the round trip exactly");
+
+    // A client may name its own entries and recognise them coming back.
+    const auto named = listed_entries[0].at("entry").get<std::string>();
+    protocol::Json again = protocol::Json::array();
+    protocol::Json keep = protocol::Json::object();
+    keep["path"] = protocol::encode_raw_path(raw);
+    keep["entry"] = named;
+    again.push_back(keep);
+    const auto kept =
+        invoke(dispatcher, "playback.replace_queue", protocol::Json{{"entries", again}});
+    require(kept.result.has_value(), "a client-supplied identity is accepted");
+    const auto relisted = invoke(dispatcher, "playback.queue", protocol::Json::object());
+    require(relisted.result->at("entries")[0].at("entry") == named,
+            "and honoured rather than replaced");
+
+    // Setting one mode leaves the others alone, so two clients changing
+    // different modes do not overwrite each other.
+    auto set = invoke(dispatcher, "playback.set_modes", protocol::Json{{"repeat", true}});
+    require(set.result.has_value(), "setting a mode succeeds");
+    set = invoke(dispatcher, "playback.set_modes", protocol::Json{{"single", 2}});
+    require(set.result.has_value(), "setting another succeeds");
+    require(set.result->at("modes").at("repeat") == true, "the first mode is still set");
+    require(set.result->at("modes").at("single") == 2, "and the second took");
+
+    const auto bad = invoke(dispatcher, "playback.set_modes", protocol::Json{{"single", 5}});
+    require(bad.error.has_value(), "an out of range tri-state is refused");
+    require(bad.error->context.at("param") == "single", "naming the parameter");
+
+    const auto unknown_entry =
+        invoke(dispatcher, "playback.play",
+               protocol::Json{{"entry", core::StableId::random().to_string()}});
+    require(unknown_entry.error.has_value(), "playing an entry not in the queue fails");
+    require(unknown_entry.error->code == "not_found", "as not_found");
+
+    const auto not_identity =
+        invoke(dispatcher, "playback.play", protocol::Json{{"entry", "nonsense"}});
+    require(not_identity.error.has_value(), "a malformed identity is refused");
+    require(not_identity.error->context.at("param") == "entry", "naming the parameter");
+}
+
+void changes_are_pushed_without_asking(engine::Player& player) {
+    std::mutex mutex;
+    std::vector<protocol::Event> seen;
+    engine::PlaybackWatcher watcher{player,
+                                    [&](const protocol::Event& event) {
+                                        const std::lock_guard guard{mutex};
+                                        seen.push_back(event);
+                                    },
+                                    std::chrono::milliseconds{10}};
+    watcher.start();
+
+    // Never sleep holding the lock: the watcher needs it to push, and this
+    // loop would otherwise starve the thread it is waiting for.
+    const auto wait_for_an_event = [&]() {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        while (std::chrono::steady_clock::now() < deadline) {
+            {
+                const std::lock_guard guard{mutex};
+                if (!seen.empty()) {
+                    return true;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        return false;
+    };
+
+    // The first sample is always emitted, so a client that connects mid-life
+    // learns the current state without having to ask for it.
+    require(wait_for_an_event(), "the watcher emits the state it finds");
+    {
+        const std::lock_guard guard{mutex};
+        require(seen.front().name == "playback.changed", "as playback.changed");
+        seen.clear();
+    }
+
+    // A steady player emits nothing further: position moves continuously and
+    // is excluded from the comparison, so an idle engine is quiet.
+    std::this_thread::sleep_for(std::chrono::milliseconds{120});
+    {
+        const std::lock_guard guard{mutex};
+        require(seen.empty(), "an unchanged player is quiet rather than chattering");
+    }
+
+    // A real change is noticed.
+    auto modes = player.modes();
+    modes.random = !modes.random;
+    player.set_modes(modes);
+    require(wait_for_an_event(), "a mode change is pushed");
+    watcher.stop();
+}
+
 } // namespace
 
 int main() {
@@ -139,6 +267,8 @@ int main() {
     an_entry_leaving_the_queue_drops_the_anchor(*player);
     modes_are_engine_state(*player);
     stepping_past_the_end_reports_rather_than_wrapping(*player);
-    std::cout << "engine player: 6 scenarios\n";
+    the_method_surface_speaks_for_the_player(**player);
+    changes_are_pushed_without_asking(**player);
+    std::cout << "engine player: 8 scenarios\n";
     return EXIT_SUCCESS;
 }

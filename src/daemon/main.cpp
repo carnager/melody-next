@@ -10,6 +10,7 @@
 
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
+#include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -112,6 +114,17 @@ int main(int argc, char** argv) {
     trackknife::protocol::Dispatcher dispatcher;
     trackknife::engine::register_catalogue_methods(dispatcher, catalogue);
 
+    // Playback is optional at startup: a machine with no audio device can
+    // still serve the catalogue, which is what a headless indexing host is.
+    // Refusing to start would make the engine useless there for no gain.
+    auto player = trackknife::engine::Player::create();
+    if (player) {
+        trackknife::engine::register_playback_methods(dispatcher, **player);
+    } else {
+        std::cerr << "tkengine: no audio output (" << player.error().message
+                  << "); playback methods are unavailable\n";
+    }
+
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
         std::cerr << "tkengine: could not listen on " << socket_path.string() << ": "
@@ -125,6 +138,13 @@ int main(int argc, char** argv) {
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
+
+    // Pushed state, so a client learns a track changed without asking.
+    std::optional<trackknife::engine::PlaybackWatcher> watcher;
+    if (player) {
+        watcher.emplace(**player, (*server)->sink());
+        watcher->start();
+    }
 
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
@@ -140,6 +160,10 @@ int main(int argc, char** argv) {
     }
 
     std::cerr << "tkengine: stopping\n";
+    // The watcher writes to the server's sink, so it stops first.
+    if (watcher) {
+        watcher->stop();
+    }
     (*server)->stop();
     return EXIT_SUCCESS;
 }

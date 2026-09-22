@@ -326,7 +326,7 @@ add_test(
 add_executable(trackknife_engine_player_tests engine_player_test.cpp)
 target_link_libraries(
     trackknife_engine_player_tests
-    PRIVATE Trackknife::Engine Trackknife::Core Threads::Threads
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME engine-player COMMAND trackknife_engine_player_tests)

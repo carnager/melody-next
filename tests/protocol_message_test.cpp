@@ -4,6 +4,7 @@
 // meant to be run by the Go implementation, which is what stops the two
 // drifting; a case added here is a case both must satisfy.
 
+#include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <cstdlib>
@@ -117,7 +118,62 @@ void run_corpus(const std::filesystem::path& path) {
         ++checked;
     }
 
-    require(checked == corpus.at("cases").size() + corpus.at("raw_path_cases").size(),
+    // Error codes are the wire contract: the strings, not the enumerator
+    // names. Every code must round trip, and the corpus must name all of them
+    // so adding one to the enum without deciding its wire name fails here.
+    std::size_t codes = 0;
+    for (const auto& entry : corpus.at("error_code_cases")) {
+        const auto name = entry.at("code").get<std::string>();
+        const auto code = protocol::error_code_from_name(name);
+        require(protocol::error_code_name(code) == name, name + ": must round trip");
+        ++codes;
+    }
+    require(codes == 10U, "the corpus must name every core::ErrorCode");
+    // An unrecognised code is not a parse failure: a newer engine may report
+    // something this client has never heard of.
+    require(protocol::error_code_from_name("from_the_future") ==
+                trackknife::core::ErrorCode::invariant,
+            "an unknown code must land on invariant rather than being rejected");
+
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("test.echoes",
+                  [](const protocol::Json& params) -> trackknife::core::Result<protocol::Json> {
+                      return params;
+                  });
+    dispatcher.on("test.fails",
+                  [](const protocol::Json&) -> trackknife::core::Result<protocol::Json> {
+                      return std::unexpected(
+                          trackknife::core::Error{.code = trackknife::core::ErrorCode::not_found,
+                                                  .message = "no such entry",
+                                                  .context = {{.key = "entry", .value = "7f3a"}}});
+                  });
+    require(dispatcher.knows("test.echoes"), "a registered method is known");
+    require(!dispatcher.knows("test.absent"), "an unregistered method is not");
+
+    for (const auto& entry : corpus.at("dispatch_cases")) {
+        const auto id = entry.at("id").get<std::string>();
+        const auto& wire = entry.at("request");
+        const protocol::Request request{.id = wire.at("id").get<std::int64_t>(),
+                                        .method = wire.at("method").get<std::string>(),
+                                        .params = wire.at("params")};
+        const auto response = dispatcher.dispatch(request);
+        require(response.id == request.id, id + ": the id is echoed");
+        if (entry.contains("expect_result")) {
+            require(response.result.has_value(), id + ": must succeed");
+            require(*response.result == entry.at("expect_result"), id + ": result");
+        } else {
+            require(response.error.has_value(), id + ": must fail");
+            require(response.error->code == entry.at("expect_error_code").get<std::string>(),
+                    id + ": error code");
+            if (entry.contains("expect_context")) {
+                require(response.error->context == entry.at("expect_context"), id + ": context");
+            }
+        }
+        ++checked;
+    }
+
+    require(checked == corpus.at("cases").size() + corpus.at("raw_path_cases").size() +
+                           corpus.at("dispatch_cases").size(),
             "every corpus case must be checked");
     std::cout << "protocol v1 corpus: " << checked << " cases\n";
 }

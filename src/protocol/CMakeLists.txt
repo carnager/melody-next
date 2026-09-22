@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
-add_library(trackknife_protocol STATIC src/message.cpp)
+add_library(trackknife_protocol STATIC src/dispatch.cpp src/message.cpp)
 add_library(Trackknife::Protocol ALIAS trackknife_protocol)
 
 target_include_directories(

@@ -309,7 +309,8 @@ add_test(NAME cue-sheet COMMAND trackknife_cue_sheet_tests)
 add_executable(trackknife_protocol_message_tests protocol_message_test.cpp)
 target_link_libraries(
     trackknife_protocol_message_tests
-    PRIVATE Trackknife::Protocol trackknife_project_options trackknife_project_warnings
+    PRIVATE Trackknife::Protocol Trackknife::Core trackknife_project_options
+            trackknife_project_warnings
 )
 add_test(
     NAME protocol-message

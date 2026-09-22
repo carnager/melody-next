@@ -1,114 +1,196 @@
 {
   "schema_version": 1,
-  "protocol": { "name": "trackknife", "version": 1 },
+  "protocol": {
+    "name": "trackknife",
+    "version": 1
+  },
   "note": "ADR-0222. Each case is one framed line and the message it must parse to. Both the C++ and Go implementations run this file; that is what stops them drifting.",
   "cases": [
     {
       "id": "request.minimal",
       "line": "{\"id\":1,\"method\":\"playback.state\"}",
-      "expect": { "kind": "request", "id": 1, "method": "playback.state", "params": {} },
+      "expect": {
+        "kind": "request",
+        "id": 1,
+        "method": "playback.state",
+        "params": {}
+      },
       "rationale": "params is optional and absent means empty, so a caller never has to send a placeholder object."
     },
     {
       "id": "request.with-params",
       "line": "{\"id\":42,\"method\":\"catalogue.filter\",\"params\":{\"query\":\"genre HAS jazz\",\"limit\":200}}",
-      "expect": { "kind": "request", "id": 42, "method": "catalogue.filter", "params": { "query": "genre HAS jazz", "limit": 200 } },
+      "expect": {
+        "kind": "request",
+        "id": 42,
+        "method": "catalogue.filter",
+        "params": {
+          "query": "genre HAS jazz",
+          "limit": 200
+        }
+      },
       "rationale": "The ordinary shape."
     },
     {
       "id": "notification.no-id",
       "line": "{\"method\":\"client.goodbye\"}",
-      "expect": { "kind": "notification", "method": "client.goodbye", "params": {} },
+      "expect": {
+        "kind": "notification",
+        "method": "client.goodbye",
+        "params": {}
+      },
       "rationale": "A method with no id is fire and forget; the absence of id is the whole distinction, so it must not be inferred from the method name."
     },
     {
       "id": "response.result",
       "line": "{\"id\":42,\"result\":{\"paths\":[\"L211c2ljL2EuZmxhYw==\"]}}",
-      "expect": { "kind": "response", "id": 42, "result": { "paths": ["L211c2ljL2EuZmxhYw=="] } },
+      "expect": {
+        "kind": "response",
+        "id": 42,
+        "result": {
+          "paths": [
+            "L211c2ljL2EuZmxhYw=="
+          ]
+        }
+      },
       "rationale": "Raw paths travel base64 because JSON strings must be valid UTF-8 and paths are bytes."
     },
     {
       "id": "response.result-null",
       "line": "{\"id\":9,\"result\":null}",
-      "expect": { "kind": "response", "id": 9, "result": null },
+      "expect": {
+        "kind": "response",
+        "id": 9,
+        "result": null
+      },
       "rationale": "A void operation still answers. Null result is present-and-empty, not absent, and must not be confused with an error."
     },
     {
       "id": "response.error-with-context",
       "line": "{\"id\":5,\"error\":{\"code\":\"not_found\",\"message\":\"no such entry\",\"context\":{\"entry\":\"7f3a\"}}}",
-      "expect": { "kind": "response", "id": 5, "error": { "code": "not_found", "message": "no such entry", "context": { "entry": "7f3a" } } },
+      "expect": {
+        "kind": "response",
+        "id": 5,
+        "error": {
+          "code": "not_found",
+          "message": "no such entry",
+          "context": {
+            "entry": "7f3a"
+          }
+        }
+      },
       "rationale": "code is machine-readable and stable; message is human text clients must not parse; context carries what the code cannot say."
     },
     {
       "id": "response.error-minimal",
       "line": "{\"id\":5,\"error\":{\"code\":\"cancelled\"}}",
-      "expect": { "kind": "response", "id": 5, "error": { "code": "cancelled", "message": "", "context": {} } },
+      "expect": {
+        "kind": "response",
+        "id": 5,
+        "error": {
+          "code": "cancelled",
+          "message": "",
+          "context": {}
+        }
+      },
       "rationale": "Only the code is required, so an engine is never forced to invent prose to report a failure."
     },
     {
       "id": "event.playback",
       "line": "{\"event\":\"playback.changed\",\"data\":{\"state\":\"playing\"}}",
-      "expect": { "kind": "event", "event": "playback.changed", "data": { "state": "playing" } },
+      "expect": {
+        "kind": "event",
+        "event": "playback.changed",
+        "data": {
+          "state": "playing"
+        }
+      },
       "rationale": "Events carry no id. They are not ordered against responses, so a client reconciles on state rather than sequence."
     },
     {
       "id": "event.job-progress",
       "line": "{\"event\":\"job.progress\",\"data\":{\"job_id\":\"a1\",\"visited\":120,\"indexed\":118}}",
-      "expect": { "kind": "event", "event": "job.progress", "data": { "job_id": "a1", "visited": 120, "indexed": 118 } },
+      "expect": {
+        "kind": "event",
+        "event": "job.progress",
+        "data": {
+          "job_id": "a1",
+          "visited": 120,
+          "indexed": 118
+        }
+      },
       "rationale": "Job progress is an event stream, so a running job occupies no request slot -- the answer to ADR-0219's cover scan starving the control path."
     },
     {
       "id": "reject.embedded-newline",
       "line": "{\"id\":1,\"method\":\"a\"}\n{\"id\":2,\"method\":\"b\"}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "Framing is one object per line. A newline inside a frame means the boundary was already lost, so it is refused rather than parsed as the first message."
     },
     {
       "id": "reject.not-json",
       "line": "not json at all",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "An unparseable line is reported, never silently dropped."
     },
     {
       "id": "reject.not-an-object",
       "line": "[1,2,3]",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "Every message is an object; an array has no shape to dispatch on."
     },
     {
       "id": "reject.no-shape",
       "line": "{\"params\":{}}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "Without method, result, error or event there is nothing to do with the message."
     },
     {
       "id": "reject.result-and-error",
       "line": "{\"id\":3,\"result\":{},\"error\":{\"code\":\"io\"}}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "A response is one or the other. Accepting both would let a sender express success and failure at once."
     },
     {
       "id": "reject.event-with-id",
       "line": "{\"id\":3,\"event\":\"playback.changed\"}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "An event is unsolicited by definition; an id would imply it answers something."
     },
     {
       "id": "reject.response-without-id",
       "line": "{\"result\":{}}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "A response with no id cannot be matched to a request, which defeats multiplexing."
     },
     {
       "id": "reject.zero-id",
       "line": "{\"id\":0,\"method\":\"a\"}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "Ids are positive so that zero stays available as an unmistakable not-a-request sentinel in implementations."
     },
     {
       "id": "reject.params-not-object",
       "line": "{\"id\":1,\"method\":\"a\",\"params\":7}",
-      "expect": { "kind": "error" },
+      "expect": {
+        "kind": "error"
+      },
       "rationale": "Coercing a scalar into an object hides a caller's mistake until it surfaces as a missing field."
     }
   ],
@@ -148,6 +230,87 @@
       "raw_bytes_hex": "2f61",
       "encoded": "L2E=",
       "rationale": "One padding character."
+    }
+  ],
+  "error_code_cases": [
+    {
+      "code": "cancelled",
+      "rationale": "Reported when a job or request stopped because it was asked to, which a client must be able to tell from a failure."
+    },
+    {
+      "code": "invalid_argument",
+      "rationale": "The caller sent something the engine cannot act on; retrying unchanged will not help."
+    },
+    {
+      "code": "not_found",
+      "rationale": "The named thing does not exist. Distinct from an empty result, which is a success."
+    },
+    {
+      "code": "conflict",
+      "rationale": "The operation collided with concurrent state, such as a saved search edited under a stale revision."
+    },
+    {
+      "code": "unsupported",
+      "rationale": "Also the answer to an unknown method, so a client talking to an older engine learns that rather than waiting forever."
+    },
+    {
+      "code": "limit_exceeded",
+      "rationale": "A bound was hit -- request queue capacity, album grouping budget -- rather than something being wrong."
+    },
+    {
+      "code": "io",
+      "rationale": "The filesystem refused. Usually transient and usually worth surfacing verbatim to the user."
+    },
+    {
+      "code": "backend",
+      "rationale": "A decoder, tag library or output device failed below the engine."
+    },
+    {
+      "code": "database",
+      "rationale": "The catalogue or workspace store failed, which is not the user's doing and not retryable by them."
+    },
+    {
+      "code": "invariant",
+      "rationale": "Something the engine believed impossible. Also where an unknown code from a newer engine lands, so that added codes are not a breaking change."
+    }
+  ],
+  "dispatch_cases": [
+    {
+      "id": "dispatch.unknown-method",
+      "request": {
+        "id": 4,
+        "method": "nope.nothing",
+        "params": {}
+      },
+      "expect_error_code": "unsupported",
+      "rationale": "A request always gets exactly one response. Leaving an unknown method unanswered would hang the caller."
+    },
+    {
+      "id": "dispatch.handler-error-keeps-context",
+      "request": {
+        "id": 5,
+        "method": "test.fails",
+        "params": {}
+      },
+      "expect_error_code": "not_found",
+      "expect_context": {
+        "entry": "7f3a"
+      },
+      "rationale": "Error context survives the boundary, so a client can say which entry failed without parsing the message text."
+    },
+    {
+      "id": "dispatch.handler-result",
+      "request": {
+        "id": 6,
+        "method": "test.echoes",
+        "params": {
+          "value": 41
+        }
+      },
+      "expect_result": {
+        "value": 41
+      },
+      "rationale": "The ordinary path: params in, result out, id echoed."
     }
   ]
 }

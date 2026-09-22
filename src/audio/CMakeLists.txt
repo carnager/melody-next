@@ -6,6 +6,7 @@ add_library(
     src/local_playback.cpp
     src/melody_agent.cpp
     src/playback_order.cpp
+    src/playback_selection.cpp
     src/pipewire_output.cpp
 )
 add_library(Trackknife::Audio ALIAS trackknife_audio)

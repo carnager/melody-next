@@ -448,6 +448,8 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    // The two facts the advance rules need about the local request queue.
+    [[nodiscard]] audio::RequestQueueState requestQueueState() const;
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
     void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
     void playAdjacent(int direction);

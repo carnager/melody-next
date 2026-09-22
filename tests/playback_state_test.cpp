@@ -6,12 +6,15 @@
 // itself is unchanged; it simply lives somewhere a headless engine can reach.
 
 #include "trackknife/audio/playback_anchors.hpp"
+#include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/track_source.hpp"
 
 #include <cstdlib>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -159,9 +162,181 @@ void anchors_compare_by_value() {
     require(!(left == right), "a different current entry is a different position");
 }
 
+// A list with no Qt in it, which is the point.
+class FakeList final : public trackknife::audio::PlaybackList {
+  public:
+    explicit FakeList(std::vector<trackknife::core::StableId> entries)
+        : entries_(std::move(entries)) {}
+
+    [[nodiscard]] int row_count() const override {
+        return static_cast<int>(entries_.size());
+    }
+    [[nodiscard]] int row_of_entry(const trackknife::core::StableId& entry,
+                                   const int hint_row) const override {
+        if (hint_row >= 0 && hint_row < row_count() &&
+            entries_[static_cast<std::size_t>(hint_row)] == entry) {
+            return hint_row;
+        }
+        for (std::size_t index = 0; index < entries_.size(); ++index) {
+            if (entries_[index] == entry) {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
+    }
+    [[nodiscard]] trackknife::audio::TrackSource source_at(const int row) const override {
+        trackknife::audio::TrackSource source;
+        source.raw_path = "/music/" + std::to_string(row) + ".flac";
+        return source;
+    }
+
+    void drop(const int row) {
+        entries_.erase(entries_.begin() + row);
+    }
+
+  private:
+    std::vector<trackknife::core::StableId> entries_;
+};
+
+struct Fixture {
+    std::vector<trackknife::core::StableId> ids;
+    FakeList list;
+    trackknife::audio::PlaybackAnchors anchors;
+    trackknife::audio::PlaybackModes modes;
+    trackknife::audio::PlaybackOrder order{7U};
+
+    explicit Fixture(const int count)
+        : ids(make_ids(count)), list(ids) {
+        anchors.document = trackknife::core::StableId::random();
+        anchors.current = ids.front();
+        anchors.source.raw_path = "/music/0.flac";
+        order.reset(count, 0, false);
+    }
+
+    static std::vector<trackknife::core::StableId> make_ids(const int count) {
+        std::vector<trackknife::core::StableId> ids;
+        for (int index = 0; index < count; ++index) {
+            ids.push_back(trackknife::core::StableId::random());
+        }
+        return ids;
+    }
+};
+
+void advancing_walks_the_list_and_stops_at_the_end() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{3};
+    const audio::RequestQueueState idle;
+
+    const auto next = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                   fixture.order, idle, 1, 0);
+    require(next && next->row == 1, "advancing must land on the following row");
+    require(next->source.raw_path == "/music/1.flac", "the choice carries that row's source");
+
+    // Walk to the end; without repeat there is nothing after the last row.
+    fixture.order.reset(3, 2, false);
+    fixture.anchors.current = fixture.ids[2];
+    const auto past_end = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                       fixture.order, idle, 1, 2);
+    require(!past_end, "the end of a list without repeat stops playback");
+}
+
+void an_entry_that_left_the_list_stops_playback() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{3};
+    fixture.list.drop(0);
+    const auto choice = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                     fixture.order, {}, 1, 0);
+    require(!choice, "an identity that outlived its row must not resolve to a guess");
+}
+
+void a_request_return_point_outranks_the_order() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{4};
+    fixture.anchors.request_return = fixture.ids[3];
+    const audio::RequestQueueState serving{.active = true, .pending_empty = false};
+
+    const auto forward = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                      fixture.order, serving, 1, 0);
+    require(forward && forward->row == 3, "a served request returns where the list was left");
+
+    // Backwards never uses the return point.
+    fixture.order.reset(4, 2, false);
+    fixture.anchors.current = fixture.ids[2];
+    const auto backward = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                       fixture.order, serving, -1, 2);
+    require(backward && backward->row == 1, "going back ignores the return point");
+
+    // Nor does it when no request is being served.
+    const auto quiet = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                    fixture.order, {}, 1, 2);
+    require(quiet && quiet->row == 3, "without an active request the order decides");
+}
+
+void consume_refuses_to_land_back_on_the_playing_row() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{1};
+    fixture.modes.repeat = true;
+    fixture.modes.consume = audio::ModeState::on;
+    // A single-row list with repeat would otherwise return row 0 forever, but
+    // consume is about to remove it.
+    const auto choice = audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                     fixture.order, {}, 1, 0);
+    require(!choice, "consume must not replay the row it is about to drop");
+}
+
+void single_stops_unless_repeat_turns_it_into_a_loop() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{3};
+    const audio::RequestQueueState idle;
+
+    fixture.modes.single = audio::ModeState::on;
+    require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                           fixture.order, idle, 0),
+            "single stops after the current track");
+
+    fixture.modes.repeat = true;
+    const auto looped = audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                                      fixture.order, idle, 0);
+    require(looped && looped->row == 0, "single with repeat repeats this track");
+
+    // Consume outranks the loop: repeating a row about to be dropped is
+    // incoherent.
+    fixture.modes.consume = audio::ModeState::on;
+    require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                           fixture.order, idle, 0),
+            "consume outranks single+repeat");
+    fixture.modes.consume = audio::ModeState::off;
+
+    // So does anything waiting in the request queue: a request is an explicit
+    // ask and single+repeat must not starve it.
+    require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                           fixture.order,
+                                           {.active = false, .pending_empty = false}, 0),
+            "a pending request outranks single+repeat");
+    require(!audio::automatic_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                           fixture.order,
+                                           {.active = true, .pending_empty = true}, 0),
+            "an active request outranks single+repeat");
+}
+
+void nothing_playing_chooses_nothing() {
+    namespace audio = trackknife::audio;
+    Fixture fixture{3};
+    fixture.anchors.source = {};
+    require(!audio::adjacent_playback_row(fixture.list, fixture.anchors, fixture.modes,
+                                          fixture.order, {}, 1, 0),
+            "with no source there is nothing to advance from");
+}
+
 } // namespace
 
 int main() {
+    advancing_walks_the_list_and_stops_at_the_end();
+    an_entry_that_left_the_list_stops_playback();
+    a_request_return_point_outranks_the_order();
+    consume_refuses_to_land_back_on_the_playing_row();
+    single_stops_unless_repeat_turns_it_into_a_loop();
+    nothing_playing_chooses_nothing();
     anchors_describe_position_without_rows();
     anchors_compare_by_value();
     a_track_source_reports_emptiness_and_compares_by_value();

@@ -1088,20 +1088,22 @@ void BenchMainWindow::adoptPlaybackRow(ListTab& tab, const int row, const LocalT
 }
 
 std::optional<std::pair<int, LocalTrackSource>> BenchMainWindow::automaticPlaybackRow() {
-    if (local_modes_.single_active()) {
-        if (local_modes_.repeat && !local_modes_.consume_active() &&
-            local_requests_.pending().empty() &&
-            !local_requests_.active()) {
-            // A valid QPersistentModelIndex always had a row; an identity can
-            // outlive its row, so the lookup is checked rather than assumed.
-            if (const auto row = resolvePlaybackRow(tabForDocument(anchors_.document));
-                row >= 0) {
-                return std::make_pair(row, anchors_.source);
-            }
-        }
+    auto* tab = tabForDocument(anchors_.document);
+    if (tab == nullptr) {
         return std::nullopt;
     }
-    return adjacentPlaybackRow(1);
+    const LocalListPlaybackView list{*tab->model};
+    const auto choice = audio::automatic_playback_row(list, anchors_, local_modes_, playback_order_,
+                                                      requestQueueState(), playback_row_);
+    if (!choice) {
+        return std::nullopt;
+    }
+    return std::make_pair(choice->row, choice->source);
+}
+
+audio::RequestQueueState BenchMainWindow::requestQueueState() const {
+    return {.active = local_requests_.active().has_value(),
+            .pending_empty = local_requests_.pending().empty()};
 }
 
 void BenchMainWindow::playRow(ListTab& tab, const int row,
@@ -1162,23 +1164,16 @@ void BenchMainWindow::playRow(ListTab& tab, const int row,
 std::optional<std::pair<int, LocalTrackSource>>
 BenchMainWindow::adjacentPlaybackRow(const int direction) {
     auto* tab = tabForDocument(anchors_.document);
-    if (tab == nullptr || anchors_.source.empty()) {
+    if (tab == nullptr) {
         return std::nullopt;
     }
-    if (direction > 0 && local_requests_.active() && !anchors_.request_return.is_nil()) {
-        if (const auto row = tab->model->rowOfEntry(anchors_.request_return, -1); row >= 0) {
-            return std::make_pair(row, tab->model->source(row));
-        }
-    }
-    const auto playing_row = resolvePlaybackRow(tab);
-    if (playing_row < 0) {
+    const LocalListPlaybackView list{*tab->model};
+    const auto choice = audio::adjacent_playback_row(list, anchors_, local_modes_, playback_order_,
+                                                     requestQueueState(), direction, playback_row_);
+    if (!choice) {
         return std::nullopt;
     }
-    const auto adjacent = playback_order_.adjacent(direction, local_modes_.repeat);
-    if (!adjacent || (local_modes_.consume_active() && *adjacent == playing_row)) {
-        return std::nullopt;
-    }
-    return std::make_pair(*adjacent, tab->model->source(*adjacent));
+    return std::make_pair(choice->row, choice->source);
 }
 
 void BenchMainWindow::adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry,

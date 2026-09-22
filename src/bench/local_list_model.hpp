@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/audio/playback_selection.hpp"
 #include "trackknife/audio/track_source.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/document.hpp"
@@ -114,6 +115,23 @@ struct LocalTrackRow {
 // that playback state holding one can leave the widget layer. The alias keeps
 // the established spelling at the several hundred call sites in src/bench.
 using LocalTrackSource = audio::TrackSource;
+
+class LocalListModel;
+
+// ADR-0220 Phase 0: the engine's narrow view of a playing list. The model owns
+// presentation; this exposes only what choosing the next track needs, so the
+// advance rules can run without a widget in sight.
+class LocalListPlaybackView final : public audio::PlaybackList {
+  public:
+    explicit LocalListPlaybackView(const LocalListModel& model) : model_(&model) {}
+
+    [[nodiscard]] int row_count() const override;
+    [[nodiscard]] int row_of_entry(const core::StableId& entry, int hint_row) const override;
+    [[nodiscard]] audio::TrackSource source_at(int row) const override;
+
+  private:
+    const LocalListModel* model_;
+};
 
 // Table model over one Trackknife working list, implementing the shared
 // album-grouped semantic role contract (uicommon/track_row_roles.hpp). Its

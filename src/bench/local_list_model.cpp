@@ -893,6 +893,18 @@ int LocalListModel::rowOfPath(const std::string& raw_path, const int hint_row) c
     return static_cast<int>(std::distance(rows_.begin(), found));
 }
 
+int LocalListPlaybackView::row_count() const {
+    return model_->rowCount();
+}
+
+int LocalListPlaybackView::row_of_entry(const core::StableId& entry, const int hint_row) const {
+    return model_->rowOfEntry(entry, hint_row);
+}
+
+audio::TrackSource LocalListPlaybackView::source_at(const int row) const {
+    return model_->source(row);
+}
+
 int LocalListModel::rowOfEntry(const core::StableId& entry, const int hint_row) const {
     if (entry.is_nil()) {
         return -1;

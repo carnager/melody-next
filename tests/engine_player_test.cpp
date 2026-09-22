@@ -460,6 +460,11 @@ void a_continuation_is_actually_armed(engine::Player& player, const std::filesys
         std::cerr << "engine player: could not start playback; skipping the gapless arming\n";
         return;
     }
+    // Paused, because the fixture is under a second and a loaded machine can
+    // finish it before the continuation is armed -- which would make this test
+    // fail for a reason that has nothing to do with gapless. A paused track
+    // never ends, and arming does not depend on the output running.
+    require(player.pause().has_value(), "pausing succeeds");
 
     // The engine cannot arm a continuation before it knows the format it has
     // to match, so this is sampled the way a running engine samples itself
@@ -501,6 +506,8 @@ void a_continuation_is_actually_armed(engine::Player& player, const std::filesys
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
     require(rearmed, "the continuation is offered again after a seek drops it");
+
+    require(player.resume().has_value(), "resuming succeeds");
 
     // And the handover itself. advance_if_ended returns true only when it had
     // to start the next track the ordinary way, so a transition it never
@@ -555,6 +562,55 @@ void a_selection_and_segment_survive_the_wire(engine::Player& player) {
     require(listed.result->at("entries")[0].at("segment").at("start_sample") == 441'000,
             "and reports the segment, so a second client sees the same track");
 
+    player.replace_queue({});
+}
+
+// An explicit ask interrupts the list; afterwards playback returns to where
+// the list was, rather than continuing from wherever the asked-for track
+// happened to sit. The rules are shared with the window (ADR-0196); what the
+// engine had to learn is to record the return point at all.
+void a_request_returns_to_where_the_list_was(engine::Player& player,
+                                             const std::filesystem::path& audio) {
+    player.set_modes({});
+    const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
+                                                  entry(audio.string()), entry(audio.string())};
+    player.replace_queue(entries);
+
+    // Stating a whole order, which is what a client owning the up-next panel
+    // does. Refusing the lot on an unknown entry matters: a half-applied order
+    // leaves nothing saying which half took.
+    require(player.set_requests({entries[3].entry_id}).has_value(), "an order can be stated");
+    require(player.requests().size() == 1U, "and is held");
+    const auto refused = player.set_requests({core::StableId::random()});
+    require(!refused.has_value(), "an entry the engine does not hold is refused");
+    require(player.requests().size() == 1U, "and the order it had is left alone");
+
+    if (!player.play_entry(entries[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping the request return\n";
+        player.clear_requests();
+        player.replace_queue({});
+        return;
+    }
+    // Paused throughout: what is under test is which row is chosen, and a
+    // fixture shorter than a second would otherwise advance underneath it.
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.state().entry == entries[0].entry_id, "the list is on its first entry");
+
+    require(player.step(1).has_value(), "next honours the ask");
+    require(player.state().entry == entries[3].entry_id, "and plays what was asked for");
+    require(player.pause().has_value(), "pausing succeeds");
+
+    require(player.step(1).has_value(), "next again leaves the request");
+    require(player.state().entry == entries[1].entry_id,
+            "and returns to where the list was rather than continuing past the asked-for track");
+    require(player.pause().has_value(), "pausing succeeds");
+
+    // The return point is spent: ordinary playback carries on from there.
+    require(player.step(1).has_value(), "next continues");
+    require(player.state().entry == entries[2].entry_id, "in list order");
+
+    static_cast<void>(player.stop());
+    player.clear_requests();
     player.replace_queue({});
 }
 
@@ -706,12 +762,13 @@ int main(int argc, char** argv) {
     a_finished_track_is_followed_by_the_next(**player, audio, other);
     a_continuation_is_actually_armed(**player, longer);
     a_selection_and_segment_survive_the_wire(**player);
+    a_request_returns_to_where_the_list_was(**player, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 16 scenarios\n";
+    std::cout << "engine player: 17 scenarios\n";
     return EXIT_SUCCESS;
 }

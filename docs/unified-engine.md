@@ -430,11 +430,20 @@ Up Next is mirrored onto the engine. The panel stays where it is -- it also
 shows the MPD queue, so it branches on authority -- but the order it holds is
 stated to the engine, which is what makes Next play a requested track. Entries
 that were never in the playing list are added to the engine's queue first,
-because an engine only plays what it holds. One difference is worth knowing:
-the local path returns to where it was after a request, and the engine
-continues from the row it played instead.
+because an engine only plays what it holds. Playback returns to where the
+list was afterwards: the rules for that are shared with the window
+(ADR-0196), and what the engine had to learn is to record the return point at
+all.
 
-The workspace's own resume, listening and gapless do not run on that
+Last.fm is credited from the engine's state rather than from a local player
+that is not running. This is an interim and named as one: scrobbling belongs
+to whoever owns playback, so its home is the engine, which would also scrobble
+with no window open. It sits in the client for now because the engine knows
+paths and durations while the tags a scrobble needs are in the client's rows.
+The accounting is `core::ListenAccounting` either way, so the move is of the
+network client, not of the rules.
+
+The workspace's own resume and gapless do not run on that
 path — the engine performs them, and doing both would double-count listening
 and fight over the queue. Reproducing them as *views* of engine state is what
 remains. MPRIS and desktop notifications likewise still follow the local

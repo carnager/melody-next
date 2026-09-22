@@ -121,6 +121,7 @@ class EnginePlaybackTest final : public QObject {
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
+    void listeningIsCreditedWhileTheEnginePlays();
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
     void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
@@ -404,6 +405,58 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     jump->trigger();
     QCOMPARE(tabs->currentWidget(), playing);
     QCOMPARE(playing->currentIndex().row(), 0);
+
+    (*server)->stop();
+}
+
+// Last.fm is fed from the local player's snapshot, which on the engine path is
+// a player that is not running -- so nothing was ever credited. The engine
+// knows the path and the position; the tags a scrobble needs are in this
+// window's rows, and the two have to be put together.
+void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("scrobbled.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(model->rows().front().probed, 5'000);
+    const auto title = QString::fromStdString(model->rows().front().title);
+    QVERIFY(!title.isEmpty());
+
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
+
+    // The tags travel with the sample, not just the path: a scrobble without
+    // an artist and a title is not a scrobble.
+    const auto credited = [&window, &title] {
+        const auto sample = window.property("trackknife-lastfm-sample").toString();
+        return sample.contains(title) && !sample.startsWith(QLatin1Char('|'));
+    };
+    QTRY_VERIFY2_WITH_TIMEOUT(credited(), "nothing was credited while the engine played", 5'000);
 
     (*server)->stop();
 }

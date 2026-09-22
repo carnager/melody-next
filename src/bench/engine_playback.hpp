@@ -68,6 +68,9 @@ class EnginePlayback final : public QObject {
         bool random{false};
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         int volume_percent{100};
+        // Which playback this is: replaying a track is a new instance, and
+        // crediting a listen has to tell those apart.
+        quint64 instance{0};
     };
     [[nodiscard]] State state() const;
 

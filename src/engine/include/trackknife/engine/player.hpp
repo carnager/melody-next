@@ -163,6 +163,10 @@ class Player final {
         // -- which is the difference between gapless working and the engine
         // merely starting the next track quickly, and it was invisible.
         core::StableId gapless_entry;
+        // Which playback this is, not which track: replaying the same file is
+        // a new instance. A client that credits listening needs to tell those
+        // apart, and a path cannot.
+        std::uint64_t instance{0U};
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         audio::ReplayGainPreamps replay_gain_preamps;
     };
@@ -191,8 +195,12 @@ class Player final {
 
     explicit Player(std::unique_ptr<audio::LocalAuditionService> audition);
 
-    // Callers already hold the lock.
-    [[nodiscard]] core::Result<void> start_locked(std::size_t row);
+    // Callers already hold the lock. `from_request` records where ordinary
+    // list playback was interrupted, so playback returns there afterwards
+    // instead of continuing from wherever the request happened to sit.
+    [[nodiscard]] core::Result<void> start_locked(std::size_t row, bool from_request = false);
+    // The two facts the advance rules need about the request queue.
+    [[nodiscard]] audio::RequestQueueState request_state_locked() const;
     void reset_order_locked();
     // Offers the audition service whatever should follow the current track,
     // so an album plays without a gap between its tracks. Recomputed rather
@@ -222,6 +230,9 @@ class Player final {
     // until the next load, so without this the same finished track would
     // advance on every tick and race through the queue.
     std::optional<core::StableId> advanced_from_;
+    // Whether what is playing was an explicit ask rather than the list's own
+    // order. The return point only applies while it is.
+    bool playing_request_{false};
     std::uint64_t seen_transitions_{0U};
 };
 

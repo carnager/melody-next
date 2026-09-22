@@ -1608,6 +1608,7 @@ void BenchMainWindow::sampleListeningHistory(const audio::LocalAuditionSnapshot&
 
 void BenchMainWindow::refreshEngineTransport() {
     const auto state = engine_playback_->state();
+    sampleLastFmFromEngine(state);
     const auto playing = state.status == QStringLiteral("playing");
     const auto stopped = state.status == QStringLiteral("stopped");
 

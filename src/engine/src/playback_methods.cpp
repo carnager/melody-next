@@ -228,6 +228,7 @@ Json to_json(const Player::State& state) {
     rendered["requests"] = state.requests;
     rendered["modes"] = modes_to_json(state.modes);
     rendered["volume_percent"] = state.volume_percent;
+    rendered["instance"] = state.instance;
     rendered["gapless_entry"] =
         state.gapless_entry.is_nil() ? Json(nullptr) : Json(state.gapless_entry.to_string());
     Json gain = Json::object();

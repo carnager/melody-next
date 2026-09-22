@@ -187,6 +187,7 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.queue_size = payload.value("queue_size", std::size_t{0});
     state_.requests = payload.value("requests", std::size_t{0});
     state_.volume_percent = payload.value("volume_percent", 100);
+    state_.instance = payload.value("instance", std::uint64_t{0});
     if (const auto modes = payload.find("modes"); modes != payload.end() && modes->is_object()) {
         state_.repeat = modes->value("repeat", false);
         state_.random = modes->value("random", false);

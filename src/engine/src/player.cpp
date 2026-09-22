@@ -54,8 +54,22 @@ void Player::reset_order_locked() {
     order_.reset(view.row_count(), row_, modes_.random);
 }
 
-core::Result<void> Player::start_locked(const std::size_t row) {
+audio::RequestQueueState Player::request_state_locked() const {
+    return {.active = playing_request_, .pending_empty = requests_.empty()};
+}
+
+core::Result<void> Player::start_locked(const std::size_t row, const bool from_request) {
     const auto& entry = queue_[row];
+    if (from_request && !playing_request_) {
+        // Where the list was when the ask interrupted it. Recorded before the
+        // ask starts, because afterwards the anchors name the request.
+        const QueueView view{queue_};
+        const auto resume_at = audio::adjacent_playback_row(view, anchors_, modes_, order_,
+                                                            request_state_locked(), 1, row_);
+        anchors_.request_return = resume_at
+                                      ? queue_[static_cast<std::size_t>(resume_at->row)].entry_id
+                                      : core::StableId{};
+    }
     // A segment is optional, and the audition service spells the two cases as
     // separate calls rather than an optional parameter.
     auto started =
@@ -71,6 +85,11 @@ core::Result<void> Player::start_locked(const std::size_t row) {
     anchors_.current = entry.entry_id;
     anchors_.source = entry.source;
     row_ = static_cast<int>(row);
+    playing_request_ = from_request;
+    if (!from_request) {
+        // Ordinary playback resumed, so there is nothing to return to.
+        anchors_.request_return = core::StableId{};
+    }
     order_.advance(row_, 1);
     std::erase(requests_, anchors_.current);
     seen_transitions_ = audition_->snapshot().chain_transitions;
@@ -95,8 +114,8 @@ void Player::refresh_gapless_locked() {
         // advance() commits it, precisely so a status refresh can ask
         // repeatedly. A defensive copy here would be waste -- and I wrote one
         // before reading that, then could not make a test fail without it.
-        if (const auto choice =
-                audio::adjacent_playback_row(view, anchors_, modes_, order_, {}, 1, row_)) {
+        if (const auto choice = audio::adjacent_playback_row(view, anchors_, modes_, order_,
+                                                             request_state_locked(), 1, row_)) {
             next_row = static_cast<std::size_t>(choice->row);
         }
     }
@@ -298,14 +317,14 @@ core::Result<void> Player::step(const int direction) {
             const auto wanted = requests_.front();
             requests_.erase(requests_.begin());
             if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
-                return start_locked(static_cast<std::size_t>(row));
+                return start_locked(static_cast<std::size_t>(row), true);
             }
             // A request whose entry has left the queue is dropped rather than
             // stopping playback: the user asked for something that is gone.
         }
     }
-    const auto choice =
-        audio::adjacent_playback_row(view, anchors_, modes_, order_, {}, direction, row_);
+    const auto choice = audio::adjacent_playback_row(view, anchors_, modes_, order_,
+                                                     request_state_locked(), direction, row_);
     if (!choice) {
         return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
                                            .message = "nothing to play in that direction",
@@ -361,7 +380,7 @@ bool Player::advance_if_ended() {
             const auto wanted = requests_.front();
             requests_.erase(requests_.begin());
             if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
-                return start_locked(static_cast<std::size_t>(row)).has_value();
+                return start_locked(static_cast<std::size_t>(row), true).has_value();
             }
         }
     }
@@ -445,6 +464,7 @@ Player::State Player::state() const {
     current.modes = modes_;
     current.volume_percent = snapshot.volume_percent;
     current.gapless_entry = gapless_entry_.value_or(core::StableId{});
+    current.instance = snapshot.playback_instance;
     current.replay_gain_mode = snapshot.replay_gain_mode;
     current.replay_gain_preamps = snapshot.replay_gain_preamps;
     return current;

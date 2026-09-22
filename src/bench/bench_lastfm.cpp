@@ -84,6 +84,47 @@ void BenchMainWindow::sampleLastFm(const audio::LocalAuditionSnapshot& snapshot)
          {"playing", playing},
          {"monotonic", lastfm_sample_time_}});
 }
+// ADR-0220: an interim, and named as one. Scrobbling belongs to whoever owns
+// playback, so its eventual home is the engine -- which would also scrobble
+// with no window open. It lives here for now because the engine knows paths
+// and durations while the tags a scrobble needs are in this process's rows.
+// The accounting itself is core::ListenAccounting either way, so the move
+// when it comes is of the network client, not of the rules.
+void BenchMainWindow::sampleLastFmFromEngine(const EnginePlayback::State& state) {
+    if (!lastfm_ || lastfm_clock_.elapsed() - lastfm_sample_time_ < 500) {
+        return;
+    }
+    lastfm_sample_time_ = lastfm_clock_.elapsed();
+    LocalTrackRow track;
+    if (const auto entry = core::StableId::parse(state.entry.toStdString())) {
+        if (auto* tab = tabForDocument(playback_.anchors.document)) {
+            if (const auto row = tab->model->rowOfEntry(*entry, playback_.row); row >= 0) {
+                track = tab->model->rows()[static_cast<std::size_t>(row)];
+            }
+        }
+    }
+    // Observable for offscreen tests and diagnostics: "is anything being
+    // credited, and for which track" is otherwise only answerable by watching
+    // the network.
+    setProperty("trackknife-lastfm-sample",
+                QStringLiteral("%1|%2|%3")
+                    .arg(QString::fromStdString(track.artist), QString::fromStdString(track.title),
+                         state.status == QStringLiteral("playing") ? QStringLiteral("playing")
+                                                                   : state.status));
+    lastfm_->observe(
+        {// The engine's playback instance, so the same track played twice is
+         // two listens rather than one long one.
+         {"identity", state.instance == 0U ? QString{} : QString::number(state.instance)},
+         {"artist", QString::fromStdString(track.artist)},
+         {"title", QString::fromStdString(track.title)},
+         {"album", QString::fromStdString(track.album)},
+         {"duration",
+          state.duration_ms > 0 ? static_cast<double>(state.duration_ms) / 1000.0 : 0.0},
+         {"position", static_cast<double>(state.position_ms) / 1000.0},
+         {"playing", state.status == QStringLiteral("playing")},
+         {"monotonic", lastfm_sample_time_}});
+}
+
 QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* page = new QWidget(parent);
     page->setObjectName(QStringLiteral("lastfm-settings"));

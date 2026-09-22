@@ -465,6 +465,9 @@ class BenchMainWindow final : public QMainWindow {
     // play a requested track rather than the next row of the list. Cheap when
     // nothing changed.
     void syncEngineRequests();
+    // Credits listening to Last.fm from the engine's state rather than from a
+    // local player that is not running.
+    void sampleLastFmFromEngine(const EnginePlayback::State& state);
     // Points the workspace at an entry the engine is playing.
     void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
     // True when playback belongs to an engine rather than to this process.

@@ -98,6 +98,24 @@ void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std:
     // that finishes silently is indistinguishable from one that did nothing.
     require(progress.visited.load() > 0U, label + ": the scan visited something");
 
+    // Cached facts must survive the crossing, or a search result against an
+    // engine comes back as paths with no metadata -- which reads as a broken
+    // library rather than a missing method.
+    persistence::LibraryQuery tracks_query;
+    tracks_query.kind = persistence::LibraryEntryKind::track;
+    const auto indexed = catalogue.paths(tracks_query);
+    require(indexed.has_value(), label + ": listing indexed tracks");
+    if (!indexed->empty()) {
+        const auto facts = catalogue.cached_tracks(*indexed);
+        require(facts.has_value(), label + ": reading cached facts");
+        require(facts->size() == indexed->size(), label + ": one per path, in order");
+        require((*facts)[0].raw_path == (*indexed)[0], label + ": paths survive exactly");
+        // Absent history is null, not zeroes: unavailable and never-played are
+        // different answers.
+        require(!(*facts)[0].facts.history.has_value() || (*facts)[0].facts.history->size() == 6U,
+                label + ": history is absent or complete");
+    }
+
     require(catalogue.remove_root(music.string()).has_value(), label + ": removing a root");
     const auto after = catalogue.roots();
     require(after.has_value() && after->empty(), label + ": the root is gone");
@@ -107,11 +125,11 @@ void what_the_remote_does_not_expose_says_so(engine::RemoteCatalogue& remote) {
     // Not every method is on the wire yet. The gap is reported as unsupported
     // and names the method, rather than arriving as an empty success that
     // would look like a library with nothing in it.
-    const auto tracks = remote.cached_tracks({"/music/a.flac"});
-    require(!tracks, "an unexposed method must fail");
-    require(tracks.error().code == core::ErrorCode::unsupported, "as unsupported");
-    require(!tracks.error().context.empty(), "naming the method");
-    require(tracks.error().context[0].value == "catalogue.cached_tracks", "which method it was");
+    const auto history = remote.history_facts({});
+    require(!history, "an unexposed method must fail");
+    require(history.error().code == core::ErrorCode::unsupported, "as unsupported");
+    require(!history.error().context.empty(), "naming the method");
+    require(history.error().context[0].value == "catalogue.history_facts", "which method it was");
 }
 
 } // namespace

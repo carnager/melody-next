@@ -32,6 +32,7 @@ class LibraryPanelEngineTest final : public QObject {
     void aConfiguredEngineServesThePanel();
     void everyPathReachesTheEngineNotTheDatabase();
     void anUnreachableEngineFallsBackAndSaysSo();
+    void thePanelSaysWhichLibraryItIsShowing();
 };
 
 void LibraryPanelEngineTest::init() {
@@ -143,6 +144,64 @@ void LibraryPanelEngineTest::anUnreachableEngineFallsBackAndSaysSo() {
     QVERIFY(status != nullptr);
     QTRY_VERIFY(status->text().contains(QStringLiteral("unreachable")));
     QVERIFY(status->text().contains(QStringLiteral("local library")));
+}
+
+// ADR-0220: a silent fallback is indistinguishable from the engine working,
+// which is exactly how a broken setup went unnoticed. The panel now states
+// which of the three situations it is in, and keeps stating it.
+void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/library.sqlite3")).toStdString()};
+
+    // No engine configured.
+    {
+        LocalLibraryPanel panel{database};
+        panel.show();
+        auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
+        QVERIFY(source != nullptr);
+        QVERIFY(source->text().contains(QStringLiteral("this process")));
+        QVERIFY(!source->text().contains(QStringLiteral("unreachable")));
+    }
+
+    // Configured but not answering: the distinction that was invisible.
+    {
+        QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                             directory.path() + QStringLiteral("/absent.sock"));
+        LocalLibraryPanel panel{database};
+        panel.show();
+        auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
+        QVERIFY(source != nullptr);
+        QVERIFY(source->text().contains(QStringLiteral("this process")));
+        QVERIFY(source->text().contains(QStringLiteral("unreachable")));
+    }
+
+    // Answering.
+    {
+        const std::filesystem::path socket{
+            (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+        engine::LocalCatalogue catalogue{database};
+        QVERIFY(catalogue.prepare().has_value());
+        protocol::Dispatcher dispatcher;
+        engine::register_catalogue_methods(dispatcher, catalogue);
+        auto server = engine::Server::listen(socket, dispatcher);
+        QVERIFY(server.has_value());
+        (*server)->start();
+
+        QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                             QString::fromStdString(socket.string()));
+        LocalLibraryPanel panel{database};
+        panel.show();
+        auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
+        QVERIFY(source != nullptr);
+        QVERIFY(source->text().contains(QStringLiteral("engine at")));
+        QVERIFY(!source->text().contains(QStringLiteral("unreachable")));
+        // And it must not be mistaken for the no-engine case.
+        QVERIFY(!source->text().contains(QStringLiteral("this process")));
+
+        (*server)->stop();
+    }
 }
 
 } // namespace trackknife::bench

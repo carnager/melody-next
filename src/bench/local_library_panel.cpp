@@ -332,6 +332,14 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     status_->setObjectName(QStringLiteral("local-library-status"));
     status_->setWordWrap(true);
     layout->addWidget(status_);
+    source_label_ = new QLabel(this);
+    source_label_->setObjectName(QStringLiteral("local-library-source"));
+    source_label_->setWordWrap(true);
+    source_label_->setTextFormat(Qt::PlainText);
+    // Dimmed: it is a standing fact rather than news, and should not compete
+    // with the status line above it.
+    source_label_->setEnabled(false);
+    layout->addWidget(source_label_);
     search_timer_ = new QTimer(this);
     search_timer_->setSingleShot(true);
     search_timer_->setInterval(200);
@@ -420,16 +428,40 @@ LocalLibraryPanel::LocalLibraryPanel(std::filesystem::path database_path, QWidge
     });
     reloadTree();
     loadRoots();
-    // Said once, after the first load has had a chance to set its own text.
-    // A configured engine that could not be reached is something the user
-    // asked for and did not get, so it is reported rather than silently
-    // becoming a local library that looks identical.
+    refreshSourceLabel();
+    // The failure is also said once in the status line, where a user is
+    // actually looking when a folder they added does not appear. The source
+    // label below keeps saying it afterwards.
     if (!engine_failure_.isEmpty()) {
         QTimer::singleShot(0, this, [this] {
             status_->setText(tr("Using the local library: the engine at %1 is unreachable (%2)")
                                  .arg(pathLabel(engine_socket_.string()), engine_failure_));
         });
     }
+}
+
+// ADR-0220: which library this panel is showing. Three distinct states, and
+// the difference between the last two is exactly what was previously
+// invisible -- a configured engine that is not answering looks identical to
+// no engine at all.
+void LocalLibraryPanel::refreshSourceLabel() {
+    if (source_label_ == nullptr) {
+        return;
+    }
+    if (engine_client_ != nullptr) {
+        source_label_->setText(tr("Library: engine at %1").arg(pathLabel(engine_socket_.string())));
+        source_label_->setToolTip(
+            tr("Folders, scanning and covers come from that engine, not from this process."));
+        return;
+    }
+    if (!engine_socket_.empty()) {
+        source_label_->setText(tr("Library: this process — engine at %1 is unreachable")
+                                   .arg(pathLabel(engine_socket_.string())));
+        source_label_->setToolTip(engine_failure_);
+        return;
+    }
+    source_label_->setText(tr("Library: this process"));
+    source_label_->setToolTip(tr("No engine is configured. Set library/engine-socket to use one."));
 }
 
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }

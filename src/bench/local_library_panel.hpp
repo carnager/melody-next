@@ -104,6 +104,7 @@ class LocalLibraryPanel final : public QWidget {
     void showContextMenu(const QPoint& position);
     void showFolders();
     void loadRoots();
+    void refreshSourceLabel();
     void startScan();
     void updateProgress();
     void updateArtwork();
@@ -126,6 +127,11 @@ class LocalLibraryPanel final : public QWidget {
     // Reported once rather than swallowed: a configured engine that could
     // not be reached is something the user asked for and did not get.
     QString engine_failure_;
+    // Always present and never overwritten by transient status, so "which
+    // library am I looking at" is answerable by looking rather than by
+    // asking. A silent fallback to the local database is otherwise
+    // indistinguishable from the engine working.
+    QLabel* source_label_{nullptr};
     QThreadPool pool_;
     QFutureWatcher<Outcome> query_watcher_;
     QFutureWatcher<ScanOutcome> scan_watcher_;

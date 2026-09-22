@@ -6,13 +6,18 @@
 // and it links no Qt, which is the property that lets the engine be a daemon.
 
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/job_methods.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -125,6 +130,73 @@ void catalogue_methods_answer_over_the_wire(const std::filesystem::path& databas
     std::cout << "catalogue methods: 12 calls\n";
 }
 
+void jobs_submit_and_cancel_over_the_wire(const std::filesystem::path& database) {
+    engine::Catalogue catalogue{database};
+
+    std::mutex mutex;
+    std::vector<protocol::Event> events;
+    engine::JobRegistry registry{[&](const protocol::Event& event) {
+        const std::lock_guard guard{mutex};
+        events.push_back(event);
+    }};
+    engine::JobCatalog jobs;
+    engine::register_catalogue_jobs(jobs, catalogue);
+
+    protocol::Dispatcher dispatcher;
+    engine::register_job_methods(dispatcher, registry, jobs);
+
+    // A job nobody registered fails at submit, with the name it did not know.
+    const auto unknown =
+        call(dispatcher, 20, "job.submit", protocol::Json{{"job", "catalogue.invented"}});
+    require(unknown.error.has_value(), "an unknown job must fail");
+    require(unknown.error->code == "unsupported", "as unsupported");
+    require(unknown.error->context.at("job") == "catalogue.invented", "naming the job");
+
+    // Missing and malformed parameters are the caller's mistake, reported in
+    // the response to their own submit rather than through an event.
+    const auto nameless = call(dispatcher, 21, "job.submit", protocol::Json::object());
+    require(nameless.error.has_value(), "a submit with no job name must fail");
+    require(nameless.error->context.at("param") == "job", "naming the parameter");
+
+    const auto bad_identity =
+        call(dispatcher, 22, "job.cancel", protocol::Json{{"job_id", "not-an-identity"}});
+    require(bad_identity.error.has_value(), "a malformed identity must fail");
+    require(bad_identity.error->context.at("param") == "job_id", "naming the parameter");
+
+    // A real job: scanning an empty catalogue finishes quickly, but still
+    // answers immediately with an identity rather than when it is done.
+    const auto submitted =
+        call(dispatcher, 23, "job.submit", protocol::Json{{"job", "catalogue.scan"}});
+    require(submitted.result.has_value(), "submitting a known job succeeds");
+    const auto job_id = submitted.result->at("job_id").get<std::string>();
+    require(!job_id.empty(), "and answers with an identity");
+
+    registry.wait_all();
+
+    bool finished = false;
+    {
+        const std::lock_guard guard{mutex};
+        for (const auto& event : events) {
+            require(event.data.at("job_id") == job_id, "every event names its job");
+            if (event.name == "job.finished") {
+                finished = true;
+                require(event.data.at("job") == "catalogue.scan", "the finish names the job");
+                require(event.data.at("outcome").contains("visited"),
+                        "and carries the scan's counters");
+            }
+        }
+    }
+    require(finished, "a submitted job must report a finish");
+
+    // Cancelling a job that has already finished is answered, not an error:
+    // the client learns the identity is no longer running.
+    const auto late = call(dispatcher, 24, "job.cancel", protocol::Json{{"job_id", job_id}});
+    require(late.result.has_value(), "cancelling a finished job still answers");
+    require(late.result->at("accepted") == false, "reporting that it was not running");
+
+    std::cout << "job methods: 6 calls\n";
+}
+
 } // namespace
 
 int main() {
@@ -133,6 +205,7 @@ int main() {
     std::filesystem::create_directory(directory);
     const auto database = directory / "library.sqlite3";
     catalogue_methods_answer_over_the_wire(database);
+    jobs_submit_and_cancel_over_the_wire(database);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
     return EXIT_SUCCESS;

@@ -333,7 +333,7 @@ add_test(NAME job-registry COMMAND trackknife_job_registry_tests)
 add_executable(trackknife_engine_methods_tests engine_methods_test.cpp)
 target_link_libraries(
     trackknife_engine_methods_tests
-    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME engine-methods COMMAND trackknife_engine_methods_tests)

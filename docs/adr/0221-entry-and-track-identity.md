@@ -35,10 +35,16 @@ and cannot be serialised, which is what blocks the unified engine's Phase 0.
 - `core::StableId`, 128 bits, already implemented with `random()`, `parse()`,
   `to_string()` and comparison, and already in use across the workspace.
 - Assigned on insert. Reordering is an `UPDATE position`; identity is untouched.
-- `list_items` gains an `entry_id` column and keys on it instead of
-  `(document_id, position)`. `list_item_fields`, whose composite foreign key
-  currently references `(document_id, item_position)`, is migrated to reference
-  `entry_id`. Position becomes an ordinary ordered column.
+- `list_items` gains an `entry_id` column, unique per document.
+
+  **As implemented (migration 41), this is the column and a
+  `(document_id, entry_id)` unique index only.** `PRIMARY KEY(document_id,
+  position)` is unchanged, and `list_item_fields` still carries its composite
+  foreign key on `(document_id, item_position)`. That was deliberate: identity
+  semantics hold without it, because ordering lives in `position` and the
+  repository writes each entry's identity alongside its row. Repointing the
+  key and the foreign key is referential tidying with real migration risk and
+  no behavioural gain, so it is available work rather than done work.
 - Re-evaluating a dynamic list or saved search assigns new entry identities.
   Those genuinely are new entries; only the track identities they carry persist.
 - Rejected alternative: keeping position as the key with a document revision
@@ -119,6 +125,36 @@ Preferring a MusicBrainz recording ID when present would flip identity scheme
 the moment tagging adds one, for no gain the carry-on-write rule does not
 already provide. One scheme, always the same fields.
 
+## What implementation added
+
+Three things the design above did not anticipate, all found by the compiler or
+the test suite rather than by reasoning:
+
+**Uniqueness is per document, not global.** A copied `ListItem` or
+`LocalTrackRow` carries its source's identity, and `items = {item, item}` is
+ordinary — duplicating a selection, dragging within a tab, or a test building a
+list from one row. A global unique index rejected it outright. The index is
+`(document_id, entry_id)`, and both `ListRepository::replace_all` and
+`LocalListModel`'s insertion paths stamp a fresh identity for a repeat within
+one list, because a copy is genuinely a new entry. Keeping the invariant at
+those two boundaries means no caller has to remember it.
+
+**Equality stays value equality.** `ListItem` and `LocalTrackRow` both had
+defaulted or salient-tie `operator==` that would have absorbed the identity,
+silently turning "same track" into "same track and same entry". Existing
+comparisons depend on the former. Identity is excluded from both, and the
+exclusion is commented where it might otherwise look like an oversight.
+
+**Anything that rebuilds a row must carry the identity.** `applyMetadata` and
+`applyProbeRows` replace a row wholesale with a freshly constructed one from a
+background probe, preserving `logical_reference`, `selection`, `segment` and
+`raw_path` — the fields that must outlive a probe. Identity was not among them,
+so enrichment reassigned it and anything anchored to that row stopped resolving
+the moment probing completed. Both now carry it; in a multi-entry probe the
+first row keeps the identity it replaces and the rest are new entries. The
+general rule: preserving identity belongs wherever a row is rebuilt rather than
+mutated.
+
 ## Consequences
 
 **Retagging an identifying field changes identity.** Every mutation that does so
@@ -158,4 +194,7 @@ migrate onto this scheme, keyed by content identity.
   fallback, re-key on access, and rows whose files are unreachable survive
   unchanged and re-key once the files return.
 - The playback service resolves position without `QPersistentModelIndex` and
-  without constructing `BenchMainWindow`.
+  without constructing `BenchMainWindow`. Covered by `tests/playback-state`,
+  which links `Trackknife::Audio` only and pulls in no Qt.
+- A background probe completing does not change an entry's identity, and an
+  anchor set before it still resolves afterwards.

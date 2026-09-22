@@ -95,27 +95,61 @@ comparison.
 playback translation units touch 98 of them. 33 are widget-typed and stay
 (`QAction`, `QToolButton`, `QLabel`, `QSlider`, the up-next dock). The
 remainder is the service: `local_requests_` (`audio::RequestQueue`),
-`playback_order_`, `playback_source_`, `playback_document_id_`,
-`playback_row_`, the `album_order_*` set, the local mode flags
-(`local_random_`, `local_repeat_`, `local_single_`, `local_consume_`,
-`local_album_random_`), `local_listen_accounting_`, the `resume_*` pair,
+`playback_order_`, the playback anchors and modes (now `anchors_` and
+`local_modes_`), `playback_row_`, the album grouping state (now
+`album_grouper_`), `local_listen_accounting_`, the `resume_*` pair,
 `advance_pending_`, `last_requested_next_`, `queued_request_` /
 `requested_request_`, plus the device and audio members (`player_`,
 `melody_endpoint_`, `selected_device_`, ReplayGain preamps, buffer profile).
 There is no `bench_transport.hpp` — these are all `BenchMainWindow::` methods
 split across files, which is why the coupling never got noticed.
 
-**The real blocker is how playback position is stored.** Five members hold it
-as `QPersistentModelIndex` — `playback_index_`, `queued_playback_index_`,
-`requested_playback_index_`, `request_return_index_`,
-`followed_playback_index_` — assigned straight off the view model
-(`playback_index_ = tab.model->index(row, 0)`) and read back as `.row()` in 23
-places. A `QPersistentModelIndex` *is* a pointer into a Qt model: it survives
-row insertion and removal precisely because the model maintains it. A
+**Progress.** The identity work and the policy extraction are done; what
+remains is orchestration. Delivered so far:
+
+| In Qt-free `src/audio` | Covering |
+| --- | --- |
+| `PlaybackAnchors` | document, current entry, the two in-flight transition anchors, request return point, decode target |
+| `PlaybackModes` | repeat/random/album-random plus the single and consume tri-states and their one-shot decay |
+| `TrackSource` | path, selection within it, span — previously stuck in a Qt header |
+| `PlaybackList` + `adjacent_playback_row` / `automatic_playback_row` | the advance rules, against a three-question view of a list |
+| `resumable` / `resume_position_ms` | the resume predicate and its offset arithmetic |
+| `AlbumGrouper` | the album grouping rule and its size limits |
+
+All of it is exercised by `tests/playback-state`, which links
+`Trackknife::Audio` only; `ldd` confirms it pulls in no Qt. That is Phase 0's
+"done when" holding for the policy half.
+
+**What Phase 0 does not cover, contrary to the list above.** Up-next, the
+resume *checkpointing* flow, listen qualification and the chunked album walk
+are still in `BenchMainWindow`, and they are not more pure functions waiting to
+be found. What is left is orchestration: `QFutureWatcher` lifecycles,
+`QSettings`, JSON persistence, status reporting, and the timers that drive the
+extracted policy. Moving those needs the service to own its own scheduling and
+to *tell a client* to do something — which is the Phase 1 client-facing API and
+the Phase 2 request/response shape, not this phase. Phase 0 should be read as
+"playback policy leaves the widget layer", with the orchestration following its
+own interface once that interface exists.
+
+**The blocker was how playback position is stored — now resolved.** Five
+members held it as `QPersistentModelIndex`, assigned straight off the view
+model (`playback_index_ = tab.model->index(row, 0)`) and read back as `.row()`
+in 23 places. A `QPersistentModelIndex` *is* a pointer into a Qt model: it
+survives row insertion and removal precisely because the model maintains it. A
 core-owned service cannot hold one, and it certainly cannot send one over a
-socket. Phase 0 therefore starts with replacing model-index positions with a
-stable queue-entry identity, before any code is moved — the extraction is
-mechanical once that is done, and impossible before.
+socket. Replacing them with entry identities had to come before any code moved;
+the extraction was mechanical afterwards and impossible before.
+
+Four of the five are now identities. `followed_playback_index_` deliberately
+stays a model index: paired with `followed_playback_view_`, it tracks which row
+to scroll into view, which is genuinely view state and not playback state.
+
+Converting them exposed a real bug rather than only moving code. `applyMetadata`
+and `applyProbeRows` replace a row wholesale with a freshly built one from the
+probe, carefully preserving `logical_reference`, `selection`, `segment` and
+`raw_path` — everything that must outlive a probe. Identity was not on that
+list, so background enrichment silently reassigned it and anything anchored to
+that row stopped resolving mid-playback.
 
 **This is the same problem in three places, none of them MPD.** Stable
 queue-entry identity is what Phase 0 needs internally, what Phase 2 must put on

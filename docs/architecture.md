@@ -1,5 +1,13 @@
 # Architecture
 
+> **Superseded in part by ADR-0220.** This document describes the current,
+> shipping architecture: a single process with two authorities behind one UI.
+> The accepted direction splits it into an engine (`melodyd`) and a client, and
+> removes the authority split entirely. Read
+> [the unified engine plan](unified-engine.md) alongside this; where the two
+> disagree about direction, ADR-0220 wins. Where they disagree about what the
+> code does *today*, this document wins.
+
 ## Status
 
 Qt 6 Widgets, C++23 with a Qt-free core, the Linux/build baseline, focused

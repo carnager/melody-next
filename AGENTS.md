@@ -4,50 +4,69 @@
 
 Before changing code, read:
 
-1. `MILESTONES.md` and identify the active milestone.
-2. `docs/product.md`.
-3. `docs/compatibility.md`.
-4. The feature-specific document linked from `docs/README.md`.
-5. `docs/architecture.md`.
+1. [ADR-0220](docs/adr/0220-unified-engine-and-remote-agents.md) and
+   [`docs/unified-engine.md`](docs/unified-engine.md) — the accepted direction
+   and its phases. **This supersedes the two-authority model described in older
+   ADRs, `MILESTONES.md`, and `docs/architecture.md`.**
+2. [ADR-0221](docs/adr/0221-entry-and-track-identity.md) if the work touches
+   lists, queues, playback position, ratings or listening history.
+3. `MILESTONES.md` and identify the active milestone.
+4. `docs/product.md`.
+5. `docs/compatibility.md`.
+6. The feature-specific document linked from `docs/README.md`.
+7. `docs/architecture.md`.
 
-This repository begins as a specification. Do not invent missing product
-decisions silently. Record consequential decisions as an ADR under `docs/adr/`.
+Do not invent missing product decisions silently. Record consequential
+decisions as an ADR under `docs/adr/`.
 
 ## Product identity
 
-Per ADR-0058 this repository builds one primary native Linux workspace:
-**Trackbench** combines an MPD/Melody client and a local-file workstation in
-separate authority-bound tabs. The former `trackknife` MPD executable was
-retired once Trackbench reached parity (ADR-0071); all workspace work belongs
-in Trackbench.
+**Trackknife** is the application; **Melody** is the backend family. The
+accepted direction (ADR-0220) makes the Trackknife core into `melodyd`: one
+engine process owning catalogue, mutation and playback, reachable over a
+protocol that works remotely, with audio produced by output agents. Trackknife
+becomes a client of that engine and may be closed without stopping playback.
 
-Trackbench is a spiritual successor to foobar2000, not a visual clone and not
+Trackbench is retired as a product name. Remaining internal uses
+(`BenchMainWindow`, `bench-*` object names, `src/bench`) are renamed
+opportunistically, not as a phase of their own.
+
+Trackknife is a spiritual successor to foobar2000, not a visual clone and not
 an attempt to run foobar2000 components. Preserve the ideas that make
 foobar2000 valuable: powerful metadata operations, predictable automation,
 broad format support, gapless playback, ReplayGain, speed, and user ownership.
 Replace dated, modal, or obscure interaction patterns with a modern and
-coherent UI. The active primary tab is the authority switch: MPD Queue uses the
-server session, library, transport, and outputs; Local Queue uses raw local
-files, local playback, PipeWire, and preparation tools. Never mix the two row
-types in one queue or expose local tagging/filesystem mutation commands in MPD
-context.
+coherent UI.
 
-## Local and Melody feature parity
+## One implementation, not two
 
-- Assess every feature for both local Trackbench playback and Melody-backed
-  playback. Where it makes sense in both authorities, implement and verify both;
-  do not treat a local-only implementation as completion of the feature.
-- Inspect Melody in `../melody` and change it when server-side support is the
-  appropriate solution. Server-owned playback, library, queue, and statistics
-  behavior belongs in Melody, not a client-side emulation tied to Trackbench's
-  lifetime or a single connected client.
-- Reuse existing Melody capabilities where they already provide the behavior.
-  Keep the user-facing workflow consistent without merging local and server
-  state, identities, or mutation authority.
-- Advertise and capability-gate new Melody protocol features. Preserve stock
-  MPD behavior and test unsupported-server handling as well as both supported
-  authorities. Explicitly document genuinely authority-specific features or
-  remaining parity gaps instead of silently omitting one side.
+The two-authority model — authority-bound tabs, an active-tab authority switch,
+and every feature built once per authority — is being removed. It is the tax
+ADR-0220 exists to end, and the ADR trail from 0210 to 0214 records paying it
+repeatedly.
+
+- **Do not add authority-gated feature code.** No new `supportsCommand()`-style
+  branching, no new `*Mpd*`-suffixed parallel to a local method, no new
+  duplicated list/history/shuffle/resume path. A feature is implemented once.
+- **Local versus remote is a connection profile**, not a branch. It is which
+  engine the client is pointed at, and the difference belongs at the connection
+  boundary rather than in feature code.
+- **Tabs are tabs.** A tab is a set of track references, an order, and a view
+  layout, distinguished only by how the set was produced and whether it
+  re-evaluates. Search results are not a special kind of tab. The tagger is the
+  one exception and stays a separate window (ADR-0221 rationale in
+  `docs/unified-engine.md`, Phase 1).
+- **`quick::MpdQueueModel` and its tab type are being deleted, not
+  generalised.** They exist only because Trackknife is currently an MPD client
+  when talking to the Go daemon. Do not build new abstractions over them.
+- **Melody's daemon is not the place for new server-side features.** Its
+  catalogue, scanner, tagging, query, history and Last.fm code are all retired
+  in favour of the C++ engine, which already implements them at greater depth.
+  Only the MPD bridge and the agent/streaming/player stack survive.
+
+**During the transition**, existing authority code keeps working until its phase
+lands. Do not break the current application to anticipate a later phase; the
+rule above governs *new* code and the direction of refactors.
 
 ## Non-negotiable behavior
 

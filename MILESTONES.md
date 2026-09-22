@@ -1,13 +1,22 @@
 # Trackknife milestones
 
-Milestones are capability gates, not calendar promises. The order reflects the
-MPD-client-first direction accepted in ADR-0009 and the unified workspace
-accepted in ADR-0058: **Trackbench** contains authority-bound **MPD Queue** and
-**Local Queue** tabs. The active tab switches transport, MPD/PipeWire output
-selection, and server-library/local-folders navigation while local mutation
-tools remain unavailable in MPD context. Both queues use the same complete,
-versioned track-view implementation. The former `trackknife` executable was
-retired once Trackbench reached parity (ADR-0071).
+Milestones are capability gates, not calendar promises.
+
+> **Current direction: M11, the unified engine.** ADR-0220 supersedes the
+> two-authority model below. The Trackknife core becomes `melodyd` — one engine
+> process owning catalogue, mutation and playback, reachable remotely, with
+> audio from output agents — and Trackknife becomes its client. See
+> [`docs/unified-engine.md`](docs/unified-engine.md) for the phases and
+> [ADR-0221](docs/adr/0221-entry-and-track-identity.md) for the identity design
+> that Phase 0 rests on. M0–M10 remain accurate as history; their description of
+> authority-bound tabs is **not** current architecture.
+
+The M0–M10 order reflects the MPD-client-first direction accepted in ADR-0009
+and the unified workspace accepted in ADR-0058: **Trackbench** contained
+authority-bound **MPD Queue** and **Local Queue** tabs, with the active tab
+switching transport, output selection, and library navigation. Both queues use
+the same complete, versioned track-view implementation. The former `trackknife`
+executable was retired once Trackbench reached parity (ADR-0071).
 
 ## Status
 
@@ -24,6 +33,7 @@ retired once Trackbench reached parity (ADR-0071).
 | M8 | Complete | Parallel converter, resampler, and organized output |
 | M9 | Complete | Melody output endpoint for the MPD client |
 | M10 | Complete | Hardening, native packaging, and release acceptance |
+| M11 | Active | Unified engine: core becomes `melodyd`, Trackknife becomes its client (ADR-0220) |
 
 ADR-0171 closes M5 after revalidating its exit criteria; M6's complete provider
 flow had already landed. ADR-0172 closes M7, ADR-0173 closes M8, ADR-0174

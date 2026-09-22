@@ -19,7 +19,17 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-22, through ADR-0219 and database schema 40.
+Updated on 2026-09-22, through ADR-0221 and database schema 40.
+
+**Accepted direction — the unified engine.** The Trackknife core becomes
+`melodyd`, reachable over a protocol that works remotely, with Trackknife as its
+client and audio produced by output agents. This supersedes the two-authority
+model in older ADRs and in `architecture.md`. Start with
+[the migration plan](unified-engine.md).
+
+- [ADR-0221: Entry identity and track identity](adr/0221-entry-and-track-identity.md).
+
+- [ADR-0220: Unified engine and remote agents](adr/0220-unified-engine-and-remote-agents.md).
 
 - [ADR-0219: Direct mapped Convert and ReplayGain](adr/0219-direct-mapped-conversion-and-replaygain.md).
 

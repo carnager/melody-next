@@ -165,19 +165,6 @@ RemoteCatalogue::scan(const core::CancellationToken& cancellation,
                                           .incomplete = outcome->value("incomplete", false)};
 }
 
-namespace {
-
-// Methods the engine does not expose yet. Reported as unsupported with the
-// method named, rather than as an empty success that would look like a
-// library with nothing in it.
-[[nodiscard]] core::Error not_exposed(std::string method) {
-    return core::Error{.code = core::ErrorCode::unsupported,
-                       .message = "this engine does not expose that yet",
-                       .context = {{.key = "method", .value = std::move(method)}}};
-}
-
-} // namespace
-
 core::Result<void> RemoteCatalogue::add_root(const std::string& raw_path) {
     auto answer =
         client_->call("catalogue.add_root", Json{{"path", protocol::encode_raw_path(raw_path)}});
@@ -350,9 +337,65 @@ RemoteCatalogue::cached_tracks(const std::vector<std::string>& raw_paths,
 }
 
 core::Result<std::vector<std::array<std::int64_t, 6>>>
-RemoteCatalogue::history_facts(const std::vector<persistence::LibraryHistorySource>&,
+RemoteCatalogue::history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                                const core::CancellationToken&) const {
-    return std::unexpected(not_exposed("catalogue.history_facts"));
+    auto encoded = Json::array();
+    for (const auto& source : sources) {
+        Json entry = Json::object();
+        entry["path"] = protocol::encode_raw_path(source.source.source_reference);
+        if (source.source.source_revision) {
+            const auto& revision = *source.source.source_revision;
+            entry["revision"] = Json::array({revision.device, revision.inode, revision.size,
+                                             revision.modification_time_seconds,
+                                             revision.modification_time_nanoseconds});
+        }
+        if (source.source.source_selection) {
+            Json selection = Json::object();
+            if (source.source.source_selection->audio_stream_index) {
+                selection["stream"] = *source.source.source_selection->audio_stream_index;
+            }
+            if (source.source.source_selection->subsong_index) {
+                selection["subsong"] = *source.source.source_selection->subsong_index;
+            }
+            entry["selection"] = std::move(selection);
+        }
+        if (source.source.segment) {
+            Json segment = Json::object();
+            segment["start"] = source.source.segment->start_sample;
+            if (source.source.segment->end_sample) {
+                segment["end"] = *source.source.segment->end_sample;
+            }
+            entry["segment"] = std::move(segment);
+        }
+        entry["album_hash"] = source.album_hash;
+        encoded.push_back(std::move(entry));
+    }
+    auto answer = client_->call("catalogue.history_facts", Json{{"sources", std::move(encoded)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto facts = answer->find("facts");
+    if (facts == answer->end() || !facts->is_array()) {
+        return std::unexpected(malformed("facts"));
+    }
+    std::vector<std::array<std::int64_t, 6>> history;
+    history.reserve(facts->size());
+    for (const auto& value : *facts) {
+        if (!value.is_array() || value.size() != 6U) {
+            return std::unexpected(malformed("facts"));
+        }
+        std::array<std::int64_t, 6> row{};
+        for (std::size_t index = 0; index < 6U; ++index) {
+            row[index] = value[index].get<std::int64_t>();
+        }
+        history.push_back(row);
+    }
+    if (history.size() != sources.size()) {
+        // One row per source, in order, or a caller would silently read
+        // another track's play count.
+        return std::unexpected(malformed("facts"));
+    }
+    return history;
 }
 
 } // namespace trackknife::engine

@@ -130,15 +130,35 @@ void adding_and_scanning_a_folder_works(engine::Catalogue& catalogue, const std:
     require(after.has_value() && after->empty(), label + ": the root is gone");
 }
 
-void what_the_remote_does_not_expose_says_so(engine::RemoteCatalogue& remote) {
-    // Not every method is on the wire yet. The gap is reported as unsupported
-    // and names the method, rather than arriving as an empty success that
-    // would look like a library with nothing in it.
-    const auto history = remote.history_facts({});
-    require(!history, "an unexposed method must fail");
-    require(history.error().code == core::ErrorCode::unsupported, "as unsupported");
-    require(!history.error().context.empty(), "naming the method");
-    require(history.error().context[0].value == "catalogue.history_facts", "which method it was");
+// History crosses as the fields the lookup keys on rather than a whole
+// ListItem. One row per source in order, because a mismatch would silently
+// give a track another track's play count.
+void history_crosses_with_its_sources(engine::Catalogue& catalogue, const std::string& label) {
+    // A source without a revision is refused: history is keyed by identity,
+    // and an unrevisioned path cannot be told apart from a different file at
+    // the same place. That is why the revision crosses the wire.
+    const core::LocalSourceRevision revision{.device = 1U,
+                                             .inode = 2U,
+                                             .size = 3U,
+                                             .modification_time_seconds = 4,
+                                             .modification_time_nanoseconds = 5};
+
+    persistence::LibraryHistorySource first;
+    first.source.source = persistence::ListSource::local;
+    first.source.source_reference = "/music/a.flac";
+    first.source.source_revision = revision;
+    persistence::LibraryHistorySource second;
+    second.source.source = persistence::ListSource::local;
+    second.source.source_reference = "/music/b.flac";
+    second.source.source_revision = revision;
+    second.source.source_selection = persistence::ListItemSourceSelection{std::nullopt, 2};
+    second.album_hash = std::string(64U, 'c');
+
+    const auto facts = catalogue.history_facts({first, second});
+    require(facts.has_value(), label + ": history must be readable");
+    require(facts->size() == 2U, label + ": one row per source, in order");
+    // Nothing has been played, so every count is zero rather than absent.
+    require((*facts)[0][0] == 0, label + ": an unplayed track has no plays");
 }
 
 } // namespace
@@ -185,7 +205,8 @@ int main() {
     adding_and_scanning_a_folder_works(local, "local", music);
     adding_and_scanning_a_folder_works(remote, "remote", music);
 
-    what_the_remote_does_not_expose_says_so(remote);
+    history_crosses_with_its_sources(local, "local");
+    history_crosses_with_its_sources(remote, "remote");
 
     (*client)->close();
     (*server)->stop();

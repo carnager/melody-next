@@ -313,6 +313,75 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{};
     });
 
+    // Play counts and timestamps. Only the fields the lookup keys on cross the
+    // wire -- path, revision, decoder selection, span and the album hash --
+    // rather than a whole ListItem, most of which the engine would ignore.
+    dispatcher.on(
+        "catalogue.history_facts", [&catalogue](const Json& params) -> core::Result<Json> {
+            const auto found = params.find("sources");
+            if (found == params.end() || !found->is_array()) {
+                return std::unexpected(bad_params("an array of sources is required", "sources"));
+            }
+            std::vector<persistence::LibraryHistorySource> sources;
+            sources.reserve(found->size());
+            for (const auto& value : *found) {
+                if (!value.is_object() || !value.contains("path")) {
+                    return std::unexpected(
+                        bad_params("each source needs an encoded path", "sources"));
+                }
+                auto raw = protocol::decode_raw_path(value.at("path").get<std::string>());
+                if (!raw) {
+                    return std::unexpected(bad_params("a path is not an encoded path", "sources"));
+                }
+                persistence::LibraryHistorySource source;
+                source.source.source = persistence::ListSource::local;
+                source.source.source_reference = std::move(*raw);
+                if (const auto revision = value.find("revision");
+                    revision != value.end() && revision->is_array() && revision->size() == 5U) {
+                    source.source.source_revision = core::LocalSourceRevision{
+                        .device = (*revision)[0].get<std::uint64_t>(),
+                        .inode = (*revision)[1].get<std::uint64_t>(),
+                        .size = (*revision)[2].get<std::uint64_t>(),
+                        .modification_time_seconds = (*revision)[3].get<std::int64_t>(),
+                        .modification_time_nanoseconds = (*revision)[4].get<std::int64_t>()};
+                }
+                if (const auto selection = value.find("selection");
+                    selection != value.end() && selection->is_object()) {
+                    persistence::ListItemSourceSelection chosen;
+                    if (const auto stream = selection->find("stream");
+                        stream != selection->end() && stream->is_number_integer()) {
+                        chosen.audio_stream_index = stream->get<int>();
+                    }
+                    if (const auto subsong = selection->find("subsong");
+                        subsong != selection->end() && subsong->is_number_integer()) {
+                        chosen.subsong_index = subsong->get<int>();
+                    }
+                    source.source.source_selection = chosen;
+                }
+                if (const auto segment = value.find("segment");
+                    segment != value.end() && segment->is_object()) {
+                    persistence::ListItemSegment span;
+                    span.start_sample = segment->value("start", std::int64_t{0});
+                    if (const auto end = segment->find("end");
+                        end != segment->end() && end->is_number_integer()) {
+                        span.end_sample = end->get<std::int64_t>();
+                    }
+                    source.source.segment = span;
+                }
+                source.album_hash = value.value("album_hash", std::string{});
+                sources.push_back(std::move(source));
+            }
+            auto facts = catalogue.history_facts(sources);
+            if (!facts) {
+                return std::unexpected(std::move(facts.error()));
+            }
+            auto rendered = Json::array();
+            for (const auto& entry : *facts) {
+                rendered.push_back(entry);
+            }
+            return Json{{"facts", std::move(rendered)}};
+        });
+
     dispatcher.on(
         "catalogue.artwork_source", [&catalogue](const Json& params) -> core::Result<Json> {
             auto key = required_string(params, "album_key");

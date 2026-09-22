@@ -31,6 +31,35 @@ class Catalogue final {
   public:
     explicit Catalogue(std::filesystem::path database) : database_(std::move(database)) {}
 
+    // The configured library roots, and adding or removing one. Mutating the
+    // root set does not scan; that is a separate ask.
+    [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const;
+    [[nodiscard]] core::Result<void> add_root(const std::string& raw_path);
+    [[nodiscard]] core::Result<void> remove_root(const std::string& raw_path);
+
+    // Browsing: a page of artists, albums or tracks, and the raw paths the
+    // same browse would yield.
+    [[nodiscard]] core::Result<persistence::LibraryPage>
+    query(const persistence::LibraryQuery& request,
+          const core::CancellationToken& cancellation = {}) const;
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    paths(const persistence::LibraryQuery& request,
+          const core::CancellationToken& cancellation = {}) const;
+
+    // Searching: a bounded page of a compiled query.
+    [[nodiscard]] core::Result<persistence::LibraryPage>
+    filter(const query::CompiledTkq& compiled, std::size_t offset, std::size_t limit,
+           const core::CancellationToken& cancellation = {}) const;
+
+    // ADR-0179: 0-10 content-identity ratings, by hash. Reading is bulk
+    // because a view asks for a screenful at once; writing is one at a time
+    // because a rating is a deliberate act.
+    [[nodiscard]] core::Result<std::vector<unsigned>>
+    ratings(const std::vector<std::string>& hashes,
+            const core::CancellationToken& cancellation = {}) const;
+    [[nodiscard]] core::Result<void> set_rating(const std::string& hash, bool album,
+                                                unsigned rating);
+
     // Raw paths matching a compiled query, in library order.
     [[nodiscard]] core::Result<std::vector<std::string>>
     filter_paths(const query::CompiledTkq& compiled,
@@ -54,6 +83,23 @@ class Catalogue final {
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const;
+
+    // Walks the configured roots and updates the index. Long, mutating, and
+    // cancellable; `progress` is a set of atomic counters the caller reads
+    // while this runs.
+    //
+    // ADR-0220 calls operations like this **jobs** -- submit, observe
+    // progress, cancel, collect a result -- and that shape already exists at
+    // the call site, assembled from Qt parts: a worker pool submits, a timer
+    // polls the counters, a token cancels, a watcher delivers the result.
+    // Passing it through the door keeps that shape and takes the database path
+    // out of the UI, which is what Phase 1 is for. What Phase 2 changes is
+    // where the thread lives and whether progress is pushed rather than
+    // polled -- not the shape here. Building engine-owned threading now would
+    // duplicate the caller's pool and design the job machinery without the
+    // socket that is its actual requirement.
+    [[nodiscard]] core::Result<persistence::LibraryScanResult>
+    scan(const core::CancellationToken& cancellation, persistence::LibraryScanProgress& progress);
 
   private:
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;

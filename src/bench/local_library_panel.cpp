@@ -439,13 +439,11 @@ void LocalLibraryPanel::pump() {
     querying_ = true;
     query_watcher_.setFuture(
         QtConcurrent::run(&pool_, [path = database_path_, work = std::move(task.work)] {
-            auto library = persistence::LocalLibrary::open(path);
-            if (!library) {
-                Outcome result;
-                result.error = text(library.error().message);
-                return result;
-            }
-            return work(*library);
+            // ADR-0220: the task is given the core's front door, never the
+            // database. Errors now surface from the individual call rather
+            // than from opening, which is the caller's concern anyway.
+            engine::Catalogue catalogue{path};
+            return work(catalogue);
         }));
 }
 
@@ -456,7 +454,7 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
     status_->setText(tr("Locating in library…"));
     enqueue(
         {[raw_path = std::move(raw_path),
-          cancellation = lifetime_cancellation_.token()](persistence::LocalLibrary& library) {
+          cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
              Outcome outcome;
              persistence::LibraryQuery query;
              query.kind = persistence::LibraryEntryKind::album;
@@ -572,7 +570,7 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
     const auto generation = generation_;
     const auto root = !parent.isValid();
     enqueue(
-        {[query, cancellation = view_cancellation_.token()](persistence::LocalLibrary& library) {
+        {[query, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
              Outcome outcome;
              const auto result = library.query(query, cancellation);
              if (result) {
@@ -698,7 +696,7 @@ void LocalLibraryPanel::loadFilterChildren(const QPersistentModelIndex& parent,
                                            std::shared_ptr<const query::CompiledTkq> compiled) {
     const auto generation = generation_;
     enqueue(
-        {[compiled, cancellation = view_cancellation_.token()](persistence::LocalLibrary& library) {
+        {[compiled, cancellation = view_cancellation_.token()](engine::Catalogue& library) {
              Outcome outcome;
              auto result = library.filter(*compiled, 0U, 200U, cancellation);
              if (result) {
@@ -869,7 +867,7 @@ void LocalLibraryPanel::requestRatings(std::vector<std::string> hashes,
         return;
     }
     enqueue({.work =
-                 [hashes = std::move(hashes)](persistence::LocalLibrary& library) {
+                 [hashes = std::move(hashes)](engine::Catalogue& library) {
                      Outcome outcome;
                      auto ratings = library.ratings(hashes);
                      if (!ratings) {
@@ -893,7 +891,7 @@ void LocalLibraryPanel::storeRating(std::string hash, const bool album, const un
         return;
     }
     enqueue({.work =
-                 [hash = std::move(hash), album, rating](persistence::LocalLibrary& library) {
+                 [hash = std::move(hash), album, rating](engine::Catalogue& library) {
                      Outcome outcome;
                      if (auto stored = library.set_rating(hash, album, rating); !stored) {
                          outcome.error = text(stored.error().message);
@@ -920,7 +918,7 @@ void LocalLibraryPanel::resolveEntries(std::vector<persistence::LibraryEntry> en
     status_->setText(tr("Loading library selection…"));
     enqueue(
         {[entries = std::move(entries),
-          cancellation = lifetime_cancellation_.token()](persistence::LocalLibrary& library) {
+          cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
              Outcome outcome;
              std::unordered_set<std::string> seen;
              std::size_t resolved = 0;
@@ -989,7 +987,7 @@ void LocalLibraryPanel::commitSearch() {
         query_error_->hide();
         enqueue(
             {[shared = std::make_shared<query::CompiledTkq>(std::move(*compiled)),
-              cancellation = lifetime_cancellation_.token()](persistence::LocalLibrary& library) {
+              cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
                  Outcome outcome;
                  auto paths = library.filter_paths(*shared, cancellation);
                  if (paths) {
@@ -1021,7 +1019,7 @@ void LocalLibraryPanel::commitSearch() {
         return;
     }
     enqueue({[query = bytes(query_text),
-              cancellation = lifetime_cancellation_.token()](persistence::LocalLibrary& library) {
+              cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
                  Outcome outcome;
                  std::unordered_set<std::string> seen;
                  // Album-name matches first (whole matching albums), then the
@@ -1067,7 +1065,7 @@ void LocalLibraryPanel::commitSearch() {
 }
 
 void LocalLibraryPanel::addRoot(std::string raw_path) {
-    enqueue({[raw_path = std::move(raw_path)](persistence::LocalLibrary& library) {
+    enqueue({[raw_path = std::move(raw_path)](engine::Catalogue& library) {
                  Outcome outcome;
                  const auto result = library.add_root(raw_path);
                  if (!result) {
@@ -1156,7 +1154,7 @@ QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
         }
         const auto path =
             roots_list_->currentItem()->data(Qt::UserRole).toByteArray().toStdString();
-        enqueue({[path](persistence::LocalLibrary& library) {
+        enqueue({[path](engine::Catalogue& library) {
                      Outcome outcome;
                      auto result = library.remove_root(path);
                      if (!result) {
@@ -1182,7 +1180,7 @@ QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
 }
 
 void LocalLibraryPanel::loadRoots() {
-    enqueue({[](persistence::LocalLibrary& library) {
+    enqueue({[](engine::Catalogue& library) {
                  Outcome outcome;
                  auto roots = library.roots();
                  if (roots) {
@@ -1248,12 +1246,11 @@ void LocalLibraryPanel::startScan() {
         QtConcurrent::run(&pool_, [path = database_path_, cancellation = scan_cancellation_.token(),
                                    progress = progress_] {
             ScanOutcome outcome;
-            auto library = persistence::LocalLibrary::open(path);
-            if (!library) {
-                outcome.error = text(library.error().message);
-                return outcome;
-            }
-            auto result = library->scan(cancellation, *progress);
+            // ADR-0220: ask the core, do not open its database. The job shape
+            // around this call -- pool, poll timer, token, watcher -- is
+            // unchanged; only the database path stops crossing the boundary.
+            engine::Catalogue catalogue{path};
+            auto result = catalogue.scan(cancellation, *progress);
             if (result) {
                 outcome.result = *result;
             } else {

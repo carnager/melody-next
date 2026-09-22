@@ -279,17 +279,27 @@ stays with the caller for now, and becomes the protocol's concern in Phase 2.
 Keeping the connection strategy behind the door is the point — it can become a
 pool, or a socket, with no caller changing.
 
-Two opens remain, and both want more than another wrapper:
+**All six catalogue opens are gone.** `engine::Catalogue` names ten
+operations — `roots`/`add_root`/`remove_root`, `query`/`paths`/`filter`/
+`filter_paths`, `cached_tracks`, `ratings`/`set_rating`, `artwork_source`,
+`history_facts`, `scan` — and the library panel's task queue now hands its
+work the door instead of the database.
 
-- `local_library_panel.cpp:442` is the panel's generic task runner: queued
-  tasks are `std::function<Outcome(LocalLibrary&)>`, so the database is handed
-  to arbitrary caller-supplied work. Moving it means naming those operations
-  on the door instead of passing the library out, which is the interesting
-  part of Phase 1 rather than a mechanical swap.
-- `local_library_panel.cpp:1251` is `scan`, a long mutating operation with
-  progress and cancellation. ADR-0220 calls these **jobs** — submit, stream
-  progress, cancel, deliver a result — and the first one should establish that
-  shape rather than be squeezed into a synchronous call.
+On `scan`: it is long, mutating, cancellable and progress-reporting, which
+ADR-0220 calls a **job**. That shape already exists at the call site, assembled
+from Qt parts — a pool submits, a timer polls atomic counters, a token cancels,
+a watcher delivers the result. Passing it through the door keeps that shape and
+takes the database path out of the UI, which is what this phase is for. Phase 2
+changes where the thread lives and whether progress is pushed rather than
+polled; it does not change the shape here. Building engine-owned threading now
+would duplicate the caller's pool and design the job machinery without the
+socket that is its actual requirement.
+
+Two `ListRepository` opens remain, and they are the other half of the door:
+`search_dialog.cpp:358`, and `ui::ListPersistenceService` itself, which owns
+the repository it should be asking. The service is the larger piece — it keeps
+its async callback surface and becomes a client of the engine rather than the
+owner of a database.
 
 Done when: nothing outside the engine opens a `LocalLibrary` or
 `ListRepository`, the UI reaches both only by asking the core, and one tab type

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/local_list_model.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
 
 #include <QCache>
@@ -78,7 +79,10 @@ class LocalLibraryPanel final : public QWidget {
         std::size_t unavailable{0};
     };
     struct Task {
-        std::function<Outcome(persistence::LocalLibrary&)> work;
+        // ADR-0220: queued work is handed the core's front door, not the
+        // database. Non-const because some tasks rate a track or change the
+        // root set.
+        std::function<Outcome(engine::Catalogue&)> work;
         std::function<void(Outcome)> done;
         bool view_query{false};
     };

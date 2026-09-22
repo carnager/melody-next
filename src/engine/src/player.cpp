@@ -70,7 +70,76 @@ core::Result<void> Player::start_locked(const std::size_t row) {
     anchors_.source = entry.source;
     row_ = static_cast<int>(row);
     order_.advance(row_, 1);
+    std::erase(requests_, anchors_.current);
+    seen_transitions_ = audition_->snapshot().chain_transitions;
+    gapless_entry_.reset();
+    refresh_gapless_locked();
     return {};
+}
+
+void Player::refresh_gapless_locked() {
+    const QueueView view{queue_};
+    // What plays next if nothing interrupts: a request first, then the order.
+    std::optional<std::size_t> next_row;
+    for (const auto& wanted : requests_) {
+        if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
+            next_row = static_cast<std::size_t>(row);
+            break;
+        }
+    }
+    if (!next_row) {
+        // Asking the order what is next does not consume it: PlaybackOrder
+        // holds its draw in `pending_` and returns the same answer until
+        // advance() commits it, precisely so a status refresh can ask
+        // repeatedly. A defensive copy here would be waste -- and I wrote one
+        // before reading that, then could not make a test fail without it.
+        if (const auto choice =
+                audio::adjacent_playback_row(view, anchors_, modes_, order_, {}, 1, row_)) {
+            next_row = static_cast<std::size_t>(choice->row);
+        }
+    }
+    if (!next_row) {
+        if (gapless_entry_) {
+            static_cast<void>(audition_->clear_gapless_next());
+            gapless_entry_.reset();
+        }
+        return;
+    }
+    const auto& entry = queue_[*next_row];
+    if (gapless_entry_ == entry.entry_id) {
+        return;
+    }
+    const auto queued =
+        entry.source.segment
+            ? audition_->queue_gapless_next_selected_segment(
+                  entry.source.raw_path, entry.source.selection, *entry.source.segment)
+            : audition_->queue_gapless_next_selected(entry.source.raw_path, entry.source.selection);
+    // A rejected continuation is not an error: the formats may differ, and the
+    // engine simply plays the next track the ordinary way.
+    gapless_entry_ = queued ? std::optional{entry.entry_id} : std::nullopt;
+}
+
+void Player::follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot) {
+    if (snapshot.chain_transitions == seen_transitions_) {
+        return;
+    }
+    seen_transitions_ = snapshot.chain_transitions;
+    if (!gapless_entry_) {
+        return;
+    }
+    const QueueView view{queue_};
+    const auto row = view.row_of_entry(*gapless_entry_, -1);
+    gapless_entry_.reset();
+    if (row < 0) {
+        return;
+    }
+    // The engine moved on without being told to, so the anchors follow it
+    // rather than the other way round.
+    anchors_.current = queue_[static_cast<std::size_t>(row)].entry_id;
+    anchors_.source = queue_[static_cast<std::size_t>(row)].source;
+    row_ = row;
+    order_.advance(row_, 1);
+    std::erase(requests_, anchors_.current);
 }
 
 void Player::replace_queue(std::vector<QueueEntry> entries) {
@@ -87,6 +156,7 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
         anchors_.current = core::StableId{};
     }
     reset_order_locked();
+    refresh_gapless_locked();
 }
 
 std::vector<QueueEntry> Player::queue() const {
@@ -195,14 +265,18 @@ void Player::set_modes(audio::PlaybackModes modes) {
     const std::lock_guard guard{mutex_};
     modes_ = modes;
     // Random and album-random change the traversal, so the order is rebuilt
-    // rather than left describing the previous mode.
+    // rather than left describing the previous mode -- and with it whatever
+    // was queued to follow, which was chosen under the old one.
     reset_order_locked();
+    refresh_gapless_locked();
 }
 
 Player::Observations Player::observe(const std::int64_t monotonic_ms) {
     const std::lock_guard guard{mutex_};
     const auto snapshot = audition_->snapshot();
     Observations observations;
+    follow_gapless_locked(snapshot);
+    refresh_gapless_locked();
 
     // ADR-0220 Phase 0's rules, unchanged: a moment counts only while the
     // output is actually carrying audio, and only against a playback instance

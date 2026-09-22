@@ -99,7 +99,9 @@ class Player final {
         std::int64_t resume_position_ms{0};
     };
 
-    // Samples the player and accumulates listening time. Called on a timer by
+    // Samples the player and accumulates listening time, keeps the gapless
+    // continuation current, and notices when the engine has handed over to
+    // it. Called on a timer by
     // whoever owns the engine; the counters it keeps need regular observation
     // rather than a callback, which is the same shape the workspace used.
     //
@@ -127,6 +129,15 @@ class Player final {
     // Callers already hold the lock.
     [[nodiscard]] core::Result<void> start_locked(std::size_t row);
     void reset_order_locked();
+    // Offers the audition service whatever should follow the current track,
+    // so an album plays without a gap between its tracks. Recomputed rather
+    // than remembered, because a queue edit or a mode change can make the
+    // answer different from the one offered a moment ago.
+    void refresh_gapless_locked();
+    // The engine increments a counter when it actually hands over to the
+    // queued continuation. Following that, rather than guessing from
+    // position, is what keeps the anchors honest across a gapless boundary.
+    void follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot);
 
     mutable std::mutex mutex_;
     std::unique_ptr<audio::LocalAuditionService> audition_;
@@ -139,6 +150,10 @@ class Player final {
     // Identities rather than sources, so a request survives the queue being
     // reordered for the same reason playback does.
     std::vector<core::StableId> requests_;
+    // What was last offered for gapless continuation, so an unchanged
+    // decision is not re-sent on every observation.
+    std::optional<core::StableId> gapless_entry_;
+    std::uint64_t seen_transitions_{0U};
 };
 
 } // namespace trackknife::engine

@@ -348,7 +348,10 @@ target_link_libraries(
     PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
-add_test(NAME engine-player COMMAND trackknife_engine_player_tests)
+add_test(
+    NAME engine-player
+    COMMAND trackknife_engine_player_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+)
 
 # ADR-0220: tkengine as a process, exercised the way an init system would.
 add_test(

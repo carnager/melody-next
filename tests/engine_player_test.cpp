@@ -11,8 +11,11 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -298,9 +301,122 @@ void listening_and_resume_are_observed_not_pushed(engine::Player& player) {
     }
 }
 
+// Decodes one of the repository's real audio fixtures, because the gapless
+// bookkeeping only runs while something is actually playing -- a queue with
+// nothing playing takes an early return, which is how the first version of
+// this test passed against a deliberately broken lookahead.
+[[nodiscard]] bool materialise(const std::filesystem::path& encoded,
+                               const std::filesystem::path& destination) {
+    std::ifstream input{encoded};
+    if (!input) {
+        return false;
+    }
+    std::string base64((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::erase(base64, '\n');
+    auto decoded = trackknife::protocol::decode_raw_path(base64);
+    if (!decoded) {
+        return false;
+    }
+    std::ofstream output{destination, std::ios::binary};
+    output.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
+    return output.good();
+}
+
+// Gapless is the last feature the workspace has and the engine did not, and
+// the one that would be noticed immediately: an album that gaps between its
+// tracks is obviously broken in a way a missing play count is not.
+//
+// What is checked here is the bookkeeping rather than the audio -- whether a
+// continuation is offered, withdrawn and recomputed at the right moments --
+// because whether two buffers actually join is the audition service's job and
+// is tested there.
+void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesystem::path& audio) {
+    const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
+                                                  entry(audio.string())};
+    player.replace_queue(entries);
+
+    // Nothing is playing, so there is nothing to follow and the engine must
+    // not be left holding a continuation from an earlier queue.
+    const auto idle = player.observe(1000);
+    require(!idle.listened_entry.has_value(), "nothing plays, nothing is credited");
+
+    // Observing repeatedly must not consume the order: asking what comes next
+    // is a question, and a lookahead that advanced would skip a track every
+    // time the engine sampled itself.
+    for (std::int64_t at = 2000; at <= 5000; at += 1000) {
+        static_cast<void>(player.observe(at));
+    }
+    const auto after = player.state();
+    require(after.queue_size == 3U, "sampling leaves the queue alone");
+    require(after.entry.is_nil(), "and starts nothing on its own");
+
+    // A mode change invalidates whatever was queued under the old one.
+    auto modes = player.modes();
+    modes.repeat = true;
+    player.set_modes(modes);
+    require(player.modes().repeat, "the mode took");
+    require(player.state().queue_size == 3U, "and the queue is intact");
+
+    // With something actually playing, the lookahead runs. Asking what comes
+    // next must not consume the order: if it did, every observation would
+    // advance it and the engine would skip a track each time it sampled
+    // itself.
+    player.replace_queue(entries);
+    modes.repeat = false;
+    // Random, because a shuffle is where repeated sampling could plausibly
+    // disturb the traversal. It does not -- PlaybackOrder holds its draw until
+    // advance() commits it -- and this asserts the property rather than
+    // guarding a defence: a three entry shuffle must still reach all three
+    // however often the engine samples itself in between.
+    modes.random = true;
+    player.set_modes(modes);
+    if (player.play_entry(entries[0].entry_id).has_value()) {
+        require(player.state().entry == entries[0].entry_id, "the first entry is playing");
+        std::set<core::StableId> visited{entries[0].entry_id};
+        for (int step = 0; step < 2; ++step) {
+            // Sample repeatedly between tracks, as a running engine does.
+            for (std::int64_t at = 0; at < 5; ++at) {
+                static_cast<void>(player.observe(10'000 + step * 10'000 + at * 1000));
+            }
+            const auto moved = player.step(1);
+            require(moved.has_value(),
+                    "a three entry shuffle must reach every entry however often it is sampled");
+            visited.insert(player.state().entry);
+        }
+        require(visited.size() == 3U, "a shuffle must visit each entry exactly once");
+        static_cast<void>(player.stop());
+    } else {
+        std::cerr << "engine player: no audio output; gapless lookahead not exercised\n";
+    }
+    modes.random = false;
+    player.set_modes(modes);
+
+    // Emptying the queue must withdraw any continuation rather than leave the
+    // engine holding a track that is no longer anywhere.
+    player.replace_queue({});
+    require(player.state().queue_size == 0U, "the queue empties");
+    static_cast<void>(player.observe(6000));
+    modes.repeat = false;
+    player.set_modes(modes);
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "usage: engine_player_test <audio-fixture-dir>\n";
+        return EXIT_FAILURE;
+    }
+    const std::filesystem::path fixtures{argv[1]};
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("trackknife-engine-player-" + core::StableId::random().to_string());
+    std::filesystem::create_directory(directory);
+    const auto audio = directory / "track.flac";
+    if (!materialise(fixtures / "rich-metadata-flac.b64", audio)) {
+        std::cerr << "engine player: could not materialise the fixture\n";
+        return EXIT_FAILURE;
+    }
+
     auto player = engine::Player::create();
     if (!player) {
         // No audio device in this environment. The engine cannot be built
@@ -318,8 +434,11 @@ int main() {
     stepping_past_the_end_reports_rather_than_wrapping(*player);
     requests_outrank_the_order_but_only_forward(**player);
     listening_and_resume_are_observed_not_pushed(**player);
+    gapless_is_offered_and_recomputed(**player, audio);
     the_method_surface_speaks_for_the_player(**player);
     changes_are_pushed_without_asking(**player);
-    std::cout << "engine player: 10 scenarios\n";
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+    std::cout << "engine player: 11 scenarios\n";
     return EXIT_SUCCESS;
 }

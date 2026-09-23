@@ -1832,6 +1832,7 @@ void BenchMainWindow::refreshEngineTransport() {
     // Observable for offscreen tests and diagnostics, the same way the local
     // path publishes its state.
     setProperty("trackknife-engine-playback", state.status);
+    publishMprisState();
     refreshPlaybackCursor();
 }
 
@@ -2350,6 +2351,41 @@ void BenchMainWindow::publishMprisState() {
         state.can_play = command_ready;
         state.can_pause = command_ready;
         state.can_seek = command_ready && duration_ms > 0;
+    } else if (playingOnEngine()) {
+        // What the desktop sees is what the engine is doing. Reading the
+        // local player here would publish an idle player while music plays,
+        // so media keys and the notification would describe nothing.
+        const auto engine = engine_playback_->state();
+        state.status = engine.status == QStringLiteral("playing")  ? QStringLiteral("Playing")
+                       : engine.status == QStringLiteral("paused") ? QStringLiteral("Paused")
+                                                                   : QStringLiteral("Stopped");
+        if (!engine.entry.isEmpty()) {
+            // The entry, not the path: the same file queued twice is two
+            // tracks to the desktop, and a notification per occurrence.
+            state.track_key = engine.entry;
+            state.title = QFileInfo{engine.path}.fileName();
+            if (const auto entry = core::StableId::parse(engine.entry.toStdString())) {
+                if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+                    if (const auto row = tab->model->rowOfEntry(*entry, playback_.row); row >= 0) {
+                        const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
+                        if (!track.title.empty()) {
+                            state.title = displayText(track.title);
+                        }
+                        state.artist = displayText(track.artist);
+                        state.album = displayText(track.album);
+                    }
+                }
+            }
+        }
+        state.position_us = engine.position_ms * 1'000;
+        state.length_us = engine.duration_ms > 0 ? engine.duration_ms * 1'000 : -1;
+        state.volume_percent = engine.volume_percent;
+        const bool has_queue = engine.queue_size > 0U;
+        state.can_next = engine.queue_size > 1U || engine.requests > 0U;
+        state.can_previous = engine.queue_size > 1U;
+        state.can_play = has_queue;
+        state.can_pause = has_queue;
+        state.can_seek = !engine.entry.isEmpty() && engine.duration_ms > 0;
     } else if (player_ != nullptr) {
         const auto snapshot = player_->snapshot();
         const auto active = playerActive(snapshot.state);

@@ -15,6 +15,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/local_list_model.hpp"
+#include "bench/mpris_service.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
@@ -34,7 +35,9 @@
 #include <QtTest>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -46,6 +49,21 @@ namespace engine = trackknife::engine;
 namespace protocol = trackknife::protocol;
 
 namespace {
+
+// Whether the engine actually started playing, given time to. A skip decided
+// too early is a skip on a loaded machine that has audio, and a skipped test
+// cannot catch the regression it exists for -- so "no output here" is only
+// concluded after the play command has had every chance to land.
+bool engine_started(const std::unique_ptr<engine::Player>& player) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!player->state().entry.is_nil()) {
+            return true;
+        }
+        QTest::qWait(10);
+    }
+    return false;
+}
 
 bool materialize_audio_fixture(const QString& encoded_name, const QString& output_path) {
     QFile source{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR) + QLatin1Char('/') + encoded_name};
@@ -125,6 +143,7 @@ class EnginePlaybackTest final : public QObject {
     void aQueueChangedElsewhereReachesTheList();
     void consumeDropsTheRowFromTheList();
     void listeningIsCreditedWhileTheEnginePlays();
+    void theDesktopSeesWhatTheEnginePlays();
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
     void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
@@ -570,7 +589,7 @@ void EnginePlaybackTest::consumeDropsTheRowFromTheList() {
 
     emit view->doubleClicked(model->index(0, 0));
     QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
-    if ((*player)->state().entry.is_nil()) {
+    if (!engine_started(*player)) {
         (*server)->stop();
         QSKIP("no audio output here, so nothing is played and nothing is consumed");
     }
@@ -635,6 +654,58 @@ void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
         return sample.contains(title) && !sample.startsWith(QLatin1Char('|'));
     };
     QTRY_VERIFY2_WITH_TIMEOUT(credited(), "nothing was credited while the engine played", 5'000);
+
+    (*server)->stop();
+}
+
+// MPRIS and notifications read the local player, which on the engine path
+// is idle -- so media keys worked (they land on the transport actions) while
+// the desktop was told nothing was playing.
+void EnginePlaybackTest::theDesktopSeesWhatTheEnginePlays() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("announced.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    auto* mpris = window.findChild<MprisService*>();
+    QVERIFY(mpris != nullptr);
+
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(model->rows().front().probed, 5'000);
+    const auto title = QString::fromStdString(model->rows().front().title);
+    const auto entry = QString::fromStdString(model->rows().front().entry_id.to_string());
+
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
+
+    // Keyed by the entry, and titled from the row's tags rather than the
+    // filename: the desktop is told which track, not which file.
+    QTRY_COMPARE_WITH_TIMEOUT(mpris->currentState().track_key, entry, 5'000);
+    QCOMPARE(mpris->currentState().title, title);
+    QVERIFY(mpris->currentState().can_pause);
 
     (*server)->stop();
 }
@@ -744,8 +815,7 @@ void EnginePlaybackTest::aNewWindowAttachesToWhatTheEngineIsPlaying() {
         QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
         // The play follows the queue on the same worker, so the queue landing
         // does not mean the engine has started yet.
-        QTest::qWait(500);
-        if ((*player)->state().entry.is_nil()) {
+        if (!engine_started(*player)) {
             (*server)->stop();
             QSKIP("no audio output here, so the engine is not playing anything to attach to");
         }

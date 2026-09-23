@@ -446,8 +446,11 @@ network client, not of the rules.
 The workspace's own resume and gapless do not run on that
 path — the engine performs them, and doing both would double-count listening
 and fight over the queue. Reproducing them as *views* of engine state is what
-remains. MPRIS and desktop notifications likewise still follow the local
-player; they move with the authority collapse.
+remains. MPRIS and desktop notifications describe what the engine is playing. Their
+commands already landed on the transport actions, which route to the engine,
+so media keys worked while the desktop was told nothing was playing; the
+published state now comes from the engine, keyed by entry so the same file
+queued twice is two tracks to the desktop.
 
 A new connection is handed this window's settings at once. An engine starts
 with its own defaults and has never heard of them, so a client that only

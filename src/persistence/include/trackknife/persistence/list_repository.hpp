@@ -99,6 +99,9 @@ struct ListDocument {
     bool pinned{false};
     bool dirty{false};
     std::vector<ListItem> items;
+    // ADR-0227: a list of the remote engine's files rather than this
+    // computer's. It plays there, and its paths name files on that machine.
+    bool remote{false};
 
     friend bool operator==(const ListDocument&, const ListDocument&) = default;
 };

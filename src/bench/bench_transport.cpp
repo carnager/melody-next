@@ -213,7 +213,7 @@ void BenchMainWindow::buildTransport() {
                                    QStringLiteral("Previous"), this);
     connect(previous_action_, &QAction::triggered, this, [this] {
         if (playingOnEngine()) {
-            engine_playback_->previous();
+            transport_->previous();
         }
     });
     play_pause_action_ =
@@ -225,14 +225,14 @@ void BenchMainWindow::buildTransport() {
         new QAction(style()->standardIcon(QStyle::SP_MediaStop), QStringLiteral("Stop"), this);
     connect(stop_action_, &QAction::triggered, this, [this] {
         if (playingOnEngine()) {
-            engine_playback_->stop();
+            transport_->stop();
         }
     });
     next_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipForward),
                                QStringLiteral("Next"), this);
     connect(next_action_, &QAction::triggered, this, [this] {
         if (playingOnEngine()) {
-            engine_playback_->next();
+            transport_->next();
         }
     });
 
@@ -360,7 +360,7 @@ void BenchMainWindow::buildTransport() {
             // The engine owns the output, so the volume lives there: another
             // client watching the same engine sees the same number, and it
             // survives this window closing.
-            engine_playback_->setVolume(value);
+            transport_->setVolume(value);
         }
         refreshMuteButton();
     });
@@ -450,7 +450,7 @@ void BenchMainWindow::buildTransport() {
     auto* refresh_devices = playback_menu->addAction(QStringLiteral("Refresh audio devices"));
     connect(refresh_devices, &QAction::triggered, this, [this] {
         if (playingOnEngine()) {
-            engine_playback_->refreshOutputs();
+            transport_->refreshOutputs();
         }
     });
 }
@@ -474,7 +474,7 @@ void BenchMainWindow::configurePlaybackBuffer(const QString& profile, const int 
     }
     // ADR-0226: the engine's buffer, which it keeps. Settings mirror it so
     // the dialog shows the engine's value.
-    engine_playback_->setBuffer(capacity_ms, start_threshold_ms);
+    transport_->setBuffer(capacity_ms, start_threshold_ms);
 
     selected_buffer_profile_ = profile;
     QSettings settings;
@@ -484,7 +484,7 @@ void BenchMainWindow::configurePlaybackBuffer(const QString& profile, const int 
     settings.sync();
     refreshPlaybackBufferChecks();
 
-    const bool pending = engine_playback_->state().status != QStringLiteral("stopped");
+    const bool pending = transport_->state().status != QStringLiteral("stopped");
     statusBar()->showMessage(
         QStringLiteral("%1 buffer · %2 ms capacity · %3 ms start%4")
             .arg(bufferProfileLabel(profile))
@@ -497,7 +497,7 @@ void BenchMainWindow::configurePlaybackBuffer(const QString& profile, const int 
 void BenchMainWindow::reloadPlaybackPreferences() {
     const QSettings settings;
     const auto preference = loadPlaybackBufferPreference();
-    const auto engine = playingOnEngine() ? std::optional{engine_playback_->state()} : std::nullopt;
+    const auto engine = playingOnEngine() ? std::optional{transport_->state()} : std::nullopt;
     if (selected_buffer_profile_ != preference.profile ||
         (engine &&
          (engine->buffer_capacity_ms != preference.config.capacity.count() ||
@@ -554,7 +554,7 @@ void BenchMainWindow::rebuildDeviceMenu() {
         device_group_->addAction(action);
         connect(action, &QAction::triggered, this, [this, target = std::move(target)] {
             if (playingOnEngine()) {
-                engine_playback_->setOutput(target);
+                transport_->setOutput(target);
             }
         });
         return action;
@@ -575,7 +575,7 @@ void BenchMainWindow::rebuildDeviceMenu() {
     refresh->setObjectName(QStringLiteral("action-refresh-audio-devices"));
     connect(refresh, &QAction::triggered, this, [this] {
         if (playingOnEngine()) {
-            engine_playback_->refreshOutputs();
+            transport_->refreshOutputs();
         }
     });
 }
@@ -735,8 +735,8 @@ void BenchMainWindow::applyLocalPlaybackModes() {
     if (playingOnEngine()) {
         // The engine decides what plays next and how loud it is, so every one
         // of these is its business.
-        engine_playback_->setModes(playback_.modes);
-        engine_playback_->setReplayGain(mode, preamps);
+        transport_->setModes(playback_.modes);
+        transport_->setReplayGain(mode, preamps);
     }
     refreshLocalPlaybackControls();
 }
@@ -805,7 +805,9 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
 }
 
 void BenchMainWindow::syncEngineRequests() {
-    if (!playingOnEngine()) {
+    // Asks go to the engine whose files they are, and only while it is the
+    // one playing: the other would be asked for paths it does not have.
+    if (!playingOnEngine() || (transport_ == remote_playback_) != up_next_remote_) {
         return;
     }
     std::vector<LocalTrackRow> rows;
@@ -820,7 +822,7 @@ void BenchMainWindow::syncEngineRequests() {
         return;
     }
     engine_requests_ = stated;
-    engine_playback_->setRequests(rows, gains);
+    transport_->setRequests(rows, gains);
 }
 
 void BenchMainWindow::syncEngineQueue() {
@@ -847,7 +849,7 @@ void BenchMainWindow::syncEngineQueue() {
     }
     // The engine follows identity, so the playing entry survives being handed
     // a queue that no longer holds it in the same row -- or at all.
-    engine_playback_->replaceQueue(rows, overrides);
+    transport_->replaceQueue(rows, overrides);
 }
 
 void BenchMainWindow::adoptEngineQueue() {
@@ -855,7 +857,7 @@ void BenchMainWindow::adoptEngineQueue() {
     if (tab == nullptr) {
         return;
     }
-    const auto held = engine_playback_->queueEntries();
+    const auto held = transport_->queueEntries();
     if (held.empty()) {
         return;
     }
@@ -898,7 +900,7 @@ void BenchMainWindow::reattachToEngine() {
     if (!playingOnEngine()) {
         return;
     }
-    const auto state = engine_playback_->state();
+    const auto state = transport_->state();
     if (state.entry.isEmpty()) {
         return; // The engine holds nothing; there is nothing to attach to.
     }
@@ -922,20 +924,24 @@ void BenchMainWindow::reattachToEngine() {
     // Otherwise the queue is the only record of what is playing, so it becomes
     // a list. The rows carry the engine's identities rather than fresh ones,
     // or the anchor below would name an entry this list does not contain.
-    auto rows = engine_playback_->queueEntries();
+    auto rows = transport_->queueEntries();
     if (rows.empty()) {
         return;
     }
     for (auto& row : rows) {
         row.title = core::escape_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
     }
-    auto* tab = addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                     .kind = persistence::ListKind::scratch,
-                                                     .name = "Playing on the engine",
-                                                     .pinned = false,
-                                                     .dirty = false,
-                                                     .items = {}},
-                           true);
+    const bool remote = transport_ != nullptr && transport_ == remote_playback_;
+    // A remote engine's queue goes into its tab, which it always has.
+    auto* tab = remote
+                    ? remoteQueueTab()
+                    : addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                           .kind = persistence::ListKind::scratch,
+                                                           .name = "Playing on the engine",
+                                                           .pinned = false,
+                                                           .dirty = false,
+                                                           .items = {}},
+                                 true);
     if (tab == nullptr) {
         return;
     }
@@ -962,12 +968,41 @@ void BenchMainWindow::adoptEngineRow(ListTab& tab, const int row, const core::St
     refreshPlaybackCursor(true);
 }
 
+EnginePlayback* BenchMainWindow::playbackFor(const bool remote) const {
+    return remote ? remote_playback_ : local_playback_;
+}
+
+void BenchMainWindow::followPlayback(EnginePlayback* playback) {
+    if (playback == nullptr || playback == transport_) {
+        return;
+    }
+    // ADR-0227: one engine plays at a time. Starting on one stops the other,
+    // in that order, so an output agent the two share is released first.
+    if (transport_ != nullptr && transport_->active() &&
+        transport_->state().status != QStringLiteral("stopped")) {
+        transport_->stop();
+    }
+    if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+        tab->model->setCurrentSource({}, -1);
+    }
+    transport_ = playback;
+    // What the window knew about the other engine says nothing about this one.
+    playback_.anchors = {};
+    playback_.row = -1;
+    engine_entry_.clear();
+    engine_queue_.clear();
+    engine_requests_.clear();
+    engine_consumed_.clear();
+    engine_queue_revision_ = 0;
+    refreshTransport();
+}
+
 bool BenchMainWindow::playingOnEngine() const {
     // Ownership, not visibility: whether an engine is connected, never which
     // tab is on screen. Deciding it from the visible tab once let the local
     // refresh see an idle player and wipe the anchors the engine was playing
     // from.
-    return engine_playback_ != nullptr && engine_playback_->active();
+    return transport_ != nullptr && transport_->active();
 }
 
 int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
@@ -979,10 +1014,18 @@ int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
 }
 
 void BenchMainWindow::playRow(ListTab& tab, const int row) {
-    if (!playingOnEngine()) {
-        statusBar()->showMessage(QStringLiteral("Nothing can play: no engine is connected"), 5'000);
+    // ADR-0227: a tab plays on the engine whose files it lists.
+    auto* target = playbackFor(tab.document.remote);
+    if (target == nullptr || !target->active()) {
+        statusBar()->showMessage(tab.document.remote
+                                     ? QStringLiteral("Nothing can play: the remote engine is "
+                                                      "not connected")
+                                     : QStringLiteral("Nothing can play: this computer's engine "
+                                                      "is not running"),
+                                 5'000);
         return;
     }
+    followPlayback(target);
     // The engine owns the queue, so it is given the whole list rather than
     // one track: skipping, shuffling and gapless are its decisions, and it
     // cannot make them from a single entry.
@@ -995,7 +1038,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
     for (const auto& source_row : rows) {
         overrides.push_back(local_replay_gain_override(source_row));
     }
-    engine_playback_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id);
+    transport_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id);
     if (playback_.anchors.document != tab.document.id) {
         if (auto* previous = tabForDocument(playback_.anchors.document); previous != nullptr) {
             previous->model->setCurrentSource({}, -1);
@@ -1012,16 +1055,16 @@ void BenchMainWindow::togglePlayPause() {
     if (!playingOnEngine()) {
         return;
     }
-    if (engine_playback_->state().status == QStringLiteral("playing")) {
-        engine_playback_->pause();
+    if (transport_->state().status == QStringLiteral("playing")) {
+        transport_->pause();
     } else {
-        engine_playback_->resume();
+        transport_->resume();
     }
 }
 
 void BenchMainWindow::seekToMs(const qint64 position_ms) {
     if (playingOnEngine()) {
-        engine_playback_->seek(position_ms);
+        transport_->seek(position_ms);
     }
 }
 
@@ -1102,7 +1145,7 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
 }
 
 void BenchMainWindow::refreshEngineTransport() {
-    const auto state = engine_playback_->state();
+    const auto state = transport_->state();
     sampleLastFmFromEngine(state);
     const auto playing = state.status == QStringLiteral("playing");
     const auto stopped = state.status == QStringLiteral("stopped");
@@ -1457,7 +1500,7 @@ void BenchMainWindow::publishMprisState() {
         // What the desktop sees is what the engine is doing. Reading the
         // local player here would publish an idle player while music plays,
         // so media keys and the notification would describe nothing.
-        const auto engine = engine_playback_->state();
+        const auto engine = transport_->state();
         state.status = engine.status == QStringLiteral("playing")  ? QStringLiteral("Playing")
                        : engine.status == QStringLiteral("paused") ? QStringLiteral("Paused")
                                                                    : QStringLiteral("Stopped");

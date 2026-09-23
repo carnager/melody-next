@@ -8,6 +8,7 @@
 
 #include <QString>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -28,11 +29,20 @@ namespace trackknife::bench {
 // still open the wrong thing; a caller that has this cannot.
 class CatalogueSource final {
   public:
-    // Reads the engine setting once. Empty means this machine's engine,
-    // started if it is not running (ADR-0226). There is no fallback: an
-    // engine that cannot be reached leaves the library unavailable, and says
-    // why, rather than showing some other database as if it were the library.
-    explicit CatalogueSource(std::filesystem::path database);
+    // ADR-0227: which of the workspace's two engines this is.
+    enum class Role : std::uint8_t {
+        // This computer's: always there, started if need be.
+        local,
+        // The configured engine elsewhere, if there is one.
+        remote,
+    };
+
+    // Reads the settings once. The local role is this computer's engine,
+    // started if it is not running (ADR-0226); the remote role is the one
+    // configured in Settings, if any (ADR-0227). There is no fallback: an
+    // engine that cannot be reached leaves its library unavailable, and says
+    // why, rather than showing some other database as if it were that one.
+    explicit CatalogueSource(std::filesystem::path database, Role role = Role::local);
     CatalogueSource(const CatalogueSource&) = delete;
     CatalogueSource(CatalogueSource&&) = delete;
     CatalogueSource& operator=(const CatalogueSource&) = delete;
@@ -60,12 +70,21 @@ class CatalogueSource final {
     // none to start or it would not come up. Blocks while it starts.
     [[nodiscard]] bool reviveLocalEngine() const;
 
+    [[nodiscard]] Role role() const noexcept { return role_; }
+    // Whether this names an engine at all: a remote role with nothing
+    // configured does not.
+    [[nodiscard]] bool configured() const noexcept { return endpoint_.has_value(); }
+    // What to call it in a source switch: "This computer", or the remote's
+    // host.
+    [[nodiscard]] QString name() const;
+
     // One line naming the source, for a panel to show. Three states, and the
     // difference between the last two is what was previously invisible.
     [[nodiscard]] QString describe() const;
 
   private:
     std::filesystem::path database_;
+    Role role_{Role::local};
     std::optional<protocol::Endpoint> endpoint_;
     std::optional<LocalEngine> local_engine_;
     [[nodiscard]] std::shared_ptr<protocol::Client> connectLocked() const;

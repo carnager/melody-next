@@ -429,6 +429,12 @@ void apply_loudness_sidecar_projection(
 } // namespace
 
 void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
+    // ADR-0227: a remote tab's files are on the remote machine. Its rows come
+    // from that engine's index; reading them here would read nothing, or the
+    // wrong file at the same path.
+    if (tab.document.remote) {
+        return;
+    }
     const auto id = QString::fromStdString(tab.document.id.to_string());
     const auto& rows = tab.model->rows();
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
@@ -543,6 +549,10 @@ void BenchMainWindow::finishProbeBatch() {
 }
 
 void BenchMainWindow::syncArtwork(ListTab& tab) {
+    // Covers are read from files; a remote tab's are not here (ADR-0227).
+    if (tab.document.remote) {
+        return;
+    }
     const auto& rows = tab.model->rows();
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
         const auto& track = rows[static_cast<std::size_t>(row)];

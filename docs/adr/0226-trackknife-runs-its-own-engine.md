@@ -3,7 +3,7 @@
 - Status: accepted
 - Date: 2026-09-23
 - Extends: ADR-0220, ADR-0223
-- Supersedes: the unified-engine plan's "several engines at once" (Phase 3)
+- Amended by: ADR-0227, which replaces "one engine per workspace" below
 
 ## Decision
 
@@ -20,11 +20,12 @@ Trackknife is not a player. A desktop that wants the music on its own
 speakers while the engine is elsewhere runs an agent, and Trackknife starts
 its own agent for that case. This answers the question Phase 4 left open.
 
-**One engine per workspace.** The engine setting names exactly one: another
-machine's (a socket or `host:port` with its token), or, left empty, this
-computer's. There is one database, the engine's.
+~~**One engine per workspace.**~~ *Withdrawn by ADR-0227: this computer's
+engine is always there, and a remote one is added beside it, not instead of
+it. Connecting to a remote engine had stopped local playback, which was never
+the intent.*
 
-**An empty setting starts this computer's engine.** Trackknife connects to
+**This computer's engine is started when needed.** Trackknife connects to
 `$XDG_RUNTIME_DIR/melodyd.sock`. If nothing answers, it starts `melodyd`
 detached, in its own session, with output going to `melodyd.log` in the data
 directory, and waits up to ten seconds for it to listen. The engine outlives

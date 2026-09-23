@@ -272,9 +272,25 @@ void BenchMainWindow::showConvertDialog() {
     showConvertForView(tab ? tab->view : nullptr);
 }
 
+bool BenchMainWindow::refuseRemoteFileWork(QTableView* view) {
+    const auto* tab =
+        view ? static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>()) : nullptr;
+    if (tab == nullptr || !tab->document.remote) {
+        return false;
+    }
+    // ADR-0227: these read and write the files, which are on the remote
+    // machine. Until that work runs in the engine next to them, it is refused
+    // rather than attempted on whatever this computer has at those paths.
+    statusBar()->showMessage(
+        QStringLiteral("Tagging, conversion and ReplayGain for the remote engine's files are "
+                       "not available yet: they have to run on that machine"),
+        7'000);
+    return true;
+}
+
 void BenchMainWindow::showConvertForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel()) {
+    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -563,7 +579,7 @@ void BenchMainWindow::showReplayGainDialog() {
 
 void BenchMainWindow::showReplayGainForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel()) {
+    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -640,7 +656,7 @@ void BenchMainWindow::showMetadataProperties() {
 
 void BenchMainWindow::showMetadataForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel()) {
+    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
         return;
     }
     auto selected = view->selectionModel()->selectedRows();

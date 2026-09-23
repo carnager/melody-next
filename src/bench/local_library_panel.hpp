@@ -50,6 +50,11 @@ class LocalLibraryPanel final : public QWidget {
     void stop();
     void resolveEntries(std::vector<persistence::LibraryEntry> entries,
                         std::function<void(std::vector<std::string>)> completion);
+    // The same selection as rows built from the engine's index rather than
+    // by reading the files (ADR-0227): what a remote engine's files are, told
+    // by the engine that has them, for a list on this computer to show.
+    void resolveEntryRows(std::vector<persistence::LibraryEntry> entries,
+                          std::function<void(std::vector<LocalTrackRow>)> completion);
     // ADR-0140: resolves the full result set of the current search text
     // (matching albums' tracks first, then remaining matching tracks,
     // deduplicated by path) and emits searchCommitted. Enter triggers it.

@@ -147,7 +147,10 @@ class BenchMainWindow final : public QMainWindow {
     void buildUpNext();
     void refreshUpNext();
     void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
-    void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1);
+    // `remote`: whose files these are (ADR-0227). Up Next holds one engine's
+    // asks at a time.
+    void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1,
+                              bool remote = false);
     void addUpNextActions(QMenu* menu, QTableView* source);
     void editUpNext(int operation, int row = -1, int destination = -1);
     void editUpNextSelection(int operation, int destination = -1);
@@ -356,6 +359,18 @@ class BenchMainWindow final : public QMainWindow {
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
     // Points the workspace at an entry the engine is playing.
     void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
+    // ADR-0227: the playback link for a connection, null when that one has
+    // none (no remote configured).
+    [[nodiscard]] EnginePlayback* playbackFor(bool remote) const;
+    // Makes `playback` the one the transport follows, stopping the other if it
+    // was playing: one engine plays at a time.
+    void followPlayback(EnginePlayback* playback);
+    // Builds the remote connection, its library panel and its default tab.
+    void connectRemoteEngine();
+    [[nodiscard]] ListTab* remoteQueueTab();
+    // True, having said why, when `view` lists the remote engine's files:
+    // work that reads or writes files cannot run here on those (ADR-0227).
+    [[nodiscard]] bool refuseRemoteFileWork(QTableView* view);
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
     [[nodiscard]] bool playingOnEngine() const;
@@ -377,6 +392,8 @@ class BenchMainWindow final : public QMainWindow {
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     LocalLibraryPanel* local_library_{nullptr};
+    // ADR-0227: the remote engine's library, beside this computer's.
+    LocalLibraryPanel* remote_library_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
     // temporary page hosting its file list (ADR-0183 addendum).
     QTabBar* local_source_tabs_{nullptr};
@@ -472,13 +489,19 @@ class BenchMainWindow final : public QMainWindow {
     QAction* notifications_action_{nullptr};
     ui::ListPersistenceService* persistence_{nullptr};
     std::filesystem::path database_path_;
-    // ADR-0220: one place decides whether a catalogue is this process or an
-    // engine, and everything that needs one asks here.
+    // ADR-0227: two engines. This computer's is always there and plays the
+    // local tabs; the remote one, when configured, plays the remote tabs.
+    // Everything that needs a catalogue asks the right one of these.
     std::unique_ptr<CatalogueSource> catalogue_source_;
-    // ADR-0220: when an engine is configured it owns playback, and the
-    // workspace drives it instead of its own player. Null when there is no
-    // engine, which is the unchanged local path.
-    EnginePlayback* engine_playback_{nullptr};
+    std::unique_ptr<CatalogueSource> remote_catalogue_source_;
+    EnginePlayback* local_playback_{nullptr};
+    EnginePlayback* remote_playback_{nullptr};
+    // The engine the transport follows: the one the playing tab belongs to.
+    // One engine plays at a time, so this is also the one that may.
+    EnginePlayback* transport_{nullptr};
+    // The connection Up Next was filled from, while it holds anything: its
+    // asks are files on that engine's machine.
+    bool up_next_remote_{false};
     // The entry the engine last reported. The engine advances its own queue,
     // so without following it the highlighted row would stay on whatever was
     // double-clicked while something else played.

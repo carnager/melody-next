@@ -548,21 +548,18 @@ the same setting that took a socket path. Byte access is not built yet.
   players without file access, so the machinery exists; the requirement here is
   only that the protocol not rule it out. See "Two things to leave possible"
   below for what it buys.
-- **One engine per workspace** ([ADR-0226](adr/0226-trackknife-runs-its-own-engine.md)).
-  The engine setting names another machine's engine or, left empty, this
-  computer's, which Trackknife starts if it is not running and which outlives
-  the window. There is one database, the engine's. This replaces the earlier
-  plan here for several connections open side by side: every client must see
-  the same ratings and history, so they belong to one engine, not to whichever
-  connection a tab came from.
+- **This computer's engine and one remote** ([ADR-0226](adr/0226-trackknife-runs-its-own-engine.md),
+  [ADR-0227](adr/0227-local-and-remote-engines.md)). This computer's engine
+  is always there, started when needed and outliving the window. A remote
+  engine is connected beside it when configured. Local and remote are
+  separate tabs, each playing on its own engine; one engine plays at a time.
+  (An interim "one engine per workspace" made a remote replace the local
+  engine, which stopped local playback; ADR-0227 withdrew it.)
 
 Done when: the desktop UI runs against an engine on another machine with no
 filesystem access to the library, including artwork, waveforms and a tag edit.
 
 ### One engine plays at a time
-
-*With one engine per workspace (ADR-0226) this holds by construction; the
-section is kept for its reasoning about agents and history.*
 
 **Decided.** However many connections are open, exactly one engine is playing.
 Starting playback from a tab on connection B while A is playing stops A and
@@ -589,8 +586,6 @@ It also settles two questions that would otherwise need answering:
   alternative is an engine writing history for files it does not own.
 
 ### Mixed tabs: not now
-
-*Moot under ADR-0226: a workspace has one engine.*
 
 A tab holding entries from several engines is **not** planned. Displaying them
 would be easy — carry a connection alongside the entry identity — but playing

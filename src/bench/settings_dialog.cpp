@@ -264,26 +264,28 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_socket_ = new QLineEdit(library);
     engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
     engine_socket_->setPlaceholderText(
-        QStringLiteral("empty: this computer's engine, started when needed"));
+        QStringLiteral("host:port or socket path; empty: no remote engine"));
     engine_socket_->setText(
         settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Engine:"), engine_socket_);
+    engine_form->addRow(QStringLiteral("Remote engine:"), engine_socket_);
     engine_token_ = new QLineEdit(library);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
     engine_token_->setPlaceholderText(QStringLiteral("only for host:port -- from engine.token"));
     engine_token_->setText(
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Engine token:"), engine_token_);
+    engine_form->addRow(QStringLiteral("Remote token:"), engine_token_);
     library_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. Leave "
-                       "this empty to use one on this computer, which Trackknife starts and "
-                       "which keeps playing after the window closes. For another machine's, "
-                       "give its unix socket, or host:port when it was started with --listen. "
-                       "A TCP engine needs the token from its engine.token file. There is no "
-                       "encryption; use it on a home network or through WireGuard. Takes effect "
-                       "when the workspace is reopened."),
+        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. This "
+                       "computer's is always used for local files; Trackknife starts it, and it "
+                       "keeps playing after the window closes. A remote engine -- on a NAS, "
+                       "say -- is added beside it: its library appears next to this computer's, "
+                       "and its files play in remote tabs, on that machine. Give its host:port "
+                       "(it was started with --listen) and the token from its engine.token "
+                       "file, or a unix socket path. There is no encryption; use it on a home "
+                       "network or through WireGuard. Takes effect when the workspace is "
+                       "reopened."),
         library);
     engine_note->setWordWrap(true);
     library_layout->addWidget(engine_note);

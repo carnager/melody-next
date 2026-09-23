@@ -117,7 +117,7 @@ void BenchMainWindow::buildUpNext() {
             refreshUpNext();
             // The engine plays asks before the list, so Next is this one.
             if (playingOnEngine())
-                engine_playback_->next();
+                transport_->next();
         }
     };
     up_next_view_->setActivateCallback(playRequest);
@@ -163,7 +163,7 @@ void BenchMainWindow::buildUpNext() {
         refreshUpNext();
         // With no asks left, the engine's Next returns to where it left off.
         if (asking && playingOnEngine())
-            engine_playback_->next();
+            transport_->next();
     });
     auto* remove = removeAction;
     remove->setShortcut(Qt::Key_Delete);
@@ -298,13 +298,34 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
                   [](const auto& a, const auto& b) { return a.row() < b.row(); });
         for (const auto& index : indices)
             rows.push_back(local->rows().at(static_cast<std::size_t>(index.row())));
-        enqueueLocalRequests(std::move(rows), position >= 0 ? position : (prepend ? 0 : -1));
+        const auto* tab =
+            static_cast<ListTab*>(source->property("bench-tab-pointer").value<void*>());
+        enqueueLocalRequests(std::move(rows), position >= 0 ? position : (prepend ? 0 : -1),
+                             tab != nullptr && tab->document.remote);
     }
     refreshUpNext();
 }
 
-void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position) {
+void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position,
+                                           const bool remote) {
     const auto count = rows.size();
+    // ADR-0227: an ask is a file on one engine's machine, and a queue cannot
+    // play files from two. Up Next is one engine's until it is empty again.
+    const bool holding =
+        !playback_.requests.pending().empty() || playback_.requests.active().has_value();
+    if (holding && remote != up_next_remote_) {
+        statusBar()->showMessage(
+            remote ? QStringLiteral("Up Next holds this computer's tracks; finish or clear it "
+                                    "before adding the remote engine's")
+                   : QStringLiteral("Up Next holds the remote engine's tracks; finish or clear "
+                                    "it before adding this computer's"),
+            6000);
+        return;
+    }
+    if (!holding) {
+        up_next_remote_ = remote;
+        engine_requests_.clear();
+    }
     // Each ask is an occurrence of its own (ADR-0221): the same track asked
     // for twice plays twice, and playing it does not move the list, whose row
     // it was copied from. The engine holds these apart from the list; a copied

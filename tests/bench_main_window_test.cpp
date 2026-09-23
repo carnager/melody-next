@@ -258,6 +258,7 @@ class BenchMainWindowTest final : public QObject {
     void desktopNotificationsNotifyBackgroundTrackChanges();
     void upNextPreservesNormalPlayback_data();
     void upNextPreservesNormalPlayback();
+    void aRemoteEnginePlaysItsOwnTabs();
     void upNextEditingAndPersistence();
     void upNextPanelAnimationAndSettings();
     void upNextMultiSelectionEdits();
@@ -4218,9 +4219,7 @@ void BenchMainWindowTest::muteRestoresLocalVolumeAcrossBrowsing() {
     auto* local = window.list_tabs_.front()->view;
     window.tabs_->setCurrentWidget(local);
     // The engine's volume: what the slider shows is what the engine reports.
-    const auto engine_volume = [&window] {
-        return window.engine_playback_->state().volume_percent;
-    };
+    const auto engine_volume = [&window] { return window.local_playback_->state().volume_percent; };
     window.volume_->setValue(37);
     QTRY_COMPARE(engine_volume(), 37);
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
@@ -4391,6 +4390,82 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     QTRY_VERIFY(window.up_next_restored_);
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
     QCOMPARE(window.playback_.requests.pending()[0].source.raw_path, row.raw_path);
+}
+
+// ADR-0227: this computer's engine and a remote one, side by side. Local tabs
+// play here and remote tabs there, never both at once; the remote library
+// fills remote tabs from its own index; and nothing mixes the two.
+void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto here = media.filePath(QStringLiteral("here.wav"));
+    // Long enough that only the switch, not the end of the track, stops it.
+    write_wave(here, wave_sample_rate * 60U);
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    const auto there = music + QStringLiteral("/there.flac");
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), there));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    auto* remote_tab = window.remoteQueueTab();
+    QVERIFY(remote_tab != nullptr && remote_tab->document.remote);
+    auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
+    QVERIFY(sources != nullptr);
+    QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
+
+    // The remote library fills the remote tab, from the remote's index.
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && !page->entries.empty());
+    window.openLocalPaths({QFile::encodeName(here).toStdString()});
+    QTRY_VERIFY(window.currentListTab() != nullptr && !window.currentListTab()->document.remote &&
+                window.currentListTab()->model->rowCount() == 1);
+    auto* local_tab = window.currentListTab();
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    QTRY_COMPARE(remote_tab->model->rowCount(), 1);
+    QCOMPARE(local_tab->model->rowCount(), 1);
+    QVERIFY(!remote_tab->model->rows().front().title.empty());
+
+    // Local plays here; the remote tab plays there and stops this one.
+    window.playRow(*local_tab, 0);
+    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
+    window.playRow(*remote_tab, 0);
+    QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
+    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("stopped"));
+    QVERIFY(window.transport_ == window.remote_playback_);
+    // And back.
+    window.playRow(*local_tab, 0);
+    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
+    QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("stopped"));
+
+    // Up Next holds one engine's asks.
+    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, true);
+    QCOMPARE(window.playback_.requests.pending().size(), 1U);
+    window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, false);
+    QCOMPARE(window.playback_.requests.pending().size(), 1U);
+    window.playback_.requests.clear();
+
+    // The binding survives a restart.
+    window.persistNow(false);
+    QVERIFY(window.close());
+    BenchMainWindow restored;
+    QTRY_VERIFY(restored.lists_restored_);
+    const auto remote_tabs = std::ranges::count_if(
+        restored.list_tabs_, [](const auto& tab) { return tab->document.remote; });
+    QCOMPARE(remote_tabs, 1);
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {
@@ -6007,8 +6082,9 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     auto* engine_socket =
         dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
     QVERIFY(engine_socket);
-    // The engine the test runs against, named the way a user would name one.
-    QCOMPARE(engine_socket->text(), engine_.socket());
+    // The remote engine: none, until one is named. This computer's engine
+    // (the fixture's) is not configured here (ADR-0227).
+    QVERIFY(engine_socket->text().isEmpty());
     engine_socket->setText(QStringLiteral("/run/user/1000/melodyd.sock"));
     // The field was shown and read back but never saved, so every TCP engine
     // refused the empty token it was sent.

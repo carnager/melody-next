@@ -29,10 +29,12 @@ class TestEngine final {
     ~TestEngine() { stop(); }
 
     // Starts on `state_directory` -- its database is lists.sqlite there -- or
-    // on the application's data directory, and names the engine in settings,
-    // so a window or catalogue built afterwards uses it. False if it never
+    // on the application's data directory, and names it as this computer's
+    // engine in settings, so a window or catalogue built afterwards uses it. False if it never
     // listened; the process output is then in log().
-    [[nodiscard]] bool start(const std::filesystem::path& state_directory = {}) {
+    // `remote`: name it as the remote engine instead (ADR-0227).
+    [[nodiscard]] bool start(const std::filesystem::path& state_directory = {},
+                             const bool remote = false) {
         stop();
         const auto state = state_directory.empty()
                                ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
@@ -55,8 +57,10 @@ class TestEngine final {
                 return false;
             }
             if (protocol::Client::connect(endpoint)) {
-                QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
-                                     socket_);
+                QSettings{}.setValue(
+                    QLatin1String(remote ? SettingsDialog::library_engine_socket_key
+                                         : SettingsDialog::library_local_engine_socket_key),
+                    socket_);
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds{20});

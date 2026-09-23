@@ -1001,6 +1001,34 @@ void LocalLibraryPanel::resolveEntries(std::vector<persistence::LibraryEntry> en
          }});
 }
 
+void LocalLibraryPanel::resolveEntryRows(
+    std::vector<persistence::LibraryEntry> entries,
+    std::function<void(std::vector<LocalTrackRow>)> completion) {
+    resolveEntries(std::move(entries), [this, completion = std::move(completion)](
+                                           std::vector<std::string> paths) {
+        enqueue({[paths = std::move(paths),
+                  cancellation = lifetime_cancellation_.token()](engine::Catalogue& library) {
+                     Outcome outcome;
+                     auto cached = library.cached_tracks(paths, cancellation);
+                     if (!cached) {
+                         outcome.error = text(cached.error().message);
+                         return outcome;
+                     }
+                     for (auto& track : *cached) {
+                         outcome.rows.push_back(cached_library_row(std::move(track)));
+                     }
+                     return outcome;
+                 },
+                 [this, completion](Outcome outcome) {
+                     if (!outcome.error.isEmpty()) {
+                         status_->setText(outcome.error);
+                         return;
+                     }
+                     completion(std::move(outcome.rows));
+                 }});
+    });
+}
+
 void LocalLibraryPanel::commitSearch() {
     const auto query_text = search_->text().trimmed();
     if (query_text.isEmpty()) {

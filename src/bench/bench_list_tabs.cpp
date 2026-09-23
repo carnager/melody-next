@@ -68,18 +68,27 @@ void BenchMainWindow::initializePersistence() {
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
     // Built once, before anything that needs a catalogue: the panel, the
     // search dialog and dynamic playlists all take this rather than a path.
-    catalogue_source_ = std::make_unique<CatalogueSource>(database_path_);
+    catalogue_source_ =
+        std::make_unique<CatalogueSource>(database_path_, CatalogueSource::Role::local);
     // Its own connection: the engine serves one connection in order, so a
     // transport command behind a library query would wait for it.
-    engine_playback_ = new EnginePlayback(*catalogue_source_, this);
-    connect(engine_playback_, &EnginePlayback::changed, this, [this] { refreshTransport(); });
-    connect(engine_playback_, &EnginePlayback::connected, this, [this] {
+    local_playback_ = new EnginePlayback(*catalogue_source_, this);
+    transport_ = local_playback_;
+    connect(local_playback_, &EnginePlayback::changed, this, [this] {
+        if (transport_ == local_playback_) {
+            refreshTransport();
+        }
+    });
+    connect(local_playback_, &EnginePlayback::connected, this, [this] {
+        if (transport_ != local_playback_) {
+            return;
+        }
         // A reconnection is a new engine as far as it is concerned: it knows
         // none of this window's settings, and it may already be playing.
         applyLocalPlaybackModes();
         reattachToEngine();
     });
-    if (engine_playback_->active()) {
+    if (local_playback_->active()) {
         // An engine starts with its own defaults and has never heard of this
         // window's settings, so they are handed over the moment the connection
         // exists. This runs after the transport is built, which is why sending
@@ -111,6 +120,9 @@ void BenchMainWindow::initializePersistence() {
         // After the lists, because the entry the engine names is looked for in
         // them before a tab is invented for it.
         reattachToEngine();
+        // ADR-0227: the remote engine too, after the lists for the same
+        // reason -- its tab may already be among them.
+        connectRemoteEngine();
         if (error.isEmpty()) {
             local_library_ = new LocalLibraryPanel(*catalogue_source_, source_stack_);
             connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,
@@ -652,6 +664,11 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     });
 
     const auto index = tabs_->addTab(view, displayText(document.name));
+    if (document.remote) {
+        // ADR-0227: which engine a tab plays on is visible, not remembered.
+        tabs_->setTabIcon(index, QIcon::fromTheme(QStringLiteral("network-server")));
+        tabs_->setTabToolTip(index, tr("Plays on the remote engine"));
+    }
     auto tab = std::make_unique<ListTab>();
     tab->document = std::move(document);
     tab->model = model;
@@ -802,10 +819,13 @@ BenchMainWindow::ListTab* BenchMainWindow::currentListTab() {
 
 void BenchMainWindow::refreshActiveContext() {
     if (source_stack_ != nullptr) {
-        auto* source = local_source_tabs_ != nullptr && local_source_tabs_->currentIndex() == 1 &&
-                               local_library_ != nullptr
-                           ? static_cast<QWidget*>(local_library_)
-                           : static_cast<QWidget*>(folder_view_);
+        const auto index = local_source_tabs_ != nullptr ? local_source_tabs_->currentIndex() : 0;
+        const bool remote_view = local_source_tabs_ != nullptr &&
+                                 local_source_tabs_->tabData(index) == QStringLiteral("remote");
+        auto* source =
+            remote_view && remote_library_ != nullptr ? static_cast<QWidget*>(remote_library_)
+            : index == 1 && local_library_ != nullptr ? static_cast<QWidget*>(local_library_)
+                                                      : static_cast<QWidget*>(folder_view_);
         source_stack_->setCurrentWidget(source);
     }
     if (folder_bookmarks_ != nullptr) {

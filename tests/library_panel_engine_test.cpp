@@ -67,7 +67,7 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
                          QStringLiteral("the-right-token"));
     {
-        CatalogueSource catalogues{database};
+        CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         QVERIFY2(catalogues.usingEngine(), qPrintable(catalogues.failure()));
         QVERIFY(catalogues.describe().contains(address));
         QVERIFY(!catalogues.describe().contains(QStringLiteral("the-right-token")));
@@ -78,7 +78,7 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
                          QStringLiteral("a-wrong-token"));
     {
-        CatalogueSource catalogues{database};
+        CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         QVERIFY(!catalogues.usingEngine());
         QVERIFY2(catalogues.describe().contains(QStringLiteral("refused the token")),
                  qPrintable(catalogues.describe()));
@@ -110,7 +110,7 @@ void LibraryPanelEngineTest::aConfiguredEngineServesThePanel() {
     // instead of asking the engine, the connection count below stays zero.
     const std::filesystem::path unused{
         (directory.path() + QStringLiteral("/never-opened.sqlite3")).toStdString()};
-    CatalogueSource catalogues{unused};
+    CatalogueSource catalogues{unused, CatalogueSource::Role::remote};
     LocalLibraryPanel panel{catalogues};
     panel.show();
 
@@ -154,7 +154,7 @@ void LibraryPanelEngineTest::everyPathReachesTheEngineNotTheDatabase() {
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
-    CatalogueSource catalogues{forbidden};
+    CatalogueSource catalogues{forbidden, CatalogueSource::Role::remote};
     LocalLibraryPanel panel{catalogues};
     panel.show();
     QTRY_COMPARE((*server)->connections(), std::size_t{1});
@@ -188,7 +188,7 @@ void LibraryPanelEngineTest::anUnreachableEngineIsSaidAndThenReached() {
 
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), socket_text);
 
-    CatalogueSource catalogues{database};
+    CatalogueSource catalogues{database, CatalogueSource::Role::remote};
     LocalLibraryPanel panel{catalogues};
     panel.show();
     auto* status = panel.findChild<QLabel*>(QStringLiteral("local-library-status"));
@@ -231,7 +231,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
 
     // No engine configured.
     {
-        CatalogueSource catalogues{database};
+        CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
@@ -244,7 +244,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
     {
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                              directory.path() + QStringLiteral("/absent.sock"));
-        CatalogueSource catalogues{database};
+        CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
@@ -267,7 +267,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
 
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                              QString::fromStdString(socket.string()));
-        CatalogueSource catalogues{database};
+        CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         LocalLibraryPanel panel{catalogues};
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
@@ -321,7 +321,7 @@ void LibraryPanelEngineTest::theSearchDialogAsksTheEngineToo() {
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
-    CatalogueSource catalogues{workspace};
+    CatalogueSource catalogues{workspace, CatalogueSource::Role::remote};
     QVERIFY(catalogues.usingEngine());
     SearchDialog dialog{catalogues, {}, {}};
     dialog.show();

@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
+// ADR-0227: the remote engine beside this computer's. Its tabs list files on
+// its machine and play there; its library sits beside this computer's in the
+// source switch. Nothing here reads the remote files: what they are comes
+// from the engine that has them.
+
+#include "bench/bench_main_window.hpp"
+#include "bench/bench_main_window_helpers.hpp"
+#include "bench/catalogue_source.hpp"
+#include "bench/engine_playback.hpp"
+#include "bench/local_library_panel.hpp"
+
+#include <QStackedWidget>
+#include <QStatusBar>
+#include <QTabBar>
+#include <QTableView>
+
+namespace trackknife::bench {
+
+BenchMainWindow::ListTab* BenchMainWindow::remoteQueueTab() {
+    for (const auto& tab : list_tabs_) {
+        if (tab->document.remote) {
+            return tab.get();
+        }
+    }
+    if (remote_catalogue_source_ == nullptr) {
+        return nullptr;
+    }
+    // Opened on first connection, named after the remote so it reads as a
+    // place rather than a list.
+    auto* tab =
+        addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                             .kind = persistence::ListKind::scratch,
+                                             .name = utf8Bytes(remote_catalogue_source_->name()),
+                                             .pinned = false,
+                                             .dirty = false,
+                                             .items = {},
+                                             .remote = true},
+                   false);
+    schedulePersist();
+    return tab;
+}
+
+void BenchMainWindow::connectRemoteEngine() {
+    remote_catalogue_source_ =
+        std::make_unique<CatalogueSource>(database_path_, CatalogueSource::Role::remote);
+    if (!remote_catalogue_source_->configured()) {
+        remote_catalogue_source_.reset();
+        return;
+    }
+    remote_playback_ = new EnginePlayback(*remote_catalogue_source_, this);
+    connect(remote_playback_, &EnginePlayback::changed, this, [this] {
+        if (transport_ == remote_playback_) {
+            refreshTransport();
+        }
+    });
+    const auto attached = [this] {
+        static_cast<void>(remoteQueueTab());
+        // Music the remote was already playing is followed, unless this
+        // computer is playing: then that is what the transport shows, and
+        // the remote waits until one of its tabs is played.
+        const auto remote = remote_playback_->state();
+        const bool local_idle = local_playback_ == nullptr ||
+                                local_playback_->state().status == QStringLiteral("stopped");
+        if (!remote.entry.isEmpty() && local_idle && transport_ != remote_playback_) {
+            followPlayback(remote_playback_);
+        }
+        if (transport_ == remote_playback_) {
+            reattachToEngine();
+        }
+    };
+    connect(remote_playback_, &EnginePlayback::connected, this, attached);
+    if (remote_playback_->active()) {
+        attached();
+    } else {
+        // Still offered, so a remote that is down now has its tab to come
+        // back to.
+        static_cast<void>(remoteQueueTab());
+    }
+
+    remote_library_ = new LocalLibraryPanel(*remote_catalogue_source_, source_stack_);
+    remote_library_->setObjectName(QStringLiteral("bench-remote-library"));
+    source_stack_->addWidget(remote_library_);
+    const auto index = local_source_tabs_->addTab(remote_catalogue_source_->name());
+    local_source_tabs_->setTabData(index, QStringLiteral("remote"));
+    local_source_tabs_->setTabToolTip(index, remote_catalogue_source_->describe());
+
+    connect(
+        remote_library_, &LocalLibraryPanel::actionRequested, this,
+        [this](std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action) {
+            if (entries.empty()) {
+                return;
+            }
+            if (action == LocalLibraryAction::request_next ||
+                action == LocalLibraryAction::request_end) {
+                remote_library_->resolveEntryRows(
+                    std::move(entries), [this, action](std::vector<LocalTrackRow> rows) {
+                        enqueueLocalRequests(std::move(rows),
+                                             action == LocalLibraryAction::request_next ? 0 : -1,
+                                             true);
+                    });
+                return;
+            }
+            // Into the remote tab on screen, or the remote's own: a
+            // remote file never lands in a local tab.
+            auto* target = currentListTab();
+            if (target == nullptr || !target->document.remote) {
+                target = remoteQueueTab();
+            }
+            if (target == nullptr) {
+                return;
+            }
+            if (action == LocalLibraryAction::new_list) {
+                target = addListTab(
+                    persistence::ListDocument{.id = core::StableId::random(),
+                                              .kind = persistence::ListKind::scratch,
+                                              .name = entries.size() == 1U ? entries.front().label
+                                                                           : "Library selection",
+                                              .pinned = false,
+                                              .dirty = false,
+                                              .items = {},
+                                              .remote = true},
+                    true);
+                schedulePersist();
+            }
+            int insertion = -1;
+            if (action == LocalLibraryAction::next) {
+                insertion = playback_.anchors.document == target->document.id ? playback_.row + 1
+                            : target->view->currentIndex().isValid()
+                                ? target->view->currentIndex().row() + 1
+                                : 0;
+            }
+            const auto id = QString::fromStdString(target->document.id.to_string());
+            remote_library_->resolveEntryRows(
+                std::move(entries), [this, id, action, insertion](std::vector<LocalTrackRow> rows) {
+                    auto* destination = tabForDocument(id);
+                    if (destination == nullptr || rows.empty()) {
+                        return;
+                    }
+                    if (action == LocalLibraryAction::replace) {
+                        destination->model->replaceRows(std::move(rows), true);
+                    } else {
+                        destination->model->appendRows(std::move(rows), insertion);
+                    }
+                    markTabDirty(*destination);
+                    schedulePersist();
+                    tabs_->setCurrentWidget(destination->view);
+                });
+        });
+    connect(remote_library_, &LocalLibraryPanel::searchCommitted, this,
+            [this](const QString& query, std::vector<LocalTrackRow> rows) {
+                auto* destination = addListTab(
+                    persistence::ListDocument{
+                        .id = core::StableId::random(),
+                        .kind = persistence::ListKind::scratch,
+                        .name = utf8Bytes(QStringLiteral("Search: %1").arg(query)),
+                        .pinned = false,
+                        .dirty = false,
+                        .items = {},
+                        .remote = true},
+                    true);
+                destination->model->appendRows(std::move(rows));
+                markTabDirty(*destination);
+            });
+}
+
+} // namespace trackknife::bench

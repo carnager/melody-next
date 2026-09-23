@@ -87,24 +87,42 @@ class UnavailableCatalogue final : public engine::Catalogue {
 
 } // namespace
 
-CatalogueSource::CatalogueSource(std::filesystem::path database) : database_(std::move(database)) {
-    const auto configured =
-        QSettings{}
-            .value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
-            .toString();
-    if (configured.isEmpty()) {
-        // ADR-0226: no engine named means this machine's, started if need be.
-        local_engine_ = bench::localEngine();
-        if (!local_engine_) {
-            failure_ = QObject::tr("no engine is configured");
+CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role)
+    : database_(std::move(database)), role_(role) {
+    const QSettings settings;
+    if (role == Role::local) {
+        // ADR-0227: this computer's engine is always there -- the one the
+        // workspace starts, or one named for development and tests.
+        const auto running =
+            settings
+                .value(QLatin1String(SettingsDialog::library_local_engine_socket_key), QString{})
+                .toString();
+        if (!running.isEmpty()) {
+            endpoint_ = protocol::Endpoint::parse(running.toStdString(), {});
+            if (!endpoint_) {
+                failure_ = QObject::tr("not an engine address: %1").arg(running);
+                return;
+            }
+        } else {
+            local_engine_ = bench::localEngine();
+            if (!local_engine_) {
+                failure_ = QObject::tr("this computer's engine is not started here");
+                return;
+            }
+            endpoint_ = protocol::Endpoint{
+                .socket = local_engine_->socket, .host = {}, .port = 0, .token = {}};
+        }
+    } else {
+        // The one engine elsewhere, if one is configured (ADR-0227).
+        const auto configured =
+            settings.value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
+                .toString();
+        if (configured.isEmpty()) {
+            failure_ = QObject::tr("no remote engine is configured");
             return;
         }
-        endpoint_ =
-            protocol::Endpoint{.socket = local_engine_->socket, .host = {}, .port = 0, .token = {}};
-    } else {
         const auto token =
-            QSettings{}
-                .value(QLatin1String(SettingsDialog::library_engine_token_key), QString{})
+            settings.value(QLatin1String(SettingsDialog::library_engine_token_key), QString{})
                 .toString()
                 .trimmed()
                 .toStdString();
@@ -172,13 +190,14 @@ bool CatalogueSource::reviveLocalEngine() const {
 QString CatalogueSource::describe() const {
     const std::lock_guard guard{mutex_};
     const bool connected = client_ && client_->connected();
-    if (connected) {
-        return local_engine_ ? QObject::tr("Library: engine on this computer")
-                             : QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
+    if (role_ == Role::local) {
+        return connected ? QObject::tr("Library: this computer")
+                         : QObject::tr("Library unavailable: this computer's engine did not "
+                                       "start (%1)")
+                               .arg(failure_);
     }
-    if (local_engine_) {
-        return QObject::tr("Library unavailable: the engine on this computer did not start (%1)")
-            .arg(failure_);
+    if (connected) {
+        return QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
     }
     if (endpoint_) {
         // A refused token is its own case: the engine is there, and saying
@@ -189,6 +208,17 @@ QString CatalogueSource::describe() const {
                               .arg(endpointText(*endpoint_));
     }
     return QObject::tr("Library unavailable: %1").arg(failure_);
+}
+
+QString CatalogueSource::name() const {
+    if (role_ == Role::local || !endpoint_) {
+        return QObject::tr("This computer");
+    }
+    // The host alone reads as a place; a socket path is named by its file.
+    if (endpoint_->tcp()) {
+        return QString::fromStdString(endpoint_->host);
+    }
+    return QString::fromStdString(endpoint_->socket.filename().string());
 }
 
 } // namespace trackknife::bench

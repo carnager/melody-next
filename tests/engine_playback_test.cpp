@@ -191,7 +191,7 @@ void EnginePlaybackTest::playingATrackDrivesTheEnginesPlayer() {
     QVERIFY(server.has_value());
     (*server)->start();
 
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -265,7 +265,7 @@ void EnginePlaybackTest::transportControlsDriveTheEngine() {
     QVERIFY(server.has_value());
     (*server)->start();
 
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -329,7 +329,7 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
     // As if the user had chosen album gain in an earlier session.
     QSettings{}.setValue(QStringLiteral("playback/local-replaygain"), QStringLiteral("album"));
@@ -401,7 +401,7 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -464,7 +464,7 @@ void EnginePlaybackTest::editingThePlayingListReachesTheEngine() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -524,7 +524,7 @@ void EnginePlaybackTest::aQueueChangedElsewhereReachesTheList() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -582,7 +582,7 @@ void EnginePlaybackTest::consumeDropsTheRowFromTheList() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -642,7 +642,7 @@ void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -693,7 +693,7 @@ void EnginePlaybackTest::theDesktopSeesWhatTheEnginePlays() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -748,7 +748,7 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     BenchMainWindow window;
@@ -812,7 +812,7 @@ void EnginePlaybackTest::aNewWindowAttachesToWhatTheEngineIsPlaying() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     core::StableId playing;
@@ -896,7 +896,7 @@ void EnginePlaybackTest::anEngineQueueNoListHoldsBecomesATab() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
 
     engine::QueueEntry queued;

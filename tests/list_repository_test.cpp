@@ -289,6 +289,16 @@ void list_documents_round_trip_transactionally() {
             .dirty = false,
             .items = {},
         },
+        // ADR-0227: a list of the remote engine's files keeps that binding.
+        persistence::ListDocument{
+            .id = trackknife::core::StableId::random(),
+            .kind = persistence::ListKind::scratch,
+            .name = "NAS queue",
+            .pinned = false,
+            .dirty = false,
+            .items = {},
+            .remote = true,
+        },
         // ADR-0181: a client-owned server list — an mpd-kind document whose
         // items are pure snapshot rows.
         persistence::ListDocument{
@@ -320,7 +330,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 42U, "state repository schema must be explicit");
+        require(repository.schema_version() == 43U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -699,7 +709,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 42U,
+        require(repository.schema_version() == 43U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1435,7 +1445,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 42U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 43U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();

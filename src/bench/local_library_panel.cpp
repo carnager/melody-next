@@ -149,12 +149,14 @@ class LibraryModel final : public QStandardItemModel {
             std::ranges::none_of(entries, [](const auto& entry) { return entry.available > 0U; })) {
             return nullptr;
         }
+        const bool remote = panel_ && panel_->remote();
         return new ui::LocalFilesMimeData{[panel = panel_, entries = std::move(entries)](
                                               ui::LocalFilesMimeData::Completion done) {
-            if (panel) {
-                panel->resolveEntries(entries, std::move(done));
-            }
-        }};
+                                              if (panel) {
+                                                  panel->resolveEntries(entries, std::move(done));
+                                              }
+                                          },
+                                          remote};
     }
 
   private:

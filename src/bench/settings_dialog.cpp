@@ -389,6 +389,20 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_token_->setText(
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Remote password:"), engine_token_);
+    // Where the remote's music is on this computer, for moving its tracks
+    // into local lists (and back): played here, and tagged here.
+    remote_folder_ = new QLineEdit(remote);
+    remote_folder_->setObjectName(QStringLiteral("bench-settings-remote-folder"));
+    remote_folder_->setPlaceholderText(QStringLiteral("e.g. /mnt/nas/Music, as the remote sees it"));
+    remote_folder_->setText(
+        settings.value(QLatin1String(library_remote_folder_key), QString{}).toString());
+    engine_form->addRow(QStringLiteral("Remote music folder:"), remote_folder_);
+    remote_mount_ = new QLineEdit(remote);
+    remote_mount_->setObjectName(QStringLiteral("bench-settings-remote-mount"));
+    remote_mount_->setPlaceholderText(QStringLiteral("the same folder here; empty: same path"));
+    remote_mount_->setText(
+        settings.value(QLatin1String(library_remote_mount_key), QString{}).toString());
+    engine_form->addRow(QStringLiteral("Mounted here at:"), remote_mount_);
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A remote engine -- on a NAS, say -- is added beside this computer's: its library appears next to this computer's, "
@@ -665,6 +679,8 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
     settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
     settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
+    settings.setValue(QLatin1String(library_remote_folder_key), remote_folder_->text().trimmed());
+    settings.setValue(QLatin1String(library_remote_mount_key), remote_mount_->text().trimmed());
     settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
     settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());
     settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());

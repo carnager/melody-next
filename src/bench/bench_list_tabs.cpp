@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/remote_mount.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playback_tab_widget.hpp"
@@ -153,6 +154,13 @@ void BenchMainWindow::initializePersistence() {
                         return;
                     }
                     auto* target = currentListTab();
+                    // This computer's library goes into a local tab: the one
+                    // on screen, or else the first there is (ADR-0227).
+                    if (target != nullptr && target->document.remote) {
+                        const auto local = std::ranges::find_if(
+                            list_tabs_, [](const auto& tab) { return !tab->document.remote; });
+                        target = local != list_tabs_.end() ? local->get() : nullptr;
+                    }
                     if (!target || entries.empty()) {
                         return;
                     }
@@ -637,17 +645,26 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
             if (!target || discovery_running_) {
                 return false;
             }
+            const bool crossing = files.remote() != target->document.remote;
             const QPersistentModelIndex anchor{target->model->index(insertion_row, 0)};
             const bool anchored = anchor.isValid();
             const QPointer<BenchMainWindow> window{this};
             const bool remote = target->document.remote;
-            files.resolve([window, id, insertion_row, anchor, anchored,
-                           remote](std::vector<std::string> paths) {
+            files.resolve([window, id, insertion_row, anchor, anchored, remote,
+                           crossing](std::vector<std::string> paths) {
                 auto* destination = window ? window->tabForDocument(id) : nullptr;
                 if (destination == nullptr || (anchored && !anchor.isValid())) {
                     return;
                 }
                 const auto row = anchored ? anchor.row() : insertion_row;
+                // From the other engine's library: as this tab's engine
+                // sees those files, where it can.
+                if (crossing) {
+                    paths = window->crossEnginePaths(std::move(paths), remote);
+                    if (paths.empty()) {
+                        return;
+                    }
+                }
                 // ADR-0227: a remote's paths are its machine's. Looking for
                 // them here, as discovery does, would find nothing without a
                 // mount and drop them all.
@@ -660,6 +677,10 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
             return true;
         });
     view->setLocalUrlDropCallback([this, id](const QList<QUrl>& urls, const int insertion_row) {
+        auto* target = tabForDocument(id);
+        if (target == nullptr) {
+            return false;
+        }
         std::vector<std::string> raw_paths;
         raw_paths.reserve(static_cast<std::size_t>(urls.size()));
         for (const auto& url : urls) {
@@ -671,6 +692,16 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         }
         if (raw_paths.empty()) {
             return false;
+        }
+        // Files from a file manager are this computer's; a remote tab takes
+        // them as the remote sees them, when its library has them.
+        if (target->document.remote) {
+            raw_paths = crossEnginePaths(std::move(raw_paths), true);
+            if (raw_paths.empty()) {
+                return false;
+            }
+            insertRemotePaths(*target, std::move(raw_paths), insertion_row);
+            return true;
         }
         startDiscovery(std::move(raw_paths), id, insertion_row);
         return true;
@@ -904,6 +935,8 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
     if (!source_model || source_tab == target || (!source_tab && !dynamic) || (dynamic && move)) {
         return false;
     }
+    const bool crossing = (source_tab != nullptr && source_tab->document.remote) !=
+                          target->document.remote;
     std::vector<LocalTrackRow> transferred;
     std::vector<int> source_rows;
     transferred.reserve(static_cast<std::size_t>(rows.size()));
@@ -915,6 +948,26 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
         }
         transferred.push_back(source_model->rows()[static_cast<std::size_t>(row_index)]);
         source_rows.push_back(row_index);
+    }
+    if (crossing) {
+        // Between engines: each row as the target's engine sees the file.
+        // A move leaves behind what could not cross.
+        std::vector<LocalTrackRow> crossed;
+        std::vector<int> crossed_rows;
+        const auto mount = RemoteMount::configured();
+        const auto roots = remoteRoots();
+        for (std::size_t index = 0; index < transferred.size(); ++index) {
+            const auto& row = transferred[index];
+            const bool reachable = target->document.remote
+                                       ? mount.to_remote(row.raw_path, roots).has_value()
+                                       : mount.to_local(row.raw_path).has_value();
+            if (reachable) {
+                crossed_rows.push_back(source_rows[index]);
+            }
+        }
+        crossed = crossEngineRows(std::move(transferred), target->document.remote);
+        transferred = std::move(crossed);
+        source_rows = std::move(crossed_rows);
     }
     if (transferred.empty()) {
         return false;
@@ -996,18 +1049,96 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
         })) {
         return false;
     }
-    auto* destination = addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                             .kind = persistence::ListKind::scratch,
-                                                             .name = utf8Bytes(name),
-                                                             .pinned = false,
-                                                             .dirty = false,
-                                                             .items = {}},
-                                   false);
+    // The new tab is the same engine's as the rows (ADR-0227).
+    auto* destination =
+        addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                             .kind = persistence::ListKind::scratch,
+                                             .name = utf8Bytes(name),
+                                             .pinned = false,
+                                             .dirty = false,
+                                             .items = {},
+                                             .remote = source_tab && source_tab->document.remote},
+                   false);
     const auto transferred = transferRows(
         source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
     if (transferred)
         tabs_->setCurrentWidget(destination->view);
     return transferred;
+}
+
+std::vector<std::string> BenchMainWindow::remoteRoots() const {
+    // Asked now, not remembered: a folder added to the remote's library since
+    // it was last asked is part of it.
+    std::vector<std::string> roots;
+    if (!remote_catalogue_source_) {
+        return roots;
+    }
+    if (auto known = remote_catalogue_source_->open()->roots()) {
+        for (auto& root : *known) {
+            roots.push_back(std::move(root.raw_path));
+        }
+    }
+    return roots;
+}
+
+std::vector<std::string> BenchMainWindow::crossEnginePaths(std::vector<std::string> paths,
+                                                           const bool to_remote) {
+    const auto mount = RemoteMount::configured();
+    const auto roots = remoteRoots();
+    std::vector<std::string> crossed;
+    crossed.reserve(paths.size());
+    for (const auto& path : paths) {
+        auto translated = to_remote ? mount.to_remote(path, roots) : mount.to_local(path);
+        if (translated) {
+            crossed.push_back(std::move(*translated));
+        }
+    }
+    if (const auto left = paths.size() - crossed.size(); left > 0U) {
+        statusBar()->showMessage(
+            to_remote
+                ? QStringLiteral("%1 of %2 tracks are not in %3's library, so it cannot play "
+                                 "them; they were left out")
+                      .arg(left)
+                      .arg(paths.size())
+                      .arg(remote_catalogue_source_ ? remote_catalogue_source_->name()
+                                                    : QStringLiteral("the remote engine"))
+                : QStringLiteral("%1 of %2 tracks are not reachable on this computer; they were "
+                                 "left out. Where the remote's music is mounted here is set in "
+                                 "Settings → Engine.")
+                      .arg(left)
+                      .arg(paths.size()),
+            10'000);
+    }
+    return crossed;
+}
+
+std::vector<LocalTrackRow> BenchMainWindow::crossEngineRows(std::vector<LocalTrackRow> rows,
+                                                            const bool to_remote) {
+    std::vector<std::string> paths;
+    paths.reserve(rows.size());
+    for (const auto& row : rows) {
+        paths.push_back(row.raw_path);
+    }
+    // One message for the whole move, from the path translation; rows are
+    // then matched back to their translated paths in order.
+    const auto crossed = crossEnginePaths(paths, to_remote);
+    const auto mount = RemoteMount::configured();
+    const auto roots = remoteRoots();
+    std::vector<LocalTrackRow> moved;
+    moved.reserve(crossed.size());
+    for (auto& row : rows) {
+        auto translated =
+            to_remote ? mount.to_remote(row.raw_path, roots) : mount.to_local(row.raw_path);
+        if (!translated) {
+            continue;
+        }
+        row.raw_path = std::move(*translated);
+        // What was known of the file on one machine says nothing of its
+        // revision on the other.
+        row.source_revision.reset();
+        moved.push_back(std::move(row));
+    }
+    return moved;
 }
 
 void BenchMainWindow::markTabDirty(ListTab& tab) {

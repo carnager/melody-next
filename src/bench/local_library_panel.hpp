@@ -45,6 +45,10 @@ class LocalLibraryPanel final : public QWidget {
     ~LocalLibraryPanel() override;
     void addRoot(std::string raw_path);
     QWidget* createFoldersWidget(QWidget* parent);
+    // Whether this is a remote engine's library (ADR-0227).
+    [[nodiscard]] bool remote() const noexcept {
+        return catalogues_->role() == CatalogueSource::Role::remote;
+    }
     // Reload committed index records; filesystem scans require the Refresh button.
     void refreshLibrary();
     void stop();

@@ -72,6 +72,10 @@ class SettingsDialog final : public QDialog {
     // ADR-0223: the password a TCP engine asks for, if it has one. The key
     // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
+    // ADR-0227: where this computer sees the remote engine's music. Both
+    // empty: the same paths on both machines.
+    static constexpr auto library_remote_folder_key = "library/remote-folder";
+    static constexpr auto library_remote_mount_key = "library/remote-mount";
     // ADR-0226/0228: how this computer's engine is shared on the network.
     static constexpr auto engine_share_key = "engine/share";
     static constexpr auto engine_listen_key = "engine/listen";
@@ -106,6 +110,8 @@ class SettingsDialog final : public QDialog {
     QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* engine_socket_{nullptr};
     QLineEdit* engine_token_{nullptr};
+    QLineEdit* remote_folder_{nullptr};
+    QLineEdit* remote_mount_{nullptr};
     QCheckBox* engine_share_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};

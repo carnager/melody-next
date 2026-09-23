@@ -4676,6 +4676,54 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QTRY_VERIFY(tab->model->rows()[2].probed);
     QCOMPARE(tab->model->rows()[2].title, std::string{"machine.flac"});
 
+    // Rows moving between the remote's tab and this computer's are translated
+    // to where this computer sees the file -- here the same path, as with the
+    // NAS mounted at the same place on both -- and what is not reachable here
+    // is left out, with a word why.
+    auto* local = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                              .kind = persistence::ListKind::scratch,
+                                                              .name = "Here",
+                                                              .pinned = false,
+                                                              .dirty = false,
+                                                              .items = {},
+                                                              .remote = false},
+                                    true);
+    const auto local_id = QString::fromStdString(local->document.id.to_string());
+    QVERIFY(window.transferRows(tab->view, {0, 2}, local_id, false, -1));
+    QCOMPARE(local->model->rowCount(), 1);
+    QCOMPARE(local->model->rows().front().raw_path, QFile::encodeName(art).toStdString());
+    QCOMPARE(local->model->rows().front().title, std::string{"Fixture Tone"});
+    QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("1 of 2")));
+
+    // Mounted elsewhere here: the path is translated, not kept.
+    const auto mounted = media.filePath(QStringLiteral("mounted-here"));
+    QVERIFY(QFile::link(music, mounted));
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), music);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), mounted);
+    QVERIFY(window.transferRows(tab->view, {0}, local_id, false, -1));
+    QCOMPARE(local->model->rows().back().raw_path,
+             QFile::encodeName(mounted + QStringLiteral("/art.flac")).toStdString());
+
+    // And back: a file of this computer's goes to the remote only when the
+    // remote's library has it.
+    const auto remote_id = QString::fromStdString(tab->document.id.to_string());
+    const auto remote_rows = tab->model->rowCount();
+    QVERIFY(window.transferRows(local->view, {1}, remote_id, false, -1));
+    QCOMPARE(tab->model->rowCount(), remote_rows + 1);
+    QCOMPARE(tab->model->rows().back().raw_path, QFile::encodeName(art).toStdString());
+    const auto download = media.filePath(QStringLiteral("download.wav"));
+    write_wave(download, wave_sample_rate);
+    auto stray = local->model->rows().front();
+    stray.raw_path = QFile::encodeName(download).toStdString();
+    stray.entry_id = core::StableId::random();
+    local->model->appendRows({stray});
+    QVERIFY(!window.transferRows(local->view, {local->model->rowCount() - 1}, remote_id, false,
+                                 -1));
+    QCOMPARE(tab->model->rowCount(), remote_rows + 1);
+    QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("not in")));
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
+
     // The search dialog searches the remote's library too, as you type, with
     // artists, albums and tracks apart -- and what it finds goes to a remote
     // tab.

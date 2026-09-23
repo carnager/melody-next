@@ -354,6 +354,10 @@ add_test(
 set_tests_properties(engine-daemon PROPERTIES TIMEOUT 60)
 
 if(TARGET trackknife_bench_ui)
+    qt_add_executable(trackknife_remote_mount_tests remote_mount_test.cpp)
+    target_link_libraries(trackknife_remote_mount_tests PRIVATE Trackknife::BenchUi Qt6::Test
+        trackknife_project_options trackknife_project_warnings)
+    add_test(NAME remote-mount COMMAND trackknife_remote_mount_tests)
     qt_add_executable(trackknife_engine_launcher_tests engine_launcher_test.cpp)
     target_link_libraries(
         trackknife_engine_launcher_tests

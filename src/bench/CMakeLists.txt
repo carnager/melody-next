@@ -9,6 +9,7 @@ qt_add_library(
     bench_list_tabs.cpp
     bench_media_ingest.cpp
     bench_remote.cpp
+    remote_mount.cpp
     bench_playlists.cpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp

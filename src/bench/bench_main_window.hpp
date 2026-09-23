@@ -318,6 +318,17 @@ class BenchMainWindow final : public QMainWindow {
     };
     void enqueueUnprobedRows(ListTab& tab);
     void enrichRemoteRows(ListTab& tab);
+    // ADR-0227: paths moving from one engine's tab to the other's, as the
+    // other engine sees them (RemoteMount). What cannot be -- not reachable
+    // here, or not in the remote's library -- is left out, and the status
+    // bar says how much and why.
+    [[nodiscard]] std::vector<std::string> crossEnginePaths(std::vector<std::string> paths,
+                                                            bool to_remote);
+    [[nodiscard]] std::vector<LocalTrackRow> crossEngineRows(std::vector<LocalTrackRow> rows,
+                                                             bool to_remote);
+    // The remote engine's library folders, asked of it; empty when it is
+    // not reachable, and then nothing is known to cross to it.
+    [[nodiscard]] std::vector<std::string> remoteRoots() const;
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
     void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);

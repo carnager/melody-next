@@ -63,22 +63,22 @@ bool PlaybackStore::restore() {
     if (auto output = workspace_->load_engine_state(output_key); output && *output) {
         const auto document = Json::parse(**output, nullptr, false);
         if (!document.is_discarded() && document.is_object()) {
+            Player::Output settings;
             if (const auto target = document.find("target");
                 target != document.end() && target->is_string()) {
-                static_cast<void>(player_->set_output_target(target->get<std::string>()));
+                settings.target = target->get<std::string>();
             }
-            const audio::PlaybackBufferDurationConfig buffer{
+            settings.buffer = audio::PlaybackBufferDurationConfig{
                 .capacity = std::chrono::milliseconds{document.value("capacity_ms", 0)},
                 .start_threshold =
                     std::chrono::milliseconds{document.value("start_threshold_ms", 0)},
             };
-            // A value this engine would refuse is left at its default.
-            if (audio::valid_local_audition_buffer_config(buffer)) {
-                static_cast<void>(player_->set_buffer_config(buffer));
-            }
+            player_->restore_local_settings(settings);
         }
     }
-    written_output_ = output_document(player_->output());
+    if (const auto settings = player_->local_settings()) {
+        written_output_ = output_document(*settings);
+    }
 
     auto stored = workspace_->load_engine_state(queue_key);
     if (!stored || !*stored) {
@@ -166,9 +166,11 @@ void PlaybackStore::persist() {
     const auto revision = player_->revision();
     const auto state = player_->persisted();
 
-    if (auto output = output_document(player_->output()); output != written_output_) {
-        if (workspace_->save_engine_state(output_key, output, now_ms())) {
-            written_output_ = std::move(output);
+    if (const auto settings = player_->local_settings()) {
+        if (auto output = output_document(*settings); output != written_output_) {
+            if (workspace_->save_engine_state(output_key, output, now_ms())) {
+                written_output_ = std::move(output);
+            }
         }
     }
 

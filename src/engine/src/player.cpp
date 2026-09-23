@@ -581,10 +581,23 @@ core::Result<void> Player::set_buffer_config(const audio::PlaybackBufferDuration
     return audition_->set_buffer_config(buffer);
 }
 
-Player::Output Player::output() const {
-    const std::lock_guard guard{mutex_};
-    const auto snapshot = audition_->snapshot();
+std::optional<Player::Output> Player::local_settings() const {
+    if (!local_) {
+        return std::nullopt;
+    }
+    const auto snapshot = local_->snapshot();
     return Output{.target = snapshot.output_target, .buffer = snapshot.configured_buffer};
+}
+
+void Player::restore_local_settings(const Output& settings) {
+    if (!local_) {
+        return;
+    }
+    static_cast<void>(local_->set_output_target(settings.target));
+    // A value this engine would refuse is left at its default.
+    if (audio::valid_local_audition_buffer_config(settings.buffer)) {
+        static_cast<void>(local_->set_buffer_config(settings.buffer));
+    }
 }
 
 core::Result<void> Player::resume() {

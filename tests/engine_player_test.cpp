@@ -1037,6 +1037,7 @@ class RecordingAudition final : public audio::Audition {
         current.format = trackknife::formats::PcmFormat{1000, 2, "stereo"};
         current.position_sample = position_ms_;
         current.replay_gain_mode = gain_mode_;
+        current.output_target = target_;
         return current;
     }
     [[nodiscard]] core::Result<void>
@@ -1109,7 +1110,10 @@ class RecordingAudition final : public audio::Audition {
         return {};
     }
     [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
-    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string>) override {
+    [[nodiscard]] core::Result<void>
+    set_output_target(std::optional<std::string> target) override {
+        const std::lock_guard guard{mutex_};
+        target_ = std::move(target);
         return {};
     }
 
@@ -1124,7 +1128,43 @@ class RecordingAudition final : public audio::Audition {
     std::string loaded_;
     std::int64_t position_ms_{0};
     audio::ReplayGainMode gain_mode_{audio::ReplayGainMode::off};
+    std::optional<std::string> target_;
 };
+
+// A sink is a device on one machine. One chosen for an agent while playing
+// there was once saved as this machine's own, and after a restart this
+// machine waited for a device it has never had.
+void an_agents_sink_is_not_kept_as_this_machines(const std::filesystem::path& directory) {
+    const auto database = directory / "sink-workspace.sqlite3";
+    std::error_code ignored;
+    std::filesystem::remove(database, ignored);
+    {
+        auto workspace = engine::Workspace::open(database);
+        require(workspace.has_value(), "the workspace opens");
+        auto player = engine::Player::create();
+        require(player.has_value(), "a player is created");
+        RecordingAudition agent;
+        engine::PlaybackStore store{**player, *workspace};
+        static_cast<void>(store.restore());
+        require((*player)->set_output(&agent).has_value(), "the agent is chosen");
+        require((*player)->set_output_target("the-agents-own-speaker").has_value(),
+                "and a sink on it");
+        require(agent.snapshot().output_target == "the-agents-own-speaker",
+                "which the agent is told");
+        require(!(*player)->local_settings()->target,
+                "and this machine's own audio is not");
+        store.persist();
+        static_cast<void>((*player)->set_output((*player)->local_output()));
+    }
+    auto workspace = engine::Workspace::open(database);
+    auto player = engine::Player::create();
+    require(workspace.has_value() && player.has_value(), "a restarted engine opens");
+    engine::PlaybackStore store{**player, *workspace};
+    static_cast<void>(store.restore());
+    require(!(*player)->local_settings()->target,
+            "and plays on its own default, not on a device of the agent's");
+    std::filesystem::remove(database, ignored);
+}
 
 void the_player_plays_on_the_output_it_is_given() {
     auto player = engine::Player::create_without_audio();
@@ -1218,12 +1258,13 @@ int main(int argc, char** argv) {
     consume_takes_every_finished_track(**player, audio);
     album_shuffle_keeps_albums_together(**player, audio);
     a_restarted_engine_comes_back_with_its_queue(directory, audio);
+    an_agents_sink_is_not_kept_as_this_machines(directory);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 23 scenarios\n";
+    std::cout << "engine player: 24 scenarios\n";
     return EXIT_SUCCESS;
 }

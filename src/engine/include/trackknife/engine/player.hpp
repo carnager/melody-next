@@ -150,11 +150,17 @@ class Player final {
     [[nodiscard]] core::Result<void> refresh_output_devices();
     // Applies from the next track, not mid-stream.
     [[nodiscard]] core::Result<void> set_buffer_config(audio::PlaybackBufferDurationConfig buffer);
+    // The sink and buffer of this machine's own audio, which is what the
+    // engine keeps across restarts. Only its own: a sink is a device on one
+    // machine, and an agent's -- chosen while playing there -- once got saved
+    // as this machine's, which then had no such device and waited forever.
+    // Nothing when this machine has no audio.
     struct Output final {
         std::optional<std::string> target;
         audio::PlaybackBufferDurationConfig buffer;
     };
-    [[nodiscard]] Output output() const;
+    [[nodiscard]] std::optional<Output> local_settings() const;
+    void restore_local_settings(const Output& settings);
     // Direction is +1 or -1. Answers not_found when the modes and order say
     // there is nowhere to go, which is how repeat-off at the end reports.
     [[nodiscard]] core::Result<void> step(int direction);

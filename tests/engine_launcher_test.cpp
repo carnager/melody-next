@@ -32,6 +32,7 @@ class EngineLauncherTest final : public QObject {
     void nothingStartsOneUnlessAllowed();
     void onlyTheEngineBesideItIsStarted();
     void sharingSettingsReachTheEngine();
+    void anOutdatedEngineIsSeenAndStopped();
 };
 
 namespace {
@@ -227,6 +228,39 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     QVERIFY(restartLocalEngine(scratch.engine).has_value());
     QVERIFY(!tcp({}).has_value());
     settings.clear();
+}
+
+// ADR-0226: this computer's engine outlives the window, so after a rebuild it
+// runs the old program until restarted -- which must be seen, or the window
+// talks to an engine that knows none of the new requests. And quitting stops
+// it, where closing the window does not.
+void EngineLauncherTest::anOutdatedEngineIsSeenAndStopped() {
+    Scratch scratch;
+    QVERIFY(scratch.directory.isValid());
+    // Its own copy of the program, so the test can replace it as a rebuild
+    // does without touching the build tree's.
+    const auto program = scratch.directory.filePath(QStringLiteral("melodyd"));
+    QVERIFY(QFile::copy(QStringLiteral(TRACKKNIFE_ENGINE_BINARY), program));
+    const auto saved = qgetenv("TRACKKNIFE_ENGINE");
+    qputenv("TRACKKNIFE_ENGINE", program.toLocal8Bit());
+    const auto restore = qScopeGuard([saved] { qputenv("TRACKKNIFE_ENGINE", saved); });
+
+    QVERIFY(connectLocalEngine(scratch.engine).has_value());
+    QVERIFY(!localEngineOutdated(scratch.engine));
+
+    // Rebuilt: a new file where the old one was, the old one still running.
+    QVERIFY(QFile::remove(program));
+    QVERIFY(QFile::copy(QStringLiteral(TRACKKNIFE_ENGINE_BINARY), program));
+    QVERIFY(localEngineOutdated(scratch.engine));
+    QVERIFY(restartLocalEngine(scratch.engine).has_value());
+    QVERIFY(!localEngineOutdated(scratch.engine));
+
+    // Quit stops it.
+    const auto pid = enginePid(scratch.engine);
+    QVERIFY(pid > 0);
+    QVERIFY(stopLocalEngine(scratch.engine).has_value());
+    QVERIFY(::kill(pid, 0) != 0);
+    QVERIFY(lockHolders(scratch.engine.state / "engine.lock").empty());
 }
 
 } // namespace trackknife::bench

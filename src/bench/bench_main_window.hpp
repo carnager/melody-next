@@ -320,6 +320,14 @@ class BenchMainWindow final : public QMainWindow {
     };
     void enqueueUnprobedRows(ListTab& tab);
     void enrichRemoteRows(ListTab& tab);
+    // ADR-0226: this computer's engine outlives the window, so a rebuilt or
+    // updated one keeps running the old program until it is restarted --
+    // done here, at once when nothing plays, else when playback stops.
+    void renewOutdatedLocalEngine();
+    bool engine_renewal_pending_{false};
+    // Quit, as opposed to closing the window: this computer's engine stops
+    // too, instead of playing on.
+    void quitAndStopEngine();
     // ADR-0227: paths moving from one engine's tab to the other's, as the
     // other engine sees them (RemoteMount). What cannot be -- not reachable
     // here, or not in the remote's library -- is left out, and the status

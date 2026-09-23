@@ -72,6 +72,10 @@ class CatalogueSource final {
     // Stops this computer's engine and starts it with the settings as they
     // are now. False when there is none, or it did not come back.
     [[nodiscard]] bool restartLocalEngine() const;
+    // This computer's engine, when this source started it: stopped, and
+    // whether it runs an outdated program.
+    [[nodiscard]] bool stopLocalEngine() const;
+    [[nodiscard]] bool localEngineOutdated() const;
 
     [[nodiscard]] Role role() const noexcept { return role_; }
     // Whether this names an engine at all: a remote role with nothing

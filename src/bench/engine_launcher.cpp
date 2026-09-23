@@ -46,6 +46,10 @@ namespace {
            "trackknife" / "trackknife";
 }
 
+[[nodiscard]] std::filesystem::path path_from_text(const QString& text) {
+    return std::filesystem::path{QFile::encodeName(text).toStdString()};
+}
+
 [[nodiscard]] QString path_text(const std::filesystem::path& path) {
     return QFile::decodeName(QByteArray::fromStdString(path.native()));
 }
@@ -154,7 +158,7 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     return arguments;
 }
 
-core::Result<void> restartLocalEngine(const LocalEngine& engine) {
+core::Result<void> stopLocalEngine(const LocalEngine& engine) {
     // The engine is whoever holds its lock. Found through /proc, as fuser
     // does, because flock(2) does not say who holds it -- and signalled,
     // because an engine older than this workspace knows no request for it.
@@ -173,12 +177,41 @@ core::Result<void> restartLocalEngine(const LocalEngine& engine) {
     if (alive()) {
         return std::unexpected(launch_error("the running engine did not stop"));
     }
+    return {};
+}
+
+core::Result<void> restartLocalEngine(const LocalEngine& engine) {
+    if (auto stopped = stopLocalEngine(engine); !stopped) {
+        return stopped;
+    }
     auto started = connectLocalEngine(engine);
     if (!started) {
         return std::unexpected(std::move(started.error()));
     }
     (*started)->close();
     return {};
+}
+
+bool localEngineOutdated(const LocalEngine& engine) {
+    const auto program = engineProgram();
+    for (const auto pid : lockHolders(engine.state / "engine.lock")) {
+        std::error_code error;
+        const auto running =
+            std::filesystem::read_symlink("/proc/" + std::to_string(pid) + "/exe", error);
+        if (error) {
+            continue;
+        }
+        // Replaced since it started: the kernel names what it runs as gone.
+        if (running.native().ends_with(" (deleted)")) {
+            return true;
+        }
+        // Or not the engine this build would start at all.
+        if (!program.isEmpty() &&
+            !std::filesystem::equivalent(running, path_from_text(program), error) && !error) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {

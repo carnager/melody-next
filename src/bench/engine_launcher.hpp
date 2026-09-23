@@ -59,9 +59,18 @@ struct LocalEngineSharing final {
 [[nodiscard]] QStringList localEngineArguments(const LocalEngine& engine,
                                                const LocalEngineSharing& sharing);
 
+// Stops this computer's engine: its queue is saved, and it comes back
+// paused the next time it is started.
+[[nodiscard]] core::Result<void> stopLocalEngine(const LocalEngine& engine);
+
 // Stops this computer's engine and starts it again, with the settings as
 // they are now. Playback is saved and comes back paused.
 [[nodiscard]] core::Result<void> restartLocalEngine(const LocalEngine& engine);
+
+// Whether this computer's engine runs a program other than the one this build
+// would start: rebuilt or updated since it started. It outlives the window,
+// so without this it would go on answering in yesterday's terms.
+[[nodiscard]] bool localEngineOutdated(const LocalEngine& engine);
 
 // The processes holding a lock file open: the engine, for its engine.lock.
 [[nodiscard]] std::vector<pid_t> lockHolders(const std::filesystem::path& lock);

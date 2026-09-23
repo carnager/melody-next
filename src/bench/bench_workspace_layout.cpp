@@ -270,7 +270,9 @@ void BenchMainWindow::buildWorkspace() {
     auto* quit = file_menu->addAction(QStringLiteral("Quit"));
     quit->setObjectName(QStringLiteral("action-quit"));
     quit->setShortcut(QKeySequence::Quit);
-    connect(quit, &QAction::triggered, this, &QWidget::close);
+    quit->setToolTip(QStringLiteral("Close Trackknife and stop this computer's engine; closing "
+                                    "the window leaves the music playing"));
+    connect(quit, &QAction::triggered, this, &BenchMainWindow::quitAndStopEngine);
 
     auto* edit_menu = menuBar()->addMenu(QStringLiteral("&Edit"));
     list_find_bar_ = new TrackListFindBar(this);

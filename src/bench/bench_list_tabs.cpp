@@ -40,6 +40,7 @@
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QApplication>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -79,11 +80,18 @@ void BenchMainWindow::initializePersistence() {
         if (transport_ == local_playback_) {
             refreshTransport();
         }
+        // An outdated engine left alone while it played is renewed once it
+        // has stopped.
+        if (engine_renewal_pending_ &&
+            local_playback_->state().status != QStringLiteral("playing")) {
+            QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
+        }
     });
     connect(local_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
+        QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         if (transport_ != local_playback_) {
             return;
         }
@@ -93,6 +101,7 @@ void BenchMainWindow::initializePersistence() {
         reattachToEngine();
     });
     if (local_playback_->active()) {
+        QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // An engine starts with its own defaults and has never heard of this
         // window's settings, so they are handed over the moment the connection
         // exists. This runs after the transport is built, which is why sending
@@ -1070,6 +1079,44 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
     if (transferred)
         tabs_->setCurrentWidget(destination->view);
     return transferred;
+}
+
+void BenchMainWindow::renewOutdatedLocalEngine() {
+    if (!catalogue_source_ || !catalogue_source_->localEngineOutdated()) {
+        engine_renewal_pending_ = false;
+        return;
+    }
+    // Restarting it stops the music, so not while it plays: once it stops.
+    if (local_playback_ != nullptr &&
+        local_playback_->state().status == QStringLiteral("playing")) {
+        if (!engine_renewal_pending_) {
+            statusBar()->showMessage(QStringLiteral("This computer's engine is out of date; it "
+                                                    "restarts when playback stops"),
+                                     10'000);
+        }
+        engine_renewal_pending_ = true;
+        return;
+    }
+    engine_renewal_pending_ = false;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool renewed = catalogue_source_->restartLocalEngine();
+    QApplication::restoreOverrideCursor();
+    statusBar()->showMessage(renewed ? QStringLiteral("This computer's engine was out of date and "
+                                                      "has been restarted")
+                                     : QStringLiteral("This computer's engine is out of date and "
+                                                      "did not restart; see its log"),
+                             8'000);
+}
+
+void BenchMainWindow::quitAndStopEngine() {
+    // Closing the window leaves the music playing; quitting stops it. After
+    // the close, so a close that was cancelled leaves it running.
+    if (!close()) {
+        return;
+    }
+    if (catalogue_source_) {
+        static_cast<void>(catalogue_source_->stopLocalEngine());
+    }
 }
 
 std::vector<std::string> BenchMainWindow::remoteRoots() const {

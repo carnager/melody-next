@@ -209,6 +209,14 @@ bool CatalogueSource::restartLocalEngine() const {
     return local_engine_ && bench::restartLocalEngine(*local_engine_).has_value();
 }
 
+bool CatalogueSource::stopLocalEngine() const {
+    return local_engine_ && bench::stopLocalEngine(*local_engine_).has_value();
+}
+
+bool CatalogueSource::localEngineOutdated() const {
+    return local_engine_ && bench::localEngineOutdated(*local_engine_);
+}
+
 QString CatalogueSource::describe() const {
     const std::lock_guard guard{mutex_};
     const bool connected = client_ && client_->connected();

@@ -553,6 +553,7 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), preamp_with_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
     settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
+    settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());
     settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());

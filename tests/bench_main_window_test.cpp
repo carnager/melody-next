@@ -6249,6 +6249,12 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     QVERIFY(engine_socket);
     QVERIFY(engine_socket->text().isEmpty());
     engine_socket->setText(QStringLiteral("/run/user/1000/tkengine.sock"));
+    // The field was shown and read back but never saved, so every TCP engine
+    // refused the empty token it was sent.
+    auto* engine_token =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-token"));
+    QVERIFY(engine_token);
+    engine_token->setText(QStringLiteral("  0123abcd "));
 
     auto* lastfm = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key"));
     QVERIFY(lastfm);
@@ -6292,6 +6298,8 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     QTRY_VERIFY(lifetime.isNull());
     QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::library_engine_socket_key)).toString(),
              QStringLiteral("/run/user/1000/tkengine.sock"));
+    QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::library_engine_token_key)).toString(),
+             QStringLiteral("0123abcd"));
     QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::acoustid_client_key)).toString(),
              QStringLiteral("test-client-key"));
     action->trigger();

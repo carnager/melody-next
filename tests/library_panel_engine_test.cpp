@@ -15,6 +15,8 @@
 #include "trackknife/engine/server.hpp"
 #include "uicommon/local_artwork.hpp"
 
+#include <sqlite3.h>
+
 #include <QAbstractButton>
 #include <QLabel>
 #include <QLineEdit>
@@ -44,6 +46,7 @@ class LibraryPanelEngineTest final : public QObject {
     void theSearchDialogAsksTheEngineToo();
     void aTcpEngineIsReachedWithItsToken();
     void theEngineReadsCoversWhereTheFilesAre();
+    void aLargeSelectionTravelsInParts();
 };
 
 // Settings go to Qt's test location, never the user's own.
@@ -142,6 +145,75 @@ void LibraryPanelEngineTest::theEngineReadsCoversWhereTheFilesAre() {
 
     // The same file, not in the library: not read, cover or no cover.
     QVERIFY(!remote->artwork(outside).has_value());
+    (*server)->stop();
+}
+
+// The engine closes a connection whose request line passes 1 MiB, and a
+// selection is not bounded: a query matching 21,984 tracks sent their paths
+// in one request of several MiB, and the search ended with "the engine
+// closed the connection". Lists go in parts.
+void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto music = directory.path() + QStringLiteral("/music");
+    QVERIFY(QDir{}.mkpath(music));
+    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    QFile track{music + QStringLiteral("/art.flac")};
+    QVERIFY(track.open(QIODevice::WriteOnly) && track.write(QByteArray::fromBase64(fixture.readAll())) > 0);
+    track.close();
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    QVERIFY(catalogue.add_root(music.toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue.scan({}, progress).has_value());
+    // Twelve thousand more of it under long names: far past 1 MiB of paths.
+    {
+        sqlite3* db = nullptr;
+        QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+        const char* copies = R"SQL(
+            WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<12000)
+            INSERT INTO local_library_tracks(raw_path,root,revision,title,artist,album,album_key,
+                release_id,date,disc,track,search_track,search_album,available,seen)
+            SELECT CAST(t.raw_path || '/a-rather-long-folder-name-for-a-release/' || n || '.flac'
+                        AS BLOB),root,revision,title,artist,album,album_key,release_id,date,disc,
+                   track,search_track,search_album,available,seen
+            FROM local_library_tracks t CROSS JOIN numbers
+        )SQL";
+        QCOMPARE(sqlite3_exec(db, copies, nullptr, nullptr, nullptr), SQLITE_OK);
+        sqlite3_close(db);
+    }
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+    CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
+                               CatalogueSource::Role::remote};
+    const auto remote = catalogues.open();
+    persistence::LibraryQuery everything;
+    everything.kind = persistence::LibraryEntryKind::track;
+    everything.limit = 100'000U;
+    const auto paths = remote->paths(everything);
+    QVERIFY(paths && paths->size() == 12'001U);
+    std::size_t bytes = 0U;
+    for (const auto& path : *paths) {
+        bytes += path.size();
+    }
+    QVERIFY(bytes > 1'000'000U);
+
+    const auto tracks = remote->cached_tracks(*paths);
+    QVERIFY2(tracks.has_value(), tracks ? "" : tracks.error().message.c_str());
+    QCOMPARE(tracks->size(), paths->size());
+    QCOMPARE(tracks->back().raw_path, paths->back());
+    // And the connection is still there for what comes next.
+    QVERIFY(remote->roots().has_value());
     (*server)->stop();
 }
 

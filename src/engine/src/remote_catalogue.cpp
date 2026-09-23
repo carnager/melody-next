@@ -39,6 +39,54 @@ using protocol::Json;
     return paths;
 }
 
+// The most one request carries. The engine refuses a line over 1 MiB by
+// closing the connection, and a selection is not bounded: 21,984 paths of a
+// real library came to several MiB. Lists are sent in parts well under it.
+constexpr std::size_t request_budget_bytes = 256U * 1024U;
+
+// Sends `items` under `key`, in as many requests as the budget takes, and
+// returns every answer's `answer_key` array joined, in order.
+[[nodiscard]] core::Result<Json> call_in_chunks(protocol::Client& client, const std::string& method,
+                                                const std::string& key, const Json& items,
+                                                const std::string& answer_key) {
+    auto joined = Json::array();
+    auto chunk = Json::array();
+    std::size_t bytes = 0U;
+    const auto send = [&]() -> core::Result<void> {
+        auto answer = client.call(method, Json{{key, std::move(chunk)}});
+        chunk = Json::array();
+        bytes = 0U;
+        if (!answer) {
+            return std::unexpected(std::move(answer.error()));
+        }
+        const auto found = answer->find(answer_key);
+        if (found == answer->end() || !found->is_array()) {
+            return std::unexpected(malformed(answer_key));
+        }
+        for (auto& value : *found) {
+            joined.push_back(std::move(value));
+        }
+        return {};
+    };
+    for (const auto& item : items) {
+        const auto size = item.dump().size() + 1U;
+        if (!chunk.empty() && bytes + size > request_budget_bytes) {
+            if (auto sent = send(); !sent) {
+                return std::unexpected(std::move(sent.error()));
+            }
+        }
+        chunk.push_back(item);
+        bytes += size;
+    }
+    // An empty list is still asked once: the answer's shape is the engine's.
+    if (!chunk.empty() || joined.empty()) {
+        if (auto sent = send(); !sent) {
+            return std::unexpected(std::move(sent.error()));
+        }
+    }
+    return joined;
+}
+
 } // namespace
 
 core::Result<std::vector<persistence::LibraryRoot>> RemoteCatalogue::roots() const {
@@ -81,14 +129,11 @@ RemoteCatalogue::filter_paths(const query::CompiledTkq& compiled,
 
 core::Result<std::vector<unsigned>> RemoteCatalogue::ratings(const std::vector<std::string>& hashes,
                                                              const core::CancellationToken&) const {
-    auto answer = client_->call("catalogue.ratings", Json{{"hashes", hashes}});
-    if (!answer) {
-        return std::unexpected(std::move(answer.error()));
+    auto joined = call_in_chunks(*client_, "catalogue.ratings", "hashes", Json(hashes), "ratings");
+    if (!joined) {
+        return std::unexpected(std::move(joined.error()));
     }
-    const auto found = answer->find("ratings");
-    if (found == answer->end() || !found->is_array()) {
-        return std::unexpected(malformed("ratings"));
-    }
+    const auto* found = &*joined;
     std::vector<unsigned> ratings;
     ratings.reserve(found->size());
     for (const auto& value : *found) {
@@ -304,14 +349,11 @@ RemoteCatalogue::cached_tracks(const std::vector<std::string>& raw_paths,
     for (const auto& raw_path : raw_paths) {
         encoded.push_back(protocol::encode_raw_path(raw_path));
     }
-    auto answer = client_->call("catalogue.cached_tracks", Json{{"paths", std::move(encoded)}});
-    if (!answer) {
-        return std::unexpected(std::move(answer.error()));
+    auto joined = call_in_chunks(*client_, "catalogue.cached_tracks", "paths", encoded, "tracks");
+    if (!joined) {
+        return std::unexpected(std::move(joined.error()));
     }
-    const auto tracks = answer->find("tracks");
-    if (tracks == answer->end() || !tracks->is_array()) {
-        return std::unexpected(malformed("tracks"));
-    }
+    const auto* tracks = &*joined;
     std::vector<persistence::LibraryTrackSnapshot> snapshots;
     snapshots.reserve(tracks->size());
     for (const auto& value : *tracks) {
@@ -400,14 +442,12 @@ RemoteCatalogue::history_facts(const std::vector<persistence::LibraryHistorySour
         entry["album_hash"] = source.album_hash;
         encoded.push_back(std::move(entry));
     }
-    auto answer = client_->call("catalogue.history_facts", Json{{"sources", std::move(encoded)}});
-    if (!answer) {
-        return std::unexpected(std::move(answer.error()));
+    auto joined =
+        call_in_chunks(*client_, "catalogue.history_facts", "sources", encoded, "facts");
+    if (!joined) {
+        return std::unexpected(std::move(joined.error()));
     }
-    const auto facts = answer->find("facts");
-    if (facts == answer->end() || !facts->is_array()) {
-        return std::unexpected(malformed("facts"));
-    }
+    const auto* facts = &*joined;
     std::vector<std::array<std::int64_t, 6>> history;
     history.reserve(facts->size());
     for (const auto& value : *facts) {

@@ -625,6 +625,7 @@ if(TRACKKNIFE_BUILD_UI)
     target_link_libraries(
         trackknife_library_panel_engine_tests
         PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
+                PkgConfig::SQLITE3
                 trackknife_project_options trackknife_project_warnings
     )
     target_compile_definitions(trackknife_library_panel_engine_tests PRIVATE

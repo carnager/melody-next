@@ -48,13 +48,12 @@ void BenchMainWindow::sampleLastFmFromEngine(const EnginePlayback::State& state)
         return;
     }
     lastfm_sample_time_ = lastfm_clock_.elapsed();
+    // Wherever this window holds the entry: the list it was played from, Up
+    // Next, or another list. Looked for only in the first, a track from Up
+    // Next was credited with no artist and no title.
     LocalTrackRow track;
-    if (const auto entry = core::StableId::parse(state.entry.toStdString())) {
-        if (auto* tab = tabForDocument(playback_.anchors.document)) {
-            if (const auto row = tab->model->rowOfEntry(*entry, playback_.row); row >= 0) {
-                track = tab->model->rows()[static_cast<std::size_t>(row)];
-            }
-        }
+    if (const auto* row = playingRow(state.entry)) {
+        track = *row;
     }
     // Observable for offscreen tests and diagnostics: "is anything being
     // credited, and for which track" is otherwise only answerable by watching

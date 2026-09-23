@@ -4902,6 +4902,8 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     auto* now_playing = window.findChild<QLabel*>(QStringLiteral("bench-now-playing"));
     QVERIFY(now_playing != nullptr);
     QTRY_COMPARE(now_playing->text(), QStringLiteral("X"));
+    // And it is credited as what it is.
+    QTRY_VERIFY(window.property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == second,

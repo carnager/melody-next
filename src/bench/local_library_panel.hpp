@@ -36,6 +36,10 @@ class QTreeView;
 
 namespace trackknife::bench {
 
+// Set on a library drag's data: the dragged entries, as a QVariantList of
+// persistence::LibraryEntry.
+inline constexpr const char* library_entries_property = "trackknife-library-entries";
+
 enum class LocalLibraryAction { append, next, replace, new_list, request_next, request_end };
 
 class LocalLibraryPanel final : public QWidget {

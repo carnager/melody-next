@@ -18,6 +18,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
+#include <QFrame>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -157,13 +158,21 @@ class LibraryModel final : public QStandardItemModel {
             return nullptr;
         }
         const bool remote = panel_ && panel_->remote();
-        return new ui::LocalFilesMimeData{[panel = panel_, entries = std::move(entries)](
+        // The entries themselves too, for a place that wants tagged rows
+        // rather than paths: Up Next.
+        QVariantList carried;
+        for (const auto& entry : entries) {
+            carried.push_back(QVariant::fromValue(entry));
+        }
+        auto* mime = new ui::LocalFilesMimeData{[panel = panel_, entries = std::move(entries)](
                                               ui::LocalFilesMimeData::Completion done) {
                                               if (panel) {
                                                   panel->resolveEntries(entries, std::move(done));
                                               }
                                           },
                                           remote};
+        mime->setProperty(library_entries_property, carried);
+        return mime;
     }
 
   private:
@@ -328,18 +337,41 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     connect(tree_, &QTreeView::activated, this, &LocalLibraryPanel::activate);
     connect(tree_, &QTreeView::customContextMenuRequested, this,
             &LocalLibraryPanel::showContextMenu);
-    status_ = new QLabel(tr("Press Refresh to scan your music folders."), this);
+    // The footer: one small, quiet line of news, under a hairline.
+    auto* footer = new QFrame(this);
+    footer->setObjectName(QStringLiteral("local-library-footer"));
+    footer->setFrameShape(QFrame::NoFrame);
+    {
+        const auto ground = palette().color(QPalette::Window);
+        const auto ink = palette().color(QPalette::Text);
+        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
+        footer->setStyleSheet(
+            QStringLiteral("QFrame#local-library-footer { border-top: 1px solid %1; }")
+                .arg(QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
+                                     mix(ground.blue(), ink.blue()))
+                         .name()));
+    }
+    auto* footer_layout = new QVBoxLayout(footer);
+    footer_layout->setContentsMargins(4, 6, 4, 2);
+    footer_layout->setSpacing(2);
+    auto small = font();
+    small.setPointSizeF(small.pointSizeF() * 0.9);
+    status_ = new QLabel(tr("Press Refresh to scan your music folders."), footer);
     status_->setObjectName(QStringLiteral("local-library-status"));
     status_->setWordWrap(true);
-    layout->addWidget(status_);
-    source_label_ = new QLabel(this);
+    status_->setFont(small);
+    status_->setForegroundRole(QPalette::PlaceholderText);
+    footer_layout->addWidget(status_);
+    // Which library this is: the tab above says so while it answers, so this
+    // line appears only when it does not (ADR-0220), and in full colour.
+    source_label_ = new QLabel(footer);
     source_label_->setObjectName(QStringLiteral("local-library-source"));
     source_label_->setWordWrap(true);
     source_label_->setTextFormat(Qt::PlainText);
-    // Dimmed: it is a standing fact rather than news, and should not compete
-    // with the status line above it.
-    source_label_->setEnabled(false);
-    layout->addWidget(source_label_);
+    source_label_->setFont(small);
+    source_label_->hide();
+    footer_layout->addWidget(source_label_);
+    layout->addWidget(footer);
     search_timer_ = new QTimer(this);
     search_timer_->setSingleShot(true);
     search_timer_->setInterval(200);
@@ -451,6 +483,7 @@ void LocalLibraryPanel::refreshSourceLabel() {
         return;
     }
     source_label_->setText(catalogues_->describe());
+    source_label_->setVisible(!catalogues_->reachable());
     source_label_->setToolTip(catalogues_->usingEngine()
                                   ? tr("Folders, scanning, search and covers come from that "
                                        "engine.")
@@ -873,13 +906,14 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                             tr("Insert next in current list"),
                             tr("Replace list and play"),
                             tr("Open in new tab"),
-                            tr("Queue next"),
-                            tr("Queue at end")};
+                            tr("Play next (Up Next)"),
+                            tr("Add to Up Next")};
     const auto icons = libraryActionIcons(this);
     for (int action = 0; action < static_cast<int>(labels.size()); ++action) {
         auto* command =
-            menu->addAction(action < 3 ? icons[static_cast<std::size_t>(action)]
-                                       : style()->standardIcon(QStyle::SP_FileDialogNewFolder),
+            menu->addAction(action < 3    ? icons[static_cast<std::size_t>(action)]
+                            : action == 3 ? QIcon::fromTheme(QStringLiteral("tab-new"))
+                                          : QIcon::fromTheme(QStringLiteral("media-playlist-append")),
                             labels[static_cast<std::size_t>(action)]);
         command->setObjectName(QStringLiteral("action-local-library-%1").arg(action));
         command->setEnabled(available);

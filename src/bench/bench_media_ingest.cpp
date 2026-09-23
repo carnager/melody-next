@@ -677,6 +677,36 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     pumpArtworkQueue();
 }
 
+QImage BenchMainWindow::coverFor(const LocalTrackRow& track, const bool remote) {
+    if (track.album.empty() && track.artist.empty() && track.album_artist.empty()) {
+        return {};
+    }
+    const auto key = LocalListModel::groupKeyOf(track);
+    for (const auto& tab : list_tabs_) {
+        if (tab->model->hasArtwork(key)) {
+            return tab->model->artwork(key);
+        }
+    }
+    if (const auto cached = artwork_cache_.constFind(key); cached != artwork_cache_.constEnd()) {
+        return *cached;
+    }
+    // Not in any list: fetched as a tab's would be, from the engine that has
+    // the file when it is the remote's.
+    std::shared_ptr<engine::Catalogue> engine;
+    if (remote) {
+        if (!remote_catalogue_source_) {
+            return {};
+        }
+        engine = remote_catalogue_source_->open();
+    }
+    if (!artwork_pending_.contains(key)) {
+        artwork_pending_.insert(key);
+        artwork_queue_.push_back(ArtworkJob{.key = key, .raw_path = track.raw_path, .engine = engine});
+        pumpArtworkQueue();
+    }
+    return {};
+}
+
 void BenchMainWindow::invalidateArtwork(const std::string& raw_path) {
     QSet<QString> keys;
     for (const auto& tab : list_tabs_) {
@@ -766,6 +796,18 @@ void BenchMainWindow::finishArtworkLoad() {
             if (tab != nullptr && !tab->model->hasArtwork(outcome->key)) {
                 tab->model->setArtwork(outcome->key, outcome->image);
             }
+        }
+        // Up Next and the header may have asked for it without a tab.
+        if (up_next_local_model_ != nullptr) {
+            for (int row = 0; row < up_next_local_model_->rowCount(); ++row) {
+                if (up_next_local_model_->groupKey(row) == outcome->key) {
+                    up_next_local_model_->setArtwork(outcome->key, outcome->image);
+                    break;
+                }
+            }
+        }
+        if (outcome->key == header_cover_wanted_) {
+            refreshHeaderCover(header_cover_entry_);
         }
     }
     pumpArtworkQueue();

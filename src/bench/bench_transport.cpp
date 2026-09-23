@@ -21,6 +21,7 @@
 #include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFrame>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -223,32 +224,16 @@ void BenchMainWindow::setUpNextCount(const int count) {
 }
 
 void BenchMainWindow::refreshHeaderCover(const QString& entry) {
+    // By album, not by the entry: a track playing from Up Next is in no tab
+    // under its own id, but its album's cover is the same wherever it is.
+    header_cover_entry_ = entry;
     QImage cover;
     QString key;
-    if (const auto identity = core::StableId::parse(entry.toStdString())) {
-        const auto look_in = [&](const ListTab& tab) {
-            const auto& rows = tab.model->rows();
-            const auto found = std::ranges::find(rows, *identity, &LocalTrackRow::entry_id);
-            if (found == rows.end()) {
-                return false;
-            }
-            const auto group = tab.model->groupKey(static_cast<int>(found - rows.begin()));
-            if (!tab.model->hasArtwork(group)) {
-                return false;
-            }
-            key = group;
-            cover = tab.model->artwork(group);
-            return true;
-        };
-        auto* anchored = tabForDocument(playback_.anchors.document);
-        if (anchored == nullptr || !look_in(*anchored)) {
-            for (const auto& tab : list_tabs_) {
-                if (look_in(*tab)) {
-                    break;
-                }
-            }
-        }
+    if (const auto* row = entry.isEmpty() ? nullptr : playingRow(entry)) {
+        key = LocalListModel::groupKeyOf(*row);
+        cover = coverFor(*row, transport_ != nullptr && transport_ == remote_playback_);
     }
+    header_cover_wanted_ = key;
     if (cover.isNull()) {
         key.clear();
     }
@@ -990,10 +975,58 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     preamp_action->setObjectName(QStringLiteral("action-local-replaygain-preamp"));
     connect(preamp_action, &QAction::triggered, this, &BenchMainWindow::showReplayGainPreampDialog);
     local_replaygain_button_->setMenu(menu);
+    styleStatusBar();
     statusBar()->addPermanentWidget(local_replaygain_button_);
     playback_menu->addMenu(menu);
     playback_menu->addSeparator();
     applyLocalPlaybackModes();
+}
+
+void BenchMainWindow::styleStatusBar() {
+    // The status bar as the header's counterpart: the same ground, a hairline
+    // above, no frames around its parts, and the modes that are on tinted in
+    // the accent -- so which are on can be seen, not hovered for.
+    const auto ground = palette().color(QPalette::Window);
+    const auto ink = palette().color(QPalette::Text);
+    const auto accent = palette().color(QPalette::Highlight);
+    const auto mix = [](const QColor& from, const QColor& to, const int percent) {
+        const auto channel = [percent](const int a, const int b) {
+            return (a * (100 - percent) + b * percent) / 100;
+        };
+        return QColor::fromRgb(channel(from.red(), to.red()), channel(from.green(), to.green()),
+                               channel(from.blue(), to.blue()))
+            .name();
+    };
+    statusBar()->setSizeGripEnabled(false);
+    statusBar()->setStyleSheet(
+        QStringLiteral("QStatusBar { border-top: 1px solid %1; }"
+                       "QStatusBar::item { border: none; }"
+                       "QStatusBar QLabel { color: palette(placeholder-text); }")
+            .arg(mix(ground, ink, 12)));
+    const auto mode_style =
+        QStringLiteral("QToolButton { border: none; border-radius: 4px; padding: 3px; }"
+                       "QToolButton:hover { background: %1; }"
+                       "QToolButton:checked { background: %2; }")
+            .arg(mix(ground, ink, 8), mix(ground, accent, 35));
+    for (auto* button : local_mode_buttons_) {
+        button->setAutoRaise(false);
+        button->setStyleSheet(mode_style);
+    }
+    auto* divider = new QFrame(statusBar());
+    divider->setObjectName(QStringLiteral("bench-status-divider"));
+    divider->setFixedSize(1, 16);
+    divider->setStyleSheet(QStringLiteral("background: %1;").arg(mix(ground, ink, 18)));
+    statusBar()->addPermanentWidget(divider);
+    local_replaygain_button_->setAutoRaise(false);
+    local_replaygain_button_->setStyleSheet(
+        QStringLiteral("QToolButton { border: 1px solid %1; border-radius: 11px; padding: 1px 10px;"
+                       " color: palette(placeholder-text); }"
+                       "QToolButton[active=\"true\"] { background: %2; border-color: %2;"
+                       " color: palette(text); }"
+                       "QToolButton:hover { border-color: palette(highlight); }"
+                       "QToolButton::menu-indicator { image: none; width: 0; }")
+            .arg(mix(ground, ink, 16), mix(ground, accent, 35)));
+    local_replaygain_button_->setToolButtonStyle(Qt::ToolButtonTextOnly);
 }
 
 void BenchMainWindow::saveLocalPlaybackModes() {
@@ -1091,7 +1124,12 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         action->setEnabled(can_play);
         action->setChecked(action->data().toString() == local_replaygain_);
         if (action->isChecked()) {
-            local_replaygain_button_->setText(QStringLiteral("RG: %1").arg(action->text()));
+            local_replaygain_button_->setText(
+                QStringLiteral("ReplayGain: %1").arg(action->text()));
+            // Off reads as quiet; a gain in use is marked like a mode that is on.
+            local_replaygain_button_->setProperty("active", local_replaygain_ != QStringLiteral("off"));
+            local_replaygain_button_->style()->unpolish(local_replaygain_button_);
+            local_replaygain_button_->style()->polish(local_replaygain_button_);
         }
     }
     local_replaygain_button_->setToolTip(
@@ -1099,7 +1137,7 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
             "Local ReplayGain: %1\nAutomatic: track gain with Random, album gain otherwise.\nUses "
             "embedded gain with peak-based clipping prevention when a matching peak is "
             "present.\nChanges apply as buffered audio drains; missing gain plays unchanged.")
-            .arg(local_replaygain_button_->text().mid(4)));
+            .arg(local_replaygain_button_->text().section(QStringLiteral(": "), 1)));
 }
 
 void BenchMainWindow::syncEngineRequests() {

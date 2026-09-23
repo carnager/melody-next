@@ -1036,9 +1036,12 @@ QString LocalListModel::groupKey(const int row) const {
     if (row < 0 || row >= static_cast<int>(rows_.size())) {
         return {};
     }
+    return groupKeyOf(rows_[static_cast<std::size_t>(row)]);
+}
+
+QString LocalListModel::groupKeyOf(const LocalTrackRow& track) {
     // Must mirror the shared delegate's grouping: album artist (with artist
     // fallback), album, and date, null-separated.
-    const auto& track = rows_[static_cast<std::size_t>(row)];
     const auto& artist = track.album_artist.empty() ? track.artist : track.album_artist;
     return display_utf8(artist) + QChar::Null + display_utf8(track.album) + QChar::Null +
            display_utf8(track.date);

@@ -2,6 +2,8 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/up_next_delegate.hpp"
+#include "uicommon/local_files_mime_data.hpp"
+#include "bench/local_library_panel.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
@@ -12,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFrame>
 #include <QLabel>
 #include <QMenu>
 #include <QPushButton>
@@ -47,13 +50,23 @@ void BenchMainWindow::buildUpNext() {
     auto* layout = new QVBoxLayout(content);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+    // Header: what this is, and whose, with how many wait.
     auto* heading = new QHBoxLayout;
-    heading->setContentsMargins(10, 8, 6, 8);
+    heading->setContentsMargins(12, 10, 6, 8);
+    auto* titles = new QVBoxLayout;
+    titles->setSpacing(1);
     auto* title = new QLabel(QStringLiteral("Up Next"), content);
     auto font = title->font();
-    font.setBold(true);
+    font.setWeight(QFont::DemiBold);
+    font.setPointSizeF(font.pointSizeF() * 1.08);
     title->setFont(font);
-    heading->addWidget(title, 1);
+    titles->addWidget(title);
+    up_next_status_ = new QLabel(content);
+    up_next_status_->setObjectName(QStringLiteral("up-next-status"));
+    up_next_status_->setWordWrap(true);
+    up_next_status_->setForegroundRole(QPalette::PlaceholderText);
+    titles->addWidget(up_next_status_);
+    heading->addLayout(titles, 1);
     auto* close = new QToolButton(content);
     close->setObjectName(QStringLiteral("up-next-close"));
     close->setAutoRaise(true);
@@ -64,10 +77,6 @@ void BenchMainWindow::buildUpNext() {
             [this] { up_next_dock_->setVisible(false); });
     heading->addWidget(close);
     layout->addLayout(heading);
-    up_next_status_ = new QLabel(content);
-    up_next_status_->setObjectName(QStringLiteral("up-next-status"));
-    up_next_status_->setWordWrap(true);
-    up_next_status_->setMargin(10);
     up_next_view_ = new ui::QueueTableView(content);
     up_next_view_->setObjectName(QStringLiteral("up-next-tracks"));
     up_next_local_model_ = new LocalListModel(this);
@@ -111,6 +120,12 @@ void BenchMainWindow::buildUpNext() {
             enqueueUpNext(table, false, position);
             return true;
         });
+    // From the library: its entries, resolved to tagged rows by the library
+    // they came from.
+    up_next_view_->setLocalFilesDropCallback(
+        [this](const ui::LocalFilesMimeData& files, const int position) {
+            return enqueueLibraryDrop(files, position);
+        });
     const auto playRequest = [this](const QModelIndex& index) {
         if (!index.isValid())
             return;
@@ -125,7 +140,24 @@ void BenchMainWindow::buildUpNext() {
     };
     up_next_view_->setActivateCallback(playRequest);
     layout->addWidget(up_next_view_, 1);
-    auto* actions = new QToolBar(content);
+    // Footer: the edits on the left, the way back to the list on the right,
+    // under a hairline.
+    auto* footer = new QFrame(content);
+    footer->setObjectName(QStringLiteral("up-next-footer"));
+    {
+        const auto ground = palette().color(QPalette::Window);
+        const auto ink = palette().color(QPalette::Text);
+        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
+        footer->setStyleSheet(
+            QStringLiteral("QFrame#up-next-footer { border-top: 1px solid %1; }")
+                .arg(QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
+                                     mix(ground.blue(), ink.blue()))
+                         .name()));
+    }
+    auto* footer_layout = new QHBoxLayout(footer);
+    footer_layout->setContentsMargins(4, 4, 8, 4);
+    footer_layout->setSpacing(4);
+    auto* actions = new QToolBar(footer);
     actions->setObjectName(QStringLiteral("up-next-toolbar"));
     actions->setIconSize(QSize(16, 16));
     actions->setToolButtonStyle(Qt::ToolButtonIconOnly);
@@ -153,13 +185,20 @@ void BenchMainWindow::buildUpNext() {
         refreshUpNext();
     });
     undo->setObjectName(QStringLiteral("up-next-undo"));
-    layout->insertWidget(1, actions);
-    layout->addWidget(up_next_status_);
-    auto* resume = new QPushButton(QStringLiteral("Return to playlist now"), content);
-    resume->setFlat(true);
+    // Its buttons always shown: the way back gives up width first.
+    actions->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    footer_layout->addWidget(actions);
+    footer_layout->addStretch(1);
+    auto* resume = new QToolButton(footer);
     resume->setObjectName(QStringLiteral("up-next-return"));
-    layout->addWidget(resume);
-    connect(resume, &QPushButton::clicked, this, [this] {
+    resume->setText(QStringLiteral("Back to the list"));
+    resume->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    resume->setIcon(QIcon::fromTheme(QStringLiteral("go-next")));
+    resume->setLayoutDirection(Qt::RightToLeft);
+    resume->setAutoRaise(true);
+    footer_layout->addWidget(resume);
+    layout->addWidget(footer);
+    connect(resume, &QToolButton::clicked, this, [this] {
         const bool asking = playback_.requests.active().has_value();
         playback_.requests.clear();
         persistUpNext();
@@ -201,6 +240,24 @@ void BenchMainWindow::buildUpNext() {
     addAction(toggle);
 }
 
+bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, const int position) {
+    const auto carried = files.property(library_entries_property).toList();
+    auto* library = files.remote() ? remote_library_ : local_library_;
+    if (carried.isEmpty() || library == nullptr) {
+        return false;
+    }
+    std::vector<persistence::LibraryEntry> entries;
+    for (const auto& entry : carried) {
+        entries.push_back(entry.value<persistence::LibraryEntry>());
+    }
+    const bool remote = files.remote();
+    library->resolveEntryRows(std::move(entries),
+                              [this, position, remote](std::vector<LocalTrackRow> rows) {
+                                  enqueueLocalRequests(std::move(rows), position, remote);
+                              });
+    return true;
+}
+
 void BenchMainWindow::refreshUpNext() {
     if (!up_next_dock_)
         return;
@@ -211,8 +268,7 @@ void BenchMainWindow::refreshUpNext() {
     bool replaced = false;
     if (auto* undo = up_next_dock_->findChild<QAction*>(QStringLiteral("up-next-undo")))
         undo->setEnabled(playback_.requests.canUndo());
-    if (auto* resume = up_next_dock_->findChild<QPushButton*>(QStringLiteral("up-next-return")))
-        resume->setEnabled(playback_.requests.active().has_value());
+    auto* resume = up_next_dock_->findChild<QToolButton*>(QStringLiteral("up-next-return"));
     auto* model = up_next_local_model_;
     {
         up_next_view_->setEnabled(true);
@@ -227,18 +283,16 @@ void BenchMainWindow::refreshUpNext() {
                 up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = playback_.requests.revision();
         }
-        // Covers from the tabs that already have them: an album's cover is
-        // keyed the same way in every list.
+        // Covers as the lists have them, or fetched when no list does.
         for (int row = 0; row < up_next_local_model_->rowCount(); ++row) {
             const auto key = up_next_local_model_->groupKey(row);
             if (up_next_local_model_->hasArtwork(key)) {
                 continue;
             }
-            for (const auto& list : list_tabs_) {
-                if (list->model->hasArtwork(key)) {
-                    up_next_local_model_->setArtwork(key, list->model->artwork(key));
-                    break;
-                }
+            if (const auto cover = coverFor(
+                    up_next_local_model_->rows()[static_cast<std::size_t>(row)], up_next_remote_);
+                !cover.isNull()) {
+                up_next_local_model_->setArtwork(key, cover);
             }
         }
         // The engine decides what plays next, so it has to be told. Guarded on
@@ -255,13 +309,25 @@ void BenchMainWindow::refreshUpNext() {
                                     remote_catalogue_source_
                                 ? remote_catalogue_source_->name()
                                 : QStringLiteral("This computer");
-        up_next_status_->setText(
-            QStringLiteral("%1 · %2 waiting%3\nReturn to: %4")
-                .arg(engine)
-                .arg(playback_.requests.pending().size())
-                .arg(playing.isEmpty() ? QString{} : QStringLiteral("\nPlaying: ") + playing)
-                .arg(tab ? QString::fromStdString(tab->document.name)
-                         : QStringLiteral("No normal playback")));
+        up_next_status_->setText(QStringLiteral("%1 · %2 waiting")
+                                     .arg(engine)
+                                     .arg(playback_.requests.pending().size()));
+        up_next_status_->setToolTip(playing.isEmpty() ? QString{}
+                                                      : QStringLiteral("Playing: ") + playing);
+        // Where playback goes once these are done, and a way there now.
+        if (resume != nullptr) {
+            const auto back = tab ? QString::fromStdString(tab->document.name) : QString{};
+            const auto label = back.isEmpty() ? tr("Back to the list") : tr("Back to %1").arg(back);
+            // Elided to what is left beside the edit buttons.
+            const auto* toolbar = up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
+            const auto room = std::max(48, up_next_dock_->width() -
+                                               (toolbar ? toolbar->sizeHint().width() : 0) -
+                                               resume->iconSize().width() - 36);
+            resume->setText(resume->fontMetrics().elidedText(label, Qt::ElideRight, room));
+            resume->setToolTip(tr("Skip what is waiting and return to the list now"));
+            resume->setEnabled(playback_.requests.active().has_value() ||
+                               !playback_.requests.pending().empty());
+        }
     }
     if (replaced) {
         auto* selection = up_next_view_->selectionModel();
@@ -292,7 +358,7 @@ void BenchMainWindow::refreshUpNext() {
             action->setEnabled(enabled && available);
     }
     up_next_view_->setEmptyMessage(enabled ? tr("Nothing waiting") : QString{},
-                                   tr("Queue tracks from any list, or drag them here."));
+                                   tr("Drag tracks here from a list or the library."));
     setUpNextCount(model->rowCount());
 }
 

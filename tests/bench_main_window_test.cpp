@@ -3,6 +3,7 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/up_next_delegate.hpp"
+#include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -222,6 +223,7 @@ class BenchMainWindowTest final : public QObject {
     void cleanup();
     void transportIsOneRowWithCoverAndPills();
     void headerShowsThePlayingAlbumsCover();
+    void libraryDragsIntoUpNextWithCovers();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
@@ -840,6 +842,73 @@ void BenchMainWindowTest::metadataGridReusesExactNativeFieldWithoutInvalidIndexe
     QCOMPARE(current.column(), 39);
 }
 
+void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+    {
+        auto catalogue = window.catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    window.local_library_->refreshLibrary();
+    auto* tree = window.local_library_->findChild<QTreeView*>();
+    QVERIFY(tree != nullptr);
+    QTRY_VERIFY(tree->model()->rowCount() > 0 &&
+                tree->model()->index(0, 0).data(Qt::DisplayRole).toString().contains(
+                    QStringLiteral("Trackknife")));
+
+    // Dragged from the library onto Up Next: queued with its tags.
+    window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
+    QTRY_VERIFY(window.up_next_view_->isVisible());
+    std::unique_ptr<QMimeData> mime{tree->model()->mimeData({tree->model()->index(0, 0)})};
+    QVERIFY(mime != nullptr);
+    auto* viewport = window.up_next_view_->viewport();
+    QDragEnterEvent enter{QPoint{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+                          Qt::NoModifier};
+    QApplication::sendEvent(viewport, &enter);
+    QVERIFY(enter.isAccepted());
+    QDropEvent drop{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &drop);
+    QVERIFY(drop.isAccepted());
+    QTRY_COMPARE(window.playback_.requests.pending().size(), std::size_t{1});
+    const auto queued = window.playback_.requests.pending().front().source;
+    QCOMPARE(queued.title, std::string{"Fixture Tone"});
+
+    // And onto the header's Up Next button: queued at the end.
+    {
+        auto* button = window.up_next_button_;
+        QDragEnterEvent over{QPoint{5, 5}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+                             Qt::NoModifier};
+        QApplication::sendEvent(button, &over);
+        QVERIFY(over.isAccepted());
+        QDropEvent onto{QPointF{5, 5}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+        QApplication::sendEvent(button, &onto);
+        QVERIFY(onto.isAccepted());
+        QTRY_COMPARE(window.playback_.requests.pending().size(), std::size_t{2});
+    }
+
+    // No tab holds its album, yet Up Next and the header find its cover.
+    const auto key = LocalListModel::groupKeyOf(queued);
+    for (const auto& tab : window.list_tabs_) {
+        tab->model->setArtwork(key, {});
+    }
+    window.artwork_cache_.remove(key);
+    window.artwork_pending_.remove(key);
+    window.up_next_local_model_->setArtwork(key, {});
+    window.refreshUpNext();
+    QTRY_VERIFY(window.up_next_local_model_->hasArtwork(key));
+    window.refreshHeaderCover(QString::fromStdString(queued.entry_id.to_string()));
+    QTRY_COMPARE(window.header_cover_key_, key);
+}
+
 void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -1073,9 +1142,12 @@ void BenchMainWindowTest::activeTabAccentSurvivesThemeTextColor() {
     QVERIFY(colored_pixels() > 10);
     bar.setCurrentIndex(1);
     QVERIFY(colored_pixels() > 10);
+    // The tab being browsed is filled with the list's ground; the others
+    // are not, whichever is playing.
     const auto image = bar.grab().toImage();
-    QCOMPARE(image.pixelColor(bar.tabRect(1).center().x(), bar.tabRect(1).bottom() - 1), accent);
-    QVERIFY(image.pixelColor(bar.tabRect(0).center().x(), bar.tabRect(0).bottom() - 1) != accent);
+    const auto ground = bar.palette().color(QPalette::Base);
+    QCOMPARE(image.pixelColor(bar.tabRect(1).center().x(), bar.tabRect(1).bottom() - 1), ground);
+    QVERIFY(image.pixelColor(bar.tabRect(0).center().x(), bar.tabRect(0).bottom() - 1) != ground);
     bar.setTabData(0, false);
     bar.setTabIcon(0, QIcon{});
     QCOMPARE(colored_pixels(), 0);
@@ -1090,8 +1162,10 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
     const auto index = tabs->indexOf(local.view);
+    // Marked by the bar's dot; the icon is left to say which engine a tab
+    // plays on, and this one plays here.
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
-    QVERIFY(!tabs->tabIcon(index).isNull());
+    QVERIFY(tabs->tabIcon(index).isNull());
     QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("Active playback queue")));
     window.refreshUpNext();
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
@@ -10863,7 +10937,7 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
         QTRY_COMPARE(window.property("trackknife-player-replaygain").toInt(), 2);
         random->trigger();
         QTRY_COMPARE(window.property("trackknife-player-replaygain").toInt(), 1);
-        QCOMPARE(rg->text(), QStringLiteral("RG: Automatic"));
+        QCOMPARE(rg->text(), QStringLiteral("ReplayGain: Automatic"));
         // Icons, not letters, with one-shot marked on the icon itself.
         QVERIFY(!single->icon().isNull() && !consume->icon().isNull());
         const auto plain_single = single->icon().pixmap(22, 22).toImage();

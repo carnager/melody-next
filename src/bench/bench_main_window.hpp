@@ -81,6 +81,10 @@ namespace trackknife::query {
 struct CompiledTkq;
 }
 
+namespace trackknife::ui {
+class LocalFilesMimeData;
+}
+
 namespace trackknife::bench {
 struct ConvertDialogItem;
 
@@ -151,6 +155,8 @@ class BenchMainWindow final : public QMainWindow {
     void buildTransport();
     void buildUpNext();
     void refreshUpNext();
+    // Queues what was dragged out of a library, with its tags.
+    bool enqueueLibraryDrop(const ui::LocalFilesMimeData& files, int position);
     void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
     // `remote`: whose files these are (ADR-0227). Up Next holds one engine's
     // asks at a time.
@@ -380,6 +386,7 @@ class BenchMainWindow final : public QMainWindow {
     void buildLocalPlaybackControls(QMenu* playback_menu);
     void refreshLocalPlaybackControls();
     void saveLocalPlaybackModes();
+    void styleStatusBar();
     void applyLocalPlaybackModes();
     void showReplayGainPreampDialog();
     // Resolve the playing entry to its current row in `tab`, or -1 when the
@@ -441,6 +448,9 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
     // The cover of the playing entry's album, from a tab that has it.
     void refreshHeaderCover(const QString& entry);
+    // An album's cover from the lists or the cache; fetched when neither has
+    // it, arriving later through the same path as a tab's.
+    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, bool remote);
     void setUpNextCount(int count);
     void playRow(ListTab& tab, int row);
     void refreshTransport();
@@ -522,6 +532,9 @@ class BenchMainWindow final : public QMainWindow {
     QLabel* now_playing_cover_{nullptr};
     // The group whose cover the header shows, so a tick does not rescale it.
     QString header_cover_key_;
+    // The album whose cover the header is waiting for, and the entry playing.
+    QString header_cover_wanted_;
+    QString header_cover_entry_;
     QLabel* selection_status_{nullptr};
     QSlider* volume_{nullptr};
     QToolButton* device_button_{nullptr};

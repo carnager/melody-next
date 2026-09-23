@@ -99,6 +99,17 @@ bool BenchMainWindow::eventFilter(QObject* watched, QEvent* event) {
         (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
          event->type() == QEvent::Drop)) {
         auto* drop = static_cast<QDropEvent*>(event);
+        // Out of a library: queued at the end, like a list's rows.
+        if (const auto* files = dynamic_cast<const ui::LocalFilesMimeData*>(drop->mimeData());
+            files != nullptr && files->property(library_entries_property).isValid()) {
+            if (event->type() == QEvent::Drop && !enqueueLibraryDrop(*files, -1)) {
+                drop->ignore();
+                return true;
+            }
+            drop->setDropAction(Qt::CopyAction);
+            drop->accept();
+            return true;
+        }
         auto* source = qobject_cast<QTableView*>(drop->source());
         if (!source || qobject_cast<LocalListModel*>(source->model()) == nullptr) {
             drop->ignore();

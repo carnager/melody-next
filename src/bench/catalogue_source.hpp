@@ -88,6 +88,8 @@ class CatalogueSource final {
     // One line naming the source, for a panel to show. Three states, and the
     // difference between the last two is what was previously invisible.
     [[nodiscard]] QString describe() const;
+    // Whether the library can be reached now; describe() says why not.
+    [[nodiscard]] bool reachable() const;
 
   private:
     std::filesystem::path database_;

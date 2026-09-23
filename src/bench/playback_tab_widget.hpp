@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include <QCursor>
+#include <QMouseEvent>
 #include <QPainterPath>
 #include <QPixmap>
 #include <QStyleOptionTab>
@@ -33,8 +35,12 @@ inline QIcon playbackSpeakerIcon(const QPalette& palette) {
     return QIcon(pixmap);
 }
 
-// Draw selection independently of playback identity, even under themes that
-// override tab label colors. The icon identifies playback; the underline browsing.
+// Tabs as in the mockup: the current one is filled with the list's own
+// ground so it reads as the top of the list below it; the others are plain
+// text, quieter. The tab that is playing carries an accent dot, whichever
+// tab is being browsed -- selection and playback stay independent, even
+// under themes that override tab label colours. A tab's icon, where it has
+// one, says which engine it plays on.
 class PlaybackTabBar final : public QTabBar {
   public:
     using QTabBar::QTabBar;
@@ -42,37 +48,56 @@ class PlaybackTabBar final : public QTabBar {
   protected:
     void paintEvent(QPaintEvent*) override {
         QStylePainter painter(this);
-        const auto draw = [this, &painter](int index) {
+        painter.setRenderHint(QPainter::Antialiasing);
+        const auto hovered = tabAt(mapFromGlobal(QCursor::pos()));
+        const auto draw = [this, &painter, hovered](int index) {
             QStyleOptionTab option;
             initStyleOption(&option, index);
-            painter.drawControl(QStyle::CE_TabBarTabShape, option);
-            if (index == currentIndex()) {
-                painter.fillRect(option.rect.adjusted(1, 1, -1, -1),
-                                 palette().color(QPalette::Window).lighter(115));
-                painter.fillRect(QRect(option.rect.left() + 2, option.rect.bottom() - 2,
-                                       option.rect.width() - 4, 3),
-                                 palette().color(QPalette::Highlight));
+            const bool current = index == currentIndex();
+            const auto tab = option.rect.adjusted(1, 3, -1, 0);
+            if (current || index == hovered) {
+                QPainterPath shape;
+                shape.addRoundedRect(QRectF(tab).adjusted(0, 0, 0, 6), 5, 5);
+                painter.save();
+                painter.setClipRect(tab);
+                auto fill = palette().color(QPalette::Base);
+                if (!current) {
+                    fill.setAlpha(110);
+                }
+                painter.fillPath(shape, fill);
+                painter.restore();
             }
-            auto rect = option.rect.adjusted(10, 0, -10, 0);
+            auto rect = option.rect.adjusted(12, 3, -10, 0);
             if (!option.leftButtonSize.isEmpty())
                 rect.setLeft(rect.left() + option.leftButtonSize.width() + 4);
             if (!option.rightButtonSize.isEmpty())
                 rect.setRight(rect.right() - option.rightButtonSize.width() - 4);
+            const bool playing = tabData(index).toBool();
+            const auto dot_width = playing ? 11 : 0;
             const auto icon_size =
-                option.icon.isNull() ? QSize{} : option.icon.actualSize(option.iconSize);
-            const auto icon_width = icon_size.isEmpty() ? 0 : icon_size.width() + 4;
-            const auto text = fontMetrics().elidedText(option.text, Qt::ElideRight,
-                                                       qMax(0, rect.width() - icon_width));
-            const auto width = fontMetrics().horizontalAdvance(text) + icon_width;
+                option.icon.isNull() ? QSize{} : option.icon.actualSize(QSize{14, 14});
+            const auto icon_width = icon_size.isEmpty() ? 0 : icon_size.width() + 5;
+            const auto text = fontMetrics().elidedText(
+                option.text, Qt::ElideRight, qMax(0, rect.width() - icon_width - dot_width));
+            const auto width = fontMetrics().horizontalAdvance(text) + icon_width + dot_width;
             auto x = rect.left() + qMax(0, (rect.width() - width) / 2);
+            if (playing) {
+                painter.save();
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(palette().color(QPalette::Highlight));
+                painter.drawEllipse(QPointF(x + 3.5, rect.center().y() + 1), 3.5, 3.5);
+                painter.restore();
+                x += dot_width;
+            }
             if (!icon_size.isEmpty()) {
                 option.icon.paint(
                     &painter,
-                    QRect(QPoint(x, rect.center().y() - icon_size.height() / 2), icon_size));
+                    QRect(QPoint(x, rect.center().y() - icon_size.height() / 2 + 1), icon_size),
+                    Qt::AlignCenter, current ? QIcon::Normal : QIcon::Disabled);
                 x += icon_width;
             }
             painter.save();
-            painter.setPen(palette().color(QPalette::WindowText));
+            painter.setPen(palette().color(current ? QPalette::Text : QPalette::PlaceholderText));
             painter.drawText(QRect(x, rect.top(), qMax(0, rect.right() - x + 1), rect.height()),
                              Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, text);
             painter.restore();
@@ -82,6 +107,18 @@ class PlaybackTabBar final : public QTabBar {
                 draw(index);
         if (currentIndex() >= 0 && isTabVisible(currentIndex()))
             draw(currentIndex());
+    }
+    void enterEvent(QEnterEvent* event) override {
+        QTabBar::enterEvent(event);
+        update();
+    }
+    void leaveEvent(QEvent* event) override {
+        QTabBar::leaveEvent(event);
+        update();
+    }
+    void mouseMoveEvent(QMouseEvent* event) override {
+        QTabBar::mouseMoveEvent(event);
+        update();
     }
 };
 

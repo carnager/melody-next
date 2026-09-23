@@ -216,6 +216,8 @@ class LocalListModel final : public QAbstractTableModel {
     // The delegate's album-grouping identity for a row; artwork is keyed and
     // painted per group.
     [[nodiscard]] QString groupKey(int row) const;
+    // The same key for a row held anywhere: an album's cover is shared by it.
+    [[nodiscard]] static QString groupKeyOf(const LocalTrackRow& track);
     [[nodiscard]] bool hasArtwork(const QString& key) const { return artwork_.contains(key); }
     void setArtwork(const QString& key, QImage image);
     [[nodiscard]] QImage artwork(const QString& key) const { return artwork_.value(key); }

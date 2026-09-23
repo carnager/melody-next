@@ -217,6 +217,11 @@ bool CatalogueSource::localEngineOutdated() const {
     return local_engine_ && bench::localEngineOutdated(*local_engine_);
 }
 
+bool CatalogueSource::reachable() const {
+    const std::lock_guard guard{mutex_};
+    return client_ && client_->connected();
+}
+
 QString CatalogueSource::describe() const {
     const std::lock_guard guard{mutex_};
     const bool connected = client_ && client_->connected();

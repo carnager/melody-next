@@ -1289,7 +1289,10 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabTextColor(index, QColor{});
     tabs_->tabBar()->setTabData(index, active);
     tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}));
-    tabs_->setTabIcon(index, active ? playbackSpeakerIcon(tabs_->palette()) : QIcon{});
+    // The playing dot is the tab bar's own; the icon says where it plays.
+    tabs_->setTabIcon(index, tab.document.remote
+                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                 : QIcon{});
     const auto kind = tab.document.kind == persistence::ListKind::scratch
                           ? QStringLiteral("Persistent scratch list")
                           : QStringLiteral("Named Trackknife working list");

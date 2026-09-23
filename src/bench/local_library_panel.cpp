@@ -44,6 +44,9 @@ constexpr int entry_role = Qt::UserRole + 1;
 constexpr int query_role = Qt::UserRole + 2;
 constexpr int loaded_role = Qt::UserRole + 3;
 constexpr int more_role = Qt::UserRole + 4;
+// The line an empty top level shows, so its text can follow what is learned
+// later about the library's folders.
+constexpr int empty_state_role = Qt::UserRole + 20;
 
 QString text(const std::string& value) { return QString::fromUtf8(value); }
 std::string bytes(const QString& value) { return value.toUtf8().toStdString(); }
@@ -538,6 +541,14 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
          }});
 }
 
+QString LocalLibraryPanel::emptyLibraryText() const {
+    if (!has_roots_) {
+        return tr("The library is empty");
+    }
+    return *has_roots_ ? tr("Nothing indexed yet — press Refresh to scan your folders")
+                       : tr("No music folders yet — choose Folders… to add one");
+}
+
 void LocalLibraryPanel::reloadTree() {
     locate_target_.reset();
     ++generation_;
@@ -720,8 +731,12 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                      }
                  }
              } else if (target->rowCount() == 0) {
-                 auto* empty = new QStandardItem(tr("No matches"));
+                 // Why it is empty, at the top: a search that found nothing
+                 // is not a library with no folders.
+                 const bool top = !parent.isValid() && query.text.empty();
+                 auto* empty = new QStandardItem(top ? emptyLibraryText() : tr("No matches"));
                  empty->setEnabled(false);
+                 empty->setData(top, empty_state_role);
                  target->appendRow(empty);
              }
              static_cast<ui::LibraryTreeView*>(tree_)->completePendingExpansions();
@@ -1283,8 +1298,15 @@ void LocalLibraryPanel::loadRoots() {
                      status_->setText(outcome.error);
                      return;
                  }
+                 has_roots_ = !outcome.roots.empty();
                  if (outcome.roots.empty()) {
                      status_->setText(tr("Choose Folders… to add your music collection."));
+                 }
+                 // The empty line may have been drawn before this was known.
+                 for (int row = 0; row < model_->rowCount(); ++row) {
+                     if (auto* item = model_->item(row); item && item->data(empty_state_role).toBool()) {
+                         item->setText(emptyLibraryText());
+                     }
                  }
                  std::size_t offline = 0;
                  if (folders_widget_) {

@@ -22,6 +22,7 @@
 #include <QLineEdit>
 #include <QFile>
 #include <QSettings>
+#include <QTreeView>
 #include <QStandardPaths>
 #include <QtTest>
 #include <atomic>
@@ -47,6 +48,7 @@ class LibraryPanelEngineTest final : public QObject {
     void aTcpEngineIsReachedWithItsToken();
     void theEngineReadsCoversWhereTheFilesAre();
     void aLargeSelectionTravelsInParts();
+    void anEmptyLibrarySaysWhy();
 };
 
 // Settings go to Qt's test location, never the user's own.
@@ -214,6 +216,50 @@ void LibraryPanelEngineTest::aLargeSelectionTravelsInParts() {
     QCOMPARE(tracks->back().raw_path, paths->back());
     // And the connection is still there for what comes next.
     QVERIFY(remote->roots().has_value());
+    (*server)->stop();
+}
+
+// An empty library says why -- no folders, or folders not yet scanned --
+// rather than "No matches", which reads as a search that found nothing.
+void LibraryPanelEngineTest::anEmptyLibrarySaysWhy() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+    const auto top_line = [](LocalLibraryPanel& panel) {
+        auto* tree = panel.findChild<QTreeView*>();
+        return tree && tree->model()->rowCount() > 0 ? tree->model()->index(0, 0).data().toString()
+                                                      : QString{};
+    };
+    {
+        CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
+                                   CatalogueSource::Role::remote};
+        LocalLibraryPanel panel{catalogues};
+        panel.show();
+        QTRY_COMPARE(top_line(panel), QStringLiteral("No music folders yet — choose Folders… to add one"));
+    }
+    const auto music = directory.path() + QStringLiteral("/music");
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(catalogue.add_root(music.toStdString()).has_value());
+    {
+        CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
+                                   CatalogueSource::Role::remote};
+        LocalLibraryPanel panel{catalogues};
+        panel.show();
+        QTRY_COMPARE(top_line(panel),
+                     QStringLiteral("Nothing indexed yet — press Refresh to scan your folders"));
+    }
     (*server)->stop();
 }
 

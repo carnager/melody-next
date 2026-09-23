@@ -153,6 +153,10 @@ class LocalLibraryPanel final : public QWidget {
     QLabel* query_error_{nullptr};
     QTreeView* tree_{nullptr};
     QStandardItemModel* model_{nullptr};
+    // Whether the library has folders, once known: what an empty library
+    // says depends on it.
+    std::optional<bool> has_roots_;
+    [[nodiscard]] QString emptyLibraryText() const;
     QLabel* status_{nullptr};
     QToolButton* scan_button_{nullptr};
     QTimer* search_timer_{nullptr};

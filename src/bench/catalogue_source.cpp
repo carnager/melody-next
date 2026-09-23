@@ -63,6 +63,10 @@ class UnavailableCatalogue final : public engine::Catalogue {
     artwork_source(const std::string&, const core::CancellationToken&) const override {
         return refuse<std::optional<std::string>>();
     }
+    [[nodiscard]] core::Result<std::vector<unsigned char>>
+    artwork(const std::string&, const core::CancellationToken&) const override {
+        return refuse<std::vector<unsigned char>>();
+    }
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>&, const core::CancellationToken&) const override {
         return refuse<std::vector<persistence::LibraryTrackSnapshot>>();

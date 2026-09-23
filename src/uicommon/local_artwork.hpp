@@ -9,6 +9,7 @@
 #include <cstdint>
 
 #include <string>
+#include <vector>
 
 namespace trackknife::ui {
 
@@ -20,7 +21,11 @@ namespace trackknife::ui {
 // tagger and none in the list for the same file.
 inline constexpr std::int64_t maximum_artwork_pixels = 32'000'000;
 
-// Worker-only local thumbnail reader shared by lists and the library. Loads
+// A 128-pixel thumbnail of encoded cover bytes, as they come from a file or
+// from an engine. Null when they are not an image.
+[[nodiscard]] QImage artworkThumbnail(const std::vector<unsigned char>& bytes);
+
+// Worker-only local thumbnail reader for files on this machine. Loads
 // embedded art first, then conventional sibling images; never uses the network.
 [[nodiscard]] QImage loadLocalArtwork(const std::string& raw_path,
                                       const core::CancellationToken& cancellation = {});

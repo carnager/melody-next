@@ -13,10 +13,12 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/server.hpp"
+#include "uicommon/local_artwork.hpp"
 
 #include <QAbstractButton>
 #include <QLabel>
 #include <QLineEdit>
+#include <QFile>
 #include <QSettings>
 #include <QtTest>
 #include <atomic>
@@ -39,6 +41,7 @@ class LibraryPanelEngineTest final : public QObject {
     void thePanelSaysWhichLibraryItIsShowing();
     void theSearchDialogAsksTheEngineToo();
     void aTcpEngineIsReachedWithItsToken();
+    void theEngineReadsCoversWhereTheFilesAre();
 };
 
 void LibraryPanelEngineTest::init() {
@@ -84,6 +87,56 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
                  qPrintable(catalogues.describe()));
     }
 
+    (*server)->stop();
+}
+
+// ADR-0227: a client shows a remote library's covers with nothing of it
+// mounted: the engine reads the cover on its own machine and sends the image.
+// It does that only for tracks in its library -- it reads files for anyone
+// who can reach it, so it reads nothing else.
+void LibraryPanelEngineTest::theEngineReadsCoversWhereTheFilesAre() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto music = directory.path() + QStringLiteral("/music");
+    const auto elsewhere = directory.path() + QStringLiteral("/elsewhere");
+    QVERIFY(QDir{}.mkpath(music) && QDir{}.mkpath(elsewhere));
+    QFile fixture{QStringLiteral(TRACKKNIFE_AUDIO_FIXTURE_DIR "/art-tone-flac.b64")};
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const auto bytes = QByteArray::fromBase64(fixture.readAll());
+    for (const auto& folder : {music, elsewhere}) {
+        QFile file{folder + QStringLiteral("/art.flac")};
+        QVERIFY(file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size());
+    }
+    const auto indexed = (music + QStringLiteral("/art.flac")).toStdString();
+    const auto outside = (elsewhere + QStringLiteral("/art.flac")).toStdString();
+
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    QVERIFY(catalogue.add_root(music.toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue.scan({}, progress).has_value());
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket, dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+    CatalogueSource catalogues{directory.path().toStdString() + "/unused.sqlite3",
+                               CatalogueSource::Role::remote};
+    const auto remote = catalogues.open();
+
+    const auto cover = remote->artwork(indexed);
+    QVERIFY2(cover.has_value(), cover ? "" : cover.error().message.c_str());
+    QVERIFY(!cover->empty());
+    QVERIFY(!ui::artworkThumbnail(*cover).isNull());
+
+    // The same file, not in the library: not read, cover or no cover.
+    QVERIFY(!remote->artwork(outside).has_value());
     (*server)->stop();
 }
 

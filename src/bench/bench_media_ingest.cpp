@@ -28,6 +28,7 @@
 #include <limits>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -429,10 +430,11 @@ void apply_loudness_sidecar_projection(
 } // namespace
 
 void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
-    // ADR-0227: a remote tab's files are on the remote machine. Its rows come
-    // from that engine's index; reading them here would read nothing, or the
-    // wrong file at the same path.
+    // ADR-0227: a remote tab's files are on the remote's machine, and need
+    // not be reachable from this one. What a row is missing is asked of that
+    // engine's index instead of read from a file here.
     if (tab.document.remote) {
+        enrichRemoteRows(tab);
         return;
     }
     const auto id = QString::fromStdString(tab.document.id.to_string());
@@ -447,6 +449,100 @@ void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
         }
     }
     pumpProbeQueue();
+}
+
+// A remote tab's counterpart to probing: rows that are bare paths -- dragged
+// from the remote's library, or taken over from its queue, which holds paths
+// and not tags -- are filled in from the remote engine's index, keeping each
+// row's identity. A path the index does not know keeps its file name and is
+// not asked about again: left unanswered, it would be asked on every look at
+// the tab, ahead of everything else on the connection.
+void BenchMainWindow::enrichRemoteRows(ListTab& tab) {
+    if (!remote_catalogue_source_) {
+        return;
+    }
+    std::vector<std::string> paths;
+    std::unordered_set<std::string> asked;
+    for (const auto& row : tab.model->rows()) {
+        // A CUE track's title is its own, not the file's.
+        if (!row.probed && !row.segment && asked.insert(row.raw_path).second) {
+            paths.push_back(row.raw_path);
+        }
+    }
+    if (paths.empty()) {
+        return;
+    }
+    // Opened here, used there: it holds its own reference to the connection.
+    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->open()};
+    using Found = std::vector<persistence::LibraryTrackSnapshot>;
+    auto* watcher = new QFutureWatcher<Found>(this);
+    const auto id = QString::fromStdString(tab.document.id.to_string());
+    connect(watcher, &QFutureWatcher<Found>::finished, this,
+            [this, watcher, id, asked = std::move(asked)] {
+                watcher->deleteLater();
+                auto found = watcher->result();
+                auto* target = tabForDocument(id);
+                if (target == nullptr) {
+                    return;
+                }
+                std::unordered_map<std::string, LocalTrackRow> by_path;
+                for (auto& snapshot : found) {
+                    auto row = cached_library_row(std::move(snapshot));
+                    auto path = row.raw_path;
+                    by_path.emplace(std::move(path), std::move(row));
+                }
+                bool applied = false;
+                for (int row = 0; row < target->model->rowCount(); ++row) {
+                    const auto& current = target->model->rows()[static_cast<std::size_t>(row)];
+                    if (current.probed || current.segment || !asked.contains(current.raw_path)) {
+                        continue;
+                    }
+                    const auto match = by_path.find(current.raw_path);
+                    auto filled = match != by_path.end() ? match->second : current;
+                    filled.selection = current.selection;
+                    std::vector<LocalTrackRow> one;
+                    one.push_back(std::move(filled));
+                    applied =
+                        target->model->applyProbeRows(current.raw_path, row, std::move(one)) ||
+                        applied;
+                }
+                if (applied) {
+                    schedulePersist();
+                    syncArtwork(*target);
+                }
+            });
+    watcher->setFuture(QtConcurrent::run([catalogue, paths = std::move(paths)] {
+        // All at once; a batch holding one path the index does not know is
+        // refused whole, and then each is asked alone.
+        if (auto all = catalogue->cached_tracks(paths, {})) {
+            return std::move(*all);
+        }
+        Found found;
+        for (const auto& path : paths) {
+            if (auto one = catalogue->cached_tracks({path}, {}); one && !one->empty()) {
+                found.push_back(std::move(one->front()));
+            }
+        }
+        return found;
+    }));
+}
+
+void BenchMainWindow::insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths,
+                                        const int insertion_row) {
+    std::vector<LocalTrackRow> rows;
+    rows.reserve(raw_paths.size());
+    for (auto& raw_path : raw_paths) {
+        LocalTrackRow row;
+        row.raw_path = std::move(raw_path);
+        row.title = core::escape_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+        rows.push_back(std::move(row));
+    }
+    if (rows.empty()) {
+        return;
+    }
+    tab.model->appendRows(std::move(rows), insertion_row);
+    markTabDirty(tab);
+    enqueueUnprobedRows(tab);
 }
 
 void BenchMainWindow::pumpProbeQueue() {
@@ -549,9 +645,14 @@ void BenchMainWindow::finishProbeBatch() {
 }
 
 void BenchMainWindow::syncArtwork(ListTab& tab) {
-    // Covers are read from files; a remote tab's are not here (ADR-0227).
+    // A remote tab's files are on the remote's machine (ADR-0227), and
+    // nothing of it need be mounted here: its covers come from its engine.
+    std::shared_ptr<engine::Catalogue> engine;
     if (tab.document.remote) {
-        return;
+        if (!remote_catalogue_source_) {
+            return;
+        }
+        engine = remote_catalogue_source_->open();
     }
     const auto& rows = tab.model->rows();
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
@@ -569,7 +670,8 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
         }
         if (!artwork_pending_.contains(key)) {
             artwork_pending_.insert(key);
-            artwork_queue_.push_back(ArtworkJob{.key = key, .raw_path = track.raw_path});
+            artwork_queue_.push_back(
+                ArtworkJob{.key = key, .raw_path = track.raw_path, .engine = engine});
         }
     }
     pumpArtworkQueue();
@@ -613,9 +715,15 @@ void BenchMainWindow::pumpArtworkQueue() {
     artwork_outcome_ =
         std::make_shared<ArtworkOutcome>(ArtworkOutcome{.key = std::move(job.key), .image = {}});
     artwork_watcher_.setFuture(
-        QtConcurrent::run([raw_path = std::move(job.raw_path), outcome = artwork_outcome_,
+        QtConcurrent::run([raw_path = std::move(job.raw_path), engine = std::move(job.engine),
+                           outcome = artwork_outcome_,
                            cancellation = probe_cancellation_.token()] {
-            outcome->image = ui::loadLocalArtwork(raw_path, cancellation);
+            if (engine) {
+                const auto bytes = engine->artwork(raw_path, cancellation);
+                outcome->image = bytes ? ui::artworkThumbnail(*bytes) : QImage{};
+            } else {
+                outcome->image = ui::loadLocalArtwork(raw_path, cancellation);
+            }
 #if defined(TRACKKNIFE_THREAD_SANITIZER)
             __tsan_release(outcome.get());
 #endif

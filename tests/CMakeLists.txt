@@ -631,6 +631,8 @@ if(TRACKKNIFE_BUILD_UI)
         PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
                 trackknife_project_options trackknife_project_warnings
     )
+    target_compile_definitions(trackknife_library_panel_engine_tests PRIVATE
+        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME library-panel-engine COMMAND trackknife_library_panel_engine_tests)
     set_tests_properties(library-panel-engine PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")

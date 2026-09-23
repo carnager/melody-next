@@ -147,6 +147,7 @@ void BenchMainWindow::connectRemoteEngine() {
                         destination->model->appendRows(std::move(rows), insertion);
                     }
                     markTabDirty(*destination);
+                    syncArtwork(*destination);
                     schedulePersist();
                     tabs_->setCurrentWidget(destination->view);
                 });
@@ -165,6 +166,7 @@ void BenchMainWindow::connectRemoteEngine() {
                     true);
                 destination->model->appendRows(std::move(rows));
                 markTabDirty(*destination);
+                syncArtwork(*destination);
             });
 }
 

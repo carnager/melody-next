@@ -57,6 +57,9 @@ class RemoteCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::optional<std::string>>
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::vector<unsigned char>>
+    artwork(const std::string& raw_path,
+            const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;

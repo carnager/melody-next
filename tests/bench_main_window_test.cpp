@@ -263,6 +263,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback_data();
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
+    void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void theDeviceMenuChoosesAnOutputAgent();
     void upNextEditingAndPersistence();
     void upNextPanelAnimationAndSettings();
@@ -4615,6 +4616,61 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
                      QStringLiteral("local"));
         QCOMPARE(button->text(), QString{});
     }
+}
+
+// ADR-0227: a remote tab's files are on the remote's machine and need not be
+// reachable from this one, so its tags and covers come from that engine --
+// however its rows got there.
+void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    const auto art = music + QStringLiteral("/art.flac");
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"), art));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    const auto covered = [tab](const int row) {
+        return row < tab->model->rowCount() && tab->model->hasArtwork(tab->model->groupKey(row));
+    };
+
+    // With the buttons: tagged from the start, and a cover from the engine.
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && page->entries.size() == 1U);
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
+    QTRY_VERIFY(covered(0));
+
+    // Dropped: a bare path, filled in from the engine's index -- not looked
+    // for on this computer, where without a mount it would not be.
+    window.insertRemotePaths(*tab, {QFile::encodeName(art).toStdString()}, -1);
+    QCOMPARE(tab->model->rowCount(), 2);
+    QTRY_COMPARE(tab->model->rows()[1].title, std::string{"Fixture Tone"});
+    QCOMPARE(tab->model->rows()[1].artist, std::string{"Trackknife Project"});
+    QTRY_VERIFY(covered(1));
+
+    // A path the engine does not know keeps its file name, and is asked about
+    // once rather than on every look at the tab.
+    window.insertRemotePaths(*tab, {"/nowhere/on/either/machine.flac"}, -1);
+    QTRY_VERIFY(tab->model->rows()[2].probed);
+    QCOMPARE(tab->model->rows()[2].title, std::string{"machine.flac"});
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

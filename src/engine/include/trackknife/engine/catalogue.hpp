@@ -94,6 +94,13 @@ class Catalogue {
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const = 0;
 
+    // A track's cover, as encoded bytes read on the engine's machine --
+    // embedded, else a folder image beside it. Only for a track in the
+    // library: this reads files on the engine's machine for anyone who can
+    // reach it, so it reads nothing else. Empty when there is no cover.
+    [[nodiscard]] virtual core::Result<std::vector<unsigned char>>
+    artwork(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const = 0;
+
     // Cached fields and technicals for the given raw paths, in input order,
     // preserving duplicates. No filesystem access: a path missing from the
     // index is an error rather than a trigger for discovery.
@@ -152,6 +159,9 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::optional<std::string>>
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::vector<unsigned char>>
+    artwork(const std::string& raw_path,
+            const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;

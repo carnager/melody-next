@@ -394,6 +394,30 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             return Json{{"facts", std::move(rendered)}};
         });
 
+    // The cover itself, read where the files are, so a client shows it with
+    // no access to them. Null when the track has none.
+    dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {
+        auto encoded = required_string(params, "path");
+        if (!encoded) {
+            return std::unexpected(std::move(encoded.error()));
+        }
+        auto raw_path = protocol::decode_raw_path(*encoded);
+        if (!raw_path) {
+            return std::unexpected(bad_params("path is not an encoded path", "path"));
+        }
+        auto image = catalogue.artwork(*raw_path);
+        if (!image) {
+            return std::unexpected(std::move(image.error()));
+        }
+        Json answer = Json::object();
+        answer["image"] =
+            image->empty()
+                ? Json(nullptr)
+                : Json(protocol::encode_raw_path(std::string_view{
+                      reinterpret_cast<const char*>(image->data()), image->size()}));
+        return answer;
+    });
+
     dispatcher.on(
         "catalogue.artwork_source", [&catalogue](const Json& params) -> core::Result<Json> {
             auto encoded = required_string(params, "album_key");

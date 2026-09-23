@@ -19,4 +19,11 @@ namespace trackknife::formats {
 load_embedded_artwork(const std::string& raw_path,
                       const core::CancellationToken& cancellation = {});
 
+// A track's cover as encoded bytes: the embedded picture, else the first of
+// the usual folder images beside it (cover, folder, front; jpg/jpeg/png).
+// Empty when there is none, or it is over 16 MiB. What Trackknife shows and
+// what an engine sends a client come from here, so they agree.
+[[nodiscard]] std::vector<unsigned char>
+load_track_artwork(const std::string& raw_path, const core::CancellationToken& cancellation = {});
+
 } // namespace trackknife::formats

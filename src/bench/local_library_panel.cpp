@@ -1424,8 +1424,13 @@ void LocalLibraryPanel::updateArtwork() {
                 // be worth having.
                 auto catalogue = catalogues->open();
                 const auto source = catalogue->artwork_source(key.toStdString(), cancellation);
-                return source && source->has_value() ? ui::loadLocalArtwork(**source, cancellation)
-                                                     : QImage{};
+                if (!source || !source->has_value() || cancellation.is_cancellation_requested()) {
+                    return QImage{};
+                }
+                // Read by the engine, where the files are: a remote library
+                // shows its covers with nothing of it mounted here.
+                const auto bytes = catalogue->artwork(**source, cancellation);
+                return bytes ? ui::artworkThumbnail(*bytes) : QImage{};
             }));
         return;
     }

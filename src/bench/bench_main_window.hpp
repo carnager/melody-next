@@ -317,12 +317,19 @@ class BenchMainWindow final : public QMainWindow {
         LocalTrackRow whole_file_fallback;
     };
     void enqueueUnprobedRows(ListTab& tab);
+    void enrichRemoteRows(ListTab& tab);
+    // Rows from paths a remote engine gave -- a drag from its library --
+    // without looking for them on this computer, where they need not be.
+    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);
     void pumpProbeQueue();
     void finishProbeBatch();
 
     struct ArtworkJob {
         QString key;
         std::string raw_path;
+        // Asked for the cover when the file is on its machine, not this one:
+        // a remote tab's (ADR-0227). Unset, the file is read here.
+        std::shared_ptr<engine::Catalogue> engine;
     };
     struct ArtworkOutcome {
         QString key;

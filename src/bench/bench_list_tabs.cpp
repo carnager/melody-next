@@ -640,13 +640,23 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
             const QPersistentModelIndex anchor{target->model->index(insertion_row, 0)};
             const bool anchored = anchor.isValid();
             const QPointer<BenchMainWindow> window{this};
-            files.resolve(
-                [window, id, insertion_row, anchor, anchored](std::vector<std::string> paths) {
-                    if (window && window->tabForDocument(id) && (!anchored || anchor.isValid())) {
-                        window->startDiscovery(std::move(paths), id,
-                                               anchored ? anchor.row() : insertion_row);
-                    }
-                });
+            const bool remote = target->document.remote;
+            files.resolve([window, id, insertion_row, anchor, anchored,
+                           remote](std::vector<std::string> paths) {
+                auto* destination = window ? window->tabForDocument(id) : nullptr;
+                if (destination == nullptr || (anchored && !anchor.isValid())) {
+                    return;
+                }
+                const auto row = anchored ? anchor.row() : insertion_row;
+                // ADR-0227: a remote's paths are its machine's. Looking for
+                // them here, as discovery does, would find nothing without a
+                // mount and drop them all.
+                if (remote) {
+                    window->insertRemotePaths(*destination, std::move(paths), row);
+                    return;
+                }
+                window->startDiscovery(std::move(paths), id, row);
+            });
             return true;
         });
     view->setLocalUrlDropCallback([this, id](const QList<QUrl>& urls, const int insertion_row) {

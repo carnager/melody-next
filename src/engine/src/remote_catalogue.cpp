@@ -110,6 +110,31 @@ core::Result<void> RemoteCatalogue::set_rating(const std::string& hash, const bo
     return {};
 }
 
+core::Result<std::vector<unsigned char>>
+RemoteCatalogue::artwork(const std::string& raw_path, const core::CancellationToken&) const {
+    auto answer =
+        client_->call("catalogue.artwork", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto found = answer->find("image");
+    if (found == answer->end()) {
+        return std::unexpected(malformed("image"));
+    }
+    if (found->is_null()) {
+        return std::vector<unsigned char>{};
+    }
+    if (!found->is_string()) {
+        return std::unexpected(malformed("image"));
+    }
+    // Bytes travel as paths do: base64.
+    auto decoded = protocol::decode_raw_path(found->get<std::string>());
+    if (!decoded) {
+        return std::unexpected(malformed("image"));
+    }
+    return std::vector<unsigned char>(decoded->begin(), decoded->end());
+}
+
 core::Result<std::optional<std::string>>
 RemoteCatalogue::artwork_source(const std::string& album_key,
                                 const core::CancellationToken&) const {

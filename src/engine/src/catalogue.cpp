@@ -2,6 +2,8 @@
 
 #include "trackknife/engine/catalogue.hpp"
 
+#include "trackknife/formats/artwork.hpp"
+
 namespace trackknife::engine {
 
 core::Result<persistence::LocalLibrary> LocalCatalogue::open() const {
@@ -34,6 +36,21 @@ LocalCatalogue::artwork_source(const std::string& album_key,
         return std::unexpected(std::move(library.error()));
     }
     return library->artwork_source(album_key, cancellation);
+}
+
+core::Result<std::vector<unsigned char>>
+LocalCatalogue::artwork(const std::string& raw_path,
+                        const core::CancellationToken& cancellation) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    // In the library, or not read: a path missing from the index is an
+    // error there, which is the answer here too.
+    if (auto known = library->cached_tracks({raw_path}, cancellation); !known) {
+        return std::unexpected(std::move(known.error()));
+    }
+    return formats::load_track_artwork(raw_path, cancellation);
 }
 
 core::Result<std::vector<persistence::LibraryTrackSnapshot>>

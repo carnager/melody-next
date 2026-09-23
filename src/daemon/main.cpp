@@ -162,16 +162,18 @@ int main(int argc, char** argv) {
     trackknife::protocol::Dispatcher dispatcher;
     trackknife::engine::register_catalogue_methods(dispatcher, catalogue);
 
-    // Playback is optional at startup: a machine with no audio device can
-    // still serve the catalogue, which is what a headless indexing host is.
-    // Refusing to start would make the engine useless there for no gain.
-    auto player = trackknife::engine::Player::create();
-    if (player) {
-        trackknife::engine::register_playback_methods(dispatcher, **player);
+    // A machine with no audio device still plays: through output agents
+    // (ADR-0228). Its player keeps the queue and plays nothing until one is
+    // chosen, rather than the engine going without playback at all.
+    std::unique_ptr<trackknife::engine::Player> player;
+    if (auto local = trackknife::engine::Player::create()) {
+        player = std::move(*local);
     } else {
-        std::cerr << "melodyd: no audio output (" << player.error().message
-                  << "); playback methods are unavailable\n";
+        std::cerr << "melodyd: no audio output here (" << local.error().message
+                  << "); playing through output agents only\n";
+        player = trackknife::engine::Player::create_without_audio();
     }
+    trackknife::engine::register_playback_methods(dispatcher, *player);
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
@@ -235,14 +237,14 @@ int main(int argc, char** argv) {
     // this the first client to connect after a restart decides what the engine
     // is playing, which is the client owning the queue with extra steps.
     std::optional<trackknife::engine::PlaybackStore> playback_store;
-    if (player) {
-        watcher.emplace(**player, sink);
+    {
+        watcher.emplace(*player, sink);
         watcher->start();
-        recorder.emplace(**player, *workspace);
+        recorder.emplace(*player, *workspace);
         recorder->start();
-        playback_store.emplace(**player, *workspace);
+        playback_store.emplace(*player, *workspace);
         if (playback_store->restore()) {
-            std::cerr << "melodyd: restored " << (*player)->queue().size()
+            std::cerr << "melodyd: restored " << player->queue().size()
                       << " queued entries, paused\n";
         }
         playback_store->start();

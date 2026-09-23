@@ -2,6 +2,8 @@
 
 #include "trackknife/engine/player.hpp"
 
+#include "trackknife/core/local_sources.hpp"
+
 #include <algorithm>
 #include <utility>
 
@@ -35,8 +37,143 @@ class Player::QueueView final : public audio::PlaybackList {
     const std::vector<QueueEntry>* entries_;
 };
 
-Player::Player(std::unique_ptr<audio::LocalAuditionService> audition)
-    : audition_(std::move(audition)) {}
+namespace {
+
+// The output when none is chosen: it refuses to play and reports silence, so
+// the player never holds a null output and a headless server keeps its queue.
+class SilentAudition final : public audio::Audition {
+  public:
+    [[nodiscard]] audio::LocalAuditionSnapshot snapshot() const override { return {}; }
+    [[nodiscard]] core::Result<void>
+    load_selected_and_play(std::string, formats::AudioSourceSelection,
+                           std::optional<formats::ReplayGainInfo>) override {
+        return refuse();
+    }
+    [[nodiscard]] core::Result<void>
+    load_selected_segment_and_play(std::string, formats::AudioSourceSelection,
+                                   formats::SampleRange,
+                                   std::optional<formats::ReplayGainInfo>) override {
+        return refuse();
+    }
+    [[nodiscard]] core::Result<void>
+    restore_paused(std::string, core::LocalSourceRevision, formats::AudioSourceSelection,
+                   std::optional<formats::SampleRange>, std::int64_t,
+                   std::optional<formats::ReplayGainInfo>) override {
+        return refuse();
+    }
+    [[nodiscard]] core::Result<void>
+    queue_gapless_next_selected(std::string, formats::AudioSourceSelection,
+                                std::optional<formats::ReplayGainInfo>, std::uint64_t) override {
+        return refuse();
+    }
+    [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(
+        std::string, formats::AudioSourceSelection, formats::SampleRange,
+        std::optional<formats::ReplayGainInfo>, std::uint64_t) override {
+        return refuse();
+    }
+    // Stopping, pausing and settings on nothing are not failures: there is
+    // nothing to stop, and a setting applies once there is an output.
+    [[nodiscard]] core::Result<void> clear_gapless_next() override { return {}; }
+    [[nodiscard]] core::Result<void> play() override { return refuse(); }
+    [[nodiscard]] core::Result<void> pause() override { return {}; }
+    [[nodiscard]] core::Result<void> stop() override { return {}; }
+    [[nodiscard]] core::Result<void> seek_to_seconds(double) override { return {}; }
+    [[nodiscard]] core::Result<void> set_volume_percent(int) override { return {}; }
+    [[nodiscard]] core::Result<void> set_replay_gain_mode(audio::ReplayGainMode) override {
+        return {};
+    }
+    [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps) override {
+        return {};
+    }
+    [[nodiscard]] core::Result<void> set_buffer_config(audio::PlaybackBufferDurationConfig) override {
+        return {};
+    }
+    [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
+    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string>) override {
+        return {};
+    }
+
+  private:
+    [[nodiscard]] static core::Result<void> refuse() {
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "no output is chosen to play on",
+                                           .context = {}});
+    }
+};
+
+[[nodiscard]] bool sounding(const audio::LocalAuditionState state) {
+    return state == audio::LocalAuditionState::playing ||
+           state == audio::LocalAuditionState::buffering ||
+           state == audio::LocalAuditionState::draining;
+}
+
+} // namespace
+
+Player::Player(std::unique_ptr<audio::LocalAuditionService> local)
+    : local_(std::move(local)), silent_(std::make_unique<SilentAudition>()),
+      audition_(local_ ? static_cast<audio::Audition*>(local_.get()) : silent_.get()) {}
+
+std::unique_ptr<Player> Player::create_without_audio() {
+    return std::unique_ptr<Player>{new Player{nullptr}};
+}
+
+audio::LocalAuditionService* Player::local_output() const noexcept { return local_.get(); }
+
+audio::Audition* Player::current_output() const {
+    const std::lock_guard guard{mutex_};
+    return audition_ == silent_.get() ? nullptr : audition_;
+}
+
+core::Result<void> Player::set_output(audio::Audition* output) {
+    const std::lock_guard guard{mutex_};
+    auto* next = output != nullptr ? output : silent_.get();
+    if (next == audition_) {
+        return {};
+    }
+    const auto before = audition_->snapshot();
+    const bool was_playing = sounding(before.state);
+    std::int64_t position_ms = 0;
+    if (before.format && before.format->sample_rate > 0) {
+        const auto rate = static_cast<std::int64_t>(before.format->sample_rate);
+        position_ms =
+            before.position_sample / rate * 1000 + before.position_sample % rate * 1000 / rate;
+    }
+    // One output at a time: the old one falls silent before the new one
+    // speaks.
+    static_cast<void>(audition_->stop());
+    // How loud a track is meant to be travels with the music; the volume is
+    // the device's own.
+    static_cast<void>(next->set_replay_gain_mode(before.replay_gain_mode));
+    static_cast<void>(next->set_replay_gain_preamps(before.replay_gain_preamps));
+    audition_ = next;
+    gapless_entry_.reset();
+    advanced_from_.reset();
+    seen_transitions_ = audition_->snapshot().chain_transitions;
+
+    const auto* entry = anchors_.current.is_nil() ? nullptr : find_locked(anchors_.current);
+    if (entry == nullptr || audition_ == silent_.get()) {
+        return {};
+    }
+    auto revision = before.source_revision;
+    if (!revision) {
+        auto observed = core::observe_local_source_revision(entry->source.raw_path);
+        if (observed) {
+            revision = *observed;
+        }
+    }
+    auto restored = audition_->restore_paused(entry->source.raw_path,
+                                              revision.value_or(core::LocalSourceRevision{}),
+                                              entry->source.selection, entry->source.segment,
+                                              position_ms, entry->replay_gain);
+    if (!restored) {
+        return std::unexpected(std::move(restored.error()));
+    }
+    seen_transitions_ = audition_->snapshot().chain_transitions;
+    if (was_playing) {
+        return audition_->play();
+    }
+    return {};
+}
 
 Player::~Player() = default;
 
@@ -242,9 +379,10 @@ void Player::refresh_gapless_locked() {
     const auto queued = entry.source.segment
                             ? audition_->queue_gapless_next_selected_segment(
                                   entry.source.raw_path, entry.source.selection,
-                                  *entry.source.segment, entry.replay_gain)
-                            : audition_->queue_gapless_next_selected(
-                                  entry.source.raw_path, entry.source.selection, entry.replay_gain);
+                                  *entry.source.segment, entry.replay_gain, 0U)
+                            : audition_->queue_gapless_next_selected(entry.source.raw_path,
+                                                                     entry.source.selection,
+                                                                     entry.replay_gain, 0U);
     // A rejected continuation is not an error: the formats may differ, and the
     // engine simply plays the next track the ordinary way.
     gapless_entry_ = queued ? std::optional{entry.entry_id} : std::nullopt;

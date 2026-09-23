@@ -56,7 +56,12 @@ struct QueueEntry final {
 // socket threads that serve requests.
 class Player final {
   public:
+    // With this machine's audio as its output. Fails without an audio device.
     [[nodiscard]] static core::Result<std::unique_ptr<Player>> create();
+    // ADR-0228: without audio of its own -- a server with no sound device,
+    // which plays through output agents. It keeps its queue and plays
+    // nothing until an output is chosen.
+    [[nodiscard]] static std::unique_ptr<Player> create_without_audio();
 
     Player(const Player&) = delete;
     Player(Player&&) = delete;
@@ -118,6 +123,15 @@ class Player final {
     // is sent -- the engine is told what to do, not what the user picked.
     [[nodiscard]] core::Result<void> set_replay_gain_mode(audio::ReplayGainMode mode);
     [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps preamps);
+
+    // ADR-0228: what plays the sound. This machine's audio (`local_output`),
+    // an output agent, or nothing. Moving playback to another output carries
+    // the playing entry and position across, stops the old one first, and
+    // keeps playing if it was: the music moves rooms rather than restarting.
+    [[nodiscard]] audio::LocalAuditionService* local_output() const noexcept;
+    // Null chooses no output: the queue stays, nothing plays.
+    [[nodiscard]] core::Result<void> set_output(audio::Audition* output);
+    [[nodiscard]] audio::Audition* current_output() const;
 
     // Which sink plays and how much decoded audio is held ahead of it. The
     // engine's, not a client's: they describe the machine the engine runs on,
@@ -268,7 +282,7 @@ class Player final {
   private:
     class QueueView;
 
-    explicit Player(std::unique_ptr<audio::LocalAuditionService> audition);
+    explicit Player(std::unique_ptr<audio::LocalAuditionService> local);
 
     // Callers already hold the lock. `from_request` records where ordinary
     // list playback was interrupted, so playback returns there afterwards
@@ -304,7 +318,12 @@ class Player final {
     void follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot);
 
     mutable std::mutex mutex_;
-    std::unique_ptr<audio::LocalAuditionService> audition_;
+    // This machine's audio, if it has any; an output that refuses to play,
+    // for when nothing is chosen; and whichever one is playing, which is
+    // never null.
+    std::unique_ptr<audio::LocalAuditionService> local_;
+    std::unique_ptr<audio::Audition> silent_;
+    audio::Audition* audition_{nullptr};
     core::ListenAccounting listening_;
     std::vector<QueueEntry> queue_;
     audio::PlaybackAnchors anchors_;

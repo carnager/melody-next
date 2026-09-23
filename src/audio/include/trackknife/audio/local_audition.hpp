@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/audio/audition.hpp"
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/audio/pipewire_output.hpp"
 #include "trackknife/core/error.hpp"
@@ -137,7 +138,7 @@ using LocalAuditionDependentStateCommitter = std::function<core::Result<void>()>
 
 // Owns every blocking local-audio operation on one serialized worker. Public
 // commands only enqueue bounded work and are safe to invoke from the UI thread.
-class LocalAuditionService final {
+class LocalAuditionService final : public Audition {
   public:
     [[nodiscard]] static core::Result<std::unique_ptr<LocalAuditionService>>
     create(LocalAuditionConfig config = {});
@@ -148,7 +149,7 @@ class LocalAuditionService final {
     LocalAuditionService& operator=(LocalAuditionService&&) = delete;
     ~LocalAuditionService();
 
-    [[nodiscard]] LocalAuditionSnapshot snapshot() const;
+    [[nodiscard]] LocalAuditionSnapshot snapshot() const override;
 
     [[nodiscard]] core::Result<void> load_and_play(std::string raw_path);
     // Revision-checked restoration: open and seek on the worker, without
@@ -157,10 +158,10 @@ class LocalAuditionService final {
     restore_paused(std::string raw_path, core::LocalSourceRevision expected_revision,
                    formats::AudioSourceSelection selection,
                    std::optional<formats::SampleRange> segment, std::int64_t position_ms,
-                   std::optional<formats::ReplayGainInfo> replay_gain_override = {});
-    [[nodiscard]] core::Result<void>
-    load_selected_and_play(std::string raw_path, formats::AudioSourceSelection selection,
-                           std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+                   std::optional<formats::ReplayGainInfo> replay_gain_override = {}) override;
+    [[nodiscard]] core::Result<void> load_selected_and_play(
+        std::string raw_path, formats::AudioSourceSelection selection,
+        std::optional<formats::ReplayGainInfo> replay_gain_override = {}) override;
     // Network media is deliberately explicit: unlike local sources it has no
     // inode revision to observe/revalidate around decoder open.
     [[nodiscard]] core::Result<void>
@@ -170,7 +171,7 @@ class LocalAuditionService final {
                                                            formats::SampleRange segment);
     [[nodiscard]] core::Result<void> load_selected_segment_and_play(
         std::string raw_path, formats::AudioSourceSelection selection, formats::SampleRange segment,
-        std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+        std::optional<formats::ReplayGainInfo> replay_gain_override = {}) override;
     // Queues the file to continue seamlessly when the current one ends. The
     // continuation must match the active PCM format exactly; on rejection the
     // snapshot's next_raw_path simply stays empty and the caller falls back
@@ -179,7 +180,7 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void>
     queue_gapless_next_selected(std::string raw_path, formats::AudioSourceSelection selection,
                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {},
-                                std::uint64_t occurrence_token = 0U);
+                                std::uint64_t occurrence_token = 0U) override;
     [[nodiscard]] core::Result<void>
     queue_gapless_network_stream(std::string url,
                                  std::optional<formats::ReplayGainInfo> replay_gain_override = {});
@@ -188,33 +189,34 @@ class LocalAuditionService final {
     [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(
         std::string raw_path, formats::AudioSourceSelection selection, formats::SampleRange segment,
         std::optional<formats::ReplayGainInfo> replay_gain_override = {},
-        std::uint64_t occurrence_token = 0U);
-    [[nodiscard]] core::Result<void> clear_gapless_next();
-    [[nodiscard]] core::Result<void> play();
-    [[nodiscard]] core::Result<void> pause();
-    [[nodiscard]] core::Result<void> stop();
+        std::uint64_t occurrence_token = 0U) override;
+    [[nodiscard]] core::Result<void> clear_gapless_next() override;
+    [[nodiscard]] core::Result<void> play() override;
+    [[nodiscard]] core::Result<void> pause() override;
+    [[nodiscard]] core::Result<void> stop() override;
     [[nodiscard]] core::Result<void> seek_to_sample(std::int64_t target_sample);
     // Queued time-domain seek for protocol adapters that do not know the
     // source rate when they enqueue a load followed by a seek.
-    [[nodiscard]] core::Result<void> seek_to_seconds(double target_seconds);
+    [[nodiscard]] core::Result<void> seek_to_seconds(double target_seconds) override;
     // Perceptual volume in percent [0, 100]; mapped cubically onto PipeWire's
     // linear stream mixer and reapplied when a new source connects.
-    [[nodiscard]] core::Result<void> set_volume_percent(int percent);
-    [[nodiscard]] core::Result<void> set_replay_gain_mode(ReplayGainMode mode);
+    [[nodiscard]] core::Result<void> set_volume_percent(int percent) override;
+    [[nodiscard]] core::Result<void> set_replay_gain_mode(ReplayGainMode mode) override;
     [[nodiscard]] core::Result<void> set_replay_gain_info(formats::ReplayGainInfo info);
-    [[nodiscard]] core::Result<void> set_replay_gain_preamps(ReplayGainPreamps preamps);
+    [[nodiscard]] core::Result<void> set_replay_gain_preamps(ReplayGainPreamps preamps) override;
     // Selects the decoded-PCM ring policy for the next source load. If a
     // source is active, its immutable ring remains attached and any prepared
     // gapless continuation is dropped so the new policy takes effect at the
     // next track boundary.
-    [[nodiscard]] core::Result<void> set_buffer_config(PlaybackBufferDurationConfig buffer_config);
+    [[nodiscard]] core::Result<void>
+    set_buffer_config(PlaybackBufferDurationConfig buffer_config) override;
     // Starts or restarts the persistent PipeWire registry/default monitor on
     // the worker. Its initial synchronization is bounded.
-    [[nodiscard]] core::Result<void> refresh_output_devices();
+    [[nodiscard]] core::Result<void> refresh_output_devices() override;
     // Selects the PipeWire sink for current and future sources; nullopt is the
     // system default. A loaded source reconnects in place, preserving its
     // position, volume, and play/pause state.
-    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target);
+    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target) override;
     // Revision-qualifies and synchronously re-keys active, gapless-next, and
     // already queued source intents without reopening a decoder or disturbing
     // transport. This is a mutation-worker barrier for a file-publication

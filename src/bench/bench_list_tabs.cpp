@@ -779,7 +779,11 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
 }
 
 void BenchMainWindow::openSearchDialog() {
+    // Opened from a remote tab, it searches the remote's library.
+    const auto* current = currentListTab();
+    const bool from_remote = current != nullptr && current->document.remote;
     if (search_dialog_ != nullptr) {
+        search_dialog_->followLibrary(from_remote);
         search_dialog_->show();
         search_dialog_->raise();
         search_dialog_->activateWindow();
@@ -865,7 +869,9 @@ void BenchMainWindow::openSearchDialog() {
                     playRow(*destination, 0);
                 }
             });
+    search_dialog_->followLibrary(from_remote);
     search_dialog_->show();
+    search_dialog_->focusInput();
 }
 
 BenchMainWindow::ListTab* BenchMainWindow::currentListTab() {

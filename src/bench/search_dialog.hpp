@@ -56,6 +56,9 @@ class SearchDialog final : public QDialog {
 
     void watchCurrentModel(QAbstractItemModel* model);
     void focusInput();
+    // The library of the tab it was opened from: the remote's for a remote
+    // tab, this computer's for a local one. "Current tab" is kept.
+    void followLibrary(bool remote);
 
   protected:
     void showEvent(QShowEvent* event) override;

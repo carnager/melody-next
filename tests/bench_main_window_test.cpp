@@ -4728,6 +4728,9 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     // The search dialog searches the remote's library too, as you type, with
     // artists, albums and tracks apart -- and what it finds goes to a remote
     // tab.
+    // Opened from a remote tab, it searches the remote's library, ready to
+    // type into.
+    window.tabs_->setCurrentWidget(tab->view);
     window.openSearchDialog();
     auto* dialog = window.search_dialog_.data();
     QVERIFY(dialog != nullptr);
@@ -4737,9 +4740,15 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     auto* results = dialog->findChild<QListWidget*>(QStringLiteral("bench-search-results"));
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-search-status"));
     QVERIFY(scope && query_mode && input && results && status);
-    const auto remote_scope = scope->findData(QStringLiteral("remote"));
-    QVERIFY(remote_scope >= 0);
-    scope->setCurrentIndex(remote_scope);
+    QCOMPARE(scope->currentData().toString(), QStringLiteral("remote"));
+    QTRY_COMPARE(dialog->focusWidget(), static_cast<QWidget*>(input));
+    // From a local tab, this computer's; and back again, the remote's.
+    window.tabs_->setCurrentWidget(local->view);
+    window.openSearchDialog();
+    QCOMPARE(scope->currentData().toString(), QStringLiteral("local"));
+    window.tabs_->setCurrentWidget(tab->view);
+    window.openSearchDialog();
+    QCOMPARE(scope->currentData().toString(), QStringLiteral("remote"));
     query_mode->setChecked(false);
     input->setText(QStringLiteral("fixture"));
     QTRY_VERIFY(status->text().contains(QStringLiteral("1 album")));

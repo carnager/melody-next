@@ -240,6 +240,16 @@ SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_acce
 
 void SearchDialog::focusInput() { input_->setFocus(Qt::ShortcutFocusReason); }
 
+void SearchDialog::followLibrary(const bool remote) {
+    if (!databaseScope()) {
+        return;
+    }
+    const auto wanted = scope_->findData(remote ? QStringLiteral("remote") : QStringLiteral("local"));
+    if (wanted >= 0 && wanted != scope_->currentIndex()) {
+        scope_->setCurrentIndex(wanted);
+    }
+}
+
 void SearchDialog::showEvent(QShowEvent* event) {
     QDialog::showEvent(event);
     focusInput();

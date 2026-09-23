@@ -14,7 +14,9 @@
 #include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/token.hpp"
 #include "trackknife/engine/workspace.hpp"
+#include "trackknife/protocol/client.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -54,10 +56,15 @@ void request_stop(int) { stop_requested.store(true); }
 }
 
 void usage() {
-    std::cerr << "usage: tkengine [--socket PATH] [--state DIR]\n"
+    std::cerr << "usage: tkengine [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/tkengine.sock)\n"
               << "  --state DIR    where the databases live (default $XDG_DATA_HOME/trackknife)\n"
+              << "  --listen HOST:PORT\n"
+              << "                 also accept TCP connections. Every one must authenticate\n"
+              << "                 with the token in DIR/engine.token (created on first use).\n"
+              << "                 There is no TLS: use it on a home network or inside a\n"
+              << "                 WireGuard tunnel, or put a TLS proxy in front (ADR-0223).\n"
               << "\n"
               << "Speaks protocol v1: one JSON object per line. Try:\n"
               << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -75,6 +82,7 @@ void usage() {
 int main(int argc, char** argv) {
     auto socket_path = default_socket_path();
     auto state_directory = default_state_directory();
+    std::string listen_address;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -85,6 +93,8 @@ int main(int argc, char** argv) {
             socket_path = value();
         } else if (argument == "--state") {
             state_directory = value();
+        } else if (argument == "--listen") {
+            listen_address = value();
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -134,9 +144,47 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    // Jobs report through the socket, so the registry is given its sink and
-    // must be destroyed before the server it writes to.
-    trackknife::engine::JobRegistry jobs{(*server)->sink()};
+    // ADR-0223: TCP only when asked for, and never without a token.
+    std::unique_ptr<trackknife::engine::Server> tcp_server;
+    if (!listen_address.empty()) {
+        const auto endpoint = trackknife::protocol::Endpoint::parse(listen_address, {});
+        if (!endpoint || !endpoint->tcp()) {
+            std::cerr << "tkengine: --listen wants HOST:PORT, got " << listen_address << "\n";
+            return EXIT_FAILURE;
+        }
+        const auto token_path = state_directory / "engine.token";
+        auto token = trackknife::engine::load_or_create_token(token_path);
+        if (!token) {
+            std::cerr << "tkengine: " << token.error().message << " (" << token_path.string()
+                      << ")\n";
+            return EXIT_FAILURE;
+        }
+        auto listening = trackknife::engine::Server::listen_tcp(endpoint->host, endpoint->port,
+                                                                dispatcher, std::move(*token));
+        if (!listening) {
+            std::cerr << "tkengine: could not listen on " << listen_address << ": "
+                      << listening.error().message << "\n";
+            return EXIT_FAILURE;
+        }
+        tcp_server = std::move(*listening);
+        std::cerr << "tkengine: listening on " << endpoint->describe() << " (token in "
+                  << token_path.string() << ")\n";
+    }
+
+    // Every listener hears every event. A client on TCP is as much a client
+    // as one on the socket, and a job started from one must report to both.
+    const auto unix_sink = (*server)->sink();
+    const auto tcp_sink = tcp_server ? tcp_server->sink() : trackknife::engine::EventSink{};
+    const trackknife::engine::EventSink sink = [unix_sink, tcp_sink](const auto& event) {
+        unix_sink(event);
+        if (tcp_sink) {
+            tcp_sink(event);
+        }
+    };
+
+    // Jobs report through the sockets, so the registry is given its sink and
+    // must be destroyed before the servers it writes to.
+    trackknife::engine::JobRegistry jobs{sink};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
@@ -152,7 +200,7 @@ int main(int argc, char** argv) {
     // is playing, which is the client owning the queue with extra steps.
     std::optional<trackknife::engine::PlaybackStore> playback_store;
     if (player) {
-        watcher.emplace(**player, (*server)->sink());
+        watcher.emplace(**player, sink);
         watcher->start();
         recorder.emplace(**player, *workspace);
         recorder->start();
@@ -170,6 +218,9 @@ int main(int argc, char** argv) {
     std::signal(SIGPIPE, SIG_IGN);
 
     (*server)->start();
+    if (tcp_server) {
+        tcp_server->start();
+    }
     std::cerr << "tkengine: listening on " << socket_path.string() << "\n"
               << "tkengine: state in " << state_directory.string() << "\n";
 
@@ -190,6 +241,9 @@ int main(int argc, char** argv) {
     }
     if (watcher) {
         watcher->stop();
+    }
+    if (tcp_server) {
+        tcp_server->stop();
     }
     (*server)->stop();
     return EXIT_SUCCESS;

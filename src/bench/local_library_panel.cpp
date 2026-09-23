@@ -411,9 +411,11 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     if (catalogues_ != nullptr && !catalogues_->usingEngine() &&
         !catalogues_->failure().isEmpty()) {
         QTimer::singleShot(0, this, [this] {
-            status_->setText(
-                tr("Using the local library: the engine at %1 is unreachable (%2)")
-                    .arg(pathLabel(catalogues_->socket().string()), catalogues_->failure()));
+            const auto where = catalogues_->endpoint()
+                                   ? pathLabel(catalogues_->endpoint()->describe())
+                                   : QString{};
+            status_->setText(tr("Using the local library: the engine at %1 is unreachable (%2)")
+                                 .arg(where, catalogues_->failure()));
         });
     }
 }

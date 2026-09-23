@@ -68,6 +68,8 @@ class SettingsDialog final : public QDialog {
     // instead, so pointing at one is a deliberate act and the default is
     // unchanged behaviour.
     static constexpr auto library_engine_socket_key = "library/engine-socket";
+    // ADR-0223: the token a TCP engine asks for. Unused for a unix socket.
+    static constexpr auto library_engine_token_key = "library/engine-token";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";
@@ -93,6 +95,7 @@ class SettingsDialog final : public QDialog {
     QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* music_root_{nullptr};
     QLineEdit* engine_socket_{nullptr};
+    QLineEdit* engine_token_{nullptr};
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};

@@ -4,6 +4,7 @@
 
 #include "trackknife/protocol/dispatch.hpp"
 
+#include <netdb.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -51,6 +52,110 @@ core::Result<std::unique_ptr<Client>> Client::connect(const std::filesystem::pat
 
     std::unique_ptr<Client> client{new Client{descriptor}};
     client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};
+    return client;
+}
+
+std::optional<Endpoint> Endpoint::parse(std::string_view text, std::string token) {
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
+        text.remove_prefix(1);
+    }
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) {
+        text.remove_suffix(1);
+    }
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    constexpr std::string_view scheme{"tcp://"};
+    const bool explicit_tcp = text.starts_with(scheme);
+    if (explicit_tcp) {
+        text.remove_prefix(scheme.size());
+    }
+    if (!explicit_tcp && text.find('/') != std::string_view::npos) {
+        Endpoint endpoint;
+        endpoint.socket = std::filesystem::path{std::string{text}};
+        return endpoint;
+    }
+    const auto colon = text.rfind(':');
+    if (colon == std::string_view::npos || colon + 1U >= text.size()) {
+        return std::nullopt;
+    }
+    auto host = text.substr(0, colon);
+    // [::1]:6601 -- the brackets are the URL spelling, not part of the address.
+    if (host.size() >= 2U && host.front() == '[' && host.back() == ']') {
+        host = host.substr(1, host.size() - 2U);
+    }
+    unsigned port = 0;
+    for (const auto digit : text.substr(colon + 1U)) {
+        if (digit < '0' || digit > '9') {
+            return std::nullopt;
+        }
+        port = port * 10U + static_cast<unsigned>(digit - '0');
+        if (port > 65535U) {
+            return std::nullopt;
+        }
+    }
+    if (port == 0U || host.empty()) {
+        return std::nullopt;
+    }
+    Endpoint endpoint;
+    endpoint.host = std::string{host};
+    endpoint.port = static_cast<std::uint16_t>(port);
+    endpoint.token = std::move(token);
+    return endpoint;
+}
+
+std::string Endpoint::describe() const {
+    if (!tcp()) {
+        return socket.string();
+    }
+    const bool literal_v6 = host.find(':') != std::string::npos;
+    return (literal_v6 ? "[" + host + "]" : host) + ":" + std::to_string(port);
+}
+
+core::Result<std::unique_ptr<Client>> Client::connect(const Endpoint& endpoint) {
+    if (!endpoint.tcp()) {
+        return connect(endpoint.socket);
+    }
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_NUMERICSERV;
+    addrinfo* found = nullptr;
+    const auto service = std::to_string(endpoint.port);
+    if (const auto resolved = ::getaddrinfo(endpoint.host.c_str(), service.c_str(), &hints, &found);
+        resolved != 0) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = "could not resolve the engine's address",
+                        .context = {{.key = "host", .value = endpoint.host},
+                                    {.key = "reason", .value = ::gai_strerror(resolved)}}});
+    }
+    int descriptor = -1;
+    for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
+        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        if (descriptor < 0) {
+            continue;
+        }
+        if (::connect(descriptor, candidate->ai_addr, candidate->ai_addrlen) == 0) {
+            break;
+        }
+        ::close(descriptor);
+        descriptor = -1;
+    }
+    ::freeaddrinfo(found);
+    if (descriptor < 0) {
+        return std::unexpected(transport_error("could not reach the engine"));
+    }
+
+    std::unique_ptr<Client> client{new Client{descriptor}};
+    client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};
+    // First, before anything a caller does: until this succeeds the engine
+    // refuses every other request, and a caller should learn that here rather
+    // than from whichever call it happens to make first.
+    auto admitted = client->call("session.authenticate", Json{{"token", endpoint.token}});
+    if (!admitted) {
+        return std::unexpected(std::move(admitted.error()));
+    }
     return client;
 }
 

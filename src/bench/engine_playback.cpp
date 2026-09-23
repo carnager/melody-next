@@ -18,7 +18,7 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
     if (!catalogues.usingEngine()) {
         return;
     }
-    socket_ = catalogues.socket();
+    endpoint_ = *catalogues.endpoint();
     static_cast<void>(open());
 
     // An engine is a separate process with its own lifetime: it can be
@@ -42,7 +42,7 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
 }
 
 bool EnginePlayback::open() {
-    auto client = protocol::Client::connect(socket_);
+    auto client = protocol::Client::connect(endpoint_);
     if (!client) {
         return false;
     }

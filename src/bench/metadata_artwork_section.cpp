@@ -108,6 +108,8 @@ namespace {
         return QStringLiteral("Database error");
     case core::ErrorCode::invariant:
         return QStringLiteral("Internal error");
+    case core::ErrorCode::unauthorized:
+        return QStringLiteral("Not authorized");
     }
     return QStringLiteral("Error");
 }

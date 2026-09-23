@@ -303,14 +303,24 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_socket_ = new QLineEdit(library);
     engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
     engine_socket_->setPlaceholderText(
-        QStringLiteral("empty: this process serves its own library and playback"));
+        QStringLiteral("socket path or host:port; empty: this process does both"));
     engine_socket_->setText(
         settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Engine socket:"), engine_socket_);
+    engine_form->addRow(QStringLiteral("Engine:"), engine_socket_);
+    engine_token_ = new QLineEdit(library);
+    engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
+    engine_token_->setEchoMode(QLineEdit::Password);
+    engine_token_->setPlaceholderText(QStringLiteral("only for host:port -- from engine.token"));
+    engine_token_->setText(
+        settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
+    engine_form->addRow(QStringLiteral("Engine token:"), engine_token_);
     library_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("The unix socket of a running trackknife engine (tkengine), which then owns "
-                       "the library and playback. Takes effect when the workspace is reopened."),
+        QStringLiteral("A running trackknife engine (tkengine), which then owns the library and "
+                       "playback: its unix socket, or host:port when it was started with --listen. "
+                       "A TCP engine needs the token from its engine.token file. There is no "
+                       "encryption; use it on a home network or through WireGuard. Takes effect "
+                       "when the workspace is reopened."),
         library);
     engine_note->setWordWrap(true);
     library_layout->addWidget(engine_note);

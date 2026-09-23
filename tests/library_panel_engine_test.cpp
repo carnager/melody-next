@@ -38,10 +38,53 @@ class LibraryPanelEngineTest final : public QObject {
     void anUnreachableEngineFallsBackAndSaysSo();
     void thePanelSaysWhichLibraryItIsShowing();
     void theSearchDialogAsksTheEngineToo();
+    void aTcpEngineIsReachedWithItsToken();
 };
 
 void LibraryPanelEngineTest::init() {
     QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_token_key));
+}
+
+// ADR-0223: the same settings name a TCP engine, with its token. A wrong token
+// has to read as a refusal: "unreachable" would send someone to check the
+// network when the engine is right there saying no.
+void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/library.sqlite3")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "the-right-token");
+    QVERIFY(server.has_value());
+    (*server)->start();
+    const auto address = QStringLiteral("127.0.0.1:%1").arg((*server)->port());
+
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), address);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                         QStringLiteral("the-right-token"));
+    {
+        CatalogueSource catalogues{database};
+        QVERIFY2(catalogues.usingEngine(), qPrintable(catalogues.failure()));
+        QVERIFY(catalogues.describe().contains(address));
+        QVERIFY(!catalogues.describe().contains(QStringLiteral("the-right-token")));
+        auto opened = catalogues.open();
+        QVERIFY(opened->roots().has_value());
+    }
+
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                         QStringLiteral("a-wrong-token"));
+    {
+        CatalogueSource catalogues{database};
+        QVERIFY(!catalogues.usingEngine());
+        QVERIFY2(catalogues.describe().contains(QStringLiteral("refused the token")),
+                 qPrintable(catalogues.describe()));
+    }
+
+    (*server)->stop();
 }
 
 void LibraryPanelEngineTest::aConfiguredEngineServesThePanel() {

@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 namespace trackknife::bench {
 
@@ -41,7 +42,11 @@ class CatalogueSource final {
     [[nodiscard]] std::unique_ptr<engine::Catalogue> open() const;
 
     [[nodiscard]] bool usingEngine() const noexcept { return client_ != nullptr; }
-    [[nodiscard]] const std::filesystem::path& socket() const noexcept { return socket_; }
+    // Where the engine is -- a socket or a TCP address with its token
+    // (ADR-0223). Empty when no engine is configured.
+    [[nodiscard]] const std::optional<protocol::Endpoint>& endpoint() const noexcept {
+        return endpoint_;
+    }
     [[nodiscard]] const QString& failure() const noexcept { return failure_; }
     [[nodiscard]] const std::filesystem::path& database() const noexcept { return database_; }
 
@@ -51,9 +56,12 @@ class CatalogueSource final {
 
   private:
     std::filesystem::path database_;
-    std::filesystem::path socket_;
+    std::optional<protocol::Endpoint> endpoint_;
     std::unique_ptr<protocol::Client> client_;
     QString failure_;
+    // Whether the engine answered and said no, as opposed to not answering.
+    // Decided from the error code: a client must never parse the message.
+    bool refused_{false};
 };
 
 } // namespace trackknife::bench

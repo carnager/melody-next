@@ -10,7 +10,7 @@ namespace {
 
 // The wire names. Changing one of these strings is a protocol change; changing
 // an enumerator name is not.
-constexpr std::array<std::pair<core::ErrorCode, std::string_view>, 10> error_code_names{{
+constexpr std::array<std::pair<core::ErrorCode, std::string_view>, 11> error_code_names{{
     {core::ErrorCode::cancelled, "cancelled"},
     {core::ErrorCode::invalid_argument, "invalid_argument"},
     {core::ErrorCode::not_found, "not_found"},
@@ -21,6 +21,7 @@ constexpr std::array<std::pair<core::ErrorCode, std::string_view>, 10> error_cod
     {core::ErrorCode::backend, "backend"},
     {core::ErrorCode::database, "database"},
     {core::ErrorCode::invariant, "invariant"},
+    {core::ErrorCode::unauthorized, "unauthorized"},
 }};
 
 } // namespace

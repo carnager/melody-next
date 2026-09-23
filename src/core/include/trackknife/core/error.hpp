@@ -19,6 +19,10 @@ enum class ErrorCode {
     backend,
     database,
     invariant,
+    // ADR-0223: the caller has not proven who it is. Distinct from
+    // invalid_argument so a client can tell "ask again with a token" from
+    // "that request was wrong".
+    unauthorized,
 };
 
 struct ErrorContext {

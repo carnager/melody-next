@@ -82,6 +82,11 @@ class EnginePlayback final : public QObject {
     };
     [[nodiscard]] State state() const;
 
+    // Hands the engine a queue without starting anything: an edit to the list
+    // that is playing, rather than a new thing to play.
+    void replaceQueue(const std::vector<LocalTrackRow>& rows,
+                      const std::vector<std::optional<formats::ReplayGainInfo>>& overrides);
+
     // Hands the engine a queue and starts one of its entries. The rows carry
     // their own identities (ADR-0221), so the engine's queue and the model
     // agree about which entry is which without a second mapping.
@@ -90,11 +95,6 @@ class EnginePlayback final : public QObject {
     // nothing where the decoder's own tags should apply. The engine opens the
     // file and reads those for itself; what it cannot see is a sidecar value
     // or a CUE sheet's REM lines, which is why they travel.
-    // Hands the engine a queue without starting anything: an edit to the list
-    // that is playing, rather than a new thing to play.
-    void replaceQueue(const std::vector<LocalTrackRow>& rows,
-                      const std::vector<std::optional<formats::ReplayGainInfo>>& overrides);
-
     void play(const std::vector<LocalTrackRow>& rows,
               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
               const core::StableId& entry);
@@ -148,7 +148,7 @@ class EnginePlayback final : public QObject {
     void send(const QString& method, protocol::Json params);
     void adopt(const protocol::Json& payload);
 
-    std::filesystem::path socket_;
+    protocol::Endpoint endpoint_;
     std::unique_ptr<protocol::Client> client_;
     QTimer* reconnect_timer_{nullptr};
     QThreadPool pool_;

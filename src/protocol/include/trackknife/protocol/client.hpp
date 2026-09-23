@@ -15,9 +15,35 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace trackknife::protocol {
+
+// Where an engine is, and what it takes to be let in.
+//
+// ADR-0223: a unix socket is trusted through its filesystem permissions and
+// needs nothing more; a TCP address needs the engine's token. Keeping both in
+// one value is what lets every caller connect without branching on which kind
+// it was given.
+struct Endpoint final {
+    std::filesystem::path socket;
+    std::string host;
+    std::uint16_t port{0};
+    std::string token;
+
+    [[nodiscard]] bool tcp() const noexcept { return port != 0; }
+
+    // A settings string: "tcp://HOST:PORT", a bare "HOST:PORT", or a socket
+    // path. A path always contains a slash and an address never does, which
+    // is what tells them apart. Nothing is an empty optional.
+    [[nodiscard]] static std::optional<Endpoint> parse(std::string_view text, std::string token);
+
+    // For status text: the address, never the token.
+    [[nodiscard]] std::string describe() const;
+
+    friend bool operator==(const Endpoint&, const Endpoint&) = default;
+};
 
 // A connection to an engine.
 //
@@ -34,6 +60,10 @@ class Client final {
 
     [[nodiscard]] static core::Result<std::unique_ptr<Client>>
     connect(const std::filesystem::path& socket_path);
+    // Connects to either kind, authenticating first when it is TCP. A refused
+    // token is an `unauthorized` error rather than a connection that fails
+    // on its first real request.
+    [[nodiscard]] static core::Result<std::unique_ptr<Client>> connect(const Endpoint& endpoint);
 
     Client(const Client&) = delete;
     Client(Client&&) = delete;

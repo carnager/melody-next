@@ -8,9 +8,15 @@
 
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/token.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include "trackknife/protocol/client.hpp"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -19,6 +25,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -49,6 +56,19 @@ class Client final {
         const auto connected =
             ::connect(descriptor_, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
         require(connected == 0, "the client must connect");
+    }
+    // ADR-0223: the same dumb client over TCP, because the point is that the
+    // handshake is typeable too -- one more line in nc, not a binary preamble.
+    explicit Client(const std::uint16_t port) {
+        descriptor_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        require(descriptor_ >= 0, "the client socket must open");
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(port);
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        const auto connected =
+            ::connect(descriptor_, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+        require(connected == 0, "the client must connect over TCP");
     }
     Client(const Client&) = delete;
     Client(Client&&) = delete;
@@ -83,6 +103,44 @@ class Client final {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds{2});
         }
+    }
+
+    // A line if one arrives within `patience`, otherwise nothing. For
+    // asserting that something was *not* sent, which line() cannot do.
+    [[nodiscard]] std::optional<std::string> maybe_line(const std::chrono::milliseconds patience) {
+        const auto deadline = std::chrono::steady_clock::now() + patience;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (const auto newline = pending_.find('\n'); newline != std::string::npos) {
+                auto found = pending_.substr(0, newline);
+                pending_.erase(0, newline + 1U);
+                return found;
+            }
+            std::array<char, 1024> buffer{};
+            const auto received = ::recv(descriptor_, buffer.data(), buffer.size(), MSG_DONTWAIT);
+            if (received > 0) {
+                pending_.append(buffer.data(), static_cast<std::size_t>(received));
+                continue;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        }
+        return std::nullopt;
+    }
+
+    // Whether the engine has hung up.
+    [[nodiscard]] bool closed_by_peer() {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::array<char, 1024> buffer{};
+            const auto received = ::recv(descriptor_, buffer.data(), buffer.size(), MSG_DONTWAIT);
+            if (received == 0) {
+                return true;
+            }
+            if (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                return true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds{2});
+        }
+        return false;
     }
 
   private:
@@ -222,6 +280,129 @@ void a_second_engine_refuses_an_occupied_socket(const std::filesystem::path& pat
 
 } // namespace
 
+// ADR-0223: TCP authenticates, loopback included, because any local user can
+// reach 127.0.0.1 -- where only the owner can reach the unix socket.
+void tcp_admits_only_the_token_holder() {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "playing"}};
+    });
+
+    const auto refused = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "");
+    require(!refused.has_value(), "a TCP listener without a token is refused outright");
+
+    const std::string token{"a-token-only-the-owner-has"};
+    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, token);
+    require(server.has_value(), "the engine binds a TCP port");
+    require((*server)->port() != 0U, "and reports which one it got");
+    (*server)->start();
+
+    Client stranger{(*server)->port()};
+    stranger.send("{\"id\":1,\"method\":\"playback.state\"}\n");
+    const auto denied = protocol::Json::parse(stranger.line(), nullptr, false);
+    require(denied.at("id") == 1, "an unauthenticated request is answered");
+    require(denied.at("error").at("code") == "unauthorized",
+            "with unauthorized, not the result it asked for");
+
+    // Nor does it hear what is playing.
+    (*server)->sink()(
+        protocol::Event{.name = "playback.changed", .data = protocol::Json{{"status", "playing"}}});
+    require(!stranger.maybe_line(std::chrono::milliseconds{200}).has_value(),
+            "an unauthenticated peer receives no events");
+
+    stranger.send("{\"id\":2,\"method\":\"session.authenticate\",\"params\":{\"token\":\"" + token +
+                  "\"}}\n");
+    const auto admitted = protocol::Json::parse(stranger.line(), nullptr, false);
+    require(admitted.at("result").at("authenticated") == true, "the right token admits it");
+    stranger.send("{\"id\":3,\"method\":\"playback.state\"}\n");
+    const auto answered = protocol::Json::parse(stranger.line(), nullptr, false);
+    require(answered.at("result").at("state") == "playing", "and then it is served");
+    (*server)->sink()(
+        protocol::Event{.name = "playback.changed", .data = protocol::Json{{"status", "playing"}}});
+    require(stranger.maybe_line(std::chrono::seconds{2}).has_value(),
+            "and hears events like any other client");
+
+    Client guesser{(*server)->port()};
+    guesser.send(
+        "{\"id\":1,\"method\":\"session.authenticate\",\"params\":{\"token\":\"guess\"}}\n");
+    const auto wrong = protocol::Json::parse(guesser.line(), nullptr, false);
+    require(wrong.at("error").at("code") == "unauthorized", "a wrong token is refused");
+    require(guesser.closed_by_peer(),
+            "and the connection is closed, so each guess costs a reconnect");
+
+    // The library client, which is what the workspace uses.
+    trackknife::protocol::Endpoint endpoint;
+    endpoint.host = "127.0.0.1";
+    endpoint.port = (*server)->port();
+    endpoint.token = token;
+    auto connected = trackknife::protocol::Client::connect(endpoint);
+    require(connected.has_value(), "the client library authenticates as it connects");
+    auto state = (*connected)->call("playback.state");
+    require(state.has_value() && state->at("state") == "playing", "and is served");
+
+    endpoint.token = "wrong";
+    auto rejected = trackknife::protocol::Client::connect(endpoint);
+    require(!rejected.has_value() && rejected.error().code == core::ErrorCode::unauthorized,
+            "a wrong token fails the connect itself, as unauthorized");
+
+    (*connected)->close();
+    (*server)->stop();
+}
+
+// A settings string names either kind of engine. A path always has a slash
+// and an address never does, so no guessing is needed.
+void an_endpoint_is_read_from_settings() {
+    using trackknife::protocol::Endpoint;
+    const auto unix_socket = Endpoint::parse("/run/user/1000/tkengine.sock", "ignored");
+    require(unix_socket && !unix_socket->tcp(), "a path is a unix socket");
+    require(unix_socket->token.empty(), "which needs no token");
+
+    const auto bare = Endpoint::parse("nas.local:6601", "t");
+    require(bare && bare->tcp() && bare->host == "nas.local" && bare->port == 6601,
+            "host:port is TCP");
+    require(bare->token == "t", "and carries its token");
+    const auto schemed = Endpoint::parse("tcp://10.0.0.2:7000", "t");
+    require(schemed && schemed->host == "10.0.0.2" && schemed->port == 7000,
+            "tcp:// is accepted too");
+    const auto v6 = Endpoint::parse("[::1]:6601", "t");
+    require(v6 && v6->host == "::1" && v6->describe() == "[::1]:6601",
+            "an IPv6 literal loses and regains its brackets");
+
+    require(!Endpoint::parse("", "t"), "empty is no engine");
+    require(!Endpoint::parse("nas.local", "t"), "an address needs a port");
+    require(!Endpoint::parse("nas.local:99999", "t"), "a port must fit");
+    require(!Endpoint::parse("nas.local:0", "t"), "and be a real one");
+    const auto secret = Endpoint::parse("nas.local:6601", "SECRET-TOKEN");
+    require(secret && secret->describe() == "nas.local:6601" &&
+                secret->describe().find("SECRET") == std::string::npos,
+            "describing an endpoint never includes its token");
+}
+
+// ADR-0223: the token is created private, kept, and never trusted once it is
+// not private any more.
+void the_token_file_stays_private(const std::filesystem::path& directory) {
+    const auto path = directory / "engine.token";
+    const auto first = engine::load_or_create_token(path);
+    require(first.has_value(), "a token is created on first use");
+    require(first->size() == 64U, "from 32 random bytes");
+
+    struct stat status{};
+    require(::stat(path.c_str(), &status) == 0, "into a file");
+    require((status.st_mode & 0777U) == 0600U, "that only its owner can read");
+
+    const auto again = engine::load_or_create_token(path);
+    require(again.has_value() && *again == *first,
+            "and reused, so a client configured once keeps working across restarts");
+
+    ::chmod(path.c_str(), 0644);
+    const auto loosened = engine::load_or_create_token(path);
+    require(!loosened.has_value(), "a token others can read is refused rather than quietly used");
+    std::filesystem::remove(path);
+
+    const auto fresh = engine::load_or_create_token(path);
+    require(fresh.has_value() && *fresh != *first, "deleting the file is how it is rotated");
+}
+
 int main() {
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-server-" + core::StableId::random().to_string());
@@ -229,8 +410,11 @@ int main() {
     the_socket_answers_plain_lines(directory / "a.sock");
     events_reach_every_client(directory / "b.sock");
     a_second_engine_refuses_an_occupied_socket(directory / "c.sock");
+    tcp_admits_only_the_token_holder();
+    an_endpoint_is_read_from_settings();
+    the_token_file_stays_private(directory);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 3 scenarios\n";
+    std::cout << "engine server: 6 scenarios\n";
     return EXIT_SUCCESS;
 }

@@ -4,6 +4,9 @@
 
 #include "trackknife/protocol/message.hpp"
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -28,6 +31,18 @@ namespace {
 // hostile sender, not a large request.
 constexpr std::size_t maximum_line_bytes = 1U << 20U;
 
+// Compares without an early exit, so how long a wrong guess takes to be
+// refused says nothing about how much of it was right.
+[[nodiscard]] bool same_token(const std::string_view offered, const std::string_view expected) {
+    unsigned char difference = offered.size() == expected.size() ? 0U : 1U;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const auto left = index < offered.size() ? static_cast<unsigned char>(offered[index]) : 0U;
+        difference = static_cast<unsigned char>(
+            difference | (left ^ static_cast<unsigned char>(expected[index])));
+    }
+    return difference == 0U;
+}
+
 } // namespace
 
 // Owns one client socket. Writes are serialised because a response from this
@@ -36,6 +51,9 @@ struct Server::Connection final {
     int descriptor{-1};
     std::mutex write_mutex;
     std::atomic_bool open{true};
+    // ADR-0223: whether this peer may do anything, including hear events.
+    // True from the start on a unix socket, earned on TCP.
+    std::atomic_bool authenticated{false};
 
     ~Connection() {
         if (descriptor >= 0) {
@@ -115,6 +133,11 @@ core::Result<std::unique_ptr<Server>> Server::listen(std::filesystem::path socke
         ::close(listener);
         return std::unexpected(std::move(error));
     }
+    return finish(listener, std::move(socket_path), dispatcher);
+}
+
+core::Result<std::unique_ptr<Server>> Server::finish(const int listener, std::filesystem::path path,
+                                                     protocol::Dispatcher& dispatcher) {
     if (::listen(listener, 16) < 0) {
         auto error = system_error("could not listen on the socket");
         ::close(listener);
@@ -129,7 +152,74 @@ core::Result<std::unique_ptr<Server>> Server::listen(std::filesystem::path socke
     }
 
     return std::unique_ptr<Server>{
-        new Server{listener, wakeup[0], wakeup[1], std::move(socket_path), dispatcher}};
+        new Server{listener, wakeup[0], wakeup[1], std::move(path), dispatcher}};
+}
+
+core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host,
+                                                         const std::uint16_t port,
+                                                         protocol::Dispatcher& dispatcher,
+                                                         std::string token) {
+    if (token.empty()) {
+        // A TCP listener without a credential is exactly what ADR-0223 exists
+        // to prevent, so it is refused here rather than trusted to callers.
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "a TCP listener requires a token",
+                                           .context = {}});
+    }
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+    addrinfo* found = nullptr;
+    const auto service = std::to_string(port);
+    if (const auto resolved =
+            ::getaddrinfo(host.empty() ? nullptr : host.c_str(), service.c_str(), &hints, &found);
+        resolved != 0) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "could not resolve the listen address",
+                        .context = {{.key = "host", .value = host},
+                                    {.key = "reason", .value = ::gai_strerror(resolved)}}});
+    }
+    int listener = -1;
+    for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
+        listener = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        if (listener < 0) {
+            continue;
+        }
+        // A restarted engine must be able to take its port back while the
+        // previous one's connections linger in TIME_WAIT.
+        const int reuse = 1;
+        ::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        if (::bind(listener, candidate->ai_addr, candidate->ai_addrlen) == 0) {
+            break;
+        }
+        ::close(listener);
+        listener = -1;
+    }
+    ::freeaddrinfo(found);
+    if (listener < 0) {
+        return std::unexpected(system_error("could not bind the TCP listener"));
+    }
+
+    sockaddr_storage bound{};
+    socklen_t length = sizeof(bound);
+    std::uint16_t actual = port;
+    if (::getsockname(listener, reinterpret_cast<sockaddr*>(&bound), &length) == 0) {
+        if (bound.ss_family == AF_INET) {
+            actual = ntohs(reinterpret_cast<const sockaddr_in*>(&bound)->sin_port);
+        } else if (bound.ss_family == AF_INET6) {
+            actual = ntohs(reinterpret_cast<const sockaddr_in6*>(&bound)->sin6_port);
+        }
+    }
+
+    auto server = finish(listener, {}, dispatcher);
+    if (!server) {
+        return server;
+    }
+    (*server)->port_ = actual;
+    (*server)->token_ = std::move(token);
+    return server;
 }
 
 Server::~Server() {
@@ -143,8 +233,10 @@ Server::~Server() {
     if (wakeup_write_ >= 0) {
         ::close(wakeup_write_);
     }
-    std::error_code ignored;
-    std::filesystem::remove(path_, ignored);
+    if (!path_.empty()) {
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+    }
 }
 
 void Server::start() {
@@ -211,6 +303,9 @@ void Server::accept_loop() {
         }
         auto connection = std::make_shared<Connection>();
         connection->descriptor = accepted;
+        // A unix peer got here through the filesystem's permissions; a TCP
+        // peer has proven nothing yet.
+        connection->authenticated.store(token_.empty());
         {
             const std::lock_guard guard{mutex_};
             connections_.push_back(connection);
@@ -272,6 +367,13 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                 continue;
             }
             if (const auto* request = std::get_if<protocol::Request>(&*parsed)) {
+                if (!connection->authenticated.load()) {
+                    if (!admit(*connection, *request)) {
+                        connection->open.store(false);
+                        break;
+                    }
+                    continue;
+                }
                 connection->write_line(protocol::encode_message(dispatcher_->dispatch(*request)));
             }
             // Notifications are answered with nothing by definition, and a
@@ -291,6 +393,33 @@ void Server::serve(std::shared_ptr<Connection> connection) {
     std::erase(connections_, connection);
 }
 
+bool Server::admit(Connection& connection, const protocol::Request& request) {
+    protocol::Response response{.id = request.id, .result = std::nullopt, .error = std::nullopt};
+    if (request.method != "session.authenticate") {
+        response.error = protocol::to_protocol_error(
+            core::Error{.code = core::ErrorCode::unauthorized,
+                        .message = "authenticate with session.authenticate before anything else",
+                        .context = {}});
+        connection.write_line(protocol::encode_message(response));
+        return true;
+    }
+    const auto offered = request.params.find("token");
+    if (offered != request.params.end() && offered->is_string() &&
+        same_token(offered->get<std::string>(), token_)) {
+        connection.authenticated.store(true);
+        response.result = protocol::Json{{"authenticated", true}};
+        connection.write_line(protocol::encode_message(response));
+        return true;
+    }
+    // Answered once, then closed: a client holding the token gets it right
+    // first time, and a guesser pays a reconnect per attempt.
+    response.error = protocol::to_protocol_error(core::Error{
+        .code = core::ErrorCode::unauthorized, .message = "wrong token", .context = {}});
+    connection.write_line(protocol::encode_message(response));
+    ::shutdown(connection.descriptor, SHUT_RDWR);
+    return false;
+}
+
 void Server::reap() {
     const std::lock_guard guard{mutex_};
     std::erase_if(connections_,
@@ -305,6 +434,10 @@ void Server::broadcast(const std::string& line) {
     }
     bool lost = false;
     for (const auto& connection : targets) {
+        // ADR-0223: an unauthenticated peer does not hear what is playing.
+        if (!connection->authenticated.load()) {
+            continue;
+        }
         lost = !connection->write_line(line) || lost;
     }
     if (lost) {

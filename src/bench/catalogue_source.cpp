@@ -14,8 +14,8 @@
 namespace trackknife::bench {
 namespace {
 
-[[nodiscard]] QString pathText(const std::filesystem::path& path) {
-    return QString::fromStdString(core::escape_raw_path(path.string()));
+[[nodiscard]] QString endpointText(const protocol::Endpoint& endpoint) {
+    return QString::fromStdString(core::escape_raw_path(endpoint.describe()));
 }
 
 } // namespace
@@ -28,13 +28,24 @@ CatalogueSource::CatalogueSource(std::filesystem::path database) : database_(std
     if (configured.isEmpty()) {
         return;
     }
-    socket_ = configured.toStdString();
-    auto client = protocol::Client::connect(socket_);
+    const auto token =
+        QSettings{}
+            .value(QLatin1String(SettingsDialog::library_engine_token_key), QString{})
+            .toString()
+            .trimmed()
+            .toStdString();
+    endpoint_ = protocol::Endpoint::parse(configured.toStdString(), token);
+    if (!endpoint_) {
+        failure_ = QObject::tr("not an engine address: %1").arg(configured);
+        return;
+    }
+    auto client = protocol::Client::connect(*endpoint_);
     if (client) {
         client_ = std::move(*client);
         return;
     }
     failure_ = QString::fromUtf8(client.error().message);
+    refused_ = client.error().code == core::ErrorCode::unauthorized;
 }
 
 CatalogueSource::~CatalogueSource() = default;
@@ -48,11 +59,15 @@ std::unique_ptr<engine::Catalogue> CatalogueSource::open() const {
 
 QString CatalogueSource::describe() const {
     if (client_) {
-        return QObject::tr("Library: engine at %1").arg(pathText(socket_));
+        return QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
     }
-    if (!socket_.empty()) {
-        return QObject::tr("Library: this process — engine at %1 is unreachable")
-            .arg(pathText(socket_));
+    if (endpoint_) {
+        // A refused token is its own case: the engine is there, and saying
+        // "unreachable" would send someone looking at the network.
+        return refused_ ? QObject::tr("Library: this process — engine at %1 refused the token")
+                              .arg(endpointText(*endpoint_))
+                        : QObject::tr("Library: this process — engine at %1 is unreachable")
+                              .arg(endpointText(*endpoint_));
     }
     return QObject::tr("Library: this process");
 }

@@ -86,6 +86,9 @@ void invoke_safely(const std::function<void(const SessionCommandResult&)>& callb
     case core::ErrorCode::conflict:
     case core::ErrorCode::unsupported:
     case core::ErrorCode::limit_exceeded:
+    // A refused credential is a definitive answer; reconnecting would only
+    // present the same one again.
+    case core::ErrorCode::unauthorized:
         return false;
     case core::ErrorCode::cancelled:
     case core::ErrorCode::io:

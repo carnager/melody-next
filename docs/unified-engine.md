@@ -525,6 +525,15 @@ and the engine survives the UI exiting mid-playback. **Met.**
 
 ### Phase 3 — Network, auth, and client byte access
 
+**TCP and authentication are built** ([ADR-0223](adr/0223-tcp-transport-and-authentication.md)).
+`tkengine --listen HOST:PORT` accepts TCP connections, each of which must
+present the token from `engine.token` before anything else -- loopback
+included, because any local user can reach 127.0.0.1. There is no built-in
+TLS: the deployments this is for are a home network and a phone reaching home
+through WireGuard, where TLS would buy only certificates to manage, and a
+reverse proxy covers the rest. The workspace takes `host:port` and a token in
+the same setting that took a socket path. Byte access is not built yet.
+
 - TCP listener with authentication required on any non-loopback bind.
 - Byte access for clients that cannot read the library: artwork, waveform peaks,
   audition. Prefer engine-side rendering for peaks; range requests for artwork.

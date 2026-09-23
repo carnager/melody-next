@@ -7,6 +7,7 @@
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
@@ -16,10 +17,12 @@
 
 namespace trackknife::engine {
 
-// ADR-0220 Phase 2: a unix socket speaking protocol v1. TCP and
-// authentication arrive in Phase 3; binding to a filesystem path means the
-// permissions are the filesystem's, which is the right answer for a local
-// engine and no answer at all for a remote one.
+// ADR-0220: protocol v1 over a stream socket.
+//
+// A unix socket's access control is the filesystem's, which is the right
+// answer for a local engine and no answer at all for a remote one -- so a TCP
+// listener requires every connection to authenticate first (ADR-0223),
+// loopback included, because any local user can reach 127.0.0.1.
 //
 // One thread per connection. A client is a person's music player, not a web
 // crawler, so the count is small and a thread apiece is simpler to reason
@@ -32,6 +35,13 @@ class Server final {
     // removed.
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen(std::filesystem::path socket_path, protocol::Dispatcher& dispatcher);
+
+    // ADR-0223: a TCP listener whose connections must present `token` through
+    // session.authenticate before anything else. Port 0 asks for an ephemeral
+    // port, which `port()` then reports.
+    [[nodiscard]] static core::Result<std::unique_ptr<Server>>
+    listen_tcp(const std::string& host, std::uint16_t port, protocol::Dispatcher& dispatcher,
+               std::string token);
 
     Server(const Server&) = delete;
     Server(Server&&) = delete;
@@ -49,6 +59,8 @@ class Server final {
     [[nodiscard]] EventSink sink();
 
     [[nodiscard]] const std::filesystem::path& path() const noexcept { return path_; }
+    // The TCP port actually bound, or 0 for a unix socket.
+    [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
     // For tests: how many clients are connected right now.
     [[nodiscard]] std::size_t connections();
 
@@ -57,6 +69,12 @@ class Server final {
 
     Server(int listener, int wakeup_read, int wakeup_write, std::filesystem::path path,
            protocol::Dispatcher& dispatcher);
+    [[nodiscard]] static core::Result<std::unique_ptr<Server>>
+    finish(int listener, std::filesystem::path path, protocol::Dispatcher& dispatcher);
+
+    // Answers a request from a connection that has not authenticated yet.
+    // Returns false when the connection should be closed.
+    bool admit(Connection& connection, const protocol::Request& request);
 
     void accept_loop();
     void serve(std::shared_ptr<Connection> connection);
@@ -69,6 +87,10 @@ class Server final {
     int wakeup_read_{-1};
     int wakeup_write_{-1};
     std::filesystem::path path_;
+    std::uint16_t port_{0};
+    // Empty for a unix socket, whose connections are trusted from their first
+    // line. Set for TCP, whose connections are not.
+    std::string token_;
     protocol::Dispatcher* dispatcher_{nullptr};
 
     std::atomic_bool running_{false};

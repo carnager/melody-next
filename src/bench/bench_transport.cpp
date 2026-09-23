@@ -1200,6 +1200,41 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
         view->setFocus(Qt::ShortcutFocusReason);
 }
 
+const LocalTrackRow* BenchMainWindow::playingRow(const QString& entry) {
+    const auto identity = core::StableId::parse(entry.toStdString());
+    if (!identity) {
+        return nullptr;
+    }
+    const auto in = [&identity](const std::vector<LocalTrackRow>& rows) -> const LocalTrackRow* {
+        const auto found = std::ranges::find(rows, *identity, &LocalTrackRow::entry_id);
+        return found != rows.end() ? &*found : nullptr;
+    };
+    // The list it was played from, first: the header reads as the row does.
+    if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+        if (const auto* row = in(tab->model->rows())) {
+            return row;
+        }
+    }
+    // Up Next: an ask is often from another list, the library or a search,
+    // and it leaves Up Next as it starts -- so the one playing is looked for
+    // there as well as among those waiting.
+    if (const auto& active = playback_.requests.active();
+        active && active->source.entry_id == *identity) {
+        return &active->source;
+    }
+    for (const auto& waiting : playback_.requests.pending()) {
+        if (waiting.source.entry_id == *identity) {
+            return &waiting.source;
+        }
+    }
+    for (const auto& tab : list_tabs_) {
+        if (const auto* row = in(tab->model->rows())) {
+            return row;
+        }
+    }
+    return nullptr;
+}
+
 void BenchMainWindow::refreshEngineTransport() {
     const auto state = transport_->state();
     sampleLastFmFromEngine(state);
@@ -1251,20 +1286,16 @@ void BenchMainWindow::refreshEngineTransport() {
         // for an entry whose tab has been closed.
         auto label = QFileInfo{state.path}.fileName();
         QString context;
-        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-            const auto& rows = tab->model->rows();
-            const auto match = std::find_if(rows.begin(), rows.end(), [&state](const auto& row) {
-                return QString::fromStdString(row.entry_id.to_string()) == state.entry;
-            });
-            if (match != rows.end() && !match->title.empty()) {
-                label = QString::fromStdString(match->title);
-                if (!match->artist.empty()) {
-                    context = QString::fromStdString(match->artist);
-                }
+        const auto* row = playingRow(state.entry);
+        if (row != nullptr && !row->title.empty()) {
+            label = QString::fromStdString(row->title);
+            if (!row->artist.empty()) {
+                context = QString::fromStdString(row->artist);
             }
-            if (context.isEmpty()) {
-                context = QString::fromStdString(tab->document.name);
-            }
+        }
+        if (auto* tab = tabForDocument(playback_.anchors.document);
+            tab != nullptr && context.isEmpty()) {
+            context = QString::fromStdString(tab->document.name);
         }
         now_playing_->setText(label);
         now_playing_context_->setText(context);

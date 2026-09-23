@@ -396,6 +396,9 @@ class BenchMainWindow final : public QMainWindow {
     // engine's state. Resume, listening and gapless are the engine's own.
     void refreshEngineTransport();
     void refreshOutputControls(const EnginePlayback::State& state);
+    // The row for the entry the engine is playing, wherever this window holds
+    // it: the list it was played from, Up Next, or another open list.
+    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
     void playRow(ListTab& tab, int row);
     void refreshTransport();
     void buildMprisService();

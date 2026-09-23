@@ -4803,6 +4803,11 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == first,
                              5000);
+    // The header names what Up Next is playing by its tags, though the entry
+    // is in no open list -- not by its file name.
+    auto* now_playing = window.findChild<QLabel*>(QStringLiteral("bench-now-playing"));
+    QVERIFY(now_playing != nullptr);
+    QTRY_COMPARE(now_playing->text(), QStringLiteral("X"));
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == second,

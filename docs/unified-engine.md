@@ -548,27 +548,21 @@ the same setting that took a socket path. Byte access is not built yet.
   players without file access, so the machinery exists; the requirement here is
   only that the protocol not rule it out. See "Two things to leave possible"
   below for what it buys.
-- Profiles gain an endpoint. A local profile spawns a loopback engine if none is
-  running; a remote profile connects.
-- **Several engines at once, not one at a time.** A profile is a connection,
-  and the client may hold more than one open — a desktop library and the engine
-  on the NAS side by side. This replaces what the MPD Queue tab did: the
-  workspace stops having *an* authority and instead has connections, each of
-  which is an engine speaking protocol v1. A tab belongs to a connection the
-  way it belongs to a document today.
-
-  This bears on the tab work. "Local versus remote is a connection profile"
-  understates it: there is no local-versus-remote axis left, only which engine
-  a tab's list came from, with the same operations available on all of them.
-  Playback, though, is owned by one engine at a time — the one holding the
-  queue — so the client has to be explicit about which connection a transport
-  command addresses.
+- **One engine per workspace** ([ADR-0226](adr/0226-trackknife-runs-its-own-engine.md)).
+  The engine setting names another machine's engine or, left empty, this
+  computer's, which Trackknife starts if it is not running and which outlives
+  the window. There is one database, the engine's. This replaces the earlier
+  plan here for several connections open side by side: every client must see
+  the same ratings and history, so they belong to one engine, not to whichever
+  connection a tab came from.
 
 Done when: the desktop UI runs against an engine on another machine with no
-filesystem access to the library, including artwork, waveforms and a tag edit,
-and two connections can be open at once without either becoming "the" authority.
+filesystem access to the library, including artwork, waveforms and a tag edit.
 
 ### One engine plays at a time
+
+*With one engine per workspace (ADR-0226) this holds by construction; the
+section is kept for its reasoning about agents and history.*
 
 **Decided.** However many connections are open, exactly one engine is playing.
 Starting playback from a tab on connection B while A is playing stops A and
@@ -595,6 +589,8 @@ It also settles two questions that would otherwise need answering:
   alternative is an engine writing history for files it does not own.
 
 ### Mixed tabs: not now
+
+*Moot under ADR-0226: a workspace has one engine.*
 
 A tab holding entries from several engines is **not** planned. Displaying them
 would be easy — carry a connection alongside the entry identity — but playing
@@ -639,10 +635,10 @@ it is not incidental.
 **Audio never lives in the UI.** The engine's own output is the loopback agent;
 a desktop that wants local audio runs a `melody-agent` process beside
 Trackknife, not inside it. Anything else means closing the window stops the
-music, which is what Phase 2 exists to prevent. Open: whether Trackknife
-*spawns and supervises* a local agent for the single-machine case, the way a
-local profile spawns a loopback engine in Phase 3, or whether the agent is
-always a separately managed service.
+music, which is what Phase 2 exists to prevent. **Decided (ADR-0226):**
+Trackknife starts its own agent when it wants the music on its own speakers
+from an engine elsewhere, the way it starts its own engine when none is
+configured. Trackknife is not a player.
 
 Done when: the engine drives its own speakers and a remote agent through the
 same interface, and output selection switches between them.

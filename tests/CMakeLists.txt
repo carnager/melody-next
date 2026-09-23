@@ -340,6 +340,21 @@ add_test(
 )
 set_tests_properties(engine-daemon PROPERTIES TIMEOUT 60)
 
+if(TARGET trackknife_bench_ui)
+    qt_add_executable(trackknife_engine_launcher_tests engine_launcher_test.cpp)
+    target_link_libraries(
+        trackknife_engine_launcher_tests
+        PRIVATE Trackknife::BenchUi Qt6::Test trackknife_project_options trackknife_project_warnings
+    )
+    target_compile_definitions(
+        trackknife_engine_launcher_tests
+        PRIVATE TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
+    )
+    add_dependencies(trackknife_engine_launcher_tests trackknife_engine_daemon)
+    add_test(NAME engine-launcher COMMAND trackknife_engine_launcher_tests)
+    set_tests_properties(engine-launcher PROPERTIES TIMEOUT 60)
+endif()
+
 # ADR-0222: the unix socket, talked to with plain POSIX calls and plain lines.
 add_executable(trackknife_engine_server_tests engine_server_test.cpp)
 target_link_libraries(

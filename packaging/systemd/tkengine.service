@@ -11,7 +11,7 @@ Type=simple
 ExecStart=/usr/bin/tkengine
 # The socket and the databases default to $XDG_RUNTIME_DIR and $XDG_DATA_HOME.
 # Override with: systemctl --user edit tkengine
-# ExecStart=/usr/bin/tkengine --socket %t/tkengine.sock --state %h/.local/share/trackknife
+# ExecStart=/usr/bin/tkengine --socket %t/tkengine.sock --state %h/.local/share/trackknife/trackknife
 Restart=on-failure
 RestartSec=2
 

@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/engine_launcher.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/protocol/client.hpp"
 
@@ -26,8 +27,9 @@ namespace trackknife::bench {
 // still open the wrong thing; a caller that has this cannot.
 class CatalogueSource final {
   public:
-    // Reads the engine socket setting once. An engine that cannot be reached
-    // is recorded and everything falls back to the local database: an
+    // Reads the engine setting once. Empty means this machine's engine,
+    // started if it is not running (ADR-0226). An engine that cannot be
+    // reached is recorded and everything falls back to the local database: an
     // unreachable engine should cost the engine, not the library.
     explicit CatalogueSource(std::filesystem::path database);
     CatalogueSource(const CatalogueSource&) = delete;
@@ -49,6 +51,11 @@ class CatalogueSource final {
     }
     [[nodiscard]] const QString& failure() const noexcept { return failure_; }
     [[nodiscard]] const std::filesystem::path& database() const noexcept { return database_; }
+    // Whether the engine is the one this workspace starts for itself.
+    [[nodiscard]] bool startsOwnEngine() const noexcept { return local_engine_.has_value(); }
+    // Starts the local engine again if it has stopped; false when there is
+    // none to start or it would not come up. Blocks while it starts.
+    [[nodiscard]] bool reviveLocalEngine() const;
 
     // One line naming the source, for a panel to show. Three states, and the
     // difference between the last two is what was previously invisible.
@@ -57,6 +64,7 @@ class CatalogueSource final {
   private:
     std::filesystem::path database_;
     std::optional<protocol::Endpoint> endpoint_;
+    std::optional<LocalEngine> local_engine_;
     std::unique_ptr<protocol::Client> client_;
     QString failure_;
     // Whether the engine answered and said no, as opposed to not answering.

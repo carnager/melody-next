@@ -44,10 +44,10 @@ for _ in $(seq 1 100); do
 done
 [ -S "${socket}" ] || fail "the daemon must create its socket"
 
-# Databases are created on start, so a first run does not fail on a client's
-# first request.
-[ -f "${state}/library.sqlite3" ] || fail "the catalogue must be created"
-[ -f "${state}/workspace.sqlite3" ] || fail "the workspace must be created"
+# The database is created on start, so a first run does not fail on a
+# client's first request. One file: catalogue, ratings, lists and journals.
+[ -f "${state}/lists.sqlite" ] || fail "the database must be created"
+[ -f "${state}/library.sqlite3" ] && fail "the catalogue must not be a second database"
 
 # A half-closed connection stays open by design, so nc needs a read timeout
 # rather than waiting for a close that is not coming. -q is GNU netcat only
@@ -62,15 +62,24 @@ job="$(printf '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}\
 echo "${job}" | grep -q '"job_id"' || fail "submitting must answer with an identity"
 echo "${job}" | grep -q '"event":"job.finished"' || fail "and the job must report a finish"
 
-# A second engine must not steal a live socket.
-if "${binary}" --socket "${socket}" --state "${state}" > "${work}/second.txt" 2>&1; then
+# A second engine must not steal a live socket, nor share the database.
+if "${binary}" --socket "${socket}" --state "${work}/other" > "${work}/second.txt" 2>&1; then
     fail "a second daemon must refuse an occupied socket"
 fi
-grep -q "could not listen" "${work}/second.txt" || fail "and say so"
+grep -q -e "could not listen" -e "another engine" "${work}/second.txt" || fail "and say so"
+if "${binary}" --socket "${work}/other.sock" --state "${state}" > "${work}/third.txt" 2>&1; then
+    fail "a second daemon must refuse a database in use"
+fi
+grep -q "another engine is using" "${work}/third.txt" || fail "and say which"
 
 # SIGTERM is how an init system stops it; the socket must not be left behind.
+# Promptly, too: sampling workers once slept out their interval first, which
+# made every stop and restart take five seconds.
+stop_started=$(date +%s%N)
 kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
+stop_ms=$(( ($(date +%s%N) - stop_started) / 1000000 ))
+[ "${stop_ms}" -lt 1000 ] || fail "SIGTERM must stop the engine promptly (took ${stop_ms} ms)"
 daemon_pid=""
 [ -S "${socket}" ] && fail "the socket must be removed on shutdown"
 

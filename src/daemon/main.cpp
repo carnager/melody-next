@@ -18,6 +18,10 @@
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/client.hpp"
 
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -35,17 +39,42 @@ std::atomic_bool stop_requested{false};
 
 void request_stop(int) { stop_requested.store(true); }
 
+// Where Trackknife has always kept its data (Qt's AppDataLocation for the
+// "trackknife" organisation and application), so the engine a workspace
+// starts adopts the library, ratings and history already there rather than
+// beginning empty beside them.
 [[nodiscard]] std::filesystem::path default_state_directory() {
     if (const auto* explicit_home = std::getenv("TRACKKNIFE_STATE_DIR")) {
         return explicit_home;
     }
     if (const auto* data_home = std::getenv("XDG_DATA_HOME")) {
-        return std::filesystem::path{data_home} / "trackknife";
+        return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
     if (const auto* home = std::getenv("HOME")) {
-        return std::filesystem::path{home} / ".local" / "share" / "trackknife";
+        return std::filesystem::path{home} / ".local" / "share" / "trackknife" / "trackknife";
     }
     return std::filesystem::current_path();
+}
+
+// One database: catalogue, ratings, history, lists and the operation journals
+// share a schema and a file. The name is the one Trackknife gave it.
+constexpr std::string_view database_filename{"lists.sqlite"};
+
+// Held for the engine's lifetime. Two engines on one database would both
+// play, both scan and both answer for the same ratings; and two started at
+// once for one socket can each find it stale and take it from the other. The
+// kernel drops a flock when the process dies, so a crash leaves nothing to
+// clean up.
+[[nodiscard]] bool hold_lock(const std::filesystem::path& path) {
+    const auto descriptor = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        return false;
+    }
+    if (::flock(descriptor, LOCK_EX | LOCK_NB) != 0) {
+        ::close(descriptor);
+        return false;
+    }
+    return true; // Deliberately never closed.
 }
 
 [[nodiscard]] std::filesystem::path default_socket_path() {
@@ -59,7 +88,8 @@ void usage() {
     std::cerr << "usage: tkengine [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/tkengine.sock)\n"
-              << "  --state DIR    where the databases live (default $XDG_DATA_HOME/trackknife)\n"
+              << "  --state DIR    where the database lives (default\n"
+              << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
               << "  --listen HOST:PORT\n"
               << "                 also accept TCP connections. Every one must authenticate\n"
               << "                 with the token in DIR/engine.token (created on first use).\n"
@@ -107,16 +137,25 @@ int main(int argc, char** argv) {
 
     std::error_code ignored;
     std::filesystem::create_directories(state_directory, ignored);
+    if (!hold_lock(state_directory / "engine.lock")) {
+        std::cerr << "tkengine: another engine is using " << state_directory.string() << "\n";
+        return EXIT_FAILURE;
+    }
+    if (!hold_lock(std::filesystem::path{socket_path.string() + ".lock"})) {
+        std::cerr << "tkengine: another engine is starting on " << socket_path.string() << "\n";
+        return EXIT_FAILURE;
+    }
 
-    // The two stores the engine owns. Both are opened eagerly so a migration
+    // Both views of the one database are opened eagerly, so a migration
     // failure surfaces now rather than in the response to some client's first
-    // request, and so both exist on disk once the engine says it is listening.
-    trackknife::engine::LocalCatalogue catalogue{state_directory / "library.sqlite3"};
+    // request.
+    const auto database = state_directory / database_filename;
+    trackknife::engine::LocalCatalogue catalogue{database};
     if (const auto prepared = catalogue.prepare(); !prepared) {
         std::cerr << "tkengine: could not open the catalogue: " << prepared.error().message << "\n";
         return EXIT_FAILURE;
     }
-    auto workspace = trackknife::engine::Workspace::open(state_directory / "workspace.sqlite3");
+    auto workspace = trackknife::engine::Workspace::open(database);
     if (!workspace) {
         std::cerr << "tkengine: could not open the workspace: " << workspace.error().message
                   << "\n";
@@ -222,7 +261,7 @@ int main(int argc, char** argv) {
         tcp_server->start();
     }
     std::cerr << "tkengine: listening on " << socket_path.string() << "\n"
-              << "tkengine: state in " << state_directory.string() << "\n";
+              << "tkengine: database " << database.string() << "\n";
 
     while (!stop_requested.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});

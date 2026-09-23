@@ -262,14 +262,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         library_layout->addStretch(1);
     }
     // ADR-0220: which engine serves the catalogue and owns playback. Empty
-    // means this process does both, which is the unchanged local behaviour --
-    // stated here rather than left as a hand-edited setting, because
-    // "is an engine in use" is otherwise unanswerable from the UI.
+    // means this computer's own, started when needed (ADR-0226) -- stated
+    // here rather than left as a hand-edited setting, because "which engine
+    // is in use" is otherwise unanswerable from the UI.
     auto* engine_form = new QFormLayout;
     engine_socket_ = new QLineEdit(library);
     engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
     engine_socket_->setPlaceholderText(
-        QStringLiteral("socket path or host:port; empty: this process does both"));
+        QStringLiteral("empty: this computer's engine, started when needed"));
     engine_socket_->setText(
         settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Engine:"), engine_socket_);
@@ -282,8 +282,10 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_form->addRow(QStringLiteral("Engine token:"), engine_token_);
     library_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("A running trackknife engine (tkengine), which then owns the library and "
-                       "playback: its unix socket, or host:port when it was started with --listen. "
+        QStringLiteral("The trackknife engine (tkengine) owns the library and playback. Leave "
+                       "this empty to use one on this computer, which Trackknife starts and "
+                       "which keeps playing after the window closes. For another machine's, "
+                       "give its unix socket, or host:port when it was started with --listen. "
                        "A TCP engine needs the token from its engine.token file. There is no "
                        "encryption; use it on a home network or through WireGuard. Takes effect "
                        "when the workspace is reopened."),

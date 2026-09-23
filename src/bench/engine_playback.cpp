@@ -19,6 +19,11 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
         return;
     }
     endpoint_ = *catalogues.endpoint();
+    if (catalogues.startsOwnEngine()) {
+        // ADR-0226: an engine this workspace started is started again if it
+        // stops, rather than waited for -- nothing else is going to.
+        revive_ = [&catalogues] { return catalogues.reviveLocalEngine(); };
+    }
     static_cast<void>(open());
 
     // An engine is a separate process with its own lifetime: it can be
@@ -91,7 +96,7 @@ void EnginePlayback::maintain() {
         }
         emit changed();
     }
-    if (!open()) {
+    if (!open() && !(revive_ && revive_() && open())) {
         return;
     }
     emit connected();

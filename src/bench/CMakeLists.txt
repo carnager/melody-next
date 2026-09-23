@@ -50,6 +50,8 @@ qt_add_library(
     cover_thumbnail.hpp
     cover_review.cpp
     artwork_fitting.cpp
+    engine_launcher.cpp
+    engine_launcher.hpp
     artwork_fitting.hpp
     metadata_artwork_section.cpp
     metadata_artwork_section.hpp

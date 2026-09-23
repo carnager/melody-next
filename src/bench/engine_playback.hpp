@@ -15,6 +15,7 @@
 #include <QTimer>
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -149,6 +150,7 @@ class EnginePlayback final : public QObject {
     void adopt(const protocol::Json& payload);
 
     protocol::Endpoint endpoint_;
+    std::function<bool()> revive_;
     std::unique_ptr<protocol::Client> client_;
     QTimer* reconnect_timer_{nullptr};
     QThreadPool pool_;

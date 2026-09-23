@@ -2,6 +2,7 @@
 
 #include "bench/catalogue_source.hpp"
 
+#include "bench/engine_launcher.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_catalogue.hpp"
@@ -26,6 +27,19 @@ CatalogueSource::CatalogueSource(std::filesystem::path database) : database_(std
             .value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
             .toString();
     if (configured.isEmpty()) {
+        // ADR-0226: no engine named means this machine's, started if need be.
+        local_engine_ = bench::localEngine();
+        if (!local_engine_) {
+            return;
+        }
+        endpoint_ =
+            protocol::Endpoint{.socket = local_engine_->socket, .host = {}, .port = 0, .token = {}};
+        auto client = connectLocalEngine(*local_engine_);
+        if (client) {
+            client_ = std::move(*client);
+            return;
+        }
+        failure_ = QString::fromUtf8(client.error().message);
         return;
     }
     const auto token =
@@ -57,7 +71,18 @@ std::unique_ptr<engine::Catalogue> CatalogueSource::open() const {
     return std::make_unique<engine::LocalCatalogue>(database_);
 }
 
+bool CatalogueSource::reviveLocalEngine() const {
+    return local_engine_ && connectLocalEngine(*local_engine_).has_value();
+}
+
 QString CatalogueSource::describe() const {
+    if (client_ && local_engine_) {
+        return QObject::tr("Library: engine on this computer");
+    }
+    if (local_engine_) {
+        return QObject::tr("Library: this process — the local engine did not start: %1")
+            .arg(failure_);
+    }
     if (client_) {
         return QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
     }

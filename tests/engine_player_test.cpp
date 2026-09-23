@@ -455,16 +455,40 @@ void a_finished_track_is_followed_by_the_next(engine::Player& player,
 void a_continuation_is_actually_armed(engine::Player& player, const std::filesystem::path& audio) {
     player.set_modes({});
     const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string())};
-    player.replace_queue(entries);
-    if (!player.play_entry(entries[0].entry_id)) {
-        std::cerr << "engine player: could not start playback; skipping the gapless arming\n";
+
+    // Arming has to happen while the first entry is still current, and the
+    // fixture is under a second: on a loaded machine the track ends first and
+    // the engine moves on, which fails this for a reason that has nothing to
+    // do with gapless. Pausing is the fix, and the attempt is retried when the
+    // pause lands too late -- an asynchronous pipeline cannot promise
+    // otherwise, and a test that pretends it can is a flaky test.
+    const auto paused_on_first = [&player, &entries] {
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            player.replace_queue(entries);
+            if (!player.play_entry(entries[0].entry_id)) {
+                return false;
+            }
+            static_cast<void>(player.pause());
+            const auto settle = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+            while (std::chrono::steady_clock::now() < settle) {
+                const auto state = player.state();
+                if (state.entry != entries[0].entry_id) {
+                    break; // The track got away; set it up again.
+                }
+                if (state.status == "paused") {
+                    return true;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+        }
+        return false;
+    };
+    if (!paused_on_first()) {
+        std::cerr << "engine player: could not hold playback on the first entry; skipping the "
+                     "gapless arming\n";
+        player.replace_queue({});
         return;
     }
-    // Paused, because the fixture is under a second and a loaded machine can
-    // finish it before the continuation is armed -- which would make this test
-    // fail for a reason that has nothing to do with gapless. A paused track
-    // never ends, and arming does not depend on the output running.
-    require(player.pause().has_value(), "pausing succeeds");
 
     // The engine cannot arm a continuation before it knows the format it has
     // to match, so this is sampled the way a running engine samples itself
@@ -479,9 +503,6 @@ void a_continuation_is_actually_armed(engine::Player& player, const std::filesys
         if (player.state().gapless_entry == entries[1].entry_id && player.armed_continuation()) {
             armed = true;
             break;
-        }
-        if (player.state().entry != entries[0].entry_id) {
-            break; // Already moved on; the continuation was never armed.
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{10});
     }
@@ -532,9 +553,6 @@ void a_continuation_is_actually_armed(engine::Player& player, const std::filesys
     player.replace_queue({});
 }
 
-// A CUE album is one file and many segments; a container can hold several
-// streams. An entry that arrives without them plays the whole file from the
-// start, which is a different track from the one the client asked for.
 void a_selection_and_segment_survive_the_wire(engine::Player& player) {
     protocol::Dispatcher dispatcher;
     engine::register_playback_methods(dispatcher, player);
@@ -654,6 +672,84 @@ void consume_drops_what_has_been_played(engine::Player& player,
 
     require(player.step(1).has_value() == false, "nothing follows the last entry");
     require(player.queue().size() == 1U, "and a refused step drops nothing");
+
+    static_cast<void>(player.stop());
+    player.set_modes({});
+    player.replace_queue({});
+}
+
+// Album shuffle: albums in a random order, tracks within an album in list
+// order. The engine's queue is paths, so the release an entry belongs to
+// travels with it -- a tagging decision the client has already made, and one
+// the engine cannot redo from a filename.
+void album_shuffle_keeps_albums_together(engine::Player& player,
+                                         const std::filesystem::path& audio) {
+    // Interleaved on purpose: album A track 1, album B track 1, album C track
+    // 1, album A track 2 ... Laid out album by album, plain list order would
+    // already play each album as a unit and this would pass with album
+    // shuffle doing nothing -- which is exactly what it did when I wrote it
+    // that way.
+    std::vector<engine::QueueEntry> entries;
+    for (int track = 0; track < 3; ++track) {
+        for (int album = 0; album < 3; ++album) {
+            auto made = entry(audio.string());
+            made.group.album = "Album " + std::to_string(album);
+            made.group.album_artist = "Artist " + std::to_string(album);
+            entries.push_back(made);
+        }
+    }
+    audio::PlaybackModes modes;
+    modes.album_random = true;
+    player.set_modes(modes);
+    player.replace_queue(entries);
+    if (!player.play_entry(entries[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping album shuffle\n";
+        player.set_modes({});
+        player.replace_queue({});
+        return;
+    }
+    require(player.pause().has_value(), "pausing succeeds");
+
+    const auto album_of = [&entries](const core::StableId& id) {
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            if (entries[index].entry_id == id) {
+                return static_cast<int>(index % 3);
+            }
+        }
+        return -1;
+    };
+    const auto track_of = [&entries](const core::StableId& id) {
+        for (std::size_t index = 0; index < entries.size(); ++index) {
+            if (entries[index].entry_id == id) {
+                return static_cast<int>(index / 3);
+            }
+        }
+        return -1;
+    };
+
+    std::vector<core::StableId> played{player.state().entry};
+    for (int step = 0; step < 8; ++step) {
+        if (!player.step(1)) {
+            break;
+        }
+        require(player.pause().has_value(), "pausing succeeds");
+        played.push_back(player.state().entry);
+    }
+    require(played.size() == 9U, "every entry is reached exactly once");
+
+    std::set<int> albums_seen;
+    for (std::size_t index = 0; index < played.size(); index += 3) {
+        const auto album = album_of(played[index]);
+        require(album >= 0, "each played entry is one of the queued ones");
+        require(albums_seen.insert(album).second, "an album is not returned to");
+        for (int track = 0; track < 3; ++track) {
+            require(album_of(played[index + static_cast<std::size_t>(track)]) == album,
+                    "an album plays as a unit rather than interleaved with another");
+            require(track_of(played[index + static_cast<std::size_t>(track)]) == track,
+                    "and its tracks keep list order inside it");
+        }
+    }
+    require(albums_seen.size() == 3U, "all three albums play");
 
     static_cast<void>(player.stop());
     player.set_modes({});
@@ -810,12 +906,13 @@ int main(int argc, char** argv) {
     a_selection_and_segment_survive_the_wire(**player);
     a_request_returns_to_where_the_list_was(**player, audio);
     consume_drops_what_has_been_played(**player, audio);
+    album_shuffle_keeps_albums_together(**player, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 18 scenarios\n";
+    std::cout << "engine player: 19 scenarios\n";
     return EXIT_SUCCESS;
 }

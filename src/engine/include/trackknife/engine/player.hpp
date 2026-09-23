@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
@@ -33,6 +34,11 @@ struct QueueEntry final {
     core::StableId entry_id{core::StableId::random()};
     audio::TrackSource source;
     std::optional<std::int64_t> duration_ms;
+    // What album this entry belongs to, for album shuffle. Sent by the client
+    // because the engine's queue is paths, not tags -- and which release a
+    // track belongs to is a tagging decision the client has already made
+    // (album artist falling back to artist, and so on).
+    audio::AlbumRowKey group;
     // ADR-0139/0141: the explicit playback override, when the client has one.
     // The decoder's own tags apply otherwise and need not be sent -- the
     // engine opens the file and reads them for itself. What it cannot know is
@@ -208,6 +214,9 @@ class Player final {
     // The two facts the advance rules need about the request queue.
     [[nodiscard]] audio::RequestQueueState request_state_locked() const;
     void reset_order_locked();
+    // Albums shuffled as units. Answers false when the list cannot be grouped
+    // within the budget, having turned the mode off.
+    bool reset_album_order_locked();
     // Removes an entry the queue is done with, keeping the playing row
     // derived from its identity rather than from its old position.
     void consume_locked(const core::StableId& entry_id);

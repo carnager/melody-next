@@ -269,6 +269,17 @@ protocol::Json EnginePlayback::entryJson(const LocalTrackRow& row,
     if (row.duration_ms) {
         item["duration_ms"] = *row.duration_ms;
     }
+    // Which release this belongs to, so the engine can shuffle albums as
+    // units. Sent because its queue is paths and this is a tagging decision
+    // the client has already made.
+    if (!row.album.empty() || !row.album_artist.empty() || !row.artist.empty()) {
+        protocol::Json group = protocol::Json::object();
+        group["album_artist"] = row.album_artist;
+        group["artist"] = row.artist;
+        group["album"] = row.album;
+        group["date"] = row.date;
+        item["group"] = std::move(group);
+    }
     // Which audio in the container, and which range of it. A CUE album is one
     // file and many segments, so an entry without these plays the whole file
     // from the start.

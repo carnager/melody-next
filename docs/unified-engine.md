@@ -460,6 +460,13 @@ one and the audition service holding one are different facts, and only the
 second is gapless working -- a distinction nothing could see before, which is
 how a stale belief about it went unnoticed.
 
+Album shuffle is the engine's too, which means the release an entry belongs
+to travels with it: the engine's queue is paths, and which album a track is
+part of is a tagging decision the client has already made and the engine
+cannot redo from a filename. A list that cannot be grouped within the budget
+turns the mode off rather than playing a truncated album order, and clients
+see that because the modes travel in the state document.
+
 Consume is the engine's, and it names the entry it dropped. A client mirrors
 that onto its own list rather than deducing it: deducing means remembering
 whether consume was active during the track that just ended, and a one-shot

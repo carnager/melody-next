@@ -51,7 +51,29 @@ core::Result<std::unique_ptr<Player>> Player::create() {
 void Player::reset_order_locked() {
     const QueueView view{queue_};
     row_ = view.row_of_entry(anchors_.current, row_);
+    if (modes_.album_random && !queue_.empty() && reset_album_order_locked()) {
+        return;
+    }
     order_.reset(view.row_count(), row_, modes_.random);
+}
+
+bool Player::reset_album_order_locked() {
+    audio::AlbumGrouper grouper;
+    if (!grouper.admits(queue_.size())) {
+        modes_.album_random = false;
+        return false;
+    }
+    for (std::size_t index = 0; index < queue_.size(); ++index) {
+        if (!grouper.add(queue_[index].group, static_cast<int>(index))) {
+            // The budget is exhausted. Turning the mode off rather than
+            // playing a truncated album order is the same choice the window
+            // makes, and clients see it because modes travel in the state.
+            modes_.album_random = false;
+            return false;
+        }
+    }
+    order_.resetAlbums(grouper.take(), row_);
+    return true;
 }
 
 audio::RequestQueueState Player::request_state_locked() const {

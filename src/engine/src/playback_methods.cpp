@@ -189,6 +189,12 @@ replay_gain_from_json(const Json& value) {
         duration != value.end() && duration->is_number_integer()) {
         entry.duration_ms = duration->get<std::int64_t>();
     }
+    if (const auto found = value.find("group"); found != value.end() && found->is_object()) {
+        entry.group.album_artist = found->value("album_artist", std::string{});
+        entry.group.artist = found->value("artist", std::string{});
+        entry.group.album = found->value("album", std::string{});
+        entry.group.date = found->value("date", std::string{});
+    }
     if (const auto found = value.find("selection"); found != value.end() && !found->is_null()) {
         auto parsed = selection_from_json(*found);
         if (!parsed) {
@@ -254,6 +260,12 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
             rendered["entry"] = entry.entry_id.to_string();
             rendered["path"] = protocol::encode_raw_path(entry.source.raw_path);
             rendered["duration_ms"] = entry.duration_ms.value_or(-1);
+            Json group = Json::object();
+            group["album_artist"] = entry.group.album_artist;
+            group["artist"] = entry.group.artist;
+            group["album"] = entry.group.album;
+            group["date"] = entry.group.date;
+            rendered["group"] = std::move(group);
             rendered["selection"] = selection_to_json(entry.source.selection);
             rendered["segment"] = segment_to_json(entry.source.segment);
             rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);

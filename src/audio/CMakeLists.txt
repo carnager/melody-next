@@ -5,7 +5,6 @@ add_library(
     src/album_grouping.cpp
     src/local_audition.cpp
     src/local_playback.cpp
-    src/melody_agent.cpp
     src/playback_order.cpp
     src/playback_selection.cpp
     src/pipewire_output.cpp

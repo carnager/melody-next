@@ -335,8 +335,10 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
     // A sequence travels as one task rather than as several, so nothing can be
     // interleaved between a queue and the play that names it.
     const QPointer self{this};
+    ++in_flight_;
     static_cast<void>(QtConcurrent::run(&pool_, [self, this, calls = std::move(calls)] {
         if (!self || client_ == nullptr) {
+            --in_flight_;
             return;
         }
         bool adopted = false;
@@ -363,7 +365,23 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
             adopt(*answer);
             adopted = true;
         }
-        if (!adopted || !self) {
+        // Before the change is announced, so whoever looks at it sees the
+        // engine as having caught up.
+        --in_flight_;
+        if (!self) {
+            return;
+        }
+        if (!adopted) {
+            // Still announced: a state skipped while this was in flight is
+            // looked at again now.
+            QMetaObject::invokeMethod(
+                self,
+                [self] {
+                    if (self) {
+                        emit self->changed();
+                    }
+                },
+                Qt::QueuedConnection);
             return;
         }
         QMetaObject::invokeMethod(

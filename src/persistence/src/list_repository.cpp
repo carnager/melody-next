@@ -344,6 +344,13 @@ read_optional_revision(sqlite3_stmt* statement, const int first,
             .context = {{"schema_version", std::to_string(version)}},
         });
     }
+    if (version == current_schema_version) {
+        // Nothing to change, so nothing to check. The engine opens the
+        // database for every library request, and the foreign-key check below
+        // reads all of it: on a library of 66,000 tracks that was half a
+        // second per request, spent confirming that no migration had run.
+        return execute(database, "COMMIT");
+    }
     if (version == 0) {
         constexpr auto migration =
             "CREATE TABLE list_documents ("

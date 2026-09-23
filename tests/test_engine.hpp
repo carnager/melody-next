@@ -82,6 +82,8 @@ class TestEngine final {
 
     [[nodiscard]] QByteArray log() { return process_.readAll(); }
     [[nodiscard]] const QString& socket() const noexcept { return socket_; }
+    // For freezing it (SIGSTOP), as an engine far away and busy is.
+    [[nodiscard]] qint64 processId() const { return process_.processId(); }
 
   private:
     QTemporaryDir runtime_;

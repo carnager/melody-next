@@ -14,6 +14,7 @@
 #include <QThreadPool>
 #include <QTimer>
 
+#include <atomic>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -112,6 +113,10 @@ class EnginePlayback final : public QObject {
         std::vector<Output> outputs;
     };
     [[nodiscard]] State state() const;
+    // Commands sent and not yet answered. While there are any, a state the
+    // engine reports may predate them -- a queue without the rows just
+    // added -- and is no reason to think the engine's queue has drifted.
+    [[nodiscard]] bool settling() const noexcept { return in_flight_.load() > 0; }
 
     // Hands the engine a queue without starting anything: an edit to the list
     // that is playing, rather than a new thing to play.
@@ -202,6 +207,7 @@ class EnginePlayback final : public QObject {
     QTimer* position_timer_{nullptr};
     mutable std::mutex mutex_;
     State state_;
+    std::atomic<int> in_flight_{0};
 };
 
 } // namespace trackknife::bench

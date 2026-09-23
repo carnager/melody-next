@@ -23,6 +23,9 @@
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "test_engine.hpp"
+
+#include <signal.h>
+
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -49,6 +52,7 @@
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include <QClipboard>
+#include <QElapsedTimer>
 #include <QDateTime>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -4407,8 +4411,10 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     write_wave(here, wave_sample_rate * 60U);
     const auto music = media.filePath(QStringLiteral("remote-music"));
     QVERIFY(QDir{}.mkpath(music));
-    const auto there = music + QStringLiteral("/there.flac");
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), there));
+    // A minute long: "playing" has to outlast what the test does while it
+    // plays, or whether the test sees it is a race.
+    const auto there = music + QStringLiteral("/there.wav");
+    write_wave(there, wave_sample_rate * 60U);
 
     BenchMainWindow window;
     window.show();
@@ -4464,6 +4470,61 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
     window.playRow(*remote_tab, 0);
     QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
+    // Adding to the remote tab while it plays: the rows stay as they were
+    // added -- tagged, with their own identities -- rather than being traded
+    // for the engine's bare paths.
+    {
+        emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+        QTRY_COMPARE(remote_tab->model->rowCount(), 2);
+        const auto added = remote_tab->model->rows();
+        for (int wait = 0; wait < 40; ++wait) {
+            QTest::qWait(50);
+            const auto& now = remote_tab->model->rows();
+            QCOMPARE(static_cast<int>(now.size()), 2);
+            for (std::size_t index = 0; index < now.size(); ++index) {
+                QCOMPARE(now[index].entry_id, added[index].entry_id);
+                QVERIFY2(now[index].probed && now[index].title == added[index].title,
+                         now[index].title.c_str());
+            }
+        }
+        remote_tab->model->removeRowIndexes({1});
+        window.markTabDirty(*remote_tab);
+        QTRY_VERIFY(!window.remote_playback_->settling());
+        QTRY_COMPARE(window.remote_playback_->state().queue_size, std::size_t{1});
+    }
+    // And while the engine is slow to answer -- a remote busy scanning, as
+    // gemenon was. An edit is on its way when an older state arrives, one
+    // whose queue lacks the row just added. That is no reason to take the
+    // engine's queue over: doing so blocked the window on the busy engine,
+    // dropped the new row, and brought it back as a bare path once the
+    // engine caught up.
+    {
+        auto extra = remote_tab->model->rows().front();
+        extra.entry_id = core::StableId::random();
+        const auto pid = static_cast<pid_t>(remote.processId());
+        QVERIFY(pid > 0);
+        QVERIFY(::kill(pid, SIGSTOP) == 0);
+        const auto resume = qScopeGuard([pid] { ::kill(pid, SIGCONT); });
+        remote_tab->model->appendRows({extra});
+        window.markTabDirty(*remote_tab);
+        QVERIFY(window.remote_playback_->settling());
+        // A state from before the edit, as far as the window can tell.
+        window.engine_queue_revision_ = 0;
+        QElapsedTimer waited;
+        waited.start();
+        emit window.remote_playback_->changed();
+        QVERIFY2(waited.elapsed() < 1'000, "the window does not wait on a busy engine");
+        QCOMPARE(remote_tab->model->rowCount(), 2);
+        QCOMPARE(remote_tab->model->rows().back().entry_id, extra.entry_id);
+        ::kill(pid, SIGCONT);
+        QTRY_VERIFY(!window.remote_playback_->settling());
+        QTest::qWait(300);
+        QCOMPARE(remote_tab->model->rowCount(), 2);
+        QCOMPARE(remote_tab->model->rows().back().entry_id, extra.entry_id);
+        QVERIFY(remote_tab->model->rows().back().probed);
+        remote_tab->model->removeRowIndexes({1});
+        window.markTabDirty(*remote_tab);
+    }
     QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("stopped"));
     QVERIFY(window.transport_ == window.remote_playback_);
     // And back.

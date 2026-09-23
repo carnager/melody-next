@@ -2,6 +2,7 @@
 
 #include "trackknife/persistence/list_repository.hpp"
 #include <sqlite3.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -1852,6 +1853,34 @@ void list_entry_identities_survive_reordering_and_separate_duplicates() {
     cleanup();
 }
 
+namespace {
+
+// The foreign-key check guards migrations, and runs only when one ran. The
+// engine opens the database for every library request; checking the whole of
+// it each time cost half a second per request on a 66,000-track library.
+// Shown by a reference no migration made: opening an up-to-date database
+// does not go looking for it.
+void an_up_to_date_database_is_opened_without_rechecking_it() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("trackknife-current-schema-" + std::to_string(::getpid()) + ".sqlite3");
+    std::filesystem::remove(path);
+    require(trackknife::persistence::ListRepository::open(path).has_value(),
+            "a fresh database is created at the current schema");
+    sqlite3* raw = nullptr;
+    require(sqlite3_open(path.c_str(), &raw) == SQLITE_OK, "the database opens directly");
+    require(sqlite3_exec(raw,
+                         "INSERT INTO list_items(document_id,position,source,source_reference) "
+                         "VALUES('no-such-document',0,0,x'2f')",
+                         nullptr, nullptr, nullptr) == SQLITE_OK,
+            "a stray reference is written with foreign keys off");
+    sqlite3_close(raw);
+    require(trackknife::persistence::ListRepository::open(path).has_value(),
+            "an up-to-date database opens without a full foreign-key check");
+    std::filesystem::remove(path);
+}
+
+} // namespace
+
 int main() {
     saved_searches_are_persistent_and_conflict_checked();
     local_listening_history_is_monotonic_and_persistent();
@@ -1866,5 +1895,6 @@ int main() {
     previously_resolved_target_reconciles_fresh_relocation();
     legacy_logical_snapshots_block_refresh();
     list_entry_identities_survive_reordering_and_separate_duplicates();
+    an_up_to_date_database_is_opened_without_rechecking_it();
     return EXIT_SUCCESS;
 }

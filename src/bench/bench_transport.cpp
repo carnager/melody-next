@@ -1338,7 +1338,12 @@ void BenchMainWindow::refreshEngineTransport() {
     // through, which is why attaching re-reads it properly; what this catches
     // is the case that actually happens -- something added or removed an entry
     // behind this window's back.
-    if (state.queue_revision != engine_queue_revision_) {
+    // Not while this window's own commands are on their way: until they are
+    // answered, the engine may report a queue from before them, and adopting
+    // it would trade the rows just added for the engine's older list -- and
+    // then, once the engine caught up, bring them back as bare paths. The
+    // revision is left unread so the check runs once they are answered.
+    if (state.queue_revision != engine_queue_revision_ && !transport_->settling()) {
         engine_queue_revision_ = state.queue_revision;
         if (auto* tab = tabForDocument(playback_.anchors.document);
             tab != nullptr &&

@@ -76,6 +76,7 @@ void BenchMainWindow::connectRemoteEngine() {
                 syncArtwork(*tab);
             }
         }
+        refreshLocalRatings();
         static_cast<void>(remoteQueueTab());
         // Music the remote was already playing is followed, unless this
         // computer is playing: then that is what the transport shows, and
@@ -102,6 +103,10 @@ void BenchMainWindow::connectRemoteEngine() {
     remote_library_ = new LocalLibraryPanel(*remote_catalogue_source_, source_stack_);
     remote_library_->setObjectName(QStringLiteral("bench-remote-library"));
     source_stack_->addWidget(remote_library_);
+    // Ratings set in remote tabs are stored on the remote, and read from it.
+    connect(remote_library_, &LocalLibraryPanel::ratingsChanged, this,
+            &BenchMainWindow::refreshLocalRatings);
+    refreshLocalRatings();
     const auto index = local_source_tabs_->addTab(remote_catalogue_source_->name());
     local_source_tabs_->setTabData(index, QStringLiteral("remote"));
     local_source_tabs_->setTabToolTip(index, remote_catalogue_source_->describe());

@@ -265,6 +265,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
+    void aRemoteTabRatesOnItsEngine();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
     void theDeviceMenuChoosesAnOutputAgent();
@@ -4670,6 +4671,66 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
 // ADR-0227: a remote tab's files are on the remote's machine and need not be
 // reachable from this one, so its tags and covers come from that engine --
 // however its rows got there.
+void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && page->entries.size() == 1U);
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QTRY_VERIFY(!tab->model->rows().front().album_rating_hash.empty());
+    const auto track_hash = tab->model->rows().front().rating_hash;
+    const auto album_hash = tab->model->rows().front().album_rating_hash;
+
+    window.tabs_->setCurrentWidget(tab->view);
+    tab->view->selectionModel()->select(
+        tab->model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QVERIFY(QMetaObject::invokeMethod(
+        tab->view, "customContextMenuRequested", Qt::DirectConnection,
+        Q_ARG(QPoint, tab->view->visualRect(tab->model->index(0, local_title_column)).center())));
+    auto* track_stars = window.findChild<QAction*>(QStringLiteral("action-local-rate-6"));
+    auto* album_stars = window.findChild<QAction*>(QStringLiteral("action-local-album-rate-8"));
+    QVERIFY(track_stars != nullptr && album_stars != nullptr);
+    track_stars->trigger();
+    album_stars->trigger();
+    window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"))->close();
+
+    // Stored where the track lives, so the remote's own queries see it...
+    const auto remote_ratings = [&window, &track_hash, &album_hash] {
+        auto found = window.remote_catalogue_source_->open()->ratings({track_hash, album_hash});
+        return found ? *found : std::vector<unsigned>{};
+    };
+    QTRY_COMPARE(remote_ratings(), (std::vector<unsigned>{6U, 8U}));
+    // ...and read back from there onto the tab's cover.
+    QTRY_COMPARE(tab->model->rows().front().album_rating, 8U);
+    // Not on this computer's engine, which does not have the track.
+    const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
+    QVERIFY(here.has_value());
+    QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
 void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

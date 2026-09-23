@@ -1634,40 +1634,50 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
 }
 
 void BenchMainWindow::refreshLocalRatings() {
-    if (local_library_ == nullptr) {
-        return;
-    }
-    QStringList hashes;
-    QSet<QString> unique;
-    for (const auto& tab : list_tabs_) {
-        for (const auto& hash : tab->model->ratingHashes()) {
-            if (!unique.contains(hash)) {
-                unique.insert(hash);
-                hashes.push_back(hash);
+    // Ratings live with the engine whose library holds the track, so each
+    // side's tabs ask their own engine.
+    for (const bool remote : {false, true}) {
+        auto* library = remote ? remote_library_ : local_library_;
+        if (library == nullptr) {
+            continue;
+        }
+        QStringList hashes;
+        QSet<QString> unique;
+        for (const auto& tab : list_tabs_) {
+            if (tab->document.remote != remote) {
+                continue;
+            }
+            for (const auto& hash : tab->model->ratingHashes()) {
+                if (!unique.contains(hash)) {
+                    unique.insert(hash);
+                    hashes.push_back(hash);
+                }
             }
         }
-    }
-    if (hashes.isEmpty()) {
-        return;
-    }
-    std::vector<std::string> keys;
-    keys.reserve(static_cast<std::size_t>(hashes.size()));
-    for (const auto& hash : hashes) {
-        keys.push_back(hash.toStdString());
-    }
-    local_library_->requestRatings(std::move(keys), [this, hashes](std::vector<unsigned> values) {
-        if (values.size() != static_cast<std::size_t>(hashes.size())) {
-            return;
+        if (hashes.isEmpty()) {
+            continue;
         }
-        QHash<QString, unsigned> ratings;
-        ratings.reserve(hashes.size());
-        for (qsizetype index = 0; index < hashes.size(); ++index) {
-            ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
+        std::vector<std::string> keys;
+        keys.reserve(static_cast<std::size_t>(hashes.size()));
+        for (const auto& hash : hashes) {
+            keys.push_back(hash.toStdString());
         }
-        for (const auto& tab : list_tabs_) {
-            tab->model->applyRatings(ratings);
-        }
-    });
+        library->requestRatings(std::move(keys), [this, hashes, remote](std::vector<unsigned> values) {
+            if (values.size() != static_cast<std::size_t>(hashes.size())) {
+                return;
+            }
+            QHash<QString, unsigned> ratings;
+            ratings.reserve(hashes.size());
+            for (qsizetype index = 0; index < hashes.size(); ++index) {
+                ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
+            }
+            for (const auto& tab : list_tabs_) {
+                if (tab->document.remote == remote) {
+                    tab->model->applyRatings(ratings);
+                }
+            }
+        });
+    }
 }
 
 void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
@@ -1718,7 +1728,12 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
     if (track_hashes.isEmpty()) {
         return;
     }
-    const auto store_ready = local_library_ != nullptr;
+    // A rating belongs to the engine whose library holds the track: a
+    // remote tab's ratings are stored there, where its queries see them.
+    const auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
+    const bool remote = tab != nullptr && tab->document.remote;
+    auto* const library = remote ? remote_library_ : local_library_;
+    const auto store_ready = library != nullptr;
     menu->addSeparator();
     auto* rate_menu = menu->addMenu(QStringLiteral("Rate"));
     rate_menu->setObjectName(QStringLiteral("bench-local-rate-menu"));
@@ -1741,17 +1756,20 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
         rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
         rate->setChecked(ratings_match && common_rating == rating);
         connect(rate, &QAction::triggered, this,
-                [this, model = QPointer{model}, track_hashes, rating] {
-                    if (local_library_ == nullptr) {
+                [this, model = QPointer{model}, library = QPointer{library}, remote, track_hashes,
+                 rating] {
+                    if (library == nullptr) {
                         return;
                     }
                     QHash<QString, unsigned> applied;
                     for (const auto& hash : track_hashes) {
-                        local_library_->storeRating(hash.toStdString(), false, rating);
+                        library->storeRating(hash.toStdString(), false, rating);
                         applied.insert(hash, rating);
                     }
-                    for (const auto& tab : list_tabs_) {
-                        tab->model->applyRatings(applied);
+                    for (const auto& other : list_tabs_) {
+                        if (other->document.remote == remote) {
+                            other->model->applyRatings(applied);
+                        }
                     }
                     if (model)
                         model->applyRatings(applied);
@@ -1759,12 +1777,12 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
         auto* album_rate = make_rating_action(album_rate_menu, rating);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
         album_rate->setChecked(album_ratings_match && common_album_rating == rating);
-        connect(album_rate, &QAction::triggered, this, [this, album_hashes, rating] {
-            if (local_library_ == nullptr) {
+        connect(album_rate, &QAction::triggered, this, [library = QPointer{library}, album_hashes, rating] {
+            if (library == nullptr) {
                 return;
             }
             for (const auto& hash : album_hashes) {
-                local_library_->storeRating(hash.toStdString(), true, rating);
+                library->storeRating(hash.toStdString(), true, rating);
             }
         });
     }

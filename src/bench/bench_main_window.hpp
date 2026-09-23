@@ -347,6 +347,9 @@ class BenchMainWindow final : public QMainWindow {
     struct ArtworkOutcome {
         QString key;
         QImage image;
+        // The engine could not be asked -- unreachable, say -- which is not
+        // the same as "this album has no cover", and is not remembered as it.
+        bool failed{false};
     };
     void syncArtwork(ListTab& tab);
     void invalidateArtwork(const std::string& raw_path);

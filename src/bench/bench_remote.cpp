@@ -68,6 +68,14 @@ void BenchMainWindow::connectRemoteEngine() {
                 local_source_tabs_->setTabText(index, remote_catalogue_source_->name());
             }
         }
+        // The remote tabs were restored before there was a remote to ask for
+        // their covers and missing tags -- or while it was away: they ask now.
+        for (auto& tab : list_tabs_) {
+            if (tab->document.remote) {
+                enqueueUnprobedRows(*tab);
+                syncArtwork(*tab);
+            }
+        }
         static_cast<void>(remoteQueueTab());
         // Music the remote was already playing is followed, unless this
         // computer is playing: then that is what the transport shows, and

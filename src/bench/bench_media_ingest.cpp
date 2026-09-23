@@ -721,6 +721,7 @@ void BenchMainWindow::pumpArtworkQueue() {
             if (engine) {
                 const auto bytes = engine->artwork(raw_path, cancellation);
                 outcome->image = bytes ? ui::artworkThumbnail(*bytes) : QImage{};
+                outcome->failed = !bytes;
             } else {
                 outcome->image = ui::loadLocalArtwork(raw_path, cancellation);
             }
@@ -743,6 +744,12 @@ void BenchMainWindow::finishArtworkLoad() {
     if (artwork_invalidated_while_loading_.remove(outcome->key)) {
         // Invalidation already queued a fresh read and its pending marker now
         // owns this key. Discard only the stale in-flight result.
+        pumpArtworkQueue();
+        return;
+    }
+    if (outcome->failed) {
+        // Not known to have no cover: asked again when the tab next looks.
+        artwork_pending_.remove(outcome->key);
         pumpArtworkQueue();
         return;
     }

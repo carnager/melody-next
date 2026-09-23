@@ -265,6 +265,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
+    void aRestoredRemoteTabGetsItsCovers();
     void theDeviceMenuChoosesAnOutputAgent();
     void upNextEditingAndPersistence();
     void upNextPanelAnimationAndSettings();
@@ -4807,6 +4808,56 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     }());
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
+}
+
+// Lists are restored before the remote engine is connected, so a restored
+// remote tab once asked for its covers when there was no one to ask, and
+// never again: they stayed missing until another album was added.
+void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    const auto covered = [](BenchMainWindow::ListTab* tab) {
+        return tab != nullptr && tab->model->rowCount() > 0 &&
+               tab->model->hasArtwork(tab->model->groupKey(0));
+    };
+    const auto remote_tab = [](BenchMainWindow& window) -> BenchMainWindow::ListTab* {
+        for (const auto& tab : window.list_tabs_) {
+            if (tab->document.remote && tab->model->rowCount() > 0) {
+                return tab.get();
+            }
+        }
+        return nullptr;
+    };
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+        persistence::LibraryQuery albums;
+        albums.kind = persistence::LibraryEntryKind::album;
+        const auto page = catalogue->query(albums);
+        QVERIFY(page && page->entries.size() == 1U);
+        emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+        QTRY_VERIFY(covered(remote_tab(window)));
+        window.persistNow(false);
+        QVERIFY(window.close());
+    }
+    BenchMainWindow restored;
+    restored.show();
+    QTRY_VERIFY(restored.lists_restored_);
+    QTRY_VERIFY(remote_tab(restored) != nullptr);
+    QTRY_VERIFY(covered(remote_tab(restored)));
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

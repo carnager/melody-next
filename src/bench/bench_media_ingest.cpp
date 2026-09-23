@@ -812,13 +812,24 @@ void BenchMainWindow::openLocalPaths(std::vector<std::string> raw_paths) {
                                    std::make_move_iterator(raw_paths.end()));
         return;
     }
+    // Files on this computer go into a local list (ADR-0227): the one on
+    // screen when it is one, else the first there is, else a new one. Into a
+    // remote tab they would be the remote's paths, which they are not.
     auto* tab = currentListTab();
-    if (tab == nullptr && !list_tabs_.empty()) {
-        tab = list_tabs_.front().get();
+    if (tab == nullptr || tab->document.remote) {
+        const auto local = std::ranges::find_if(
+            list_tabs_, [](const auto& candidate) { return !candidate->document.remote; });
+        tab = local != list_tabs_.end()
+                  ? local->get()
+                  : addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                         .kind = persistence::ListKind::scratch,
+                                                         .name = "Local Queue",
+                                                         .pinned = false,
+                                                         .dirty = false,
+                                                         .items = {},
+                                                         .remote = false},
+                               true);
         tabs_->setCurrentWidget(tab->view);
-    }
-    if (tab == nullptr) {
-        return;
     }
     startDiscovery(std::move(raw_paths), QString::fromStdString(tab->document.id.to_string()), -1);
 }

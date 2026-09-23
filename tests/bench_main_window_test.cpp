@@ -4791,6 +4791,21 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QCOMPARE(tab->model->rows().back().title, std::string{"Fixture Tone"});
     dialog->close();
 
+    // Files opened from this computer go into a local list, never the remote
+    // tab that happens to be on screen.
+    {
+        window.tabs_->setCurrentWidget(tab->view);
+        const auto rows_before = tab->model->rowCount();
+        const auto opened = media.filePath(QStringLiteral("opened-here.wav"));
+        write_wave(opened, wave_sample_rate);
+        window.openLocalPaths({QFile::encodeName(opened).toStdString()});
+        QTRY_VERIFY(window.currentListTab() != nullptr && !window.currentListTab()->document.remote &&
+                    std::ranges::any_of(window.currentListTab()->model->rows(), [&opened](const auto& row) {
+                        return row.raw_path == QFile::encodeName(opened).toStdString();
+                    }));
+        QCOMPARE(tab->model->rowCount(), rows_before);
+    }
+
     // Last, as it retags the fixture everything above searched for.
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), music);
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), mounted);

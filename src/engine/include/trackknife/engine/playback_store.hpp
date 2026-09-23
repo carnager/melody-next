@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 
 namespace trackknife::engine {
@@ -29,6 +30,10 @@ class PlaybackStore final {
   public:
     static constexpr auto queue_key = "playback.queue.v1";
     static constexpr auto position_key = "playback.position.v1";
+    // The sink and buffer: kept apart from the queue, and restored even when
+    // there is no queue, because an engine with nothing queued still has
+    // speakers someone chose.
+    static constexpr auto output_key = "playback.output.v1";
 
     PlaybackStore(Player& player, Workspace& workspace,
                   std::chrono::milliseconds interval = std::chrono::seconds{5});
@@ -57,6 +62,7 @@ class PlaybackStore final {
     std::chrono::milliseconds interval_;
     std::uint64_t written_revision_{0};
     bool written_anything_{false};
+    std::string written_output_;
     std::atomic_bool running_{false};
     InterruptiblePause pause_;
     std::thread worker_;

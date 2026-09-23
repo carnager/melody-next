@@ -37,48 +37,6 @@ void BenchMainWindow::buildLastFm() {
     };
     connect(lastfm_, &LastFmService::completed, this, feedback);
 }
-void BenchMainWindow::sampleLastFm(const audio::LocalAuditionSnapshot& snapshot) {
-    if (!lastfm_ || lastfm_clock_.elapsed() - lastfm_sample_time_ < 500)
-        return;
-    lastfm_sample_time_ = lastfm_clock_.elapsed();
-    LocalTrackRow track;
-    if (auto* tab = tabForDocument(playback_.anchors.document)) {
-        const auto row = tab->model->rowOfSource(
-            {snapshot.raw_path, snapshot.selection, snapshot.segment}, playback_.row);
-        if (row >= 0)
-            track = tab->model->rows()[static_cast<std::size_t>(row)];
-    }
-    if (snapshot.occurrence_token != 0) {
-        if (playback_.requests.active() &&
-            playback_.requests.active()->id == snapshot.occurrence_token)
-            track = playback_.requests.active()->source;
-        else
-            for (const auto& request : playback_.requests.pending())
-                if (request.id == snapshot.occurrence_token) {
-                    track = request.source;
-                    break;
-                }
-    }
-    double position = 0, duration = 0;
-    if (snapshot.format && snapshot.format->sample_rate > 0) {
-        position = static_cast<double>(snapshot.position_sample) / snapshot.format->sample_rate;
-        if (snapshot.end_sample)
-            duration = static_cast<double>(*snapshot.end_sample) / snapshot.format->sample_rate;
-    }
-    const bool playing = (snapshot.state == audio::LocalAuditionState::playing ||
-                          snapshot.state == audio::LocalAuditionState::draining) &&
-                         snapshot.output_target_available && !snapshot.output_suspended;
-    lastfm_->observe(
-        {{"identity",
-          snapshot.raw_path.empty() ? QString{} : QString::number(snapshot.playback_instance)},
-         {"artist", QString::fromStdString(track.artist)},
-         {"title", QString::fromStdString(track.title)},
-         {"album", QString::fromStdString(track.album)},
-         {"duration", duration},
-         {"position", position},
-         {"playing", playing},
-         {"monotonic", lastfm_sample_time_}});
-}
 // ADR-0220: an interim, and named as one. Scrobbling belongs to whoever owns
 // playback, so its eventual home is the engine -- which would also scrobble
 // with no window open. It lives here for now because the engine knows paths

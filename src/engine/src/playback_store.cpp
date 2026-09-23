@@ -43,6 +43,14 @@ using protocol::Json;
     return revision;
 }
 
+[[nodiscard]] std::string output_document(const Player::Output& output) {
+    Json document = Json::object();
+    document["target"] = output.target ? Json(*output.target) : Json(nullptr);
+    document["capacity_ms"] = output.buffer.capacity.count();
+    document["start_threshold_ms"] = output.buffer.start_threshold.count();
+    return document.dump();
+}
+
 } // namespace
 
 PlaybackStore::PlaybackStore(Player& player, Workspace& workspace,
@@ -52,6 +60,26 @@ PlaybackStore::PlaybackStore(Player& player, Workspace& workspace,
 PlaybackStore::~PlaybackStore() { stop(); }
 
 bool PlaybackStore::restore() {
+    if (auto output = workspace_->load_engine_state(output_key); output && *output) {
+        const auto document = Json::parse(**output, nullptr, false);
+        if (!document.is_discarded() && document.is_object()) {
+            if (const auto target = document.find("target");
+                target != document.end() && target->is_string()) {
+                static_cast<void>(player_->set_output_target(target->get<std::string>()));
+            }
+            const audio::PlaybackBufferDurationConfig buffer{
+                .capacity = std::chrono::milliseconds{document.value("capacity_ms", 0)},
+                .start_threshold =
+                    std::chrono::milliseconds{document.value("start_threshold_ms", 0)},
+            };
+            // A value this engine would refuse is left at its default.
+            if (audio::valid_local_audition_buffer_config(buffer)) {
+                static_cast<void>(player_->set_buffer_config(buffer));
+            }
+        }
+    }
+    written_output_ = output_document(player_->output());
+
     auto stored = workspace_->load_engine_state(queue_key);
     if (!stored || !*stored) {
         return false;
@@ -74,7 +102,14 @@ bool PlaybackStore::restore() {
             state.queue.push_back(std::move(*entry));
         }
     }
-    if (state.queue.empty()) {
+    if (const auto asks = document.find("asks"); asks != document.end() && asks->is_array()) {
+        for (const auto& value : *asks) {
+            if (auto entry = queue_entry_from_json(value)) {
+                state.asks.push_back(std::move(*entry));
+            }
+        }
+    }
+    if (state.queue.empty() && state.asks.empty()) {
         return false;
     }
     if (const auto entry = document.find("entry"); entry != document.end() && entry->is_string()) {
@@ -131,6 +166,12 @@ void PlaybackStore::persist() {
     const auto revision = player_->revision();
     const auto state = player_->persisted();
 
+    if (auto output = output_document(player_->output()); output != written_output_) {
+        if (workspace_->save_engine_state(output_key, output, now_ms())) {
+            written_output_ = std::move(output);
+        }
+    }
+
     if (revision != written_revision_ || !written_anything_) {
         Json document = Json::object();
         auto entries = Json::array();
@@ -138,6 +179,11 @@ void PlaybackStore::persist() {
             entries.push_back(to_json(entry));
         }
         document["queue"] = std::move(entries);
+        auto held = Json::array();
+        for (const auto& entry : state.asks) {
+            held.push_back(to_json(entry));
+        }
+        document["asks"] = std::move(held);
         document["entry"] = state.entry.is_nil() ? Json(nullptr) : Json(state.entry.to_string());
         document["request_return"] =
             state.request_return.is_nil() ? Json(nullptr) : Json(state.request_return.to_string());

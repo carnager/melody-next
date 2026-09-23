@@ -593,7 +593,9 @@ if(TRACKKNIFE_BUILD_UI)
     target_compile_definitions(
         trackknife_bench_main_window_tests
         PRIVATE TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+                TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>"
     )
+    add_dependencies(trackknife_bench_main_window_tests trackknife_engine_daemon)
     target_link_libraries(
         trackknife_bench_main_window_tests
         PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options

@@ -541,10 +541,14 @@ void EnginePlaybackTest::aQueueChangedElsewhereReachesTheList() {
     emit view->doubleClicked(model->index(0, 0));
     QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{2}, 5'000);
 
-    // Somebody else appends to the engine's queue.
+    // Somebody else edits the engine's list -- a second client appending to
+    // it. (enqueue is not that: it holds asks for up-next, which are not list
+    // entries and must not appear as rows.)
     engine::QueueEntry added;
     added.source.raw_path = raw_paths[2];
-    (*player)->enqueue({added});
+    auto edited = (*player)->queue();
+    edited.push_back(added);
+    (*player)->replace_queue(std::move(edited));
 
     QTRY_VERIFY2_WITH_TIMEOUT(model->rowOfEntry(added.entry_id, -1) >= 0,
                               "the window is still showing a queue the engine has moved past",
@@ -760,7 +764,7 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     QVERIFY(model != nullptr);
     QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
 
-    const auto wanted = model->rows().at(1).entry_id;
+    const auto wanted = model->rows().at(1).raw_path;
     emit view->doubleClicked(model->index(0, 0));
     QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
 
@@ -771,18 +775,20 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     QVERIFY(queue_next != nullptr);
     queue_next->trigger();
 
-    const auto requested = [&player, &wanted] {
-        const auto asked = (*player)->requests();
-        return std::find(asked.begin(), asked.end(), wanted) != asked.end();
-    };
-    QTRY_VERIFY2_WITH_TIMEOUT(requested(), "the engine was never told about the request", 5'000);
+    // The ask is an occurrence of its own (ADR-0221/0226): a new identity for
+    // the same track, held by the engine apart from the list.
+    QTRY_VERIFY2_WITH_TIMEOUT((*player)->requests().size() == 1U,
+                              "the engine was never told about the request", 5'000);
+    QCOMPARE((*player)->queue().size(), 2U);
 
     // And Next honours it rather than walking the list.
     auto* next = window.findChild<QAction*>(QStringLiteral("action-next-track"));
     QVERIFY(next != nullptr);
     QTRY_VERIFY(next->isEnabled());
     next->trigger();
-    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().entry, wanted, 5'000);
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->state().source.raw_path, wanted, 5'000);
+    QCOMPARE((*player)->queue().size(), 2U);
+    QCOMPARE(model->rowCount(), 2);
 
     (*server)->stop();
 }
@@ -943,8 +949,11 @@ void EnginePlaybackTest::withoutAnEngineNothingChanges() {
 
     emit view->doubleClicked(model->index(0, 0));
     QTest::qWait(200);
-    // No engine, so the engine branch must not have claimed the transport.
-    QVERIFY(!window.property("trackknife-engine-playback").isValid());
+    // ADR-0226: no engine, nothing plays -- the window has no player of its
+    // own to fall back on, and says so rather than pretending.
+    QCOMPARE(window.property("trackknife-engine-playback").toString(),
+             QStringLiteral("unavailable"));
+    QVERIFY(!window.findChild<QAction*>(QStringLiteral("action-play-pause"))->isEnabled());
 }
 
 } // namespace trackknife::bench

@@ -106,16 +106,11 @@ void BenchMainWindow::initializePersistence() {
                 QByteArray{preset.header_state.data(),
                            static_cast<qsizetype>(preset.header_state.size())});
         }
-        // Tab creation emits transport refreshes. Do not let their empty player
-        // snapshot overwrite the checkpoint before it has been read.
-        resume_restore_pending_ = true;
         restoreLists(std::move(workspace.lists));
         restoreUpNext();
         // After the lists, because the entry the engine names is looked for in
         // them before a tab is invented for it.
         reattachToEngine();
-        if (!error.isEmpty())
-            resume_restore_pending_ = false;
         if (error.isEmpty()) {
             local_library_ = new LocalLibraryPanel(*catalogue_source_, source_stack_);
             connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,
@@ -558,26 +553,6 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     connect(model, &QAbstractItemModel::rowsInserted, this, [this] { refreshSelectionStatus(); });
     connect(model, &QAbstractItemModel::rowsRemoved, this, [this] { refreshSelectionStatus(); });
     connect(model, &QAbstractItemModel::modelReset, this, [this] { refreshSelectionStatus(); });
-    const auto reset_order = [this, model] {
-        if (!consuming_row_) {
-            // The model identity check the persistent index used to provide is
-            // now exactly the document check below, so one branch covers both.
-            const auto* playing = tabForDocument(playback_.anchors.document);
-            if (playing != nullptr && playing->model == model) {
-                resetPlaybackOrder();
-            }
-        }
-    };
-    connect(model, &QAbstractItemModel::rowsInserted, this, reset_order);
-    connect(model, &QAbstractItemModel::rowsRemoved, this, reset_order);
-    connect(model, &QAbstractItemModel::rowsMoved, this, reset_order);
-    connect(model, &QAbstractItemModel::modelReset, this, reset_order);
-    connect(model, &QAbstractItemModel::layoutChanged, this, reset_order);
-    connect(model, &QAbstractItemModel::dataChanged, this,
-            [this, reset_order](const QModelIndex&, const QModelIndex&, const QList<int>& roles) {
-                if (playback_.modes.album_random && roles.empty())
-                    reset_order();
-            });
     view->setProperty("trackknife-hover-row", -1);
     view->setAlternatingRowColors(true);
     view->setShowGrid(false);

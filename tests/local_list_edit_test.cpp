@@ -57,14 +57,13 @@ class LocalListEditTest final : public QObject {
     void limitsRejectIncompleteEdits();
     void entryIdentitiesStayDistinctAndSurviveReordering();
     void probingPreservesEntryIdentity();
-    void thePlaybackServiceDecidesWithoutAWindow();
+    void thePlayingEntryIsFoundByIdentity();
 };
 
-// ADR-0220 Phase 0: the service holds the playback state and the decisions
-// that need it, so both can be exercised without constructing
-// BenchMainWindow. This is the object the remaining orchestration migrates
-// into, and the one Phase 2 serialises.
-void LocalListEditTest::thePlaybackServiceDecidesWithoutAWindow() {
+// ADR-0221/0226: the window's anchor names the entry the engine is playing.
+// What plays next is the engine's decision; what the window must get right
+// is finding that entry again after its list is reordered or edited.
+void LocalListEditTest::thePlayingEntryIsFoundByIdentity() {
     LocalListModel model;
     model.replaceRows({row("A", "/a.flac"), row("B", "/b.flac"), row("C", "/c.flac")});
     const LocalListPlaybackView list{model};
@@ -75,52 +74,21 @@ void LocalListEditTest::thePlaybackServiceDecidesWithoutAWindow() {
     QCOMPARE(playback.resolveRow(list), -1);
 
     playback.anchors.document = core::StableId::random();
-    playback.adopt(rows[0].entry_id, 0, model.source(0));
-    playback.order.reset(3, 0, false);
+    playback.anchors.current = rows[0].entry_id;
+    playback.row = 0;
     QVERIFY(playback.anchors.playing());
     QCOMPARE(playback.resolveRow(list), 0);
 
-    const auto next = playback.adjacentRow(list, 1);
-    QVERIFY(next.has_value());
-    QCOMPARE(next->row, 1);
-
     // Reordering moves the row without disturbing the identity, and the
-    // cached row is only a hint: the service still finds the entry.
+    // cached row is only a hint.
     auto reversed = rows;
     std::reverse(reversed.begin(), reversed.end());
     model.replaceRows(reversed);
     QCOMPARE(playback.resolveRow(list), 2);
 
-    // An entry that leaves the list stops playback rather than guessing.
+    // An entry that leaves the list is not guessed at.
     model.replaceRows({reversed[0], reversed[1]});
     QCOMPARE(playback.resolveRow(list), -1);
-    QVERIFY(!playback.adjacentRow(list, 1).has_value());
-
-    playback.stop();
-    QVERIFY(!playback.anchors.playing());
-    QVERIFY(playback.anchors.source.empty());
-    QCOMPARE(playback.row, -1);
-
-    // The service owns the request queue, so it derives for itself the two
-    // facts the advance rules need rather than being told them.
-    LocalListModel fresh;
-    fresh.replaceRows({row("A", "/a.flac"), row("B", "/b.flac")});
-    const LocalListPlaybackView list2{fresh};
-    LocalPlaybackService serving;
-    serving.anchors.document = core::StableId::random();
-    serving.adopt(fresh.rows()[0].entry_id, 0, fresh.source(0));
-    serving.order.reset(2, 0, false);
-    QVERIFY(!serving.requestState().active);
-    QVERIFY(serving.requestState().pending_empty);
-
-    // Single + Repeat normally loops the current track, but a pending request
-    // is an explicit ask and outranks it.
-    serving.modes.single = audio::ModeState::on;
-    serving.modes.repeat = true;
-    QVERIFY(serving.automaticRow(list2).has_value());
-    QVERIFY(serving.requests.insert({fresh.rows()[1]}, 0));
-    QVERIFY(!serving.requestState().pending_empty);
-    QVERIFY(!serving.automaticRow(list2).has_value());
 }
 
 // ADR-0221: a probe refreshes what a row says about its track. It must not

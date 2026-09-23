@@ -90,10 +90,10 @@ class Player final {
     // worse than a rejected one, because nothing then says which half took.
     [[nodiscard]] core::Result<void> set_requests(const std::vector<core::StableId>& entries);
 
-    // Appends entries that are not already in the queue, by identity. This is
-    // how something that was never in the list -- a track sent to up-next from
-    // the library -- becomes playable by an engine that only plays what it
-    // holds.
+    // Holds entries that are not in the queue, by identity, so they can be
+    // requested. This is how something that was never in the list -- a track
+    // sent to up-next from the library -- becomes playable by an engine that
+    // only plays what it holds. They stay out of the queue itself.
     void enqueue(std::vector<QueueEntry> entries);
     void clear_requests();
 
@@ -118,6 +118,21 @@ class Player final {
     // is sent -- the engine is told what to do, not what the user picked.
     [[nodiscard]] core::Result<void> set_replay_gain_mode(audio::ReplayGainMode mode);
     [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps preamps);
+
+    // Which sink plays and how much decoded audio is held ahead of it. The
+    // engine's, not a client's: they describe the machine the engine runs on,
+    // and a laptop's devices mean nothing to the engine on a NAS (ADR-0226).
+    // Nullopt is the system default sink.
+    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target);
+    // Re-reads the device list; the monitor keeps it current otherwise.
+    [[nodiscard]] core::Result<void> refresh_output_devices();
+    // Applies from the next track, not mid-stream.
+    [[nodiscard]] core::Result<void> set_buffer_config(audio::PlaybackBufferDurationConfig buffer);
+    struct Output final {
+        std::optional<std::string> target;
+        audio::PlaybackBufferDurationConfig buffer;
+    };
+    [[nodiscard]] Output output() const;
     // Direction is +1 or -1. Answers not_found when the modes and order say
     // there is nowhere to go, which is how repeat-off at the end reports.
     [[nodiscard]] core::Result<void> step(int direction);
@@ -186,6 +201,19 @@ class Player final {
         std::uint64_t instance{0U};
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
         audio::ReplayGainPreamps replay_gain_preamps;
+        // The chosen sink (nullopt: the default), what the default is now, and
+        // whether the chosen one exists -- a USB DAC unplugged is chosen but
+        // absent, and a client should say so rather than show it as playing.
+        std::optional<std::string> output_target;
+        std::optional<std::string> default_output;
+        bool output_available{true};
+        std::vector<audio::PipeWireDevice> devices;
+        // Reconnecting after the sink went away and came back.
+        bool output_suspended{false};
+        audio::PlaybackBufferDurationConfig buffer;
+        // A buffer change waits for the next track; this says one is waiting.
+        bool buffer_pending{false};
+        std::uint64_t underruns{0U};
     };
     [[nodiscard]] State state() const;
 
@@ -194,6 +222,8 @@ class Player final {
     // is what a client renders and includes derived things like the status.
     struct Persisted final {
         std::vector<QueueEntry> queue;
+        // Requested tracks that are not in the list.
+        std::vector<QueueEntry> asks;
         core::StableId entry;
         core::StableId request_return;
         bool playing_request{false};
@@ -244,6 +274,16 @@ class Player final {
     // list playback was interrupted, so playback returns there afterwards
     // instead of continuing from wherever the request happened to sit.
     [[nodiscard]] core::Result<void> start_locked(std::size_t row, bool from_request = false);
+    // The same for any entry the engine holds, in the list or asked for from
+    // outside it. Takes a copy: starting consumes, which moves rows.
+    [[nodiscard]] core::Result<void> start_entry_locked(QueueEntry entry, bool from_request);
+    // Plays the first request that still names something held; false when
+    // none does, having dropped the ones that do not.
+    [[nodiscard]] std::optional<core::Result<void>> start_next_request_locked();
+    // An entry by identity, in the list or among the asks; null when neither.
+    [[nodiscard]] const QueueEntry* find_locked(const core::StableId& entry_id) const;
+    // Drops asks nothing refers to any more: not requested, not playing.
+    void prune_asks_locked();
     // The two facts the advance rules need about the request queue.
     [[nodiscard]] audio::RequestQueueState request_state_locked() const;
     void reset_order_locked();
@@ -274,6 +314,15 @@ class Player final {
     // Identities rather than sources, so a request survives the queue being
     // reordered for the same reason playback does.
     std::vector<core::StableId> requests_;
+    // Tracks asked for from outside the list -- up-next fed from the library.
+    // Kept apart from the queue: they are not list entries, so they take no
+    // part in its order, its consume or what a client shows as the list. They
+    // once were appended to it, and a client mirroring the queue then showed
+    // every asked-for track as a new row.
+    std::vector<QueueEntry> asks_;
+    // Whether the continuation armed for gapless is a request, so a handover
+    // to it keeps the same books a start would.
+    bool gapless_from_request_{false};
     // What was last offered for gapless continuation, so an unchanged
     // decision is not re-sent on every observation.
     std::optional<core::StableId> gapless_entry_;

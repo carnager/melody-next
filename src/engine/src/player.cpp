@@ -45,6 +45,9 @@ core::Result<std::unique_ptr<Player>> Player::create() {
     if (!audition) {
         return std::unexpected(std::move(audition.error()));
     }
+    // Watch the devices from the start, so the first client to ask sees them
+    // and a sink appearing later is noticed without being asked.
+    static_cast<void>((*audition)->refresh_output_devices());
     return std::unique_ptr<Player>{new Player{std::move(*audition)}};
 }
 
@@ -81,7 +84,42 @@ audio::RequestQueueState Player::request_state_locked() const {
 }
 
 core::Result<void> Player::start_locked(const std::size_t row, const bool from_request) {
-    const auto& entry = queue_[row];
+    return start_entry_locked(queue_[row], from_request);
+}
+
+const QueueEntry* Player::find_locked(const core::StableId& entry_id) const {
+    if (entry_id.is_nil()) {
+        return nullptr;
+    }
+    for (const auto* pool : {&queue_, &asks_}) {
+        const auto found = std::ranges::find(*pool, entry_id, &QueueEntry::entry_id);
+        if (found != pool->end()) {
+            return &*found;
+        }
+    }
+    return nullptr;
+}
+
+void Player::prune_asks_locked() {
+    std::erase_if(asks_, [this](const QueueEntry& ask) {
+        return ask.entry_id != anchors_.current && !std::ranges::contains(requests_, ask.entry_id);
+    });
+}
+
+std::optional<core::Result<void>> Player::start_next_request_locked() {
+    while (!requests_.empty()) {
+        const auto wanted = requests_.front();
+        requests_.erase(requests_.begin());
+        // A request whose entry has gone is dropped rather than stopping
+        // playback: the user asked for something that is no longer there.
+        if (const auto* entry = find_locked(wanted); entry != nullptr) {
+            return start_entry_locked(*entry, true);
+        }
+    }
+    return std::nullopt;
+}
+
+core::Result<void> Player::start_entry_locked(QueueEntry entry, const bool from_request) {
     if (from_request && !playing_request_) {
         // Where the list was when the ask interrupted it. Recorded before the
         // ask starts, because afterwards the anchors name the request.
@@ -107,13 +145,14 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
     const auto left = anchors_.current;
     anchors_.current = entry.entry_id;
     anchors_.source = entry.source;
-    row_ = static_cast<int>(row);
+    // An ask from outside the list has no row; the list is where the return
+    // point leads back to.
+    row_ = QueueView{queue_}.row_of_entry(entry.entry_id, -1);
     playing_request_ = from_request;
     ++revision_;
     // Consume drops the entry playback just left. Done after the new one is
     // anchored, because erasing moves rows and the anchor is what survives
-    // that (ADR-0221). `entry` is a reference into the queue and must not be
-    // touched afterwards.
+    // that (ADR-0221).
     if (modes_.consume_active() && !left.is_nil() && left != anchors_.current) {
         consume_locked(left);
     }
@@ -121,8 +160,11 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
         // Ordinary playback resumed, so there is nothing to return to.
         anchors_.request_return = core::StableId{};
     }
-    order_.advance(row_, 1);
+    if (row_ >= 0) {
+        order_.advance(row_, 1);
+    }
     std::erase(requests_, anchors_.current);
+    prune_asks_locked();
     seen_transitions_ = audition_->snapshot().chain_transitions;
     gapless_entry_.reset();
     refresh_gapless_locked();
@@ -154,32 +196,37 @@ void Player::consume_locked(const core::StableId& entry_id) {
 void Player::refresh_gapless_locked() {
     const QueueView view{queue_};
     // What plays next if nothing interrupts: a request first, then the order.
-    std::optional<std::size_t> next_row;
-    for (const auto& wanted : requests_) {
-        if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
-            next_row = static_cast<std::size_t>(row);
-            break;
+    const QueueEntry* next = nullptr;
+    bool next_is_request = false;
+    // Single stops rather than playing an ask, as advancing does.
+    if (!modes_.single_active()) {
+        for (const auto& wanted : requests_) {
+            if ((next = find_locked(wanted)) != nullptr) {
+                next_is_request = true;
+                break;
+            }
         }
     }
-    if (!next_row) {
+    if (next == nullptr) {
         // Asking the order what is next does not consume it: PlaybackOrder
         // holds its draw in `pending_` and returns the same answer until
         // advance() commits it, precisely so a status refresh can ask
         // repeatedly. A defensive copy here would be waste -- and I wrote one
         // before reading that, then could not make a test fail without it.
-        if (const auto choice = audio::adjacent_playback_row(view, anchors_, modes_, order_,
-                                                             request_state_locked(), 1, row_)) {
-            next_row = static_cast<std::size_t>(choice->row);
+        if (const auto choice = audio::automatic_playback_row(view, anchors_, modes_, order_,
+                                                              request_state_locked(), row_)) {
+            next = &queue_[static_cast<std::size_t>(choice->row)];
         }
     }
-    if (!next_row) {
+    if (next == nullptr) {
         if (gapless_entry_) {
             static_cast<void>(audition_->clear_gapless_next());
             gapless_entry_.reset();
         }
         return;
     }
-    const auto& entry = queue_[*next_row];
+    const auto& entry = *next;
+    gapless_from_request_ = next_is_request;
     // Checked against what the audition service is actually holding, not
     // against what this class remembers offering. The two disagree whenever
     // something drops the queued continuation -- a seek does -- and trusting
@@ -211,19 +258,42 @@ void Player::follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot)
     if (!gapless_entry_) {
         return;
     }
-    const QueueView view{queue_};
-    const auto row = view.row_of_entry(*gapless_entry_, -1);
+    const auto* entry = find_locked(*gapless_entry_);
     gapless_entry_.reset();
-    if (row < 0) {
+    if (entry == nullptr) {
         return;
     }
+    // The same books a start keeps: a request records where the list was,
+    // and ordinary playback forgets any return point.
+    if (gapless_from_request_ && !playing_request_) {
+        const QueueView view{queue_};
+        const auto resume_at = audio::adjacent_playback_row(view, anchors_, modes_, order_,
+                                                            request_state_locked(), 1, row_);
+        anchors_.request_return = resume_at
+                                      ? queue_[static_cast<std::size_t>(resume_at->row)].entry_id
+                                      : core::StableId{};
+    } else if (!gapless_from_request_) {
+        anchors_.request_return = core::StableId{};
+    }
+    playing_request_ = gapless_from_request_;
     // The engine moved on without being told to, so the anchors follow it
     // rather than the other way round.
-    anchors_.current = queue_[static_cast<std::size_t>(row)].entry_id;
-    anchors_.source = queue_[static_cast<std::size_t>(row)].source;
-    row_ = row;
-    order_.advance(row_, 1);
+    const auto left = anchors_.current;
+    anchors_.current = entry->entry_id;
+    anchors_.source = entry->source;
+    row_ = QueueView{queue_}.row_of_entry(anchors_.current, -1);
+    if (row_ >= 0) {
+        order_.advance(row_, 1);
+    }
     std::erase(requests_, anchors_.current);
+    ++revision_;
+    // A gapless handover finishes a track as surely as a load does, so
+    // consume applies here too. It once did not: a list played gaplessly in
+    // consume mode kept every entry.
+    if (modes_.consume_active() && !left.is_nil() && left != anchors_.current) {
+        consume_locked(left);
+    }
+    prune_asks_locked();
 }
 
 void Player::replace_queue(std::vector<QueueEntry> entries) {
@@ -233,11 +303,12 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
     // ADR-0221: the playing entry is followed by identity. If it has gone,
     // playback is not silently handed to whatever now sits at its old row.
     const QueueView view{queue_};
-    std::erase_if(requests_, [&view](const core::StableId& wanted) {
-        return view.row_of_entry(wanted, -1) < 0;
-    });
+    std::erase_if(requests_,
+                  [this](const core::StableId& wanted) { return find_locked(wanted) == nullptr; });
     row_ = view.row_of_entry(anchors_.current, -1);
-    if (row_ < 0 && !anchors_.current.is_nil()) {
+    // An ask that is playing has no row and is still playing.
+    if (row_ < 0 && !anchors_.current.is_nil() &&
+        !std::ranges::contains(asks_, anchors_.current, &QueueEntry::entry_id)) {
         anchors_.current = core::StableId{};
     }
     reset_order_locked();
@@ -251,8 +322,7 @@ std::vector<QueueEntry> Player::queue() const {
 
 core::Result<void> Player::request(const core::StableId& entry_id) {
     const std::lock_guard guard{mutex_};
-    const QueueView view{queue_};
-    if (view.row_of_entry(entry_id, -1) < 0) {
+    if (find_locked(entry_id) == nullptr) {
         return std::unexpected(
             core::Error{.code = core::ErrorCode::not_found,
                         .message = "no such entry in the queue",
@@ -270,9 +340,8 @@ std::vector<core::StableId> Player::requests() const {
 
 core::Result<void> Player::set_requests(const std::vector<core::StableId>& entries) {
     const std::lock_guard guard{mutex_};
-    const QueueView view{queue_};
     for (const auto& wanted : entries) {
-        if (view.row_of_entry(wanted, -1) < 0) {
+        if (find_locked(wanted) == nullptr) {
             return std::unexpected(
                 core::Error{.code = core::ErrorCode::not_found,
                             .message = "no such entry in the queue",
@@ -281,30 +350,29 @@ core::Result<void> Player::set_requests(const std::vector<core::StableId>& entri
     }
     requests_ = entries;
     ++revision_;
+    prune_asks_locked();
     refresh_gapless_locked();
     return {};
 }
 
 void Player::enqueue(std::vector<QueueEntry> entries) {
     const std::lock_guard guard{mutex_};
-    const QueueView view{queue_};
     for (auto& entry : entries) {
-        if (view.row_of_entry(entry.entry_id, -1) >= 0) {
+        if (find_locked(entry.entry_id) != nullptr) {
             continue;
         }
-        queue_.push_back(std::move(entry));
+        asks_.push_back(std::move(entry));
     }
-    ++revision_;
-    // The order describes a queue that just changed size, and whatever was
-    // queued to follow was chosen under the old one.
-    reset_order_locked();
-    refresh_gapless_locked();
+    // Held but not yet requested: set_requests, which follows, names them.
+    // The list, its order and its revision are untouched.
 }
 
 void Player::clear_requests() {
     const std::lock_guard guard{mutex_};
     requests_.clear();
     ++revision_;
+    prune_asks_locked();
+    refresh_gapless_locked();
 }
 
 core::Result<void> Player::play_entry(const core::StableId& entry_id) {
@@ -333,6 +401,27 @@ core::Result<void> Player::set_replay_gain_mode(const audio::ReplayGainMode mode
 core::Result<void> Player::set_replay_gain_preamps(const audio::ReplayGainPreamps preamps) {
     const std::lock_guard guard{mutex_};
     return audition_->set_replay_gain_preamps(preamps);
+}
+
+core::Result<void> Player::set_output_target(std::optional<std::string> target) {
+    const std::lock_guard guard{mutex_};
+    return audition_->set_output_target(std::move(target));
+}
+
+core::Result<void> Player::refresh_output_devices() {
+    const std::lock_guard guard{mutex_};
+    return audition_->refresh_output_devices();
+}
+
+core::Result<void> Player::set_buffer_config(const audio::PlaybackBufferDurationConfig buffer) {
+    const std::lock_guard guard{mutex_};
+    return audition_->set_buffer_config(buffer);
+}
+
+Player::Output Player::output() const {
+    const std::lock_guard guard{mutex_};
+    const auto snapshot = audition_->snapshot();
+    return Output{.target = snapshot.output_target, .buffer = snapshot.configured_buffer};
 }
 
 core::Result<void> Player::resume() {
@@ -371,14 +460,8 @@ core::Result<void> Player::step(const int direction) {
     // forward: stepping back means "the track before this one", not "undo a
     // request nobody has heard yet".
     if (direction > 0) {
-        while (!requests_.empty()) {
-            const auto wanted = requests_.front();
-            requests_.erase(requests_.begin());
-            if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
-                return start_locked(static_cast<std::size_t>(row), true);
-            }
-            // A request whose entry has left the queue is dropped rather than
-            // stopping playback: the user asked for something that is gone.
+        if (auto started = start_next_request_locked()) {
+            return std::move(*started);
         }
     }
     const auto choice = audio::adjacent_playback_row(view, anchors_, modes_, order_,
@@ -435,21 +518,25 @@ bool Player::advance_if_ended() {
     // An explicit ask outranks the order, exactly as it does when the user
     // presses next -- unless single is active, where the point is to stop.
     if (!modes_.single_active()) {
-        while (!requests_.empty()) {
-            const auto wanted = requests_.front();
-            requests_.erase(requests_.begin());
-            if (const auto row = view.row_of_entry(wanted, -1); row >= 0) {
-                return start_locked(static_cast<std::size_t>(row), true).has_value();
-            }
+        if (auto started = start_next_request_locked()) {
+            return started->has_value();
         }
     }
+    // The request state is the real one: a request that ends by itself
+    // returns to where the list was, exactly as pressing next does. Passing
+    // "no request" here once meant an ask from outside the list ended in
+    // silence.
     const auto choice =
-        audio::automatic_playback_row(view, anchors_, modes_, order_,
-                                      {.active = false, .pending_empty = requests_.empty()}, row_);
+        audio::automatic_playback_row(view, anchors_, modes_, order_, request_state_locked(), row_);
     if (!choice) {
         // Nothing follows: the queue is done, or single mode says stop here.
         // The anchors stay where they are so a client can still see what was
-        // playing, which is what the window shows after a list finishes.
+        // playing, which is what the window shows after a list finishes --
+        // unless consume removes the entry, since a finished track is
+        // consumed whether or not anything plays after it.
+        if (modes_.consume_active()) {
+            consume_locked(anchors_.current);
+        }
         if (modes_.expire_single()) {
             reset_order_locked();
         }
@@ -493,6 +580,7 @@ Player::Persisted Player::persisted() const {
     const auto snapshot = audition_->snapshot();
     Persisted stored;
     stored.queue = queue_;
+    stored.asks = asks_;
     stored.entry = anchors_.current;
     stored.request_return = anchors_.request_return;
     stored.playing_request = playing_request_;
@@ -510,6 +598,7 @@ Player::Persisted Player::persisted() const {
 bool Player::restore(Persisted state) {
     const std::lock_guard guard{mutex_};
     queue_ = std::move(state.queue);
+    asks_ = std::move(state.asks);
     modes_ = state.modes;
     requests_ = std::move(state.requests);
     anchors_.request_return = state.request_return;
@@ -520,15 +609,17 @@ bool Player::restore(Persisted state) {
 
     const QueueView view{queue_};
     row_ = view.row_of_entry(anchors_.current, -1);
-    if (row_ < 0) {
+    const auto* anchored = find_locked(anchors_.current);
+    if (anchored == nullptr) {
         // The entry is gone from the queue it was in. The queue still comes
         // back; nothing is anchored in it.
         anchors_.current = core::StableId{};
         anchors_.source = {};
+        prune_asks_locked();
         reset_order_locked();
         return false;
     }
-    const auto& entry = queue_[static_cast<std::size_t>(row_)];
+    const auto entry = *anchored;
     anchors_.source = entry.source;
     reset_order_locked();
     if (!state.revision) {
@@ -581,8 +672,8 @@ Player::State Player::state() const {
         current.position_ms =
             snapshot.position_sample / rate * 1000 + snapshot.position_sample % rate * 1000 / rate;
     }
-    if (row_ >= 0 && static_cast<std::size_t>(row_) < queue_.size()) {
-        current.duration_ms = queue_[static_cast<std::size_t>(row_)].duration_ms.value_or(-1);
+    if (const auto* playing = find_locked(anchors_.current); playing != nullptr) {
+        current.duration_ms = playing->duration_ms.value_or(-1);
     }
     current.queue_size = queue_.size();
     current.requests = requests_.size();
@@ -594,6 +685,15 @@ Player::State Player::state() const {
     current.queue_revision = revision_;
     current.replay_gain_mode = snapshot.replay_gain_mode;
     current.replay_gain_preamps = snapshot.replay_gain_preamps;
+    current.output_target = snapshot.output_target;
+    current.default_output = snapshot.default_output_target;
+    current.output_available = snapshot.output_target_available;
+    current.devices = snapshot.devices;
+    current.output_suspended = snapshot.output_suspended;
+    current.buffer = snapshot.configured_buffer;
+    current.buffer_pending =
+        snapshot.active_buffer && *snapshot.active_buffer != snapshot.configured_buffer;
+    current.underruns = snapshot.underrun_count;
     return current;
 }
 

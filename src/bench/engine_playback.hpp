@@ -70,6 +70,7 @@ class EnginePlayback final : public QObject {
         // round once a track has gone by.
         audio::PlaybackModes modes;
         audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
+        audio::ReplayGainPreamps replay_gain_preamps;
         int volume_percent{100};
         // Which playback this is: replaying a track is a new instance, and
         // crediting a listen has to tell those apart.
@@ -80,6 +81,22 @@ class EnginePlayback final : public QObject {
         // The entry the engine's consume mode last dropped, so this client
         // can drop the same row from the list it came from.
         QString consumed;
+        // ADR-0226: the engine's sink and buffer. The devices are the engine
+        // machine's, which is why they come from here and not from this one.
+        struct Device final {
+            std::string name;
+            std::string description;
+            friend bool operator==(const Device&, const Device&) = default;
+        };
+        std::optional<std::string> output_target;
+        std::optional<std::string> default_output;
+        bool output_available{true};
+        bool output_suspended{false};
+        std::vector<Device> devices;
+        qint64 buffer_capacity_ms{0};
+        qint64 buffer_start_threshold_ms{0};
+        bool buffer_pending{false};
+        quint64 underruns{0};
     };
     [[nodiscard]] State state() const;
 
@@ -124,6 +141,10 @@ class EnginePlayback final : public QObject {
     // this client's policy about its own shuffle, not something to ask the
     // engine to interpret.
     void setReplayGain(audio::ReplayGainMode mode, audio::ReplayGainPreamps preamps);
+    // Nullopt is the system default sink.
+    void setOutput(const std::optional<std::string>& target);
+    void refreshOutputs();
+    void setBuffer(qint64 capacity_ms, qint64 start_threshold_ms);
 
   signals:
     // The engine's state changed. Emitted on this object's thread.

@@ -117,7 +117,6 @@ published_relocation_document(const operations::FilePublicationCommitResult& res
 [[nodiscard]] std::shared_ptr<MetadataOperationJobOutcome>
 run_metadata_operation_job(const std::filesystem::path& database_path,
                            ui::ListPersistenceService* const persistence_service,
-                           audio::LocalAuditionService* player_service,
                            const core::CancellationToken& cancellation) {
     auto outcome = std::make_shared<MetadataOperationJobOutcome>();
     auto metadata_opened = persistence::SqliteMetadataOperationJournal::open(database_path);
@@ -160,7 +159,7 @@ run_metadata_operation_job(const std::filesystem::path& database_path,
         return {};
     };
     const auto file_dependent =
-        [persistence_service, player_service, cancellation,
+        [persistence_service, cancellation,
          outcome](const operations::FilePublicationCommitResult& result) -> core::Result<void> {
         if (!persistence_service) {
             return std::unexpected(core::Error{
@@ -193,19 +192,7 @@ run_metadata_operation_job(const std::filesystem::path& database_path,
                 });
             return relocated ? core::Result<void>{} : std::unexpected(std::move(relocated.error()));
         };
-        if (player_service != nullptr) {
-            auto relocated = player_service->commit_source_relocation_and_wait(
-                audio::LocalAuditionSourceRelocation{
-                    .source_raw_path = result.source_raw_path,
-                    .target_raw_path = result.target_raw_path,
-                    .source_revision = result.source_revision,
-                    .target_revision = result.target_revision,
-                },
-                durable);
-            if (!relocated) {
-                return std::unexpected(std::move(relocated.error()));
-            }
-        } else if (auto relocated = durable(); !relocated) {
+        if (auto relocated = durable(); !relocated) {
             return std::unexpected(std::move(relocated.error()));
         }
         outcome->relocated_sources.push_back(result);
@@ -805,19 +792,9 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                             return relocated ? core::Result<void>{}
                                              : std::unexpected(std::move(relocated.error()));
                         };
-                        if (player_ == nullptr) {
-                            return durable();
-                        }
-                        auto relocated = player_->commit_source_relocation_and_wait(
-                            audio::LocalAuditionSourceRelocation{
-                                .source_raw_path = result.source_raw_path,
-                                .target_raw_path = result.target_raw_path,
-                                .source_revision = result.source_revision,
-                                .target_revision = result.target_revision,
-                            },
-                            durable);
-                        return relocated ? core::Result<void>{}
-                                         : std::unexpected(std::move(relocated.error()));
+                        // The engine keeps its open file; its queue learns
+                        // the new path when the list is sent again below.
+                        return durable();
                     };
                     const auto file_dependent =
                         [&relocate](const operations::FilePublicationCommitResult& result) {
@@ -1014,10 +991,10 @@ void BenchMainWindow::startMetadataOperationRecovery() {
     auto* const persistence_service = persistence_;
     const auto database_path = database_path_;
     const auto cancellation = metadata_operation_cancellation_.token();
-    metadata_operation_watcher_.setFuture(QtConcurrent::run([database_path, persistence_service,
-                                                             player = player_, cancellation] {
-        return run_metadata_operation_job(database_path, persistence_service, player, cancellation);
-    }));
+    metadata_operation_watcher_.setFuture(
+        QtConcurrent::run([database_path, persistence_service, cancellation] {
+            return run_metadata_operation_job(database_path, persistence_service, cancellation);
+        }));
 }
 
 void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitResult& result) {
@@ -1136,19 +1113,18 @@ void BenchMainWindow::applyCommittedRelocation(
         }
     };
     playback_.requests.updateSources(update_request);
-    if (requested_request_)
-        update_request(requested_request_->source);
-    if (queued_request_)
-        update_request(queued_request_->source);
     persistUpNext();
     refreshUpNext();
     if (playback_.anchors.source.raw_path == result.source_raw_path) {
         playback_.anchors.source.raw_path = result.target_raw_path;
     }
-    if (playback_.last_requested_next &&
-        playback_.last_requested_next->raw_path == result.source_raw_path) {
-        playback_.last_requested_next->raw_path = result.target_raw_path;
-    }
+    // The engine's queue names files by path. Identities are unchanged by a
+    // move, so the ordinary sync would see nothing new: it is told to send
+    // the list again, carrying the new paths.
+    engine_queue_.clear();
+    engine_requests_.clear();
+    syncEngineQueue();
+    syncEngineRequests();
 }
 
 void BenchMainWindow::applyCommittedPublicationMetadata(

@@ -204,8 +204,44 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
         state_.modes.single = audio::mode_state_from_int(modes->value("single", 0));
         state_.modes.consume = audio::mode_state_from_int(modes->value("consume", 0));
     }
+    state_.output_target.reset();
+    state_.default_output.reset();
+    state_.output_available = true;
+    state_.output_suspended = false;
+    state_.devices.clear();
+    state_.underruns = 0;
+    if (const auto output = payload.find("output");
+        output != payload.end() && output->is_object()) {
+        const auto text = [&output](const char* key) -> std::optional<std::string> {
+            const auto value = output->find(key);
+            return value != output->end() && value->is_string()
+                       ? std::optional{value->get<std::string>()}
+                       : std::nullopt;
+        };
+        state_.output_target = text("target");
+        state_.default_output = text("default");
+        state_.output_available = output->value("available", true);
+        state_.output_suspended = output->value("suspended", false);
+        state_.underruns = output->value("underruns", std::uint64_t{0});
+        if (const auto devices = output->find("devices");
+            devices != output->end() && devices->is_array()) {
+            for (const auto& device : *devices) {
+                state_.devices.push_back(
+                    State::Device{.name = device.value("name", std::string{}),
+                                  .description = device.value("description", std::string{})});
+            }
+        }
+    }
+    if (const auto buffer = payload.find("buffer");
+        buffer != payload.end() && buffer->is_object()) {
+        state_.buffer_capacity_ms = buffer->value("capacity_ms", qint64{0});
+        state_.buffer_start_threshold_ms = buffer->value("start_threshold_ms", qint64{0});
+        state_.buffer_pending = buffer->value("pending", false);
+    }
     state_.replay_gain_mode = audio::ReplayGainMode::off;
     if (const auto gain = payload.find("replay_gain"); gain != payload.end() && gain->is_object()) {
+        state_.replay_gain_preamps.with_gain_db = gain->value("preamp_with_gain_db", 0.0F);
+        state_.replay_gain_preamps.without_gain_db = gain->value("preamp_without_gain_db", 0.0F);
         const auto name = gain->value("mode", std::string{"off"});
         if (name == "track") {
             state_.replay_gain_mode = audio::ReplayGainMode::track;
@@ -388,6 +424,20 @@ void EnginePlayback::seek(const qint64 position_ms) {
 
 void EnginePlayback::request(const core::StableId& entry) {
     send(QStringLiteral("playback.request"), protocol::Json{{"entry", entry.to_string()}});
+}
+
+void EnginePlayback::setOutput(const std::optional<std::string>& target) {
+    send(QStringLiteral("playback.set_output"),
+         protocol::Json{{"target", target ? protocol::Json(*target) : protocol::Json(nullptr)}});
+}
+
+void EnginePlayback::refreshOutputs() {
+    send(QStringLiteral("playback.refresh_outputs"), protocol::Json::object());
+}
+
+void EnginePlayback::setBuffer(const qint64 capacity_ms, const qint64 start_threshold_ms) {
+    send(QStringLiteral("playback.set_buffer"),
+         protocol::Json{{"capacity_ms", capacity_ms}, {"start_threshold_ms", start_threshold_ms}});
 }
 
 void EnginePlayback::setVolume(const int percent) {

@@ -1059,8 +1059,6 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     });
     connect(dialog, &QDialog::accepted, this, [this] {
         reloadPlaybackPreferences();
-        if (player_)
-            checkpointLocalResume(player_->snapshot(), true);
         for (auto* section : findChildren<MetadataArtworkSection*>())
             section->refreshStoragePolicy();
     });

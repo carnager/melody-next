@@ -634,6 +634,43 @@ void a_request_returns_to_where_the_list_was(engine::Player& player,
     player.replace_queue({});
 }
 
+// A track asked for from outside the list is held apart from it: the list a
+// client mirrors does not grow a row, the order does not reach it, and once
+// played it returns to where the list was. It was once appended to the queue,
+// and every window watching the engine showed it as a new list entry.
+void an_ask_from_outside_the_list_stays_out_of_it(engine::Player& player,
+                                                  const std::filesystem::path& audio) {
+    player.set_modes({});
+    const std::vector<engine::QueueEntry> list{entry(audio.string()), entry(audio.string()),
+                                               entry(audio.string())};
+    player.replace_queue(list);
+    const auto ask = entry(audio.string());
+    player.enqueue({ask});
+    require(player.set_requests({ask.entry_id}).has_value(), "an ask held apart can be requested");
+    require(player.queue().size() == 3U, "and the list does not grow");
+    require(player.state().queue_size == 3U, "nor does the size a client renders");
+
+    if (!player.play_entry(list[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping the ask\n";
+        player.clear_requests();
+        player.replace_queue({});
+        return;
+    }
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.step(1).has_value(), "next plays the ask");
+    require(player.state().entry == ask.entry_id, "which is what plays");
+    require(player.pause().has_value(), "pausing succeeds");
+    require(player.queue().size() == 3U, "still outside the list");
+    require(player.step(1).has_value(), "next again");
+    require(player.state().entry == list[1].entry_id, "returns to where the list was");
+    require(player.pause().has_value(), "pausing succeeds");
+    require(!player.set_requests({ask.entry_id}).has_value(),
+            "and a played ask is let go rather than kept for ever");
+
+    static_cast<void>(player.stop());
+    player.replace_queue({});
+}
+
 // Consume removes what has been played. The engine decides it, because the
 // engine owns the queue -- and it reports which entry went, so a client
 // mirrors the same drop onto its list instead of deducing it from a mode that
@@ -674,6 +711,41 @@ void consume_drops_what_has_been_played(engine::Player& player,
 
     require(player.step(1).has_value() == false, "nothing follows the last entry");
     require(player.queue().size() == 1U, "and a refused step drops nothing");
+
+    static_cast<void>(player.stop());
+    player.set_modes({});
+    player.replace_queue({});
+}
+
+// Consume drops every track it finishes, however playback left it: by a
+// gapless handover (two tracks of one format arm one), and at the end of the
+// queue where nothing follows. Both once kept the entry -- a list played in
+// consume mode was never emptied.
+void consume_takes_every_finished_track(engine::Player& player,
+                                        const std::filesystem::path& audio) {
+    audio::PlaybackModes modes;
+    modes.consume = audio::ModeState::on;
+    player.set_modes(modes);
+    const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string())};
+    player.replace_queue(entries);
+    if (!player.play_entry(entries[0].entry_id)) {
+        std::cerr << "engine player: could not start playback; skipping consume to the end\n";
+        player.set_modes({});
+        player.replace_queue({});
+        return;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    bool first_dropped = false;
+    while (std::chrono::steady_clock::now() < deadline && !player.queue().empty()) {
+        static_cast<void>(player.advance_if_ended());
+        if (player.state().consumed == entries[0].entry_id) {
+            first_dropped = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+    }
+    require(first_dropped, "the track playback moved on from is consumed");
+    require(player.queue().empty(), "and so is the last one, with nothing after it");
+    require(player.state().consumed == entries[1].entry_id, "and is named for clients");
 
     static_cast<void>(player.stop());
     player.set_modes({});
@@ -998,7 +1070,9 @@ int main(int argc, char** argv) {
     a_continuation_is_actually_armed(**player, longer);
     a_selection_and_segment_survive_the_wire(**player);
     a_request_returns_to_where_the_list_was(**player, audio);
+    an_ask_from_outside_the_list_stays_out_of_it(**player, audio);
     consume_drops_what_has_been_played(**player, audio);
+    consume_takes_every_finished_track(**player, audio);
     album_shuffle_keeps_albums_together(**player, audio);
     a_restarted_engine_comes_back_with_its_queue(directory, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
@@ -1007,6 +1081,6 @@ int main(int argc, char** argv) {
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 20 scenarios\n";
+    std::cout << "engine player: 22 scenarios\n";
     return EXIT_SUCCESS;
 }

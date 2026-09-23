@@ -58,7 +58,6 @@ class SettingsDialog final : public QDialog {
 
     // QSettings keys shared with the consumers.
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
-    static constexpr auto restore_playback_key = "playback/restore-paused";
     // ADR-0220: empty means the library is opened in this process, which is
     // what it has always done. A socket path routes it through an engine
     // instead, so pointing at one is a deliberate act and the default is
@@ -82,7 +81,6 @@ class SettingsDialog final : public QDialog {
 
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
-    QCheckBox* restore_playback_{nullptr};
     QCheckBox* panel_animations_{nullptr};
     QCheckBox* notifications_{nullptr};
     QCheckBox* notifications_background_{nullptr};

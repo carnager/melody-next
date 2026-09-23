@@ -38,7 +38,6 @@ qt_add_library(
     catalogue_source.hpp
     local_list_model.cpp
     local_list_history.cpp
-    bench_resume.cpp
     local_list_model.hpp
     local_list_edit_bar.cpp
     local_list_edit_bar.hpp

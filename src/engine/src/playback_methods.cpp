@@ -281,6 +281,21 @@ Json to_json(const Player::State& state) {
     gain["preamp_with_gain_db"] = state.replay_gain_preamps.with_gain_db;
     gain["preamp_without_gain_db"] = state.replay_gain_preamps.without_gain_db;
     rendered["replay_gain"] = std::move(gain);
+    Json output = Json::object();
+    output["target"] = state.output_target ? Json(*state.output_target) : Json(nullptr);
+    output["default"] = state.default_output ? Json(*state.default_output) : Json(nullptr);
+    output["available"] = state.output_available;
+    auto devices = Json::array();
+    for (const auto& device : state.devices) {
+        devices.push_back(Json{{"name", device.name}, {"description", device.description}});
+    }
+    output["devices"] = std::move(devices);
+    output["suspended"] = state.output_suspended;
+    output["underruns"] = state.underruns;
+    rendered["output"] = std::move(output);
+    rendered["buffer"] = Json{{"capacity_ms", state.buffer.capacity.count()},
+                              {"start_threshold_ms", state.buffer.start_threshold.count()},
+                              {"pending", state.buffer_pending}};
     return rendered;
 }
 
@@ -484,6 +499,52 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
             return std::unexpected(bad_params("percent must be within [0, 100]", "percent"));
         }
         auto set = player.set_volume_percent(static_cast<int>(value));
+        if (!set) {
+            return std::unexpected(std::move(set.error()));
+        }
+        return to_json(player.state());
+    });
+
+    // ADR-0226: the engine's sink and buffer, persisted by the engine.
+    dispatcher.on("playback.set_output", [&player](const Json& params) -> core::Result<Json> {
+        const auto target = params.find("target");
+        if (target == params.end() || !(target->is_null() || target->is_string())) {
+            return std::unexpected(
+                bad_params("target must be a sink name, or null for the default", "target"));
+        }
+        auto set = player.set_output_target(
+            target->is_null() ? std::nullopt : std::optional{target->get<std::string>()});
+        if (!set) {
+            return std::unexpected(std::move(set.error()));
+        }
+        return to_json(player.state());
+    });
+    dispatcher.on("playback.refresh_outputs", [&player](const Json&) -> core::Result<Json> {
+        auto refreshed = player.refresh_output_devices();
+        if (!refreshed) {
+            return std::unexpected(std::move(refreshed.error()));
+        }
+        return to_json(player.state());
+    });
+    dispatcher.on("playback.set_buffer", [&player](const Json& params) -> core::Result<Json> {
+        const auto capacity = params.find("capacity_ms");
+        const auto threshold = params.find("start_threshold_ms");
+        if (capacity == params.end() || !capacity->is_number_integer() ||
+            threshold == params.end() || !threshold->is_number_integer()) {
+            return std::unexpected(
+                bad_params("capacity_ms and start_threshold_ms must be integers", "capacity_ms"));
+        }
+        const audio::PlaybackBufferDurationConfig buffer{
+            .capacity = std::chrono::milliseconds{capacity->get<std::int64_t>()},
+            .start_threshold = std::chrono::milliseconds{threshold->get<std::int64_t>()},
+        };
+        if (!audio::valid_local_audition_buffer_config(buffer)) {
+            return std::unexpected(
+                bad_params("the start threshold must fit within the capacity, and both within "
+                           "the supported range",
+                           "capacity_ms"));
+        }
+        auto set = player.set_buffer_config(buffer);
         if (!set) {
             return std::unexpected(std::move(set.error()));
         }

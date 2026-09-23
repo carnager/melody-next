@@ -10,13 +10,11 @@
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
 #include "bench/settings_dialog.hpp"
-#include "trackknife/audio/album_grouping.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
 #include "trackknife/audio/playback_order.hpp"
 #include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
-#include "trackknife/core/listen_accounting.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
 #include "trackknife/operations/file_publication.hpp"
@@ -69,10 +67,7 @@ class QToolButton;
 class QTreeView;
 class QVBoxLayout;
 
-namespace trackknife::audio {
-class LocalAuditionService;
-struct LocalAuditionSnapshot;
-} // namespace trackknife::audio
+namespace trackknife::audio {} // namespace trackknife::audio
 
 namespace trackknife::ui {
 class QueueTableView;
@@ -158,10 +153,6 @@ class BenchMainWindow final : public QMainWindow {
     void editUpNextSelection(int operation, int destination = -1);
     void persistUpNext();
     void restoreUpNext();
-    void restoreLocalResume();
-    void checkpointLocalResume(const audio::LocalAuditionSnapshot& snapshot, bool force = false);
-    [[nodiscard]] bool playLocalRequest(std::optional<std::int64_t> restore_position_ms = {});
-    void adoptLocalRequest(audio::RequestQueue<LocalTrackRow>::Entry entry, bool restoring = false);
 
     [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
     void loadPanelLayout();
@@ -344,13 +335,6 @@ class BenchMainWindow final : public QMainWindow {
     void saveLocalPlaybackModes();
     void applyLocalPlaybackModes();
     void showReplayGainPreampDialog();
-    void resetPlaybackOrder();
-    void prepareAlbumPlaybackOrder(std::uint64_t generation);
-    void adoptPlaybackRow(ListTab& tab, int row, const LocalTrackSource& source, bool consume,
-                          int direction = 1);
-    // ADR-0221: the entry to consume is named by identity, with the row it
-    // last occupied as a lookup hint.
-    void consumePlaybackRow(ListTab& tab, const core::StableId& entry, int hint_row);
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
@@ -372,17 +356,14 @@ class BenchMainWindow final : public QMainWindow {
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
     // Points the workspace at an entry the engine is playing.
     void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
-    // True when playback belongs to an engine rather than to this process.
+    // True while an engine is connected. ADR-0226: nothing plays otherwise;
+    // this window has no player of its own.
     [[nodiscard]] bool playingOnEngine() const;
-    // The transport view when the engine owns playback: the workspace's own
-    // up-next, resume, listening and gapless are the engine's job then, so
-    // this is only the controls and the cursor.
+    // The transport view: controls, cursor, output and buffer, all from the
+    // engine's state. Resume, listening and gapless are the engine's own.
     void refreshEngineTransport();
-    [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>> automaticPlaybackRow();
-    void playRow(ListTab& tab, int row, std::optional<std::int64_t> restore_position_ms = {});
-    void playAdjacent(int direction);
-    [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>>
-    adjacentPlaybackRow(int direction);
+    void refreshOutputControls(const EnginePlayback::State& state);
+    void playRow(ListTab& tab, int row);
     void refreshTransport();
     void buildMprisService();
     void publishMprisState();
@@ -393,9 +374,6 @@ class BenchMainWindow final : public QMainWindow {
     void reloadPlaybackPreferences();
     void togglePlayPause();
     void seekToMs(qint64 position_ms);
-
-    audio::LocalAuditionService* player_{nullptr};
-    std::unique_ptr<audio::LocalAuditionService> player_storage_;
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     LocalLibraryPanel* local_library_{nullptr};
@@ -553,10 +531,6 @@ class BenchMainWindow final : public QMainWindow {
     // and flushed into the initial tab once it exists.
     std::vector<std::string> pending_open_paths_;
     bool lists_restored_{false};
-    bool resume_restore_pending_{false};
-    bool resume_save_pending_{false};
-    std::uint64_t resume_intent_generation_{0};
-    QElapsedTimer resume_save_clock_;
 
     QAction* local_repeat_action_{nullptr};
     QAction* local_random_action_{nullptr};
@@ -566,18 +540,10 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<QToolButton*> local_mode_buttons_;
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
-    bool album_order_preparing_{false};
-    std::uint64_t album_order_generation_{0};
-    int album_order_build_row_{0};
-    // ADR-0220 Phase 0: the grouping rule and its limits are Qt-free policy;
-    // the chunked walk and the timers driving it stay here.
-    audio::AlbumGrouper album_grouper_;
     QString local_replaygain_{QStringLiteral("off")};
     double local_rg_preamp_with_{0.0};
     double local_rg_preamp_without_{0.0};
     std::optional<ListTab> detached_playback_;
-    std::optional<audio::RequestQueue<LocalTrackRow>::Entry> requested_request_;
-    std::optional<audio::RequestQueue<LocalTrackRow>::Entry> queued_request_;
     QDockWidget* up_next_dock_{nullptr};
     QToolButton* up_next_button_{nullptr};
     ui::QueueTableView* up_next_view_{nullptr};
@@ -595,36 +561,23 @@ class BenchMainWindow final : public QMainWindow {
     QElapsedTimer lastfm_clock_;
     qint64 lastfm_sample_time_{-1000};
     void buildLastFm();
-    void sampleLastFm(const audio::LocalAuditionSnapshot& snapshot);
-    core::ListenAccounting local_listen_accounting_;
-    QElapsedTimer local_history_clock_;
-    void sampleListeningHistory(const audio::LocalAuditionSnapshot& snapshot, qint64 monotonic_ms,
-                                qint64 wall_ms);
     QWidget* buildLastFmSettings(QWidget* parent);
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
-    bool advance_pending_{false};
-    // Gapless continuation upkeep: the last takeover count seen, the last
-    // requested next path, and a throttle for re-requests after the engine
-    // dropped or rejected a queue.
-    quint64 last_chain_transitions_{0U};
-    std::uint64_t last_requested_token_{0U};
-    QElapsedTimer next_request_timer_;
     bool seeking_{false};
     QToolButton* mute_button_{nullptr};
     QHash<QString, int> unmuted_volumes_;
     void refreshMuteButton();
     bool changing_volume_{false};
-    QString last_player_error_;
-    QString last_device_monitor_error_;
-    QString last_output_recovery_error_;
     QString selected_buffer_profile_{QStringLiteral("balanced")};
     std::vector<std::pair<std::string, std::string>> device_choices_;
     std::optional<std::string> selected_device_;
     std::optional<std::string> default_device_;
     bool selected_device_available_{true};
-    quint64 last_device_generation_{0U};
+    // Whether an engine state has been seen, so the first one does not read
+    // as the output changing.
+    bool engine_output_seen_{false};
 };
 
 } // namespace trackknife::bench

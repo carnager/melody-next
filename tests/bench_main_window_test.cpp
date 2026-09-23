@@ -22,6 +22,7 @@
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "test_engine.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -210,6 +211,7 @@ class BenchMainWindowTest final : public QObject {
 
   private slots:
     void initTestCase();
+    void init();
     void cleanup();
     void transportUsesStackedNowPlayingAndCompactDeviceButton();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
@@ -217,12 +219,7 @@ class BenchMainWindowTest final : public QObject {
     void followPlaybackAndJumpRespectBrowsing();
     void commandPaletteFindsAndRunsRegisteredActions();
     void commandPaletteTracksAvailabilityAndLifetime();
-    void localListeningCountsPlaybackWithoutLastFm();
     void localListeningColumnsLoadRefreshAndRespectAuthority();
-    void localPlaybackRestoresPausedWithoutOutput();
-    void localRequestRestoresPaused_data();
-    void continuousAlbumShuffleKeepsListOrder();
-    void localRequestRestoresPaused();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
@@ -331,6 +328,7 @@ class BenchMainWindowTest final : public QObject {
 
   private:
     QTemporaryDir settings_directory_;
+    testing::TestEngine engine_;
 };
 
 void BenchMainWindowTest::initTestCase() {
@@ -343,8 +341,12 @@ void BenchMainWindowTest::initTestCase() {
     QDir{QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)}.removeRecursively();
 }
 
+// ADR-0226: every window runs against an engine, as the application does.
+void BenchMainWindowTest::init() { QVERIFY2(engine_.start(), engine_.log().constData()); }
+
 void BenchMainWindowTest::cleanup() {
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    engine_.stop();
     QSettings settings;
     settings.clear();
     settings.sync();
@@ -432,87 +434,6 @@ void BenchMainWindowTest::commandPaletteTracksAvailabilityAndLifetime() {
     QVERIFY(!palette.isVisible());
 }
 
-void BenchMainWindowTest::localListeningCountsPlaybackWithoutLastFm() {
-    QTemporaryDir media;
-    const auto file = media.filePath(QStringLiteral("listen.flac"));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
-    const auto path = QFile::encodeName(file).toStdString();
-    const auto revision = core::observe_local_source_revision(path);
-    QVERIFY(revision);
-    BenchMainWindow window;
-    QTRY_VERIFY(window.lists_restored_);
-    window.transport_timer_->stop();
-    audio::LocalAuditionSnapshot sample;
-    sample.raw_path = path;
-    sample.source_revision = *revision;
-    sample.playback_instance = 1;
-    sample.format = formats::PcmFormat{48000, 2, "stereo"};
-    sample.end_sample = 40 * 48000;
-    sample.state = audio::LocalAuditionState::playing;
-    persistence::ListItem source;
-    source.source = persistence::ListSource::local;
-    source.source_reference = path;
-    source.source_revision = *revision;
-    auto repository = persistence::ListRepository::open(window.database_path_);
-    QVERIFY(repository);
-    const auto key = repository->local_listening_key(source);
-    QVERIFY(key);
-    qint64 now = 0;
-    const auto observe = [&](int seconds) {
-        sample.position_sample = seconds * 48000;
-        window.sampleListeningHistory(sample, now, 100000 + now);
-        now += 1000;
-    };
-    const auto count = [&]() -> std::uint64_t {
-        const auto history = repository->load_local_listening_history(*key);
-        return history && *history ? (*history)->play_count : 0;
-    };
-    for (int second = 0; second <= 10; ++second)
-        observe(second);
-    QCOMPARE(count(), 0U);
-    sample.state = audio::LocalAuditionState::paused;
-    for (int n = 0; n < 10; ++n)
-        observe(10);
-    sample.state = audio::LocalAuditionState::playing;
-    observe(10);
-    observe(35); // Seeking forward and backward earns no credit.
-    observe(0);
-    for (int second = 1; second <= 9; ++second)
-        observe(second);
-    QCOMPARE(count(), 0U);
-    observe(10);
-    QTRY_COMPARE(count(), 1U);
-    for (int second = 11; second <= 40; ++second)
-        observe(second);
-    QCOMPARE(count(), 1U);
-    // A repeated occurrence of the exact same source counts independently.
-    ++sample.playback_instance;
-    for (int second = 0; second <= 20; ++second)
-        observe(second);
-    QTRY_COMPARE(count(), 2U);
-    ++sample.playback_instance;
-    sample.output_suspended = true;
-    for (int second = 0; second <= 40; ++second)
-        observe(second);
-    QCOMPARE(count(), 2U);
-    sample.output_suspended = false;
-    ++sample.playback_instance;
-    sample.end_sample = 30 * 48000; // Brief clips are not counted.
-    for (int second = 0; second <= 30; ++second)
-        observe(second);
-    QCOMPARE(count(), 2U);
-    sample.end_sample = 40 * 48000;
-    ++sample.playback_instance;
-    sample.segment = formats::SampleRange{48000, 41 * 48000};
-    source.segment = persistence::ListItemSegment{48000, 41 * 48000};
-    const auto logical_key = repository->local_listening_key(source);
-    QVERIFY(logical_key && logical_key != key);
-    for (int second = 0; second <= 20; ++second)
-        observe(second);
-    QTRY_VERIFY(repository->load_local_listening_history(*logical_key)->has_value());
-    QCOMPARE(count(), 2U);
-}
-
 void BenchMainWindowTest::localListeningColumnsLoadRefreshAndRespectAuthority() {
     BenchMainWindow window;
     window.show();
@@ -583,174 +504,6 @@ void BenchMainWindowTest::localListeningColumnsLoadRefreshAndRespectAuthority() 
         !directory.isEmpty()) {
         QCoreApplication::processEvents();
         QVERIFY(window.grab().save(directory + QStringLiteral("/listening-history.png")));
-    }
-}
-
-void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
-    BenchMainWindow window;
-    QTRY_VERIFY(window.lists_restored_);
-    auto* tab = window.currentListTab();
-    QVERIFY(tab);
-    LocalTrackRow a, b;
-    a.raw_path = "/album-a.flac";
-    a.album = "A";
-    a.artist = "Artist";
-    a.probed = true;
-    b = a;
-    b.raw_path = "/album-b.flac";
-    b.album = "B";
-    tab->model->replaceRows({a, b, a, b});
-    window.playback_.anchors.document = tab->document.id;
-    window.playback_.anchors.current = tab->model->rows().at(0).entry_id;
-    window.playback_.row = 0;
-    window.playback_.modes.album_random = true;
-    window.resetPlaybackOrder();
-    QTRY_VERIFY(!window.album_order_preparing_);
-    QCOMPARE(window.playback_.order.adjacent(1, false), std::optional<int>{2});
-    QCOMPARE(tab->model->rows()[1].album, std::string{"B"});
-    window.playback_.modes.album_random = false;
-    window.saveLocalPlaybackModes();
-}
-
-void BenchMainWindowTest::localRequestRestoresPaused_data() {
-    QTest::addColumn<bool>("consume");
-    QTest::addColumn<bool>("enabled");
-    QTest::addColumn<bool>("changed");
-    QTest::addColumn<int>("pending_count");
-    QTest::newRow("duplicate-request") << false << true << false << 1;
-    QTest::newRow("consumed-anchor") << true << true << false << 1;
-    QTest::newRow("disabled") << false << false << false << 1;
-    QTest::newRow("changed-source") << false << true << true << 1;
-    QTest::newRow("full-pending-queue") << false << true << false << 500;
-}
-
-void BenchMainWindowTest::localRequestRestoresPaused() {
-    QFETCH(bool, consume);
-    QFETCH(bool, enabled);
-    QFETCH(bool, changed);
-    QFETCH(int, pending_count);
-    QTemporaryDir media;
-    const auto file = media.filePath(QStringLiteral("request.flac"));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
-    const auto path = QFile::encodeName(file).toStdString();
-    const auto revision = core::observe_local_source_revision(path);
-    QVERIFY(revision);
-    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), true);
-    {
-        BenchMainWindow window;
-        QTRY_VERIFY(window.up_next_restored_ && !window.resume_restore_pending_);
-        auto* tab = window.currentListTab();
-        QVERIFY(tab);
-        LocalTrackRow row;
-        row.raw_path = path;
-        row.source_revision = *revision;
-        row.probed = true;
-        tab->model->replaceRows({row, row});
-        window.playRow(*tab, 0, 0);
-        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
-        window.playback_.anchors.request_return = tab->model->rows().at(1).entry_id;
-        window.enqueueLocalRequests({row});
-        QVERIFY(window.playLocalRequest(20));
-        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
-        window.enqueueLocalRequests(
-            std::vector<LocalTrackRow>(static_cast<std::size_t>(pending_count), row));
-        if (consume) {
-            window.playback_.modes.consume = audio::ModeState::on;
-            window.consumePlaybackRow(*tab, window.playback_.anchors.current, window.playback_.row);
-            QCOMPARE(tab->model->rowCount(), 1);
-        }
-        QCOMPARE(window.playback_.requests.pending().size(),
-                 static_cast<std::size_t>(pending_count));
-        window.close();
-    }
-    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), enabled);
-    if (changed) {
-        QFile altered(file);
-        QVERIFY(altered.open(QIODevice::Append));
-        QCOMPARE(altered.write("x"), 1);
-        altered.close();
-    }
-    {
-        BenchMainWindow window;
-        QTRY_VERIFY(window.up_next_restored_ && !window.resume_restore_pending_);
-        if (!enabled) {
-            QCOMPARE(window.player_->snapshot().state, audio::LocalAuditionState::empty);
-            QVERIFY(!window.playback_.requests.active());
-            QCOMPARE(window.playback_.requests.pending().size(),
-                     static_cast<std::size_t>(pending_count + 1));
-        } else {
-            QTRY_COMPARE(window.player_->snapshot().state, changed
-                                                               ? audio::LocalAuditionState::failed
-                                                               : audio::LocalAuditionState::paused);
-            QVERIFY(window.playback_.requests.active());
-            QCOMPARE(window.playback_.requests.pending().size(),
-                     static_cast<std::size_t>(pending_count));
-            QCOMPARE(window.playback_.requests.active()->source.raw_path, path);
-            QCOMPARE(row_of(window.tabForDocument(window.playback_.anchors.document),
-                            window.playback_.anchors.request_return),
-                     consume ? 0 : 1);
-            if (!changed)
-                QCOMPARE(window.player_->snapshot().position_sample, 882);
-            QCOMPARE(window.player_->snapshot().output.state,
-                     audio::PipeWireOutputState::unconnected);
-        }
-        window.close();
-    }
-}
-
-void BenchMainWindowTest::localPlaybackRestoresPausedWithoutOutput() {
-    QTemporaryDir media;
-    const auto file = media.filePath(QStringLiteral("resume.flac"));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), file));
-    const auto path = QFile::encodeName(file).toStdString();
-    const auto revision = core::observe_local_source_revision(path);
-    QVERIFY(revision);
-    QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), true);
-    QString document;
-    {
-        BenchMainWindow window;
-        QTRY_VERIFY(window.lists_restored_);
-        QTRY_VERIFY(!window.resume_restore_pending_);
-        auto* tab = window.currentListTab();
-        QVERIFY(tab);
-        LocalTrackRow row;
-        row.raw_path = path;
-        row.source_revision = *revision;
-        row.title = "Resume fixture";
-        row.probed = true;
-        tab->model->replaceRows({row, row});
-        document = QString::fromStdString(tab->document.id.to_string());
-        window.playRow(*tab, 1, 20);
-        QTRY_COMPARE(window.player_->snapshot().state, audio::LocalAuditionState::paused);
-        window.checkpointLocalResume(window.player_->snapshot(), true);
-        QTRY_VERIFY(!window.resume_save_pending_);
-        window.close();
-    }
-    QVERIFY(!QSettings{}.value(QStringLiteral("playback/local-resume-v1")).toByteArray().isEmpty());
-    {
-        BenchMainWindow window;
-        QTRY_VERIFY(window.lists_restored_);
-        QTRY_VERIFY(!window.resume_restore_pending_);
-        QTRY_VERIFY2(window.player_->snapshot().state == audio::LocalAuditionState::paused,
-                     qPrintable(window.statusBar()->currentMessage()));
-        QCOMPARE(document_text(window.playback_.anchors.document), document);
-        QCOMPARE(row_of(window.tabForDocument(window.playback_.anchors.document),
-                        window.playback_.anchors.current),
-                 1);
-        QCOMPARE(window.player_->snapshot().position_sample, 882);
-        QCOMPARE(window.player_->snapshot().output.state, audio::PipeWireOutputState::unconnected);
-        QSettings{}.setValue(QLatin1String(SettingsDialog::restore_playback_key), false);
-        window.checkpointLocalResume(window.player_->snapshot(), true);
-        QTRY_VERIFY(!window.resume_save_pending_);
-        QVERIFY(
-            QSettings{}.value(QStringLiteral("playback/local-resume-v1")).toByteArray().isEmpty());
-        window.close();
-    }
-    {
-        BenchMainWindow window;
-        QTRY_VERIFY(window.lists_restored_);
-        QCOMPARE(window.player_->snapshot().state, audio::LocalAuditionState::empty);
-        window.close();
     }
 }
 
@@ -956,8 +709,12 @@ void BenchMainWindowTest::dynamicResultActionsUseTheirOwnSources() {
 }
 
 void BenchMainWindowTest::currentTabHistoryPreservesOccurrences() {
-    QTemporaryDir directory;
-    const auto database = std::filesystem::path{directory.path().toStdString()} / "history.sqlite";
+    // The engine's database, which is the application's (ADR-0226): history
+    // written there is what the engine answers with.
+    const auto database =
+        std::filesystem::path{
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString()} /
+        "lists.sqlite";
     auto repository = persistence::ListRepository::open(database);
     QVERIFY(repository);
     LocalTrackRow played, unplayed;
@@ -1110,7 +867,6 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QCOMPARE(device->menu()->actions().front()->text(), QStringLiteral("System default"));
     QVERIFY(window.property("trackknife-player-output-available").isValid());
     QVERIFY(window.property("trackknife-player-output-suspended").isValid());
-    QVERIFY(window.property("trackknife-player-device-generation").isValid());
     QVERIFY(window.property("trackknife-player-default-output").isValid());
     QCOMPARE(transport->findChildren<QToolButton*>(QString{}, Qt::FindDirectChildrenOnly).size(),
              5);
@@ -1293,16 +1049,12 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     QVERIFY(tabs->tabBar()->tabData(tabs->indexOf(next->view)).toBool());
 }
 
+// ADR-0226: the buffer is the engine's. The window shows what the engine
+// reports, and a restarted window finds the engine's choice, not its own.
 void BenchMainWindowTest::playbackBufferProfilesPersistAndExposeDiagnostics() {
-    {
-        QSettings settings;
-        settings.setValue(QStringLiteral("playback/buffer-profile"), QStringLiteral("responsive"));
-        settings.sync();
-    }
-
     BenchMainWindow window;
     window.show();
-    QCoreApplication::processEvents();
+    QTRY_VERIFY(window.playingOnEngine());
 
     auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-buffer-menu"));
     auto* responsive = window.findChild<QAction*>(QStringLiteral("action-buffer-responsive"));
@@ -1316,12 +1068,14 @@ void BenchMainWindowTest::playbackBufferProfilesPersistAndExposeDiagnostics() {
     QVERIFY(resilient != nullptr);
     QVERIFY(custom != nullptr);
     QVERIFY(device != nullptr);
-    QVERIFY(responsive->isChecked());
+    // An engine that has never been told starts balanced.
+    QTRY_VERIFY(balanced->isChecked());
+    responsive->trigger();
+    QTRY_VERIFY(responsive->isChecked());
     QVERIFY(!balanced->isChecked());
     QCOMPARE(responsive->toolTip(), QStringLiteral("250 ms capacity; playback starts at 50 ms"));
     QCOMPARE(custom->text(), QStringLiteral("Custom…"));
     QTRY_COMPARE(window.property("trackknife-player-buffer-capacity-ms").toLongLong(), 250);
-    QCOMPARE(window.property("trackknife-player-active-buffer-capacity-ms").toLongLong(), -1);
     QVERIFY(!window.property("trackknife-player-buffer-pending").toBool());
     QCOMPARE(window.property("trackknife-player-underruns").toULongLong(), 0ULL);
 
@@ -4460,22 +4214,27 @@ void BenchMainWindowTest::muteRestoresLocalVolumeAcrossBrowsing() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(!window.list_tabs_.empty());
+    QTRY_VERIFY(window.playingOnEngine());
     auto* local = window.list_tabs_.front()->view;
     window.tabs_->setCurrentWidget(local);
+    // The engine's volume: what the slider shows is what the engine reports.
+    const auto engine_volume = [&window] {
+        return window.engine_playback_->state().volume_percent;
+    };
     window.volume_->setValue(37);
-    QTRY_COMPARE(window.player_->snapshot().volume_percent, 37);
+    QTRY_COMPARE(engine_volume(), 37);
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
-    QTRY_COMPARE(window.player_->snapshot().volume_percent, 0);
+    QTRY_COMPARE(engine_volume(), 0);
     QVERIFY(window.mute_button_->isChecked());
     QVERIFY(window.mute_button_->isEnabled());
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
-    QTRY_COMPARE(window.player_->snapshot().volume_percent, 37);
+    QTRY_COMPARE(engine_volume(), 37);
     QVERIFY(!window.mute_button_->isChecked());
     window.volume_->setValue(0);
-    QTRY_COMPARE(window.player_->snapshot().volume_percent, 0);
+    QTRY_COMPARE(engine_volume(), 0);
     QVERIFY(window.mute_button_->isChecked());
     window.volume_->setValue(21);
-    QTRY_COMPARE(window.player_->snapshot().volume_percent, 21);
+    QTRY_COMPARE(engine_volume(), 21);
     QVERIFY(!window.mute_button_->isChecked());
 }
 
@@ -4655,12 +4414,13 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     window.openLocalPaths({QFile::encodeName(a).toStdString(), QFile::encodeName(b).toStdString()});
     QTRY_VERIFY(window.currentListTab() != nullptr &&
                 window.currentListTab()->model->rowCount() == 2);
+    QTRY_VERIFY(window.playingOnEngine());
     window.playback_.modes.consume = consume ? audio::ModeState::on : audio::ModeState::off;
+    window.applyLocalPlaybackModes();
     auto* tab = window.currentListTab();
     window.playRow(*tab, 0);
-    QTRY_VERIFY(window.property("trackknife-player-state").toInt() >= 3);
-    if (window.property("trackknife-player-state").toInt() == 8)
-        QSKIP("live PipeWire playback unavailable");
+    QTRY_COMPARE(window.property("trackknife-engine-playback").toString(),
+                 QStringLiteral("playing"));
     LocalTrackRow request;
     request.raw_path = QFile::encodeName(b).toStdString();
     request.title = "X";
@@ -6247,7 +6007,8 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     auto* engine_socket =
         dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
     QVERIFY(engine_socket);
-    QVERIFY(engine_socket->text().isEmpty());
+    // The engine the test runs against, named the way a user would name one.
+    QCOMPARE(engine_socket->text(), engine_.socket());
     engine_socket->setText(QStringLiteral("/run/user/1000/melodyd.sock"));
     // The field was shown and read back but never saved, so every TCP engine
     // refused the empty token it was sent.
@@ -10318,17 +10079,17 @@ void BenchMainWindowTest::localPlaybackModesAdvance() {
     view->selectionModel()->setCurrentIndex(
         model->index(0, 1), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTest::keyClick(view, Qt::Key_Return);
-    QTRY_VERIFY(window.property("trackknife-player-state").toInt() >= 3);
-    if (window.property("trackknife-player-state").toInt() == 8) {
-        QSKIP("live PipeWire playback unavailable");
-    }
+    // ADR-0226: the engine plays, so its reported status is what is watched.
+    const auto status = [&window] {
+        return window.property("trackknife-engine-playback").toString();
+    };
+    QTRY_VERIFY(status() == QStringLiteral("playing") || status() == QStringLiteral("loading"));
     QTest::qWait(track_ms * 3 + 600);
-    QCOMPARE(model->rowCount(), expected_count);
+    QTRY_COMPARE(model->rowCount(), expected_count);
     if (ended) {
-        QTRY_COMPARE(window.property("trackknife-player-state").toInt(), 7);
+        QTRY_COMPARE(status(), QStringLiteral("stopped"));
     } else {
-        QVERIFY(window.property("trackknife-player-state").toInt() != 7);
-        QVERIFY(window.property("trackknife-player-state").toInt() != 8);
+        QVERIFY(status() != QStringLiteral("stopped"));
     }
     if (single != 0 && consume == 0) {
         QVERIFY(model->index(0, 0).data(ui::track_current_role).toBool());

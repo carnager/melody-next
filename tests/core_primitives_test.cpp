@@ -3,6 +3,7 @@
 #include "trackknife/core/atomic_rename.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/error.hpp"
+#include "trackknife/core/listen_accounting.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/progress.hpp"
 #include "trackknife/core/revision.hpp"
@@ -311,6 +312,43 @@ void noReplacePublicationLaddersAndRefusesOccupiedTargets() {
     fs::remove_all(directory);
 }
 
+// The listening rules the engine credits plays with. They were only exercised
+// through the window's own player; the rules are core's, so they are tested
+// here, where no player is needed.
+void listenAccountingCreditsRealListeningOnly() {
+    trackknife::core::ListenAccounting accounting;
+    std::int64_t now = 0;
+    const auto observe = [&](const std::string& identity, const double duration,
+                             const double position, const bool playing) {
+        const auto credited = accounting.observe(identity, duration, position, playing, now);
+        now += 1000;
+        return credited;
+    };
+    int credits = 0;
+    for (int second = 0; second <= 10; ++second)
+        credits += observe("one", 40, second, true) ? 1 : 0;
+    CHECK(credits == 0); // Ten seconds of a forty-second track is not half.
+    for (int n = 0; n < 10; ++n)
+        credits += observe("one", 40, 10, false) ? 1 : 0;
+    credits += observe("one", 40, 10, true) ? 1 : 0;
+    credits += observe("one", 40, 35, true) ? 1 : 0; // A seek forward earns nothing,
+    credits += observe("one", 40, 0, true) ? 1 : 0;  // nor does one back.
+    for (int second = 1; second <= 9; ++second)
+        credits += observe("one", 40, second, true) ? 1 : 0;
+    CHECK(credits == 0);
+    credits += observe("one", 40, 10, true) ? 1 : 0; // Twenty seconds heard: half.
+    CHECK(credits == 1);
+    for (int second = 11; second <= 40; ++second)
+        credits += observe("one", 40, second, true) ? 1 : 0;
+    CHECK(credits == 1); // Once per playback, however long it goes on.
+    for (int second = 0; second <= 20; ++second)
+        credits += observe("two", 40, second, true) ? 1 : 0;
+    CHECK(credits == 2); // Another playback of the same file counts again.
+    for (int second = 0; second <= 30; ++second)
+        credits += observe("three", 30, second, true) ? 1 : 0;
+    CHECK(credits == 2); // Clips of thirty seconds or less never count.
+}
+
 int main() {
     stableIdsRoundTrip();
     cancellationIsSharedAndMonotonic();
@@ -322,5 +360,6 @@ int main() {
     localSourceDiscoveryPreservesRawPathsAndOrder();
     containedSourceRevalidationFollowsSymlinksAndRejectsEscapes();
     noReplacePublicationLaddersAndRefusesOccupiedTargets();
+    listenAccountingCreditsRealListeningOnly();
     return failures == 0 ? 0 : 1;
 }

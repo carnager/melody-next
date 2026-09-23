@@ -60,13 +60,39 @@ and one that didn't started an engine.
 
 ## Transition
 
-The in-process catalogue and player remain as a fallback, used only when no
-engine could be started, and by tests. They are deleted next, once the tests
-run against an engine. The file-changing work moves into the engine after
-that. Until it does, the tagger writes files from the client, which is correct
-only for this computer's engine.
+**Trackknife has no player.** The in-process audition service, the client's
+playback order, gapless bookkeeping, listening credit, resume checkpoint and
+Last.fm sampler of its own are gone. The window renders the engine's state and
+sends it commands. With no engine connected, nothing plays and the transport
+says so. The "restore playback on startup" setting went with the resume
+checkpoint: the engine outlives the window and restores its own queue, paused,
+when it restarts.
 
-**The engine is `melodyd`.** It was built as `melodyd` so that an existing
-install of the Go `melodyd` would not be replaced by accident. No such
-install exists, so the engine takes its planned name now rather than after
-Phase 6: the binary, `melodyd.sock`, `melodyd.service` and `melodyd.log`.
+**Output and buffer are the engine's.** `playback.set_output`,
+`playback.refresh_outputs` and `playback.set_buffer` choose the engine
+machine's sink and buffer. The state document reports the devices, the default
+sink, availability, suspension, underruns and whether a buffer change is
+pending. The engine persists the choice (`playback.output.v1`); the window
+mirrors it into its settings only so the dialog shows the engine's value.
+
+**Asks are held apart from the list.** A track sent to Up Next from outside
+the playing list is held in a pool of asks, not appended to the queue. It is
+playable and requestable, but it is not a list entry: it takes no part in the
+order or in consume, and a client mirroring the queue does not show it as a
+row. Each Up Next ask has its own identity, so the same track asked for twice
+plays twice. An ask that ends by itself returns to where the list was, as
+pressing Next already did.
+
+The in-process catalogue remains as a fallback when no engine could be
+started, and for tests. It goes next, once those tests run against an engine.
+The file-changing work moves into the engine after that. Until it does, the
+tagger writes files from the client, which is correct only for this
+computer's engine. Relocating a file re-sends the list so the engine's queue
+names the new path; the playing track keeps its open file.
+
+**The engine is `melodyd`.** It was built as `tkengine` so that an existing
+install of the Go `melodyd` would not be replaced by accident. The one that
+remained (in `~/.local/bin`) has been retired, so the engine takes its planned
+name now rather than after Phase 6: the binary, `melodyd.sock`,
+`melodyd.service` and `melodyd.log`. The launcher never searches `PATH`
+(above), so a same-named program elsewhere is never started in its place.

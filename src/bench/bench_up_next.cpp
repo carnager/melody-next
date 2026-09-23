@@ -115,7 +115,9 @@ void BenchMainWindow::buildUpNext() {
             playback_.requests.move(
                 playback_.requests.pending()[static_cast<std::size_t>(index.row())].id, 0);
             refreshUpNext();
-            static_cast<void>(playLocalRequest());
+            // The engine plays asks before the list, so Next is this one.
+            if (playingOnEngine())
+                engine_playback_->next();
         }
     };
     up_next_view_->setActivateCallback(playRequest);
@@ -144,7 +146,6 @@ void BenchMainWindow::buildUpNext() {
     clearAction->setObjectName(QStringLiteral("up-next-clear"));
     auto* undo = button(QStringLiteral("Undo"), QStringLiteral("edit-undo"), [this] {
         playback_.requests.undo();
-        playback_.last_requested_next.reset();
         persistUpNext();
         refreshUpNext();
     });
@@ -156,11 +157,13 @@ void BenchMainWindow::buildUpNext() {
     resume->setObjectName(QStringLiteral("up-next-return"));
     layout->addWidget(resume);
     connect(resume, &QPushButton::clicked, this, [this] {
+        const bool asking = playback_.requests.active().has_value();
         playback_.requests.clear();
-        if (playback_.requests.active())
-            playAdjacent(1);
         persistUpNext();
         refreshUpNext();
+        // With no asks left, the engine's Next returns to where it left off.
+        if (asking && playingOnEngine())
+            engine_playback_->next();
     });
     auto* remove = removeAction;
     remove->setShortcut(Qt::Key_Delete);
@@ -302,13 +305,19 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
 
 void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position) {
     const auto count = rows.size();
+    // Each ask is an occurrence of its own (ADR-0221): the same track asked
+    // for twice plays twice, and playing it does not move the list, whose row
+    // it was copied from. The engine holds these apart from the list; a copied
+    // identity made both asks one entry, and the second never played.
+    for (auto& row : rows) {
+        row.entry_id = core::StableId::random();
+    }
     if (!playback_.requests.insert(std::move(rows), position < 0
                                                         ? playback_.requests.pending().size()
                                                         : static_cast<std::size_t>(position))) {
         statusBar()->showMessage(QStringLiteral("Up Next holds at most 500 tracks."), 5000);
         return;
     }
-    playback_.last_requested_next.reset();
     persistUpNext();
     refreshUpNext();
     statusBar()->showMessage(QStringLiteral("Added %1 to Up Next").arg(count), 3000);
@@ -362,7 +371,6 @@ void BenchMainWindow::editUpNextSelection(int operation, int destination) {
     if (ids == up_next_display_ids_)
         return;
     if (playback_.requests.retain(ids)) {
-        playback_.last_requested_next.reset();
         persistUpNext();
         refreshUpNext();
     }
@@ -383,7 +391,6 @@ void BenchMainWindow::editUpNext(int operation, int row, int destination) {
             playback_.requests.move(id, static_cast<std::size_t>(destination));
         }
     }
-    playback_.last_requested_next.reset();
     persistUpNext();
     refreshUpNext();
 }
@@ -436,35 +443,6 @@ void BenchMainWindow::persistUpNext() {
     };
     if (playback_.requests.active())
         append(playback_.requests.active()->source);
-    if (playback_.requests.active() && player_ &&
-        QSettings{}.value(QLatin1String(SettingsDialog::restore_playback_key), false).toBool()) {
-        const auto snapshot = player_->snapshot();
-        const auto& source = playback_.requests.active()->source;
-        if ((snapshot.state == audio::LocalAuditionState::paused ||
-             snapshot.state == audio::LocalAuditionState::playing ||
-             snapshot.state == audio::LocalAuditionState::buffering ||
-             snapshot.state == audio::LocalAuditionState::draining) &&
-            snapshot.raw_path == source.raw_path && snapshot.selection == source.selection &&
-            snapshot.chain_transitions == last_chain_transitions_ &&
-            snapshot.segment == source.segment && snapshot.source_revision && snapshot.format &&
-            snapshot.format->sample_rate > 0 && snapshot.position_sample >= 0 &&
-            (!snapshot.end_sample || snapshot.position_sample < *snapshot.end_sample)) {
-            const auto& revision = *snapshot.source_revision;
-            const auto rate = snapshot.format->sample_rate;
-            auto item = rows[0].toObject();
-            item[QStringLiteral("resume")] = QJsonObject{
-                {QStringLiteral("version"), 1},
-                {QStringLiteral("position"),
-                 QString::number(snapshot.position_sample / rate * 1000 +
-                                 snapshot.position_sample % rate * 1000 / rate)},
-                {QStringLiteral("revision"),
-                 QJsonArray{QString::number(revision.device), QString::number(revision.inode),
-                            QString::number(revision.size),
-                            QString::number(revision.modification_time_seconds),
-                            QString::number(revision.modification_time_nanoseconds)}}};
-            rows[0] = item;
-        }
-    }
     for (const auto& entry : playback_.requests.pending())
         append(entry.source);
     QJsonObject state{
@@ -496,18 +474,10 @@ void BenchMainWindow::persistUpNext() {
 void BenchMainWindow::restoreUpNext() {
     if (!persistence_)
         return;
-    const auto generation = resume_intent_generation_;
     const auto request_revision = playback_.requests.revision();
-    persistence_->loadUiState(QStringLiteral("playback/up-next/v1"), [this, generation,
-                                                                      request_revision](
+    persistence_->loadUiState(QStringLiteral("playback/up-next/v1"), [this, request_revision](
                                                                          QByteArray payload,
                                                                          QString error) {
-        const auto finish = qScopeGuard([this, generation] {
-            if (resume_restore_pending_ && generation == resume_intent_generation_)
-                restoreLocalResume();
-            else
-                resume_restore_pending_ = false;
-        });
         if (!error.isEmpty()) {
             statusBar()->showMessage(error, 5000);
             return;
@@ -527,43 +497,14 @@ void BenchMainWindow::restoreUpNext() {
                     tr("Saved Up Next exceeds the queue limit; it has been preserved."), 8000);
                 return;
             }
-            std::optional<std::int64_t> resume_position;
-            bool first = true;
             for (const auto& value : state.value(QStringLiteral("rows")).toArray()) {
                 const auto item = value.toObject();
-                const bool was_first = std::exchange(first, false);
                 LocalTrackRow row;
                 row.raw_path =
                     QByteArray::fromBase64(item.value(QStringLiteral("path")).toString().toLatin1())
                         .toStdString();
                 if (row.raw_path.empty())
                     continue;
-                if (was_first) {
-                    const auto resume = item.value(QStringLiteral("resume")).toObject();
-                    const auto revision = resume.value(QStringLiteral("revision")).toArray();
-                    bool valid = false;
-                    const auto position =
-                        resume.value(QStringLiteral("position")).toString().toLongLong(&valid);
-                    if (resume.value(QStringLiteral("version")).toInt() == 1 && valid &&
-                        position >= 0 && position <= 365LL * 24 * 60 * 60 * 1000 &&
-                        revision.size() == 5) {
-                        core::LocalSourceRevision observed;
-                        bool ok[5]{};
-                        observed.device = revision[0].toString().toULongLong(&ok[0]);
-                        observed.inode = revision[1].toString().toULongLong(&ok[1]);
-                        observed.size = revision[2].toString().toULongLong(&ok[2]);
-                        observed.modification_time_seconds =
-                            revision[3].toString().toLongLong(&ok[3]);
-                        observed.modification_time_nanoseconds =
-                            revision[4].toString().toLongLong(&ok[4]);
-                        if (std::ranges::all_of(ok, [](bool parsed) { return parsed; }) &&
-                            observed.inode != 0 && observed.modification_time_nanoseconds >= 0 &&
-                            observed.modification_time_nanoseconds < 1000000000) {
-                            row.source_revision = observed;
-                            resume_position = position;
-                        }
-                    }
-                }
                 row.title = item.value(QStringLiteral("title")).toString().toStdString();
                 row.artist = item.value(QStringLiteral("artist")).toString().toStdString();
                 if (item.contains(QStringLiteral("stream")))
@@ -613,23 +554,11 @@ void BenchMainWindow::restoreUpNext() {
                 }
                 rows.push_back(std::move(row));
             }
-            const bool untouched = generation == resume_intent_generation_ &&
-                                   request_revision == playback_.requests.revision() &&
+            const bool untouched = request_revision == playback_.requests.revision() &&
                                    playback_.requests.pending().empty() &&
                                    !playback_.requests.active();
-            const bool resume_request =
-                untouched && resume_position && !rows.empty() && player_ &&
-                player_->snapshot().state == audio::LocalAuditionState::empty &&
-                QSettings{}
-                    .value(QLatin1String(SettingsDialog::restore_playback_key), false)
-                    .toBool();
-            std::vector<LocalTrackRow> remaining;
             if (untouched) {
-                if (resume_request) {
-                    playback_.requests.insert({rows.front()}, 0);
-                    remaining.assign(std::make_move_iterator(rows.begin() + 1),
-                                     std::make_move_iterator(rows.end()));
-                } else if (!playback_.requests.insert(std::move(rows), 0)) {
+                if (!playback_.requests.insert(std::move(rows), 0)) {
                     statusBar()->showMessage(
                         tr("Saved Up Next exceeds the pending queue limit; it has been preserved."),
                         8000);
@@ -650,31 +579,8 @@ void BenchMainWindow::restoreUpNext() {
                             tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
                         playback_.row = row;
                         playback_.anchors.source = tab->model->source(row);
-                        resetPlaybackOrder();
                     }
                 }
-            }
-            if (resume_request) {
-                // Restore the saved continuation, not a newly computed one. In
-                // Consume mode the originating row may already have been removed.
-                const auto id = state.value(QStringLiteral("document")).toString();
-                if (auto* tab = tabForDocument(id)) {
-                    const auto row = state.value(QStringLiteral("returnRow")).toInt(-1);
-                    if (row >= 0 && row < tab->model->rowCount() &&
-                        continuationIdentity(tab->model->rows().at(static_cast<std::size_t>(
-                            row))) == state.value(QStringLiteral("returnSource")).toArray()) {
-                        playback_.anchors.document = document_identity(id);
-                        playback_.anchors.request_return =
-                            tab->model->rows().at(static_cast<std::size_t>(row)).entry_id;
-                        if (playback_.anchors.source.empty())
-                            playback_.anchors.source = tab->model->source(row);
-                    }
-                }
-                refreshUpNext();
-                static_cast<void>(playLocalRequest(*resume_position));
-                if (!remaining.empty())
-                    playback_.requests.insert(std::move(remaining),
-                                              playback_.requests.pending().size());
             }
         }
         playback_.requests.forgetUndo();

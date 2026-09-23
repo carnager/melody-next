@@ -224,6 +224,7 @@ class BenchMainWindowTest final : public QObject {
     void transportIsOneRowWithCoverAndPills();
     void headerShowsThePlayingAlbumsCover();
     void libraryDragsIntoUpNextWithCovers();
+    void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
@@ -842,6 +843,29 @@ void BenchMainWindowTest::metadataGridReusesExactNativeFieldWithoutInvalidIndexe
     QCOMPARE(current.column(), 39);
 }
 
+void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
+    // An MP3 converted by FFmpeg: TagLib reads its TSSE frame as ENCODING,
+    // FFmpeg reports the same tag as "encoder". It is one tag, and must not
+    // come back as a second, stream-only field that no edit can touch.
+    metadata::MetadataDocument document;
+    document.fields.push_back(metadata::MetadataField{.canonical_name = "encoding",
+                                                      .native_name = "ENCODING",
+                                                      .values = {"Lavf61.5.101"},
+                                                      .qualifier = {},
+                                                      .provenance =
+                                                          metadata::FieldProvenance::embedded});
+    document.fields.push_back(metadata::MetadataField{.canonical_name = "encoder",
+                                                      .native_name = "encoder",
+                                                      .values = {"Lavf61.5.101", "Lavc61.11"},
+                                                      .qualifier = {},
+                                                      .provenance =
+                                                          metadata::FieldProvenance::stream});
+    remove_shadowed_probed_metadata(document);
+    QCOMPARE(document.fields.size(), std::size_t{1});
+    QCOMPARE(document.fields.front().canonical_name, std::string{"encoding"});
+    QCOMPARE(probed_semantic_alias("ENCODER"), std::optional<std::string_view>{"encoding"});
+}
+
 void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -1322,7 +1346,7 @@ void BenchMainWindowTest::statusBarSummarizesTrackSelection() {
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QCOMPARE(status->text(),
              QStringLiteral("First artist — First title · First album (2026) · 1:01"));
-    QCOMPARE(status->toolTip(), QString::fromStdString(core::escape_raw_path(first_raw)));
+    QCOMPARE(status->toolTip(), QString::fromStdString(core::display_raw_path(first_raw)));
 
     view->selectionModel()->select(model->index(1, 0),
                                    QItemSelectionModel::Select | QItemSelectionModel::Rows);

@@ -187,6 +187,70 @@ std::string escape_raw_path(const std::string_view raw_path) {
     return escaped;
 }
 
+namespace {
+
+// The length of the valid UTF-8 sequence starting at `offset`, and its code
+// point; zero when the bytes there are not one.
+[[nodiscard]] std::pair<std::size_t, char32_t> utf8_sequence(const std::string_view text,
+                                                             const std::size_t offset) {
+    const auto lead = static_cast<unsigned char>(text[offset]);
+    std::size_t length = 0U;
+    char32_t code = 0U;
+    if (lead >= 0xC2U && lead <= 0xDFU) {
+        length = 2U;
+        code = lead & 0x1FU;
+    } else if (lead >= 0xE0U && lead <= 0xEFU) {
+        length = 3U;
+        code = lead & 0x0FU;
+    } else if (lead >= 0xF0U && lead <= 0xF4U) {
+        length = 4U;
+        code = lead & 0x07U;
+    } else {
+        return {0U, 0U};
+    }
+    if (offset + length > text.size()) {
+        return {0U, 0U};
+    }
+    for (std::size_t index = 1U; index < length; ++index) {
+        const auto next = static_cast<unsigned char>(text[offset + index]);
+        if ((next & 0xC0U) != 0x80U) {
+            return {0U, 0U};
+        }
+        code = (code << 6U) | (next & 0x3FU);
+    }
+    // Overlong forms, surrogates and values past Unicode are not UTF-8.
+    const bool overlong = (length == 3U && code < 0x800U) || (length == 4U && code < 0x10000U);
+    if (overlong || (code >= 0xD800U && code <= 0xDFFFU) || code > 0x10FFFFU) {
+        return {0U, 0U};
+    }
+    return {length, code};
+}
+
+[[nodiscard]] bool hides_itself(const char32_t code) {
+    return (code >= 0x80U && code <= 0x9FU) || code == 0xADU ||
+           (code >= 0x200BU && code <= 0x200FU) || code == 0x2028U || code == 0x2029U ||
+           (code >= 0x202AU && code <= 0x202EU) || (code >= 0x2060U && code <= 0x2064U) ||
+           (code >= 0x2066U && code <= 0x206FU) || code == 0xFEFFU;
+}
+
+} // namespace
+
+std::string display_raw_path(const std::string_view raw_path) {
+    std::string shown;
+    shown.reserve(raw_path.size());
+    for (std::size_t offset = 0U; offset < raw_path.size();) {
+        const auto [length, code] = utf8_sequence(raw_path, offset);
+        if (length > 0U && !hides_itself(code)) {
+            shown.append(raw_path.substr(offset, length));
+            offset += length;
+        } else {
+            shown += escape_raw_path(raw_path.substr(offset, 1U));
+            ++offset;
+        }
+    }
+    return shown;
+}
+
 Result<LocalSourceRevision> observe_local_source_revision(const std::string& raw_path) {
     const auto failure = [&raw_path](const ErrorCode code, std::string message) {
         return std::unexpected(Error{

@@ -191,7 +191,7 @@ OutputProfilesManagerWidget::OutputProfilesManagerWidget(OutputProfileStore stor
         destination_root_raw_path_.assign(encoded.constData(),
                                           static_cast<std::size_t>(encoded.size()));
         destination_root_->setText(
-            QString::fromStdString(core::escape_raw_path(destination_root_raw_path_)));
+            QString::fromStdString(core::display_raw_path(destination_root_raw_path_)));
         updateButtons();
     });
 
@@ -306,7 +306,7 @@ void OutputProfilesManagerWidget::selectDestinationRow(const int row) {
     destination_root_raw_path_ = saved.profile.root_raw_path;
     destination_name_->setText(displayText(saved.profile.name));
     destination_root_->setText(
-        QString::fromStdString(core::escape_raw_path(destination_root_raw_path_)));
+        QString::fromStdString(core::display_raw_path(destination_root_raw_path_)));
     updateButtons();
 }
 

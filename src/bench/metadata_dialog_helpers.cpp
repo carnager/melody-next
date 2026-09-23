@@ -20,32 +20,7 @@ QString display_utf8(const std::string_view value) {
 }
 
 QString display_raw_path(const std::string_view value) {
-    QString result;
-    for (std::size_t offset = 0U; offset < value.size();) {
-        const auto byte = static_cast<unsigned char>(value[offset]);
-        const auto length = byte >= 0xC2U && byte <= 0xDFU   ? 2U
-                            : byte >= 0xE0U && byte <= 0xEFU ? 3U
-                            : byte >= 0xF0U && byte <= 0xF4U ? 4U
-                                                             : 1U;
-        const auto part = value.substr(offset, length);
-        if (length > 1U && part.size() == length &&
-            QByteArrayView{part.data(), static_cast<qsizetype>(part.size())}.isValidUtf8()) {
-            const auto decoded = display_utf8(part);
-            if (decoded.front().category() != QChar::Other_Control &&
-                decoded.front().category() != QChar::Other_Format &&
-                decoded.front().category() != QChar::Separator_Line &&
-                decoded.front().category() != QChar::Separator_Paragraph) {
-                result += decoded;
-            } else {
-                result += display_utf8(core::escape_raw_path(part));
-            }
-            offset += length;
-        } else {
-            result += display_utf8(core::escape_raw_path(value.substr(offset, 1U)));
-            ++offset;
-        }
-    }
-    return result;
+    return display_utf8(core::display_raw_path(value));
 }
 
 std::string encode_utf8(const QString& value) {

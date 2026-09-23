@@ -383,7 +383,7 @@ void BenchMainWindow::refreshSelectionStatus() {
         const auto summary = details.join(QStringLiteral(" · "));
         selection_status_->setText(summary);
         selection_status_->setToolTip(
-            QString::fromStdString(core::escape_raw_path(track.raw_path)));
+            QString::fromStdString(core::display_raw_path(track.raw_path)));
         return;
     }
 

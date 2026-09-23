@@ -886,7 +886,7 @@ void MetadataArtworkSection::present(const BatchResult& result) {
     for (const auto& source : result.sources) {
         const auto label = source_label(source.scope);
         const auto media_path =
-            QString::fromStdString(core::escape_raw_path(source.scope.raw_path));
+            QString::fromStdString(core::display_raw_path(source.scope.raw_path));
         if (!source.inventory) {
             add_available_ = false;
             ++read_only_count;
@@ -947,7 +947,7 @@ void MetadataArtworkSection::present(const BatchResult& result) {
         for (std::size_t index = 0U; index < inventory.items.size(); ++index) {
             const auto& artwork = inventory.items[index];
             const auto raw_artwork_path =
-                QString::fromStdString(core::escape_raw_path(artwork.raw_source_path));
+                QString::fromStdString(core::display_raw_path(artwork.raw_source_path));
             const auto fingerprint = QString::fromStdString(
                 metadata::artwork_fingerprint_hex(artwork.content_fingerprint));
             const auto embedded = artwork.provenance == metadata::ArtworkProvenance::embedded;
@@ -1009,7 +1009,7 @@ void MetadataArtworkSection::present(const BatchResult& result) {
 
         for (const auto& issue : inventory.issues) {
             const auto raw_issue_path =
-                QString::fromStdString(core::escape_raw_path(issue.raw_source_path));
+                QString::fromStdString(core::display_raw_path(issue.raw_source_path));
             const auto details = error_tool_tip(issue.error);
             QList<QStandardItem*> issue_row;
             issue_row.reserve(4);
@@ -1498,7 +1498,7 @@ void MetadataArtworkSection::finishExport() {
                 }
                 rows.push_back(PreparationFeedbackRow{
                     .file =
-                        QString::fromStdString(core::escape_raw_path(item.destination_raw_path)),
+                        QString::fromStdString(core::display_raw_path(item.destination_raw_path)),
                     .detail =
                         item.issue ? display_utf8(item.issue->message) : QStringLiteral("Stopped"),
                 });
@@ -1694,16 +1694,16 @@ void MetadataArtworkSection::updatePendingPresentation() {
         }
         pending_rows_.push_back(intent);
         pending_model_->appendRow(
-            {table_item(QString::fromStdString(core::escape_raw_path(
+            {table_item(QString::fromStdString(core::display_raw_path(
                             std::filesystem::path{intent.raw_media_path}.filename().native())),
-                        QString::fromStdString(core::escape_raw_path(intent.raw_media_path))),
+                        QString::fromStdString(core::display_raw_path(intent.raw_media_path))),
              table_item(title_case(
                  display_utf8(metadata::artwork_write_plan_intent_kind_name(intent.kind)))),
              table_item(
                  intent.kind == metadata::ArtworkWritePlanIntentKind::add
                      ? title_case(display_utf8(metadata::artwork_role_name(intent.added_role)))
                      : QStringLiteral("Picture %1").arg(intent.target_ordinal + 1)),
-             table_item(intent.replacement_raw_path ? QString::fromStdString(core::escape_raw_path(
+             table_item(intent.replacement_raw_path ? QString::fromStdString(core::display_raw_path(
                                                           *intent.replacement_raw_path))
                                                     : QString{}),
              table_item(intent.kind == metadata::ArtworkWritePlanIntentKind::add
@@ -1959,7 +1959,7 @@ void MetadataArtworkSection::finishReview() {
                 continue;
             }
             rows.push_back(PreparationFeedbackRow{
-                .file = QString::fromStdString(core::escape_raw_path(source.raw_media_path)),
+                .file = QString::fromStdString(core::display_raw_path(source.raw_media_path)),
                 .detail = QStringLiteral("%1: %2").arg(
                     display_utf8(metadata::artwork_write_plan_issue_kind_name(issue.kind)),
                     display_utf8(issue.error.message)),
@@ -2090,7 +2090,7 @@ void MetadataArtworkSection::finishApply() {
                     continue;
                 }
                 rows.push_back(PreparationFeedbackRow{
-                    .file = QString::fromStdString(core::escape_raw_path(source_result.raw_path)),
+                    .file = QString::fromStdString(core::display_raw_path(source_result.raw_path)),
                     .detail = source_result.issue ? display_utf8(source_result.issue->message)
                                                   : artwork_state_text(source_result.state),
                 });

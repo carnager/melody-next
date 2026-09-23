@@ -47,7 +47,7 @@ void stamp_distinct_entry_ids(std::vector<LocalTrackRow>& rows,
 }
 
 [[nodiscard]] QString escaped(const std::string& raw) {
-    return QString::fromStdString(core::escape_raw_path(raw));
+    return QString::fromStdString(core::display_raw_path(raw));
 }
 
 [[nodiscard]] QString display_utf8(const std::string& utf8) {

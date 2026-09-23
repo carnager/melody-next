@@ -114,6 +114,12 @@ std::optional<std::string_view> probed_semantic_alias(const std::string_view nat
     if (name == "album_artist") {
         return "albumartist";
     }
+    // FFmpeg's "encoder" is the tag TagLib reads as ENCODING (ID3 TSSE, MP4
+    // ©too); without this it came through a second time, as a field that
+    // is not a tag and so could never be edited or removed.
+    if (name == "encoder") {
+        return "encoding";
+    }
     return std::nullopt;
 }
 

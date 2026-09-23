@@ -2762,7 +2762,7 @@ void MetadataPropertiesDialog::finishWritePlan() {
     const auto add_row = [&rows](const std::string& raw_path, const QString& detail) {
         rows.push_back(PreparationFeedbackRow{
             .file = raw_path.empty() ? QStringLiteral("Selection")
-                                     : QString::fromStdString(core::escape_raw_path(raw_path)),
+                                     : QString::fromStdString(core::display_raw_path(raw_path)),
             .detail = detail,
         });
     };
@@ -3087,7 +3087,7 @@ void MetadataPropertiesDialog::finishMetadataApply() {
             continue;
         }
         rows.push_back(PreparationFeedbackRow{
-            .file = QString::fromStdString(core::escape_raw_path(source.raw_path)),
+            .file = QString::fromStdString(core::display_raw_path(source.raw_path)),
             .detail =
                 source.issue ? display_utf8(source.issue->message) : apply_state_text(source.state),
         });
@@ -3097,7 +3097,7 @@ void MetadataPropertiesDialog::finishMetadataApply() {
             continue;
         }
         rows.push_back(PreparationFeedbackRow{
-            .file = QString::fromStdString(core::escape_raw_path(sheet.raw_cue_path)),
+            .file = QString::fromStdString(core::display_raw_path(sheet.raw_cue_path)),
             .detail =
                 sheet.issue ? display_utf8(sheet.issue->message) : apply_state_text(sheet.state),
         });
@@ -3107,7 +3107,7 @@ void MetadataPropertiesDialog::finishMetadataApply() {
             continue;
         }
         rows.push_back(PreparationFeedbackRow{
-            .file = QString::fromStdString(core::escape_raw_path(sidecar.raw_audio_path)),
+            .file = QString::fromStdString(core::display_raw_path(sidecar.raw_audio_path)),
             .detail = sidecar.issue ? display_utf8(sidecar.issue->message)
                                     : apply_state_text(sidecar.state),
         });
@@ -3200,7 +3200,7 @@ void MetadataPropertiesDialog::finishFileApply() {
         }
         for (const auto& note : source.commit->notes) {
             note_rows.push_back(PreparationFeedbackRow{
-                .file = QString::fromStdString(core::escape_raw_path(source.source_raw_path)),
+                .file = QString::fromStdString(core::display_raw_path(source.source_raw_path)),
                 .detail = display_utf8(note),
             });
         }
@@ -3231,7 +3231,7 @@ void MetadataPropertiesDialog::finishFileApply() {
             continue;
         }
         rows.push_back(PreparationFeedbackRow{
-            .file = QString::fromStdString(core::escape_raw_path(source.source_raw_path)),
+            .file = QString::fromStdString(core::display_raw_path(source.source_raw_path)),
             .detail = source.issue ? display_utf8(source.issue->message)
                                    : file_apply_state_text(source.state),
         });

@@ -18,7 +18,7 @@ namespace trackknife::bench {
 namespace {
 
 [[nodiscard]] QString endpointText(const protocol::Endpoint& endpoint) {
-    return QString::fromStdString(core::escape_raw_path(endpoint.describe()));
+    return QString::fromStdString(core::display_raw_path(endpoint.describe()));
 }
 
 // What a caller gets with no engine to ask. ADR-0226: there is no database

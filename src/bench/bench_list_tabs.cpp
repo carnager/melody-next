@@ -153,7 +153,7 @@ void BenchMainWindow::initializePersistence() {
                                 for (auto& path : paths) {
                                     LocalTrackRow row;
                                     row.raw_path = std::move(path);
-                                    row.title = core::escape_raw_path(
+                                    row.title = core::display_raw_path(
                                         row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
                                     rows.push_back(std::move(row));
                                 }

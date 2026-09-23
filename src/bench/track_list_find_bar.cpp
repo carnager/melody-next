@@ -351,7 +351,7 @@ void TrackListFindBar::pump() {
                 }
                 for (std::size_t field = 0; field < candidate.fields.size(); ++field) {
                     const auto text = candidate.local_path && field + 1 == candidate.fields.size()
-                                          ? core::escape_raw_path(candidate.fields[field])
+                                          ? core::display_raw_path(candidate.fields[field])
                                           : candidate.fields[field];
                     const auto haystack = core::unicodeSimpleLower(text);
                     if (!haystack) {

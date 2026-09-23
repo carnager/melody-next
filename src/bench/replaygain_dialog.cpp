@@ -449,14 +449,14 @@ void ReplayGainDialog::finishScan() {
                 for (const auto& source : plan->sources) {
                     for (const auto& issue : source.issues) {
                         apply->problems << QStringLiteral("%1: %2").arg(
-                            display_utf8(core::escape_raw_path(source.raw_path)),
+                            display_utf8(core::display_raw_path(source.raw_path)),
                             display_utf8(issue.error.message));
                     }
                 }
                 for (const auto& sidecar : plan->sidecars) {
                     for (const auto& issue : sidecar.issues) {
                         apply->problems << QStringLiteral("%1: %2").arg(
-                            display_utf8(core::escape_raw_path(sidecar.raw_audio_path)),
+                            display_utf8(core::display_raw_path(sidecar.raw_audio_path)),
                             display_utf8(issue.error.message));
                     }
                 }
@@ -516,7 +516,7 @@ void ReplayGainDialog::finishApply() {
         for (const auto& source : result.sources) {
             if (!source.commit && source.issue) {
                 problems << QStringLiteral("%1: %2").arg(
-                    display_utf8(core::escape_raw_path(source.raw_path)),
+                    display_utf8(core::display_raw_path(source.raw_path)),
                     display_utf8(source.issue->message));
             }
         }

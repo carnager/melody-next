@@ -44,6 +44,11 @@ discover_local_sources(std::span<const std::string> raw_paths,
 
 // Produces valid UTF-8 ASCII for presentation while retaining every raw byte.
 [[nodiscard]] std::string escape_raw_path(std::string_view raw_path);
+// A raw path for people to read: valid UTF-8 stays as written ("Kopfhörer",
+// not "Kopfh\xC3\xB6rer"); only bytes that are not UTF-8, control
+// characters, line separators and invisible format marks are escaped as
+// escape_raw_path would, so nothing in a name can hide or disguise itself.
+[[nodiscard]] std::string display_raw_path(std::string_view raw_path);
 
 struct ContainedLocalSource {
     std::string raw_root;

@@ -534,7 +534,7 @@ void BenchMainWindow::insertRemotePaths(ListTab& tab, std::vector<std::string> r
     for (auto& raw_path : raw_paths) {
         LocalTrackRow row;
         row.raw_path = std::move(raw_path);
-        row.title = core::escape_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+        row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
         rows.push_back(std::move(row));
     }
     if (rows.empty()) {

@@ -187,6 +187,12 @@ void groupsEveryIntentAndReportsLogicalConflicts() {
         shared.changes, track_number, &trackknife::metadata::MetadataWritePlanChange::field_index);
     CHECK(track_change != shared.changes.end());
     CHECK(track_change != shared.changes.end() && track_change->unresolved_non_embedded_target);
+    // The refusal names the field it is about, so it can be acted on.
+    CHECK(std::ranges::any_of(shared.issues, [](const auto& issue) {
+        return issue.kind == MetadataWritePlanIssueKind::unresolved_non_embedded_target &&
+               (issue.error.message.find("\u201ctracknumber\u201d") != std::string::npos ||
+                issue.error.message.find("\u201cTRACKNUMBER\u201d") != std::string::npos);
+    }));
 
     const auto& other = planned->sources[1];
     CHECK(other.ready());

@@ -135,7 +135,7 @@ void PlaylistTransferBar::importFile(std::string raw_path) {
             }
             result.name = std::filesystem::path{path}.stem().native();
             if (!core::unicodeCodePointCount(result.name))
-                result.name = core::escape_raw_path(result.name);
+                result.name = core::display_raw_path(result.name);
             result.rows = std::make_shared<std::vector<LocalTrackRow>>();
             result.rows->reserve(entries->size());
             progress->store(0);
@@ -164,7 +164,7 @@ void PlaylistTransferBar::importFile(std::string raw_path) {
                     if (row.title.empty()) {
                         row.title = std::filesystem::path{row.raw_path}.filename().native();
                         if (!core::unicodeCodePointCount(row.title))
-                            row.title = core::escape_raw_path(row.title);
+                            row.title = core::display_raw_path(row.title);
                     }
                     row.metadata.fields.push_back(
                         {.canonical_name = "title",

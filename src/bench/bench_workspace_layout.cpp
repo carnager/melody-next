@@ -897,12 +897,12 @@ void BenchMainWindow::loadFolderBookmarks() {
         }
         const std::string raw_path{bytes.constData(), static_cast<std::size_t>(bytes.size())};
         const auto display = QString::fromUtf8(
-            core::escape_raw_path(std::filesystem::path{raw_path}.filename().native().empty()
+            core::display_raw_path(std::filesystem::path{raw_path}.filename().native().empty()
                                       ? raw_path
                                       : std::filesystem::path{raw_path}.filename().native()));
         auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")), display,
                                          folder_bookmarks_);
-        item->setToolTip(QString::fromUtf8(core::escape_raw_path(raw_path)));
+        item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
         item->setData(Qt::UserRole, bytes);
     }
     folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
@@ -928,9 +928,9 @@ void BenchMainWindow::addFolderBookmark(const std::string& raw_path) {
     const auto name = std::filesystem::path{raw_path}.filename().native();
     auto* item = new QListWidgetItem(
         QIcon::fromTheme(QStringLiteral("folder")),
-        QString::fromUtf8(core::escape_raw_path(name.empty() ? raw_path : name)),
+        QString::fromUtf8(core::display_raw_path(name.empty() ? raw_path : name)),
         folder_bookmarks_);
-    item->setToolTip(QString::fromUtf8(core::escape_raw_path(raw_path)));
+    item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
     item->setData(Qt::UserRole, bytes);
     persistFolderBookmarks();
     folder_bookmarks_->setVisible(true);

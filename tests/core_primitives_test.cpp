@@ -163,6 +163,18 @@ void localSourceDiscoveryPreservesRawPathsAndOrder() {
     CHECK(std::ranges::count(discovered.raw_files, first.native()) == 2);
     CHECK(std::ranges::find(discovered.raw_files, invalid.native()) != discovered.raw_files.end());
     CHECK(trackknife::core::escape_raw_path(invalid_name) == "invalid-\\xFF.wav");
+    // For people: valid UTF-8 as written, only what is not text escaped.
+    CHECK(trackknife::core::display_raw_path("/music/Kopfh\xC3\xB6rer.mp3") ==
+          "/music/Kopfh\xC3\xB6rer.mp3");
+    CHECK(trackknife::core::escape_raw_path("/music/Kopfh\xC3\xB6rer.mp3") ==
+          "/music/Kopfh\\xC3\\xB6rer.mp3");
+    CHECK(trackknife::core::display_raw_path(invalid_name) == "invalid-\\xFF.wav");
+    CHECK(trackknife::core::display_raw_path("a\nb") == "a\\x0Ab");
+    // A direction override would disguise the rest of the name.
+    CHECK(trackknife::core::display_raw_path("x\xE2\x80\xAEy") == "x\\xE2\\x80\\xAEy");
+    // Overlong and truncated sequences are not UTF-8.
+    CHECK(trackknife::core::display_raw_path("\xC0\xAF") == "\\xC0\\xAF");
+    CHECK(trackknife::core::display_raw_path("\xE2\x82") == "\\xE2\\x82");
 
     trackknife::core::CancellationSource cancellation;
     cancellation.request_cancellation();

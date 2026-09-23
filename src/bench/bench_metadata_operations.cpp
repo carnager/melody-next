@@ -1407,7 +1407,7 @@ void BenchMainWindow::presentInterruptedOperations() {
         }
         acknowledged.insert(key);
         rows.push_back(PreparationFeedbackRow{
-            .file = QString::fromStdString(core::escape_raw_path(raw_path)),
+            .file = QString::fromStdString(core::display_raw_path(raw_path)),
             .detail = std::move(detail),
         });
     };
@@ -1427,7 +1427,7 @@ void BenchMainWindow::presentInterruptedOperations() {
                           : QStringLiteral("An interrupted move could not be finished or safely "
                                            "rolled back");
         detail += QStringLiteral(" · planned target %1")
-                      .arg(QString::fromStdString(core::escape_raw_path(record.target_raw_path)));
+                      .arg(QString::fromStdString(core::display_raw_path(record.target_raw_path)));
         collect(record.id, record.source_raw_path, std::move(detail));
     }
     // Keep acknowledgements even when a transient database/open error omits an

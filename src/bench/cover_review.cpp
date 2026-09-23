@@ -42,7 +42,7 @@ void reviewFolderImages(QWidget* parent, const std::vector<metadata::FolderImage
         table->insertRow(row);
         table->setItem(
             row, 0,
-            new QTableWidgetItem(QString::fromStdString(core::escape_raw_path(image.raw_path))));
+            new QTableWidgetItem(QString::fromStdString(core::display_raw_path(image.raw_path))));
         const auto identical = image.original && image.original->content_fingerprint ==
                                                      image.image.content_fingerprint;
         table->setItem(row, 1,
@@ -52,7 +52,7 @@ void reviewFolderImages(QWidget* parent, const std::vector<metadata::FolderImage
                                                 : QStringLiteral("Create")));
         table->setItem(row, 2,
                        new QTableWidgetItem(
-                           QString::fromStdString(core::escape_raw_path(image.image.raw_path))));
+                           QString::fromStdString(core::display_raw_path(image.image.raw_path))));
     }
     layout->addWidget(table);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, dialog);

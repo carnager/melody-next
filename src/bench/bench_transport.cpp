@@ -1212,7 +1212,7 @@ void BenchMainWindow::adoptEngineQueue() {
         }
         auto fresh = entry;
         fresh.title =
-            core::escape_raw_path(fresh.raw_path.substr(fresh.raw_path.find_last_of('/') + 1));
+            core::display_raw_path(fresh.raw_path.substr(fresh.raw_path.find_last_of('/') + 1));
         merged.push_back(std::move(fresh));
     }
     QString stated;
@@ -1265,7 +1265,7 @@ void BenchMainWindow::reattachToEngine() {
         return;
     }
     for (auto& row : rows) {
-        row.title = core::escape_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+        row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
     }
     const bool remote = transport_ != nullptr && transport_ == remote_playback_;
     // A remote engine's queue goes into its tab, which it always has.

@@ -152,7 +152,7 @@ std::shared_ptr<ReplayGainScanOutcome> run_replaygain_scan(
         outcome->export_rows
                 << QStringList{
                        csv_field(display_utf8(document_title)),
-                       csv_field(QString::fromStdString(core::escape_raw_path(track.raw_path))),
+                       csv_field(QString::fromStdString(core::display_raw_path(track.raw_path))),
                        analyzed ? display_utf8(lufs_text(track.loudness->integrated_lufs))
                                 : QString{},
                        analyzed ? display_utf8(decibel_text(track.loudness->track_gain_db()))
@@ -172,7 +172,7 @@ std::shared_ptr<ReplayGainScanOutcome> run_replaygain_scan(
         if (track.state != loudness::LoudnessScanState::analyzed || !track.loudness) {
             if (track.issue) {
                 outcome->problems.push_back(PreparationFeedbackRow{
-                    .file = QString::fromStdString(core::escape_raw_path(track.raw_path)),
+                    .file = QString::fromStdString(core::display_raw_path(track.raw_path)),
                     .detail = display_utf8(track.issue->message),
                 });
             }
@@ -186,7 +186,7 @@ std::shared_ptr<ReplayGainScanOutcome> run_replaygain_scan(
         }
         if (!track.loudness->measurable()) {
             outcome->problems.push_back(PreparationFeedbackRow{
-                .file = QString::fromStdString(core::escape_raw_path(track.raw_path)),
+                .file = QString::fromStdString(core::display_raw_path(track.raw_path)),
                 .detail =
                     QStringLiteral("Too short for gated loudness (under 400 ms); no gain staged"),
             });

@@ -63,6 +63,38 @@ void add_issue(MetadataWritePlanSource& source, const MetadataWritePlanIssueKind
     return cell != nullptr && cell->provenance != FieldProvenance::embedded;
 }
 
+// Why a field cannot be written into the file, in the words the person
+// applying the edit can act on: which field, and where its value came from.
+[[nodiscard]] std::string non_embedded_reason(const StagedMetadataSelection& selection,
+                                              const MetadataWritePlanIntent& intent,
+                                              const std::size_t field_index,
+                                              const std::string& name) {
+    const auto quoted = "\u201c" + name + "\u201d ";
+    const auto& field = selection.field(field_index);
+    if (selection.source(intent.item_index).logical_track &&
+        (field.canonical_name.starts_with("replaygain") || field.canonical_name.starts_with("r128"))) {
+        return quoted + "belongs to one track inside a larger file, which has nowhere to keep it yet";
+    }
+    const auto* cell = selection.cell(intent.item_index, field_index);
+    switch (cell != nullptr ? cell->provenance : FieldProvenance::embedded) {
+    case FieldProvenance::stream:
+        return quoted + "is not a tag in this file: it was read from the audio stream, so there "
+                        "is nothing here to change";
+    case FieldProvenance::cached_snapshot:
+        return quoted + "was taken from a stored copy rather than read from the file; reload the "
+                        "file and apply again";
+    case FieldProvenance::sidecar:
+        return quoted + "comes from a file beside this one, not from its tags";
+    case FieldProvenance::segment:
+        return quoted + "belongs to a chapter or part of the file, which cannot hold tags";
+    case FieldProvenance::annotation:
+        return quoted + "is Trackknife's own note, not a tag in the file";
+    case FieldProvenance::embedded:
+        break;
+    }
+    return quoted + "cannot be written into this file";
+}
+
 [[nodiscard]] core::Result<MetadataWritePlan> cancelled() {
     return std::unexpected(core::Error{
         .code = core::ErrorCode::cancelled,
@@ -183,7 +215,7 @@ std::string_view metadata_write_plan_issue_kind_name(const MetadataWritePlanIssu
     case MetadataWritePlanIssueKind::conflicting_logical_edits:
         return "conflicting logical edits";
     case MetadataWritePlanIssueKind::unresolved_non_embedded_target:
-        return "unresolved non-embedded target";
+        return "not a tag in the file";
     case MetadataWritePlanIssueKind::writer_unavailable:
         return "writer unavailable";
     case MetadataWritePlanIssueKind::preservation_unproven:
@@ -678,13 +710,17 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
                           change.field_index, intent_items);
             }
             if (change.unresolved_non_embedded_target) {
-                add_issue(
-                    source, MetadataWritePlanIssueKind::unresolved_non_embedded_target,
-                    planner_error(core::ErrorCode::unsupported,
-                                  "the field requires a logical-track or non-embedded storage "
-                                  "target that is not yet supported",
-                                  source.raw_path),
-                    change.field_index, std::move(intent_items));
+                const auto blocked = std::ranges::find_if(change.intents, [&](const auto& intent) {
+                    return is_non_embedded(selection, intent, change.field_index);
+                });
+                const auto& name =
+                    change.display_name.empty() ? change.canonical_name : change.display_name;
+                add_issue(source, MetadataWritePlanIssueKind::unresolved_non_embedded_target,
+                          planner_error(core::ErrorCode::unsupported,
+                                        non_embedded_reason(selection, *blocked,
+                                                            change.field_index, name),
+                                        source.raw_path),
+                          change.field_index, std::move(intent_items));
             }
         }
         for (std::size_t left = 0U; left < source.changes.size(); ++left) {

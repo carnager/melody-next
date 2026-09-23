@@ -51,7 +51,7 @@ constexpr int empty_state_role = Qt::UserRole + 20;
 
 QString text(const std::string& value) { return QString::fromUtf8(value); }
 std::string bytes(const QString& value) { return value.toUtf8().toStdString(); }
-QString pathLabel(const std::string& value) { return text(core::escape_raw_path(value)); }
+QString pathLabel(const std::string& value) { return text(core::display_raw_path(value)); }
 QByteArray entryKey(const persistence::LibraryEntry& entry) {
     return QByteArray::number(static_cast<int>(entry.kind)) + ':' +
            QByteArray::fromStdString(entry.key);

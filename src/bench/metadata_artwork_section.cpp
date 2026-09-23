@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_artwork_section.hpp"
+
 #include "bench/cover_review.hpp"
 #include "bench/cover_thumbnail.hpp"
 #include "bench/settings_dialog.hpp"
+#include "uicommon/local_artwork.hpp"
 #include <QCryptographicHash>
 #include <QDir>
 #include <QMenu>
@@ -588,7 +590,7 @@ void MetadataArtworkSection::stageFrontCover(const QString& path) {
 
 void MetadataArtworkSection::pasteFrontCover(const QImage& image) {
     if (!isEnabled() || isBusy() || image.isNull() ||
-        static_cast<qint64>(image.width()) * image.height() > 32'000'000)
+        static_cast<qint64>(image.width()) * image.height() > ui::maximum_artwork_pixels)
         return;
     const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
                            QStringLiteral("/cover-drafts");

@@ -530,7 +530,15 @@ if(TRACKKNIFE_BUILD_UI)
     add_test(NAME queue-table-view COMMAND trackknife_queue_table_view_tests)
     set_tests_properties(queue-table-view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-            qt_add_executable(trackknife_local_folder_tree_model_tests local_folder_tree_model_test.cpp)
+            qt_add_executable(trackknife_local_artwork_tests local_artwork_test.cpp)
+    target_link_libraries(
+        trackknife_local_artwork_tests
+        PRIVATE Trackknife::UiCommon Qt6::Test trackknife_project_options trackknife_project_warnings
+    )
+    add_test(NAME local-artwork COMMAND trackknife_local_artwork_tests)
+    set_tests_properties(local-artwork PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    qt_add_executable(trackknife_local_folder_tree_model_tests local_folder_tree_model_test.cpp)
     target_link_libraries(
         trackknife_local_folder_tree_model_tests
         PRIVATE Trackknife::UiCommon Qt6::Test trackknife_project_options trackknife_project_warnings

@@ -75,7 +75,7 @@ QImage thumbnail(const std::vector<unsigned char>& bytes) {
     QImageReader reader{&buffer};
     const auto size = reader.size();
     if (!size.isValid() || size.isEmpty() || size.width() > 32'768 || size.height() > 32'768 ||
-        static_cast<std::int64_t>(size.width()) * size.height() > 16'000'000) {
+        static_cast<std::int64_t>(size.width()) * size.height() > maximum_artwork_pixels) {
         return {};
     }
     if (size.width() > thumbnail_extent || size.height() > thumbnail_extent) {

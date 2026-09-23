@@ -69,6 +69,9 @@ class CatalogueSource final {
     // Starts the local engine again if it has stopped; false when there is
     // none to start or it would not come up. Blocks while it starts.
     [[nodiscard]] bool reviveLocalEngine() const;
+    // Stops this computer's engine and starts it with the settings as they
+    // are now. False when there is none, or it did not come back.
+    [[nodiscard]] bool restartLocalEngine() const;
 
     [[nodiscard]] Role role() const noexcept { return role_; }
     // Whether this names an engine at all: a remote role with nothing

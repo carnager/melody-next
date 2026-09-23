@@ -10,6 +10,7 @@
 class QAction;
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QStackedWidget;
@@ -40,6 +41,7 @@ class SettingsDialog final : public QDialog {
         general,
         playback,
         library,
+        engine,
         naming,
         replaygain,
         covers,
@@ -70,6 +72,14 @@ class SettingsDialog final : public QDialog {
     // ADR-0223: the password a TCP engine asks for, if it has one. The key
     // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
+    // ADR-0226/0228: how this computer's engine is shared on the network.
+    static constexpr auto engine_share_key = "engine/share";
+    static constexpr auto engine_listen_key = "engine/listen";
+    static constexpr auto engine_listen_default = "0.0.0.0:6600";
+    static constexpr auto engine_stream_port_key = "engine/stream-port";
+    static constexpr int engine_stream_port_default = 6601;
+    static constexpr auto engine_password_key = "engine/password";
+    static constexpr auto engine_music_root_key = "engine/music-root";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";
@@ -96,6 +106,12 @@ class SettingsDialog final : public QDialog {
     QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* engine_socket_{nullptr};
     QLineEdit* engine_token_{nullptr};
+    QCheckBox* engine_share_{nullptr};
+    QLineEdit* engine_listen_{nullptr};
+    QSpinBox* engine_stream_port_{nullptr};
+    QLineEdit* engine_password_{nullptr};
+    QLineEdit* engine_music_root_{nullptr};
+    QLabel* engine_agent_command_{nullptr};
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};

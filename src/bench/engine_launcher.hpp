@@ -6,6 +6,7 @@
 #include "trackknife/protocol/client.hpp"
 
 #include <QString>
+#include <QStringList>
 
 #include <chrono>
 #include <filesystem>
@@ -37,6 +38,27 @@ void allowLocalEngine(bool allowed);
 [[nodiscard]] core::Result<std::unique_ptr<protocol::Client>>
 connectLocalEngine(const LocalEngine& engine,
                    std::chrono::milliseconds timeout = std::chrono::seconds{10});
+
+// How this computer's engine is shared, from Settings; read each time the
+// engine is started, so a restart takes up a change.
+struct LocalEngineSharing final {
+    bool share{false};
+    QString listen;     // host:port for clients and agents
+    int stream_port{0}; // the stream port for agents without the files
+    QString password;   // empty: open
+    QString music_root; // empty: none
+    friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
+};
+[[nodiscard]] LocalEngineSharing localEngineSharing();
+// The command line melodyd is started with, beyond its socket and state.
+// Writes the password, if any, to a file only its owner can read, rather
+// than putting it where `ps` shows it.
+[[nodiscard]] QStringList localEngineArguments(const LocalEngine& engine,
+                                               const LocalEngineSharing& sharing);
+
+// Stops this computer's engine and starts it again, with the settings as
+// they are now. Playback is saved and comes back paused.
+[[nodiscard]] core::Result<void> restartLocalEngine(const LocalEngine& engine);
 
 // The melodyd installed beside this executable, or the build tree's.
 // TRACKKNIFE_ENGINE overrides. Never a search of PATH: another program of

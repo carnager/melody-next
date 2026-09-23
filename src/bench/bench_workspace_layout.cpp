@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/metadata_artwork_section.hpp"
@@ -1057,7 +1058,18 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             }
         }
     });
-    connect(dialog, &QDialog::accepted, this, [this] {
+    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
+        // ADR-0226: this computer's engine runs apart from the window, so a
+        // change to how it is shared means starting it again.
+        if (localEngineSharing() != sharing && catalogue_source_) {
+            QApplication::setOverrideCursor(Qt::WaitCursor);
+            const bool restarted = catalogue_source_->restartLocalEngine();
+            QApplication::restoreOverrideCursor();
+            statusBar()->showMessage(
+                restarted ? QStringLiteral("This computer's engine restarted with its new settings")
+                          : QStringLiteral("This computer's engine did not restart; see its log"),
+                8'000);
+        }
         reloadPlaybackPreferences();
         for (auto* section : findChildren<MetadataArtworkSection*>())
             section->refreshStoragePolicy();

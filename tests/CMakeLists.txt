@@ -357,7 +357,7 @@ if(TARGET trackknife_bench_ui)
     qt_add_executable(trackknife_engine_launcher_tests engine_launcher_test.cpp)
     target_link_libraries(
         trackknife_engine_launcher_tests
-        PRIVATE Trackknife::BenchUi Qt6::Test trackknife_project_options trackknife_project_warnings
+        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options trackknife_project_warnings
     )
     target_compile_definitions(
         trackknife_engine_launcher_tests

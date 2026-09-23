@@ -2,12 +2,15 @@
 
 #include "bench/engine_launcher.hpp"
 
+#include "bench/settings_dialog.hpp"
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include <signal.h>
@@ -93,6 +96,82 @@ QString engineProgram() {
     return {};
 }
 
+LocalEngineSharing localEngineSharing() {
+    const QSettings settings;
+    return LocalEngineSharing{
+        .share = settings.value(QLatin1String(SettingsDialog::engine_share_key), false).toBool(),
+        .listen = settings
+                      .value(QLatin1String(SettingsDialog::engine_listen_key),
+                             QString::fromLatin1(SettingsDialog::engine_listen_default))
+                      .toString()
+                      .trimmed(),
+        .stream_port = settings
+                           .value(QLatin1String(SettingsDialog::engine_stream_port_key),
+                                  SettingsDialog::engine_stream_port_default)
+                           .toInt(),
+        .password =
+            settings.value(QLatin1String(SettingsDialog::engine_password_key), QString{})
+                .toString(),
+        .music_root =
+            settings.value(QLatin1String(SettingsDialog::engine_music_root_key), QString{})
+                .toString()
+                .trimmed(),
+    };
+}
+
+QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSharing& sharing) {
+    QStringList arguments;
+    const auto password_file = engine.state / "engine.password";
+    std::error_code ignored;
+    if (!sharing.music_root.isEmpty()) {
+        arguments << QStringLiteral("--music-root") << sharing.music_root;
+    }
+    if (!sharing.share || sharing.listen.isEmpty()) {
+        std::filesystem::remove(password_file, ignored);
+        return arguments;
+    }
+    arguments << QStringLiteral("--listen") << sharing.listen;
+    // Streams on the same address as the engine, on their own port.
+    const auto colon = sharing.listen.lastIndexOf(QLatin1Char(':'));
+    if (colon > 0 && sharing.stream_port > 0) {
+        arguments << QStringLiteral("--http")
+                  << QStringLiteral("%1:%2").arg(sharing.listen.left(colon)).arg(sharing.stream_port);
+    }
+    if (sharing.password.isEmpty()) {
+        std::filesystem::remove(password_file, ignored);
+        return arguments;
+    }
+    QFile file{path_text(password_file)};
+    // Owner-only from the moment it exists, not after.
+    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate, QFileDevice::ReadOwner |
+                                                                   QFileDevice::WriteOwner)) {
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        file.write(sharing.password.toUtf8() + '\n');
+        file.close();
+        arguments << QStringLiteral("--password-file") << path_text(password_file);
+    }
+    return arguments;
+}
+
+core::Result<void> restartLocalEngine(const LocalEngine& engine) {
+    const protocol::Endpoint endpoint{.socket = engine.socket, .host = {}, .port = 0, .token = {}};
+    if (auto running = protocol::Client::connect(endpoint)) {
+        static_cast<void>((*running)->call("engine.stop"));
+        (*running)->close();
+        // Gone when its socket stops answering; it saves the queue first.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+        while (std::chrono::steady_clock::now() < deadline && protocol::Client::connect(endpoint)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+        }
+    }
+    auto started = connectLocalEngine(engine);
+    if (!started) {
+        return std::unexpected(std::move(started.error()));
+    }
+    (*started)->close();
+    return {};
+}
+
 core::Result<std::unique_ptr<protocol::Client>>
 connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds timeout) {
     const protocol::Endpoint endpoint{.socket = engine.socket, .host = {}, .port = 0, .token = {}};
@@ -108,8 +187,9 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
     const auto log = path_text(engine.state / "melodyd.log");
     QProcess process;
     process.setProgram(program);
-    process.setArguments({QStringLiteral("--socket"), path_text(engine.socket),
-                          QStringLiteral("--state"), path_text(engine.state)});
+    process.setArguments(QStringList{QStringLiteral("--socket"), path_text(engine.socket),
+                                     QStringLiteral("--state"), path_text(engine.state)} +
+                         localEngineArguments(engine, localEngineSharing()));
     process.setWorkingDirectory(path_text(engine.state));
     process.setStandardInputFile(QProcess::nullDevice());
     process.setStandardOutputFile(log, QIODevice::Append);

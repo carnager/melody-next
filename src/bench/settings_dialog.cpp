@@ -15,6 +15,8 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QSysInfo>
+#include <QGroupBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -256,41 +258,152 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         library_layout->addWidget(note);
         library_layout->addStretch(1);
     }
+    add_page(QStringLiteral("Library"), library);
+
+    // --- Engine ------------------------------------------------------------
+    auto* engine = new QWidget(this);
+    auto* engine_layout = new QVBoxLayout(engine);
+    auto* engine_intro = new QLabel(
+        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. This "
+                       "computer's is always used for local files; Trackknife starts it, and it "
+                       "keeps playing after the window closes."),
+        engine);
+    engine_intro->setWordWrap(true);
+    engine_layout->addWidget(engine_intro);
+
+    // ADR-0226/0228: this computer's engine, shared on the network so output
+    // agents -- the bedside speaker -- can play what it plays.
+    auto* sharing = new QGroupBox(QStringLiteral("This computer's engine"), engine);
+    auto* sharing_form = new QFormLayout(sharing);
+    engine_share_ = new QCheckBox(QStringLiteral("Share on the network"), sharing);
+    engine_share_->setObjectName(QStringLiteral("bench-settings-engine-share"));
+    engine_share_->setToolTip(QStringLiteral(
+        "Lets output agents play this computer's music, and other Trackknife windows control it"));
+    engine_share_->setChecked(
+        settings.value(QLatin1String(engine_share_key), false).toBool());
+    sharing_form->addRow(engine_share_);
+    engine_listen_ = new QLineEdit(sharing);
+    engine_listen_->setObjectName(QStringLiteral("bench-settings-engine-listen"));
+    engine_listen_->setText(settings
+                                .value(QLatin1String(engine_listen_key),
+                                       QString::fromLatin1(engine_listen_default))
+                                .toString());
+    engine_listen_->setToolTip(
+        QStringLiteral("host:port; 0.0.0.0 listens on every network this computer is on"));
+    sharing_form->addRow(QStringLiteral("Address:"), engine_listen_);
+    engine_stream_port_ = new QSpinBox(sharing);
+    engine_stream_port_->setObjectName(QStringLiteral("bench-settings-engine-stream-port"));
+    engine_stream_port_->setRange(1, 65535);
+    engine_stream_port_->setValue(
+        settings.value(QLatin1String(engine_stream_port_key), engine_stream_port_default).toInt());
+    engine_stream_port_->setToolTip(QStringLiteral(
+        "Where agents without a copy of the music fetch it, on the same address"));
+    sharing_form->addRow(QStringLiteral("Stream port:"), engine_stream_port_);
+    engine_password_ = new QLineEdit(sharing);
+    engine_password_->setObjectName(QStringLiteral("bench-settings-engine-password"));
+    engine_password_->setEchoMode(QLineEdit::Password);
+    engine_password_->setPlaceholderText(QStringLiteral("none: open, like MPD"));
+    engine_password_->setText(
+        settings.value(QLatin1String(engine_password_key), QString{}).toString());
+    sharing_form->addRow(QStringLiteral("Password:"), engine_password_);
+    engine_music_root_ = new QLineEdit(sharing);
+    engine_music_root_->setObjectName(QStringLiteral("bench-settings-engine-music-root"));
+    engine_music_root_->setPlaceholderText(QStringLiteral("optional"));
+    engine_music_root_->setToolTip(QStringLiteral(
+        "Agents started with their own --music-root are sent paths relative to this folder; "
+        "agents without one stream"));
+    engine_music_root_->setText(
+        settings.value(QLatin1String(engine_music_root_key), QString{}).toString());
+    auto* music_root_row = new QHBoxLayout;
+    music_root_row->addWidget(engine_music_root_, 1);
+    auto* music_root_browse = new QPushButton(QStringLiteral("Browse…"), sharing);
+    connect(music_root_browse, &QPushButton::clicked, this, [this] {
+        const auto chosen = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Music root"), engine_music_root_->text());
+        if (!chosen.isEmpty()) {
+            engine_music_root_->setText(chosen);
+        }
+    });
+    music_root_row->addWidget(music_root_browse);
+    sharing_form->addRow(QStringLiteral("Music root:"), music_root_row);
+    // What to run on the machine with the speakers, kept in step with the
+    // fields: the one thing this page is for, spelled out.
+    engine_agent_command_ = new QLabel(sharing);
+    engine_agent_command_->setObjectName(QStringLiteral("bench-settings-engine-agent-command"));
+    engine_agent_command_->setWordWrap(true);
+    engine_agent_command_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    sharing_form->addRow(engine_agent_command_);
+    const auto refresh_sharing = [this] {
+        const bool on = engine_share_->isChecked();
+        for (QWidget* field : std::initializer_list<QWidget*>{
+                 engine_listen_, engine_stream_port_, engine_password_}) {
+            field->setEnabled(on);
+        }
+        if (!on) {
+            engine_agent_command_->setText(QStringLiteral(
+                "Not shared: only this computer plays, and Trackknife here controls it."));
+            return;
+        }
+        const auto listen = engine_listen_->text().trimmed();
+        const auto colon = listen.lastIndexOf(QLatin1Char(':'));
+        auto host = colon > 0 ? listen.left(colon) : listen;
+        if (host.isEmpty() || host == QStringLiteral("0.0.0.0") || host == QStringLiteral("::")) {
+            host = QSysInfo::machineHostName();
+        }
+        const auto port = colon > 0 ? listen.mid(colon + 1) : QString{};
+        auto command =
+            QStringLiteral("melody-agent --server %1:%2").arg(host, port);
+        if (!engine_password_->text().isEmpty()) {
+            command += QStringLiteral(" --password …");
+        }
+        engine_agent_command_->setText(
+            QStringLiteral("On a machine with speakers, run:\n%1\nAdd --music-root DIR where "
+                           "it has the music itself; without it, it streams. Changing these "
+                           "restarts this computer's engine; playback comes back paused.")
+                .arg(command));
+    };
+    connect(engine_share_, &QCheckBox::toggled, this, refresh_sharing);
+    connect(engine_listen_, &QLineEdit::textChanged, this, refresh_sharing);
+    connect(engine_password_, &QLineEdit::textChanged, this, refresh_sharing);
+    refresh_sharing();
+    engine_layout->addWidget(sharing);
+
+    auto* remote = new QGroupBox(QStringLiteral("Remote engine"), engine);
+    auto* remote_layout = new QVBoxLayout(remote);
     // ADR-0220: which engine serves the catalogue and owns playback. Empty
     // means this computer's own, started when needed (ADR-0226) -- stated
     // here rather than left as a hand-edited setting, because "which engine
     // is in use" is otherwise unanswerable from the UI.
     auto* engine_form = new QFormLayout;
-    engine_socket_ = new QLineEdit(library);
+    engine_socket_ = new QLineEdit(remote);
     engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
     engine_socket_->setPlaceholderText(
         QStringLiteral("host:port or socket path; empty: no remote engine"));
     engine_socket_->setText(
         settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Remote engine:"), engine_socket_);
-    engine_token_ = new QLineEdit(library);
+    engine_token_ = new QLineEdit(remote);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
     engine_token_->setPlaceholderText(QStringLiteral("only if the engine has one"));
     engine_token_->setText(
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Remote password:"), engine_token_);
-    library_layout->addLayout(engine_form);
+    remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. This "
-                       "computer's is always used for local files; Trackknife starts it, and it "
-                       "keeps playing after the window closes. A remote engine -- on a NAS, "
-                       "say -- is added beside it: its library appears next to this computer's, "
+        QStringLiteral("A remote engine -- on a NAS, say -- is added beside this computer's: its library appears next to this computer's, "
                        "and its files play in remote tabs, on that machine. Give its host:port "
                        "(it was started with --listen) and its password if it has one, or a "
                        "unix socket path. There is no encryption; use it on a home "
                        "network or through WireGuard. Takes effect when the workspace is "
                        "reopened."),
-        library);
+        remote);
     engine_note->setWordWrap(true);
-    library_layout->addWidget(engine_note);
+    remote_layout->addWidget(engine_note);
 
-    add_page(QStringLiteral("Library"), library);
+    engine_layout->addWidget(remote);
+    engine_layout->addStretch(1);
+    add_page(QStringLiteral("Engine"), engine);
 
     // --- Naming ------------------------------------------------------------
     auto* naming = new QWidget(this);
@@ -552,6 +665,11 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
     settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
     settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
+    settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
+    settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());
+    settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());
+    settings.setValue(QLatin1String(engine_password_key), engine_password_->text());
+    settings.setValue(QLatin1String(engine_music_root_key), engine_music_root_->text().trimmed());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());
     settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());

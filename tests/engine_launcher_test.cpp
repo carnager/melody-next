@@ -6,7 +6,11 @@
 // forgot would leave one running.
 
 #include "bench/engine_launcher.hpp"
+#include "bench/settings_dialog.hpp"
 
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -27,6 +31,7 @@ class EngineLauncherTest final : public QObject {
     void aMissingProgramSaysSo();
     void nothingStartsOneUnlessAllowed();
     void onlyTheEngineBesideItIsStarted();
+    void sharingSettingsReachTheEngine();
 };
 
 namespace {
@@ -67,7 +72,16 @@ struct Scratch {
 
 } // namespace
 
-void EngineLauncherTest::initTestCase() { qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY); }
+void EngineLauncherTest::initTestCase() {
+    // The launcher reads Settings; never the real ones. Not through Qt's
+    // test mode, which one case here needs off.
+    static QTemporaryDir settings_home;
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, settings_home.path());
+    QCoreApplication::setOrganizationName(QStringLiteral("trackknife-tests"));
+    QCoreApplication::setApplicationName(QStringLiteral("engine-launcher-test"));
+    QSettings{}.clear();
+    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+}
 
 void EngineLauncherTest::startsAnEngineAndFindsItAgain() {
     Scratch scratch;
@@ -157,6 +171,62 @@ void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
     qputenv("PATH", path);
     qputenv("TRACKKNIFE_ENGINE", saved);
     QVERIFY(!program.startsWith(bin.path()));
+}
+
+// ADR-0226/0228: sharing this computer's engine is a setting, which reaches
+// the engine the next time it starts -- and restarting it is how a change is
+// taken up.
+void EngineLauncherTest::sharingSettingsReachTheEngine() {
+    Scratch scratch;
+    QVERIFY(scratch.directory.isValid());
+    const auto free_port = [] {
+        QTcpServer probe;
+        probe.listen(QHostAddress::LocalHost, 0);
+        return probe.serverPort();
+    };
+    const auto port = free_port();
+    QSettings settings;
+    settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
+    settings.setValue(QLatin1String(SettingsDialog::engine_listen_key),
+                      QStringLiteral("127.0.0.1:%1").arg(port));
+    settings.setValue(QLatin1String(SettingsDialog::engine_stream_port_key), free_port());
+    settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
+                      QStringLiteral("correct horse"));
+    settings.sync();
+    const auto tcp = [port](const std::string& password) {
+        return protocol::Client::connect(protocol::Endpoint{
+            .socket = {}, .host = "127.0.0.1", .port = port, .token = password});
+    };
+
+    auto started = connectLocalEngine(scratch.engine);
+    QVERIFY2(started.has_value(), started ? "" : started.error().message.c_str());
+    // The password travels in a file only its owner can read, not in argv.
+    const auto password_file = scratch.engine.state / "engine.password";
+    QVERIFY(std::filesystem::exists(password_file));
+    QCOMPARE(std::filesystem::status(password_file).permissions() & std::filesystem::perms::all,
+             std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    QVERIFY(!tcp({}).has_value() || !(*tcp({}))->call("catalogue.roots").has_value());
+    auto admitted = tcp("correct horse");
+    QVERIFY(admitted.has_value() && (*admitted)->call("catalogue.roots").has_value());
+    (*admitted)->close();
+    const auto first = enginePid(scratch.engine);
+
+    // No password: open, and the file is gone.
+    settings.remove(QLatin1String(SettingsDialog::engine_password_key));
+    settings.sync();
+    QVERIFY(restartLocalEngine(scratch.engine).has_value());
+    QVERIFY(enginePid(scratch.engine) != first);
+    QVERIFY(!std::filesystem::exists(password_file));
+    auto open = tcp({});
+    QVERIFY(open.has_value() && (*open)->call("catalogue.roots").has_value());
+    (*open)->close();
+
+    // Not shared: nothing listens on the network.
+    settings.setValue(QLatin1String(SettingsDialog::engine_share_key), false);
+    settings.sync();
+    QVERIFY(restartLocalEngine(scratch.engine).has_value());
+    QVERIFY(!tcp({}).has_value());
+    settings.clear();
 }
 
 } // namespace trackknife::bench

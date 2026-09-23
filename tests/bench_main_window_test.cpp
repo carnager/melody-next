@@ -4446,6 +4446,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // Named by what the engine calls itself -- here its machine's name, as
     // it was started without one -- rather than by its socket or address.
     QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());
+    // And the library says so too, not the address.
+    QTRY_COMPARE(window.remote_catalogue_source_->describe(),
+                 QStringLiteral("Library: %1").arg(QSysInfo::machineHostName()));
 
     // A folder is added to the remote's library by its path there: this
     // computer's file dialog would offer this computer's folders.
@@ -4491,6 +4494,10 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
     window.playRow(*remote_tab, 0);
     QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
+    window.refreshUpNext();
+    QVERIFY2(window.up_next_status_->text().startsWith(QSysInfo::machineHostName() +
+                                                        QStringLiteral(" · ")),
+             qPrintable(window.up_next_status_->text()));
     // Adding to the remote tab while it plays: the rows stay as they were
     // added -- tagged, with their own identities -- rather than being traded
     // for the engine's bare paths.
@@ -4553,6 +4560,14 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
     QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("stopped"));
 
+    // Up Next is named by the engine it belongs to.
+    {
+        auto* status = window.up_next_status_;
+        QVERIFY(status != nullptr);
+        window.refreshUpNext();
+        QVERIFY2(status->text().startsWith(QStringLiteral("This computer · ")),
+                 qPrintable(status->text()));
+    }
     // Up Next holds one engine's asks.
     window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, true);
     QCOMPARE(window.playback_.requests.pending().size(), 1U);

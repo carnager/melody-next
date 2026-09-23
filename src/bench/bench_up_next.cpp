@@ -232,8 +232,15 @@ void BenchMainWindow::refreshUpNext() {
         if (playback_.requests.active())
             playing = QString::fromStdString(playback_.requests.active()->source.artist + " — " +
                                              playback_.requests.active()->source.title);
+        // Up Next belongs to the engine that is playing (ADR-0227), so it is
+        // named by it -- "Local" was the MPD era's word for this computer.
+        const auto engine = transport_ != nullptr && transport_ == remote_playback_ &&
+                                    remote_catalogue_source_
+                                ? remote_catalogue_source_->name()
+                                : QStringLiteral("This computer");
         up_next_status_->setText(
-            QStringLiteral("Local · %1 pending%2\nReturn to: %3")
+            QStringLiteral("%1 · %2 waiting%3\nReturn to: %4")
+                .arg(engine)
                 .arg(playback_.requests.pending().size())
                 .arg(playing.isEmpty() ? QString{} : QStringLiteral("\nPlaying: ") + playing)
                 .arg(tab ? QString::fromStdString(tab->document.name)

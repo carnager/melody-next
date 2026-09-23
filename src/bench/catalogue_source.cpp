@@ -227,7 +227,10 @@ QString CatalogueSource::describe() const {
                                .arg(failure_);
     }
     if (connected) {
-        return QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
+        // By the name it gave, as its tab is; by address when it gave none.
+        return announced_.isEmpty()
+                   ? QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_))
+                   : QObject::tr("Library: %1").arg(announced_);
     }
     if (endpoint_) {
         // A refused password is its own case: the engine is there, and saying

@@ -94,6 +94,13 @@ class Catalogue {
     artwork_source(const std::string& album_key,
                    const core::CancellationToken& cancellation = {}) const = 0;
 
+    // Re-reads the named files now, after they were tagged or moved from
+    // elsewhere: the ones in the library are indexed again, the ones gone
+    // are dropped. Returns how many changed.
+    [[nodiscard]] virtual core::Result<std::size_t>
+    refresh(const std::vector<std::string>& raw_paths,
+            const core::CancellationToken& cancellation = {}) = 0;
+
     // A track's cover, as encoded bytes read on the engine's machine --
     // embedded, else a folder image beside it. Only for a track in the
     // library: this reads files on the engine's machine for anyone who can
@@ -162,6 +169,9 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<unsigned char>>
     artwork(const std::string& raw_path,
             const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::size_t>
+    refresh(const std::vector<std::string>& raw_paths,
+            const core::CancellationToken& cancellation = {}) override;
     [[nodiscard]] core::Result<std::vector<persistence::LibraryTrackSnapshot>>
     cached_tracks(const std::vector<std::string>& raw_paths,
                   const core::CancellationToken& cancellation = {}) const override;

@@ -38,6 +38,15 @@ LocalCatalogue::artwork_source(const std::string& album_key,
     return library->artwork_source(album_key, cancellation);
 }
 
+core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>& raw_paths,
+                                                  const core::CancellationToken& cancellation) {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->refresh(raw_paths, cancellation);
+}
+
 core::Result<std::vector<unsigned char>>
 LocalCatalogue::artwork(const std::string& raw_path,
                         const core::CancellationToken& cancellation) const {

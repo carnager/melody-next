@@ -1544,6 +1544,107 @@ struct ScanRequest {
     core::LocalSourceRevision before{};
 };
 
+// The expensive part of indexing one file -- probe, metadata read, tag and
+// technical extraction -- with no database access, so a scan runs it on
+// its worker pool and a refresh of a few files runs it directly.
+PreparedFile prepare_file(ScanRequest request, const core::CancellationToken& cancellation) {
+    PreparedFile prepared;
+    prepared.raw_path = std::move(request.raw_path);
+    prepared.root = std::move(request.root);
+    prepared.revision = std::move(request.revision);
+    prepared.before = request.before;
+    auto probe = formats::probe_local_media(prepared.raw_path, cancellation);
+    if (!probe || !probe->best_audio_stream) {
+        prepared.failed = true;
+    } else {
+        prepared.technicals = technicals_from(*probe);
+        const auto read = metadata::read_local_metadata(prepared.raw_path, cancellation);
+        if (read) {
+            prepared.document = read->document;
+        } else if (read.error().code != core::ErrorCode::unsupported) {
+            prepared.failed = true;
+        }
+        for (const auto& tag : probe->tags) {
+            const auto identity = metadata::resolve_text_property_identity(tag.name);
+            if (!prepared.document.first_effective_value(identity.canonical_name)) {
+                prepared.document.fields.push_back(
+                    {.canonical_name = identity.canonical_name,
+                     .native_name = tag.name,
+                     .values = {tag.value},
+                     .qualifier = {},
+                     .provenance = metadata::FieldProvenance::stream});
+            }
+        }
+        prepared.tags = tags_from(prepared.document, prepared.raw_path);
+    }
+    return prepared;
+}
+
+enum class CommitOutcome : std::uint8_t { committed, failed, root_lost };
+
+// Stores one prepared file in its own transaction, with the scan's guards:
+// the file unchanged since it was read, and its root still scanning under
+// `generation` -- the token the row is marked seen with.
+CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
+                                   const std::string& generation) {
+    if (prepared.failed) {
+        Statement incomplete{
+            db,
+            "UPDATE local_library_tracks SET field_index_complete=0 WHERE raw_path=?"};
+        incomplete.blob(1, prepared.raw_path);
+        incomplete.next();
+        return CommitOutcome::failed;
+    }
+    Transaction transaction{db};
+    // The commit lock serializes this fresh revision check against
+    // metadata and relocation publication's dependent-state update.
+    const auto after = core::observe_local_source_revision(prepared.raw_path);
+    if (!after || prepared.before != *after) {
+        return CommitOutcome::failed;
+    }
+    Statement exists{
+        db, "SELECT 1 FROM local_library_roots WHERE raw_path=? AND scan_token=?"};
+    exists.blob(1, prepared.root);
+    exists.text(2, generation);
+    if (!exists.next()) {
+        return CommitOutcome::root_lost;
+    }
+    const auto identity = rating_identity(prepared.document, prepared.raw_path);
+    Statement upsert{
+        db, "INSERT INTO "
+            "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
+            "release_id,date,disc,track,search_track,search_album,available,seen,"
+            "codec_name,sample_rate,bits,channels,duration_ms,"
+            "rating_hash,album_rating_hash) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(raw_path) DO UPDATE SET "
+            "root=excluded.root,revision=excluded.revision,title=excluded.title,artist="
+            "excluded.artist,album=excluded.album,album_key=excluded.album_key,"
+            "release_id=excluded.release_id,date=excluded.date,disc=excluded.disc,"
+            "track=excluded.track,search_track=excluded.search_track,search_album="
+            "excluded.search_album,available=1,seen=excluded.seen,"
+            "codec_name=excluded.codec_name,sample_rate=excluded.sample_rate,"
+            "bits=excluded.bits,channels=excluded.channels,"
+            "duration_ms=excluded.duration_ms,rating_hash=excluded.rating_hash,"
+            "album_rating_hash=excluded.album_rating_hash"};
+    upsert.blob(1, prepared.raw_path);
+    upsert.blob(2, prepared.root);
+    upsert.text(3, prepared.revision);
+    bind_tags(upsert, 4, prepared.tags, prepared.raw_path);
+    upsert.text(14, generation);
+    upsert.text(15, prepared.technicals.codec);
+    upsert.number(16, prepared.technicals.sample_rate);
+    upsert.number(17, prepared.technicals.bits);
+    upsert.number(18, prepared.technicals.channels);
+    upsert.number(19, prepared.technicals.duration_ms);
+    upsert.text(20, identity.track_hash);
+    upsert.text(21, identity.album_hash);
+    upsert.next();
+    write_field_rows(db, prepared.raw_path, prepared.document);
+    transaction.commit();
+    return CommitOutcome::committed;
+}
+
 class PreparationPipeline {
   public:
     PreparationPipeline(const std::size_t worker_count, core::CancellationToken cancellation)
@@ -1648,35 +1749,7 @@ class PreparationPipeline {
                 request = std::move(requests_.front());
                 requests_.pop_front();
             }
-            PreparedFile prepared;
-            prepared.raw_path = std::move(request.raw_path);
-            prepared.root = std::move(request.root);
-            prepared.revision = std::move(request.revision);
-            prepared.before = request.before;
-            auto probe = formats::probe_local_media(prepared.raw_path, cancellation_);
-            if (!probe || !probe->best_audio_stream) {
-                prepared.failed = true;
-            } else {
-                prepared.technicals = technicals_from(*probe);
-                const auto read = metadata::read_local_metadata(prepared.raw_path, cancellation_);
-                if (read) {
-                    prepared.document = read->document;
-                } else if (read.error().code != core::ErrorCode::unsupported) {
-                    prepared.failed = true;
-                }
-                for (const auto& tag : probe->tags) {
-                    const auto identity = metadata::resolve_text_property_identity(tag.name);
-                    if (!prepared.document.first_effective_value(identity.canonical_name)) {
-                        prepared.document.fields.push_back(
-                            {.canonical_name = identity.canonical_name,
-                             .native_name = tag.name,
-                             .values = {tag.value},
-                             .qualifier = {},
-                             .provenance = metadata::FieldProvenance::stream});
-                    }
-                }
-                prepared.tags = tags_from(prepared.document, prepared.raw_path);
-            }
+            auto prepared = prepare_file(std::move(request), cancellation_);
             {
                 const std::scoped_lock lock{mutex_};
                 results_.push_back(std::move(prepared));
@@ -1705,6 +1778,66 @@ class PreparationPipeline {
 }
 
 } // namespace
+
+core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& raw_paths,
+                                                const core::CancellationToken& cancellation) {
+    return checked([&] {
+        if (raw_paths.size() > filter_match_cap) {
+            fail("Refresh exceeds 100000 files", core::ErrorCode::limit_exceeded);
+        }
+        auto* db = implementation_->db;
+        struct Root {
+            std::string raw_path;
+            std::string scan_token;
+        };
+        std::vector<Root> roots;
+        {
+            Statement select{db, "SELECT raw_path,scan_token FROM local_library_roots"};
+            while (select.next()) {
+                roots.push_back({select.bytes(0), select.bytes(1)});
+            }
+        }
+        std::size_t refreshed = 0U;
+        for (const auto& raw_path : raw_paths) {
+            if (cancellation.is_cancellation_requested()) {
+                fail("Library refresh cancelled", core::ErrorCode::cancelled);
+            }
+            const auto root = std::ranges::find_if(roots, [&raw_path](const Root& candidate) {
+                return raw_path.size() > candidate.raw_path.size() &&
+                       raw_path.starts_with(candidate.raw_path) &&
+                       (candidate.raw_path.back() == '/' ||
+                        raw_path[candidate.raw_path.size()] == '/');
+            });
+            if (root == roots.end()) {
+                continue;
+            }
+            const auto before = core::observe_local_source_revision(raw_path);
+            if (!before) {
+                // Gone -- moved or deleted: its row goes, fields and all.
+                Statement drop{db, "DELETE FROM local_library_tracks WHERE raw_path=?"};
+                drop.blob(1, raw_path);
+                drop.next();
+                refreshed += sqlite3_changes(db) > 0 ? 1U : 0U;
+                continue;
+            }
+            if (!audio_path(std::filesystem::path{raw_path})) {
+                continue;
+            }
+            // Read as a scan reads it, and stored under the root's current
+            // scan token, so the next scan treats it as seen.
+            auto prepared = prepare_file(ScanRequest{.raw_path = raw_path,
+                                                     .root = root->raw_path,
+                                                     .revision = revision_key(*before),
+                                                     .before = *before},
+                                         cancellation);
+            if (commit_prepared_file(db, prepared, root->scan_token) ==
+                CommitOutcome::committed) {
+                ++refreshed;
+            }
+        }
+        return refreshed;
+    });
+}
 
 core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken& cancellation,
                                                    LibraryScanProgress& progress) {
@@ -1749,68 +1882,19 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 if (root_lost) {
                     return;
                 }
-                if (prepared.failed) {
-                    Statement incomplete{
-                        db,
-                        "UPDATE local_library_tracks SET field_index_complete=0 WHERE raw_path=?"};
-                    incomplete.blob(1, prepared.raw_path);
-                    incomplete.next();
+                switch (commit_prepared_file(db, prepared, generation)) {
+                case CommitOutcome::committed:
+                    ++progress.indexed;
+                    break;
+                case CommitOutcome::failed:
                     ++progress.failed;
                     complete = false;
-                    return;
-                }
-                Transaction transaction{db};
-                // The commit lock serializes this fresh revision check against
-                // metadata and relocation publication's dependent-state update.
-                const auto after = core::observe_local_source_revision(prepared.raw_path);
-                if (!after || prepared.before != *after) {
-                    ++progress.failed;
-                    complete = false;
-                    return;
-                }
-                Statement exists{
-                    db, "SELECT 1 FROM local_library_roots WHERE raw_path=? AND scan_token=?"};
-                exists.blob(1, prepared.root);
-                exists.text(2, generation);
-                if (!exists.next()) {
+                    break;
+                case CommitOutcome::root_lost:
                     root_lost = true;
                     complete = false;
-                    return;
+                    break;
                 }
-                const auto identity = rating_identity(prepared.document, prepared.raw_path);
-                Statement upsert{
-                    db, "INSERT INTO "
-                        "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
-                        "release_id,date,disc,track,search_track,search_album,available,seen,"
-                        "codec_name,sample_rate,bits,channels,duration_ms,"
-                        "rating_hash,album_rating_hash) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?) "
-                        "ON CONFLICT(raw_path) DO UPDATE SET "
-                        "root=excluded.root,revision=excluded.revision,title=excluded.title,artist="
-                        "excluded.artist,album=excluded.album,album_key=excluded.album_key,"
-                        "release_id=excluded.release_id,date=excluded.date,disc=excluded.disc,"
-                        "track=excluded.track,search_track=excluded.search_track,search_album="
-                        "excluded.search_album,available=1,seen=excluded.seen,"
-                        "codec_name=excluded.codec_name,sample_rate=excluded.sample_rate,"
-                        "bits=excluded.bits,channels=excluded.channels,"
-                        "duration_ms=excluded.duration_ms,rating_hash=excluded.rating_hash,"
-                        "album_rating_hash=excluded.album_rating_hash"};
-                upsert.blob(1, prepared.raw_path);
-                upsert.blob(2, prepared.root);
-                upsert.text(3, prepared.revision);
-                bind_tags(upsert, 4, prepared.tags, prepared.raw_path);
-                upsert.text(14, generation);
-                upsert.text(15, prepared.technicals.codec);
-                upsert.number(16, prepared.technicals.sample_rate);
-                upsert.number(17, prepared.technicals.bits);
-                upsert.number(18, prepared.technicals.channels);
-                upsert.number(19, prepared.technicals.duration_ms);
-                upsert.text(20, identity.track_hash);
-                upsert.text(21, identity.album_hash);
-                upsert.next();
-                write_field_rows(db, prepared.raw_path, prepared.document);
-                ++progress.indexed;
-                transaction.commit();
             };
             for (; iterator != std::filesystem::recursive_directory_iterator{};
                  iterator.increment(error)) {

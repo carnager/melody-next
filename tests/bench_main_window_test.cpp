@@ -4721,6 +4721,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
                                  -1));
     QCOMPARE(tab->model->rowCount(), remote_rows + 1);
     QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("not in")));
+
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
 
@@ -4764,6 +4765,39 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QTRY_COMPARE(tab->model->rowCount(), before + 1);
     QCOMPARE(tab->model->rows().back().title, std::string{"Fixture Tone"});
     dialog->close();
+
+    // Last, as it retags the fixture everything above searched for.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), music);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), mounted);
+    // Tools on a remote tab work on the file where this computer sees it --
+    // the mount -- and what they change reaches the remote's library without
+    // waiting for a scan.
+    tab->view->selectionModel()->select(tab->model->index(0, 0),
+                                        QItemSelectionModel::ClearAndSelect |
+                                            QItemSelectionModel::Rows);
+    const auto tooled = window.remoteFileWorkRows(tab->view);
+    QVERIFY(tooled && tooled->size() == 1U);
+    const auto here = QFile::encodeName(mounted + QStringLiteral("/art.flac")).toStdString();
+    QCOMPARE(tooled->front().raw_path, here);
+    // Retagged, as the tag editor would write it, and reported as committed.
+    QVERIFY(QFile::remove(art));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), art));
+    operations::MetadataCommitResult committed;
+    committed.source_raw_path = here;
+    committed.published_revision = *core::observe_local_source_revision(here);
+    committed.document.fields.push_back({.canonical_name = "title",
+                                         .native_name = "TITLE",
+                                         .values = {"Metadata Fixture"},
+                                         .qualifier = {},
+                                         .provenance = metadata::FieldProvenance::embedded});
+    window.applyCommittedMetadata(committed);
+    const auto remote_art = QFile::encodeName(art).toStdString();
+    QTRY_VERIFY([&] {
+        const auto indexed = window.remote_catalogue_source_->open()->cached_tracks({remote_art});
+        return indexed && indexed->front().facts.title == "Metadata Fixture";
+    }());
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

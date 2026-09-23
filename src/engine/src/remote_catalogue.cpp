@@ -155,6 +155,25 @@ core::Result<void> RemoteCatalogue::set_rating(const std::string& hash, const bo
     return {};
 }
 
+core::Result<std::size_t> RemoteCatalogue::refresh(const std::vector<std::string>& raw_paths,
+                                                   const core::CancellationToken&) {
+    auto encoded = Json::array();
+    for (const auto& raw_path : raw_paths) {
+        encoded.push_back(protocol::encode_raw_path(raw_path));
+    }
+    // Each part answers with how many it changed, as a one-element list, so
+    // the parts join like any other list.
+    auto joined = call_in_chunks(*client_, "catalogue.refresh", "paths", encoded, "refreshed");
+    if (!joined) {
+        return std::unexpected(std::move(joined.error()));
+    }
+    std::size_t refreshed = 0U;
+    for (const auto& count : *joined) {
+        refreshed += count.is_number_unsigned() ? count.get<std::size_t>() : 0U;
+    }
+    return refreshed;
+}
+
 core::Result<std::vector<unsigned char>>
 RemoteCatalogue::artwork(const std::string& raw_path, const core::CancellationToken&) const {
     auto answer =

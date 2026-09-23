@@ -132,6 +132,13 @@ class LocalLibrary final {
             const core::CancellationToken& cancellation = {}) const;
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
+    // Re-reads the named files now, without a walk: after they were tagged
+    // or moved by someone else. A file inside a library folder is indexed
+    // as a scan would; one that is gone is dropped from the index, as a
+    // moved file's old path is. Paths outside every folder are ignored.
+    // Returns how many were re-read or dropped.
+    core::Result<std::size_t> refresh(const std::vector<std::string>& raw_paths,
+                                      const core::CancellationToken& cancellation = {});
 
   private:
     struct Impl;

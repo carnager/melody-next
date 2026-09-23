@@ -394,6 +394,31 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             return Json{{"facts", std::move(rendered)}};
         });
 
+    // Files tagged or moved from elsewhere, re-read now rather than at the
+    // next scan. The count comes as a one-element list, so a client that
+    // sends a long list in parts joins the answers like any other.
+    dispatcher.on("catalogue.refresh", [&catalogue](const Json& params) -> core::Result<Json> {
+        const auto paths = params.find("paths");
+        if (paths == params.end() || !paths->is_array()) {
+            return std::unexpected(bad_params("paths must be a list", "paths"));
+        }
+        std::vector<std::string> raw_paths;
+        raw_paths.reserve(paths->size());
+        for (const auto& encoded : *paths) {
+            auto decoded = encoded.is_string() ? protocol::decode_raw_path(encoded.get<std::string>())
+                                               : core::Result<std::string>{};
+            if (!encoded.is_string() || !decoded) {
+                return std::unexpected(bad_params("a path is not an encoded path", "paths"));
+            }
+            raw_paths.push_back(std::move(*decoded));
+        }
+        auto refreshed = catalogue.refresh(raw_paths);
+        if (!refreshed) {
+            return std::unexpected(std::move(refreshed.error()));
+        }
+        return Json{{"refreshed", Json::array({*refreshed})}};
+    });
+
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
     dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {

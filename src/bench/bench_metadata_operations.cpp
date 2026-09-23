@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/remote_mount.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/convert_dialog.hpp"
@@ -272,25 +273,158 @@ void BenchMainWindow::showConvertDialog() {
     showConvertForView(tab ? tab->view : nullptr);
 }
 
-bool BenchMainWindow::refuseRemoteFileWork(QTableView* view) {
+std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QTableView* view) {
     const auto* tab =
         view ? static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>()) : nullptr;
-    if (tab == nullptr || !tab->document.remote) {
-        return false;
+    if (tab == nullptr || !tab->document.remote || view->selectionModel() == nullptr) {
+        return std::nullopt;
     }
-    // ADR-0227: these read and write the files, which are on the remote
-    // machine. Until that work runs in the engine next to them, it is refused
-    // rather than attempted on whatever this computer has at those paths.
-    statusBar()->showMessage(
-        QStringLiteral("Tagging, conversion and ReplayGain for the remote engine's files are "
-                       "not available yet: they have to run on that machine"),
-        7'000);
-    return true;
+    // ADR-0227: the tools read and write files here, so a remote tab's are
+    // taken where this computer has them -- through the mount -- or not at
+    // all, rather than whatever is at the remote's paths on this machine.
+    auto selected = view->selectionModel()->selectedRows();
+    std::ranges::sort(selected, {}, &QModelIndex::row);
+    const auto mount = RemoteMount::configured();
+    std::vector<LocalTrackRow> rows;
+    std::size_t unreachable = 0U;
+    for (const auto& index : selected) {
+        const auto row = static_cast<std::size_t>(index.row());
+        if (row >= tab->model->rows().size()) {
+            continue;
+        }
+        auto local = tab->model->rows()[row];
+        const auto remote_path = local.raw_path;
+        auto here = mount.to_local(remote_path);
+        if (!here) {
+            ++unreachable;
+            continue;
+        }
+        local.raw_path = std::move(*here);
+        // What was known of it came from the remote; this computer reads it
+        // afresh before writing.
+        local.source_revision.reset();
+        remote_file_work_[local.raw_path] = remote_path;
+        rows.push_back(std::move(local));
+    }
+    if (unreachable > 0U) {
+        statusBar()->showMessage(
+            QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
+                           "out. Where the remote's music is mounted here is set in Settings → "
+                           "Engine.")
+                .arg(unreachable)
+                .arg(selected.size()),
+            10'000);
+    }
+    return rows;
+}
+
+void BenchMainWindow::followRemoteRetag(const operations::MetadataCommitResult& result) {
+    const auto known = remote_file_work_.find(result.source_raw_path);
+    if (known == remote_file_work_.end()) {
+        return;
+    }
+    // The remote tabs' rows take the new tags by the remote's name for the
+    // file: where the mount differs, the local commit did not reach them.
+    for (auto& tab : list_tabs_) {
+        if (tab->document.remote) {
+            static_cast<void>(tab->model->applyCommittedMetadata(known->second, result.document,
+                                                                 result.published_revision));
+        }
+    }
+    queueRemoteRefresh(known->second);
+}
+
+void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitResult& result) {
+    const auto known = remote_file_work_.find(result.source_raw_path);
+    if (known == remote_file_work_.end()) {
+        return;
+    }
+    const auto remote_source = known->second;
+    remote_file_work_.erase(known);
+    // Where the remote sees the new place. Outside its library it has lost
+    // the file, which re-reading the old path records.
+    const auto remote_target =
+        RemoteMount::configured().to_remote(result.target_raw_path, remoteRoots());
+    if (remote_target) {
+        remote_file_work_[result.target_raw_path] = *remote_target;
+        for (auto& tab : list_tabs_) {
+            if (tab->document.remote) {
+                static_cast<void>(tab->model->applyCommittedRelocation(
+                    remote_source, *remote_target, result.source_revision,
+                    result.target_revision));
+            }
+        }
+        queueRemoteRefresh(*remote_target);
+    }
+    queueRemoteRefresh(remote_source);
+}
+
+void BenchMainWindow::queueRemoteRefresh(std::string remote_path) {
+    pending_remote_refresh_.push_back(std::move(remote_path));
+    if (remote_refresh_timer_ == nullptr) {
+        // One request for a whole apply, however many files it wrote.
+        remote_refresh_timer_ = new QTimer(this);
+        remote_refresh_timer_->setSingleShot(true);
+        remote_refresh_timer_->setInterval(300);
+        connect(remote_refresh_timer_, &QTimer::timeout, this, &BenchMainWindow::sendRemoteRefresh);
+    }
+    remote_refresh_timer_->start();
+}
+
+void BenchMainWindow::sendRemoteRefresh() {
+    if (!remote_catalogue_source_ || pending_remote_refresh_.empty()) {
+        return;
+    }
+    auto paths = std::exchange(pending_remote_refresh_, {});
+    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->open()};
+    auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
+        watcher->deleteLater();
+        if (!watcher->result()) {
+            statusBar()->showMessage(
+                QStringLiteral("%1 has not re-read the changed files: %2")
+                    .arg(remote_catalogue_source_ ? remote_catalogue_source_->name()
+                                                  : QStringLiteral("The remote engine"),
+                         displayText(watcher->result().error().message)),
+                8'000);
+            return;
+        }
+        // Its index has the new tags and paths: what shows them catches up.
+        if (remote_library_ != nullptr) {
+            remote_library_->refreshLibrary();
+        }
+        for (auto& tab : list_tabs_) {
+            if (tab->document.remote) {
+                enqueueUnprobedRows(*tab);
+            }
+        }
+    });
+    watcher->setFuture(QtConcurrent::run(
+        [catalogue, paths = std::move(paths)] { return catalogue->refresh(paths); }));
 }
 
 void BenchMainWindow::showConvertForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
+    if (!model || !view->selectionModel()) {
+        return;
+    }
+    if (auto remote = remoteFileWorkRows(view)) {
+        std::vector<ConvertDialogItem> items;
+        for (auto& row : *remote) {
+            auto label = displayText(row.title.empty() ? row.raw_path : row.title);
+            if (!row.artist.empty()) {
+                label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
+            }
+            items.push_back(ConvertDialogItem{.raw_path = row.raw_path,
+                                              .selection = row.selection,
+                                              .segment = row.segment,
+                                              .source_revision = row.source_revision,
+                                              .metadata = row.metadata,
+                                              .label = std::move(label)});
+        }
+        if (!items.empty()) {
+            openConvertItems(std::move(items));
+        }
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -384,22 +518,27 @@ BenchMainWindow::selectionSourceReader(ListTab& tab, std::vector<QPersistentMode
 
 MetadataPropertiesSourceReader
 BenchMainWindow::selectionSourceReader(LocalListModel* source_model,
-                                       std::vector<QPersistentModelIndex> rows) {
+                                       std::vector<QPersistentModelIndex> rows,
+                                       std::optional<std::vector<LocalTrackRow>> snapshot) {
     const QPointer model{source_model};
     std::shared_ptr<const std::vector<LocalTrackRow>> frozen;
-    if (source_model && source_model->property("definition-owned").toBool()) {
-        auto snapshot = std::make_shared<std::vector<LocalTrackRow>>();
+    if (snapshot) {
+        // Given, not read from the list: a remote tab's rows as this computer
+        // sees their files.
+        frozen = std::make_shared<const std::vector<LocalTrackRow>>(std::move(*snapshot));
+    } else if (source_model && source_model->property("definition-owned").toBool()) {
+        auto rows_now = std::make_shared<std::vector<LocalTrackRow>>();
         for (const auto& index : rows) {
             if (!index.isValid())
                 return {};
-            snapshot->push_back(source_model->rows().at(static_cast<std::size_t>(index.row())));
+            rows_now->push_back(source_model->rows().at(static_cast<std::size_t>(index.row())));
         }
-        frozen = std::move(snapshot);
+        frozen = std::move(rows_now);
     }
     auto selected_rows = std::move(rows);
     return [model, frozen, selected_rows = std::move(selected_rows)](
                const std::size_t selected_index) -> std::optional<MetadataPropertiesSource> {
-        if (selected_index >= selected_rows.size() ||
+        if (selected_index >= (frozen ? frozen->size() : selected_rows.size()) ||
             (!frozen && (model == nullptr || !selected_rows[selected_index].isValid()))) {
             return std::nullopt;
         }
@@ -579,7 +718,18 @@ void BenchMainWindow::showReplayGainDialog() {
 
 void BenchMainWindow::showReplayGainForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
+    if (!model || !view->selectionModel()) {
+        return;
+    }
+    if (auto remote = remoteFileWorkRows(view)) {
+        if (remote->empty()) {
+            return;
+        }
+        const auto count = remote->size();
+        auto* dialog = new ReplayGainDialog(
+            count, selectionSourceReader(model, {}, std::move(*remote)),
+            metadataPlanApplierFactory(), metadataApplyObserver(), this);
+        dialog->show();
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -656,7 +806,14 @@ void BenchMainWindow::showMetadataProperties() {
 
 void BenchMainWindow::showMetadataForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel() || refuseRemoteFileWork(view)) {
+    if (!model || !view->selectionModel()) {
+        return;
+    }
+    if (auto remote = remoteFileWorkRows(view)) {
+        if (!remote->empty()) {
+            const auto count = remote->size();
+            openMetadataProperties(count, selectionSourceReader(model, {}, std::move(*remote)));
+        }
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -1017,6 +1174,7 @@ void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitRes
     // The same commit boundary carries text-only and embedded-artwork writes.
     // Cached misses and previous covers must not survive either path.
     invalidateArtwork(result.source_raw_path);
+    followRemoteRetag(result);
     if (local_library_ != nullptr) {
         local_library_->refreshLibrary();
     }
@@ -1105,6 +1263,7 @@ void BenchMainWindow::applyCommittedLoudnessSidecar(
 
 void BenchMainWindow::applyCommittedRelocation(
     const operations::FilePublicationCommitResult& result) {
+    followRemoteMove(result);
     if (local_library_ != nullptr) {
         local_library_->refreshLibrary();
     }

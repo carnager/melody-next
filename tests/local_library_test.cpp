@@ -136,6 +136,7 @@ class LocalLibraryTest final : public QObject {
     void journalRebuildsKeepTheirEvidence();
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
+    void refreshRereadsNamedFilesWithoutAWalk();
     void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
     void missingFilesOnAnotherDeviceAreRetained();
     void deletionCleanupPagesWithoutChangingWorkingLists();
@@ -252,6 +253,45 @@ void LocalLibraryTest::incrementalScanSearchAndPaging() {
     std::filesystem::create_symlink(std::filesystem::path{first}, root / "alias.flac");
     persistence::LibraryScanProgress symlink;
     QVERIFY(library->scan({}, symlink));
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+}
+
+// Files tagged or moved from elsewhere -- by Trackknife, through a mount of
+// the engine's music -- are re-read by name, without walking the library.
+void LocalLibraryTest::refreshRereadsNamedFilesWithoutAWalk() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto first = fixture(root, "01.flac", "Old title");
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress scanned;
+    QVERIFY(library->scan({}, scanned));
+    QCOMPARE(library->query(tracks("Old"))->entries.size(), 1U);
+
+    // Retagged: the new title, at once.
+    QCOMPARE(fixture(root, "01.flac", "New title"), first);
+    const auto retagged = library->refresh({first});
+    QVERIFY(retagged && *retagged == 1U);
+    QVERIFY(library->query(tracks("Old"))->entries.empty());
+    QCOMPARE(library->query(tracks("New"))->entries.size(), 1U);
+
+    // Moved: the old path goes, the new one comes, and a later scan agrees.
+    const auto moved = (root / "02.flac").string();
+    std::filesystem::rename(first, moved);
+    const auto relocated = library->refresh({first, moved});
+    QVERIFY(relocated && *relocated == 2U);
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+    QCOMPARE(library->paths(tracks())->front(), moved);
+    persistence::LibraryScanProgress again;
+    QVERIFY(library->scan({}, again));
+    QCOMPARE(again.indexed.load(), 0U);
+    QCOMPARE(library->paths(tracks())->size(), 1U);
+
+    // Outside every library folder: not the library's business.
+    const auto elsewhere = fixture(base / "elsewhere", "03.flac", "Stray");
+    const auto ignored = library->refresh({elsewhere});
+    QVERIFY(ignored && *ignored == 0U);
     QCOMPARE(library->paths(tracks())->size(), 1U);
 }
 

@@ -42,6 +42,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
 class QActionGroup;
@@ -192,7 +193,8 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
     [[nodiscard]] MetadataPropertiesSourceReader
-    selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows);
+    selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
+                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
     [[nodiscard]] MetadataWritePlanApplierFactory metadataPlanApplierFactory();
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
@@ -388,7 +390,21 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] ListTab* remoteQueueTab();
     // True, having said why, when `view` lists the remote engine's files:
     // work that reads or writes files cannot run here on those (ADR-0227).
-    [[nodiscard]] bool refuseRemoteFileWork(QTableView* view);
+    // ADR-0227: the selected rows of a remote tab as this computer sees their
+    // files (RemoteMount), for the tools that read and write them here.
+    // Nothing when the view is not a remote tab's; what is not reachable
+    // here is left out and said. Remembers which local path is which remote
+    // one, so what the tools change reaches the remote's index.
+    [[nodiscard]] std::optional<std::vector<LocalTrackRow>> remoteFileWorkRows(QTableView* view);
+    // After a commit on a file a remote tab named: its rows follow, and the
+    // remote engine is asked to re-read it (batched).
+    void followRemoteRetag(const operations::MetadataCommitResult& result);
+    void followRemoteMove(const operations::FilePublicationCommitResult& result);
+    void queueRemoteRefresh(std::string remote_path);
+    void sendRemoteRefresh();
+    std::unordered_map<std::string, std::string> remote_file_work_;
+    std::vector<std::string> pending_remote_refresh_;
+    QTimer* remote_refresh_timer_{nullptr};
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
     [[nodiscard]] bool playingOnEngine() const;

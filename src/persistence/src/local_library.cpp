@@ -624,7 +624,13 @@ translate_predicate(const query::TkqPredicate& predicate) {
                                  "f.raw_path=t.raw_path AND f.canonical_name=?";
     switch (predicate.comparison) {
     case TkqComparison::is:
-        clause.sql = std::string{"("} + exists_head + " AND f.value_lower=?))";
+        // The value is looked up once, through the (name, value) index, and
+        // each track checked against what it found. Written as a correlated
+        // EXISTS like the rest, SQLite used that index from inside the
+        // per-track subquery and walked every match once per track: 1.3 s for
+        // `artist IS "alice in chains"` on 66,000 tracks, against 2 ms this way.
+        clause.sql = "(t.raw_path IN (SELECT f.raw_path FROM local_library_fields f WHERE "
+                     "f.canonical_name=? AND f.value_lower=?))";
         clause.bindings.push_back({FilterBinding::Kind::text, canonical});
         clause.bindings.push_back({FilterBinding::Kind::blob, predicate.normalized});
         break;

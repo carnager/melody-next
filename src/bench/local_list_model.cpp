@@ -958,8 +958,6 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return index.row() == current_row_;
     case ui::track_album_artist_role:
         return display_utf8(row.album_artist.empty() ? row.artist : row.album_artist);
-    case ui::track_priority_role:
-        return {};
     case ui::track_rating_role:
         return QVariant::fromValue(row.rating);
     case ui::track_album_rating_role:

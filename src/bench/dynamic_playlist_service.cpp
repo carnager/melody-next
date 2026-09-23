@@ -3,7 +3,6 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/persistence/local_library.hpp"
-#include "trackknife/query/tkq_melody.hpp"
 #include <QCryptographicHash>
 #include <QFutureWatcher>
 #include <QJsonArray>
@@ -37,21 +36,10 @@ QString quoted(QString value) {
     value.replace(QStringLiteral("\""), QStringLiteral("\"\""));
     return QStringLiteral("\"") + value + QStringLiteral("\"");
 }
-QString text(const mpd::Track& track, const char* field) {
-    const auto value = track.metadata.first(field);
-    return value ? QString::fromUtf8(value->data(), static_cast<qsizetype>(value->size()))
-                 : QString{};
-}
 QString text(const LocalTrackRow& track, const char* field) {
     return QString::fromStdString(std::string_view(field) == "Artist" ? track.artist : track.title);
 }
 const std::string& identity(const LocalTrackRow& track) { return track.raw_path; }
-const std::string& identity(const mpd::Track& track) { return track.uri; }
-DynamicPlaylistService::Tracks emptyTracks(const DynamicPlaylistDefinition& definition) {
-    if (definition.profile == QStringLiteral("local"))
-        return std::vector<LocalTrackRow>{};
-    return std::vector<mpd::Track>{};
-}
 QString historyKey(const DynamicPlaylistDefinition& definition) {
     const auto context =
         QJsonDocument(QJsonArray{definition.profile, definition.id, definition.source,
@@ -184,7 +172,7 @@ void DynamicPlaylistService::refresh(DynamicPlaylistDefinition definition,
                                      const QString& lastfm_key) {
     cancel();
     definition_ = std::move(definition);
-    result_ = emptyTracks(definition_);
+    result_.clear();
     unmatched_ = 0;
     if (!validSource(definition_.source) || definition_.limit < 1 || definition_.limit > 500) {
         fail(QStringLiteral("Invalid playlist source or limit"));
@@ -204,10 +192,6 @@ void DynamicPlaylistService::refresh(DynamicPlaylistDefinition definition,
                 return;
             if (!tracks) {
                 self->fail(QString::fromStdString(tracks.error().message));
-                return;
-            }
-            if (tracks->index() != self->result_.index()) {
-                self->fail(QStringLiteral("Library authority changed; refresh the playlist"));
                 return;
             }
             self->result_ = std::move(*tracks);
@@ -291,7 +275,7 @@ void DynamicPlaylistService::matchRecommendations(DynamicPlaylistDefinition defi
         candidates_.resize(lastfm_candidate_limit);
     candidate_index_ = 0;
     unmatched_ = 0;
-    result_ = emptyTracks(definition_);
+    result_.clear();
     matchNext(generation_);
 }
 void DynamicPlaylistService::matchNext(const quint64 generation) {
@@ -321,29 +305,20 @@ void DynamicPlaylistService::matchNext(const quint64 generation) {
             self->fail(QString::fromStdString(tracks.error().message));
             return;
         }
-        if (tracks->index() != self->result_.index()) {
-            self->fail(QStringLiteral("Library authority changed; refresh the playlist"));
-            return;
-        }
-        std::visit(
-            [&](auto& matches) {
-                using Rows = std::decay_t<decltype(matches)>;
-                auto& result = std::get<Rows>(self->result_);
-                std::erase_if(matches, [&candidate](const auto& t) {
-                    return normalized(text(t, "Artist")) != normalized(candidate.artist) ||
-                           normalized(text(t, "Title")) != normalized(candidate.title);
-                });
-                std::ranges::sort(matches, [](const auto& a, const auto& b) {
-                    return identity(a) < identity(b);
-                });
-                if (matches.empty())
-                    ++self->unmatched_;
-                else if (std::ranges::none_of(result, [&matches](const auto& t) {
-                             return identity(t) == identity(matches.front());
-                         }))
-                    result.push_back(std::move(matches.front()));
-            },
-            *tracks);
+        auto& matches = *tracks;
+        auto& result = self->result_;
+        std::erase_if(matches, [&candidate](const auto& t) {
+            return normalized(text(t, "Artist")) != normalized(candidate.artist) ||
+                   normalized(text(t, "Title")) != normalized(candidate.title);
+        });
+        std::ranges::sort(matches,
+                          [](const auto& a, const auto& b) { return identity(a) < identity(b); });
+        if (matches.empty())
+            ++self->unmatched_;
+        else if (std::ranges::none_of(result, [&matches](const auto& t) {
+                     return identity(t) == identity(matches.front());
+                 }))
+            result.push_back(std::move(matches.front()));
         QTimer::singleShot(0, self, [self, generation] {
             if (self)
                 self->matchNext(generation);
@@ -351,7 +326,7 @@ void DynamicPlaylistService::matchNext(const quint64 generation) {
     });
 }
 void DynamicPlaylistService::complete() {
-    matched_pool_size_ = std::visit([](const auto& rows) { return rows.size(); }, result_);
+    matched_pool_size_ = result_.size();
     if (definition_.source != QStringLiteral("rules")) {
         // Membership varies independently of display ordering. Prefer every unseen
         // match before reusing any track from the last successful refresh.
@@ -360,50 +335,42 @@ void DynamicPlaylistService::complete() {
         const auto previous = settings.value(key).toStringList();
         const QSet<QString> recent(previous.begin(), previous.end());
         QStringList selected_ids;
-        std::visit(
-            [this, &recent, &selected_ids](auto& rows) {
-                std::vector<std::size_t> indices(rows.size());
-                std::iota(indices.begin(), indices.end(), 0U);
-                std::mt19937 generator(std::random_device{}());
-                std::shuffle(indices.begin(), indices.end(), generator);
-                std::stable_partition(indices.begin(), indices.end(), [&](std::size_t index) {
-                    return !recent.contains(identityHash(identity(rows[index])));
-                });
-                indices.resize(
-                    std::min(indices.size(), static_cast<std::size_t>(definition_.limit)));
-                if (definition_.shuffle)
-                    std::shuffle(indices.begin(), indices.end(), generator);
-                else
-                    std::ranges::sort(indices);
-                std::decay_t<decltype(rows)> selected;
-                selected.reserve(indices.size());
-                for (const auto index : indices) {
-                    selected_ids.push_back(identityHash(identity(rows[index])));
-                    selected.push_back(std::move(rows[index]));
-                }
-                rows = std::move(selected);
-            },
-            result_);
+        auto& rows = result_;
+        std::vector<std::size_t> indices(rows.size());
+        std::iota(indices.begin(), indices.end(), 0U);
+        std::mt19937 generator(std::random_device{}());
+        std::shuffle(indices.begin(), indices.end(), generator);
+        std::stable_partition(indices.begin(), indices.end(), [&](std::size_t index) {
+            return !recent.contains(identityHash(identity(rows[index])));
+        });
+        indices.resize(std::min(indices.size(), static_cast<std::size_t>(definition_.limit)));
+        if (definition_.shuffle)
+            std::shuffle(indices.begin(), indices.end(), generator);
+        else
+            std::ranges::sort(indices);
+        Tracks selected;
+        selected.reserve(indices.size());
+        for (const auto index : indices) {
+            selected_ids.push_back(identityHash(identity(rows[index])));
+            selected.push_back(std::move(rows[index]));
+        }
+        rows = std::move(selected);
         // Empty, failed and cancelled refreshes must not forget the last selection.
         if (!selected_ids.isEmpty())
             settings.setValue(key, selected_ids);
         emit finished(result_, unmatched_, {});
         return;
     }
-    const auto prepare = [shuffle = definition_.shuffle, limit = definition_.limit](Tracks tracks) {
-        std::visit(
-            [shuffle, limit](auto& rows) {
-                if (shuffle) {
-                    std::mt19937 generator(std::random_device{}());
-                    std::shuffle(rows.begin(), rows.end(), generator);
-                }
-                if (rows.size() > static_cast<std::size_t>(limit))
-                    rows.resize(static_cast<std::size_t>(limit));
-            },
-            tracks);
-        return tracks;
+    const auto prepare = [shuffle = definition_.shuffle, limit = definition_.limit](Tracks rows) {
+        if (shuffle) {
+            std::mt19937 generator(std::random_device{}());
+            std::shuffle(rows.begin(), rows.end(), generator);
+        }
+        if (rows.size() > static_cast<std::size_t>(limit))
+            rows.resize(static_cast<std::size_t>(limit));
+        return rows;
     };
-    if (std::visit([](const auto& rows) { return rows.size(); }, result_) <= 500U) {
+    if (result_.size() <= 500U) {
         result_ = prepare(std::move(result_));
         emit finished(result_, unmatched_, {});
         return;
@@ -421,11 +388,9 @@ void DynamicPlaylistService::complete() {
     watcher->setFuture(QtConcurrent::run(prepare, std::move(result_)));
 }
 
-DynamicPlaylistService::Result
-queryDynamicLocalLibrary(const std::filesystem::path& database, const query::CompiledTkq& compiled,
-                         const core::CancellationToken& cancellation) {
-    // ADR-0220: ask the core, do not open its database.
-    const engine::LocalCatalogue catalogue{database};
+DynamicPlaylistService::Result queryDynamicLibrary(const engine::Catalogue& catalogue,
+                                                   const query::CompiledTkq& compiled,
+                                                   const core::CancellationToken& cancellation) {
     auto paths = catalogue.filter_paths(compiled, cancellation);
     if (!paths)
         return std::unexpected(paths.error());
@@ -436,6 +401,6 @@ queryDynamicLocalLibrary(const std::filesystem::path& database, const query::Com
     rows.reserve(cached->size());
     for (auto& entry : *cached)
         rows.push_back(cached_library_row(std::move(entry)));
-    return DynamicPlaylistService::Tracks{std::move(rows)};
+    return rows;
 }
 } // namespace trackknife::bench

@@ -2,11 +2,11 @@
 pkgname=trackknife-git
 pkgver=r166.g7d0cb83
 pkgrel=1
-pkgdesc="MPD client and audio workstation: tagging, conversion, ReplayGain (built from HEAD)"
+pkgdesc="Music player and audio workstation: library, playback engine, tagging, conversion, ReplayGain (built from HEAD)"
 arch=(x86_64)
 url="https://github.com/carnager/trackknife"
 license=(GPL-3.0-only)
-depends=(ffmpeg libebur128 libmpdclient libopenmpt libutf8proc pipewire qt6-base sqlite taglib)
+depends=(ffmpeg libebur128 libopenmpt libutf8proc pipewire qt6-base sqlite taglib)
 makedepends=(cmake git ninja nlohmann-json)
 optdepends=('chromaprint: AcoustID fingerprinting in the MusicBrainz Identify dialog')
 provides=(trackknife)
@@ -49,8 +49,6 @@ package() {
     "$pkgdir/usr/lib/systemd/user/tkengine.service"
   install -Dm755 build/release/src/tools/trackknife-titleformat \
     "$pkgdir/usr/bin/trackknife-titleformat"
-  install -Dm755 build/release/src/tools/trackknife-mpd-probe \
-    "$pkgdir/usr/bin/trackknife-mpd-probe"
   install -Dm644 packaging/arch/trackknife.desktop \
     "$pkgdir/usr/share/applications/trackknife.desktop"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

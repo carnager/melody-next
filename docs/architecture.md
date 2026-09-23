@@ -1,5 +1,11 @@
 # Architecture
 
+> **Out of date.** The MPD backend described throughout this document was
+> removed in [ADR-0224](adr/0224-retire-the-mpd-backend.md); catalogue and
+> playback now belong to the engine ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md),
+> [unified engine](unified-engine.md)). This document needs rewriting around
+> the engine rather than patching.
+
 > **Superseded in part by ADR-0220.** This document describes the current,
 > shipping architecture: a single process with two authorities behind one UI.
 > The accepted direction splits it into an engine (`melodyd`) and a client, and

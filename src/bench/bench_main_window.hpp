@@ -72,29 +72,17 @@ class QVBoxLayout;
 namespace trackknife::audio {
 class LocalAuditionService;
 struct LocalAuditionSnapshot;
-class MelodyAgentService;
 } // namespace trackknife::audio
 
 namespace trackknife::ui {
 class QueueTableView;
 class ListPersistenceService;
 class LocalFolderTreeModel;
-class ServerLibraryTreeModel;
-class ServerLibraryTreeView;
 } // namespace trackknife::ui
 
-namespace trackknife::mpd {
-struct Track;
-} // namespace trackknife::mpd
 namespace trackknife::query {
 struct CompiledTkq;
 }
-
-namespace trackknife::quick {
-class MpdProbeController;
-class MpdQueueModel;
-class MpdSearchResultModel;
-} // namespace trackknife::quick
 
 namespace trackknife::bench {
 struct ConvertDialogItem;
@@ -104,7 +92,6 @@ class MusicBrainzFetchService;
 class LocalLibraryPanel;
 class MetadataPropertiesDialog;
 class SearchDialog;
-class MpdLibrarySearchModel;
 class DesktopNotifier;
 class MprisService;
 class TrackListFindBar;
@@ -138,10 +125,6 @@ class BenchMainWindow final : public QMainWindow {
 
     void importM3u8Path(std::string raw_path);
     void openLocalPaths(std::vector<std::string> raw_paths);
-    void loadMpdUrisAsLocalFiles(const QStringList& uris);
-    // Mapped file tools open directly; only explicit Load as local files creates a list.
-    enum class MaterializedDialog : std::uint8_t { none, edit_tags, replay_gain, convert };
-    void materializeMpdSelectionForDialog(const QStringList& uris, MaterializedDialog dialog);
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -161,25 +144,10 @@ class BenchMainWindow final : public QMainWindow {
         bool view_layout_persistence_protected{false};
     };
 
-    // Server-authoritative stored-playlist tab (ADR-0129): keyed by the MPD
-    // playlist name, session-only, refreshed exclusively from server re-reads.
-    struct MpdPlaylistTab {
-        QString name;
-        // A scratch list is a working tab: server-owned like every list, but
-        // presented in the tab strip instead of the Playlists sidebar.
-        bool scratch{false};
-        quick::MpdQueueModel* model{nullptr};
-        QTableView* view{nullptr};
-        ui::TrackViewLayout view_layout;
-    };
-
     void buildPlaylistActions(QMenu* file_menu);
     void importPlaylistDialog();
     void exportPlaylistDialog();
     void buildWorkspace();
-    void buildMpdWorkspace();
-    void buildMpdSearch();
-    void buildMpdStatusControls();
     void buildTransport();
     void buildUpNext();
     void refreshUpNext();
@@ -212,71 +180,16 @@ class BenchMainWindow final : public QMainWindow {
     void persistNow(bool wait);
     void backupWorkspace();
     void scheduleWorkspaceRestore();
-    void showMpdDiagnostics();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
     [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
-    void openMpdConnectionDialog();
-    void autoConnectMpd();
     void refreshActiveContext();
-    [[nodiscard]] bool isMpdContext() const;
-    void previewMpdSearch();
-    void finishMpdSearch(const QString& query, bool success);
-    void updateMpdSearchPresentation();
-    void activateMpdSearchResult(const QModelIndex& index, int action, int insertion_row = -1);
-    void refreshMpdStatusControls();
-    void activateMpdLibraryAction(const QModelIndex& index, int action);
-    void completePendingMpdLibraryAction();
-    void showMpdLibraryContextMenu(const QPoint& position);
-    [[nodiscard]] QVariantList selectedMpdQueueRows() const;
-    [[nodiscard]] QStringList selectedMpdQueueUris() const;
-    void refreshMpdPriorityMenu();
-    // ADR-0179: shared star-rating submenus for both authorities, and the
-    // debounced local rating reload from the content-identity store.
-    void refreshMpdRateMenu();
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
     void addLocalRateMenus(QMenu* menu, QTableView* view);
     void refreshLocalRatings();
 
-    void buildMpdPlaylists();
-    [[nodiscard]] MpdPlaylistTab* mpdPlaylistTabForWidget(QWidget* widget) const;
-    [[nodiscard]] MpdPlaylistTab* currentMpdPlaylistTab() const;
-    [[nodiscard]] MpdPlaylistTab* mpdPlaylistTabNamed(const QString& name) const;
-    MpdPlaylistTab* openMpdPlaylistTab(const QString& name, bool select);
-    void refreshMpdPlaylistTabChrome(MpdPlaylistTab& tab);
-    // Names the server flags as scratch lists, refreshed with the playlist
-    // listing; a tab is a working tab exactly when its list is in here.
-    QSet<QString> mpd_scratch_lists_;
-    QStringList mpd_playlist_names_;
-    void acceptMpdScratchLists(const QStringList& names);
-    void acceptMpdStoredPlaylistNames(const QStringList& names);
-    void acceptMpdStoredPlaylistContents(const QString& name);
-    void renameMpdPlaylistTab(const QString& from, const QString& to);
-    void refreshMpdPlaylistContextMarkers();
-    void persistOpenPlaylistTabs();
-    void refreshMpdPlaylistSidebar();
-    void restoreOpenPlaylistTabs(const QStringList& available);
-    void closeMpdPlaylistTab(const QString& name);
-    void refreshMpdPlaylistsSoon();
-    void showMpdPlaylistSidebarMenu(const QPoint& position);
-    void commitMpdSearchTab();
     void showDynamicPlaylists();
-    QStringList mpdDynamicSnapshots() const;
-    void setMpdDynamicSnapshot(const QString& name, bool enabled);
-    void openMpdSearchTab(const QString& query, std::vector<mpd::Track> tracks, bool select);
-    void addMpdPlaylistActions(QMenu* menu, const QString& name);
-    void promptSaveQueueAsPlaylist();
-    void promptRenameMpdPlaylist(const QString& name);
-    void confirmClearMpdPlaylist(const QString& name);
-    void confirmDeleteMpdPlaylist(const QString& name);
-    [[nodiscard]] QStringList selectedMpdViewUris(QTableView* view) const;
-    void addMappedLocalTrackActions(QMenu* menu, const QStringList& uris,
-                                    const QString& object_prefix);
 
     ListTab* addListTab(persistence::ListDocument document, bool select);
-    [[nodiscard]] QString effectiveMpdMusicRoot() const;
-    [[nodiscard]] std::optional<core::StableId> currentMpdProfileId() const;
-    ListTab* materializeMpdSelectionAsLocalTab(const QStringList& uris);
-    void maybeOpenMaterializedDialog();
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
@@ -318,7 +231,6 @@ class BenchMainWindow final : public QMainWindow {
     QAction* follow_playback_action_{};
     QPointer<QTableView> followed_playback_view_;
     QPersistentModelIndex followed_playback_index_;
-    QString pending_playing_list_;
     void refreshTabActions();
     void refreshListHistoryActions();
     void replayListEdit(bool undo);
@@ -337,9 +249,6 @@ class BenchMainWindow final : public QMainWindow {
     void renameCurrentList();
     void showTabContextMenu(const QPoint& position);
     void showTrackContextMenu(QTableView* view, const QPoint& position);
-    void
-    searchCurrentServerTab(const query::CompiledTkq& compiled,
-                           std::function<void(core::Result<std::vector<mpd::Track>>)> completion);
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();
@@ -347,15 +256,9 @@ class BenchMainWindow final : public QMainWindow {
     void addFolderBookmark(const std::string& raw_path);
     void revealFolderPath(const std::string& raw_path);
     void revealFolderStep(const QPersistentModelIndex& parent_index, const std::string& raw_path);
-    void goToMpdLibraryEntry(const QString& artist, const QString& album);
-    void completeMpdLibraryGoTo(const QString& artist, const QString& album);
     void playCurrentRow();
     void showMetadataProperties();
     void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader);
-    void showMpdMetadataProperties(const QStringList& uris);
-    [[nodiscard]] MetadataPropertiesSourceReader mappedMpdSourceReader(const QStringList& uris);
-    void showMappedFileTool(const QStringList& uris, MaterializedDialog tool);
-    bool mapped_tool_loading_{false};
     void showConvertDialog();
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);
@@ -363,7 +266,6 @@ class BenchMainWindow final : public QMainWindow {
     void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
     [[nodiscard]] OutputProfileStore buildOutputProfileStore();
-    void applyLibraryOrder(bool persist);
     void startMetadataOperationRecovery();
     [[nodiscard]] MusicBrainzLookupService musicBrainzLookupService();
     void finishMetadataOperationJob();
@@ -452,11 +354,6 @@ class BenchMainWindow final : public QMainWindow {
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
-    // Where playback actually is, as opposed to which tab is on screen.
-    // `isMpdContext` answers the second question, and using it for the first
-    // is why jumping to the playing track did nothing while an MPD tab was
-    // visible: it looked for a local track in the MPD queue.
-    [[nodiscard]] bool playbackIsMpd() const;
     // Adopts whatever the engine is already playing. An engine outlives the
     // window, so a window that only learns about playback by having started it
     // shows nothing after a restart while the music is still going.
@@ -487,8 +384,6 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] std::optional<std::pair<int, LocalTrackSource>>
     adjacentPlaybackRow(int direction);
     void refreshTransport();
-    void refreshMpdTransport();
-    void refreshMelodyEndpoint();
     void buildMprisService();
     void publishMprisState();
     void rebuildDeviceMenu();
@@ -501,104 +396,17 @@ class BenchMainWindow final : public QMainWindow {
 
     audio::LocalAuditionService* player_{nullptr};
     std::unique_ptr<audio::LocalAuditionService> player_storage_;
-    std::unique_ptr<audio::LocalAuditionService> melody_player_storage_;
-    std::unique_ptr<audio::MelodyAgentService> melody_endpoint_;
-    QString melody_endpoint_profile_;
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     LocalLibraryPanel* local_library_{nullptr};
+    // Folders and Library, plus -- while the tag editor is open -- a
+    // temporary page hosting its file list (ADR-0183 addendum).
     QTabBar* local_source_tabs_{nullptr};
-    // ADR-0183 addendum: temporary sidebar page hosting the active tag
-    // editor's file list.
-    QTabBar* mpd_source_tabs_{nullptr};
-    QStackedWidget* mpd_source_pages_{nullptr};
     QTreeView* folder_view_{nullptr};
-    quick::MpdProbeController* mpd_controller_{nullptr};
-    ui::ServerLibraryTreeModel* server_library_model_{nullptr};
-    ui::ServerLibraryTreeView* server_library_view_{nullptr};
-    QTableView* mpd_queue_view_{nullptr};
-    QLineEdit* mpd_search_field_{nullptr};
-    QWidget* mpd_library_panel_{nullptr};
-    QStackedWidget* mpd_library_stack_{nullptr};
-    QWidget* mpd_search_surface_{nullptr};
-    quick::MpdSearchResultModel* mpd_search_model_{nullptr};
-    MpdLibrarySearchModel* mpd_search_tree_model_{nullptr};
-    QTreeView* mpd_search_view_{nullptr};
-    QLabel* mpd_search_status_{nullptr};
-    QTimer* mpd_search_timer_{nullptr};
-    ui::TrackViewLayout mpd_view_layout_;
-    QByteArray preserved_mpd_view_layout_;
-    bool mpd_view_layout_persistence_protected_{false};
-    std::vector<persistence::ConnectionProfile> mpd_profiles_;
-    bool mpd_was_connected_{false};
-    enum class MpdLibraryAction : std::uint8_t {
-        append,
-        next,
-        replace,
-        insert,
-        load_local,
-        update_directory,
-        edit_tags,
-        replay_gain,
-        convert,
-    };
-    std::optional<MpdLibraryAction> pending_mpd_library_action_;
-    QPersistentModelIndex pending_mpd_library_index_;
-    int pending_mpd_library_insertion_row_{-1};
-    // A drop or menu action taken on a library branch that has not been
-    // fetched yet; runs when its rows arrive.
-    QPersistentModelIndex pending_library_selection_;
-    std::function<void(std::vector<mpd::Track>)> pending_library_apply_;
-    bool resolveLibraryTracks(const QModelIndexList& indexes,
-                              std::function<void(std::vector<mpd::Track>)> apply);
     QTabWidget* tabs_{nullptr};
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QPointer<SearchDialog> search_dialog_;
     QAction* replaygain_action_{nullptr};
-    std::vector<std::unique_ptr<MpdPlaylistTab>> mpd_playlist_tabs_;
-
-    // ADR-0191: a working tab is a scratch list — a stored playlist on the
-    // server flagged so it shows here rather than beside curated playlists.
-    // Lists live on the server; the client holds no list of its own.
-    [[nodiscard]] int mpdTabInsertionIndex();
-    [[nodiscard]] QString uniqueScratchListName();
-    [[nodiscard]] QString promptScratchListName();
-    void createScratchListTab(const QString& name, const QStringList& uris, bool select = true);
-    void promoteScratchList(const QString& name);
-    void confirmCloseScratchList(const QString& name);
-    // ADR-0190: every MPD-side tab is a destination for a selection of
-    // server tracks — the visible one by default, any other by name.
-    struct MpdTabTarget {
-        enum class Kind { queue, playlist };
-        Kind kind{Kind::queue};
-        QString label;
-        QString playlist;
-    };
-    enum class MpdSendMode { append, insert_next, replace };
-    [[nodiscard]] std::vector<mpd::Track> mpdTracksFromSourceView(QAbstractItemView* source) const;
-    [[nodiscard]] std::vector<MpdTabTarget> mpdTabTargets() const;
-    [[nodiscard]] std::optional<MpdTabTarget> visibleMpdTabTarget() const;
-    void sendTracksToMpdTab(const MpdTabTarget& target, std::vector<mpd::Track> tracks,
-                            MpdSendMode mode);
-    void sendMpdLibraryEntryToTab(const QModelIndex& index, MpdSendMode mode);
-    // `resolve` handles selections whose tracks are not loaded yet, and
-    // returns false when there is nothing to send.
-    using MpdTrackResolver =
-        std::function<bool(const std::function<void(std::vector<mpd::Track>)>&)>;
-    void addSendToTabMenu(QMenu* menu, const std::function<std::vector<mpd::Track>()>& selection,
-                          MpdTrackResolver resolve = {});
-    void addCopyToServerListMenu(QMenu* menu, QTableView* source_view);
-    [[nodiscard]] std::vector<mpd::Track> selectedMpdViewTracks(QTableView* view) const;
-    // Enter pressed before the debounced search finished: commit this
-    // query as soon as its results arrive (ADR-0140).
-    QString pending_mpd_search_commit_;
-    // ADR-0188: the Playlists sidebar is a tree — playlists expand to their
-    // tracks, like albums in the library.
-    QTreeWidget* mpd_playlists_list_{nullptr};
-    [[nodiscard]] QStringList mpdPlaylistNames() const;
-    [[nodiscard]] QStringList curatedPlaylistNames() const;
-    QMenu* mpd_playlists_menu_{nullptr};
-    QTimer* mpd_playlists_refresh_timer_{nullptr};
 
     QAction* previous_action_{nullptr};
     QAction* play_pause_action_{nullptr};
@@ -609,8 +417,6 @@ class BenchMainWindow final : public QMainWindow {
     std::optional<bool> transport_icon_playing_;
     QAction* stop_action_{nullptr};
     QAction* next_action_{nullptr};
-    QAction* connect_mpd_action_{nullptr};
-    QAction* disconnect_mpd_action_{nullptr};
     QAction* duplicate_tab_action_{nullptr};
     QAction* pin_tab_action_{nullptr};
     QAction* save_tab_action_{nullptr};
@@ -619,11 +425,6 @@ class BenchMainWindow final : public QMainWindow {
     QAction* play_selected_action_{nullptr};
     QAction* properties_action_{nullptr};
     QAction* convert_action_{nullptr};
-    QAction* mpd_load_local_action_{nullptr};
-    QAction* mpd_edit_tags_action_{nullptr};
-    QAction* mpd_replaygain_action_{nullptr};
-    QAction* mpd_convert_action_{nullptr};
-    QComboBox* library_order_{nullptr};
     QAction* remove_selected_action_{nullptr};
     QAction* undo_list_action_{nullptr};
     QAction* redo_list_action_{nullptr};
@@ -658,22 +459,6 @@ class BenchMainWindow final : public QMainWindow {
     QLabel* now_playing_{nullptr};
     QLabel* now_playing_context_{nullptr};
     QLabel* selection_status_{nullptr};
-    QWidget* mpd_status_separator_{nullptr};
-    QAction* mpd_repeat_action_{nullptr};
-    QAction* mpd_random_action_{nullptr};
-    QAction* mpd_album_random_action_{nullptr};
-    QToolButton* mpd_album_random_button_{nullptr};
-    QAction* mpd_single_action_{nullptr};
-    QAction* mpd_consume_action_{nullptr};
-    QAction* mpd_crop_selection_action_{nullptr};
-    QToolButton* mpd_repeat_button_{nullptr};
-    QToolButton* mpd_random_button_{nullptr};
-    QToolButton* mpd_single_button_{nullptr};
-    QToolButton* mpd_consume_button_{nullptr};
-    QToolButton* mpd_replaygain_button_{nullptr};
-    QActionGroup* mpd_replaygain_group_{nullptr};
-    QMenu* mpd_priority_menu_{nullptr};
-    QMenu* mpd_rate_menu_{nullptr};
     QSlider* volume_{nullptr};
     QToolButton* device_button_{nullptr};
     QMenu* device_menu_{nullptr};
@@ -683,7 +468,6 @@ class BenchMainWindow final : public QMainWindow {
     QMenu* tab_context_menu_{nullptr};
     QMenu* track_context_menu_{nullptr};
     QMenu* folder_context_menu_{nullptr};
-    QMenu* mpd_library_context_menu_{nullptr};
     QActionGroup* layout_arrangement_group_{nullptr};
     QActionGroup* track_presentation_group_{nullptr};
     QMenu* track_columns_menu_{nullptr};
@@ -698,8 +482,6 @@ class BenchMainWindow final : public QMainWindow {
     QMenu* folder_bookmark_menu_{nullptr};
     QAction* folder_bookmark_add_action_{nullptr};
     QAction* folder_bookmark_remove_action_{nullptr};
-    QAction* mpd_go_to_artist_action_{nullptr};
-    QAction* mpd_go_to_album_action_{nullptr};
     QStackedWidget* source_stack_{nullptr};
     QHash<QString, QWidget*> panel_widgets_;
     bool applying_panel_layout_{false};
@@ -745,9 +527,6 @@ class BenchMainWindow final : public QMainWindow {
     bool discovery_anchored_{false};
     bool discovery_replace_and_play_{false};
     bool discovery_running_{false};
-    MaterializedDialog discovery_dialog_follow_up_{MaterializedDialog::none};
-    MaterializedDialog pending_dialog_kind_{MaterializedDialog::none};
-    QString pending_dialog_document_;
 
     QFutureWatcher<std::vector<ProbeOutcome>> probe_watcher_;
     std::deque<ProbeJob> probe_queue_;
@@ -803,13 +582,10 @@ class BenchMainWindow final : public QMainWindow {
     QToolButton* up_next_button_{nullptr};
     ui::QueueTableView* up_next_view_{nullptr};
     LocalListModel* up_next_local_model_{nullptr};
-    quick::MpdQueueModel* up_next_mpd_model_{nullptr};
     QLabel* up_next_status_{nullptr};
     std::vector<std::uint64_t> up_next_display_ids_;
     bool up_next_restored_{false};
     std::uint64_t up_next_local_revision_{0};
-    unsigned up_next_remote_revision_{0};
-    QString up_next_remote_profile_;
 
     // ADR-0220 Phase 0: the playback service. The mode actions, transport
     // buttons and up-next view above are its views.

@@ -11,7 +11,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/persistence/rating_identity.hpp"
-#include "ui/server_library_tree_view.hpp"
+#include "uicommon/library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_table_view.hpp"
@@ -22,6 +22,7 @@
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFile>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -1109,7 +1110,8 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
         QStringLiteral("local"), QStringLiteral("Local library"),
         [database](query::CompiledTkq compiled, core::CancellationToken cancellation,
                    DynamicPlaylistService::Completion completion) {
-            completion(queryDynamicLocalLibrary(database, compiled, cancellation));
+            const engine::LocalCatalogue catalogue{database};
+            completion(queryDynamicLibrary(catalogue, compiled, cancellation));
         }};
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     CatalogueSource catalogues{database};
@@ -1144,7 +1146,7 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     std::vector<LocalTrackRow> snapshot;
     connect(&dialog, &DynamicPlaylistDialog::snapshotRequested, &dialog,
             [&snapshot](const QString&, const DynamicPlaylistService::Tracks& tracks) {
-                snapshot = std::get<std::vector<LocalTrackRow>>(tracks);
+                snapshot = tracks;
             });
     dialog.findChild<QPushButton*>(QStringLiteral("dynamic-open"))->click();
     QCOMPARE(snapshot.size(), 2U);
@@ -1153,7 +1155,8 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     cancelled.request_cancellation();
     const auto compiled = query::compile_tkq("ALL");
     QVERIFY(compiled);
-    QVERIFY(!queryDynamicLocalLibrary(database, *compiled, cancelled.token()));
+    const engine::LocalCatalogue catalogue{database};
+    QVERIFY(!queryDynamicLibrary(catalogue, *compiled, cancelled.token()));
 }
 
 void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
@@ -1315,7 +1318,7 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
         QTRY_VERIFY(tree->model()->index(0, 0).data().toString().contains(QStringLiteral("Björk")));
         const auto artist = tree->model()->index(0, 0);
-        QCOMPARE(artist.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString(),
+        QCOMPARE(artist.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
                  QStringLiteral("1 album"));
         tree->expand(artist);
         QTRY_VERIFY(tree->model()
@@ -1347,13 +1350,12 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         QVERIFY(local);
         QCOMPARE(local->rows().front().raw_path, path);
         auto* local_view = qobject_cast<QTableView*>(tabs->currentWidget());
-        auto* mpd = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-        QVERIFY(local_view && mpd);
+        QVERIFY(local_view);
         const auto second = fixture(root, "02.flac", "Second song");
         panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
         QTRY_VERIFY(tree->model()
                         ->index(0, 0, tree->model()->index(0, 0))
-                        .data(ui::ServerLibraryTreeDelegate::secondaryTextRole)
+                        .data(ui::LibraryTreeDelegate::secondaryTextRole)
                         .toString()
                         .contains(QStringLiteral("2 tracks")));
         const auto album_index = [&] {
@@ -1366,29 +1368,33 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         const auto first_rect = local_view->visualRect(local->index(0, 0));
         QVERIFY(dropFiles(local_view, mime.get(), first_rect.topLeft() + QPoint{5, 2}));
         search->setText(QStringLiteral("no match"));
-        tabs->setCurrentWidget(mpd);
+        // Another tab becomes current while the drop resolves: the rows still
+        // land in the tab they were dropped on, not whichever is showing.
+        auto* new_list = window.findChild<QAction*>(QStringLiteral("action-new-list"));
+        QVERIFY(new_list);
+        // Naming the list is a modal prompt; answer it rather than let it
+        // block the test waiting for a person.
+        QTimer::singleShot(0, &window, [&window] {
+            auto* prompt = window.findChild<QInputDialog*>();
+            if (prompt != nullptr) {
+                prompt->setTextValue(QStringLiteral("Elsewhere"));
+                prompt->accept();
+            }
+        });
+        new_list->trigger();
+        auto* elsewhere = tabs->currentWidget();
+        QVERIFY(elsewhere != local_view);
         QTRY_COMPARE(local->rowCount(), 3);
         QCOMPARE(local->rows()[0].raw_path, path);
         QCOMPARE(local->rows()[1].raw_path, second);
         QCOMPARE(local->rows()[2].raw_path, path);
-        QCOMPARE(tabs->currentWidget(), mpd);
-        QVERIFY(!dropFiles(mpd, mime.get(), QPoint{20, 20}));
-        QCOMPARE(mpd->model()->rowCount(), 0);
+        QCOMPARE(tabs->currentWidget(), elsewhere);
         tabs->setCurrentWidget(local_view);
         search->setText(QStringLiteral("Test album"));
         QTRY_VERIFY(album_index()
-                        .data(ui::ServerLibraryTreeDelegate::secondaryTextRole)
+                        .data(ui::LibraryTreeDelegate::secondaryTextRole)
                         .toString()
                         .contains(QStringLiteral("2 tracks")));
-        {
-            ui::ServerLibraryTreeDelegate mpd_delegate{
-                static_cast<ui::ServerLibraryTreeView*>(tree), {}};
-            QStyleOptionViewItem option;
-            option.initFrom(tree);
-            const auto heading = tree->model()->index(0, 0);
-            QCOMPARE(tree->itemDelegate()->sizeHint(option, heading).height(),
-                     mpd_delegate.sizeHint(option, heading).height());
-        }
         // Append an overlapping album + track selection once, preserving the
         // multi-selection when opening the menu on an already selected entry.
         QTRY_COMPARE(tree->model()->rowCount(tree->model()->index(1, 0)), 2);
@@ -1473,10 +1479,6 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
             tree->setCurrentIndex(album_index());
             QVERIFY(window.grab().save(QString::fromUtf8(screenshot)));
         }
-        tabs->setCurrentWidget(mpd);
-        QVERIFY(!panel->isVisible());
-        QCOMPARE(window.property("trackknife-active-authority").toString(), QStringLiteral("mpd"));
-        QVERIFY(sources->currentWidget() != panel);
     }
     qputenv("XDG_DATA_HOME", old_data);
 }
@@ -1512,8 +1514,8 @@ void LocalLibraryTest::dragResolvesUnloadedPagesAndRawPaths() {
     QVERIFY(std::ranges::find(paths, raw) != paths.end());
     QVERIFY(!tree->isExpanded(artist));
     QVERIFY(!panel.property("scanning").toBool());
-    // Shared MPD-style branch interaction and inline actions work with local
-    // presentation data, without enabling actions on placeholder rows.
+    // Branch interaction and inline actions work with local presentation
+    // data, without enabling actions on placeholder rows.
     tree->setCurrentIndex(artist);
     QTest::keyClick(tree, Qt::Key_Return);
     QTRY_VERIFY(tree->isExpanded(artist));
@@ -1529,7 +1531,7 @@ void LocalLibraryTest::dragResolvesUnloadedPagesAndRawPaths() {
                 QCOMPARE(action, LocalLibraryAction::append);
                 selected = std::move(entries);
             });
-    const auto action_rect = ui::ServerLibraryTreeView::actionRect(tree->visualRect(album), 0);
+    const auto action_rect = ui::LibraryTreeView::actionRect(tree->visualRect(album), 0);
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, action_rect.center());
     QCOMPARE(selected.size(), 1U);
     QCOMPARE(selected.front().kind, persistence::LibraryEntryKind::album);

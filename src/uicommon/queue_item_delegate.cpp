@@ -185,27 +185,12 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             item.decorationSize = QSize{14, 14};
         }
     }
-    QString priority_label;
-    QRect priority_badge;
-    QFont priority_font = item.font;
     const auto inline_artwork =
         index.column() == artwork_column && side_artwork && isSingleTrackGroup(index, this);
     if (artwork_cell) {
         item.text.clear();
     } else if (index.column() == title_column) {
         item.text = trackLabel(index, this);
-        priority_label = priorityLabel(index);
-        if (!priority_label.isEmpty()) {
-            priority_font.setPointSizeF(std::max(6.5, priority_font.pointSizeF() - 1.5));
-            const QFontMetrics priority_metrics{priority_font};
-            const auto badge_height =
-                std::min(item.rect.height() - 6, priority_metrics.height() + 2);
-            const auto badge_width = priority_metrics.horizontalAdvance(priority_label) + 10;
-            priority_badge =
-                QRect{item.rect.right() - badge_width - 4,
-                      item.rect.center().y() - badge_height / 2, badge_width, badge_height};
-            item.rect.setRight(priority_badge.left() - 4);
-        }
     }
     const auto* widget = item.widget;
     auto* item_style = widget != nullptr ? widget->style() : QApplication::style();
@@ -230,22 +215,6 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 icon.paint(painter, target, Qt::AlignCenter, QIcon::Disabled);
             }
         }
-    }
-    if (!priority_badge.isNull()) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        auto outline =
-            item.palette.color(selected ? QPalette::HighlightedText : QPalette::Highlight);
-        auto fill = outline;
-        fill.setAlpha(40);
-        outline.setAlpha(180);
-        painter->setPen(outline);
-        painter->setBrush(fill);
-        painter->drawRoundedRect(priority_badge, 4, 4);
-        painter->setPen(item.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
-        painter->setFont(priority_font);
-        painter->drawText(priority_badge, Qt::AlignCenter, priority_label);
-        painter->restore();
     }
     if (current_track && !selected && !artwork_cell) {
         auto playback_line = item.palette.color(QPalette::Highlight);
@@ -286,13 +255,6 @@ std::pair<int, int> QueueItemDelegate::albumRowRange(const QModelIndex& index) c
         ++last;
     }
     return {first, last};
-}
-
-QString QueueItemDelegate::priorityLabel(const QModelIndex& index) const {
-    const auto priority = index.data(track_priority_role);
-    bool numeric = false;
-    const auto value = priority.toUInt(&numeric);
-    return numeric && value > 0U ? QString::number(value) : QString{};
 }
 
 bool QueueItemDelegate::beginsAlbum(const QModelIndex& index) const {

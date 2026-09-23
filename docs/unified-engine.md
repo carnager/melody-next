@@ -525,6 +525,11 @@ and the engine survives the UI exiting mid-playback. **Met.**
 
 ### Phase 3 — Network, auth, and client byte access
 
+**The MPD backend is gone** ([ADR-0224](adr/0224-retire-the-mpd-backend.md)).
+With TCP there is one engine to work with, so the MPD client, its queue and
+playlist tabs, server search and the Melody Last.fm authority were removed
+rather than kept as a second implementation of every feature.
+
 **TCP and authentication are built** ([ADR-0223](adr/0223-tcp-transport-and-authentication.md)).
 `tkengine --listen HOST:PORT` accepts TCP connections, each of which must
 present the token from `engine.token` before anything else -- loopback

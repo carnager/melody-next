@@ -2,17 +2,13 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
-#include "ui/server_library_tree_view.hpp"
 
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playlist_transfer_bar.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
 
 #include "bench/local_library_panel.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
-#include "trackknife/audio/melody_agent.hpp"
 
 #include <QCloseEvent>
 #include <QDragEnterEvent>
@@ -107,8 +103,7 @@ bool BenchMainWindow::eventFilter(QObject* watched, QEvent* event) {
          event->type() == QEvent::Drop)) {
         auto* drop = static_cast<QDropEvent*>(event);
         auto* source = qobject_cast<QTableView*>(drop->source());
-        if (!source ||
-            ((qobject_cast<LocalListModel*>(source->model()) != nullptr) == isMpdContext())) {
+        if (!source || qobject_cast<LocalListModel*>(source->model()) == nullptr) {
             drop->ignore();
             return true;
         }
@@ -135,60 +130,6 @@ bool BenchMainWindow::handleTabTrackDrop(QAbstractItemView* source, QDropEvent* 
     // The QTabWidget receives drops in the unused strip beyond the bar's width.
     if (position.y() < 0 || position.y() >= tabs_->tabBar()->height()) {
         drop->ignore();
-        return true;
-    }
-    // ADR-0191: dropping server rows on the tab strip builds a working list
-    // on the server — the drag equivalent of "Send to tab > New list…".
-    const auto from_library =
-        source != nullptr &&
-        source == static_cast<QAbstractItemView*>(static_cast<QTreeView*>(server_library_view_));
-    if (source != nullptr &&
-        tabForDocument(source->property("bench-document-id").toString()) == nullptr &&
-        (from_library || qobject_cast<quick::MpdQueueModel*>(source->model()) != nullptr)) {
-        const auto tab_index = tabs_->tabBar()->tabAt(position);
-        auto* target_view =
-            tab_index < 0 ? nullptr : qobject_cast<QTableView*>(tabs_->widget(tab_index));
-        auto* target_list = target_view == nullptr ? nullptr : mpdPlaylistTabForWidget(target_view);
-        if (tab_index >= 0 && target_list == nullptr) {
-            drop->ignore();
-            return true;
-        }
-        if (drop->type() == QEvent::Drop) {
-            const auto send = [this, target_list](std::vector<mpd::Track> tracks) {
-                QStringList uris;
-                for (const auto& track : tracks) {
-                    uris.push_back(displayText(track.uri));
-                }
-                if (uris.isEmpty()) {
-                    return;
-                }
-                if (target_list != nullptr) {
-                    mpd_controller_->addToStoredPlaylist(target_list->name, uris, -1);
-                    tabs_->setCurrentWidget(target_list->view);
-                    return;
-                }
-                createScratchListTab(uniqueScratchListName(), uris);
-            };
-            // A library branch may still be unfetched — dragging an
-            // unexpanded artist is the ordinary case — so the drop finishes
-            // when its rows land.
-            if (from_library) {
-                if (source->selectionModel() == nullptr ||
-                    !resolveLibraryTracks(source->selectionModel()->selectedRows(0), send)) {
-                    drop->ignore();
-                    return true;
-                }
-            } else {
-                auto tracks = selectedMpdViewTracks(qobject_cast<QTableView*>(source));
-                if (tracks.empty()) {
-                    drop->ignore();
-                    return true;
-                }
-                send(std::move(tracks));
-            }
-        }
-        drop->setDropAction(Qt::CopyAction);
-        drop->accept();
         return true;
     }
     auto* source_table = qobject_cast<QTableView*>(source);

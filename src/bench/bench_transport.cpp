@@ -6,10 +6,8 @@
 #include <QDockWidget>
 
 #include "bench/bench_main_window_helpers.hpp"
-#include "quick/mpd_probe_controller.hpp"
 #include "trackknife/audio/listen_observation.hpp"
 #include "trackknife/audio/local_audition.hpp"
-#include "trackknife/audio/melody_agent.hpp"
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
 
@@ -255,9 +253,7 @@ void BenchMainWindow::refreshMuteButton() {
         return;
     const bool muted = volume_->value() == 0;
     if (!muted && volume_->isEnabled()) {
-        const auto key = isMpdContext() ? QStringLiteral("server/") + mpd_controller_->profileId() +
-                                              "/" + mpd_controller_->activeOutputName()
-                                        : QStringLiteral("local");
+        const auto key = QStringLiteral("local");
         unmuted_volumes_.insert(key, volume_->value());
     }
     mute_button_->setEnabled(volume_->isEnabled());
@@ -281,9 +277,7 @@ void BenchMainWindow::buildTransport() {
     previous_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipBackward),
                                    QStringLiteral("Previous"), this);
     connect(previous_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            mpd_controller_->previous();
-        } else if (playingOnEngine()) {
+        if (playingOnEngine()) {
             engine_playback_->previous();
         } else {
             playAdjacent(-1);
@@ -297,9 +291,7 @@ void BenchMainWindow::buildTransport() {
     stop_action_ =
         new QAction(style()->standardIcon(QStyle::SP_MediaStop), QStringLiteral("Stop"), this);
     connect(stop_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            mpd_controller_->stop();
-        } else if (playingOnEngine()) {
+        if (playingOnEngine()) {
             engine_playback_->stop();
         } else if (player_ != nullptr) {
             ++resume_intent_generation_;
@@ -309,9 +301,7 @@ void BenchMainWindow::buildTransport() {
     next_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipForward),
                                QStringLiteral("Next"), this);
     connect(next_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            mpd_controller_->next();
-        } else if (playingOnEngine()) {
+        if (playingOnEngine()) {
             engine_playback_->next();
         } else {
             playAdjacent(1);
@@ -419,9 +409,7 @@ void BenchMainWindow::buildTransport() {
     connect(mute_button_, &QToolButton::clicked, this, [this] {
         if (!volume_->isEnabled())
             return;
-        const auto key = isMpdContext() ? QStringLiteral("server/") + mpd_controller_->profileId() +
-                                              "/" + mpd_controller_->activeOutputName()
-                                        : QStringLiteral("local");
+        const auto key = QStringLiteral("local");
         if (volume_->value() > 0) {
             unmuted_volumes_.insert(key, volume_->value());
             volume_->setValue(0);
@@ -440,9 +428,7 @@ void BenchMainWindow::buildTransport() {
     connect(volume_, &QSlider::sliderPressed, this, [this] { changing_volume_ = true; });
     connect(volume_, &QSlider::sliderReleased, this, [this] { changing_volume_ = false; });
     connect(volume_, &QSlider::valueChanged, this, [this](const int value) {
-        if (isMpdContext()) {
-            mpd_controller_->setVolume(value);
-        } else if (playingOnEngine()) {
+        if (playingOnEngine()) {
             // The engine owns the output, so the volume lives there: another
             // client watching the same engine sees the same number, and it
             // survives this window closing.
@@ -483,8 +469,6 @@ void BenchMainWindow::buildTransport() {
     playback_menu->addSeparator();
 
     buildLocalPlaybackControls(playback_menu);
-    if (mpd_album_random_action_)
-        playback_menu->addAction(mpd_album_random_action_);
 
     // ADR-0144: quiet, opt-in track-change notifications while the
     // window is in the background.
@@ -632,75 +616,6 @@ void BenchMainWindow::rebuildDeviceMenu() {
     device_menu_->clear();
     device_menu_->setToolTipsVisible(true);
 
-    if (isMpdContext()) {
-        device_group_->setExclusive(false);
-        auto* output_model = mpd_controller_->outputModel();
-        for (int row = 0; row < output_model->rowCount(); ++row) {
-            const auto index = output_model->index(row, 0);
-            const auto id = output_model->data(index, quick::MpdOutputModel::OutputIdRole).toUInt();
-            const auto name = output_model->data(index, quick::MpdOutputModel::NameRole).toString();
-            const auto enabled =
-                output_model->data(index, quick::MpdOutputModel::EnabledRole).toBool();
-            auto label = name;
-            QString endpoint_detail;
-            if (melody_endpoint_ != nullptr && name == displayText(melody_endpoint_->name())) {
-                const auto endpoint = melody_endpoint_->snapshot();
-                const auto mode = endpoint.replay_gain_mode == audio::ReplayGainMode::track
-                                      ? QStringLiteral("Track")
-                                  : endpoint.replay_gain_mode == audio::ReplayGainMode::album
-                                      ? QStringLiteral("Album")
-                                      : QStringLiteral("Off");
-                const auto selected_gain =
-                    endpoint.replay_gain_mode == audio::ReplayGainMode::album &&
-                            endpoint.album_gain_db
-                        ? endpoint.album_gain_db
-                        : endpoint.track_gain_db;
-                endpoint_detail = QStringLiteral("ReplayGain: %1").arg(mode);
-                if (selected_gain) {
-                    endpoint_detail += QStringLiteral(" · %1 dB · %2×")
-                                           .arg(*selected_gain, 0, 'f', 2)
-                                           .arg(endpoint.effective_gain_multiplier, 0, 'f', 3);
-                } else if (endpoint.replay_gain_mode != audio::ReplayGainMode::off) {
-                    const auto received =
-                        endpoint.replay_gain_mode == audio::ReplayGainMode::album &&
-                                endpoint.received_album_gain_db
-                            ? endpoint.received_album_gain_db
-                            : endpoint.received_track_gain_db;
-                    endpoint_detail +=
-                        received ? QStringLiteral(" · queue %1 dB, player missing")
-                                       .arg(*received, 0, 'f', 2)
-                        : std::abs(endpoint.effective_gain_multiplier - 1.0F) > 0.0001F
-                            ? QStringLiteral(" · decoder metadata · %1×")
-                                  .arg(endpoint.effective_gain_multiplier, 0, 'f', 3)
-                            : QStringLiteral(" · no gain metadata");
-                }
-                label += QStringLiteral(" — %1").arg(endpoint_detail);
-            }
-            auto* action = device_menu_->addAction(label);
-            action->setObjectName(QStringLiteral("action-mpd-output-%1").arg(id));
-            action->setCheckable(true);
-            // MPD outputs are independent toggles; clicking one must never
-            // silently disable the others.
-            action->setChecked(enabled);
-            auto detail = output_model->data(index, quick::MpdOutputModel::DetailRole).toString();
-            if (!endpoint_detail.isEmpty()) {
-                detail += QStringLiteral("\n") + endpoint_detail;
-            }
-            action->setToolTip(detail);
-            device_group_->addAction(action);
-            connect(action, &QAction::triggered, this,
-                    [this, id, enabled] { mpd_controller_->setOutputEnabled(id, !enabled); });
-        }
-        if (device_menu_->isEmpty()) {
-            auto* none = device_menu_->addAction(mpd_controller_->connected()
-                                                     ? QStringLiteral("No MPD outputs")
-                                                     : QStringLiteral("Connect to MPD"));
-            none->setEnabled(false);
-        }
-        device_button_->setAccessibleName(QStringLiteral("MPD output"));
-        return;
-    }
-
     device_group_->setExclusive(true);
     device_button_->setAccessibleName(QStringLiteral("Audio output device"));
 
@@ -797,8 +712,6 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
                                           QStringLiteral("media-playlist-shuffle"));
     local_album_random_action_->setIcon(albumShuffleIcon(palette()));
     connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
-        if (isMpdContext())
-            return;
         playback_.modes.album_random = on;
         if (on)
             playback_.modes.random = false;
@@ -807,16 +720,10 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     });
     local_consume_action_ = add_mode(QStringLiteral("consume"), QStringLiteral("Consume"), {});
     connect(local_repeat_action_, &QAction::triggered, this, [this](bool on) {
-        if (isMpdContext()) {
-            return;
-        }
         playback_.modes.repeat = on;
         applyLocalPlaybackModes();
     });
     connect(local_random_action_, &QAction::triggered, this, [this](bool on) {
-        if (isMpdContext()) {
-            return;
-        }
         playback_.modes.random = on;
         if (on)
             playback_.modes.album_random = false;
@@ -824,16 +731,10 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         applyLocalPlaybackModes();
     });
     connect(local_single_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            return;
-        }
         playback_.modes.single = audio::next_mode_state(playback_.modes.single);
         applyLocalPlaybackModes();
     });
     connect(local_consume_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            return;
-        }
         playback_.modes.consume = audio::next_mode_state(playback_.modes.consume);
         applyLocalPlaybackModes();
     });
@@ -862,9 +763,6 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         action->setData(value);
         local_replaygain_group_->addAction(action);
         connect(action, &QAction::triggered, this, [this, value] {
-            if (isMpdContext()) {
-                return;
-            }
             local_replaygain_ = value;
             applyLocalPlaybackModes();
         });
@@ -935,13 +833,10 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     if (local_repeat_action_ == nullptr) {
         return;
     }
-    const auto visible = !isMpdContext();
     for (auto* button : local_mode_buttons_) {
-        button->setVisible(visible);
-        button->defaultAction()->setVisible(visible);
         // An engine can act on these even when this process has no audio
         // device of its own, which is the whole point of it owning playback.
-        button->defaultAction()->setEnabled(visible && (player_ != nullptr || playingOnEngine()));
+        button->defaultAction()->setEnabled(player_ != nullptr || playingOnEngine());
     }
     local_repeat_action_->setChecked(playback_.modes.repeat);
     local_random_action_->setChecked(playback_.modes.random);
@@ -974,11 +869,10 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
           QStringLiteral("C"),
           QStringLiteral("Remove finished or skipped entries from the local list. Files stay on "
                          "disk. Click to cycle Off / On / One-shot."));
-    local_replaygain_button_->setVisible(visible);
-    local_replaygain_button_->setEnabled(visible && player_ != nullptr);
-    local_replaygain_button_->menu()->menuAction()->setVisible(visible);
+    const bool can_play = player_ != nullptr || playingOnEngine();
+    local_replaygain_button_->setEnabled(can_play);
     for (auto* action : local_replaygain_group_->actions()) {
-        action->setEnabled(visible && player_ != nullptr);
+        action->setEnabled(can_play);
         action->setChecked(action->data().toString() == local_replaygain_);
         if (action->isChecked()) {
             local_replaygain_button_->setText(QStringLiteral("RG: %1").arg(action->text()));
@@ -1150,34 +1044,11 @@ void BenchMainWindow::adoptEngineRow(ListTab& tab, const int row, const core::St
     refreshPlaybackCursor(true);
 }
 
-bool BenchMainWindow::playbackIsMpd() const {
-    const auto mpd_playing =
-        mpd_controller_ != nullptr && mpd_controller_->connected() && mpd_controller_->playing();
-    // Whichever authority is actually making sound wins. One engine plays at
-    // a time, so this is a choice between two and never a merge.
-    if (playingOnEngine()) {
-        if (engine_playback_->state().status != QStringLiteral("stopped")) {
-            return false;
-        }
-    } else if (player_ != nullptr &&
-               player_->snapshot().state != audio::LocalAuditionState::empty &&
-               player_->snapshot().state != audio::LocalAuditionState::ended) {
-        return false;
-    }
-    if (mpd_playing) {
-        return true;
-    }
-    // Nothing is playing anywhere. Prefer the local anchors when there are
-    // any, so jumping after a stop still lands on the track that was playing.
-    return playback_.anchors.current.is_nil();
-}
-
 bool BenchMainWindow::playingOnEngine() const {
-    // Ownership, not visibility. This deliberately does not ask which tab is
-    // on screen: looking at the MPD queue does not hand the local player back
-    // its queue, and when it did, the local refresh saw an idle player and
-    // wiped the anchors the engine was playing from -- which is what broke
-    // jumping to the playing track.
+    // Ownership, not visibility: whether an engine is connected, never which
+    // tab is on screen. Deciding it from the visible tab once let the local
+    // refresh see an idle player and wipe the anchors the engine was playing
+    // from.
     return engine_playback_ != nullptr && engine_playback_->active();
 }
 
@@ -1493,10 +1364,6 @@ void BenchMainWindow::playAdjacent(const int direction) {
 }
 
 void BenchMainWindow::togglePlayPause() {
-    if (isMpdContext()) {
-        mpd_controller_->playPause();
-        return;
-    }
     if (playingOnEngine()) {
         // What the engine last reported, rather than a local snapshot: the
         // local player is idle here and would always answer "not playing".
@@ -1524,10 +1391,6 @@ void BenchMainWindow::togglePlayPause() {
 }
 
 void BenchMainWindow::seekToMs(const qint64 position_ms) {
-    if (isMpdContext()) {
-        mpd_controller_->seekTo(position_ms);
-        return;
-    }
     if (playingOnEngine()) {
         engine_playback_->seek(position_ms);
         return;
@@ -1561,7 +1424,7 @@ void BenchMainWindow::buildShortcuts() {
         connect(action, &QAction::triggered, this, [this, prepend] {
             auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
             if (view && view->selectionModel() &&
-                (qobject_cast<LocalListModel*>(view->model()) || isMpdContext()))
+                qobject_cast<LocalListModel*>(view->model()) != nullptr)
                 enqueueUpNext(view, prepend);
         });
     }
@@ -1588,51 +1451,17 @@ void BenchMainWindow::refreshPlaybackCursor(const bool jump) {
         return;
     QTableView* view = nullptr;
     int row = -1;
-    if (playbackIsMpd()) {
-        if (!mpd_controller_->connected())
-            return;
-        if (const auto& requests = mpd_controller_->requestQueue();
-            requests && requests->active_id != 0) {
-            if (jump && up_next_dock_) {
-                up_next_dock_->setVisible(true);
-                up_next_dock_->raise();
-            }
-            return;
+    if (playback_.requests.active()) {
+        if (jump && up_next_dock_) {
+            up_next_dock_->setVisible(true);
+            up_next_dock_->raise();
         }
-        const auto name = mpd_controller_->activeContextName();
-        row = mpd_controller_->songPosition();
-        if (row < 0)
-            return;
-        if (name.isEmpty()) {
-            if (mpd_controller_->queueStashed())
-                return;
-            view = mpd_queue_view_;
-        } else if (auto* tab = mpdPlaylistTabNamed(name)) {
+        return;
+    }
+    if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
+        if (const auto playing_row = resolvePlaybackRow(tab); playing_row >= 0) {
             view = tab->view;
-        } else if (jump) {
-            pending_playing_list_ = name;
-            openMpdPlaylistTab(name, true);
-            return;
-        }
-        // Context positions can temporarily precede the list refresh. Never
-        // select a different track just because it occupies the same row.
-        if (view && (row >= view->model()->rowCount() ||
-                     view->model()->index(row, 0).data(ui::track_source_role).toString() !=
-                         mpd_controller_->nowPlayingUri()))
-            return;
-    } else {
-        if (playback_.requests.active()) {
-            if (jump && up_next_dock_) {
-                up_next_dock_->setVisible(true);
-                up_next_dock_->raise();
-            }
-            return;
-        }
-        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-            if (const auto playing_row = resolvePlaybackRow(tab); playing_row >= 0) {
-                view = tab->view;
-                row = playing_row;
-            }
+            row = playing_row;
         }
     }
     if (!view || !view->model() || row < 0 || row >= view->model()->rowCount())
@@ -1841,23 +1670,11 @@ void BenchMainWindow::refreshTransport() {
         // The workspace's own up-next, resume, listening and gapless belong
         // to the engine now, so none of the 400 lines below run: doing both
         // would double-count listening and fight over the queue.
-        if (isMpdContext()) {
-            // An MPD tab is still the MPD server's, and the header follows the
-            // tab. The local path is skipped either way, because the local
-            // player is idle and its state means nothing here.
-            refreshMpdTransport();
-            refreshPlaybackCursor();
-            return;
-        }
         refreshEngineTransport();
         return;
     }
     refreshPlaybackCursor();
     if (player_ == nullptr) {
-        if (isMpdContext()) {
-            refreshMpdTransport();
-            return;
-        }
         for (auto* action : {previous_action_, play_pause_action_, stop_action_, next_action_}) {
             action->setEnabled(false);
         }
@@ -2112,10 +1929,6 @@ void BenchMainWindow::refreshTransport() {
         }
     }
 
-    if (isMpdContext()) {
-        refreshMpdTransport();
-        return;
-    }
     const bool active = playerActive(snapshot.state);
     const bool source_ready = snapshot.format.has_value() &&
                               snapshot.state != audio::LocalAuditionState::loading &&
@@ -2329,29 +2142,7 @@ void BenchMainWindow::publishMprisState() {
         return;
     }
     MprisPlaybackState state;
-    if (isMpdContext()) {
-        const auto connected = mpd_controller_->connected();
-        const auto command_ready = connected && !mpd_controller_->commandBusy();
-        const auto has_queue = mpd_controller_->queueCount() > 0;
-        state.status = mpd_controller_->playing()  ? QStringLiteral("Playing")
-                       : mpd_controller_->paused() ? QStringLiteral("Paused")
-                                                   : QStringLiteral("Stopped");
-        state.track_key = mpd_controller_->nowPlayingUri();
-        if (!state.track_key.isEmpty()) {
-            state.title = mpd_controller_->nowPlayingTitle();
-            state.artist = mpd_controller_->nowPlayingArtist();
-            state.album = mpd_controller_->nowPlayingAlbum();
-        }
-        const auto duration_ms = mpd_controller_->durationMs();
-        state.length_us = duration_ms > 0 ? duration_ms * 1'000 : -1;
-        state.position_us = mpd_controller_->elapsedMs() * 1'000;
-        state.volume_percent = mpd_controller_->volume();
-        state.can_next = command_ready && has_queue;
-        state.can_previous = command_ready && has_queue;
-        state.can_play = command_ready;
-        state.can_pause = command_ready;
-        state.can_seek = command_ready && duration_ms > 0;
-    } else if (playingOnEngine()) {
+    if (playingOnEngine()) {
         // What the desktop sees is what the engine is doing. Reading the
         // local player here would publish an idle player while music plays,
         // so media keys and the notification would describe nothing.

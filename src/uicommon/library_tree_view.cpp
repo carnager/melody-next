@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "ui/server_library_tree_view.hpp"
+#include "uicommon/library_tree_view.hpp"
 
-#include "ui/server_library_tree_model.hpp"
 #include "uicommon/rating_stars.hpp"
 
 #include <QApplication>
@@ -21,10 +20,7 @@
 
 namespace trackknife::ui {
 
-static_assert(ServerLibraryTreeDelegate::secondaryTextRole ==
-              ServerLibraryTreeModel::SecondaryTextRole);
-
-ServerLibraryTreeView::ServerLibraryTreeView(QWidget* parent) : QTreeView(parent) {
+LibraryTreeView::LibraryTreeView(QWidget* parent) : QTreeView(parent) {
     setMouseTracking(true);
     setUniformRowHeights(false);
     setIconSize(QSize{32, 32});
@@ -32,28 +28,27 @@ ServerLibraryTreeView::ServerLibraryTreeView(QWidget* parent) : QTreeView(parent
     setAnimated(true);
 }
 
-void ServerLibraryTreeView::setActionCallback(
-    std::function<void(const QModelIndex&, int)> callback) {
+void LibraryTreeView::setActionCallback(std::function<void(const QModelIndex&, int)> callback) {
     action_callback_ = std::move(callback);
 }
 
-void ServerLibraryTreeView::setActionLabels(std::array<QString, 3> labels) {
+void LibraryTreeView::setActionLabels(std::array<QString, 3> labels) {
     action_labels_ = std::move(labels);
 }
 
-void ServerLibraryTreeView::setActionsAvailable(std::function<bool(const QModelIndex&)> available) {
+void LibraryTreeView::setActionsAvailable(std::function<bool(const QModelIndex&)> available) {
     actions_available_ = std::move(available);
 }
 
-bool ServerLibraryTreeView::actionsAvailable(const QModelIndex& index) const {
+bool LibraryTreeView::actionsAvailable(const QModelIndex& index) const {
     return index.isValid() && (!actions_available_ || actions_available_(index));
 }
 
-QModelIndex ServerLibraryTreeView::hoverIndex() const { return hover_index_; }
+QModelIndex LibraryTreeView::hoverIndex() const { return hover_index_; }
 
-int ServerLibraryTreeView::hoverAction() const noexcept { return hover_action_; }
+int LibraryTreeView::hoverAction() const noexcept { return hover_action_; }
 
-void ServerLibraryTreeView::completePendingExpansions() {
+void LibraryTreeView::completePendingExpansions() {
     std::erase_if(pending_expansions_, [this](const QPersistentModelIndex& pending) {
         if (!pending.isValid() || model()->rowCount(pending) <= 0) {
             return !pending.isValid();
@@ -63,9 +58,9 @@ void ServerLibraryTreeView::completePendingExpansions() {
     });
 }
 
-void ServerLibraryTreeView::cancelPendingExpansions() { pending_expansions_.clear(); }
+void LibraryTreeView::cancelPendingExpansions() { pending_expansions_.clear(); }
 
-QRect ServerLibraryTreeView::actionRect(const QRect& row_rect, const int action) {
+QRect LibraryTreeView::actionRect(const QRect& row_rect, const int action) {
     constexpr int action_count = 3;
     constexpr int action_extent = 24;
     constexpr int right_margin = 4;
@@ -74,7 +69,7 @@ QRect ServerLibraryTreeView::actionRect(const QRect& row_rect, const int action)
             action_extent};
 }
 
-void ServerLibraryTreeView::mousePressEvent(QMouseEvent* event) {
+void LibraryTreeView::mousePressEvent(QMouseEvent* event) {
     pressed_index_ = QPersistentModelIndex{};
     pressed_action_ = -1;
     pressed_expanded_ = false;
@@ -101,9 +96,9 @@ void ServerLibraryTreeView::mousePressEvent(QMouseEvent* event) {
     QTreeView::mousePressEvent(event);
 }
 
-void ServerLibraryTreeView::mouseDoubleClickEvent(QMouseEvent* event) { event->accept(); }
+void LibraryTreeView::mouseDoubleClickEvent(QMouseEvent* event) { event->accept(); }
 
-void ServerLibraryTreeView::mouseMoveEvent(QMouseEvent* event) {
+void LibraryTreeView::mouseMoveEvent(QMouseEvent* event) {
     const auto old_index = QModelIndex{hover_index_};
     const auto old_action = hover_action_;
     const auto index = indexAt(event->position().toPoint());
@@ -122,7 +117,7 @@ void ServerLibraryTreeView::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
-void ServerLibraryTreeView::mouseReleaseEvent(QMouseEvent* event) {
+void LibraryTreeView::mouseReleaseEvent(QMouseEvent* event) {
     const auto index = indexAt(event->position().toPoint());
     const auto action = actionAt(index, event->position().toPoint());
     const auto same_press = pressed_index_.isValid() && QModelIndex{pressed_index_} == index;
@@ -155,7 +150,7 @@ void ServerLibraryTreeView::mouseReleaseEvent(QMouseEvent* event) {
     }
 }
 
-void ServerLibraryTreeView::keyPressEvent(QKeyEvent* event) {
+void LibraryTreeView::keyPressEvent(QKeyEvent* event) {
     const auto index = currentIndex();
     if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && index.isValid() &&
         model()->hasChildren(index)) {
@@ -166,7 +161,7 @@ void ServerLibraryTreeView::keyPressEvent(QKeyEvent* event) {
     QTreeView::keyPressEvent(event);
 }
 
-void ServerLibraryTreeView::leaveEvent(QEvent* event) {
+void LibraryTreeView::leaveEvent(QEvent* event) {
     const auto old_index = QModelIndex{hover_index_};
     hover_index_ = QPersistentModelIndex{};
     hover_action_ = -1;
@@ -176,7 +171,7 @@ void ServerLibraryTreeView::leaveEvent(QEvent* event) {
     QTreeView::leaveEvent(event);
 }
 
-bool ServerLibraryTreeView::viewportEvent(QEvent* event) {
+bool LibraryTreeView::viewportEvent(QEvent* event) {
     if (event->type() == QEvent::ToolTip) {
         const auto* help = static_cast<QHelpEvent*>(event);
         const auto index = indexAt(help->pos());
@@ -190,12 +185,12 @@ bool ServerLibraryTreeView::viewportEvent(QEvent* event) {
     return QTreeView::viewportEvent(event);
 }
 
-void ServerLibraryTreeView::startDrag(const Qt::DropActions supported_actions) {
+void LibraryTreeView::startDrag(const Qt::DropActions supported_actions) {
     drag_started_ = true;
     QTreeView::startDrag(supported_actions);
 }
 
-void ServerLibraryTreeView::toggleBranch(const QModelIndex& index) {
+void LibraryTreeView::toggleBranch(const QModelIndex& index) {
     const auto pending = QPersistentModelIndex{index};
     const auto found = std::ranges::find(pending_expansions_, pending);
     if (found != pending_expansions_.end()) {
@@ -214,7 +209,7 @@ void ServerLibraryTreeView::toggleBranch(const QModelIndex& index) {
     setExpanded(index, true);
 }
 
-int ServerLibraryTreeView::actionAt(const QModelIndex& index, const QPoint& position) const {
+int LibraryTreeView::actionAt(const QModelIndex& index, const QPoint& position) const {
     if (!actionsAvailable(index)) {
         return -1;
     }
@@ -227,34 +222,22 @@ int ServerLibraryTreeView::actionAt(const QModelIndex& index, const QPoint& posi
     return -1;
 }
 
-ServerLibraryTreeDelegate::ServerLibraryTreeDelegate(
-    ServerLibraryTreeView* view, std::array<QIcon, 3> action_icons,
+LibraryTreeDelegate::LibraryTreeDelegate(
+    LibraryTreeView* view, std::array<QIcon, 3> action_icons,
     std::function<Presentation(const QModelIndex&)> presentation)
     : QStyledItemDelegate(view), view_(view), action_icons_(std::move(action_icons)),
-      presentation_(std::move(presentation)) {
-    if (!presentation_) {
-        presentation_ = [](const QModelIndex& index) {
-            return Presentation{
-                .track = static_cast<ServerLibraryTreeModel::NodeKind>(
-                             index.data(ServerLibraryTreeModel::KindRole).toInt()) ==
-                         ServerLibraryTreeModel::NodeKind::track,
-                .album = index.data(ServerLibraryTreeModel::AlbumRole).toBool(),
-                .root = index.data(ServerLibraryTreeModel::LevelRole).toULongLong() == 0U,
-                .secondary = index.data(ServerLibraryTreeModel::SecondaryTextRole).toString()};
-        };
-    }
-}
+      presentation_(std::move(presentation)) {}
 
-QSize ServerLibraryTreeDelegate::sizeHint(const QStyleOptionViewItem& option,
-                                          const QModelIndex& index) const {
+QSize LibraryTreeDelegate::sizeHint(const QStyleOptionViewItem& option,
+                                    const QModelIndex& index) const {
     auto size = QStyledItemDelegate::sizeHint(option, index);
     const auto row = presentation_(index);
     size.setHeight(row.track ? 34 : row.album ? 42 : row.root ? 46 : 38);
     return size;
 }
 
-void ServerLibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
-                                      const QModelIndex& index) const {
+void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
+                                const QModelIndex& index) const {
     auto item = option;
     initStyleOption(&item, index);
     const auto icon = item.icon;
@@ -287,7 +270,7 @@ void ServerLibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewI
     }
     content.setLeft(icon_rect.right() + (is_track ? 6 : 8));
     if (show_actions) {
-        content.setRight(ServerLibraryTreeView::actionRect(item.rect, 0).left() - 5);
+        content.setRight(LibraryTreeView::actionRect(item.rect, 0).left() - 5);
     }
 
     const auto foreground = item.palette.color(
@@ -326,7 +309,7 @@ void ServerLibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewI
         return;
     }
     for (int action = 0; action < 3; ++action) {
-        const auto action_rect = ServerLibraryTreeView::actionRect(item.rect, action);
+        const auto action_rect = LibraryTreeView::actionRect(item.rect, action);
         const bool hovered = view_->hoverIndex() == index && view_->hoverAction() == action;
         if (hovered) {
             auto fill = item.palette.color(QPalette::Highlight);

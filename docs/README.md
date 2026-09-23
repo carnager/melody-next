@@ -53,9 +53,9 @@ model in older ADRs and in `architecture.md`. Start with
 - [ADR-0209: Melody listening statistics](adr/0209-melody-listening-statistics.md).
 
 The application is built as `trackknife` from `src/bench`. Older development
-documents call this workspace **Trackbench**. It combines the MPD client and
-local file tools in one window; the separate MPD application was retired in
-ADR-0071.
+documents call this workspace **Trackbench**. Its library and playback belong
+to an engine ([unified engine](unified-engine.md)); the MPD client it used to
+contain was retired in [ADR-0224](adr/0224-retire-the-mpd-backend.md).
 
 Recent work includes saved searches, opening search results from cached
 metadata, MusicBrainz matching for untagged albums, and saving tag and cover
@@ -95,8 +95,8 @@ also available in [CMakePresets.json](../CMakePresets.json).
 
 - [Up Next](up-next.md): temporary requests with automatic return to normal
   playback in local and Melody contexts; [design](adr/0196-up-next-request-queue.md).
-- [MPD client](mpd-client.md): connections, the server library, queues, and playlists;
-  [shared server-list interactions](adr/0198-shared-server-list-interactions.md).
+- [MPD client](mpd-client.md) *(retired, ADR-0224)*: the former MPD backend,
+  kept for history.
 - [Workspace](ui-workspace.md): tabs, views, controls, and performance requirements.
 - [Local library](local-library.md): indexing, offline folders, refresh, and searches.
 - [Metadata and files](metadata-and-files.md): tag drafts, artwork, rename/move, and recovery.

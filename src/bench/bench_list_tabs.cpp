@@ -12,11 +12,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/metadata_properties_dialog.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
-#include "trackknife/query/tkq_melody.hpp"
-#include "ui/server_library_tree_view.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
@@ -109,27 +105,6 @@ void BenchMainWindow::initializePersistence() {
                 displayText(preset.binding),
                 QByteArray{preset.header_state.data(),
                            static_cast<qsizetype>(preset.header_state.size())});
-        }
-        mpd_profiles_ = std::move(workspace.profiles);
-        auto stored_mpd_layout = restored_track_view_layouts_.value(QStringLiteral("mpd:queue"));
-        if (stored_mpd_layout.isEmpty()) {
-            stored_mpd_layout = restored_track_view_layouts_.value(QStringLiteral("live-queue"));
-        }
-        if (!stored_mpd_layout.isEmpty()) {
-            QString layout_error;
-            if (auto decoded = ui::deserializeTrackViewLayout(stored_mpd_layout, trackColumnIds(),
-                                                              &layout_error);
-                decoded) {
-                applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, *decoded);
-            } else {
-                mpd_view_layout_persistence_protected_ = true;
-                preserved_mpd_view_layout_ = stored_mpd_layout;
-                statusBar()->showMessage(
-                    QStringLiteral("MPD track layout was not loaded (%1); the saved value was "
-                                   "preserved")
-                        .arg(layout_error),
-                    7'000);
-            }
         }
         // Tab creation emits transport refreshes. Do not let their empty player
         // snapshot overwrite the checkpoint before it has been read.
@@ -240,7 +215,6 @@ void BenchMainWindow::initializePersistence() {
                     });
             refreshActiveContext();
         }
-        autoConnectMpd();
         startMetadataOperationRecovery();
     });
 }
@@ -252,8 +226,8 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
         qCDebug(tkDebug) << "  list" << displayText(document.name) << "kind"
                          << static_cast<int>(document.kind) << "items"
                          << static_cast<int>(document.items.size());
-        // ADR-0191: lists live on the server now, so the client-owned
-        // documents of the previous design are dropped rather than migrated.
+        // Documents of the retired MPD backend name server URIs, not files;
+        // opened as local lists they would be rows that cannot play.
         if (document.kind == persistence::ListKind::mpd) {
             continue;
         }
@@ -272,12 +246,6 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
             true);
     } else {
         tabs_->setCurrentWidget(list_tabs_.front()->view);
-    }
-    const QSettings settings;
-    if (settings.value(QLatin1String(SettingsDialog::startup_context_key)).toString() ==
-            QStringLiteral("mpd") &&
-        mpd_queue_view_ != nullptr) {
-        tabs_->setCurrentWidget(mpd_queue_view_);
     }
     if (!pending_open_paths_.empty()) {
         auto pending = std::exchange(pending_open_paths_, std::vector<std::string>{});
@@ -379,16 +347,7 @@ std::vector<persistence::ListDocument> BenchMainWindow::collectDocuments() {
 
 std::vector<persistence::TrackViewPreset> BenchMainWindow::collectTrackViewLayouts() {
     std::vector<persistence::TrackViewPreset> layouts;
-    layouts.reserve(list_tabs_.size() + 1U);
-    const auto mpd_bytes = mpd_view_layout_persistence_protected_
-                               ? preserved_mpd_view_layout_
-                               : ui::serializeTrackViewLayout(
-                                     captureTrackViewLayout(mpd_queue_view_, mpd_view_layout_));
-    layouts.push_back(persistence::TrackViewPreset{
-        .binding = "mpd:queue",
-        .header_state =
-            std::string{mpd_bytes.constData(), static_cast<std::size_t>(mpd_bytes.size())},
-    });
+    layouts.reserve(list_tabs_.size());
     for (const auto& tab : list_tabs_) {
         const auto id = QString::fromStdString(tab->document.id.to_string());
         const auto bytes = tab->view_layout_persistence_protected
@@ -783,69 +742,8 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
     return raw_tab;
 }
 
-void BenchMainWindow::searchCurrentServerTab(
-    const query::CompiledTkq& compiled,
-    std::function<void(core::Result<std::vector<mpd::Track>>)> completion) {
-    auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
-    auto* model = view ? qobject_cast<quick::MpdQueueModel*>(view->model()) : nullptr;
-    if (!isMpdContext() || !model) {
-        completion(std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
-                                               .message = "No server track tab is active",
-                                               .context = {}}));
-        return;
-    }
-    auto translated = query::translate_tkq_to_melody(
-        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
-        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
-    if (!translated) {
-        completion(std::unexpected(translated.error()));
-        return;
-    }
-    auto snapshot = model->tracksSnapshot();
-    if (snapshot.size() > 100'000U) {
-        completion(std::unexpected(
-            core::Error{.code = core::ErrorCode::limit_exceeded,
-                        .message = "Current-tab searches support at most 100,000 rows",
-                        .context = {}}));
-        return;
-    }
-    const auto* tab = mpdPlaylistTabForWidget(view);
-    const auto list = tab ? utf8Bytes(tab->name) : std::string{};
-    if (!mpd_controller_->supportsCommand(QStringLiteral("melody_list_search"))) {
-        completion(std::unexpected(core::Error{
-            .code = core::ErrorCode::unsupported,
-            .message = "Current-tab server queries require Melody's list-search capability",
-            .context = {}}));
-        return;
-    }
-    mpd_controller_->searchServerExpression(
-        displayText(translated->filter_expression), displayText(translated->sort),
-        [model = QPointer{model}, snapshot = std::move(snapshot),
-         completion = std::move(completion)](core::Result<std::vector<mpd::Track>> result) mutable {
-            if (!result) {
-                completion(std::unexpected(result.error()));
-                return;
-            }
-            if (!model || model->tracksSnapshot() != snapshot) {
-                completion(
-                    std::unexpected(core::Error{.code = core::ErrorCode::conflict,
-                                                .message = "The source list changed; search again",
-                                                .context = {}}));
-                return;
-            }
-            completion(std::move(*result));
-        },
-        list);
-}
-
 void BenchMainWindow::openSearchDialog() {
-    // Search where you are: a server-side tab means the server library.
-    const auto server_context = isMpdContext();
     if (search_dialog_ != nullptr) {
-        if (server_context) {
-            search_dialog_->preferServerScope();
-        }
         search_dialog_->show();
         search_dialog_->raise();
         search_dialog_->activateWindow();
@@ -869,114 +767,6 @@ void BenchMainWindow::openSearchDialog() {
             for (const auto& tab : list_tabs_) {
                 tab->model->applyTechnicals(raw_path, technicals);
             }
-        },
-        SearchDialog::ServerScope{
-            .available = [this] { return mpd_controller_->supportsServerQueries(); },
-            .run =
-                [this](const query::CompiledTkq& compiled,
-                       std::function<void(QStringList, int, QString)> completion) {
-                    auto translated = query::translate_tkq_to_melody(
-                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
-                    if (!translated) {
-                        completion({}, 0, displayText(translated.error().message));
-                        return;
-                    }
-                    mpd_controller_->searchServerExpression(
-                        QString::fromStdString(translated->filter_expression),
-                        QString::fromStdString(translated->sort),
-                        [completion =
-                             std::move(completion)](core::Result<std::vector<mpd::Track>> result) {
-                            if (!result) {
-                                completion({}, 0, displayText(result.error().message));
-                                return;
-                            }
-                            QStringList labels;
-                            // The dialog decides what it can show; handing it
-                            // 200 of several thousand hits was its own limit.
-                            const auto shown = std::min<std::size_t>(result->size(), 20'000U);
-                            for (std::size_t index = 0U; index < shown; ++index) {
-                                const auto& track = (*result)[index];
-                                const auto artist = track.metadata.first("Artist");
-                                const auto title = track.metadata.first("Title");
-                                auto label =
-                                    title ? QString::fromUtf8(title->data(),
-                                                              static_cast<qsizetype>(title->size()))
-                                          : QString::fromStdString(track.uri);
-                                if (artist && !artist->empty()) {
-                                    label =
-                                        QString::fromUtf8(artist->data(),
-                                                          static_cast<qsizetype>(artist->size())) +
-                                        QStringLiteral(" — ") + label;
-                                }
-                                labels.push_back(std::move(label));
-                            }
-                            completion(labels, static_cast<int>(result->size()), {});
-                        });
-                },
-            .open =
-                [this](const query::CompiledTkq& compiled, const QString& query_text) {
-                    auto translated = query::translate_tkq_to_melody(
-                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
-                    if (!translated) {
-                        return;
-                    }
-                    mpd_controller_->searchServerExpression(
-                        QString::fromStdString(translated->filter_expression),
-                        QString::fromStdString(translated->sort),
-                        [this, query_text](core::Result<std::vector<mpd::Track>> result) {
-                            if (!result || result->empty()) {
-                                statusBar()->showMessage(
-                                    QStringLiteral("The server search returned nothing to open"),
-                                    5'000);
-                                return;
-                            }
-                            openMpdSearchTab(QStringLiteral("tkq: %1").arg(query_text),
-                                             std::move(*result), true);
-                        });
-                },
-            .current_available = [this] { return isMpdContext(); },
-            .run_current =
-                [this](const query::CompiledTkq& compiled,
-                       std::function<void(QStringList, int, QString)> completion) {
-                    searchCurrentServerTab(compiled, [completion =
-                                                          std::move(completion)](auto result) {
-                        if (!result) {
-                            completion({}, 0, displayText(result.error().message));
-                            return;
-                        }
-                        QStringList labels;
-                        for (const auto& track : *result)
-                            labels.push_back(displayText(
-                                std::string{track.metadata.first("Title").value_or(track.uri)}));
-                        completion(labels, static_cast<int>(result->size()), {});
-                    });
-                },
-            .open_current =
-                [this](const query::CompiledTkq& compiled, const QString& text) {
-                    searchCurrentServerTab(compiled, [this, text](auto result) {
-                        if (!result) {
-                            statusBar()->showMessage(displayText(result.error().message), 8000);
-                            return;
-                        }
-                        openMpdSearchTab(QStringLiteral("tkq: %1").arg(text), std::move(*result),
-                                         true);
-                    });
-                },
-            .unsupported_reason =
-                [this](const query::CompiledTkq& compiled, bool current) {
-                    if (current &&
-                        !mpd_controller_->supportsCommand(QStringLiteral("melody_list_search")))
-                        return QStringLiteral("This server does not support current-list search");
-                    const auto translated = query::translate_tkq_to_melody(
-                        compiled, mpd_controller_->supportsCommand(QStringLiteral("filtergrammar")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_filters")),
-                        mpd_controller_->supportsCommand(QStringLiteral("melody_history_sort")));
-                    return translated ? QString{} : displayText(translated.error().message);
-                },
         },
         this);
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
@@ -1024,9 +814,6 @@ void BenchMainWindow::openSearchDialog() {
                     playRow(*destination, 0);
                 }
             });
-    if (server_context) {
-        search_dialog_->preferServerScope();
-    }
     search_dialog_->show();
 }
 
@@ -1038,59 +825,23 @@ BenchMainWindow::ListTab* BenchMainWindow::currentListTab() {
     return static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
 }
 
-bool BenchMainWindow::isMpdContext() const {
-    if (tabs_ == nullptr) {
-        return false;
-    }
-    auto* current = tabs_->currentWidget();
-    return (mpd_queue_view_ != nullptr && current == mpd_queue_view_) ||
-           mpdPlaylistTabForWidget(current) != nullptr;
-}
-
 void BenchMainWindow::refreshActiveContext() {
-    const auto mpd = isMpdContext();
-    const auto authority = mpd ? QStringLiteral("mpd") : QStringLiteral("local");
-    const auto context_changed = property("trackknife-active-authority").toString() != authority;
-    setProperty("trackknife-active-authority", authority);
     if (source_stack_ != nullptr) {
-        auto* source = mpd ? mpd_library_panel_
-                       : local_source_tabs_ != nullptr && local_source_tabs_->currentIndex() == 1 &&
+        auto* source = local_source_tabs_ != nullptr && local_source_tabs_->currentIndex() == 1 &&
                                local_library_ != nullptr
                            ? static_cast<QWidget*>(local_library_)
                            : static_cast<QWidget*>(folder_view_);
-        if (source != nullptr) {
-            source_stack_->setCurrentWidget(source);
-        }
-    }
-    updateMpdSearchPresentation();
-    if (local_source_tabs_ != nullptr) {
-        local_source_tabs_->setVisible(!mpd);
-    }
-    if (mpd_source_tabs_ != nullptr) {
-        mpd_source_tabs_->setVisible(mpd);
-    }
-    if (library_order_ != nullptr) {
-        library_order_->setVisible(mpd);
+        source_stack_->setCurrentWidget(source);
     }
     if (folder_bookmarks_ != nullptr) {
         const auto folders_visible =
-            !mpd && (local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0);
+            local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0;
         folder_bookmarks_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
         folder_bookmarks_heading_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
     }
-    if (connect_mpd_action_ != nullptr) {
-        connect_mpd_action_->setEnabled(!mpd_controller_->busy());
-    }
-    if (disconnect_mpd_action_ != nullptr) {
-        disconnect_mpd_action_->setEnabled(mpd_controller_->connected());
-    }
-    if (buffer_menu_ != nullptr) {
-        buffer_menu_->setEnabled(!mpd);
-    }
-    if (context_changed && device_menu_ != nullptr) {
+    if (device_menu_ != nullptr && device_menu_->isEmpty()) {
         rebuildDeviceMenu();
     }
-    refreshMpdStatusControls();
     refreshLocalPlaybackControls();
     if (seek_ != nullptr) {
         refreshTransport();
@@ -1293,11 +1044,7 @@ void BenchMainWindow::refreshTabActions() {
     if (list_edit_bar_)
         list_edit_bar_->setView(available ? tab->view : nullptr);
     if (list_find_bar_ != nullptr) {
-        auto* playlist_tab = currentMpdPlaylistTab();
-        auto* find_view = available        ? tab->view
-                          : playlist_tab   ? playlist_tab->view
-                          : isMpdContext() ? mpd_queue_view_
-                                           : nullptr;
+        auto* find_view = available ? tab->view : nullptr;
         list_find_bar_->setView(find_view);
         find_list_action_->setEnabled(find_view != nullptr);
         find_next_action_->setEnabled(find_view != nullptr);
@@ -1316,8 +1063,7 @@ void BenchMainWindow::refreshTabActions() {
     if (close_tab_action_ != nullptr) {
         const auto properties_tab =
             qobject_cast<MetadataPropertiesDialog*>(tabs_->currentWidget()) != nullptr;
-        close_tab_action_->setEnabled(properties_tab || currentMpdPlaylistTab() != nullptr ||
-                                      (available && !tab->document.pinned));
+        close_tab_action_->setEnabled(properties_tab || (available && !tab->document.pinned));
     }
 }
 
@@ -1372,21 +1118,6 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     auto* view = qobject_cast<QTableView*>(tabs_->widget(index));
     if (view == nullptr) {
-        return;
-    }
-    if (view == mpd_queue_view_) {
-        statusBar()->showMessage(QStringLiteral("MPD Queue is a permanent authority tab"), 3'000);
-        return;
-    }
-    if (auto* playlist_tab = mpdPlaylistTabForWidget(view)) {
-        // ADR-0191: closing a working list is the gesture that discards it —
-        // it exists on the server only as long as its tab does. Curated
-        // playlists just lose their tab.
-        if (playlist_tab->scratch) {
-            confirmCloseScratchList(playlist_tab->name);
-            return;
-        }
-        closeMpdPlaylistTab(playlist_tab->name);
         return;
     }
     auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
@@ -1541,17 +1272,6 @@ void BenchMainWindow::showTabContextMenu(const QPoint& position) {
     }
     tabs_->setCurrentIndex(index);
     refreshTabActions();
-    if (auto* playlist_tab = mpdPlaylistTabForWidget(tabs_->widget(index))) {
-        auto* menu = new QMenu(this);
-        menu->setAttribute(Qt::WA_DeleteOnClose);
-        addMpdPlaylistActions(menu, playlist_tab->name);
-        menu->addSeparator();
-        const auto name = playlist_tab->name;
-        auto* close = menu->addAction(QStringLiteral("Close tab"));
-        connect(close, &QAction::triggered, this, [this, name] { closeMpdPlaylistTab(name); });
-        menu->popup(tabs_->tabBar()->mapToGlobal(position));
-        return;
-    }
     tab_context_menu_->popup(tabs_->tabBar()->mapToGlobal(position));
 }
 
@@ -1584,102 +1304,12 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     }
     refreshSelectionStatus();
 
-    const auto* playlist_tab = mpdPlaylistTabForWidget(view);
-    const auto server_list = view == mpd_queue_view_ || playlist_tab != nullptr;
     const auto has_selection = !view->selectionModel()->selectedRows().isEmpty();
-    const auto command_ready =
-        !server_list || (mpd_controller_->connected() && !mpd_controller_->commandBusy());
     track_context_menu_->clear();
-    play_selected_action_->setEnabled(view->currentIndex().isValid() && command_ready);
-    remove_selected_action_->setEnabled(has_selection && command_ready);
+    play_selected_action_->setEnabled(view->currentIndex().isValid());
+    remove_selected_action_->setEnabled(has_selection);
     track_context_menu_->addAction(play_selected_action_);
     addUpNextActions(track_context_menu_, view);
-    if (server_list) {
-        refreshListHistoryActions();
-        if (shuffle_albums_action_->isVisible())
-            track_context_menu_->addAction(shuffle_albums_action_);
-        const auto has_uris = !selectedMpdViewUris(view).isEmpty();
-        mpd_crop_selection_action_->setEnabled(command_ready && has_selection);
-        track_context_menu_->addSeparator();
-        const auto current = view->currentIndex();
-        const auto go_to_artist = current.isValid()
-                                      ? current.siblingAtColumn(0)
-                                            .data(static_cast<int>(ui::track_album_artist_role))
-                                            .toString()
-                                      : QString{};
-        const auto go_to_album =
-            current.isValid()
-                ? current.siblingAtColumn(ui::track_album_column).data(Qt::DisplayRole).toString()
-                : QString{};
-        mpd_load_local_action_->setEnabled(has_uris);
-        track_context_menu_->addAction(mpd_load_local_action_);
-        const auto mapped_ready = has_uris && !effectiveMpdMusicRoot().isEmpty();
-        mpd_edit_tags_action_->setEnabled(mapped_ready);
-        mpd_replaygain_action_->setEnabled(mapped_ready);
-        mpd_convert_action_->setEnabled(mapped_ready);
-        auto* tools = track_context_menu_->addMenu(tr("Tools"));
-        tools->addAction(mpd_edit_tags_action_);
-        tools->addAction(mpd_replaygain_action_);
-        tools->addAction(mpd_convert_action_);
-        mpd_go_to_artist_action_->setEnabled(!go_to_artist.isEmpty());
-        mpd_go_to_album_action_->setEnabled(!go_to_artist.isEmpty() && !go_to_album.isEmpty());
-        track_context_menu_->addAction(mpd_go_to_artist_action_);
-        track_context_menu_->addAction(mpd_go_to_album_action_);
-        track_context_menu_->addSeparator();
-        track_context_menu_->addAction(remove_selected_action_);
-        track_context_menu_->addAction(mpd_crop_selection_action_);
-        refreshMpdPriorityMenu();
-        track_context_menu_->addMenu(mpd_priority_menu_);
-        refreshMpdRateMenu();
-        track_context_menu_->addMenu(mpd_rate_menu_);
-        if (mpd_controller_->supportsAlbumRatings()) {
-            const auto* queue_model = qobject_cast<quick::MpdQueueModel*>(view->model());
-            const auto* track =
-                queue_model != nullptr ? queue_model->trackAt(view->currentIndex().row()) : nullptr;
-            if (track != nullptr) {
-                const std::string album_artist{
-                    track->metadata.first("AlbumArtist")
-                        .value_or(track->metadata.first("Artist").value_or(std::string_view{}))};
-                const std::string album{
-                    track->metadata.first("Album").value_or(std::string_view{})};
-                const std::string date{track->metadata.first("Date").value_or(std::string_view{})};
-                auto* album_rate_menu = track_context_menu_->addMenu(QStringLiteral("Rate album"));
-                album_rate_menu->setObjectName(QStringLiteral("bench-mpd-album-rate-menu"));
-                album_rate_menu->setEnabled(command_ready && !album_artist.empty() &&
-                                            !album.empty());
-                const auto current_album_rating = mpd_controller_->melodyStoredAlbumRating(
-                    quick::MpdQueueModel::albumGroupKey(*track));
-                for (unsigned rating = 0U; rating <= 10U; rating += 2U) {
-                    QAction* choice = nullptr;
-                    if (rating == 0U) {
-                        choice = album_rate_menu->addAction(ui::ratingMenuLabel(rating));
-                        choice->setCheckable(true);
-                    } else {
-                        auto* stars = new ui::RatingMenuAction(rating, album_rate_menu);
-                        album_rate_menu->addAction(stars);
-                        choice = stars;
-                    }
-                    choice->setObjectName(QStringLiteral("action-mpd-album-rate-%1").arg(rating));
-                    choice->setChecked(current_album_rating == rating);
-                    connect(choice, &QAction::triggered, this,
-                            [this, album_artist = QString::fromStdString(album_artist),
-                             album = QString::fromStdString(album),
-                             date = QString::fromStdString(date), rating,
-                             list_name = playlist_tab ? playlist_tab->name : QString{}] {
-                                mpd_controller_->setMelodyAlbumRating(
-                                    album_artist, album, date, static_cast<int>(rating), list_name);
-                            });
-                }
-            }
-        }
-        track_context_menu_->addSeparator();
-        addSendToTabMenu(track_context_menu_, [this, view] { return selectedMpdViewTracks(view); });
-        addCopyToServerListMenu(track_context_menu_, view);
-        track_context_menu_->addSeparator();
-        addLastFmActions(track_context_menu_, view);
-        track_context_menu_->popup(view->viewport()->mapToGlobal(position));
-        return;
-    }
 
     track_context_menu_->addSeparator();
     auto* tools = track_context_menu_->addMenu(tr("Tools"));
@@ -1935,13 +1565,6 @@ void BenchMainWindow::showFolderContextMenu(const QPoint& position) {
 }
 
 void BenchMainWindow::playCurrentRow() {
-    if (isMpdContext()) {
-        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
-        if (view && view->currentIndex().isValid())
-            mpd_controller_->playListContext(view->property("bench-mpd-playlist-name").toString(),
-                                             view->currentIndex().row());
-        return;
-    }
     auto* tab = currentListTab();
     if (tab != nullptr && tab->view->currentIndex().isValid()) {
         playRow(*tab, tab->view->currentIndex().row());
@@ -1954,19 +1577,7 @@ void BenchMainWindow::refreshListHistoryActions() {
     const auto* tab = currentListTab();
     const auto* model = tab == nullptr ? nullptr : tab->model;
     if (shuffle_albums_action_) {
-        const bool supported =
-            !isMpdContext() ||
-            ((tabs_->currentWidget() == mpd_queue_view_ ||
-              mpdPlaylistTabForWidget(tabs_->currentWidget()) != nullptr) &&
-             mpd_controller_->supportsCommand(QStringLiteral("melody_list_shuffle_albums"))) ||
-            (tabs_->currentWidget() == mpd_queue_view_ &&
-             mpd_controller_->activeContextName().isEmpty() &&
-             mpd_controller_->supportsCommand(QStringLiteral("melody_shuffle_albums")));
-        shuffle_albums_action_->setVisible(supported);
-        shuffle_albums_action_->setEnabled(
-            supported &&
-            (isMpdContext() ? mpd_controller_->connected() && !mpd_controller_->commandBusy()
-                            : model != nullptr && model->rowCount() > 1));
+        shuffle_albums_action_->setEnabled(model != nullptr && model->rowCount() > 1);
     }
     if (sort_list_menu_) {
         const auto editable = model != nullptr && model->rowCount() > 1;
@@ -1990,7 +1601,7 @@ void BenchMainWindow::refreshListHistoryActions() {
 
 void BenchMainWindow::replayListEdit(const bool undo) {
     auto* tab = currentListTab();
-    if (tab == nullptr || isMpdContext())
+    if (tab == nullptr)
         return;
     if (replayCrossTabMove(undo) || (undo ? tab->model->undo() : tab->model->redo())) {
         markTabDirty(*tab);
@@ -2002,17 +1613,6 @@ void BenchMainWindow::replayListEdit(const bool undo) {
 }
 
 void BenchMainWindow::removeSelectedRows() {
-    if (isMpdContext()) {
-        auto* view = qobject_cast<QTableView*>(tabs_->currentWidget());
-        if (!view || !view->selectionModel())
-            return;
-        QVariantList rows;
-        for (const auto& index : view->selectionModel()->selectedRows())
-            rows.push_back(index.row());
-        mpd_controller_->removeListItems(view->property("bench-mpd-playlist-name").toString(),
-                                         rows);
-        return;
-    }
     auto* tab = currentListTab();
     if (tab == nullptr || tab->view->selectionModel() == nullptr) {
         return;

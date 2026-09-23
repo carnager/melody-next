@@ -25,16 +25,14 @@ inline constexpr auto track_side_artwork_property = "trackknife-track-side-artwo
 
 // Shared role and column contract for the album-grouped track presentation
 // (QueueItemDelegate/QueueTableView). Any model rendered by the shared
-// delegate provides these roles and the seven-column layout below; the MPD
-// queue model and Trackknife's local list model both implement it.
+// delegate provides these roles and the seven-column layout below.
 enum TrackRowRole : int {
-    track_source_role = Qt::UserRole + 1, // MPD URI or raw local path bytes
+    track_source_role = Qt::UserRole + 1, // raw local path bytes
     track_id_role,                        // stable per-occurrence identity
     track_position_role,                  // display position
     track_duration_ms_role,               // qint64 duration in milliseconds
     track_current_role,                   // bool: the playing occurrence
     track_album_artist_role,              // grouping artist with fallbacks
-    track_priority_role,                  // uint MPD priority; 0/absent hides
     track_album_artwork_role,             // QImage cover for the group header
     track_album_artwork_key_role,         // artwork cache identity
     // Optional fast path: bool, true only for the first row of a group with

@@ -71,7 +71,6 @@ class SettingsPageDelegate final : public QStyledItemDelegate {
 
 SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store,
                                std::function<QWidget*(QWidget*)> library_folders,
-                               std::function<QWidget*(QWidget*)> connections,
                                std::function<QWidget*(QWidget*)> lastfm, QList<QAction*> shortcuts)
     : QDialog(parent) {
     setWindowTitle(QStringLiteral("Settings"));
@@ -110,35 +109,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     // --- General -----------------------------------------------------------
     auto* general = new QWidget(this);
     auto* general_form = new QFormLayout(general);
-    startup_ = new QComboBox(general);
-    startup_->setObjectName(QStringLiteral("bench-settings-startup"));
-    startup_->addItem(QStringLiteral("Local queue"), QStringLiteral("local"));
-    startup_->addItem(QStringLiteral("MPD queue"), QStringLiteral("mpd"));
-    const auto saved_context =
-        settings.value(QLatin1String(startup_context_key), QStringLiteral("local")).toString();
-    if (const auto position = startup_->findData(saved_context); position >= 0) {
-        startup_->setCurrentIndex(position);
-    }
-    general_form->addRow(QStringLiteral("Start in:"), startup_);
-    auto* root_row = new QHBoxLayout;
-    music_root_ = new QLineEdit(general);
-    music_root_->setObjectName(QStringLiteral("bench-settings-music-root"));
-    music_root_->setText(settings.value(QLatin1String(music_root_key)).toString());
-    music_root_->setPlaceholderText(QStringLiteral("MPD music folder, e.g. /mnt/nas/Music"));
-    music_root_->setToolTip(
-        QStringLiteral("The folder MPD serves its library from, as this machine sees it. "
-                       "With it set, MPD selections can load as local files."));
-    auto* browse = new QPushButton(QStringLiteral("Browse…"), general);
-    browse->setObjectName(QStringLiteral("bench-settings-music-root-browse"));
-    connect(browse, &QPushButton::clicked, this, [this] {
-        const auto chosen = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Choose the MPD music folder"), music_root_->text());
-        if (!chosen.isEmpty()) {
-            music_root_->setText(chosen);
-        }
-    });
-    root_row->addWidget(music_root_, 1);
-    root_row->addWidget(browse);
 
     notifications_ = new QCheckBox(QStringLiteral("Track-change notifications"), general);
     notifications_->setObjectName(QStringLiteral("bench-settings-notifications"));
@@ -184,12 +154,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* playback = new QWidget(this);
     auto* playback_layout = new QVBoxLayout(playback);
     playback_layout->setSpacing(16);
-    auto* playback_note = new QLabel(
-        QStringLiteral(
-            "These preferences apply to local playback. MPD uses the server’s playback settings."),
-        playback);
-    playback_note->setWordWrap(true);
-    playback_layout->addWidget(playback_note);
     restore_playback_ = new QCheckBox(
         QStringLiteral("Restore local track and position on startup (paused)"), playback);
     restore_playback_->setObjectName(QStringLiteral("bench-settings-restore-playback"));
@@ -197,8 +161,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         settings.value(QLatin1String(restore_playback_key), false).toBool());
     playback_layout->addWidget(restore_playback_);
     auto* resume_note =
-        new QLabel(QStringLiteral("Melody restores its own queue paused when the server restarts. "
-                                  "Reconnecting this app never interrupts server playback."),
+        new QLabel(QStringLiteral("An engine restores its own queue, paused, when it restarts. "
+                                  "Closing or reconnecting this app never interrupts it."),
                    playback);
     resume_note->setWordWrap(true);
     playback_layout->addWidget(resume_note);
@@ -326,26 +290,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     library_layout->addWidget(engine_note);
 
     add_page(QStringLiteral("Library"), library);
-
-    auto* connections_page = new QWidget(this);
-    auto* connections_layout = new QVBoxLayout(connections_page);
-    connections_layout->setSpacing(18);
-    if (connections)
-        connections_layout->addWidget(connections(connections_page));
-    else
-        connections_layout->addWidget(new QLabel(
-            QStringLiteral("Connection profiles are available from the running workspace."),
-            connections_page));
-    auto* fallback = new QFormLayout;
-    fallback->addRow(QStringLiteral("Fallback music folder:"), root_row);
-    connections_layout->addLayout(fallback);
-    auto* fallback_note =
-        new QLabel(QStringLiteral("Used when the connected profile has no local music folder."),
-                   connections_page);
-    fallback_note->setWordWrap(true);
-    connections_layout->addWidget(fallback_note);
-    connections_layout->addStretch(1);
-    add_page(QStringLiteral("Connections"), connections_page);
 
     // --- Naming ------------------------------------------------------------
     auto* naming = new QWidget(this);
@@ -513,9 +457,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         if (page == Page::library)
             save_note->setText(
                 QStringLiteral("Folder changes save immediately. Cancel does not undo them."));
-        else if (page == Page::connections)
-            save_note->setText(QStringLiteral("Save profile and Remove take effect immediately. "
-                                              "The fallback folder uses Save below."));
         else if (page == Page::naming)
             save_note->setText(QStringLiteral("Save layout, Save destination, and Remove take "
                                               "effect immediately. Cancel does not undo them."));
@@ -586,8 +527,6 @@ void SettingsDialog::save() {
                       buffer_threshold_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), preamp_with_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
-    settings.setValue(QLatin1String(startup_context_key), startup_->currentData().toString());
-    settings.setValue(QLatin1String(music_root_key), music_root_->text().trimmed());
     settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());

@@ -4,7 +4,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/engine/catalogue.hpp"
-#include "ui/server_library_tree_view.hpp"
+#include "uicommon/library_tree_view.hpp"
 #include "uicommon/local_artwork.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/rating_stars.hpp"
@@ -114,7 +114,7 @@ class LibraryModel final : public QStandardItemModel {
             fetch_(parent);
     }
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
-        if (role == ui::ServerLibraryTreeDelegate::secondaryTextRole) {
+        if (role == ui::LibraryTreeDelegate::secondaryTextRole) {
             const auto value = QStandardItemModel::data(index, entry_role);
             if (!value.isValid())
                 return {};
@@ -228,7 +228,7 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     tools->addStretch();
     tools->addWidget(scan_button_);
     layout->addLayout(tools);
-    auto* library_view = new ui::ServerLibraryTreeView(this);
+    auto* library_view = new ui::LibraryTreeView(this);
     tree_ = library_view;
     tree_->setObjectName(QStringLiteral("local-library-tree"));
     tree_->setAccessibleName(tr("Local artists, albums, and tracks"));
@@ -247,16 +247,15 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     library_view->setActionCallback([this](const QModelIndex& index, int action) {
         requestAction(index, static_cast<LocalLibraryAction>(action));
     });
-    tree_->setItemDelegate(new ui::ServerLibraryTreeDelegate(
+    tree_->setItemDelegate(new ui::LibraryTreeDelegate(
         library_view, libraryActionIcons(this), [](const QModelIndex& index) {
             const auto value = index.data(entry_role);
             const auto entry = value.value<persistence::LibraryEntry>();
-            return ui::ServerLibraryTreeDelegate::Presentation{
+            return ui::LibraryTreeDelegate::Presentation{
                 .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
                 .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
                 .root = !index.parent().isValid(),
-                .secondary =
-                    index.data(ui::ServerLibraryTreeDelegate::secondaryTextRole).toString(),
+                .secondary = index.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
                 .album_rating = value.isValid() ? entry.rating : 0U};
         }));
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -553,7 +552,7 @@ void LocalLibraryPanel::reloadTree() {
         expanded_entries_.clear();
         current_entry_.clear();
     }
-    static_cast<ui::ServerLibraryTreeView*>(tree_)->cancelPendingExpansions();
+    static_cast<ui::LibraryTreeView*>(tree_)->cancelPendingExpansions();
     model_->clear();
     const auto query_text = bytes(search_->text().trimmed());
     if (query_text.empty()) {
@@ -602,8 +601,8 @@ void LocalLibraryPanel::reloadTree() {
 
 void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                                      persistence::LibraryQuery query) {
-    // Browsing shows the complete level in one load, like the MPD server
-    // library tree — the default 200-row page left the list cut off behind
+    // Browsing shows the complete level in one load -- the default 200-row
+    // page left the list cut off behind
     // a manual "Show more…" row. The bound matches the tkq result cap and
     // keeps the more-row as a never-expected safety valve.
     query.limit = 100'000U;
@@ -727,7 +726,7 @@ void LocalLibraryPanel::loadChildren(const QPersistentModelIndex& parent,
                  empty->setEnabled(false);
                  target->appendRow(empty);
              }
-             static_cast<ui::ServerLibraryTreeView*>(tree_)->completePendingExpansions();
+             static_cast<ui::LibraryTreeView*>(tree_)->completePendingExpansions();
          },
          true});
 }

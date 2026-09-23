@@ -14,9 +14,6 @@ class QTimer;
 namespace trackknife::ui {
 class QueueTableView;
 }
-namespace trackknife::quick {
-class MpdQueueModel;
-}
 namespace trackknife::bench {
 class DynamicPlaylistDialog final : public QDialog {
     Q_OBJECT
@@ -35,7 +32,6 @@ class DynamicPlaylistDialog final : public QDialog {
     void playRequested(int row);
     void resultsChanged();
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
-    void appendRequested(const DynamicPlaylistService::Tracks& tracks);
 
   private:
     DynamicPlaylistDefinition definition() const;
@@ -67,10 +63,8 @@ class DynamicPlaylistDialog final : public QDialog {
     QLabel* status_;
     QPushButton* refresh_;
     QPushButton* open_;
-    QPushButton* append_;
     QTimer* refresh_timer_;
     ui::QueueTableView* view_;
     LocalListModel* local_model_{nullptr};
-    quick::MpdQueueModel* mpd_model_{nullptr};
 };
 } // namespace trackknife::bench

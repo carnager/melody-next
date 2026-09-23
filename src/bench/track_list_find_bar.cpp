@@ -4,7 +4,6 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/local_list_model.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "trackknife/core/unicode.hpp"
 
 #include <QAction>
@@ -117,8 +116,7 @@ void TrackListFindBar::setView(QTableView* view) {
         view_->removeEventFilter(this);
     view_ = view;
     model_ = view == nullptr ? nullptr : view->model();
-    if (!qobject_cast<LocalListModel*>(model_.data()) &&
-        !qobject_cast<quick::MpdQueueModel*>(model_.data()))
+    if (!qobject_cast<LocalListModel*>(model_.data()))
         model_ = nullptr;
     status_->clear();
     if (model_ == nullptr)
@@ -252,7 +250,6 @@ void TrackListFindBar::pump() {
     QElapsedTimer capture_time;
     capture_time.start();
     const auto* local = qobject_cast<LocalListModel*>(model_.data());
-    const auto* remote = qobject_cast<quick::MpdQueueModel*>(model_.data());
     while (visited_ < total_ && candidates.size() < batch_row_limit && capture_time.elapsed() < 4) {
         std::vector<std::string_view> fields;
         // Backs formatted texts (durations) referenced by fields for the
@@ -285,8 +282,8 @@ void TrackListFindBar::pump() {
                         fields.push_back(value);
                     }
                 }
-                // ADR-0153: retained probe technicals join the haystack the
-                // way MPD rows already expose their audio_format. Reserved
+                // ADR-0153: retained probe technicals join the haystack, so
+                // a codec or a sample rate is findable like a tag. Reserved
                 // up front: fields holds views into owned_texts, so the
                 // vector must never reallocate after the first push.
                 owned_texts.reserve(4U);
@@ -301,27 +298,6 @@ void TrackListFindBar::pump() {
                 }
                 duration_text(row.duration_ms);
                 fields.push_back(row.raw_path);
-            }
-        } else if (remote) {
-            const auto* track = remote->trackAt(cursor_);
-            if (!track)
-                return;
-            // Bound even a pathological number of empty/unrelated server tags.
-            oversized = track->metadata.fields().size() + track->unknown_structural_pairs.size() >
-                        row_value_limit;
-            if (!oversized) {
-                for (const auto& tag : track->metadata.fields()) {
-                    fields.push_back(tag.value);
-                }
-                for (const auto& pair : track->unknown_structural_pairs) {
-                    fields.push_back(pair.value);
-                }
-                if (track->audio_format && !track->audio_format->empty()) {
-                    fields.push_back(*track->audio_format);
-                }
-                duration_text(track->duration ? std::optional{track->duration->count()}
-                                              : std::nullopt);
-                fields.push_back(track->uri);
             }
         }
         std::size_t bytes = 0;

@@ -22,7 +22,6 @@ class QueueItemDelegate final : public QStyledItemDelegate {
                                  const QModelIndex& index) const override;
     [[nodiscard]] bool isAlbumHeaderHit(const QModelIndex& index, int relative_y) const;
     [[nodiscard]] std::pair<int, int> albumRowRange(const QModelIndex& index) const;
-    [[nodiscard]] QString priorityLabel(const QModelIndex& index) const;
 
   private:
     [[nodiscard]] bool beginsAlbum(const QModelIndex& index) const;

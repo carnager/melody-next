@@ -15,17 +15,12 @@ qt_add_library(
     search_dialog.cpp
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp
-    bench_mpd.cpp
-    bench_mpd_list_tabs.cpp
-    bench_mpd_playlists.cpp
     bench_dynamic_playlists.cpp
     dynamic_playlist_service.cpp
     dynamic_playlist_dialog.cpp
     desktop_notifier.cpp
     mpris_service.cpp
     mpris_service.hpp
-    mpd_library_search_model.cpp
-    mpd_library_search_model.hpp
     bench_track_views.cpp
     bench_lastfm.cpp
     lastfm_service.cpp
@@ -72,8 +67,6 @@ qt_add_library(
     metadata_scalar_delegate.hpp
     output_profiles_widget.cpp
     output_profiles_widget.hpp
-    connection_profiles_widget.cpp
-    connection_profiles_widget.hpp
     shortcut_settings.cpp
     shortcut_settings.hpp
     settings_dialog.cpp
@@ -95,11 +88,11 @@ add_library(Trackknife::BenchUi ALIAS trackknife_bench_ui)
 
 target_link_libraries(
     trackknife_bench_ui
-    PUBLIC Trackknife::Mpd Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Engine Trackknife::Persistence
+    PUBLIC Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Engine Trackknife::Persistence
            Trackknife::Convert Trackknife::Formats Trackknife::Loudness Trackknife::Metadata Trackknife::MusicBrainz
            Trackknife::Operations Trackknife::Audio
            trackknife_project_options
-    PRIVATE Trackknife::MpdUi Trackknife::Ui Qt6::Concurrent Qt6::DBus Qt6::Network
+    PRIVATE Qt6::Concurrent Qt6::DBus Qt6::Network
             trackknife_project_warnings
 )
 target_include_directories(trackknife_bench_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")

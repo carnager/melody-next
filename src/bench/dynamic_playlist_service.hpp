@@ -4,14 +4,14 @@
 #include "bench/local_list_model.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
-#include "trackknife/mpd/model.hpp"
+#include "trackknife/engine/catalogue.hpp"
 #include "trackknife/query/tkq.hpp"
 #include <QObject>
 #include <QPointer>
 #include <QString>
 #include <QVector>
 #include <functional>
-#include <variant>
+#include <vector>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -50,7 +50,7 @@ core::Result<QVector<RecommendationTrack>> parseLastFmTracks(const QByteArray& d
 class DynamicPlaylistService final : public QObject {
     Q_OBJECT
   public:
-    using Tracks = std::variant<std::vector<LocalTrackRow>, std::vector<mpd::Track>>;
+    using Tracks = std::vector<LocalTrackRow>;
     using Result = core::Result<Tracks>;
     using Completion = std::function<void(Result)>;
     using Search = std::function<void(query::CompiledTkq, core::CancellationToken, Completion)>;
@@ -81,7 +81,9 @@ class DynamicPlaylistService final : public QObject {
     Tracks result_;
     std::size_t matched_pool_size_{0};
 };
-DynamicPlaylistService::Result
-queryDynamicLocalLibrary(const std::filesystem::path& database, const query::CompiledTkq& compiled,
-                         const core::CancellationToken& cancellation);
+// The library the catalogue source chose -- this process's or an engine's --
+// never a database opened here.
+DynamicPlaylistService::Result queryDynamicLibrary(const engine::Catalogue& catalogue,
+                                                   const query::CompiledTkq& compiled,
+                                                   const core::CancellationToken& cancellation);
 } // namespace trackknife::bench

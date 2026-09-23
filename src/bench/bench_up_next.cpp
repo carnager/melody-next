@@ -3,8 +3,6 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/queue_table_view.hpp"
@@ -72,7 +70,6 @@ void BenchMainWindow::buildUpNext() {
     up_next_view_ = new ui::QueueTableView(content);
     up_next_view_->setObjectName(QStringLiteral("up-next-tracks"));
     up_next_local_model_ = new LocalListModel(this);
-    up_next_mpd_model_ = new quick::MpdQueueModel(this);
     up_next_view_->setModel(up_next_local_model_);
     auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(up_next_view_, flat, flat);
@@ -106,8 +103,7 @@ void BenchMainWindow::buildUpNext() {
             auto* table = qobject_cast<QTableView*>(source);
             if (!table)
                 return false;
-            const bool local = qobject_cast<LocalListModel*>(table->model()) != nullptr;
-            if (local == isMpdContext())
+            if (qobject_cast<LocalListModel*>(table->model()) == nullptr)
                 return false;
             enqueueUpNext(table, false, position);
             return true;
@@ -115,15 +111,7 @@ void BenchMainWindow::buildUpNext() {
     const auto playRequest = [this](const QModelIndex& index) {
         if (!index.isValid())
             return;
-        if (isMpdContext()) {
-            if (const auto* track = up_next_mpd_model_->trackAt(index.row());
-                track && track->queue_id) {
-                mpd::RequestQueueCommand command;
-                command.operation = mpd::RequestQueueOperation::play;
-                command.id = *track->queue_id;
-                mpd_controller_->editRequestQueue(std::move(command));
-            }
-        } else if (index.row() < static_cast<int>(playback_.requests.pending().size())) {
+        if (index.row() < static_cast<int>(playback_.requests.pending().size())) {
             playback_.requests.move(
                 playback_.requests.pending()[static_cast<std::size_t>(index.row())].id, 0);
             refreshUpNext();
@@ -155,16 +143,10 @@ void BenchMainWindow::buildUpNext() {
                                [this] { editUpNext(0); });
     clearAction->setObjectName(QStringLiteral("up-next-clear"));
     auto* undo = button(QStringLiteral("Undo"), QStringLiteral("edit-undo"), [this] {
-        if (isMpdContext()) {
-            mpd::RequestQueueCommand command;
-            command.operation = mpd::RequestQueueOperation::undo;
-            mpd_controller_->editRequestQueue(std::move(command));
-        } else {
-            playback_.requests.undo();
-            playback_.last_requested_next.reset();
-            persistUpNext();
-            refreshUpNext();
-        }
+        playback_.requests.undo();
+        playback_.last_requested_next.reset();
+        persistUpNext();
+        refreshUpNext();
     });
     undo->setObjectName(QStringLiteral("up-next-undo"));
     layout->insertWidget(1, actions);
@@ -174,17 +156,11 @@ void BenchMainWindow::buildUpNext() {
     resume->setObjectName(QStringLiteral("up-next-return"));
     layout->addWidget(resume);
     connect(resume, &QPushButton::clicked, this, [this] {
-        if (isMpdContext()) {
-            mpd::RequestQueueCommand command;
-            command.operation = mpd::RequestQueueOperation::resume;
-            mpd_controller_->editRequestQueue(std::move(command));
-        } else {
-            playback_.requests.clear();
-            if (playback_.requests.active())
-                playAdjacent(1);
-            persistUpNext();
-            refreshUpNext();
-        }
+        playback_.requests.clear();
+        if (playback_.requests.active())
+            playAdjacent(1);
+        persistUpNext();
+        refreshUpNext();
     });
     auto* remove = removeAction;
     remove->setShortcut(Qt::Key_Delete);
@@ -217,87 +193,22 @@ void BenchMainWindow::buildUpNext() {
     toggle->setObjectName(QStringLiteral("action-show-up-next"));
     toggle->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+U")));
     addAction(toggle);
-    connect(mpd_controller_, &quick::MpdProbeController::stateChanged, this,
-            &BenchMainWindow::refreshUpNext);
 }
 
 void BenchMainWindow::refreshUpNext() {
     if (!up_next_dock_)
         return;
-    const bool server = isMpdContext();
     std::vector<std::uint64_t> selectedIds;
     for (const auto& index : up_next_view_->selectionModel()->selectedRows())
         if (index.row() >= 0 && index.row() < static_cast<int>(up_next_display_ids_.size()))
             selectedIds.push_back(up_next_display_ids_[static_cast<std::size_t>(index.row())]);
     bool replaced = false;
     if (auto* undo = up_next_dock_->findChild<QAction*>(QStringLiteral("up-next-undo")))
-        undo->setEnabled(server
-                             ? (mpd_controller_->connected() && mpd_controller_->requestQueue() &&
-                                mpd_controller_->requestQueue()->can_undo)
-                             : playback_.requests.canUndo());
+        undo->setEnabled(playback_.requests.canUndo());
     if (auto* resume = up_next_dock_->findChild<QPushButton*>(QStringLiteral("up-next-return")))
-        resume->setEnabled(server
-                               ? (mpd_controller_->connected() && mpd_controller_->requestQueue() &&
-                                  mpd_controller_->requestQueue()->active_id != 0)
-                               : playback_.requests.active().has_value());
-    auto* model = server ? static_cast<QAbstractItemModel*>(up_next_mpd_model_)
-                         : static_cast<QAbstractItemModel*>(up_next_local_model_);
-    if (up_next_view_->model() != model) {
-        selectedIds.clear();
-        up_next_display_ids_.clear();
-        up_next_local_revision_ = 0;
-        up_next_remote_revision_ = 0;
-        up_next_view_->setModel(model);
-        auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
-        applyTrackViewLayout(up_next_view_, flat, flat);
-        up_next_view_->setAlbumGroupingEnabled(false);
-
-        for (int col = 0; col < model->columnCount(); ++col)
-            up_next_view_->setColumnHidden(col, col != ui::track_artist_column &&
-                                                    col != ui::track_title_column &&
-                                                    col != ui::track_length_column);
-        up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_artist_column,
-                                                                QHeaderView::Interactive);
-        up_next_view_->setColumnWidth(ui::track_artist_column, 140);
-        up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_length_column,
-                                                                QHeaderView::ResizeToContents);
-        connect(
-            up_next_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-            [this] { refreshUpNext(); }, Qt::QueuedConnection);
-        up_next_view_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    }
-    if (server) {
-        const auto& state = mpd_controller_->requestQueue();
-        bool available = mpd_controller_->connected() &&
-                         mpd_controller_->supportsCommand(QStringLiteral("melody_upnext")) &&
-                         state.has_value();
-        up_next_view_->setEnabled(available);
-        if (available) {
-            if (up_next_remote_revision_ != state->revision ||
-                up_next_remote_profile_ != mpd_controller_->profileId()) {
-                up_next_mpd_model_->replaceTracks(state->pending);
-                replaced = true;
-                up_next_display_ids_.clear();
-                for (const auto& track : state->pending)
-                    up_next_display_ids_.push_back(track.queue_id.value_or(0));
-                up_next_remote_revision_ = state->revision;
-                up_next_remote_profile_ = mpd_controller_->profileId();
-            }
-            up_next_status_->setText(QStringLiteral("Melody · %1 pending\nReturn to: %3")
-                                         .arg(state->pending.size())
-                                         .arg(state->context.empty()
-                                                  ? QStringLiteral("Queue")
-                                                  : QString::fromStdString(state->context)));
-        } else {
-            if (up_next_mpd_model_->rowCount() != 0)
-                up_next_mpd_model_->replaceTracks({});
-            up_next_display_ids_.clear();
-            up_next_remote_revision_ = 0;
-            up_next_status_->setText(QStringLiteral(
-                "Up Next requires a connected Melody server with request-queue support. Stock MPD "
-                "still supports inserting tracks into its normal list."));
-        }
-    } else {
+        resume->setEnabled(playback_.requests.active().has_value());
+    auto* model = up_next_local_model_;
+    {
         up_next_view_->setEnabled(true);
         if (up_next_local_revision_ != playback_.requests.revision()) {
             std::vector<LocalTrackRow> rows;
@@ -342,16 +253,13 @@ void BenchMainWindow::refreshUpNext() {
         first = std::min(first, index.row());
         last = std::max(last, index.row());
     }
-    const bool batchAvailable =
-        !server || selectionRows.size() <= 1 ||
-        mpd_controller_->supportsCommand(QStringLiteral("melody_upnext_edit"));
     const auto row = selectionRows.isEmpty() ? -1 : first;
     const auto count = model->rowCount();
     const auto enabled = up_next_view_->isEnabled();
     for (const auto& [name, available] : std::initializer_list<std::pair<const char*, bool>>{
-             {"up-next-remove", batchAvailable && row >= 0 && row < count},
-             {"up-next-move-up", batchAvailable && row > 0},
-             {"up-next-move-down", batchAvailable && row >= 0 && last + 1 < count},
+             {"up-next-remove", row >= 0 && row < count},
+             {"up-next-move-up", row > 0},
+             {"up-next-move-down", row >= 0 && last + 1 < count},
              {"up-next-clear", count > 0}}) {
         if (auto* action = up_next_dock_->findChild<QAction*>(QString::fromLatin1(name)))
             action->setEnabled(enabled && available);
@@ -364,7 +272,7 @@ void BenchMainWindow::refreshUpNext() {
 }
 
 void BenchMainWindow::addUpNextActions(QMenu* menu, QTableView* source) {
-    const bool remote = qobject_cast<LocalListModel*>(source->model()) == nullptr;
+    const bool local = qobject_cast<LocalListModel*>(source->model()) != nullptr;
     for (bool prepend : {true, false}) {
         auto* action = findChild<QAction*>(prepend ? QStringLiteral("action-queue-next")
                                                    : QStringLiteral("action-queue-end"));
@@ -375,10 +283,7 @@ void BenchMainWindow::addUpNextActions(QMenu* menu, QTableView* source) {
         scoped->setShortcuts(action->shortcuts());
         connect(scoped, &QAction::triggered, source,
                 [this, source, prepend] { enqueueUpNext(source, prepend); });
-        scoped->setEnabled(
-            !source->selectionModel()->selectedRows().isEmpty() &&
-            (!remote || (mpd_controller_->connected() &&
-                         mpd_controller_->supportsCommand(QStringLiteral("melody_upnext")))));
+        scoped->setEnabled(local && !source->selectionModel()->selectedRows().isEmpty());
     }
 }
 
@@ -391,17 +296,6 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
         for (const auto& index : indices)
             rows.push_back(local->rows().at(static_cast<std::size_t>(index.row())));
         enqueueLocalRequests(std::move(rows), position >= 0 ? position : (prepend ? 0 : -1));
-    } else {
-        mpd::RequestQueueCommand command;
-        command.operation = position >= 0 ? mpd::RequestQueueOperation::insert
-                                          : (prepend ? mpd::RequestQueueOperation::prepend
-                                                     : mpd::RequestQueueOperation::append);
-        if (position >= 0)
-            command.position = static_cast<unsigned>(position);
-        for (const auto& track : selectedMpdViewTracks(source))
-            command.uris.push_back(track.uri);
-        if (!command.uris.empty())
-            mpd_controller_->editRequestQueue(std::move(command));
     }
     refreshUpNext();
 }
@@ -429,20 +323,6 @@ void BenchMainWindow::editUpNextSelection(int operation, int destination) {
             selected[static_cast<std::size_t>(index.row())] = true;
     if (std::ranges::find(selected, true) == selected.end())
         return;
-    if (isMpdContext() && !mpd_controller_->supportsCommand(QStringLiteral("melody_upnext_edit"))) {
-        const auto rows = up_next_view_->selectionModel()->selectedRows();
-        if (rows.size() != 1) {
-            statusBar()->showMessage(
-                tr("Update Melody to edit multiple Up Next requests together."), 5000);
-            return;
-        }
-        const auto row = rows.front().row();
-        editUpNext(operation == 1 ? 1 : 2, row,
-                   operation == 2   ? row - 1
-                   : operation == 3 ? row + 1
-                                    : destination - (destination > row ? 1 : 0));
-        return;
-    }
     std::vector<int> order(static_cast<std::size_t>(count));
     std::iota(order.begin(), order.end(), 0);
     if (operation == 1) {
@@ -481,12 +361,7 @@ void BenchMainWindow::editUpNextSelection(int operation, int destination) {
         ids.push_back(up_next_display_ids_[static_cast<std::size_t>(row)]);
     if (ids == up_next_display_ids_)
         return;
-    if (isMpdContext()) {
-        mpd::RequestQueueCommand command;
-        command.operation = mpd::RequestQueueOperation::retain;
-        command.ids.assign(ids.begin(), ids.end());
-        mpd_controller_->editRequestQueue(std::move(command));
-    } else if (playback_.requests.retain(ids)) {
+    if (playback_.requests.retain(ids)) {
         playback_.last_requested_next.reset();
         persistUpNext();
         refreshUpNext();
@@ -494,46 +369,23 @@ void BenchMainWindow::editUpNextSelection(int operation, int destination) {
 }
 
 void BenchMainWindow::editUpNext(int operation, int row, int destination) {
-    if (isMpdContext()) {
-        const auto& state = mpd_controller_->requestQueue();
-        if (!state)
+    if (operation == 0)
+        playback_.requests.clear();
+    else {
+        if (row < 0 || row >= static_cast<int>(playback_.requests.pending().size()))
             return;
-        mpd::RequestQueueCommand command;
-        if (operation == 0)
-            command.operation = mpd::RequestQueueOperation::clear;
+        auto id = playback_.requests.pending()[static_cast<std::size_t>(row)].id;
+        if (operation == 1)
+            playback_.requests.remove(id);
         else {
-            if (row < 0 || row >= static_cast<int>(state->pending.size()))
+            if (destination < 0)
                 return;
-            command.id = state->pending[static_cast<std::size_t>(row)].queue_id.value_or(0);
-            if (operation == 1)
-                command.operation = mpd::RequestQueueOperation::remove;
-            else {
-                if (destination < 0 || destination >= static_cast<int>(state->pending.size()))
-                    return;
-                command.operation = mpd::RequestQueueOperation::move;
-                command.position = static_cast<unsigned>(destination);
-            }
+            playback_.requests.move(id, static_cast<std::size_t>(destination));
         }
-        mpd_controller_->editRequestQueue(std::move(command));
-    } else {
-        if (operation == 0)
-            playback_.requests.clear();
-        else {
-            if (row < 0 || row >= static_cast<int>(playback_.requests.pending().size()))
-                return;
-            auto id = playback_.requests.pending()[static_cast<std::size_t>(row)].id;
-            if (operation == 1)
-                playback_.requests.remove(id);
-            else {
-                if (destination < 0)
-                    return;
-                playback_.requests.move(id, static_cast<std::size_t>(destination));
-            }
-        }
-        playback_.last_requested_next.reset();
-        persistUpNext();
-        refreshUpNext();
     }
+    playback_.last_requested_next.reset();
+    persistUpNext();
+    refreshUpNext();
 }
 
 void BenchMainWindow::persistUpNext() {

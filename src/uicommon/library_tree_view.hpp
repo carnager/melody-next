@@ -13,12 +13,12 @@
 
 namespace trackknife::ui {
 
-// Shared library interaction and presentation. MPD defaults can be overridden
-// with local labels, availability, and row presentation without sharing authority.
-// The three inline actions are append, add next, and replace-and-play.
-class ServerLibraryTreeView final : public QTreeView {
+// The library tree: artists, albums and tracks, with three inline actions on
+// hover -- append, add next, and replace-and-play. What a row looks like is
+// the model's business, supplied through the delegate's presentation.
+class LibraryTreeView final : public QTreeView {
   public:
-    explicit ServerLibraryTreeView(QWidget* parent = nullptr);
+    explicit LibraryTreeView(QWidget* parent = nullptr);
 
     void setActionCallback(std::function<void(const QModelIndex&, int)> callback);
     void setActionLabels(std::array<QString, 3> labels);
@@ -56,14 +56,13 @@ class ServerLibraryTreeView final : public QTreeView {
     bool drag_started_{false};
     std::function<void(const QModelIndex&, int)> action_callback_;
     std::function<bool(const QModelIndex&)> actions_available_;
-    std::array<QString, 3> action_labels_{QStringLiteral("Append to live queue"),
-                                          QStringLiteral("Insert next in live queue"),
-                                          QStringLiteral("Replace queue and play")};
+    std::array<QString, 3> action_labels_{QStringLiteral("Append"), QStringLiteral("Play next"),
+                                          QStringLiteral("Replace and play")};
 };
 
-class ServerLibraryTreeDelegate final : public QStyledItemDelegate {
+class LibraryTreeDelegate final : public QStyledItemDelegate {
   public:
-    // Shared row subtitle role for local and server-backed models.
+    // The row subtitle role a model provides.
     static constexpr int secondaryTextRole = Qt::UserRole + 6;
 
     struct Presentation {
@@ -74,8 +73,8 @@ class ServerLibraryTreeDelegate final : public QStyledItemDelegate {
         // ADR-0179: painted as stars over the album cover when non-zero.
         unsigned album_rating{0U};
     };
-    ServerLibraryTreeDelegate(ServerLibraryTreeView* view, std::array<QIcon, 3> action_icons,
-                              std::function<Presentation(const QModelIndex&)> presentation = {});
+    LibraryTreeDelegate(LibraryTreeView* view, std::array<QIcon, 3> action_icons,
+                        std::function<Presentation(const QModelIndex&)> presentation);
 
     [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& option,
                                  const QModelIndex& index) const override;
@@ -83,7 +82,7 @@ class ServerLibraryTreeDelegate final : public QStyledItemDelegate {
                const QModelIndex& index) const override;
 
   private:
-    ServerLibraryTreeView* view_;
+    LibraryTreeView* view_;
     std::array<QIcon, 3> action_icons_;
     std::function<Presentation(const QModelIndex&)> presentation_;
 };

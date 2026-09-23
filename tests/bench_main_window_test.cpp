@@ -4,18 +4,17 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
-#include "bench/connection_profiles_widget.hpp"
 #include "bench/convert_dialog.hpp"
 #include "bench/cover_thumbnail.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
+#include "bench/lastfm_service.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_properties_dialog.hpp"
-#include "bench/mpd_library_search_model.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
@@ -23,9 +22,6 @@
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
-#include "quick/mpd_search_result_model.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -43,9 +39,6 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
-#include "trackknife/query/tkq_melody.hpp"
-#include "ui/server_library_tree_model.hpp"
-#include "ui/server_library_tree_view.hpp"
 #include "uicommon/command_palette.hpp"
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
@@ -58,11 +51,14 @@
 #include <QDateTime>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QHostAddress>
+#include <QJsonDocument>
 #include <QKeySequenceEdit>
 #include <QLocale>
 #include <QMimeData>
 #include <QProxyStyle>
 #include <QStyleFactory>
+#include <QTcpServer>
 
 #include <QAbstractItemModelTester>
 #include <QAction>
@@ -216,13 +212,6 @@ class BenchMainWindowTest final : public QObject {
     void initTestCase();
     void cleanup();
     void transportUsesStackedNowPlayingAndCompactDeviceButton();
-    void unifiesMpdAndLocalAuthoritiesInOneWorkspace();
-    void mpdSearchProjectsControllerResults();
-    void mpdSearchResolvesCompleteAlbums();
-    void mpdSearchCoversFollowLibraryRefresh();
-    void mpdQueueAndLibraryMenusExposeServerActions();
-    void mpdGoToArtistAlbumNavigatesLibrary();
-    void mpdStoredPlaylistTabsFollowServerAuthority();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
@@ -230,10 +219,8 @@ class BenchMainWindowTest final : public QObject {
     void commandPaletteTracksAvailabilityAndLifetime();
     void localListeningCountsPlaybackWithoutLastFm();
     void localListeningColumnsLoadRefreshAndRespectAuthority();
-    void melodyListeningColumnsRequireCapability();
     void localPlaybackRestoresPausedWithoutOutput();
     void localRequestRestoresPaused_data();
-    void albumShuffleIsCapabilityGated();
     void continuousAlbumShuffleKeepsListOrder();
     void localRequestRestoresPaused();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
@@ -265,10 +252,8 @@ class BenchMainWindowTest final : public QObject {
     void savedSearchesCanBeManagedAndReopened();
     void searchDialogFiltersTabAndOpensResults();
     void searchResultTabLoadsCovers();
-    void serverArtworkRetriesCongestedRequests();
     void searchDialogProbesMissingTechnicalsOnDemand();
-    void searchDialogServerScopeRunsTranslatedQueries();
-    void searchPresetsAreGroupedAndCapabilityGated();
+    void searchPresetsAreGroupedAndPrompt();
     void musicBrainzStagesFromCachedSearchMetadata();
     void contextReplayGainScansAndApplies_data();
     void contextReplayGainScansAndApplies();
@@ -292,14 +277,9 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanPreservesLogicalSources();
     void convertDialogPlansAndConvertsSelection();
     void convertDialogAppliesPermanentReplayGain();
-    void settingsControlStartupContextAndMusicRoot();
-    void mpdSugarActionsMaterializeAndOpenDialog();
     void propertiesFileListLivesInTheTaggerWindow();
-    void serverWorkingTabCreationGestures();
-    void libraryDragResolvesUnexpandedBranch();
     void selectionActionsFollowTheActiveTab();
     void closingATabReturnsToThePreviousOne();
-    void searchOpensInTheScopeOfTheActiveTab();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
@@ -309,7 +289,6 @@ class BenchMainWindowTest final : public QObject {
     void coverPolicyRoundTrip();
     void playbackSettingsApplyLiveAndCancel();
     void librarySettingsManageFoldersWithoutScanning();
-    void connectionSettingsPreserveProfilesAndFailures();
     void metadataServiceSettingsAndCompactPages();
     void coverThumbnailAppliesPolicy_data();
     void coverThumbnailAppliesPolicy();
@@ -379,13 +358,11 @@ void BenchMainWindowTest::commandPaletteFindsAndRunsRegisteredActions() {
     auto* command = window.findChild<QAction*>(QStringLiteral("action-command-palette"));
     QVERIFY(command != nullptr);
     QCOMPARE(command->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+P")));
-    QCOMPARE(window.findChild<QAction*>(QStringLiteral("action-connect-mpd"))->shortcut(),
-             QKeySequence(QStringLiteral("Ctrl+K")));
     // Parameter choices and transient actions must not leak into command discovery.
     QAction device(QStringLiteral("caprica"), &window);
-    device.setObjectName(QStringLiteral("action-mpd-output-123"));
+    device.setObjectName(QStringLiteral("action-output-123"));
     QAction rating(QStringLiteral("1"), &window);
-    rating.setObjectName(QStringLiteral("action-mpd-queue-rate-1"));
+    rating.setObjectName(QStringLiteral("action-local-rate-1"));
     command->trigger();
 
     auto* palette = window.findChild<QDialog*>(QStringLiteral("command-palette"));
@@ -601,86 +578,12 @@ void BenchMainWindowTest::localListeningColumnsLoadRefreshAndRespectAuthority() 
     window.applyTrackViewLayout(*tab, *restored_layout);
     QVERIFY(!tab->view->isColumnHidden(local_last_played_column));
     window.copyTrackViewLayoutToAllTabs();
-    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_play_count_column));
-    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_last_played_column));
-    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
-    QVERIFY(!window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
-    window.tabs_->setCurrentWidget(tab->view);
     QVERIFY(window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QCoreApplication::processEvents();
         QVERIFY(window.grab().save(directory + QStringLiteral("/listening-history.png")));
     }
-}
-
-void BenchMainWindowTest::melodyListeningColumnsRequireCapability() {
-    BenchMainWindow window;
-    window.show();
-    QTRY_VERIFY(window.lists_restored_);
-    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
-    auto* controller = window.mpd_controller_;
-    controller->connected_ = true;
-    controller->advertised_commands_.insert(QStringLiteral("melody_stats"));
-    window.refreshTrackViewActions();
-    QVERIFY(window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
-    window.setTrackColumnVisible(QStringLiteral("play-count"), true);
-    window.setTrackColumnVisible(QStringLiteral("last-played"), true);
-    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
-    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_last_played_column));
-    QCOMPARE(window.mpd_queue_view_->columnWidth(local_last_played_column), 170);
-    controller->advertised_commands_.clear();
-    window.applyTrackViewLayout(window.mpd_queue_view_, window.mpd_view_layout_,
-                                window.mpd_view_layout_);
-    QVERIFY(window.mpd_queue_view_->isColumnHidden(local_play_count_column));
-    QVERIFY(!window.track_column_actions_.value(QStringLiteral("play-count"))->isVisible());
-    // Reconnecting to a capable server restores the stored visible preference.
-    controller->advertised_commands_.insert(QStringLiteral("melody_stats"));
-    window.applyTrackViewLayout(window.mpd_queue_view_, window.mpd_view_layout_,
-                                window.mpd_view_layout_);
-    QVERIFY(!window.mpd_queue_view_->isColumnHidden(local_play_count_column));
-    controller->connected_ = false;
-}
-
-void BenchMainWindowTest::albumShuffleIsCapabilityGated() {
-    BenchMainWindow window;
-    QTRY_VERIFY(window.lists_restored_);
-    auto* tab = window.currentListTab();
-    QVERIFY(tab);
-    LocalTrackRow row;
-    row.raw_path = "/not-opened.flac";
-    row.probed = true;
-    tab->model->replaceRows({row, row});
-    window.refreshListHistoryActions();
-    QVERIFY(window.shuffle_albums_action_->isVisible());
-    QVERIFY(window.shuffle_albums_action_->isEnabled());
-    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
-    window.mpd_controller_->connected_ = true;
-    window.mpd_controller_->advertised_commands_.clear();
-    window.refreshListHistoryActions();
-    QVERIFY(!window.shuffle_albums_action_->isVisible());
-    QVERIFY(!window.shuffle_albums_action_->isEnabled());
-    window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_shuffle_albums"));
-    window.refreshListHistoryActions();
-    QVERIFY(window.shuffle_albums_action_->isVisible());
-    QVERIFY(window.shuffle_albums_action_->isEnabled());
-    window.mpd_controller_->active_context_ = QStringLiteral("Another playlist");
-    window.refreshListHistoryActions();
-    QVERIFY(!window.shuffle_albums_action_->isVisible());
-    window.mpd_controller_->advertised_commands_.insert(
-        QStringLiteral("melody_list_shuffle_albums"));
-    window.refreshListHistoryActions();
-    QVERIFY(window.shuffle_albums_action_->isVisible());
-    QVERIFY(window.shuffle_albums_action_->isEnabled());
-    QVERIFY(window.openMpdPlaylistTab(QStringLiteral("Year 2024"), true));
-    window.refreshListHistoryActions();
-    QVERIFY(window.shuffle_albums_action_->isVisible());
-    QVERIFY(window.shuffle_albums_action_->isEnabled());
-    window.mpd_controller_->advertised_commands_.remove(
-        QStringLiteral("melody_list_shuffle_albums"));
-    window.refreshListHistoryActions();
-    QVERIFY(!window.shuffle_albums_action_->isVisible());
-    window.mpd_controller_->connected_ = false;
 }
 
 void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
@@ -705,17 +608,8 @@ void BenchMainWindowTest::continuousAlbumShuffleKeepsListOrder() {
     QTRY_VERIFY(!window.album_order_preparing_);
     QCOMPARE(window.playback_.order.adjacent(1, false), std::optional<int>{2});
     QCOMPARE(tab->model->rows()[1].album, std::string{"B"});
-    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
-    window.mpd_controller_->connected_ = true;
-    window.mpd_controller_->advertised_commands_.clear();
-    window.refreshMpdStatusControls();
-    QVERIFY(!window.mpd_album_random_action_->isVisible());
-    window.mpd_controller_->advertised_commands_.insert(QStringLiteral("melody_album_random"));
-    window.refreshMpdStatusControls();
-    QVERIFY(window.mpd_album_random_action_->isVisible());
     window.playback_.modes.album_random = false;
     window.saveLocalPlaybackModes();
-    window.mpd_controller_->connected_ = false;
 }
 
 void BenchMainWindowTest::localRequestRestoresPaused_data() {
@@ -955,34 +849,22 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
 
 void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
     using Service = DynamicPlaylistService;
-    for (const bool remote : {false, true}) {
+    {
         Service::Completion pending;
-        DynamicPlaylistDialog dialog(remote ? QStringLiteral("mpd/refresh-test")
-                                            : QStringLiteral("local"),
-                                     QStringLiteral("Test"),
+        DynamicPlaylistDialog dialog(QStringLiteral("local"), QStringLiteral("Test"),
                                      [&](query::CompiledTkq, core::CancellationToken,
                                          Service::Completion done) { pending = std::move(done); });
         dialog.setAttribute(Qt::WA_DeleteOnClose, false);
         dialog.show();
         auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
         const auto deliver = [&](const std::vector<std::string>& paths) {
-            if (remote) {
-                std::vector<mpd::Track> tracks;
-                for (const auto& path : paths) {
-                    mpd::Track track;
-                    track.uri = path;
-                    tracks.push_back(track);
-                }
-                pending(Service::Tracks{std::move(tracks)});
-            } else {
-                std::vector<LocalTrackRow> rows;
-                for (const auto& path : paths) {
-                    LocalTrackRow row;
-                    row.raw_path = path;
-                    rows.push_back(row);
-                }
-                pending(Service::Tracks{std::move(rows)});
+            std::vector<LocalTrackRow> rows;
+            for (const auto& path : paths) {
+                LocalTrackRow row;
+                row.raw_path = path;
+                rows.push_back(row);
             }
+            pending(Service::Tracks{std::move(rows)});
         };
         refresh->click();
         QVERIFY(pending);
@@ -1189,7 +1071,7 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QCoreApplication::processEvents();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
 
     auto* now_playing = window.findChild<QLabel*>(QStringLiteral("bench-now-playing"));
     auto* now_playing_context =
@@ -1218,7 +1100,6 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QVERIFY(window.findChild<QToolButton*>(QStringLiteral("bench-main-menu")) == nullptr);
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-backup-workspace")) != nullptr);
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-restore-workspace")) != nullptr);
-    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-diagnostics")) != nullptr);
     QVERIFY(!window.menuBar()->isHidden());
     QCOMPARE(window.menuBar()->actions().size(), 4);
     QCOMPARE(device->toolButtonStyle(), Qt::ToolButtonIconOnly);
@@ -1249,723 +1130,6 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QVERIFY(header->height() <= 72);
 }
 
-void BenchMainWindowTest::unifiesMpdAndLocalAuthoritiesInOneWorkspace() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* mpd_queue = dynamic_cast<ui::QueueTableView*>(
-        window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue")));
-    auto* folder_view = window.findChild<QTreeView*>(QStringLiteral("bench-folder-tree"));
-    auto* mpd_library = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
-    auto* local_source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
-    auto* mpd_source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-mpd-source-tabs"));
-    auto* properties = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
-    auto* plain = window.findChild<QAction*>(QStringLiteral("action-track-layout-plain"));
-    auto* copy_layout = window.findChild<QAction*>(QStringLiteral("action-copy-track-layout"));
-    auto* buffer_menu = window.findChild<QMenu*>(QStringLiteral("bench-buffer-menu"));
-    auto* device = window.findChild<QToolButton*>(QStringLiteral("bench-device"));
-    auto* search = window.findChild<QLineEdit*>(QStringLiteral("bench-mpd-search"));
-    auto* search_surface = window.findChild<QWidget*>(QStringLiteral("bench-mpd-search-surface"));
-    auto* repeat = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-repeat"));
-    auto* random = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-random"));
-    auto* single = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-single"));
-    auto* consume = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-consume"));
-    auto* replaygain = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-replaygain"));
-    QVERIFY(tabs != nullptr);
-    QVERIFY(mpd_queue != nullptr);
-    QVERIFY(folder_view != nullptr);
-    QVERIFY(mpd_library != nullptr);
-    QVERIFY(local_source_tabs != nullptr);
-    QVERIFY(mpd_source_tabs != nullptr);
-    QCOMPARE(local_source_tabs->tabText(0), QStringLiteral("Folders"));
-    QCOMPARE(local_source_tabs->tabText(1), QStringLiteral("Library"));
-    QCOMPARE(mpd_source_tabs->tabText(0), QStringLiteral("Library"));
-    QCOMPARE(mpd_source_tabs->tabText(1), QStringLiteral("Playlists"));
-    QVERIFY(properties != nullptr);
-    QVERIFY(plain != nullptr);
-    QVERIFY(copy_layout != nullptr);
-    QVERIFY(buffer_menu != nullptr);
-    QVERIFY(device != nullptr);
-    QVERIFY(search != nullptr);
-    QVERIFY(search_surface != nullptr);
-    QVERIFY(repeat != nullptr);
-    QVERIFY(random != nullptr);
-    QVERIFY(single != nullptr);
-    QVERIFY(consume != nullptr);
-    QVERIFY(replaygain != nullptr);
-    QCOMPARE(replaygain->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
-    QVERIFY(replaygain->text().startsWith(QStringLiteral("RG: ")));
-    QVERIFY(replaygain->menu() != nullptr);
-    QCOMPARE(replaygain->menu()->actions().size(), 4);
-    QTRY_COMPARE(tabs->count(), 2);
-    auto* local_queue = dynamic_cast<ui::QueueTableView*>(tabs->currentWidget());
-    QVERIFY(local_queue != nullptr);
-    QVERIFY(local_queue != mpd_queue);
-    QCOMPARE(mpd_queue->model()->columnCount(), local_column_count);
-    QCOMPARE(local_queue->model()->columnCount(), local_column_count);
-    QCOMPARE(mpd_queue->property("trackknife-hover-row").toInt(), -1);
-    QCOMPARE(local_queue->property("trackknife-hover-row").toInt(), -1);
-    for (int column = 0; column < local_column_count; ++column) {
-        QCOMPARE(mpd_queue->model()->headerData(column, Qt::Horizontal).toString(),
-                 local_queue->model()->headerData(column, Qt::Horizontal).toString());
-        QCOMPARE(mpd_queue->isColumnHidden(column), local_queue->isColumnHidden(column));
-        QCOMPARE(mpd_queue->horizontalHeader()->visualIndex(column),
-                 local_queue->horizontalHeader()->visualIndex(column));
-        QCOMPARE(mpd_queue->columnWidth(column), local_queue->columnWidth(column));
-    }
-    QVERIFY(qobject_cast<ui::QueueItemDelegate*>(mpd_queue->itemDelegate()) != nullptr);
-    QVERIFY(qobject_cast<ui::QueueItemDelegate*>(local_queue->itemDelegate()) != nullptr);
-    QVERIFY(tabs->cornerWidget(Qt::TopRightCorner) == nullptr);
-    QVERIFY(
-        window.findChild<QWidget*>(QStringLiteral("bench-panel-folders"))->isAncestorOf(search));
-    QVERIFY(!search->isVisible());
-    QVERIFY(!repeat->isVisible());
-    QVERIFY(!random->isVisible());
-    QVERIFY(!single->isVisible());
-    QVERIFY(!consume->isVisible());
-
-    const auto mpd_index = tabs->indexOf(mpd_queue);
-    QVERIFY(mpd_index >= 0);
-    QCOMPARE(tabs->tabText(mpd_index), QStringLiteral("MPD Queue"));
-    auto* mpd_close = tabs->tabBar()->tabButton(mpd_index, QTabBar::RightSide);
-    QVERIFY(mpd_close == nullptr || !mpd_close->isVisible());
-    tabs->setCurrentWidget(mpd_queue);
-    QTRY_COMPARE(window.property("trackknife-active-authority").toString(), QStringLiteral("mpd"));
-    QVERIFY(mpd_source_tabs->isVisible());
-    QVERIFY(!local_source_tabs->isVisible());
-    QVERIFY(mpd_library->isVisible());
-    QVERIFY(!folder_view->isVisible());
-    QVERIFY(!properties->isEnabled());
-    QVERIFY(!buffer_menu->isEnabled());
-    QCOMPARE(device->accessibleName(), QStringLiteral("MPD output"));
-    QVERIFY(plain->isEnabled());
-    QVERIFY(search->isVisible());
-    QVERIFY(repeat->isVisible());
-    QVERIFY(random->isVisible());
-    QVERIFY(single->isVisible());
-    QVERIFY(consume->isVisible());
-    QCOMPARE(single->text(), QStringLiteral("1"));
-    QCOMPARE(consume->text(), QStringLiteral("C"));
-    QTest::keyClick(&window, Qt::Key_L, Qt::ControlModifier);
-    QVERIFY(!search_surface->isVisible());
-    QVERIFY(mpd_library->isVisible());
-    QVERIFY(tabs->cornerWidget(Qt::TopRightCorner) == nullptr);
-    auto* sources = window.findChild<QWidget*>(QStringLiteral("bench-panel-folders"));
-    QVERIFY(sources != nullptr);
-    QVERIFY(sources->isAncestorOf(search));
-    QVERIFY(search->geometry().right() < sources->width());
-    QCOMPARE(tabs->tabBar()->maximumWidth(), QWIDGETSIZE_MAX);
-
-    plain->trigger();
-    copy_layout->trigger();
-    QVERIFY(qobject_cast<ui::QueueItemDelegate*>(mpd_queue->itemDelegate()) == nullptr);
-    tabs->setCurrentWidget(local_queue);
-    QTRY_COMPARE(window.property("trackknife-active-authority").toString(),
-                 QStringLiteral("local"));
-    QVERIFY(local_source_tabs->isVisible());
-    QVERIFY(!mpd_source_tabs->isVisible());
-    QVERIFY(folder_view->isVisible());
-    QVERIFY(!mpd_library->isVisible());
-    QVERIFY(buffer_menu->isEnabled());
-    QCOMPARE(device->accessibleName(), QStringLiteral("Audio output device"));
-    QVERIFY(qobject_cast<ui::QueueItemDelegate*>(local_queue->itemDelegate()) == nullptr);
-    QVERIFY(!search->isVisible());
-    QVERIFY(!search_surface->isVisible());
-    QVERIFY(!repeat->isVisible());
-    QVERIFY(!random->isVisible());
-    QVERIFY(!single->isVisible());
-    QVERIFY(!consume->isVisible());
-}
-
-void BenchMainWindowTest::mpdSearchProjectsControllerResults() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* mpd_queue = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    auto* field = window.findChild<QLineEdit*>(QStringLiteral("bench-mpd-search"));
-    auto* surface = window.findChild<QWidget*>(QStringLiteral("bench-mpd-search-surface"));
-    auto* results = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-search-results"));
-    auto* result_model = window.findChild<quick::MpdSearchResultModel*>();
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    QVERIFY(tabs != nullptr);
-    QVERIFY(mpd_queue != nullptr);
-    QVERIFY(field != nullptr);
-    QVERIFY(surface != nullptr);
-    QVERIFY(results != nullptr);
-    QVERIFY(result_model != nullptr);
-    QVERIFY(controller != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
-    tabs->setCurrentWidget(mpd_queue);
-
-    auto* library = qobject_cast<quick::MpdQueueModel*>(controller->libraryModel());
-    QVERIFY(library != nullptr);
-    mpd::Metadata metadata{{
-        {"Artist", "Search Artist"},
-        {"AlbumArtist", "Search Artist"},
-        {"Album", "Search Album"},
-        {"Date", "2026"},
-        {"Track", "1"},
-        {"Title", "Search Result"},
-    }};
-    library->replaceTracks({mpd::Track{
-        .uri = "search/result.flac",
-        .metadata = std::move(metadata),
-        .musicbrainz = {},
-        .queue_id = std::nullopt,
-        .queue_position = std::nullopt,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = std::nullopt,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    field->setText(QStringLiteral("S"));
-    QTest::qWait(220);
-    QVERIFY(QMetaObject::invokeMethod(controller, "searchFinished", Qt::DirectConnection,
-                                      Q_ARG(QString, QStringLiteral("S")), Q_ARG(bool, true)));
-    QTRY_VERIFY(result_model->firstResultRow() >= 0);
-    // ADR-0192: Enter commits the hits as a working list on the server, so
-    // disconnected there is nowhere to put them and no tab appears.
-    const auto tab_count = tabs->count();
-    QTest::keyClick(field, Qt::Key_Return);
-    QTest::qWait(50);
-    QCOMPARE(tabs->count(), tab_count);
-    QVERIFY(window.findChild<QTableView*>(QStringLiteral("bench-mpd-search-tab-view")) == nullptr);
-
-    tabs->setCurrentWidget(mpd_queue);
-    const auto first = result_model->firstResultRow();
-    QCOMPARE(result_model->index(first, 1).data().toString(), QStringLiteral("Search Result"));
-    QCOMPARE(result_model->index(first, 4).data(Qt::ToolTipRole).toString(),
-             QStringLiteral("Append to queue (Enter)"));
-
-    auto* tree_model = qobject_cast<MpdLibrarySearchModel*>(results->model());
-    QVERIFY(tree_model);
-    QCOMPARE(tree_model->index(0, 0).data().toString(), QStringLiteral("Albums"));
-    QCOMPARE(tree_model->index(1, 0).data().toString(), QStringLiteral("Tracks"));
-    QCOMPARE(tree_model->index(0, 0, tree_model->index(1, 0)).data().toString(),
-             QStringLiteral("Search Artist — 01. Search Result"));
-
-    QSignalSpy artwork_requests{result_model, &quick::MpdSearchResultModel::artworkRequested};
-    result_model->replaceTracks({mpd::Track{
-        .uri = "search/album-cover.flac",
-        .metadata = mpd::Metadata{{
-            {"Artist", "Cover Artist"},
-            {"AlbumArtist", "Cover Artist"},
-            {"Album", "Cover Album"},
-            {"Date", "2026"},
-            {"Track", "1"},
-            {"Title", "Covered Track"},
-        }},
-        .musicbrainz = {},
-        .queue_id = std::nullopt,
-        .queue_position = std::nullopt,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = std::nullopt,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    QTRY_VERIFY(!artwork_requests.isEmpty());
-    const auto album_row = result_model->firstResultRow();
-    QVERIFY(album_row >= 0);
-    QImage cover{160, 160, QImage::Format_ARGB32_Premultiplied};
-    cover.fill(Qt::blue);
-    result_model->acceptArtwork(artwork_requests.front().front().toULongLong(), cover);
-    QVERIFY(!result_model->index(album_row, 0).data(Qt::DecorationRole).value<QImage>().isNull());
-    auto* local_tree = window.findChild<QTreeView*>(QStringLiteral("local-library-tree"));
-    QVERIFY(local_tree);
-    QVERIFY(dynamic_cast<ui::ServerLibraryTreeView*>(results));
-    QVERIFY(dynamic_cast<ui::ServerLibraryTreeDelegate*>(results->itemDelegate()));
-    QCOMPARE(results->selectionMode(), local_tree->selectionMode());
-    QCOMPARE(results->indentation(), local_tree->indentation());
-    auto* browse = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
-    QVERIFY(browse);
-    QVERIFY(local_tree->isAnimated());
-    QCOMPARE(local_tree->isAnimated(), browse->isAnimated());
-    QCOMPARE(results->isAnimated(), browse->isAnimated());
-    QCOMPARE(local_tree->iconSize(), browse->iconSize());
-    QCOMPARE(local_tree->uniformRowHeights(), browse->uniformRowHeights());
-    QCOMPARE(results->frameShape(), local_tree->frameShape());
-    QCOMPARE(results->dragDropMode(), local_tree->dragDropMode());
-    QCOMPARE(results->expandsOnDoubleClick(), local_tree->expandsOnDoubleClick());
-    const auto album = tree_model->index(0, 0, tree_model->index(0, 0));
-    QCOMPARE(album.data().toString(), QStringLiteral("Cover Album"));
-    QCOMPARE(album.data(MpdLibrarySearchModel::ArtistRole).toString(),
-             QStringLiteral("Cover Artist"));
-
-    QTest::keyClick(&window, Qt::Key_L, Qt::ControlModifier);
-    QTRY_VERIFY(surface->isVisible());
-    results->viewport()->repaint();
-    const auto album_cell = results->visualRect(album);
-    QVERIFY(!album_cell.isEmpty());
-    const auto album_render = results->viewport()->grab(album_cell).toImage();
-    auto blue_left = album_render.width();
-    auto blue_right = -1;
-    auto blue_top = album_render.height();
-    auto blue_bottom = -1;
-    for (int y = 0; y < album_render.height(); ++y) {
-        for (int x = 0; x < album_render.width(); ++x) {
-            if (album_render.pixelColor(x, y) == QColor(Qt::blue)) {
-                blue_left = std::min(blue_left, x);
-                blue_right = std::max(blue_right, x);
-                blue_top = std::min(blue_top, y);
-                blue_bottom = std::max(blue_bottom, y);
-            }
-        }
-    }
-    QVERIFY(blue_right >= blue_left);
-    QVERIFY(blue_bottom >= blue_top);
-    const auto painted_cover_width = blue_right - blue_left + 1;
-    const auto painted_cover_height = blue_bottom - blue_top + 1;
-    QVERIFY(painted_cover_width <= album_render.height());
-    QVERIFY(painted_cover_height <= album_render.height());
-    QVERIFY(std::abs(painted_cover_width - painted_cover_height) <= 1);
-    if (qEnvironmentVariableIsSet("TRACKKNIFE_SEARCH_SCREENSHOT")) {
-        surface->parentWidget()->parentWidget()->grab().save(
-            qEnvironmentVariable("TRACKKNIFE_SEARCH_SCREENSHOT"));
-    }
-    QCOMPARE(album_cell.height(), 42);
-    QCOMPARE(painted_cover_width, 28);
-    results->setCurrentIndex(album);
-    results->setFocus();
-    QVERIFY(!results->isExpanded(album));
-    QTest::keyClick(results, Qt::Key_Return);
-    QVERIFY(results->isExpanded(album));
-    QCOMPARE(results->currentIndex(), album);
-    QTest::keyClick(results, Qt::Key_Left);
-    QVERIFY(!results->isExpanded(album));
-    QTest::keyClick(results, Qt::Key_Right);
-    QVERIFY(results->isExpanded(album));
-    const auto track = tree_model->index(0, 0, tree_model->index(1, 0));
-    results->selectionModel()->select(track,
-                                      QItemSelectionModel::Select | QItemSelectionModel::Rows);
-    QCOMPARE(results->selectionModel()->selectedRows().size(), 2);
-    tree_model->setMore(true);
-    QVERIFY(tree_model->index(1, 0, tree_model->index(1, 0))
-                .data(MpdLibrarySearchModel::MoreRole)
-                .toBool());
-    tree_model->setMore(false);
-    QCOMPARE(tree_model->rowCount(tree_model->index(1, 0)), 1);
-    mpd_queue->setFocus();
-    QTRY_VERIFY(surface->isVisible());
-    auto* sources = window.findChild<QWidget*>(QStringLiteral("bench-panel-folders"));
-    auto* tree = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
-    auto* stack = window.findChild<QStackedWidget*>(QStringLiteral("bench-source-stack"));
-    QVERIFY(sources && tree && stack);
-    QVERIFY(sources->isAncestorOf(field));
-    QVERIFY(sources->isAncestorOf(surface));
-    QVERIFY(stack->currentWidget()->isAncestorOf(surface));
-    QVERIFY(!tree->isVisible());
-    const auto retained_count = result_model->rowCount();
-    tabs->setCurrentIndex(1);
-    QVERIFY(!field->isVisible());
-    QVERIFY(!surface->isVisible());
-    tabs->setCurrentWidget(mpd_queue);
-    QVERIFY(surface->isVisible());
-    QCOMPARE(field->text(), QStringLiteral("S"));
-    QCOMPARE(result_model->rowCount(), retained_count);
-    // Query edits remove stale actionable results immediately. A late reply
-    // for the old query must not replace the new search or the browse tree.
-    field->setText(QStringLiteral("Different"));
-    QCOMPARE(result_model->rowCount(), 0);
-    QVERIFY(QMetaObject::invokeMethod(controller, "searchFinished", Qt::DirectConnection,
-                                      Q_ARG(QString, QStringLiteral("S")), Q_ARG(bool, true)));
-    QCOMPARE(result_model->rowCount(), 0);
-    field->clear();
-    QVERIFY(field->text().isEmpty());
-    QVERIFY(stack->currentWidget()->isAncestorOf(tree));
-    QVERIFY(!surface->isVisible());
-    QVERIFY(tree->isVisible());
-    QVERIFY(QMetaObject::invokeMethod(controller, "searchFinished", Qt::DirectConnection,
-                                      Q_ARG(QString, QStringLiteral("Different")),
-                                      Q_ARG(bool, true)));
-    QCOMPARE(result_model->rowCount(), 0);
-}
-
-void BenchMainWindowTest::mpdSearchCoversFollowLibraryRefresh() {
-    BenchMainWindow window;
-    window.show();
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    auto* model = window.findChild<quick::MpdSearchResultModel*>();
-    auto* field = window.findChild<QLineEdit*>(QStringLiteral("bench-mpd-search"));
-    auto* tree = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-search-results"));
-    QVERIFY(controller && model && field && tree);
-    field->setText(QStringLiteral("Album"));
-    QTest::qWait(250);
-    mpd::Track track;
-    track.uri = "album/01.flac";
-    track.metadata = mpd::Metadata{{{"Artist", "Artist"}, {"Album", "Album"}}};
-    QSignalSpy requests{model, &quick::MpdSearchResultModel::artworkRequested};
-    model->replaceTracks({track});
-    QVERIFY(!requests.empty());
-    const auto old_token = requests.last().at(0).toULongLong();
-    QImage old_cover{32, 32, QImage::Format_RGB32};
-    old_cover.fill(Qt::red);
-    model->acceptArtwork(old_token, old_cover);
-    const QPersistentModelIndex album{tree->model()->index(0, 0, tree->model()->index(0, 0))};
-    const auto color = [&] {
-        const auto image = album.data(Qt::DecorationRole).value<QIcon>().pixmap(32, 32).toImage();
-        return image.isNull() ? QColor{} : image.pixelColor(16, 16);
-    };
-    QCOMPARE(color(), QColor{Qt::red});
-    const auto previous_requests = requests.size();
-    QVERIFY(QMetaObject::invokeMethod(controller, "serverDatabaseChanged", Qt::DirectConnection));
-    QTRY_VERIFY(requests.size() > previous_requests);
-    QVERIFY(album.isValid());
-    QCOMPARE(field->text(), QStringLiteral("Album"));
-    const auto fresh_token = requests.last().at(0).toULongLong();
-    QVERIFY(fresh_token != old_token);
-    QImage fresh_cover{32, 32, QImage::Format_RGB32};
-    fresh_cover.fill(Qt::blue);
-    model->acceptArtwork(fresh_token, fresh_cover);
-    QCOMPARE(color(), QColor{Qt::blue});
-    model->acceptArtwork(old_token, old_cover);
-    QCOMPARE(color(), QColor{Qt::blue});
-    // Repeating the same query gets fresh artwork too.
-    model->replaceTracks({track});
-    QVERIFY(requests.last().at(0).toULongLong() != fresh_token);
-}
-
-void BenchMainWindowTest::mpdSearchResolvesCompleteAlbums() {
-    quick::MpdSearchResultModel source;
-    MpdLibrarySearchModel tree{&source};
-    mpd::Track first{};
-    first.uri = "album/01.flac";
-    first.metadata = mpd::Metadata{
-        {{"AlbumArtist", "Artist"}, {"Album", "Album"}, {"Title", "First"}, {"Track", "1"}}};
-    auto second = first;
-    second.uri = "album/02.flac";
-    second.metadata = mpd::Metadata{
-        {{"AlbumArtist", "Artist"}, {"Album", "Album"}, {"Title", "Second"}, {"Track", "2/2"}}};
-    source.replaceTracks({second}); // The search matched only one track of this release.
-    QSignalSpy requests{&tree, &MpdLibrarySearchModel::albumRequested};
-    const auto album = tree.index(0, 0, tree.index(0, 0));
-    const auto matching_track = tree.index(0, 0, tree.index(1, 0));
-    QStringList resolved;
-    QString error;
-    int completions = 0;
-    tree.resolve({matching_track, album}, [&](QStringList uris, QString problem) {
-        resolved = std::move(uris);
-        error = std::move(problem);
-        ++completions;
-    });
-    QCOMPARE(completions, 0);
-    QCOMPARE(requests.size(), 1);
-    tree.loadAlbum(album); // Expansion joins the existing complete-release request.
-    QCOMPARE(requests.size(), 1);
-    tree.acceptAlbum(requests.front().front().toULongLong(), {second, first}, {});
-    QCOMPARE(completions, 1);
-    QVERIFY(error.isEmpty());
-    QCOMPARE(resolved, QStringList({"album/01.flac", "album/02.flac"}));
-    QCOMPARE(tree.rowCount(album), 2);
-    QCOMPARE(tree.index(1, 0, album).data().toString(), QStringLiteral("02. Second"));
-    QCOMPARE(album.data().toString(), QStringLiteral("Album (2)"));
-    tree.resolve({album, tree.index(0, 0, album), matching_track},
-                 [&](QStringList uris, QString problem) {
-                     resolved = std::move(uris);
-                     error = std::move(problem);
-                     ++completions;
-                 });
-    QCOMPARE(completions, 2);
-    QCOMPARE(resolved.size(), 2);
-    QCOMPARE(requests.size(), 1);
-
-    source.replaceTracks({second});
-    tree.resolve({tree.index(0, 0, tree.index(0, 0))}, [&](QStringList uris, QString problem) {
-        resolved = std::move(uris);
-        error = std::move(problem);
-        ++completions;
-    });
-    QCOMPARE(requests.size(), 2);
-    const auto stale_token = requests.back().front().toULongLong();
-    source.replaceTracks({});
-    QCOMPARE(completions, 3);
-    QVERIFY(resolved.isEmpty());
-    QVERIFY(!error.isEmpty());
-    tree.acceptAlbum(stale_token, {first, second}, {});
-    QCOMPARE(completions, 3);
-    QCOMPARE(tree.index(0, 0, tree.index(0, 0)).data().toString(), QStringLiteral("No matches"));
-}
-
-void BenchMainWindowTest::mpdQueueAndLibraryMenusExposeServerActions() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    auto* track_menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
-    auto* priority_menu = window.findChild<QMenu*>(QStringLiteral("bench-mpd-priority-menu"));
-    auto* library = dynamic_cast<ui::ServerLibraryTreeView*>(
-        window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library")));
-    auto* library_model = window.findChild<ui::ServerLibraryTreeModel*>();
-    auto* library_menu = window.findChild<QMenu*>(QStringLiteral("bench-mpd-library-context-menu"));
-    auto* replaygain = window.findChild<QToolButton*>(QStringLiteral("bench-mpd-replaygain"));
-    QVERIFY(tabs != nullptr);
-    QVERIFY(queue != nullptr);
-    QVERIFY(controller != nullptr);
-    QVERIFY(track_menu != nullptr);
-    QVERIFY(priority_menu != nullptr);
-    QVERIFY(library != nullptr);
-    QVERIFY(library_model != nullptr);
-    QVERIFY(library_menu != nullptr);
-    QVERIFY(replaygain != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
-    tabs->setCurrentWidget(queue);
-
-    auto* queue_model = qobject_cast<quick::MpdQueueModel*>(controller->queueModel());
-    QVERIFY(queue_model != nullptr);
-    queue_model->replaceTracks({mpd::Track{
-        .uri = "queue/prioritized.flac",
-        .metadata = mpd::Metadata{{{"Title", "Prioritized"}}},
-        .musicbrainz = {},
-        .queue_id = 17U,
-        .queue_position = 0U,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = 192U,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    queue->scrollTo(queue_model->index(0, 0));
-    const auto queue_position = queue->visualRect(queue_model->index(0, 0)).center();
-    QVERIFY(QMetaObject::invokeMethod(queue, "customContextMenuRequested", Qt::DirectConnection,
-                                      Q_ARG(QPoint, queue_position)));
-    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-add-next-selection")) == nullptr);
-    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-append-selection")) == nullptr);
-    for (const auto& label : {QStringLiteral("Queue next"), QStringLiteral("Queue at end")}) {
-        QVERIFY(std::ranges::any_of(
-            track_menu->actions(), [&](const QAction* action) { return action->text() == label; }));
-    }
-    QVERIFY(track_menu->actions().contains(
-        window.findChild<QAction*>(QStringLiteral("action-mpd-crop-selection"))));
-    QVERIFY(track_menu->actions().contains(priority_menu->menuAction()));
-    auto* high = window.findChild<QAction*>(QStringLiteral("action-mpd-queue-priority-192"));
-    QVERIFY(high != nullptr);
-    QVERIFY(high->isChecked());
-    QVERIFY(!priority_menu->isEnabled()); // Disconnected capability gate.
-    auto* rate_menu = window.findChild<QMenu*>(QStringLiteral("bench-mpd-rate-menu"));
-    QVERIFY(rate_menu != nullptr);
-    QVERIFY(track_menu->actions().contains(rate_menu->menuAction()));
-    QVERIFY(!rate_menu->isEnabled()); // Disconnected capability gate.
-    track_menu->close();
-
-    // ADR-0179: sticker ratings render as stars and drive the checked state.
-    queue_model->setStickerRatings({{QStringLiteral("queue/prioritized.flac"), 8U}});
-    QCOMPARE(queue_model->index(0, ui::track_rating_column).data().toString(),
-             QStringLiteral("★★★★"));
-    QVERIFY(QMetaObject::invokeMethod(queue, "customContextMenuRequested", Qt::DirectConnection,
-                                      Q_ARG(QPoint, queue_position)));
-    auto* four_stars = window.findChild<QAction*>(QStringLiteral("action-mpd-queue-rate-8"));
-    QVERIFY(four_stars != nullptr);
-    QVERIFY(four_stars->isChecked());
-    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-queue-rate-0")) != nullptr);
-    track_menu->close();
-
-    QCOMPARE(replaygain->popupMode(), QToolButton::InstantPopup);
-    QCOMPARE(replaygain->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
-    QCOMPARE(replaygain->accessibleName(), QStringLiteral("MPD ReplayGain mode"));
-
-    QSignalSpy root_requests{library_model, &ui::ServerLibraryTreeModel::rootRequested};
-    library_model->reload();
-    QTRY_COMPARE(root_requests.size(), 1);
-    const auto token = root_requests.front().at(0).toULongLong();
-    const auto tag = root_requests.front().at(1).toString();
-    library_model->acceptRoot(token, tag, {QStringLiteral("Library Artist")}, {});
-    const auto root = library_model->index(0, 0);
-    QVERIFY(root.isValid());
-    QVERIFY(root.flags().testFlag(Qt::ItemIsDragEnabled));
-    QVERIFY(library->dragEnabled());
-    QVERIFY(dynamic_cast<ui::ServerLibraryTreeDelegate*>(library->itemDelegate()) != nullptr);
-    library->scrollTo(root);
-    QTRY_VERIFY(!library->visualRect(root).isEmpty());
-
-    QSignalSpy branch_requests{library_model, &ui::ServerLibraryTreeModel::branchRequested};
-    library_model->fetchMore(root);
-    QTRY_COMPARE(branch_requests.size(), 1);
-    const auto branch_token = branch_requests.front().front().toULongLong();
-    library_model->acceptBranch(branch_token,
-                                {mpd::Track{
-                                    .uri = "library/artist/album/01.flac",
-                                    .metadata = mpd::Metadata{{
-                                        {"Artist", "Library Artist"},
-                                        {"AlbumArtist", "Library Artist"},
-                                        {"Album", "Library Album"},
-                                        {"Date", "2026"},
-                                        {"Track", "1"},
-                                        {"Title", "Library Track"},
-                                    }},
-                                    .musicbrainz = {},
-                                    .queue_id = std::nullopt,
-                                    .queue_position = std::nullopt,
-                                    .duration = std::chrono::milliseconds{180'000},
-                                    .last_modified = std::nullopt,
-                                    .audio_format = std::nullopt,
-                                    .priority = std::nullopt,
-                                    .rating = std::nullopt,
-                                    .melody_song_id = std::nullopt,
-                                    .unknown_structural_pairs = {},
-                                }},
-                                {});
-    QVERIFY(library_model->rowCount(root) > 0);
-    QVERIFY(!library->isExpanded(root));
-    QStyleOptionViewItem branch_option;
-    branch_option.initFrom(library);
-    branch_option.rect = library->visualRect(root);
-    const auto disclosure = library->style()->subElementRect(QStyle::SE_TreeViewDisclosureItem,
-                                                             &branch_option, library);
-    QVERIFY(!disclosure.isEmpty());
-    QTest::mouseClick(library->viewport(), Qt::LeftButton, Qt::NoModifier, disclosure.center());
-    QTRY_VERIFY(library->isExpanded(root));
-    QCoreApplication::processEvents();
-    QVERIFY(library->isExpanded(root)); // Disclosure click toggles exactly once.
-
-    const auto library_position = library->visualRect(root).center();
-    QVERIFY(QMetaObject::invokeMethod(library, "customContextMenuRequested", Qt::DirectConnection,
-                                      Q_ARG(QPoint, library_position)));
-    // ADR-0190: the direct actions name the visible tab; everything else is
-    // reachable through "Send to tab".
-    QCOMPARE(library_menu->actions().at(0)->text(), QStringLiteral("Add to MPD Queue"));
-    QCOMPARE(library_menu->actions().at(1)->text(), QStringLiteral("Replace MPD Queue"));
-    auto* send_to = window.findChild<QMenu*>(QStringLiteral("bench-send-to-tab-menu"));
-    QVERIFY(send_to != nullptr);
-    QVERIFY(!send_to->actions().isEmpty());
-    // "New list…" first, then a separator, then a submenu per open tab.
-    QCOMPARE(send_to->actions().at(0)->text(), QStringLiteral("New list…"));
-    QCOMPARE(send_to->actions().at(2)->text(), QStringLiteral("MPD Queue"));
-    auto* queue_placements = send_to->actions().at(2)->menu();
-    QVERIFY(queue_placements != nullptr);
-    QCOMPARE(queue_placements->actions().size(), 3);
-    QCOMPARE(queue_placements->actions().at(1)->text(), QStringLiteral("Insert next"));
-    library_menu->close();
-}
-
-void BenchMainWindowTest::mpdGoToArtistAlbumNavigatesLibrary() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    auto* library = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
-    auto* library_model = window.findChild<ui::ServerLibraryTreeModel*>();
-    auto* go_to_artist = window.findChild<QAction*>(QStringLiteral("action-mpd-go-to-artist"));
-    auto* go_to_album = window.findChild<QAction*>(QStringLiteral("action-mpd-go-to-album"));
-    QVERIFY(tabs != nullptr);
-    QVERIFY(queue != nullptr);
-    QVERIFY(controller != nullptr);
-    QVERIFY(library != nullptr);
-    QVERIFY(library_model != nullptr);
-    QVERIFY(go_to_artist != nullptr);
-    QVERIFY(go_to_album != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
-    tabs->setCurrentWidget(queue);
-
-    auto* queue_model = qobject_cast<quick::MpdQueueModel*>(controller->queueModel());
-    QVERIFY(queue_model != nullptr);
-    queue_model->replaceTracks({mpd::Track{
-        .uri = "queue/target.flac",
-        .metadata = mpd::Metadata{{
-            {"Title", "Queued"},
-            {"Artist", "Library Artist"},
-            {"AlbumArtist", "Library Artist"},
-            {"Album", "Library Album"},
-        }},
-        .musicbrainz = {},
-        .queue_id = 7U,
-        .queue_position = 0U,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = std::nullopt,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    queue->setCurrentIndex(queue_model->index(0, 0));
-
-    QSignalSpy root_requests{library_model, &ui::ServerLibraryTreeModel::rootRequested};
-    QSignalSpy branch_requests{library_model, &ui::ServerLibraryTreeModel::branchRequested};
-
-    // Go to album on an unloaded library: the tree loads its roots, then
-    // the artist's branch, then lands on the album row.
-    go_to_album->trigger();
-    QTRY_COMPARE(root_requests.size(), 1);
-    library_model->acceptRoot(
-        root_requests.front().at(0).toULongLong(), root_requests.front().at(1).toString(),
-        {QStringLiteral("Another Artist"), QStringLiteral("Library Artist")}, {});
-    QTRY_COMPARE(branch_requests.size(), 1);
-    library_model->acceptBranch(branch_requests.front().front().toULongLong(),
-                                {mpd::Track{
-                                    .uri = "library/artist/album/01.flac",
-                                    .metadata = mpd::Metadata{{
-                                        {"Artist", "Library Artist"},
-                                        {"AlbumArtist", "Library Artist"},
-                                        {"Album", "Library Album"},
-                                        {"Track", "1"},
-                                        {"Title", "Library Track"},
-                                    }},
-                                    .musicbrainz = {},
-                                    .queue_id = std::nullopt,
-                                    .queue_position = std::nullopt,
-                                    .duration = std::chrono::milliseconds{180'000},
-                                    .last_modified = std::nullopt,
-                                    .audio_format = std::nullopt,
-                                    .priority = std::nullopt,
-                                    .rating = std::nullopt,
-                                    .melody_song_id = std::nullopt,
-                                    .unknown_structural_pairs = {},
-                                }},
-                                {});
-    QTRY_VERIFY(library->currentIndex().isValid());
-    QTRY_VERIFY(library->currentIndex()
-                    .data(Qt::DisplayRole)
-                    .toString()
-                    .startsWith(QStringLiteral("Library Album")));
-    QVERIFY(library->isExpanded(library->currentIndex().parent()));
-    QCOMPARE(library->currentIndex()
-                 .parent()
-                 .data(ui::ServerLibraryTreeModel::QueryValueRole)
-                 .toString(),
-             QStringLiteral("Library Artist"));
-
-    // Go to artist selects the loaded artist row directly, and an artist
-    // the tree does not know reports instead of navigating.
-    go_to_artist->trigger();
-    QTRY_COMPARE(
-        library->currentIndex().data(ui::ServerLibraryTreeModel::QueryValueRole).toString(),
-        QStringLiteral("Library Artist"));
-    queue_model->replaceTracks({mpd::Track{
-        .uri = "queue/unknown.flac",
-        .metadata = mpd::Metadata{{
-            {"Title", "Unknown"},
-            {"AlbumArtist", "Nobody Known"},
-            {"Album", "Nowhere"},
-        }},
-        .musicbrainz = {},
-        .queue_id = 8U,
-        .queue_position = 0U,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = std::nullopt,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    queue->setCurrentIndex(queue_model->index(0, 0));
-    go_to_artist->trigger();
-    QTRY_VERIFY(
-        window.statusBar()->currentMessage().contains(QStringLiteral("not in the library tree")));
-}
-
-// ADR-0129: the sidebar Playlists list opens one closable tab per server
-// playlist name, contents follow only authoritative re-reads, and edits are
-// server commands — a disconnected controller must leave rows untouched.
 void BenchMainWindowTest::shortcutSettingsValidateSaveAndCancel() {
     QSettings{}.remove(QStringLiteral("shortcuts"));
     BenchMainWindow window;
@@ -2046,22 +1210,6 @@ void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
     QCOMPARE(playing.view->currentIndex().row(), 0);
     QCOMPARE(jump->shortcut(), QKeySequence(QStringLiteral("Ctrl+J")));
 
-    // Browsing the MPD queue must not make the workspace forget where its own
-    // playback is. Choosing the branch from the visible tab meant jumping
-    // looked for a local track in the MPD queue and silently did nothing --
-    // and, once the engine owned playback, the same confusion let the local
-    // refresh wipe the anchors outright.
-    tabs->setCurrentWidget(window.mpd_queue_view_);
-    QVERIFY(tabs->currentWidget() != playing.view);
-    // Restated because no sound is actually being made here: an idle player
-    // legitimately drops the anchors, and what is under test is which
-    // authority the jump consults, not who keeps the anchors alive.
-    window.playback_.anchors.document = playing.document.id;
-    window.playback_.anchors.current = playing.model->rows().at(0).entry_id;
-    window.playback_.row = 0;
-    jump->trigger();
-    QCOMPARE(tabs->currentWidget(), playing.view);
-    QCOMPARE(playing.view->currentIndex().row(), 0);
     QVERIFY(!QSettings{}.value(QStringLiteral("workspace/follow-playback")).toBool());
 }
 
@@ -2128,10 +1276,8 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
     QVERIFY(!tabs->tabIcon(index).isNull());
     QVERIFY(tabs->tabToolTip(index).contains(QStringLiteral("Active playback queue")));
-    tabs->setCurrentWidget(window.mpd_queue_view_);
     window.refreshUpNext();
     QVERIFY(tabs->tabBar()->tabData(index).toBool());
-    tabs->setCurrentWidget(local.view);
     window.stop_action_->trigger();
     window.playback_.anchors.document = core::StableId{};
     window.refreshTransport();
@@ -2145,138 +1291,6 @@ void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {
     window.setActiveLocalList(QString::fromStdString(next->document.id.to_string()));
     QVERIFY(!tabs->tabBar()->tabData(index).toBool());
     QVERIFY(tabs->tabBar()->tabData(tabs->indexOf(next->view)).toBool());
-}
-
-void BenchMainWindowTest::mpdStoredPlaylistTabsFollowServerAuthority() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    auto* playlists = window.findChild<QTreeWidget*>(QStringLiteral("bench-mpd-playlists"));
-    auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-mpd-source-tabs"));
-    auto* source_pages =
-        window.findChild<QStackedWidget*>(QStringLiteral("bench-mpd-source-pages"));
-    auto* remove_selected =
-        window.findChild<QAction*>(QStringLiteral("action-remove-selected-tracks"));
-    auto* close_tab = window.findChild<QAction*>(QStringLiteral("action-close-tab"));
-    QVERIFY(tabs != nullptr);
-    QVERIFY(controller != nullptr);
-    QVERIFY(playlists != nullptr);
-    QVERIFY(source_tabs != nullptr);
-    QVERIFY(source_pages != nullptr);
-    QVERIFY(remove_selected != nullptr);
-    QVERIFY(close_tab != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
-    auto* queue = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(queue != nullptr);
-    tabs->setCurrentWidget(queue);    // MPD context shows the library panel.
-    QVERIFY(!playlists->isVisible()); // The Library page is the default.
-
-    emit controller->storedPlaylistListLoaded(
-        {QStringLiteral("Quiet mix"), QStringLiteral("Road mix")});
-    QCOMPARE(playlists->topLevelItemCount(), 2);
-    // The ADR-0130 sidebar tab bar switches to the full-height Playlists page.
-    source_tabs->setCurrentIndex(1);
-    QTRY_VERIFY(playlists->isVisible());
-    QCOMPARE(source_pages->currentWidget(), playlists);
-
-    // Activating a sidebar entry opens exactly one tab keyed by the name.
-    emit playlists->itemActivated(playlists->topLevelItem(1), 0);
-    QTRY_COMPARE(tabs->count(), 3);
-    auto* view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-playlist-view"));
-    QVERIFY(view != nullptr);
-    QCOMPARE(view->property("bench-mpd-playlist-name").toString(), QStringLiteral("Road mix"));
-    QCOMPARE(tabs->currentWidget(), view);
-    QCOMPARE(tabs->tabText(tabs->indexOf(view)), QStringLiteral("Road mix"));
-    emit playlists->itemActivated(playlists->topLevelItem(1), 0);
-    QCOMPARE(tabs->count(), 3); // Reopening refreshes instead of duplicating.
-
-    // Contents arrive only through the authoritative playlist re-read.
-    auto* playlist_model = qobject_cast<quick::MpdQueueModel*>(controller->browserPlaylistModel());
-    QVERIFY(playlist_model != nullptr);
-    playlist_model->replaceTracks({mpd::Track{
-        .uri = "Artist/Release/01.flac",
-        .metadata = mpd::Metadata{{{"Title", "Stored one"}, {"Artist", "Credited Artist"}}},
-        .musicbrainz = {},
-        .queue_id = std::nullopt,
-        .queue_position = std::nullopt,
-        .duration = std::chrono::milliseconds{180'000},
-        .last_modified = std::nullopt,
-        .audio_format = std::nullopt,
-        .priority = std::nullopt,
-        .rating = std::nullopt,
-        .melody_song_id = std::nullopt,
-        .unknown_structural_pairs = {},
-    }});
-    emit controller->storedPlaylistLoaded(QStringLiteral("Road mix"));
-    QTRY_COMPARE(view->model()->rowCount(), 1);
-
-    // Both server surfaces use the same track menu, including entry ordering.
-    auto* queue_model = qobject_cast<quick::MpdQueueModel*>(queue->model());
-    QVERIFY(queue_model != nullptr);
-    queue_model->replaceTracks(playlist_model->tracksSnapshot());
-    auto* track_menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
-    QVERIFY(track_menu != nullptr);
-    const auto menu_labels = [&](QTableView* surface) {
-        tabs->setCurrentWidget(surface);
-        surface->selectRow(0);
-        surface->scrollTo(surface->model()->index(0, 0));
-        window.showTrackContextMenu(surface,
-                                    surface->visualRect(surface->model()->index(0, 0)).center());
-        QStringList labels;
-        for (auto* action : track_menu->actions())
-            labels.push_back(action->isSeparator() ? QStringLiteral("---") : action->text());
-        track_menu->close();
-        return labels;
-    };
-    const auto queue_labels = menu_labels(queue);
-    auto* server_model = qobject_cast<quick::MpdQueueModel*>(view->model());
-    QVERIFY(server_model != nullptr);
-    server_model->setStickerRatings({{QStringLiteral("Artist/Release/01.flac"), 8U}});
-    QCOMPARE(menu_labels(view), queue_labels);
-    QVERIFY(queue_labels.contains(QStringLiteral("Play")));
-    QVERIFY(queue_labels.contains(QStringLiteral("Queue next")));
-    QVERIFY(!queue_labels.contains(QStringLiteral("Append to live queue")));
-    auto* four_stars = window.findChild<QAction*>(QStringLiteral("action-mpd-queue-rate-8"));
-    QVERIFY(four_stars != nullptr && four_stars->isChecked()); // Reads this list, not MPD Queue.
-    QVERIFY(controller->listPriorityTrack(QStringLiteral("Road mix"), 0,
-                                          QStringLiteral("Artist/Release/01.flac")) ==
-            nullptr); // Inactive list cannot address live IDs.
-
-    // Removal is a server command: disconnected, the rows must stay visible.
-    view->selectionModel()->select(view->model()->index(0, 0),
-                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-    remove_selected->trigger();
-    QCOMPARE(view->model()->rowCount(), 1);
-
-    // The playlist tab is an MPD-authority surface and stays closable.
-    QCOMPARE(window.property("trackknife-active-authority").toString(), QStringLiteral("mpd"));
-    QVERIFY(close_tab->isEnabled());
-
-    // Scratch flags update presentation without replaying saved-tab restoration.
-    // A saved name becomes eligible only on the next authoritative name response.
-    QSettings{}.setValue(QStringLiteral("mpd/open-playlist-tabs"),
-                         QStringList{QStringLiteral("Quiet mix")});
-    emit controller->scratchListsLoaded({QStringLiteral("Road mix")});
-    QCOMPARE(playlists->topLevelItemCount(), 1);
-    QCOMPARE(playlists->topLevelItem(0)->text(0), QStringLiteral("Quiet mix"));
-    QCOMPARE(tabs->count(), 3);
-    QCOMPARE(view->model()->rowCount(), 1);
-    emit controller->scratchListsLoaded({});
-    QCOMPARE(playlists->topLevelItemCount(), 2);
-    QCOMPARE(tabs->count(), 3);
-
-    // Server-side rename retargets the open tab; deletion closes it.
-    emit controller->storedPlaylistRenamed(QStringLiteral("Road mix"),
-                                           QStringLiteral("Highway mix"));
-    QTRY_COMPARE(tabs->tabText(tabs->indexOf(view)), QStringLiteral("Highway mix"));
-    QCOMPARE(view->property("bench-mpd-playlist-name").toString(), QStringLiteral("Highway mix"));
-    emit controller->storedPlaylistDeleted(QStringLiteral("Highway mix"));
-    QTRY_COMPARE(tabs->count(), 2);
-
-    // Disconnect clears the sidebar list.
-    emit controller->storedPlaylistListLoaded({});
-    QCOMPARE(playlists->topLevelItemCount(), 0);
 }
 
 void BenchMainWindowTest::playbackBufferProfilesPersistAndExposeDiagnostics() {
@@ -2375,7 +1389,7 @@ void BenchMainWindowTest::statusBarSummarizesTrackSelection() {
     QVERIFY(tabs != nullptr);
     QVERIFY(status != nullptr);
     QCOMPARE(status->accessibleName(), QStringLiteral("Selected track information"));
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -2557,7 +1571,7 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
     auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(tabs != nullptr && properties_action != nullptr && source_tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* list_view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(list_view != nullptr);
     auto* list_model = qobject_cast<LocalListModel*>(list_view->model());
@@ -2575,7 +1589,7 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
 
     // The workspace is untouched: no extra sidebar page, no extra tab.
     QCOMPARE(source_tabs->count(), sidebar_tabs_before);
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
     QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(list_view));
 
     // The grid, and with it the file list, builds asynchronously.
@@ -2661,7 +1675,7 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
     QVERIFY(tabs != nullptr);
     QVERIFY(properties_action != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     QTRY_VERIFY(!window.property("trackknife-metadata-operation-running").toBool());
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
@@ -2679,7 +1693,7 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     // ADR-0221: a window, so the tab strip is untouched and the list the
     // selection came from stays current.
     QVERIFY(properties->isWindow());
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
     QVERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) == nullptr);
     QVERIFY(properties->windowTitle().startsWith(QStringLiteral("Edit tags · 1 track")));
     QTableView* fields = nullptr;
@@ -2708,7 +1722,7 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
              (std::vector<std::string>{"Applied from ready preview"}));
     QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
     QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
 }
@@ -4783,475 +3797,76 @@ void write_sine_wav_fixture(const QString& path, const double amplitude,
 
 } // namespace
 
-void BenchMainWindowTest::settingsControlStartupContextAndMusicRoot() {
-    // Startup in the MPD queue when the setting says so.
-    {
-        QSettings settings;
-        settings.setValue(QLatin1String(SettingsDialog::startup_context_key),
-                          QStringLiteral("mpd"));
-        settings.sync();
-    }
-    {
-        BenchMainWindow window;
-        window.show();
-        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QVERIFY(tabs != nullptr);
-        QTRY_VERIFY(tabs->currentWidget() != nullptr &&
-                    tabs->currentWidget()->objectName() == QStringLiteral("bench-mpd-queue"));
-
-        // The settings dialog exposes both values and persists on Save.
-        auto* settings_action = window.findChild<QAction*>(QStringLiteral("action-settings"));
-        QVERIFY(settings_action != nullptr);
-        settings_action->trigger();
-        QDialog* dialog = nullptr;
-        QTRY_VERIFY((dialog = window.findChild<QDialog*>(
-                         QStringLiteral("bench-settings-dialog"))) != nullptr);
-        auto* startup = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-startup"));
-        auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-music-root"));
-        auto* buttons =
-            dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
-        QVERIFY(startup != nullptr && root != nullptr && buttons != nullptr);
-        QCOMPARE(startup->currentData().toString(), QStringLiteral("mpd"));
-        startup->setCurrentIndex(startup->findData(QStringLiteral("local")));
-        root->setText(QStringLiteral("/music/root"));
-        QTest::mouseClick(buttons->button(QDialogButtonBox::Save), Qt::LeftButton);
-        QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-settings-dialog")) == nullptr);
-        const QSettings persisted;
-        QCOMPARE(persisted.value(QLatin1String(SettingsDialog::startup_context_key)).toString(),
-                 QStringLiteral("local"));
-        QCOMPARE(persisted.value(QLatin1String(SettingsDialog::music_root_key)).toString(),
-                 QStringLiteral("/music/root"));
-    }
-
-    // "Load as local files" resolves URIs below the music root into a new
-    // local tab and reports the misses without failing.
-    QTemporaryDir media;
-    QVERIFY(media.isValid());
-    QDir{media.path()}.mkpath(QStringLiteral("Artist/Album"));
-    const auto wav = media.filePath(QStringLiteral("Artist/Album/one.wav"));
-    write_sine_wav_fixture(wav, 0.5);
-    {
-        QSettings settings;
-        settings.setValue(QLatin1String(SettingsDialog::music_root_key), media.path());
-        settings.sync();
-    }
-    {
-        BenchMainWindow window;
-        window.show();
-        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QVERIFY(tabs != nullptr);
-        QTRY_VERIFY(tabs->count() >= 2);
-        const auto tabs_before = tabs->count();
-        window.loadMpdUrisAsLocalFiles(
-            {QStringLiteral("Artist/Album/one.wav"), QStringLiteral("Artist/Album/gone.wav")});
-        QTRY_COMPARE(tabs->count(), tabs_before + 1);
-        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
-        QVERIFY(view != nullptr);
-        QTRY_COMPARE(view->model()->rowCount(), 1);
-        QVERIFY(window.findChild<QStatusBar*>()->currentMessage().contains(
-            QStringLiteral("1 track could not be opened")));
-
-        // The queue and library context actions exist for discoverability.
-        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-load-local")) != nullptr);
-
-        // The library ordering dropdown is scoped to the server library.
-        auto* order = window.findChild<QComboBox*>(QStringLiteral("bench-library-order"));
-        auto* mpd_queue = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-        QVERIFY(order != nullptr && mpd_queue != nullptr);
-        QCOMPARE(order->count(), 2);
-        QVERIFY(!order->isVisible());
-        QCOMPARE(order->currentData().toString(), QStringLiteral("az"));
-        tabs->setCurrentWidget(mpd_queue);
-        QTRY_VERIFY(order->isVisible());
-        order->setFocus();
-        QTest::keyClick(order, Qt::Key_Down);
-        QCOMPARE(order->currentData().toString(), QStringLiteral("latest"));
-        {
-            const QSettings persisted;
-            QCOMPARE(persisted.value(QStringLiteral("mpd/library-order")).toString(),
-                     QStringLiteral("latest"));
-        }
-        QTest::keyClick(order, Qt::Key_Up);
-        {
-            const QSettings persisted;
-            QCOMPARE(persisted.value(QStringLiteral("mpd/library-order")).toString(),
-                     QStringLiteral("az"));
-        }
-    }
-
-    // Leave a clean slate for the other window tests.
-    QSettings settings;
-    settings.remove(QLatin1String(SettingsDialog::startup_context_key));
-    settings.remove(QLatin1String(SettingsDialog::music_root_key));
-    settings.remove(QStringLiteral("mpd/library-order"));
-    settings.sync();
-}
-
-// Mapped tools open directly without an intermediate list. Exercises the global-root fallback of
-// effectiveMpdMusicRoot; the per-profile branch reuses the melody-endpoint
-// profile lookup covered elsewhere.
-void BenchMainWindowTest::mpdSugarActionsMaterializeAndOpenDialog() {
-    QTemporaryDir media;
-    QVERIFY(media.isValid());
-    QDir{media.path()}.mkpath(QStringLiteral("Artist/Album"));
-    const auto flac = media.filePath(QStringLiteral("Artist/Album/one.flac"));
-    // This test scans ReplayGain, so the fixture must be long enough to
-    // produce a gated integrated loudness. EBU R128 has no measurement for
-    // material shorter than one 400 ms gating block, and the shared
-    // rich-metadata fixture is 100 ms; the long variant carries identical
-    // tags over one second of audio.
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), flac));
-    write_sine_wav_fixture(media.filePath(QStringLiteral("Artist/Album/one.wav")), 0.5);
-    {
-        QSettings settings;
-        settings.setValue(QLatin1String(SettingsDialog::music_root_key), media.path());
-        settings.sync();
-    }
-    {
-        BenchMainWindow window;
-        window.show();
-        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QVERIFY(tabs != nullptr);
-        QTRY_VERIFY(tabs->count() >= 2);
-
-        // The queue sugar actions exist for discoverability.
-        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-edit-tags")) != nullptr);
-        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-replaygain")) != nullptr);
-        QVERIFY(window.findChild<QAction*>(QStringLiteral("action-mpd-convert")) != nullptr);
-
-        tabs->setCurrentWidget(window.mpd_queue_view_);
-        const auto tabs_before = tabs->count();
-        const auto local_lists_before = window.list_tabs_.size();
-        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
-                                                BenchMainWindow::MaterializedDialog::edit_tags);
-        QCOMPARE(tabs->count(), tabs_before);
-        auto* properties = window.findChild<MetadataPropertiesDialog*>(
-            QStringLiteral("bench-metadata-properties"));
-        QVERIFY(properties);
-        QVERIFY(properties->isWindow());
-        QVERIFY(!properties->isModal());
-        QCOMPARE(tabs->currentWidget(), static_cast<QWidget*>(window.mpd_queue_view_));
-        QCOMPARE(window.list_tabs_.size(), local_lists_before);
-        QVERIFY(!window.discovery_running_);
-        MetadataGridModel* grid = nullptr;
-        QTRY_VERIFY((grid = properties->findChild<MetadataGridModel*>()) != nullptr);
-        QCOMPARE(grid->rowCount(), 1);
-        QVERIFY(grid->selection().source(0).source_revision.has_value());
-        const auto artist_column = grid->fieldColumn(QStringLiteral("ARTIST"));
-        QVERIFY(artist_column.has_value());
-        QVERIFY(!grid->data(grid->index(0, *artist_column), Qt::DisplayRole).toString().isEmpty());
-        QVERIFY(properties->fileListView()->isVisible());
-        // ADR-0221: the file list belongs to the tagger window, and the
-        // workspace sidebar is left alone.
-        QVERIFY(properties->isAncestorOf(properties->fileListView()));
-        auto* source_tabs = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
-        QVERIFY(source_tabs->tabText(source_tabs->currentIndex()) != QStringLiteral("Files"));
-        auto* fields = properties->findChild<QTableView*>(QStringLiteral("bench-metadata-fields"));
-        auto* aggregate = qobject_cast<MetadataAggregateModel*>(fields->model());
-        QVERIFY(aggregate);
-        const auto title = aggregate->fieldRow(QStringLiteral("title"));
-        QVERIFY(title);
-        QVERIFY(aggregate->setData(aggregate->index(*title, 2),
-                                   QStringLiteral("Edited without a local list"), Qt::EditRole));
-        auto* apply =
-            properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
-        QTRY_VERIFY(apply->isEnabled());
-        apply->click();
-        QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) ==
-                    nullptr);
-
-        const auto reread = metadata::read_local_metadata(QFile::encodeName(flac).toStdString());
-        QVERIFY(reread);
-        QCOMPARE(reread->document.effective_values("title"),
-                 (std::vector<std::string>{"Edited without a local list"}));
-        QCOMPARE(tabs->count(), tabs_before);
-        QCOMPARE(window.list_tabs_.size(), local_lists_before);
-
-        window.materializeMpdSelectionForDialog({QStringLiteral("../escape.flac")},
-                                                BenchMainWindow::MaterializedDialog::edit_tags);
-        QVERIFY(!window.findChild<MetadataPropertiesDialog*>());
-        QCOMPARE(tabs->count(), tabs_before);
-        window.materializeMpdSelectionForDialog({QStringLiteral("missing.flac")},
-                                                BenchMainWindow::MaterializedDialog::edit_tags);
-        properties = window.findChild<MetadataPropertiesDialog*>();
-        QVERIFY(properties);
-        auto* summary = properties->findChild<QLabel*>(QStringLiteral("bench-metadata-summary"));
-        QTRY_COMPARE(summary->text(), QStringLiteral("Properties unavailable"));
-        // ADR-0221: even an editor that cannot read its sources is a window.
-        QCOMPARE(tabs->count(), tabs_before);
-        QVERIFY(properties->isWindow());
-        properties->close();
-        QTRY_VERIFY(!window.findChild<MetadataPropertiesDialog*>());
-
-        // A second flavor proves the dispatch switch.
-        const auto original_widget = tabs->currentWidget();
-        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
-                                                BenchMainWindow::MaterializedDialog::convert);
-        QDialog* convert = nullptr;
-        QTRY_VERIFY((convert = window.findChild<QDialog*>(
-                         QStringLiteral("bench-convert-dialog"))) != nullptr);
-        QCOMPARE(tabs->count(), tabs_before);
-        QCOMPARE(window.list_tabs_.size(), local_lists_before);
-        QCOMPARE(tabs->currentWidget(), original_widget);
-        QVERIFY(!window.discovery_running_);
-        convert->close();
-        QTRY_VERIFY(!window.findChild<ConvertDialog*>());
-
-        window.materializeMpdSelectionForDialog(
-            {QStringLiteral("Artist/Album/one.flac"), QStringLiteral("missing.flac")},
-            BenchMainWindow::MaterializedDialog::convert);
-        QTRY_VERIFY(!window.mapped_tool_loading_);
-        QVERIFY(!window.findChild<ConvertDialog*>());
-        QCOMPARE(tabs->count(), tabs_before);
-        QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("missing.flac")));
-        window.materializeMpdSelectionForDialog({QStringLiteral("../escape.flac")},
-                                                BenchMainWindow::MaterializedDialog::convert);
-        QVERIFY(!window.mapped_tool_loading_);
-        QVERIFY(!window.findChild<ConvertDialog*>());
-
-        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
-                                                BenchMainWindow::MaterializedDialog::convert);
-        auto* preparation =
-            window.findChild<QProgressDialog*>(QStringLiteral("bench-mapped-convert-progress"));
-        QVERIFY(preparation);
-        QVERIFY(QMetaObject::invokeMethod(preparation, "canceled"));
-        QTRY_VERIFY(!window.mapped_tool_loading_);
-        QVERIFY(!window.findChild<ConvertDialog*>());
-
-        window.materializeMpdSelectionForDialog({QStringLiteral("Artist/Album/one.flac")},
-                                                BenchMainWindow::MaterializedDialog::replay_gain);
-        auto* replaygain = window.findChild<ReplayGainDialog*>();
-        QVERIFY(replaygain);
-        QCOMPARE(tabs->count(), tabs_before);
-        QCOMPARE(window.list_tabs_.size(), local_lists_before);
-        QCOMPARE(tabs->currentWidget(), original_widget);
-        auto* rg_run =
-            replaygain->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));
-        auto* rg_preview =
-            replaygain->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-preview"));
-        auto* rg_status =
-            replaygain->findChild<QLabel*>(QStringLiteral("bench-replaygain-dialog-status"));
-        QVERIFY(rg_run && rg_preview && rg_status);
-        const auto before_preview =
-            metadata::read_local_metadata(QFile::encodeName(flac).toStdString());
-        QVERIFY(before_preview);
-        rg_preview->click();
-        QTRY_VERIFY(rg_run->isEnabled());
-        QVERIFY2(rg_status->text().startsWith(QStringLiteral("1 tracks ready")),
-                 qPrintable(rg_status->text()));
-        auto* groups =
-            replaygain->findChild<QListWidget*>(QStringLiteral("bench-replaygain-dialog-groups"));
-        QVERIFY(groups && groups->count() == 1);
-        QCOMPARE(
-            metadata::read_local_metadata(QFile::encodeName(flac).toStdString())->source_revision,
-            before_preview->source_revision);
-        rg_run->click();
-        QTRY_VERIFY_WITH_TIMEOUT(rg_run->isEnabled(), 30000);
-        QVERIFY2(rg_status->text().startsWith(QStringLiteral("Saved ReplayGain tags to 1")),
-                 qPrintable(rg_status->text()));
-        QCOMPARE(window.list_tabs_.size(), local_lists_before);
-        replaygain->close();
-        QTRY_VERIFY(!window.findChild<ReplayGainDialog*>());
-
-        // The hardened bridge rejects traversal URIs instead of joining them.
-        auto* status_bar = window.findChild<QStatusBar*>();
-        QVERIFY(status_bar != nullptr);
-        const auto tabs_before_escape = tabs->count();
-        window.loadMpdUrisAsLocalFiles(
-            {QStringLiteral("../escape.wav"), QStringLiteral("Artist/Album/one.wav")});
-        QTRY_COMPARE(tabs->count(), tabs_before_escape + 1);
-        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
-        QVERIFY(view != nullptr);
-        QTRY_COMPARE(view->model()->rowCount(), 1);
-        QVERIFY(
-            status_bar->currentMessage().contains(QStringLiteral("1 track could not be opened")));
-    }
-
-    QSettings settings;
-    settings.remove(QLatin1String(SettingsDialog::music_root_key));
-    settings.sync();
-}
-
-// Search where you are: opened from a server-side tab, the dialog starts on
-// the server library rather than the local database.
-void BenchMainWindowTest::searchOpensInTheScopeOfTheActiveTab() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    auto* action = window.findChild<QAction*>(QStringLiteral("action-search-dialog"));
-    QVERIFY(tabs != nullptr && queue_view != nullptr && action != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-
-    tabs->setCurrentWidget(queue_view);
-    action->trigger();
-    QDialog* dialog = nullptr;
-    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
-                nullptr);
-    auto* scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
-    QVERIFY(scope != nullptr);
-    QCOMPARE(scope->count(), 3); // Library database, current tab, server library.
-    QCOMPARE(scope->currentIndex(), 2);
-
-    // Reopening from a local tab leaves the choice alone rather than forcing
-    // the server scope back on.
-    dialog->close();
-    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-search-dialog")) == nullptr);
-    for (int index = 0; index < tabs->count(); ++index) {
-        if (tabs->widget(index) != queue_view &&
-            qobject_cast<QTableView*>(tabs->widget(index)) != nullptr) {
-            tabs->setCurrentIndex(index);
-            break;
-        }
-    }
-    action->trigger();
-    QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-search-dialog"))) !=
-                nullptr);
-    scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
-    QVERIFY(scope != nullptr);
-    QCOMPARE(scope->currentIndex(), 0);
-    dialog->close();
-}
-
-// Closing a tab returns to the one you came from, not to its neighbour.
 void BenchMainWindowTest::closingATabReturnsToThePreviousOne() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(tabs != nullptr && queue_view != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-
-    auto* first = window.openMpdPlaylistTab(QStringLiteral("First"), true);
-    auto* second = window.openMpdPlaylistTab(QStringLiteral("Second"), true);
+    QVERIFY(tabs != nullptr);
+    QTRY_VERIFY(!window.list_tabs_.empty());
+    auto* origin = window.list_tabs_.front()->view;
+    const auto make = [&window](const char* name) {
+        return window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                           .kind = persistence::ListKind::scratch,
+                                                           .name = name,
+                                                           .pinned = false,
+                                                           .dirty = false,
+                                                           .items = {}},
+                                 true);
+    };
+    auto* first = make("First");
+    auto* second = make("Second");
     QVERIFY(first != nullptr && second != nullptr);
 
-    // Visit the queue, then the second list: closing it goes back to the
-    // queue, even though "First" sits right beside it.
-    tabs->setCurrentWidget(queue_view);
+    // Visit the origin, then the second list: closing it goes back to the
+    // origin, even though "First" sits right beside it.
+    tabs->setCurrentWidget(origin);
     tabs->setCurrentWidget(second->view);
     window.closeTabAt(tabs->indexOf(second->view));
-    QTRY_COMPARE(tabs->currentWidget(), static_cast<QWidget*>(queue_view));
+    QTRY_COMPARE(tabs->currentWidget(), static_cast<QWidget*>(origin));
     QVERIFY(tabs->indexOf(first->view) >= 0);
 }
 
-// Delete and Play act on the tab you are looking at. The regression twice
-// over: the active view fell back to the MPD queue for every server-side
-// tab, so a list tab's own selection was never the one being acted on.
+// Delete and Play act on the tab you are looking at, not on whichever list
+// last held a selection.
 void BenchMainWindowTest::selectionActionsFollowTheActiveTab() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(tabs != nullptr && queue_view != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-    tabs->setCurrentWidget(queue_view);
-    QCOMPARE(window.activeTrackView(), queue_view);
-
-    auto* playlist_tab = window.openMpdPlaylistTab(QStringLiteral("Working"), true);
-    QVERIFY(playlist_tab != nullptr);
-    QCOMPARE(tabs->currentWidget(), playlist_tab->view);
-    QCOMPARE(window.activeTrackView(), playlist_tab->view);
-
-    // A selection there is the one Delete would remove.
-    mpd::Track track;
-    track.uri = "w/1.flac";
-    track.metadata = mpd::Metadata{{{"Title", "One"}}};
-    playlist_tab->model->replaceTracks({track});
-    playlist_tab->view->selectRow(0);
-    QVERIFY(!playlist_tab->view->selectionModel()->selectedRows().isEmpty());
-    QVERIFY(queue_view->selectionModel()->selectedRows().isEmpty());
-
-    tabs->setCurrentWidget(queue_view);
-    QCOMPARE(window.activeTrackView(), queue_view);
-}
-
-// A library branch loads on demand, so dropping an artist that was never
-// expanded must request its tracks and finish when they land — not quietly
-// drop nothing.
-void BenchMainWindowTest::libraryDragResolvesUnexpandedBranch() {
-    BenchMainWindow window;
-    window.show();
-    auto* library = window.findChild<QTreeView*>(QStringLiteral("bench-mpd-library"));
-    auto* library_model = window.findChild<ui::ServerLibraryTreeModel*>();
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(library != nullptr && library_model != nullptr && queue_view != nullptr);
-
-    QSignalSpy root_requests{library_model, &ui::ServerLibraryTreeModel::rootRequested};
-    library_model->reload();
-    QTRY_COMPARE(root_requests.size(), 1);
-    library_model->acceptRoot(root_requests.front().at(0).toULongLong(),
-                              root_requests.front().at(1).toString(),
-                              {QStringLiteral("Dragged Artist")}, {});
-    const auto artist = library_model->index(0, 0);
-    QVERIFY(artist.isValid());
-    QVERIFY(library_model->canFetchMore(artist)); // Never expanded.
-    library->selectionModel()->select(artist, QItemSelectionModel::ClearAndSelect |
-                                                  QItemSelectionModel::Rows);
-
-    // The drop is accepted and asks the server for the branch.
-    QSignalSpy branch_requests{library_model, &ui::ServerLibraryTreeModel::branchRequested};
-    QMimeData mime;
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    // Past the last tab: the strip's "make a new list" region.
-    const QPointF drop_point{static_cast<qreal>(tabs->tabBar()->width() - 2), 4.0};
-    QDropEvent drop{drop_point,     Qt::CopyAction, &mime,
-                    Qt::LeftButton, Qt::NoModifier, QEvent::Drop};
-    QVERIFY(window.handleTabTrackDrop(library, &drop, drop_point.toPoint()));
-    QTRY_VERIFY(!branch_requests.isEmpty()); // Expanding may ask more than once.
+    QTRY_VERIFY(!window.list_tabs_.empty());
+    auto& origin = *window.list_tabs_.front();
+    LocalTrackRow row;
+    row.raw_path = "/one.flac";
+    row.title = "One";
+    row.probed = true;
+    origin.model->replaceRows({row});
+    tabs->setCurrentWidget(origin.view);
+    QCOMPARE(window.activeTrackView(), origin.view);
+
+    auto* other =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Other",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
+    QVERIFY(other != nullptr);
+    QCOMPARE(tabs->currentWidget(), other->view);
+    QCOMPARE(window.activeTrackView(), other->view);
+
+    // A selection in the list on screen is the one Delete would remove, and
+    // one in a list that is not on screen is not.
+    origin.view->selectRow(0);
+    QVERIFY(other->view->selectionModel()->selectedRows().isEmpty());
+    window.refreshSelectionActions();
+    QVERIFY(!window.remove_selected_action_->isEnabled());
+    tabs->setCurrentWidget(origin.view);
+    window.refreshSelectionActions();
+    QCOMPARE(window.activeTrackView(), origin.view);
+    QVERIFY(window.remove_selected_action_->isEnabled());
 }
 
-// ADR-0191: working tabs are scratch lists on the server — dropping a
-// selection on the tab strip creates one there, and it never becomes a
-// client-owned copy.
-void BenchMainWindowTest::serverWorkingTabCreationGestures() {
-    BenchMainWindow window;
-    window.show();
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    auto* queue_view = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(tabs != nullptr && queue_view != nullptr);
-    QTRY_VERIFY(tabs->count() >= 2);
-    auto* queue_model = qobject_cast<quick::MpdQueueModel*>(queue_view->model());
-    QVERIFY(queue_model != nullptr);
-
-    const auto make_track = [](const char* uri, std::uint32_t id) {
-        trackknife::mpd::Track track;
-        track.uri = uri;
-        track.queue_id = id;
-        track.metadata = trackknife::mpd::Metadata{{{"Title", uri}}};
-        return track;
-    };
-    queue_model->replaceTracks({make_track("q/1.flac", 1), make_track("q/2.flac", 2)});
-    queue_view->selectionModel()->select(
-        queue_model->index(0, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-
-    // Disconnected there is no server to hold the list, so the drop creates
-    // no tab — and the queue it was dragged from is left alone.
-    const auto tabs_before = tabs->count();
-    const QPointF drop_point{static_cast<qreal>(tabs->tabBar()->width() - 2), 4.0};
-    QMimeData mime;
-    QDropEvent drop{drop_point,     Qt::CopyAction | Qt::MoveAction,
-                    &mime,          Qt::LeftButton,
-                    Qt::NoModifier, QEvent::Drop};
-    QVERIFY(window.handleTabTrackDrop(queue_view, &drop, drop_point.toPoint()));
-    QCOMPARE(tabs->count(), tabs_before);
-    QCOMPARE(queue_model->rowCount(), 2);
-
-    // The creation gesture is offered on the queue's context menu, disabled
-    // until a server can take the list.
-    tabs->setCurrentWidget(queue_view);
-    const QPoint menu_point{4, 4};
-    QVERIFY(QMetaObject::invokeMethod(queue_view, "customContextMenuRequested",
-                                      Qt::DirectConnection, Q_ARG(QPoint, menu_point)));
-    auto* create = window.findChild<QAction*>(QStringLiteral("action-send-to-new-working-list"));
-    QVERIFY(create != nullptr);
-    QVERIFY(!create->isEnabled());
-}
-
-// A metadata commit invalidates the album's cached cover and reloads it;
-// the reload must actually reach the model again (the regression: clearing
-// via a null insert left hasArtwork() true, so the reload was dropped).
 void BenchMainWindowTest::localArtworkSurvivesInvalidation() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -5744,16 +4359,25 @@ void BenchMainWindowTest::desktopNotificationsNotifyBackgroundTrackChanges() {
 void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     BenchMainWindow window;
     window.show();
+    // The service talks to an endpoint that accepts and never answers, so no
+    // request leaves this machine and no real reply races the ones fed below.
+    QTcpServer silent;
+    QVERIFY(silent.listen(QHostAddress::LocalHost));
+    QTemporaryDir state;
+    QVERIFY(state.isValid());
+    delete window.lastfm_;
+    window.lastfm_ =
+        new LastFmService(state.filePath(QStringLiteral("lastfm.json")), &window,
+                          QUrl(QStringLiteral("http://127.0.0.1:%1/").arg(silent.serverPort())));
+    const auto reply = [&window](const QString& op, const QByteArray& json) {
+        emit window.lastfm_->completed(op, QJsonDocument::fromJson(json).object(), {});
+    };
     auto* dialog = window.showSettingsDialog(SettingsDialog::Page::lastfm);
-    auto* authority = dialog->findChild<QComboBox*>(QStringLiteral("lastfm-authority"));
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("lastfm-status"));
     auto* secret = dialog->findChild<QLineEdit*>(QStringLiteral("lastfm-account-secret"));
-    QVERIFY(authority && status && secret);
+    QVERIFY(status && secret);
     QCOMPARE(secret->echoMode(), QLineEdit::Password);
-    authority->setCurrentIndex(0);
     QTRY_VERIFY(status->text().contains(QStringLiteral("Not connected")));
-    authority->setCurrentIndex(1);
-    QTRY_VERIFY(status->text().contains(QStringLiteral("does not support Last.fm")));
     auto* key = dialog->findChild<QLineEdit*>(QStringLiteral("lastfm-account-key"));
     auto* reuse = dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-reuse-key"));
     auto* begin = dialog->findChild<QPushButton*>(QStringLiteral("lastfm-authorize"));
@@ -5767,7 +4391,7 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     key->setText(QStringLiteral("invalid"));
     begin->click();
     QVERIFY(status->text().contains(QStringLiteral("32-character")));
-    // The disconnected server sends no HTTP; sharing the key is an explicit local setting.
+    // Sharing the key with dynamic playlists is an explicit local setting.
     key->setText(QString(32, 'a'));
     secret->setText(QString(32, 'b'));
     begin->click();
@@ -5778,29 +4402,24 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     key->setText(QString(32, 'c'));
     begin->click();
     QCOMPARE(QSettings{}.value(QStringLiteral("lastfm/api-key")).toString(), QString(32, 'a'));
-    window.mpd_controller_->lastFmCompleted(
-        QStringLiteral("status"),
-        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    reply(QStringLiteral("status"),
+          QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"));
     QVERIFY(dialog->findChild<QWidget*>(QStringLiteral("lastfm-credentials"))->isHidden());
     QVERIFY(!poll->isActive());
     QVERIFY(begin->property("credentials-saved").toBool());
     // Feed deterministic replies without opening a real browser or contacting Last.fm.
     auto* page = dialog->findChild<QWidget*>(QStringLiteral("lastfm-settings"));
     page->setProperty("auth-waiting", true);
-    window.mpd_controller_->lastFmCompleted(
-        QStringLiteral("begin"),
-        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    reply(QStringLiteral("begin"),
+          QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"));
     QVERIFY(poll->isActive());
     QVERIFY(status->text().contains(QStringLiteral("Waiting for browser approval")));
-    window.mpd_controller_->lastFmCompleted(
-        QStringLiteral("finish"),
-        QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"), {});
+    reply(QStringLiteral("finish"),
+          QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"));
     QVERIFY(poll->isActive());
-    window.mpd_controller_->lastFmCompleted(
-        QStringLiteral("finish"),
-        QByteArray(
-            R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"),
-        {});
+    reply(QStringLiteral("finish"),
+          QByteArray(
+              R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"));
     QVERIFY(!poll->isActive());
     QVERIFY(!page->property("auth-waiting").toBool());
     QVERIFY(dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-enabled"))->isChecked());
@@ -5810,16 +4429,13 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QVERIFY(!poll->isActive());
     QVERIFY(status->text().contains(QStringLiteral("Stopped waiting")));
     // A late reply after cancellation must not restart polling.
-    window.mpd_controller_->lastFmCompleted(QStringLiteral("finish"),
-                                            QByteArray(R"({"authorization_pending":true})"), {});
+    reply(QStringLiteral("finish"), QByteArray(R"({"authorization_pending":true})"));
     QVERIFY(!poll->isActive());
     page->setProperty("auth-waiting", true);
     poll->start();
     QMetaObject::invokeMethod(deadline, "timeout", Qt::DirectConnection);
     QVERIFY(!poll->isActive());
     QVERIFY(status->text().contains(QStringLiteral("timed out")));
-    authority->setCurrentIndex(0);
-    QTRY_VERIFY(!begin->property("credentials-saved").toBool());
     QVERIFY(cancel->isHidden());
     dialog->close();
     LocalListModel model;
@@ -5851,10 +4467,7 @@ void BenchMainWindowTest::muteRestoresLocalVolumeAcrossBrowsing() {
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
     QTRY_COMPARE(window.player_->snapshot().volume_percent, 0);
     QVERIFY(window.mute_button_->isChecked());
-    window.tabs_->setCurrentWidget(window.mpd_queue_view_);
-    QVERIFY(!window.mute_button_->isEnabled());
-    window.tabs_->setCurrentWidget(local);
-    QTRY_VERIFY(window.mute_button_->isEnabled());
+    QVERIFY(window.mute_button_->isEnabled());
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
     QTRY_COMPARE(window.player_->snapshot().volume_percent, 37);
     QVERIFY(!window.mute_button_->isChecked());
@@ -5989,7 +4602,7 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.up_next_restored_);
-    window.tabs_->setCurrentIndex(1);
+    window.tabs_->setCurrentIndex(0);
     LocalTrackRow row;
     row.raw_path = std::string{"/tmp/raw-"} + char(0xff) + ".flac";
     row.title = "Request";
@@ -6081,7 +4694,7 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
     QCOMPARE(parsed->size(), 3);
     QVERIFY(!parseLastFmTracks(R"({"error":10,"message":"Invalid API key"})", 100));
     QVERIFY(!parseLastFmTracks("not JSON", 100));
-    for (const bool local : {true, false}) {
+    {
         std::vector<Service::Completion> pending;
         std::vector<query::CompiledTkq> queries;
         Service service([&](query::CompiledTkq compiled, core::CancellationToken,
@@ -6100,23 +4713,16 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
                     unmatched = missing;
                     failure = error;
                 });
-        const auto rows = [local]() -> Service::Tracks {
-            if (local) {
-                LocalTrackRow row;
-                row.raw_path = std::string("/raw-\xff.flac");
-                row.artist = "A & B";
-                row.title = "Song \"quoted\"";
-                return std::vector<LocalTrackRow>{row};
-            }
-            mpd::Track row;
-            row.uri = "music/song.flac";
-            row.metadata = mpd::Metadata({{"Artist", "A & B"}, {"Title", "Song \"quoted\""}});
-            return std::vector<mpd::Track>{row};
+        const auto rows = []() -> Service::Tracks {
+            LocalTrackRow row;
+            row.raw_path = std::string("/raw-\xff.flac");
+            row.artist = "A & B";
+            row.title = "Song \"quoted\"";
+            return std::vector<LocalTrackRow>{row};
         };
         DynamicPlaylistDefinition definition{.id = QStringLiteral("rules"),
                                              .name = QStringLiteral("Favorites"),
-                                             .profile = local ? QStringLiteral("local")
-                                                              : QStringLiteral("mpd/test")};
+                                             .profile = QStringLiteral("local")};
         service.refresh(definition, {});
         QCOMPARE(pending.size(), 1U);
         QCOMPARE(queries.front().source, std::string("rating GREATER 6"));
@@ -6124,10 +4730,7 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
         complete(rows());
         QCOMPARE(completions, 1);
         QVERIFY(failure.isEmpty());
-        QCOMPARE(output.index(), local ? 0U : 1U);
-        if (local)
-            QCOMPARE(std::get<std::vector<LocalTrackRow>>(output).front().raw_path,
-                     std::string("/raw-\xff.flac"));
+        QCOMPARE(output.front().raw_path, std::string("/raw-\xff.flac"));
         service.refresh(definition, {});
         auto cancelled = std::move(pending.back());
         service.cancel();
@@ -6142,14 +4745,13 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
         const auto before = pending.size();
         QTRY_COMPARE(pending.size(), before + 1);
         auto missing = std::move(pending.back());
-        missing(local ? Service::Tracks{std::vector<LocalTrackRow>{}}
-                      : Service::Tracks{std::vector<mpd::Track>{}});
+        missing(Service::Tracks{});
         QTRY_COMPARE(pending.size(), before + 2);
         auto duplicate = std::move(pending.back());
         duplicate(rows());
         QTRY_COMPARE(completions, 2);
         QCOMPARE(unmatched, 1);
-        QCOMPARE(std::visit([](const auto& values) { return values.size(); }, output), 1U);
+        QCOMPARE(output.size(), 1U);
         QVERIFY(failure.isEmpty());
         service.refresh(definition, {});
         QCOMPARE(completions, 3);
@@ -6159,11 +4761,10 @@ void BenchMainWindowTest::dynamicPlaylistsShareRulesAndRecommendationMatching() 
 
 void BenchMainWindowTest::lastFmRefreshSelectsFreshTracksFromLargerPool() {
     using Service = DynamicPlaylistService;
-    for (const bool local : {true, false}) {
+    {
         DynamicPlaylistDefinition definition{.id = QStringLiteral("variety"),
                                              .name = QStringLiteral("Variety"),
-                                             .profile = local ? QStringLiteral("local")
-                                                              : QStringLiteral("mpd/variety"),
+                                             .profile = QStringLiteral("local"),
                                              .source = QStringLiteral("similar"),
                                              .artist = QStringLiteral("Seed"),
                                              .track = QStringLiteral("Seed track"),
@@ -6175,21 +4776,14 @@ void BenchMainWindowTest::lastFmRefreshSelectsFreshTracksFromLargerPool() {
         QStringList selection;
         std::size_t matched = 0;
         const auto run = [&](QVector<RecommendationTrack> candidates, bool cancel = false) {
-            Service service([local](query::CompiledTkq compiled, core::CancellationToken,
-                                    Service::Completion completion) {
+            Service service([](query::CompiledTkq compiled, core::CancellationToken,
+                               Service::Completion completion) {
                 const auto title = compiled.predicates.back().text;
-                if (local) {
-                    LocalTrackRow row;
-                    row.raw_path = std::string("/raw-\xff/") + title;
-                    row.artist = "Artist";
-                    row.title = title;
-                    completion(Service::Tracks{std::vector<LocalTrackRow>{row}});
-                } else {
-                    mpd::Track row;
-                    row.uri = "music/" + title;
-                    row.metadata = mpd::Metadata({{"Artist", "Artist"}, {"Title", title}});
-                    completion(Service::Tracks{std::vector<mpd::Track>{row}});
-                }
+                LocalTrackRow row;
+                row.raw_path = std::string("/raw-\xff/") + title;
+                row.artist = "Artist";
+                row.title = title;
+                completion(Service::Tracks{row});
             });
             int finished = 0;
             connect(&service, &Service::finished, &service,
@@ -6197,18 +4791,9 @@ void BenchMainWindowTest::lastFmRefreshSelectsFreshTracksFromLargerPool() {
                         QVERIFY2(error.isEmpty(), qPrintable(error));
                         ++finished;
                         selection.clear();
-                        std::visit(
-                            [&](const auto& values) {
-                                for (const auto& row : values) {
-                                    if constexpr (std::is_same_v<std::decay_t<decltype(row)>,
-                                                                 LocalTrackRow>)
-                                        selection.push_back(QString::fromStdString(row.title));
-                                    else
-                                        selection.push_back(QString::fromStdString(
-                                            std::string(*row.metadata.first("Title"))));
-                                }
-                            },
-                            rows);
+                        for (const auto& row : rows) {
+                            selection.push_back(QString::fromStdString(row.title));
+                        }
                         matched = service.matchedPoolSize();
                     });
             service.matchRecommendations(definition, std::move(candidates));
@@ -6301,25 +4886,12 @@ void BenchMainWindowTest::dynamicPlaylistCatalogAndEditor() {
     row.raw_path = "/dynamic-layout-test.flac";
     row.title = "A track";
     emit dialog->snapshotRequested(QStringLiteral("Dynamic layout"),
-                                   DynamicPlaylistService::Tracks{std::vector<LocalTrackRow>{row}});
+                                   DynamicPlaylistService::Tracks{row});
     auto* local_tab = window.currentListTab();
     QVERIFY(local_tab);
     QCOMPARE(local_tab->view_layout.presentation, ui::TrackViewPresentation::plain_columns);
     QVERIFY(!static_cast<ui::QueueTableView*>(local_tab->view)->albumGroupingEnabled());
     QVERIFY(local_tab->view->isColumnHidden(local_artwork_column));
-    window.setMpdDynamicSnapshot(QStringLiteral("Dynamic server layout"), true);
-    auto* server_tab = window.openMpdPlaylistTab(QStringLiteral("Dynamic server layout"), false);
-    QVERIFY(server_tab);
-    QCOMPARE(server_tab->view_layout.presentation, ui::TrackViewPresentation::plain_columns);
-    QVERIFY(!static_cast<ui::QueueTableView*>(server_tab->view)->albumGroupingEnabled());
-    window.renameMpdPlaylistTab(QStringLiteral("Dynamic server layout"),
-                                QStringLiteral("Renamed dynamic"));
-    window.closeMpdPlaylistTab(QStringLiteral("Renamed dynamic"));
-    server_tab = window.openMpdPlaylistTab(QStringLiteral("Renamed dynamic"), false);
-    QVERIFY(server_tab);
-    QCOMPARE(server_tab->view_layout.presentation, ui::TrackViewPresentation::plain_columns);
-    emit window.mpd_controller_->storedPlaylistDeleted(QStringLiteral("Renamed dynamic"));
-    QVERIFY(!window.mpdDynamicSnapshots().contains(QStringLiteral("Renamed dynamic")));
     QPointer<DynamicPlaylistDialog> previous(dialog);
     dialog->close();
     QTRY_VERIFY(previous.isNull());
@@ -6376,7 +4948,7 @@ void BenchMainWindowTest::loudnessSidecarProjectsOntoProbedRows() {
          std::string{stale_encoded.constData(), static_cast<std::size_t>(stale_encoded.size())}});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     LocalListModel* list_model = nullptr;
     QTRY_VERIFY((list_model = [&]() -> LocalListModel* {
                     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
@@ -6879,7 +5451,7 @@ void BenchMainWindowTest::searchDialogFiltersTabAndOpensResults() {
         {QFile::encodeName(flac_path).toStdString(), QFile::encodeName(opus_path).toStdString()});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -6957,7 +5529,7 @@ void BenchMainWindowTest::searchResultTabLoadsCovers() {
     window.openLocalPaths({QFile::encodeName(opus_path).toStdString()});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -7014,51 +5586,6 @@ void BenchMainWindowTest::searchResultTabLoadsCovers() {
     dialog->close();
 }
 
-// ADR-0209/0184: opening a long server list floods the session command
-// queue with album-rating queries, and the artwork requests it refuses
-// never reach the server. Reporting that congestion as an empty cover
-// spent the model's attempts and left the albums on their placeholder
-// for the rest of the session, which is what a search-results tab is
-// made of. Congestion is retried; a real refusal still resolves.
-void BenchMainWindowTest::serverArtworkRetriesCongestedRequests() {
-    quick::MpdProbeController controller;
-    QSignalSpy resolved{&controller, &quick::MpdProbeController::serverLibraryArtworkLoaded};
-    controller.connected_ = true;
-    const auto answer = [&controller](const quint64 command_id, const quint64 token,
-                                      const core::ErrorCode code) {
-        controller.pending_library_tree_artwork_.insert(
-            command_id, quick::MpdProbeController::PendingArtworkRequest{
-                            .token = token,
-                            .uri = QStringLiteral("album/track.flac"),
-                            .congestion_retries = 0});
-        controller.applyCommandResult(
-            controller.connection_token_,
-            mpd::SessionCommandResult{
-                .id = command_id,
-                .generation = 0U,
-                .kind = mpd::SessionCommandKind::artwork,
-                .action = mpd::TransportAction::play,
-                .payload = {},
-                .error = core::Error{.code = code, .message = "rejected", .context = {}}});
-    };
-
-    answer(1U, 11U, core::ErrorCode::limit_exceeded);
-    QCOMPARE(resolved.count(), 0);
-
-    // A refusal the server actually made resolves the album at once.
-    answer(2U, 12U, core::ErrorCode::not_found);
-    QCOMPARE(resolved.count(), 1);
-    QCOMPARE(resolved.front().front().toULongLong(), 12U);
-
-    // The retry is reissued once the queue has had a moment to drain. With
-    // no session behind it the album resolves rather than stalling the
-    // model's one-at-a-time pump.
-    QTRY_COMPARE(resolved.count(), 2);
-    QCOMPARE(resolved.back().front().toULongLong(), 11U);
-}
-
-// ADR-0153: a technical query against rows without retained technicals
-// probes exactly those files once and reports the facts back.
 void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -7124,43 +5651,16 @@ void BenchMainWindowTest::searchDialogProbesMissingTechnicalsOnDemand() {
 // The Server library scope translates tkq for the connected server,
 // previews the result labels, refuses untranslatable queries with the
 // translator's message, and opens results through the window callback.
-void BenchMainWindowTest::searchPresetsAreGroupedAndCapabilityGated() {
-    bool connected = true;
-    bool full = true;
-    bool history = true;
-    bool current_supported = true;
-    QString executed;
-    const auto run = [&](const query::CompiledTkq& compiled,
-                         std::function<void(QStringList, int, QString)> completion) {
-        executed = displayText(compiled.source);
-        completion({}, 0, {});
-    };
+void BenchMainWindowTest::searchPresetsAreGroupedAndPrompt() {
     CatalogueSource catalogues{std::filesystem::path{}};
-    SearchDialog dialog{
-        catalogues,
-        {},
-        {},
-        SearchDialog::ServerScope{
-            .available = [&] { return connected; },
-            .run = run,
-            .open = [](const query::CompiledTkq&, const QString&) {},
-            .current_available = [] { return true; },
-            .run_current = run,
-            .unsupported_reason =
-                [&](const query::CompiledTkq& compiled, bool current) {
-                    if (current && !current_supported)
-                        return QStringLiteral("Unsupported list search");
-                    const auto translated =
-                        query::translate_tkq_to_melody(compiled, full, history, history);
-                    return translated ? QString{} : displayText(translated.error().message);
-                },
-        }};
+    SearchDialog dialog{catalogues, {}, {}};
     dialog.show();
     auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
     auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
     auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
     auto* menu = dialog.findChild<QMenu*>(QStringLiteral("bench-search-presets-menu"));
     QVERIFY(input && scope && mode && menu);
+    QCOMPARE(scope->count(), 2); // Library database, current tab.
     QTRY_VERIFY(input->hasFocus());
     scope->setFocus();
     dialog.hide();
@@ -7195,130 +5695,14 @@ void BenchMainWindowTest::searchPresetsAreGroupedAndCapabilityGated() {
     });
     year->trigger();
     QCOMPARE(input->text(), QStringLiteral("date EQUAL 2001"));
-    dialog.preferServerScope();
-    populate();
-    QCOMPARE(menu->actions().size(), 5);
-    menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums"))->trigger();
-    QTRY_COMPARE(executed, QStringLiteral("HISTORY(albumplaycount) EQUAL 0"));
-    history = false;
-    full = false;
-    populate();
-    QVERIFY(!menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums")));
-    QVERIFY(!menu->findChild<QAction*>(QStringLiteral("search-preset-year")));
-    QVERIFY(menu->findChild<QAction*>(QStringLiteral("search-preset-artist")));
+    // Every preset runs against the library itself, so none is withheld: the
+    // gating only ever existed for what a remote server could translate.
     scope->setCurrentIndex(1);
-    current_supported = false;
-    populate();
-    QCOMPARE(menu->actions().size(), 1);
-    QVERIFY(!menu->actions().front()->isEnabled());
-    connected = false;
-    scope->setCurrentIndex(2);
-    populate();
-    QCOMPARE(menu->actions().size(), 1);
-    scope->setCurrentIndex(0);
     populate();
     QCOMPARE(menu->actions().size(), 5);
+    QVERIFY(menu->findChild<QAction*>(QStringLiteral("search-preset-unplayed-albums")));
 }
 
-void BenchMainWindowTest::searchDialogServerScopeRunsTranslatedQueries() {
-    QString ran_expression;
-    QString ran_sort;
-    QString opened_query;
-    CatalogueSource catalogues{std::filesystem::path{}};
-    SearchDialog dialog{catalogues,
-                        {},
-                        {},
-                        SearchDialog::ServerScope{
-                            .available = [] { return true; },
-                            .run =
-                                [&](const query::CompiledTkq& compiled,
-                                    std::function<void(QStringList, int, QString)> completion) {
-                                    auto translated = query::translate_tkq_to_melody(compiled);
-                                    if (!translated) {
-                                        completion({}, 0, displayText(translated.error().message));
-                                        return;
-                                    }
-                                    ran_expression =
-                                        QString::fromStdString(translated->filter_expression);
-                                    ran_sort = QString::fromStdString(translated->sort);
-                                    completion({QStringLiteral("Artist — Structured hit")}, 1, {});
-                                },
-                            .open = [&](const query::CompiledTkq&,
-                                        const QString& query_text) { opened_query = query_text; },
-                        }};
-    dialog.show();
-    auto* scope = dialog.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
-    auto* input = dialog.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
-    auto* mode = dialog.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
-    auto* results = dialog.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
-    auto* open_button = dialog.findChild<QPushButton*>(QStringLiteral("bench-search-open-tab"));
-    auto* status = dialog.findChild<QLabel*>(QStringLiteral("bench-search-status"));
-    auto* error = dialog.findChild<QLabel*>(QStringLiteral("bench-search-error"));
-    QVERIFY(scope && input && mode && results && open_button && status && error);
-    QCOMPARE(scope->count(), 3);
-    scope->setCurrentIndex(2);
-    mode->setChecked(true);
-    input->setText(QStringLiteral("rating GREATER 7 SORT DESCENDING BY %date%"));
-    QTRY_COMPARE(results->count(), 1);
-    QCOMPARE(ran_expression, QStringLiteral("(rating > 7)"));
-    QCOMPARE(ran_sort, QStringLiteral("-date"));
-    QVERIFY(status->text().startsWith(QStringLiteral("1 match")));
-    QVERIFY(open_button->isEnabled());
-    QTest::mouseClick(open_button, Qt::LeftButton);
-    QCOMPARE(opened_query, QStringLiteral("rating GREATER 7 SORT DESCENDING BY %date%"));
-
-    // Untranslatable constructs surface the translator's refusal.
-    input->setText(QStringLiteral("genre HAS jazz OR genre HAS blues"));
-    QTRY_VERIFY(error->isVisible());
-    QVERIFY(error->text().contains(QStringLiteral("OR")));
-    QVERIFY(!open_button->isEnabled());
-
-    // A server advertising filtergrammar takes the same query structured.
-    QString structured_expression;
-    SearchDialog structured{
-        catalogues,
-        {},
-        {},
-        SearchDialog::ServerScope{
-            .available = [] { return true; },
-            .run =
-                [&](const query::CompiledTkq& compiled,
-                    std::function<void(QStringList, int, QString)> completion) {
-                    auto translated = query::translate_tkq_to_melody(compiled, true);
-                    if (!translated) {
-                        completion({}, 0, displayText(translated.error().message));
-                        return;
-                    }
-                    structured_expression = QString::fromStdString(translated->filter_expression);
-                    completion({QStringLiteral("Artist — Either genre")}, 1, {});
-                },
-            .open = [](const query::CompiledTkq&, const QString&) {},
-        }};
-    structured.show();
-    auto* structured_scope = structured.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
-    auto* structured_input = structured.findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
-    auto* structured_mode =
-        structured.findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
-    auto* structured_results =
-        structured.findChild<QListWidget*>(QStringLiteral("bench-search-results"));
-    QVERIFY(structured_scope && structured_input && structured_mode && structured_results);
-    structured_scope->setCurrentIndex(2);
-    structured_mode->setChecked(true);
-    structured_input->setText(QStringLiteral("genre HAS jazz OR genre HAS blues"));
-    QTRY_COMPARE(structured_results->count(), 1);
-    QCOMPARE(structured_expression,
-             QStringLiteral("((genre contains \"jazz\") OR (genre contains \"blues\"))"));
-
-    // Without a server scope the combo keeps its two local scopes.
-    SearchDialog local_only{catalogues, {}, {}};
-    auto* local_scope = local_only.findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
-    QVERIFY(local_scope != nullptr);
-    QCOMPARE(local_scope->count(), 2);
-}
-
-// ADR-0156: the context-menu ReplayGain dialog scans the selection and
-// writes immediately through the shared journaled pipeline — here two
-// unwritable WAVs divert into loudness sidecars (ADR-0143).
 void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
     QTemporaryDir media;
     const auto path = media.filePath(QStringLiteral("cached-release.flac"));
@@ -7426,7 +5810,7 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
         {QFile::encodeName(first).toStdString(), QFile::encodeName(second).toStdString()});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     QTRY_COMPARE(view->model()->rowCount(), 2);
@@ -7533,7 +5917,7 @@ void BenchMainWindowTest::replayGainScanPreservesLogicalSources() {
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
     QVERIFY(tabs != nullptr && properties_action != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -7896,14 +6280,10 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     }
     dialog->showPage(SettingsDialog::Page::naming);
     QVERIFY(note->text().contains(QStringLiteral("immediately")));
-    dialog->showPage(SettingsDialog::Page::connections);
-    QVERIFY(note->text().contains(QStringLiteral("fallback folder")));
     dialog->showPage(SettingsDialog::Page::metadata_services);
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-metadata-small.png")));
-        dialog->showPage(SettingsDialog::Page::connections);
-        QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-connections-small.png")));
     }
     QPointer<SettingsDialog> lifetime = dialog;
     dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
@@ -7943,122 +6323,6 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     QCOMPARE(pages->currentItem()->text(), QStringLiteral("Playback"));
     QVERIFY(!window.findChild<QDialog*>(QStringLiteral("bench-rg-preamp-dialog")));
     dialog->reject();
-}
-
-void BenchMainWindowTest::connectionSettingsPreserveProfilesAndFailures() {
-    using Profiles = ConnectionProfilesWidget::Profiles;
-    Profiles stored{{.id = core::StableId::random(),
-                     .name = "First",
-                     .host = "localhost",
-                     .port = 6600,
-                     .local_music_root = std::string{"/music/invalid-"} + char(0xff),
-                     .auto_connect = true}};
-    bool fail = false;
-    std::function<void(QString)> pending;
-    std::optional<Profiles> proposed;
-    SettingsDialog dialog{nullptr, {}, {}, [&](QWidget* parent) {
-                              return new ConnectionProfilesWidget(
-                                  stored,
-                                  [&](Profiles next, std::function<void(QString)> done) {
-                                      proposed = std::move(next);
-                                      pending = std::move(done);
-                                  },
-                                  parent);
-                          }};
-    dialog.showPage(SettingsDialog::Page::connections);
-    dialog.show();
-    const auto finish = [&] {
-        QVERIFY(pending && proposed);
-        if (!fail)
-            stored = *proposed;
-        auto done = std::move(pending);
-        done(fail ? QStringLiteral("Test storage failure") : QString{});
-    };
-    auto* name = dialog.findChild<QLineEdit*>(QStringLiteral("settings-connection-name"));
-    auto* host = dialog.findChild<QLineEdit*>(QStringLiteral("settings-connection-host"));
-    auto* root = dialog.findChild<QLineEdit*>(QStringLiteral("settings-connection-root"));
-    auto* startup = dialog.findChild<QCheckBox*>(QStringLiteral("settings-connection-startup"));
-    auto* selector = dialog.findChild<QComboBox*>(QStringLiteral("settings-connection-profile"));
-    auto* save = dialog.findChild<QPushButton*>(QStringLiteral("settings-connection-save"));
-    auto* create = dialog.findChild<QPushButton*>(QStringLiteral("settings-connection-new"));
-    auto* remove = dialog.findChild<QPushButton*>(QStringLiteral("settings-connection-remove"));
-    QVERIFY(name && host && root && startup && selector && save && create && remove);
-    const auto raw_path = stored.front().local_music_root;
-    name->setText(QStringLiteral("Renamed"));
-    save->click();
-    QVERIFY(!save->isEnabled());
-    finish();
-    QCOMPARE(stored.front().name, std::string{"Renamed"});
-    QCOMPARE(stored.front().local_music_root, raw_path);
-    create->click();
-    name->setText(QStringLiteral("Second"));
-    host->clear();
-    QVERIFY(!save->isEnabled());
-    host->setText(QStringLiteral("music-server"));
-    root->setText(QStringLiteral("/mnt/music"));
-    startup->setChecked(true);
-    fail = true;
-    save->click();
-    finish();
-    QCOMPARE(stored.size(), 1U);
-    QCOMPARE(name->text(), QStringLiteral("Second"));
-    QVERIFY(dialog.findChild<QLabel*>(QStringLiteral("settings-connection-status"))
-                ->text()
-                .contains(QStringLiteral("failure")));
-    fail = false;
-    save->click();
-    finish();
-    QCOMPARE(stored.size(), 2U);
-    QVERIFY(!stored[0].auto_connect && stored[1].auto_connect);
-    selector->setCurrentIndex(0);
-    QCOMPARE(name->text(), QStringLiteral("Renamed"));
-    selector->setCurrentIndex(1);
-    QCOMPARE(host->text(), QStringLiteral("music-server"));
-    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
-        !directory.isEmpty())
-        QVERIFY(dialog.grab().save(directory + QStringLiteral("/settings-connections.png")));
-    remove->click();
-    finish();
-    QCOMPARE(stored.size(), 1U);
-    QCOMPARE(selector->count(), 1);
-
-    // The real workspace persists profiles without starting a connection.
-    BenchMainWindow window;
-    window.show();
-    QTRY_VERIFY(window.findChild<LocalLibraryPanel*>());
-    auto* controller = window.findChild<quick::MpdProbeController*>();
-    QVERIFY(controller);
-    const auto previous_profile = controller->profileId();
-    window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
-    auto* settings = window.findChild<SettingsDialog*>();
-    QVERIFY(settings);
-    settings->showPage(SettingsDialog::Page::connections);
-    auto* real_name = settings->findChild<QLineEdit*>(QStringLiteral("settings-connection-name"));
-    QVERIFY(real_name);
-    settings->findChild<QPushButton*>(QStringLiteral("settings-connection-new"))->click();
-    real_name->setText(QStringLiteral("Saved without connecting"));
-    auto* status = settings->findChild<QLabel*>(QStringLiteral("settings-connection-status"));
-    settings->findChild<QPushButton*>(QStringLiteral("settings-connection-save"))->click();
-    QTRY_COMPARE(status->text(), QStringLiteral("Connection profiles saved"));
-    QCOMPARE(controller->profileId(), previous_profile);
-    auto repository = persistence::ListRepository::open(std::filesystem::path{
-        QFile::encodeName(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
-                          QStringLiteral("/lists.sqlite"))
-            .toStdString()});
-    QVERIFY(repository);
-    const auto saved_profiles = repository->load_profiles();
-    QVERIFY(saved_profiles);
-    QVERIFY(std::ranges::any_of(*saved_profiles, [](const auto& profile) {
-        return profile.name == "Saved without connecting";
-    }));
-    QPointer<SettingsDialog> lifetime = settings;
-    settings->reject();
-    QTRY_VERIFY(lifetime.isNull());
-    window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
-    settings = window.findChild<SettingsDialog*>();
-    QVERIFY(settings->findChild<QComboBox*>(QStringLiteral("settings-connection-profile"))
-                ->findText(QStringLiteral("Saved without connecting")) >= 0);
-    settings->reject();
 }
 
 void BenchMainWindowTest::librarySettingsManageFoldersWithoutScanning() {
@@ -9400,7 +7664,7 @@ void BenchMainWindowTest::combinedPublicationStartupRecoversMetadataAndPath() {
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
     auto* list_model =
@@ -9439,7 +7703,7 @@ void BenchMainWindowTest::folderDiscoveryAdmitsWave64() {
     window.openLocalPaths({directory_raw});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -9452,8 +7716,8 @@ void BenchMainWindowTest::contextTransfersCreateTabs() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QTRY_COMPARE(tabs->count(), 2);
-    auto* source = qobject_cast<QTableView*>(tabs->widget(1));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* source = qobject_cast<QTableView*>(tabs->widget(0));
     QVERIFY(source != nullptr);
     auto* model = qobject_cast<LocalListModel*>(source->model());
     QVERIFY(model != nullptr);
@@ -9477,7 +7741,7 @@ void BenchMainWindowTest::contextTransfersCreateTabs() {
             dialog->reject();
     });
     copy->trigger();
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
     QCOMPARE(model->rowCount(), 2);
     QTimer::singleShot(0, [] {
         if (auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget())) {
@@ -9486,7 +7750,7 @@ void BenchMainWindowTest::contextTransfersCreateTabs() {
         }
     });
     copy->trigger();
-    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->count(), 2);
     auto* copied =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QCOMPARE(copied->rowCount(), 2);
@@ -9507,7 +7771,7 @@ void BenchMainWindowTest::contextTransfersCreateTabs() {
         }
     });
     move->trigger();
-    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(tabs->count(), 3);
     QCOMPARE(model->rowCount(), 0);
     auto* moved =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
@@ -9519,8 +7783,8 @@ void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QTRY_COMPARE(tabs->count(), 2);
-    auto* source = qobject_cast<QTableView*>(tabs->widget(1));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* source = qobject_cast<QTableView*>(tabs->widget(0));
     auto* model = qobject_cast<LocalListModel*>(source->model());
     LocalTrackRow row;
     row.raw_path = "/unmounted/track.flac";
@@ -9549,29 +7813,27 @@ void BenchMainWindowTest::tabBarDropsTransferLocalRows() {
         return QPoint{tabs->tabBar()->tabRect(tabs->count() - 1).right() + 12,
                       tabs->tabBar()->height() / 2};
     };
+    // Onto its own tab is not a transfer.
     QVERIFY(!send_drop(source, tabs->tabBar()->tabRect(0).center(), Qt::NoModifier, true));
-    QVERIFY(!send_drop(source, tabs->tabBar()->tabRect(1).center(), Qt::NoModifier, true));
-    QVERIFY(!send_drop(qobject_cast<QTableView*>(tabs->widget(0)), empty_position(), Qt::NoModifier,
-                       true));
     QVERIFY(!send_drop(source, QPoint{20, tabs->tabBar()->height() + 20}, Qt::NoModifier, true));
     QVERIFY(send_drop(source, empty_position(), Qt::ControlModifier, false));
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
     QVERIFY(send_drop(source, empty_position(), Qt::ControlModifier, true));
-    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->count(), 2);
     QCOMPARE(model->rowCount(), 2);
     auto* copied_view = qobject_cast<QTableView*>(tabs->currentWidget());
     auto* copied = qobject_cast<LocalListModel*>(copied_view->model());
     QCOMPARE(copied->rowCount(), 2);
     QCOMPARE(copied->rows()[0].raw_path, row.raw_path);
     QVERIFY(send_drop(source, empty_position(), Qt::NoModifier, true));
-    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(tabs->count(), 3);
     QCOMPARE(model->rowCount(), 0);
     auto* moved_view = qobject_cast<QTableView*>(tabs->currentWidget());
     QCOMPARE(moved_view->model()->rowCount(), 2);
     moved_view->selectAll();
     QVERIFY(send_drop(moved_view, tabs->tabBar()->tabRect(tabs->indexOf(copied_view)).center(),
                       Qt::NoModifier, true));
-    QCOMPARE(tabs->count(), 4);
+    QCOMPARE(tabs->count(), 3);
     QCOMPARE(copied->rowCount(), 4);
     QCOMPARE(moved_view->model()->rowCount(), 0);
 }
@@ -9601,14 +7863,14 @@ void BenchMainWindowTest::contextMenusTargetSelectionsListsAndFolders() {
     QVERIFY(folder_menu != nullptr);
     QVERIFY(folder_view != nullptr);
     QVERIFY(folder_model != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     window.openLocalPaths(raw_paths);
     auto* source = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(source != nullptr);
     QTRY_COMPARE(source->model()->rowCount(), 3);
 
     duplicate->trigger();
-    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->count(), 2);
     auto* destination = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(destination != nullptr);
     QCOMPARE(destination->model()->rowCount(), 3);
@@ -9717,7 +7979,7 @@ void BenchMainWindowTest::panelLayoutPersistsAndPreservesFutureState() {
         QVERIFY(tabbed != nullptr);
         QVERIFY(swap != nullptr);
         QVERIFY(track_tabs != nullptr);
-        QTRY_COMPARE(track_tabs->count(), 2);
+        QTRY_COMPARE(track_tabs->count(), 1);
         QCOMPARE(edit->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+L")));
 
         auto* initial_split = qobject_cast<QSplitter*>(root_widget(window));
@@ -9891,7 +8153,7 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     auto* previous = window.findChild<QAction*>(QStringLiteral("action-find-previous-in-list"));
     auto* bar = window.findChild<TrackListFindBar*>();
     QVERIFY(tabs && find && next && previous && bar);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -9921,31 +8183,38 @@ void BenchMainWindowTest::trackListFindActionsFollowActiveTab() {
     find->trigger();
     QVERIFY(!bar->isHidden());
 
-    auto* mpd = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    QVERIFY(mpd != nullptr);
-    tabs->setCurrentWidget(mpd);
+    // Find follows the tab on screen: another list is searched on its own,
+    // and the first list's cursor is left where it was.
+    auto* other =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Other",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
+    QVERIFY(other != nullptr);
+    QCOMPARE(tabs->currentWidget(), other->view);
     QVERIFY(bar->isHidden());
     QVERIFY(find->isEnabled() && next->isEnabled() && previous->isEnabled());
-    auto* mpd_model = qobject_cast<quick::MpdQueueModel*>(mpd->model());
-    QVERIFY(mpd_model != nullptr);
-    mpd::Track server_track;
-    server_track.queue_id = 41U;
-    server_track.uri = "server/remote.flac";
-    server_track.metadata = mpd::Metadata{{{"Title", "Server song"}}};
-    mpd_model->replaceTracks({server_track});
-    mpd->setFocus();
-    QTest::keyClick(mpd, Qt::Key_F, Qt::ControlModifier);
+    LocalTrackRow elsewhere;
+    elsewhere.raw_path = "/elsewhere.flac";
+    elsewhere.title = "Elsewhere song";
+    elsewhere.probed = true;
+    other->model->replaceRows({elsewhere});
+    other->view->setFocus();
+    QTest::keyClick(other->view, Qt::Key_F, Qt::ControlModifier);
     QTRY_VERIFY(query->hasFocus());
-    query->setText(QStringLiteral("server song"));
+    query->setText(QStringLiteral("elsewhere song"));
     auto* status = bar->findChild<QLabel*>(QStringLiteral("bench-list-find-status"));
     QVERIFY(status != nullptr);
     QTRY_COMPARE(status->text(), QStringLiteral("Track 1 of 1"));
-    QCOMPARE(mpd_model->queueIdAt(mpd->currentIndex().row()), std::optional<std::uint32_t>{41U});
+    QCOMPARE(other->view->currentIndex().row(), 0);
     QCOMPARE(view->currentIndex().row(), 0);
     tabs->setCurrentWidget(view);
     QVERIFY(find->isEnabled());
     QVERIFY(bar->isHidden());
-    QCOMPARE(query->text(), QStringLiteral("server song"));
+    QCOMPARE(query->text(), QStringLiteral("elsewhere song"));
 
     view->selectionModel()->select(model->index(0, 0),
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
@@ -10087,8 +8356,8 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
-    tabs->setCurrentIndex(1);
+    QTRY_COMPARE(tabs->count(), 1);
+    tabs->setCurrentIndex(0);
     auto* source_view = qobject_cast<QTableView*>(tabs->currentWidget());
     auto* source = qobject_cast<LocalListModel*>(source_view->model());
     QVERIFY(source != nullptr);
@@ -10098,7 +8367,7 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
     second.raw_path = "/music/second.flac";
     source->replaceRows({first, second});
     window.duplicateCurrentTab();
-    QCOMPARE(tabs->count(), 3);
+    QCOMPARE(tabs->count(), 2);
     auto* target_view = qobject_cast<QTableView*>(tabs->currentWidget());
     auto* target = qobject_cast<LocalListModel*>(target_view->model());
     QVERIFY(target != nullptr && target != source);
@@ -10123,7 +8392,7 @@ void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -10147,8 +8416,18 @@ void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {
     QCOMPARE(view->selectionModel()->selectedRows().front().row(), 1);
     QTest::keyClick(view, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
     QCOMPARE(model->rowCount(), 2);
-    auto* mpd = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    tabs->setCurrentWidget(mpd);
+    // Undo follows the list on screen: another list has its own (empty)
+    // history, and undoing there never reaches back into this one.
+    auto* other =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Other",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
+    QVERIFY(other != nullptr);
+    QCOMPARE(tabs->currentWidget(), other->view);
     QVERIFY(!undo->isEnabled());
     QVERIFY(!redo->isEnabled());
     undo->trigger();
@@ -10176,7 +8455,7 @@ void BenchMainWindowTest::localListOrderingActionsRespectAuthorityAndPersist() {
     BenchMainWindow window;
     window.show();
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     auto* model = qobject_cast<LocalListModel*>(view->model());
     auto* sort = window.findChild<QAction*>(QStringLiteral("action-sort-list-title"));
@@ -10208,8 +8487,17 @@ void BenchMainWindowTest::localListOrderingActionsRespectAuthorityAndPersist() {
     QCOMPARE(model->rowCount(), 2);
     window.findChild<QAction*>(QStringLiteral("action-undo-list-edit"))->trigger();
     QCOMPARE(model->rowCount(), 3);
-    auto* mpd = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-    tabs->setCurrentWidget(mpd);
+    // Ordering actions follow the list on screen, and an empty one offers none.
+    auto* other =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Other",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {}},
+                          true);
+    QVERIFY(other != nullptr);
+    QCOMPARE(tabs->currentWidget(), other->view);
     QVERIFY(!sort_menu->isEnabled());
     QVERIFY(!reverse->isEnabled());
     QVERIFY(!deduplicate->isEnabled());
@@ -10217,6 +8505,8 @@ void BenchMainWindowTest::localListOrderingActionsRespectAuthorityAndPersist() {
     // Even a directly invoked action cannot use a stale local destination.
     reverse->trigger();
     QCOMPARE(model->rowCount(), 3);
+    // Closed again, so the restart below restores only the list under test.
+    window.closeTabAt(tabs->indexOf(other->view));
     tabs->setCurrentWidget(view);
     QVERIFY(reverse->isEnabled());
     // Custom-expression editing retains native text undo, separate from list undo.
@@ -10234,7 +8524,7 @@ void BenchMainWindowTest::localListOrderingActionsRespectAuthorityAndPersist() {
     BenchMainWindow reopened;
     reopened.show();
     auto* restored_tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QTRY_COMPARE(restored_tabs->count(), 2);
+    QTRY_COMPARE(restored_tabs->count(), 1);
     auto* restored_view = qobject_cast<QTableView*>(restored_tabs->currentWidget());
     auto* restored_model = qobject_cast<LocalListModel*>(restored_view->model());
     QVERIFY(restored_model);
@@ -10258,26 +8548,22 @@ void BenchMainWindowTest::portablePlaylistImportsPreserveAuthorityAndPersist() {
         BenchMainWindow window;
         window.show();
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* local_view = qobject_cast<QTableView*>(tabs->currentWidget());
         auto* local_model = qobject_cast<LocalListModel*>(local_view->model());
         QVERIFY(local_model);
         auto* import_action = window.findChild<QAction*>(QStringLiteral("action-import-m3u8"));
         auto* export_action = window.findChild<QAction*>(QStringLiteral("action-export-m3u8"));
-        auto* mpd = window.findChild<QTableView*>(QStringLiteral("bench-mpd-queue"));
-        tabs->setCurrentWidget(mpd);
         QVERIFY(import_action->isEnabled());
-        QVERIFY(!export_action->isEnabled());
-        const auto mpd_count = mpd->model()->rowCount();
         auto* bar = window.findChild<PlaylistTransferBar*>();
         QSignalSpy completed{bar, &PlaylistTransferBar::completed};
         window.importM3u8Path(QFile::encodeName(playlist).toStdString());
         QTRY_COMPARE(completed.size(), 1);
         QVERIFY(completed[0][0].toBool());
-        QCOMPARE(tabs->count(), 3);
+        QCOMPARE(tabs->count(), 2);
         QVERIFY(export_action->isEnabled());
+        // Imported into a list of its own, not into the one that was showing.
         QCOMPARE(local_model->rowCount(), 0);
-        QCOMPARE(mpd->model()->rowCount(), mpd_count);
         auto* imported_view = qobject_cast<QTableView*>(tabs->currentWidget());
         auto* imported_model = qobject_cast<LocalListModel*>(imported_view->model());
         QVERIFY(imported_model);
@@ -10289,7 +8575,7 @@ void BenchMainWindowTest::portablePlaylistImportsPreserveAuthorityAndPersist() {
     BenchMainWindow reopened;
     reopened.show();
     auto* tabs = reopened.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QTRY_COMPARE(tabs->count(), 3);
+    QTRY_COMPARE(tabs->count(), 2);
     LocalListModel* restored = nullptr;
     for (int i = 0; i < tabs->count(); ++i) {
         if (tabs->tabText(i) == QStringLiteral("Offline mix")) {
@@ -10331,7 +8617,7 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         QVERIFY(side != nullptr);
         QVERIFY(plain != nullptr);
         QVERIFY(date != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
         QVERIFY(view != nullptr);
         QCOMPARE(view->model()->columnCount(), local_column_count);
@@ -10441,7 +8727,7 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         BenchMainWindow restored;
         restored.show();
         auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
         QCOMPARE(view->albumArtworkColumn(), local_artwork_column);
         QCOMPARE(view->horizontalHeader()->logicalIndex(1), local_title_column);
@@ -10471,7 +8757,7 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         BenchMainWindow fallback;
         fallback.show();
         auto* tabs = fallback.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = static_cast<ui::QueueTableView*>(tabs->currentWidget());
         QCOMPARE(view->albumArtworkColumn(), local_artwork_column);
         QVERIFY(fallback.statusBar()->currentMessage().contains(QStringLiteral("preserved")));
@@ -10481,7 +8767,8 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
     QVERIFY(repository.has_value());
     const auto presets = repository->load_view_presets();
     QVERIFY(presets.has_value());
-    QCOMPARE(presets->size(), 2U);
+    // One per list tab; the MPD queue's own preset went with the queue.
+    QCOMPARE(presets->size(), 1U);
     const auto stored =
         std::ranges::find(*presets, binding.toStdString(), &persistence::TrackViewPreset::binding);
     QVERIFY(stored != presets->end());
@@ -10515,7 +8802,7 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
         QCOMPARE(pin->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+P")));
         QCOMPARE(save->shortcut(), QKeySequence::Save);
         QCOMPARE(close->shortcut(), QKeySequence(QStringLiteral("Ctrl+W")));
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
 
         window.openLocalPaths({raw_path});
         auto* source = qobject_cast<QTableView*>(tabs->currentWidget());
@@ -10535,8 +8822,8 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
         QVERIFY(!close->isEnabled());
 
         duplicate->trigger();
-        QCOMPARE(tabs->count(), 3);
-        QCOMPARE(tabs->currentIndex(), 2);
+        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->currentIndex(), 1);
         auto* copied = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(copied != nullptr);
         QCOMPARE(copied->model()->rowCount(), 1);
@@ -10565,14 +8852,14 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
             }
         });
         close->trigger();
-        QCOMPARE(tabs->count(), 3);
+        QCOMPARE(tabs->count(), 2);
         QTimer::singleShot(0, [] {
             if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
                 box->done(QMessageBox::Yes);
             }
         });
         close->trigger();
-        QCOMPARE(tabs->count(), 2);
+        QCOMPARE(tabs->count(), 1);
         QCOMPARE(tabs->currentWidget(), source);
         QVERIFY(pin->isChecked());
         QVERIFY(window.close());
@@ -10582,7 +8869,7 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
     restored.show();
     auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     const auto local_index = tabs->currentIndex();
     QCOMPARE(tabs->tabText(local_index), QStringLiteral("Local Queue *"));
     QVERIFY(tabs->tabToolTip(local_index).contains(QStringLiteral("pinned")));
@@ -10607,7 +8894,7 @@ void BenchMainWindowTest::richMetadataValuesAndIdentitiesSurviveListRestart() {
         window.openLocalPaths({raw_path});
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* model = qobject_cast<LocalListModel*>(
             qobject_cast<QTableView*>(tabs->currentWidget())->model());
         QVERIFY(model != nullptr);
@@ -10665,7 +8952,7 @@ void BenchMainWindowTest::richMetadataValuesAndIdentitiesSurviveListRestart() {
     restored.show();
     auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QVERIFY(model != nullptr);
@@ -10864,7 +9151,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QVERIFY(properties != nullptr);
     QCOMPARE(properties->shortcut(), QKeySequence(QStringLiteral("Alt+Return")));
     QCOMPARE(properties->text(), QStringLiteral("Edit tags…"));
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* list_model = qobject_cast<LocalListModel*>(view->model());
@@ -10895,7 +9182,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     // while edits are staged.
     QVERIFY(!dialog->isModal());
     QVERIFY(dialog->isWindow());
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
     QVERIFY(qobject_cast<MetadataPropertiesDialog*>(tabs->currentWidget()) == nullptr);
     QCOMPARE(dialog->windowTitle(), QStringLiteral("Edit tags · 2 tracks"));
     QVERIFY(dialog->findChild<QLabel*>(QStringLiteral("bench-metadata-loading")) != nullptr);
@@ -11304,7 +9591,7 @@ void BenchMainWindowTest::metadataPropertiesFileSelectionDrivesIndividualAndBulk
     QPointer<MetadataPropertiesDialog> lifetime = dialog;
     QVERIFY(dialog->close());
     QTRY_VERIFY(lifetime.isNull());
-    QCOMPARE(tabs->count(), 2);
+    QCOMPARE(tabs->count(), 1);
 }
 
 void BenchMainWindowTest::metadataPropertiesArtworkSectionShowsProvenanceAndCapabilities() {
@@ -11677,7 +9964,7 @@ void BenchMainWindowTest::cueSheetsExpandIntoPersistentSegmentRows() {
         window.openLocalPaths({raw_folder});
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(view != nullptr);
         auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -11718,7 +10005,7 @@ void BenchMainWindowTest::cueSheetsExpandIntoPersistentSegmentRows() {
     restored.show();
     auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QVERIFY(model != nullptr);
@@ -11751,7 +10038,7 @@ void BenchMainWindowTest::containerChaptersExpandIntoPersistentSegmentRows() {
         window.openLocalPaths({raw_path});
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(view != nullptr);
         auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -11791,7 +10078,7 @@ void BenchMainWindowTest::containerChaptersExpandIntoPersistentSegmentRows() {
     restored.show();
     auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QVERIFY(model != nullptr);
@@ -11824,7 +10111,7 @@ void BenchMainWindowTest::codecNativeSubsongsExpandAndPersistDecoderSelections()
         window.openLocalPaths({raw_folder});
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(view != nullptr);
         auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -11854,7 +10141,7 @@ void BenchMainWindowTest::codecNativeSubsongsExpandAndPersistDecoderSelections()
     restored.show();
     auto* tabs = restored.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* model =
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QVERIFY(model != nullptr);
@@ -11878,8 +10165,8 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
         window.show();
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_VERIFY(tabs->count() >= 2);
-        tabs->setCurrentIndex(1);
+        QTRY_VERIFY(tabs->count() >= 1);
+        tabs->setCurrentIndex(0);
         auto* repeat = window.findChild<QAction*>(QStringLiteral("action-local-repeat"));
         auto* random = window.findChild<QAction*>(QStringLiteral("action-local-random"));
         auto* single = window.findChild<QAction*>(QStringLiteral("action-local-single"));
@@ -11888,7 +10175,7 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
             window.findChild<QAction*>(QStringLiteral("action-local-replaygain-auto"));
         auto* rg = window.findChild<QToolButton*>(QStringLiteral("bench-local-replaygain"));
         QVERIFY(repeat && random && single && consume && automatic && rg);
-        for (const auto* name : {"bench-local-album-random", "bench-mpd-album-random"}) {
+        for (const auto* name : {"bench-local-album-random"}) {
             auto* album_mode = window.findChild<QToolButton*>(QString::fromLatin1(name));
             QVERIFY(album_mode);
             QCOMPARE(album_mode->toolButtonStyle(), Qt::ToolButtonIconOnly);
@@ -11910,14 +10197,6 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
         consume->trigger();
         consume->trigger();
         QCOMPARE(consume->iconText(), QStringLiteral("C×"));
-        tabs->setCurrentIndex(0);
-        QVERIFY(!rg->isVisible());
-        QVERIFY(!repeat->isEnabled());
-        QVERIFY(!automatic->isEnabled());
-        // Local commands remain scoped even when invoked programmatically.
-        random->trigger();
-        QVERIFY(random->isChecked());
-        tabs->setCurrentIndex(1);
         QVERIFY(rg->isVisible());
         QVERIFY(repeat->isChecked());
         QVERIFY(random->isChecked());
@@ -12020,10 +10299,6 @@ void BenchMainWindowTest::localPlaybackModesAdvance() {
     if (window.property("trackknife-player-state").toInt() == 8) {
         QSKIP("live PipeWire playback unavailable");
     }
-    // Progression must continue while the MPD authority is visible.
-    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
-    QVERIFY(tabs != nullptr);
-    tabs->setCurrentIndex(0);
     QTest::qWait(track_ms * 3 + 600);
     QCOMPARE(model->rowCount(), expected_count);
     if (ended) {

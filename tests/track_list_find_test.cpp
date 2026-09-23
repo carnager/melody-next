@@ -2,7 +2,6 @@
 
 #include "bench/local_list_model.hpp"
 #include "bench/track_list_find_bar.hpp"
-#include "quick/mpd_queue_model.hpp"
 
 #include <QLabel>
 #include <QLineEdit>
@@ -54,7 +53,6 @@ class TrackListFindTest final : public QObject {
     void discardsStaleResultsAndYieldsBetweenBatches();
     void invalidatesOnStructuralAndMetadataChanges();
     void reportsOversizedTextWithoutClaimingNoMatch();
-    void mpdQueueFindPreservesServerStateAndRejectsStaleRows();
 };
 
 void TrackListFindTest::navigatesDuplicateOccurrencesWithoutMutatingOrPlaying() {
@@ -230,72 +228,6 @@ void TrackListFindTest::invalidatesOnStructuralAndMetadataChanges() {
     w.bar->findNext();
     w.model.setCurrentSource(w.model.source(2), 2);
     QTRY_COMPARE(w.status->text(), QStringLiteral("Wrapped · Track 1 of 3"));
-}
-
-void TrackListFindTest::mpdQueueFindPreservesServerStateAndRejectsStaleRows() {
-    const auto make_track = [](const std::uint32_t id, std::string title) {
-        mpd::Track row;
-        row.queue_id = id;
-        row.uri = "https://example.invalid/music/a\\b.flac";
-        row.metadata =
-            mpd::Metadata{{{"Title", std::move(title)}, {"Artist", "First"}, {"Artist", "Björk"}}};
-        return row;
-    };
-    const auto first = make_track(41U, "Server match");
-    auto middle = make_track(42U, "Other");
-    const auto last = make_track(43U, "Server match");
-    const std::vector original{first, middle, last};
-    quick::MpdQueueModel model;
-    model.replaceTracks(original);
-    model.setCurrentSongId(42U);
-    Workspace w{{}};
-    w.bar->setView(nullptr);
-    w.view->setModel(&model);
-    w.bar->setView(w.view);
-    w.bar->open();
-    QSignalSpy changed{&model, &QAbstractItemModel::dataChanged};
-    QSignalSpy reset{&model, &QAbstractItemModel::modelReset};
-    QSignalSpy activated{w.view, &QTableView::activated};
-    w.query->setText(QStringLiteral("server MATCH"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 1 of 3"));
-    w.bar->findNext();
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 3 of 3"));
-    QCOMPARE(model.queueIdAt(w.view->currentIndex().row()), std::optional<std::uint32_t>{43U});
-    w.bar->findNext();
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Wrapped · Track 1 of 3"));
-    QVERIFY(model.tracksSnapshot() == original);
-    QVERIFY(model.index(1, 0).data(quick::MpdQueueModel::CurrentRole).toBool());
-    QCOMPARE(changed.count(), 0);
-    QCOMPARE(reset.count(), 0);
-    QCOMPARE(activated.count(), 0);
-
-    w.bar->findNext();
-    model.replaceTracks({first, middle});
-    QCOMPARE(w.status->text(), QStringLiteral("List changed — search again"));
-    QTest::qWait(50);
-    QCOMPARE(model.queueIdAt(w.view->currentIndex().row()), std::optional<std::uint32_t>{41U});
-    middle.metadata = mpd::Metadata{{{"Title", "Updated remotely"},
-                                     {"Artist", "First"},
-                                     {"Artist", "Björk"},
-                                     {"Composer", "Arvo Pärt"}}};
-    // ADR-0142: arbitrary server tags, the audio format, and the
-    // formatted duration are part of the haystack.
-    middle.audio_format = "44100:16:2";
-    middle.duration = std::chrono::milliseconds{95'000};
-    model.replaceTracks({first, middle});
-    w.query->setText(QStringLiteral("updated remotely"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
-    w.query->setText(QStringLiteral("BJÖRK"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
-    w.query->setText(QStringLiteral("ARVO pärt"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
-    w.query->setText(QStringLiteral("44100:16"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
-    w.query->setText(QStringLiteral("1:35"));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
-    // An MPD URI remains exact protocol text, including literal backslashes.
-    w.query->setText(QString::fromStdString(first.uri));
-    QTRY_COMPARE(w.status->text(), QStringLiteral("Track 2 of 2"));
 }
 
 void TrackListFindTest::reportsOversizedTextWithoutClaimingNoMatch() {

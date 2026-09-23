@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/dynamic_playlist_dialog.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -33,8 +32,6 @@ QList<QByteArray> resultKeys(QAbstractItemModel* model) {
                    << row.selection.subsong_index.value_or(-1)
                    << static_cast<qint64>(row.segment ? row.segment->start_sample : -1)
                    << static_cast<qint64>(row.segment ? row.segment->end_sample.value_or(-1) : -1);
-        } else if (auto* remote = qobject_cast<quick::MpdQueueModel*>(model)) {
-            stream << QByteArray::fromStdString(remote->trackAt(i)->uri);
         }
         const auto ordinal = occurrences[key]++;
         stream << ordinal;
@@ -114,14 +111,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     stop->setObjectName(QStringLiteral("dynamic-stop"));
     open_ = new QPushButton(QStringLiteral("Open snapshot in new tab"), this);
     open_->setObjectName(QStringLiteral("dynamic-open"));
-    append_ = new QPushButton(QStringLiteral("Add to queue"), this);
-    append_->setObjectName(QStringLiteral("dynamic-append"));
-    if (profile_ == QStringLiteral("local"))
-        append_->hide();
     actions->addWidget(refresh_);
     actions->addWidget(stop);
     actions->addStretch();
-    actions->addWidget(append_);
     actions->addWidget(open_);
     layout->addLayout(actions);
     status_ = new QLabel(this);
@@ -140,15 +132,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     view_->setAcceptDrops(false);
     view_->setActivateCallback([this](const QModelIndex&) { playCurrent(); });
     connect(view_, &QTableView::doubleClicked, this, [this](const QModelIndex&) { playCurrent(); });
-    if (profile_ == QStringLiteral("local")) {
-        local_model_ = new LocalListModel(this);
-        local_model_->setProperty("definition-owned", true);
-        view_->setModel(local_model_);
-    } else {
-        mpd_model_ = new quick::MpdQueueModel(this);
-        mpd_model_->setProperty("definition-owned", true);
-        view_->setModel(mpd_model_);
-    }
+    local_model_ = new LocalListModel(this);
+    local_model_->setProperty("definition-owned", true);
+    view_->setModel(local_model_);
     // Hidden by default; the owning window supplies the authority's history service.
     view_->setColumnHidden(ui::track_play_count_column, true);
     view_->setColumnHidden(ui::track_last_played_column, true);
@@ -195,8 +181,8 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
             const auto offset = top.isValid() ? view_->visualRect(top).top() : 0;
             const auto horizontal = view_->horizontalScrollBar()->value();
             tracks_ = tracks;
-            if (local_model_) {
-                const auto& rows = std::get<std::vector<LocalTrackRow>>(tracks_);
+            {
+                const auto& rows = tracks_;
                 const auto& previous = local_model_->rows();
                 const bool unchanged = rows.size() == previous.size() &&
                                        std::equal(rows.begin(), rows.end(), previous.begin(),
@@ -206,8 +192,7 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
                                                   });
                 if (!unchanged)
                     local_model_->replaceRows(rows);
-            } else
-                mpd_model_->replaceTracks(std::get<std::vector<mpd::Track>>(tracks_));
+            }
             const auto keys = resultKeys(view_->model());
             view_->selectionModel()->clearSelection();
             for (int i = 0; i < keys.size(); ++i) {
@@ -226,9 +211,8 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
             }
             view_->horizontalScrollBar()->setValue(horizontal);
             emit resultsChanged();
-            const auto count = std::visit([](const auto& rows) { return rows.size(); }, tracks_);
+            const auto count = tracks_.size();
             open_->setEnabled(count > 0);
-            append_->setEnabled(count > 0);
             status_->setText(
                 source_->currentData() == QStringLiteral("rules")
                     ? QStringLiteral(
@@ -256,7 +240,6 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     });
     connect(open_, &QPushButton::clicked, this,
             [this] { emit snapshotRequested(name_->text().trimmed(), tracks_); });
-    connect(append_, &QPushButton::clicked, this, [this] { emit appendRequested(tracks_); });
     connect(catalog_, &QComboBox::activated, this, [this](int) { loadSelection(); });
     connect(source_, &QComboBox::currentIndexChanged, this, [this](int) {
         updateFields();
@@ -400,11 +383,7 @@ void DynamicPlaylistDialog::discardResults() {
     busy_ = false;
     refresh_->setEnabled(authority_valid_);
     open_->setEnabled(false);
-    append_->setEnabled(false);
-    if (local_model_)
-        local_model_->replaceRows({});
-    else
-        mpd_model_->replaceTracks({});
+    local_model_->replaceRows({});
 }
 void DynamicPlaylistDialog::refresh(const bool) {
     if (!authority_valid_)
@@ -413,7 +392,6 @@ void DynamicPlaylistDialog::refresh(const bool) {
     refresh_timer_->stop();
     service_->cancel();
     open_->setEnabled(false);
-    append_->setEnabled(false);
     auto_refresh_ = true;
     refresh_pending_ = false;
     busy_ = true;

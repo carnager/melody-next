@@ -38,8 +38,7 @@ struct LocalPlaybackService final {
     // a list is reordered, which is the whole reason ADR-0221 exists.
     int row{-1};
     // Explicit asks, which outrank the playback order. The up-next panel that
-    // displays and edits this still lives in the window, because it also shows
-    // the MPD queue and so branches on authority; the queue itself does not.
+    // displays and edits this lives in the window; the queue itself does not.
     audio::RequestQueue<LocalTrackRow> requests;
     // What was last handed to the player for gapless continuation, so an
     // unchanged decision is not re-sent every tick.

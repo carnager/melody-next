@@ -194,6 +194,14 @@ bool LocalFolderTreeModel::hasChildren(const QModelIndex& parent_index) const {
                                : node->directory && (!node->fetched || !node->children.empty());
 }
 
+bool LocalFolderTreeModel::isLoaded(const QModelIndex& index) const {
+    if (!index.isValid()) {
+        return true;
+    }
+    const auto* node = nodeFor(index);
+    return !node->directory || node->fetched;
+}
+
 bool LocalFolderTreeModel::canFetchMore(const QModelIndex& parent_index) const {
     if (!parent_index.isValid()) {
         return false;
@@ -238,6 +246,7 @@ void LocalFolderTreeModel::fetchMore(const QModelIndex& parent_index) {
                 if (!listing.error.empty()) {
                     emit directoryError(QString::fromStdString(listing.error));
                 }
+                emit directoryLoaded(QModelIndex{persistent_parent});
             });
     watcher->setFuture(QtConcurrent::run([raw_parent] {
         DirectoryListing result;

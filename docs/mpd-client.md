@@ -1,5 +1,9 @@
 # MPD client, sources, queues, and Melody capabilities
 
+> **Superseded.** Trackknife no longer contains an MPD client
+> ([ADR-0224](adr/0224-retire-the-mpd-backend.md)). This document describes the
+> retired backend and is kept for history.
+
 ## Scope
 
 This document defines the first visible product slice. Trackknife is a standard

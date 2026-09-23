@@ -19,7 +19,7 @@ class QDoubleSpinBox;
 namespace trackknife::bench {
 
 // The application settings screen (ADR-0112, ADR-0185): a paged dialog —
-// General (startup context, MPD music folder, notifications), Playback (local
+// General (notifications, appearance), Playback (local
 // buffering and ReplayGain preamps), Naming (the reusable
 // output-layout and move-destination profile managers), ReplayGain
 // (set-once scan preferences), and Covers (the ADR-0184 storage policy
@@ -40,7 +40,6 @@ class SettingsDialog final : public QDialog {
         general,
         playback,
         library,
-        connections,
         naming,
         replaygain,
         covers,
@@ -50,7 +49,6 @@ class SettingsDialog final : public QDialog {
     };
     explicit SettingsDialog(QWidget* parent = nullptr, OutputProfileStore profile_store = {},
                             std::function<QWidget*(QWidget*)> library_folders = {},
-                            std::function<QWidget*(QWidget*)> connections = {},
                             std::function<QWidget*(QWidget*)> lastfm = {},
                             QList<QAction*> shortcuts = {});
     void showPage(Page page);
@@ -60,9 +58,7 @@ class SettingsDialog final : public QDialog {
 
     // QSettings keys shared with the consumers.
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
-    static constexpr auto startup_context_key = "startup/context";
     static constexpr auto restore_playback_key = "playback/restore-paused";
-    static constexpr auto music_root_key = "mpd/music-root";
     // ADR-0220: empty means the library is opened in this process, which is
     // what it has always done. A socket path routes it through an engine
     // instead, so pointing at one is a deliberate act and the default is
@@ -83,7 +79,6 @@ class SettingsDialog final : public QDialog {
 
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
-    QComboBox* startup_{nullptr};
     QCheckBox* restore_playback_{nullptr};
     QCheckBox* panel_animations_{nullptr};
     QCheckBox* notifications_{nullptr};
@@ -93,7 +88,6 @@ class SettingsDialog final : public QDialog {
     QSpinBox* buffer_threshold_{nullptr};
     QDoubleSpinBox* preamp_with_{nullptr};
     QDoubleSpinBox* preamp_without_{nullptr};
-    QLineEdit* music_root_{nullptr};
     QLineEdit* engine_socket_{nullptr};
     QLineEdit* engine_token_{nullptr};
     QLineEdit* lastfm_key_{nullptr};

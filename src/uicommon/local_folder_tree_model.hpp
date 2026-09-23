@@ -30,10 +30,17 @@ class LocalFolderTreeModel final : public QAbstractItemModel {
     [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
     [[nodiscard]] bool hasChildren(const QModelIndex& parent = {}) const override;
     [[nodiscard]] bool canFetchMore(const QModelIndex& parent) const override;
+    // Whether a directory's children are all present. Distinct from
+    // !canFetchMore, which is also false while a listing is in flight -- and a
+    // caller treating "in flight" as "loaded" sees an empty directory.
+    [[nodiscard]] bool isLoaded(const QModelIndex& index) const;
     void fetchMore(const QModelIndex& parent) override;
 
   signals:
     void directoryError(const QString& message);
+    // A directory finished loading, including when it turned out to be empty
+    // and so inserted no rows at all.
+    void directoryLoaded(const QModelIndex& index);
 
   private:
     struct Node;

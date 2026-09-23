@@ -4,7 +4,6 @@
 #include "query/search_preset_corpus.hpp"
 #include "trackknife/query/search_presets.hpp"
 #include "trackknife/query/tkq.hpp"
-#include "trackknife/query/tkq_melody.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -172,103 +171,6 @@ void boundsFailClosed() {
 
 } // namespace
 
-void melodyTranslationCoversTheSupportedSubset() {
-    using trackknife::query::translate_tkq_to_melody;
-    const auto translate = [](const std::string_view source) {
-        const auto compiled = compile_tkq(source);
-        CHECK(compiled.has_value());
-        return translate_tkq_to_melody(*compiled);
-    };
-
-    // Word searches, tag terms, and pseudo-fields join with AND.
-    auto translated = translate("miles davis");
-    CHECK(translated.has_value() && translated->filter_expression ==
-                                        "((any contains \"miles\") AND (any contains \"davis\"))");
-    translated = translate("genre HAS jazz AND rating GREATER 7");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "((genre contains \"jazz\") AND (rating > 7))");
-    translated = translate("albumartist IS \"Bohren & der Club of Gore\"");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "(albumartist == \"Bohren & der Club of Gore\")");
-    translated = translate("samplerate GREATER 48000 AND bitspersample EQUAL 24");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "((samplerate > 48000) AND (bitspersample == 24))");
-    translated = translate("length_ms GREATER 600000");
-    CHECK(translated.has_value() && translated->filter_expression == "(length > 600)");
-    translated = translate("rating PRESENT");
-    CHECK(translated.has_value() && translated->filter_expression == "(rating >= 1)");
-    translated = translate("musicbrainz_albumid IS abc");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "(musicbrainz_albumid == \"abc\")");
-    translated = translate("ALL");
-    CHECK(translated.has_value() && translated->filter_expression == "(base \"\")");
-    translated = translate("albumrating GREATER 7 SORT DESCENDING BY %date%");
-    CHECK(translated.has_value() && translated->filter_expression == "(albumrating > 7)" &&
-          translated->sort == "-date");
-    translated = translate("artist HAS nick SORT BY %tracknumber%");
-    CHECK(translated.has_value() && translated->sort == "track");
-
-    // Untranslatable constructs are typed errors, never broadened queries.
-    for (const auto* source : {"genre HAS jazz OR genre HAS blues", "NOT genre HAS jazz",
-                               "rating MISSING", "date GREATER 1990", "genre GREATER 5",
-                               "\"%artist% x\" HAS y", "genre HAS jazz SORT BY $lower(%artist%)"}) {
-        const auto rejected = translate(source);
-        CHECK(!rejected.has_value());
-        if (!rejected.has_value()) {
-            CHECK(rejected.error().code == trackknife::core::ErrorCode::unsupported);
-        }
-    }
-}
-
-void melodyFullGrammarTranslatesStructuredQueries() {
-    using trackknife::query::translate_tkq_to_melody;
-    const auto translate = [](const std::string_view source) {
-        const auto compiled = compile_tkq(source);
-        CHECK(compiled.has_value());
-        return translate_tkq_to_melody(*compiled, true);
-    };
-
-    // OR, NOT, and nesting render the server's parenthesized grammar.
-    auto translated = translate("genre HAS jazz OR genre HAS blues");
-    CHECK(translated.has_value() &&
-          translated->filter_expression ==
-              "((genre contains \"jazz\") OR (genre contains \"blues\"))");
-    translated = translate("NOT genre HAS jazz");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "(!(genre contains \"jazz\"))");
-    translated = translate("(artist IS a AND genre HAS jazz) OR title IS b");
-    CHECK(translated.has_value() &&
-          translated->filter_expression ==
-              "(((artist == \"a\") AND (genre contains \"jazz\")) OR (title == \"b\"))");
-
-    // MPD's empty-value forms carry PRESENT and MISSING; ratings negate
-    // their numeric form because 0 means unrated.
-    translated = translate("genre MISSING");
-    CHECK(translated.has_value() && translated->filter_expression == "(genre == \"\")");
-    translated = translate("genre PRESENT");
-    CHECK(translated.has_value() && translated->filter_expression == "(genre != \"\")");
-    translated = translate("rating MISSING");
-    CHECK(translated.has_value() && translated->filter_expression == "(!(rating >= 1))");
-
-    // Numeric comparisons reach ordinary tags; EQUAL becomes the range
-    // pair because the server's == is string equality there.
-    translated = translate("date GREATER 1990 AND date LESS 2000");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "((date > 1990) AND (date < 2000))");
-    translated = translate("date EQUAL 1994");
-    CHECK(translated.has_value() &&
-          translated->filter_expression == "((date >= 1994) AND (date <= 1994))");
-
-    // Still impossible even at grammar level 2.
-    for (const auto* source : {"\"%artist% x\" HAS y", "samplerate MISSING"}) {
-        const auto rejected = translate(source);
-        CHECK(!rejected.has_value());
-        if (!rejected.has_value()) {
-            CHECK(rejected.error().code == trackknife::core::ErrorCode::unsupported);
-        }
-    }
-}
-
 int main() {
     std::set<std::string_view> ids;
     std::set<std::string_view> topics;
@@ -281,7 +183,6 @@ int main() {
             continue;
         const auto compiled = compile_tkq(*source);
         CHECK(compiled.has_value());
-        CHECK(compiled && trackknife::query::translate_tkq_to_melody(*compiled, true, true, true));
         if (preset.input == trackknife::query::PresetInput::integer) {
             CHECK(!trackknife::query::preset_query(preset, ""));
             CHECK(!trackknife::query::preset_query(preset, "1 OR ALL"));
@@ -309,17 +210,10 @@ int main() {
         const auto result = trackknife::query::preset_query(*found, test.source);
         CHECK(result && *result == test.expected);
     }
+    // The corpus's expected outputs are the retired Melody translation; what
+    // stays true is that every source still compiles.
     for (const auto& test : history_corpus::sort_cases) {
-        const auto compiled = compile_tkq(test.source);
-        CHECK(compiled.has_value());
-        if (!compiled)
-            continue;
-        CHECK(!trackknife::query::translate_tkq_to_melody(*compiled, true, true));
-        const auto translated_sort =
-            trackknife::query::translate_tkq_to_melody(*compiled, true, true, true);
-        CHECK(translated_sort.has_value());
-        if (translated_sort)
-            CHECK(translated_sort->sort == test.expected);
+        CHECK(compile_tkq(test.source).has_value());
     }
     const auto literal_sort = compile_tkq("ALL SORT BY HISTORY");
     CHECK(literal_sort && literal_sort->sort->history.empty());
@@ -329,32 +223,17 @@ int main() {
     CHECK(!compile_tkq("ALL SORT HISTORY(playcount) trailing"));
     CHECK(!compile_tkq("ALL SORT HISTORY(playcount"));
     for (const auto& test : history_corpus::cases) {
-        const auto compiled = compile_tkq(test.source);
-        CHECK(compiled.has_value());
-        if (!compiled)
-            continue;
-        const auto output = trackknife::query::translate_tkq_to_melody(*compiled, true, true);
-        CHECK(output.has_value());
-        if (output)
-            CHECK(output->filter_expression == test.expected);
+        CHECK(compile_tkq(test.source).has_value());
     }
     const auto history =
         compile_tkq("HISTORY(albumplaycount) EQUAL 0 OR HISTORY(albumdayssinceplayed) GREATER 180");
     CHECK(history.has_value());
     CHECK(history->predicates.front().operand == trackknife::query::TkqOperandKind::history);
-    CHECK(!trackknife::query::translate_tkq_to_melody(*history, true));
-    const auto translated = trackknife::query::translate_tkq_to_melody(*history, true, true);
-    CHECK(translated.has_value());
-    CHECK(translated->filter_expression ==
-          "((history-albumplaycount == 0) OR ((history-albumdayssinceplayed >= 0) AND "
-          "(history-albumdayssinceplayed > 180)))");
     CHECK(!compile_tkq("HISTORY(unknown) EQUAL 0"));
     CHECK(!compile_tkq("HISTORY(playcount) HAS 1"));
     CHECK(compile_tkq("HISTORY IS tag")->predicates.front().operand ==
           trackknife::query::TkqOperandKind::field);
     simpleWordsBecomeAnAllWordSearch();
-    melodyTranslationCoversTheSupportedSubset();
-    melodyFullGrammarTranslatesStructuredQueries();
     structuredQueriesParseWithPrecedence();
     quotingEscapesAndKeywordsInsideStrings();
     expressionOperandsCompileAsFormatPredicates();

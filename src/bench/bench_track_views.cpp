@@ -3,8 +3,6 @@
 #include "bench/bench_main_window.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include "uicommon/track_row_roles.hpp"
@@ -111,10 +109,8 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         const bool history_column =
             logical == local_play_count_column || logical == local_last_played_column;
         view->setColumnHidden(
-            logical, !column.visible ||
-                         (history_column && !qobject_cast<LocalListModel*>(view->model()) &&
-                          !(mpd_controller_ && mpd_controller_->connected() &&
-                            mpd_controller_->supportsCommand(QStringLiteral("melody_stats")))));
+            logical,
+            !column.visible || (history_column && !qobject_cast<LocalListModel*>(view->model())));
         view->setColumnWidth(logical, column.width);
     }
     queue_view->setAlbumArtworkColumn(side_artwork ? local_artwork_column : -1);
@@ -167,17 +163,6 @@ BenchMainWindow::captureTrackViewLayout(const QTableView* view,
 }
 
 void BenchMainWindow::setTrackViewPresentation(const ui::TrackViewPresentation presentation) {
-    if (isMpdContext()) {
-        if (applying_track_view_layout_) {
-            return;
-        }
-        mpd_view_layout_persistence_protected_ = false;
-        preserved_mpd_view_layout_.clear();
-        applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_,
-                             defaultTrackViewLayout(presentation));
-        schedulePersist();
-        return;
-    }
     auto* tab = currentListTab();
     if (tab == nullptr || applying_track_view_layout_) {
         return;
@@ -189,40 +174,6 @@ void BenchMainWindow::setTrackViewPresentation(const ui::TrackViewPresentation p
 }
 
 void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool visible) {
-    if (isMpdContext() && !mpd_controller_->supportsCommand(QStringLiteral("melody_stats")) &&
-        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
-        return;
-    if (isMpdContext()) {
-        if (applying_track_view_layout_) {
-            return;
-        }
-        auto layout = captureTrackViewLayout(mpd_queue_view_, mpd_view_layout_);
-        const auto visible_count =
-            std::ranges::count(layout.columns, true, &ui::TrackViewColumnLayout::visible);
-        const auto found =
-            std::ranges::find(layout.columns, column_id, &ui::TrackViewColumnLayout::id);
-        if (found == layout.columns.end() || (!visible && found->visible && visible_count == 1)) {
-            refreshTrackViewActions();
-            return;
-        }
-        found->visible = visible;
-        mpd_view_layout_persistence_protected_ = false;
-        preserved_mpd_view_layout_.clear();
-        applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, layout);
-        if (column_id == QStringLiteral("play-count") ||
-            column_id == QStringLiteral("last-played")) {
-            for (auto& tab : mpd_playlist_tabs_) {
-                auto playlist_layout = captureTrackViewLayout(tab->view, tab->view_layout);
-                const auto column = std::ranges::find(playlist_layout.columns, column_id,
-                                                      &ui::TrackViewColumnLayout::id);
-                if (column != playlist_layout.columns.end())
-                    column->visible = visible;
-                applyTrackViewLayout(tab->view, tab->view_layout, playlist_layout);
-            }
-        }
-        schedulePersist();
-        return;
-    }
     auto* tab = currentListTab();
     if (tab == nullptr || applying_track_view_layout_) {
         return;
@@ -246,13 +197,6 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
 }
 
 void BenchMainWindow::resetTrackViewLayout() {
-    if (isMpdContext()) {
-        mpd_view_layout_persistence_protected_ = false;
-        preserved_mpd_view_layout_.clear();
-        applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, defaultTrackViewLayout());
-        schedulePersist();
-        return;
-    }
     auto* tab = currentListTab();
     if (tab == nullptr) {
         return;
@@ -264,17 +208,11 @@ void BenchMainWindow::resetTrackViewLayout() {
 }
 
 void BenchMainWindow::copyTrackViewLayoutToAllTabs() {
-    auto layout = ui::TrackViewLayout{};
-    if (isMpdContext()) {
-        layout = captureTrackViewLayout(mpd_queue_view_, mpd_view_layout_);
-    } else if (auto* source = currentListTab(); source != nullptr) {
-        layout = captureTrackViewLayout(*source);
-    } else {
+    auto* source = currentListTab();
+    if (source == nullptr) {
         return;
     }
-    mpd_view_layout_persistence_protected_ = false;
-    preserved_mpd_view_layout_.clear();
-    applyTrackViewLayout(mpd_queue_view_, mpd_view_layout_, layout);
+    const auto layout = captureTrackViewLayout(*source);
     for (auto& tab : list_tabs_) {
         tab->view_layout_persistence_protected = false;
         tab->preserved_view_layout.clear();
@@ -288,27 +226,20 @@ void BenchMainWindow::refreshTrackViewActions() {
         return;
     }
     auto* tab = currentListTab();
-    const auto available = tab != nullptr || isMpdContext();
+    const auto available = tab != nullptr;
     for (auto* action :
          {track_albums_side_action_, track_albums_header_action_, track_plain_columns_action_,
           track_compact_queue_action_, track_layout_reset_action_, track_layout_copy_action_}) {
         action->setEnabled(available);
     }
-    for (auto it = track_column_actions_.begin(); it != track_column_actions_.end(); ++it) {
-        const bool history_column =
-            it.key() == QStringLiteral("play-count") || it.key() == QStringLiteral("last-played");
-        const bool history_available =
-            available &&
-            (!isMpdContext() || (mpd_controller_->connected() &&
-                                 mpd_controller_->supportsCommand(QStringLiteral("melody_stats"))));
-        it.value()->setVisible(!history_column || history_available);
-        it.value()->setEnabled(available && (!history_column || history_available));
+    for (auto* action : track_column_actions_) {
+        action->setVisible(true);
+        action->setEnabled(available);
     }
     if (!available) {
         return;
     }
-    const auto layout = isMpdContext() ? captureTrackViewLayout(mpd_queue_view_, mpd_view_layout_)
-                                       : captureTrackViewLayout(*tab);
+    const auto layout = captureTrackViewLayout(*tab);
     const QSignalBlocker side_blocker{track_albums_side_action_};
     const QSignalBlocker header_blocker{track_albums_header_action_};
     const QSignalBlocker plain_blocker{track_plain_columns_action_};
@@ -354,14 +285,6 @@ void BenchMainWindow::showTrackViewHeaderMenu(QTableView* view, const QPoint& po
 // The table the tab strip is currently showing, whichever kind of list it
 // holds. Selection-driven actions ask this rather than each surface.
 QTableView* BenchMainWindow::activeTrackView() {
-    // Playlist and working tabs first: they are MPD context too, but the
-    // selection that matters is theirs, not the queue's.
-    if (auto* playlist_tab = currentMpdPlaylistTab()) {
-        return playlist_tab->view;
-    }
-    if (isMpdContext()) {
-        return mpd_queue_view_;
-    }
     if (auto* tab = currentListTab()) {
         return tab->view;
     }
@@ -374,29 +297,20 @@ void BenchMainWindow::refreshSelectionActions() {
     auto* view = activeTrackView();
     const auto has_selection = view != nullptr && view->selectionModel() != nullptr &&
                                !view->selectionModel()->selectedRows().isEmpty();
-    // Every MPD-side list is edited on the server, so all of them need a
-    // connection that is not mid-command; local lists never do.
-    const auto server_ready =
-        !isMpdContext() || (mpd_controller_ != nullptr && mpd_controller_->connected() &&
-                            !mpd_controller_->commandBusy());
     if (remove_selected_action_ != nullptr) {
-        remove_selected_action_->setEnabled(has_selection && server_ready);
+        remove_selected_action_->setEnabled(has_selection);
     }
     if (play_selected_action_ != nullptr) {
-        play_selected_action_->setEnabled(view != nullptr && view->currentIndex().isValid() &&
-                                          server_ready);
+        play_selected_action_->setEnabled(view != nullptr && view->currentIndex().isValid());
     }
 }
 
 void BenchMainWindow::refreshSelectionStatus() {
     if (tabs_) {
         auto* source = qobject_cast<QTableView*>(tabs_->currentWidget());
-        const bool can_queue =
-            source && source->selectionModel() &&
-            !source->selectionModel()->selectedRows().isEmpty() &&
-            (qobject_cast<LocalListModel*>(source->model()) ||
-             (isMpdContext() && mpd_controller_->connected() &&
-              mpd_controller_->supportsCommand(QStringLiteral("melody_upnext"))));
+        const bool can_queue = source && source->selectionModel() &&
+                               !source->selectionModel()->selectedRows().isEmpty() &&
+                               qobject_cast<LocalListModel*>(source->model()) != nullptr;
         for (const auto& name :
              {QStringLiteral("action-queue-next"), QStringLiteral("action-queue-end")})
             if (auto* action = findChild<QAction*>(name))
@@ -404,43 +318,6 @@ void BenchMainWindow::refreshSelectionStatus() {
     }
     refreshSelectionActions();
     if (selection_status_ == nullptr) {
-        return;
-    }
-    if (isMpdContext()) {
-        // The menubar actions stay local-only; mapped MPD selections get the
-        // context-menu sugar actions instead (ADR-0180).
-        if (properties_action_ != nullptr) {
-            properties_action_->setEnabled(false);
-        }
-        if (convert_action_ != nullptr) {
-            convert_action_->setEnabled(false);
-        }
-        auto* playlist_tab = currentMpdPlaylistTab();
-        auto* view = playlist_tab != nullptr ? playlist_tab->view : mpd_queue_view_;
-        const auto label =
-            playlist_tab != nullptr ? playlist_tab->name : QStringLiteral("MPD Queue");
-        if (view->selectionModel() == nullptr) {
-            selection_status_->setText(label);
-            return;
-        }
-        const auto selected = view->selectionModel()->selectedRows();
-        if (selected.empty()) {
-            const auto count =
-                playlist_tab != nullptr ? view->model()->rowCount() : mpd_controller_->queueCount();
-            selection_status_->setText(QStringLiteral("%1 · %2 tracks").arg(label).arg(count));
-            selection_status_->setToolTip(mpd_controller_->status());
-            return;
-        }
-        qint64 duration_ms = 0;
-        for (const auto& index : selected) {
-            duration_ms += index.data(ui::track_duration_ms_role).toLongLong();
-        }
-        const auto summary = QStringLiteral("%1 · %2 selected · %3 total")
-                                 .arg(label)
-                                 .arg(selected.size())
-                                 .arg(formatTime(duration_ms));
-        selection_status_->setText(summary);
-        selection_status_->setToolTip(summary);
         return;
     }
     auto* tab = currentListTab();

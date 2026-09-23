@@ -26,6 +26,7 @@
 #include <QAction>
 #include <QDir>
 #include <QFile>
+#include <QInputDialog>
 #include <QSettings>
 #include <QSlider>
 #include <QStandardPaths>
@@ -199,7 +200,7 @@ void EnginePlaybackTest::playingATrackDrivesTheEnginesPlayer() {
 
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -272,7 +273,7 @@ void EnginePlaybackTest::transportControlsDriveTheEngine() {
     window.openLocalPaths(raw_paths);
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -345,7 +346,7 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
         {std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
 
     // The saved settings reach the engine without the user touching anything.
     // A window that only sends them when a menu is used leaves the first
@@ -408,7 +409,7 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     window.openLocalPaths({raw_path});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* playing = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(playing != nullptr);
     auto* model = qobject_cast<LocalListModel*>(playing->model());
@@ -418,7 +419,18 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     QTRY_VERIFY_WITH_TIMEOUT(!(*player)->queue().empty(), 5'000);
 
     // The user looks somewhere else.
-    tabs->setCurrentIndex(0);
+    auto* new_list = window.findChild<QAction*>(QStringLiteral("action-new-list"));
+    QVERIFY(new_list != nullptr);
+    // Naming the list is a modal prompt; answer it rather than let it
+    // block the test waiting for a person.
+    QTimer::singleShot(0, &window, [&window] {
+        auto* prompt = window.findChild<QInputDialog*>();
+        if (prompt != nullptr) {
+            prompt->setTextValue(QStringLiteral("Elsewhere"));
+            prompt->accept();
+        }
+    });
+    new_list->trigger();
     QVERIFY(tabs->currentWidget() != playing);
 
     auto* jump = window.findChild<QAction*>(QStringLiteral("action-jump-to-playing"));
@@ -460,7 +472,7 @@ void EnginePlaybackTest::editingThePlayingListReachesTheEngine() {
     window.openLocalPaths(raw_paths);
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -520,7 +532,7 @@ void EnginePlaybackTest::aQueueChangedElsewhereReachesTheList() {
     window.openLocalPaths({raw_paths[0], raw_paths[1]});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -574,7 +586,7 @@ void EnginePlaybackTest::consumeDropsTheRowFromTheList() {
     window.openLocalPaths(raw_paths);
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -634,7 +646,7 @@ void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
     window.openLocalPaths({raw_path});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -688,7 +700,7 @@ void EnginePlaybackTest::theDesktopSeesWhatTheEnginePlays() {
     window.openLocalPaths({raw_path});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -741,7 +753,7 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     window.openLocalPaths({raw_paths[0], raw_paths[1]});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -804,7 +816,7 @@ void EnginePlaybackTest::aNewWindowAttachesToWhatTheEngineIsPlaying() {
         window.openLocalPaths({raw_path});
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         QVERIFY(tabs != nullptr);
-        QTRY_COMPARE(tabs->count(), 2);
+        QTRY_COMPARE(tabs->count(), 1);
         auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
         QVERIFY(view != nullptr);
         auto* model = qobject_cast<LocalListModel*>(view->model());
@@ -922,7 +934,7 @@ void EnginePlaybackTest::withoutAnEngineNothingChanges() {
     window.openLocalPaths({raw_path});
     auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
     QVERIFY(tabs != nullptr);
-    QTRY_COMPARE(tabs->count(), 2);
+    QTRY_COMPARE(tabs->count(), 1);
     auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
     QVERIFY(view != nullptr);
     auto* model = qobject_cast<LocalListModel*>(view->model());

@@ -47,33 +47,10 @@ class SearchDialog final : public QDialog {
     using TabAccess = std::function<std::optional<TabSnapshot>()>;
     using TechnicalsSink = std::function<void(std::string, LocalTrackTechnicals)>;
 
-    // The optional server-library scope: the window translates the tkq query
-    // for the connected server and reports labels or a typed refusal, so the
-    // dialog stays protocol-agnostic. Open hands the query back to the
-    // window, which owns MPD search tabs.
-    struct ServerScope {
-        std::function<bool()> available;
-        std::function<void(query::CompiledTkq compiled,
-                           std::function<void(QStringList labels, int total, QString error)>)>
-            run;
-        std::function<void(query::CompiledTkq compiled, QString query_text)> open;
-        std::function<bool()> current_available{};
-        std::function<void(query::CompiledTkq, std::function<void(QStringList, int, QString)>)>
-            run_current{};
-        std::function<void(query::CompiledTkq, QString)> open_current{};
-        std::function<QString(const query::CompiledTkq&, bool current)> unsupported_reason{};
-    };
-
-    SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
-                 TechnicalsSink technicals_sink, ServerScope server_scope,
-                 QWidget* parent = nullptr);
     SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                  TechnicalsSink technicals_sink, QWidget* parent = nullptr);
     ~SearchDialog() override;
 
-    // Opens on the scope that matches where the search was started: a
-    // server-side tab searches the server library.
-    void preferServerScope();
     void watchCurrentModel(QAbstractItemModel* model);
     void focusInput();
 
@@ -111,16 +88,11 @@ class SearchDialog final : public QDialog {
     void openResults(LocalLibraryAction action, bool selection_only);
     [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
     [[nodiscard]] bool databaseScope() const;
-    [[nodiscard]] bool serverScope() const;
-    [[nodiscard]] bool serverCurrentScope() const;
-    void startServerSearch(query::CompiledTkq compiled);
 
     const CatalogueSource* catalogues_{nullptr};
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
-    ServerScope server_scope_;
     std::vector<QMetaObject::Connection> current_model_connections_;
-    std::optional<query::CompiledTkq> server_result_query_;
     QComboBox* saved_searches_{nullptr};
     QPushButton* save_search_{nullptr};
     QPushButton* update_search_{nullptr};

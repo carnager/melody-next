@@ -6,6 +6,8 @@ qt_add_library(
     command_palette.hpp
     line_slider.cpp
     line_slider.hpp
+    library_tree_view.cpp
+    library_tree_view.hpp
     list_persistence_service.cpp
     list_persistence_service.hpp
     local_folder_tree_model.cpp

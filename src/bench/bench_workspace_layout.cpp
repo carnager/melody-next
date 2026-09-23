@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "bench/connection_profiles_widget.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/metadata_artwork_section.hpp"
@@ -12,9 +11,6 @@
 #include <QRandomGenerator>
 
 #include "bench/bench_main_window_helpers.hpp"
-#include "quick/mpd_probe_controller.hpp"
-#include "quick/mpd_queue_model.hpp"
-#include "ui/server_library_tree_view.hpp"
 #include "uicommon/command_palette.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/local_folder_tree_model.hpp"
@@ -145,25 +141,7 @@ void BenchMainWindow::buildWorkspace() {
         }
         refreshActiveContext();
     });
-    mpd_source_tabs_ = make_source_tabs(QStringLiteral("bench-mpd-source-tabs"),
-                                        QStringLiteral("MPD sidebar source"));
-    mpd_source_tabs_->addTab(QStringLiteral("Library"));
-    mpd_source_tabs_->addTab(QStringLiteral("Playlists"));
-    mpd_source_tabs_->setVisible(false);
-    heading_row->addWidget(mpd_source_tabs_);
     heading_row->addStretch(1);
-    library_order_ = new QComboBox(folders_panel_);
-    library_order_->setObjectName(QStringLiteral("bench-library-order"));
-    library_order_->setAccessibleName(QStringLiteral("Library ordering"));
-    library_order_->addItem(QStringLiteral("A–Z"), QStringLiteral("az"));
-    library_order_->addItem(QStringLiteral("Latest added"), QStringLiteral("latest"));
-    library_order_->setCurrentIndex(
-        QSettings{}.value(QStringLiteral("mpd/library-order")).toString() ==
-                QStringLiteral("latest")
-            ? 1
-            : 0);
-    library_order_->setVisible(false);
-    connect(library_order_, &QComboBox::activated, this, [this](int) { applyLibraryOrder(true); });
     folders_layout->addLayout(heading_row);
     folder_bookmarks_heading_ = new QLabel(QStringLiteral("Bookmarks"), folders_panel_);
     auto* bookmarks_heading = folder_bookmarks_heading_;
@@ -216,8 +194,6 @@ void BenchMainWindow::buildWorkspace() {
     source_stack_->addWidget(folder_view_);
     folders_layout->addWidget(source_stack_, 1);
 
-    buildMpdWorkspace();
-
     panel_widgets_.insert(QString::fromLatin1(folders_panel_id), folders_panel_);
     panel_widgets_.insert(QString::fromLatin1(track_lists_panel_id), tabs_);
     layout_host_ = new QWidget(this);
@@ -234,7 +210,6 @@ void BenchMainWindow::buildWorkspace() {
     selection_status_->setContentsMargins(6, 0, 6, 0);
     selection_status_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     statusBar()->addWidget(selection_status_, 1);
-    buildMpdStatusControls();
     refreshSelectionStatus();
 
     folder_bookmark_add_action_ = new QAction(QStringLiteral("Bookmark folder"), this);
@@ -250,7 +225,7 @@ void BenchMainWindow::buildWorkspace() {
     connect(folder_bookmark_remove_action_, &QAction::triggered, this, [this] {
         delete folder_bookmarks_->takeItem(folder_bookmarks_->currentRow());
         persistFolderBookmarks();
-        folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0 && !isMpdContext());
+        folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
         folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
     });
     folder_bookmark_menu_ = new QMenu(this);
@@ -290,18 +265,6 @@ void BenchMainWindow::buildWorkspace() {
     auto* add_root = file_menu->addAction(QStringLiteral("Bookmark folder…"));
     connect(add_root, &QAction::triggered, this, &BenchMainWindow::addFolderRoot);
     file_menu->addSeparator();
-    connect_mpd_action_ = file_menu->addAction(QStringLiteral("Connect to MPD…"));
-    connect_mpd_action_->setObjectName(QStringLiteral("action-connect-mpd"));
-    connect_mpd_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+K")));
-    connect(connect_mpd_action_, &QAction::triggered, this,
-            &BenchMainWindow::openMpdConnectionDialog);
-    disconnect_mpd_action_ = file_menu->addAction(QStringLiteral("Disconnect MPD"));
-    disconnect_mpd_action_->setObjectName(QStringLiteral("action-disconnect-mpd"));
-    connect(disconnect_mpd_action_, &QAction::triggered, mpd_controller_,
-            &quick::MpdProbeController::disconnectFromServer);
-    auto* mpd_diagnostics = file_menu->addAction(QStringLiteral("MPD capability diagnostics…"));
-    mpd_diagnostics->setObjectName(QStringLiteral("action-mpd-diagnostics"));
-    connect(mpd_diagnostics, &QAction::triggered, this, &BenchMainWindow::showMpdDiagnostics);
     file_menu->addSeparator();
     auto* quit = file_menu->addAction(QStringLiteral("Quit"));
     quit->setObjectName(QStringLiteral("action-quit"));
@@ -382,19 +345,10 @@ void BenchMainWindow::buildWorkspace() {
     shuffle_albums_action_->setToolTip(tr("Reorder the whole list by album; retain each album's "
                                           "existing track order. Random playback is unchanged."));
     connect(shuffle_albums_action_, &QAction::triggered, this, [this] {
-        if (isMpdContext()) {
-            if (tabs_->currentWidget() == mpd_queue_view_)
-                mpd_controller_->shuffleAlbums();
-            else if (const auto* tab = mpdPlaylistTabForWidget(tabs_->currentWidget()))
-                mpd_controller_->shuffleAlbums(tab->name);
-        } else {
-            list_edit_bar_->start({.kind = lists::EditKind::shuffle_albums,
-                                   .expression = {},
-                                   .seed = QRandomGenerator::global()->generate()});
-        }
+        list_edit_bar_->start({.kind = lists::EditKind::shuffle_albums,
+                               .expression = {},
+                               .seed = QRandomGenerator::global()->generate()});
     });
-    connect(mpd_controller_, &quick::MpdProbeController::stateChanged, this,
-            &BenchMainWindow::refreshListHistoryActions);
     connect(reverse_list_action_, &QAction::triggered, this, [this] {
         list_edit_bar_->start({.kind = lists::EditKind::reverse, .expression = {}});
     });
@@ -606,24 +560,9 @@ void BenchMainWindow::buildWorkspace() {
     track_context_menu_->setObjectName(QStringLiteral("bench-track-context-menu"));
     folder_context_menu_ = new QMenu(folders_panel_);
     folder_context_menu_->setObjectName(QStringLiteral("bench-folder-context-menu"));
-    mpd_library_context_menu_ = new QMenu(server_library_view_);
-    mpd_library_context_menu_->setObjectName(QStringLiteral("bench-mpd-library-context-menu"));
     refreshTabActions();
     refreshTrackViewActions();
     refreshPanelLayoutActions();
-}
-
-void BenchMainWindow::showMpdDiagnostics() {
-    QMessageBox dialog{this};
-    dialog.setWindowTitle(QStringLiteral("MPD capability diagnostics"));
-    dialog.setIcon(QMessageBox::Information);
-    dialog.setText(mpd_controller_->connected() ? mpd_controller_->status()
-                                                : QStringLiteral("MPD is not connected"));
-    dialog.setDetailedText(mpd_controller_->details().isEmpty()
-                               ? QStringLiteral("Connect to an MPD server to inspect its protocol "
-                                                "version, commands, tags, queue, and outputs.")
-                               : mpd_controller_->details());
-    dialog.exec();
 }
 
 ui::PanelLayout BenchMainWindow::defaultPanelLayout() const {
@@ -964,7 +903,7 @@ void BenchMainWindow::addFolderBookmark(const std::string& raw_path) {
     item->setToolTip(QString::fromUtf8(core::escape_raw_path(raw_path)));
     item->setData(Qt::UserRole, bytes);
     persistFolderBookmarks();
-    folder_bookmarks_->setVisible(!isMpdContext());
+    folder_bookmarks_->setVisible(true);
     folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
 }
 
@@ -1017,18 +956,25 @@ void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index
         return;
     }
     const QModelIndex parent{parent_index};
-    if (folder_model_->canFetchMore(parent)) {
+    if (!folder_model_->isLoaded(parent)) {
+        // Waits for the listing whether this starts it or another reveal
+        // already has. Treating an in-flight listing as loaded -- which is
+        // what asking canFetchMore did -- found no children and gave up, so a
+        // bookmark clicked while the startup reveal was still listing "/"
+        // silently did nothing.
         auto connection = std::make_shared<QMetaObject::Connection>();
         *connection =
-            connect(folder_model_, &QAbstractItemModel::rowsInserted, this,
-                    [this, connection, parent_index, raw_path](const QModelIndex& inserted_parent) {
-                        if (inserted_parent != QModelIndex{parent_index}) {
+            connect(folder_model_, &ui::LocalFolderTreeModel::directoryLoaded, this,
+                    [this, connection, parent_index, raw_path](const QModelIndex& loaded) {
+                        if (loaded != QModelIndex{parent_index}) {
                             return;
                         }
                         disconnect(*connection);
                         revealFolderStep(parent_index, raw_path);
                     });
-        folder_model_->fetchMore(parent);
+        if (folder_model_->canFetchMore(parent)) {
+            folder_model_->fetchMore(parent);
+        }
         return;
     }
     folder_view_->expand(parent);
@@ -1060,38 +1006,20 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
     QList<QAction*> commands;
     // Deliberate task inventory. Device names, rating values, column names and
     // transient context-menu choices are parameters, not standalone commands.
-    for (const auto* id : {"action-open-files",
-                           "action-open-folder",
-                           "action-new-list",
-                           "action-import-m3u8",
-                           "action-export-m3u8",
-                           "action-dynamic-playlists",
-                           "action-connect-mpd",
-                           "action-disconnect-mpd",
-                           "action-mpd-diagnostics",
-                           "action-settings",
-                           "action-search-dialog",
-                           "action-find-in-list",
-                           "action-jump-to-playing",
-                           "action-follow-playback",
-                           "action-show-up-next",
-                           "action-play-pause",
-                           "action-stop",
-                           "action-next-track",
-                           "action-previous-track",
-                           "action-save-list",
-                           "action-rename-tab",
-                           "action-duplicate-tab",
-                           "action-close-tab",
-                           "action-track-properties",
-                           "action-replaygain-dialog",
-                           "action-convert-files",
-                           "action-reverse-list",
-                           "action-shuffle-albums",
-                           "action-local-album-random",
-                           "action-mpd-album-random",
-                           "action-deduplicate-list",
-                           "action-backup-workspace",
+    for (const auto* id : {"action-open-files",       "action-open-folder",
+                           "action-new-list",         "action-import-m3u8",
+                           "action-export-m3u8",      "action-dynamic-playlists",
+                           "action-settings",         "action-search-dialog",
+                           "action-find-in-list",     "action-jump-to-playing",
+                           "action-follow-playback",  "action-show-up-next",
+                           "action-play-pause",       "action-stop",
+                           "action-next-track",       "action-previous-track",
+                           "action-save-list",        "action-rename-tab",
+                           "action-duplicate-tab",    "action-close-tab",
+                           "action-track-properties", "action-replaygain-dialog",
+                           "action-convert-files",    "action-reverse-list",
+                           "action-shuffle-albums",   "action-local-album-random",
+                           "action-deduplicate-list", "action-backup-workspace",
                            "action-restore-workspace"}) {
         if (auto* action = findChild<QAction*>(QString::fromLatin1(id)))
             commands.append(action);
@@ -1117,36 +1045,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             return local_library_->createFoldersWidget(parent);
         };
     }
-    const auto connections = [this](QWidget* parent) -> QWidget* {
-        if (!local_library_) {
-            auto* note =
-                new QLabel(QStringLiteral("Connection profiles are not available yet. Reopen "
-                                          "Settings after workspace loading finishes."),
-                           parent);
-            note->setWordWrap(true);
-            return note;
-        }
-        return new ConnectionProfilesWidget(
-            mpd_profiles_,
-            [this](ConnectionProfilesWidget::Profiles profiles, std::function<void(QString)> done) {
-                if (!persistence_) {
-                    done(QStringLiteral("Profile storage is unavailable"));
-                    return;
-                }
-                auto retained = profiles;
-                const QPointer self{this};
-                persistence_->saveProfiles(
-                    std::move(profiles),
-                    [self, profiles = std::move(retained), done = std::move(done)](QString error) {
-                        if (self && error.isEmpty())
-                            self->mpd_profiles_ = profiles;
-                        done(std::move(error));
-                    });
-            },
-            parent);
-    };
     auto* dialog = new SettingsDialog(
-        this, buildOutputProfileStore(), std::move(library_folders), connections,
+        this, buildOutputProfileStore(), std::move(library_folders),
         [this](QWidget* parent) { return buildLastFmSettings(parent); }, configurable_shortcuts_);
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.

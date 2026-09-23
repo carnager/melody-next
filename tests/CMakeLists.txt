@@ -264,27 +264,6 @@ target_link_libraries(
 )
 add_test(NAME preparation-plan COMMAND trackknife_preparation_plan_tests)
 
-add_executable(trackknife_mpd_domain_tests mpd_domain_test.cpp)
-target_link_libraries(
-    trackknife_mpd_domain_tests
-    PRIVATE Trackknife::Mpd trackknife_project_options trackknife_project_warnings
-)
-add_test(NAME mpd-domain COMMAND trackknife_mpd_domain_tests)
-
-add_executable(trackknife_mpd_client_tests mpd_client_test.cpp)
-target_link_libraries(
-    trackknife_mpd_client_tests
-    PRIVATE Trackknife::Mpd trackknife_project_options trackknife_project_warnings
-)
-add_test(NAME mpd-client COMMAND trackknife_mpd_client_tests)
-
-add_executable(trackknife_mpd_session_tests mpd_session_test.cpp)
-target_link_libraries(
-    trackknife_mpd_session_tests
-    PRIVATE Trackknife::Mpd trackknife_project_options trackknife_project_warnings
-)
-add_test(NAME mpd-session COMMAND trackknife_mpd_session_tests)
-
 add_executable(trackknife_formats_probe_tests formats_probe_test.cpp)
 target_link_libraries(
     trackknife_formats_probe_tests
@@ -551,38 +530,15 @@ if(TRACKKNIFE_BUILD_UI)
     add_test(NAME queue-table-view COMMAND trackknife_queue_table_view_tests)
     set_tests_properties(queue-table-view PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-    qt_add_executable(trackknife_paged_model_tests paged_track_model_test.cpp)
-    target_link_libraries(
-        trackknife_paged_model_tests
-        PRIVATE Trackknife::QtModels Qt6::Test trackknife_project_options trackknife_project_warnings
-    )
-    add_test(NAME paged-track-model COMMAND trackknife_paged_model_tests)
-    set_tests_properties(paged-track-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
-    qt_add_executable(trackknife_mpd_queue_model_tests mpd_queue_model_test.cpp)
-    target_link_libraries(
-        trackknife_mpd_queue_model_tests
-        PRIVATE Trackknife::MpdUi Qt6::Test trackknife_project_options trackknife_project_warnings
-    )
-    add_test(NAME mpd-queue-model COMMAND trackknife_mpd_queue_model_tests)
-
-    qt_add_executable(trackknife_local_folder_tree_model_tests local_folder_tree_model_test.cpp)
+            qt_add_executable(trackknife_local_folder_tree_model_tests local_folder_tree_model_test.cpp)
     target_link_libraries(
         trackknife_local_folder_tree_model_tests
-        PRIVATE Trackknife::Ui Qt6::Test trackknife_project_options trackknife_project_warnings
+        PRIVATE Trackknife::UiCommon Qt6::Test trackknife_project_options trackknife_project_warnings
     )
     add_test(NAME local-folder-tree-model COMMAND trackknife_local_folder_tree_model_tests)
     set_tests_properties(local-folder-tree-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
-    qt_add_executable(trackknife_server_library_tree_model_tests server_library_tree_model_test.cpp)
-    target_link_libraries(
-        trackknife_server_library_tree_model_tests
-        PRIVATE Trackknife::Ui Qt6::Test trackknife_project_options trackknife_project_warnings
-    )
-    add_test(NAME server-library-tree-model COMMAND trackknife_server_library_tree_model_tests)
-    set_tests_properties(server-library-tree-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-
-    qt_add_executable(trackknife_lastfm_service_tests lastfm_service_test.cpp)
+        qt_add_executable(trackknife_lastfm_service_tests lastfm_service_test.cpp)
     target_link_libraries(trackknife_lastfm_service_tests PRIVATE Trackknife::BenchUi Qt6::Network
         Qt6::Test trackknife_project_options trackknife_project_warnings)
     add_test(NAME lastfm-service COMMAND trackknife_lastfm_service_tests)
@@ -609,7 +565,7 @@ if(TRACKKNIFE_BUILD_UI)
     )
     target_link_libraries(
         trackknife_bench_main_window_tests
-        PRIVATE Trackknife::BenchUi Trackknife::MpdUi Qt6::Test trackknife_project_options
+        PRIVATE Trackknife::BenchUi Qt6::Network Qt6::Test trackknife_project_options
                 trackknife_project_warnings
     )
     add_test(NAME bench-main-window COMMAND trackknife_bench_main_window_tests)
@@ -661,7 +617,7 @@ if(TRACKKNIFE_BUILD_UI)
     add_test(NAME local-list-edit COMMAND trackknife_local_list_edit_tests)
 
     qt_add_executable(trackknife_track_list_find_tests track_list_find_test.cpp)
-    target_link_libraries(trackknife_track_list_find_tests PRIVATE Trackknife::BenchUi Trackknife::MpdUi Qt6::Test
+    target_link_libraries(trackknife_track_list_find_tests PRIVATE Trackknife::BenchUi Qt6::Test
         trackknife_project_options trackknife_project_warnings)
     add_test(NAME track-list-find COMMAND trackknife_track_list_find_tests)
     set_tests_properties(m3u8 local-list-edit track-list-find PROPERTIES TIMEOUT 30 ENVIRONMENT

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/bench_main_window.hpp"
 #include "bench/lastfm_service.hpp"
-#include "quick/mpd_probe_controller.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -37,10 +36,6 @@ void BenchMainWindow::buildLastFm() {
                 5000);
     };
     connect(lastfm_, &LastFmService::completed, this, feedback);
-    connect(mpd_controller_, &quick::MpdProbeController::lastFmCompleted, this,
-            [feedback](const QString& op, const QByteArray& payload, const QString& error) {
-                feedback(op, QJsonDocument::fromJson(payload).object(), error);
-            });
 }
 void BenchMainWindow::sampleLastFm(const audio::LocalAuditionSnapshot& snapshot) {
     if (!lastfm_ || lastfm_clock_.elapsed() - lastfm_sample_time_ < 500)
@@ -129,16 +124,9 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* page = new QWidget(parent);
     page->setObjectName(QStringLiteral("lastfm-settings"));
     auto* layout = new QVBoxLayout(page);
-    auto* authority = new QComboBox(page);
-    authority->setObjectName(QStringLiteral("lastfm-authority"));
-    authority->addItems({QStringLiteral("Local playback"), QStringLiteral("Melody server")});
-    authority->setCurrentIndex(isMpdContext() ? 1 : 0);
-    layout->addWidget(authority);
-    auto* note = new QLabel(
-        QStringLiteral("Connect each player separately. Melody scrobbles server playback even when "
-                       "Trackbench is closed. Local playback is scrobbled only by Trackbench. "
-                       "Account actions take effect immediately."),
-        page);
+    auto* note = new QLabel(QStringLiteral("Playback is scrobbled while Trackknife is open. "
+                                           "Account actions take effect immediately."),
+                            page);
     note->setWordWrap(true);
     layout->addWidget(note);
     auto* credentials = new QWidget(page);
@@ -147,10 +135,9 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     credentials_layout->setContentsMargins(0, 0, 0, 0);
     auto* instructions = new QLabel(
         QStringLiteral("1. Register a free Last.fm API application using the link below. "
-                       "Choose an application name such as Melody or Trackknife; "
+                       "Choose an application name such as Trackknife; "
                        "no callback URL is needed for desktop authorization.\n"
-                       "2. Paste the API key and shared secret here once. "
-                       "You can use the same pair for both players.\n"
+                       "2. Paste the API key and shared secret here once.\n"
                        "3. Connect to enable scrobbling, then approve access in your browser. "
                        "This page connects automatically once you approve."),
         credentials);
@@ -181,10 +168,8 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     reuse->setChecked(true);
     credentials_layout->addWidget(reuse);
     layout->addWidget(credentials);
-    auto* security = new QLabel(
-        QStringLiteral("Credentials are saved privately on the selected player. Server setup uses "
-                       "your MPD connection; use a trusted network or tunnel."),
-        page);
+    auto* security =
+        new QLabel(QStringLiteral("Credentials are saved privately on this computer."), page);
     security->setWordWrap(true);
     layout->addWidget(security);
     auto* buttons = new QHBoxLayout;
@@ -201,11 +186,10 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     deadline->setObjectName(QStringLiteral("lastfm-auth-deadline"));
     deadline->setSingleShot(true);
     deadline->setInterval(5 * 60 * 1000);
-    auto waiting = [page, begin, cancel, authority, poll, deadline](bool active) {
+    auto waiting = [page, begin, cancel, poll, deadline](bool active) {
         page->setProperty("auth-waiting", active);
         const bool idle = !active && !page->property("auth-request-pending").toBool();
         begin->setEnabled(idle);
-        authority->setEnabled(idle);
         cancel->setVisible(active);
         if (active)
             deadline->start();
@@ -227,16 +211,12 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     status->setWordWrap(true);
     layout->addWidget(status);
     layout->addStretch();
-    auto send = [this, authority, status, page](const QString& op,
-                                                const QStringList& args = QStringList{}) {
+    auto send = [this, status, page](const QString& op, const QStringList& args = QStringList{}) {
         if (op == QStringLiteral("begin") || op == QStringLiteral("finish"))
             page->setProperty("auth-request-pending", true);
         if (op != QStringLiteral("status") && op != QStringLiteral("finish"))
             status->setText(QStringLiteral("Working…"));
-        if (authority->currentIndex() == 1)
-            mpd_controller_->lastFm(op, args);
-        else
-            lastfm_->execute(op, args);
+        lastfm_->execute(op, args);
     };
     connect(poll, &QTimer::timeout, page, [send] { send(QStringLiteral("finish")); });
     connect(deadline, &QTimer::timeout, page, [waiting, status] {
@@ -258,7 +238,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
             }
         }
         if (!error.isEmpty()) {
-            // Older Melody versions return the provider's pending code as an ACK.
+            // The provider's "not yet authorized" answer means keep waiting.
             if (op == QStringLiteral("finish") && error.contains(QStringLiteral("(code 14)"))) {
                 poll->start();
                 return;
@@ -300,18 +280,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
                 QDesktopServices::openUrl(url);
         }
     };
-    connect(
-        lastfm_, &LastFmService::completed, page,
-        [authority, receive](const QString& op, const QJsonObject& state, const QString& error) {
-            if (authority->currentIndex() == 0)
-                receive(op, state, error);
-        });
-    connect(
-        mpd_controller_, &quick::MpdProbeController::lastFmCompleted, page,
-        [authority, receive](const QString& op, const QByteArray& payload, const QString& error) {
-            if (authority->currentIndex() == 1)
-                receive(op, QJsonDocument::fromJson(payload).object(), error);
-        });
+    connect(lastfm_, &LastFmService::completed, page, receive);
     connect(
         begin, &QPushButton::clicked, page,
         [send, key, secret, reuse, begin, status, parent, waiting] {
@@ -350,14 +319,6 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     connect(enabled, &QCheckBox::toggled, page, [send](bool value) {
         send(QStringLiteral("enable"), {value ? QStringLiteral("1") : QStringLiteral("0")});
     });
-    connect(authority, &QComboBox::currentIndexChanged, page,
-            [send, secret, begin, credentials, waiting] {
-                begin->setProperty("credentials-saved", false);
-                credentials->show();
-                waiting(false);
-                secret->clear();
-                send(QStringLiteral("status"));
-            });
     auto* timer = new QTimer(page);
     connect(timer, &QTimer::timeout, page, [page, send] {
         if (page->isVisible() && !page->property("auth-waiting").toBool())
@@ -372,26 +333,15 @@ void BenchMainWindow::addLastFmActions(QMenu* menu, QTableView* view) {
         return;
     QString artist, title;
     const auto rows = view->selectionModel()->selectedRows();
-    const bool local = qobject_cast<LocalListModel*>(view->model()) != nullptr;
     if (rows.size() == 1) {
         if (auto* model = qobject_cast<LocalListModel*>(view->model())) {
             const auto& track = model->rows()[static_cast<std::size_t>(rows.first().row())];
             artist = QString::fromStdString(track.artist);
             title = QString::fromStdString(track.title);
-        } else {
-            const auto tracks = selectedMpdViewTracks(view);
-            if (tracks.size() == 1) {
-                artist = QString::fromStdString(
-                    std::string(tracks[0].metadata.first("Artist").value_or("")));
-                title = QString::fromStdString(
-                    std::string(tracks[0].metadata.first("Title").value_or("")));
-            }
         }
     }
     auto* submenu = menu->addMenu(QStringLiteral("Last.fm"));
-    const bool available =
-        !artist.isEmpty() && !title.isEmpty() &&
-        (local || mpd_controller_->supportsCommand(QStringLiteral("melody_lastfm")));
+    const bool available = !artist.isEmpty() && !title.isEmpty();
     submenu->setEnabled(available);
     auto* info = submenu->addAction(QStringLiteral("Checking loved state…"));
     info->setEnabled(false);
@@ -399,12 +349,8 @@ void BenchMainWindow::addLastFmActions(QMenu* menu, QTableView* view) {
         auto* action =
             submenu->addAction(op == QStringLiteral("love") ? QStringLiteral("Love track")
                                                             : QStringLiteral("Unlove track"));
-        connect(action, &QAction::triggered, this, [this, local, op, artist, title] {
-            if (local)
-                lastfm_->execute(op, {artist, title});
-            else
-                mpd_controller_->lastFm(op, {artist, title});
-        });
+        connect(action, &QAction::triggered, this,
+                [this, op, artist, title] { lastfm_->execute(op, {artist, title}); });
     }
     auto receive = [info, artist, title](const QString& op, const QJsonObject& state,
                                          const QString& error) {
@@ -418,18 +364,8 @@ void BenchMainWindow::addLastFmActions(QMenu* menu, QTableView* view) {
             info->setText(state.value("loved").toBool() ? QStringLiteral("♥ Loved on Last.fm")
                                                         : QStringLiteral("Not loved on Last.fm"));
     };
-    if (local)
-        connect(lastfm_, &LastFmService::completed, submenu, receive);
-    else
-        connect(mpd_controller_, &quick::MpdProbeController::lastFmCompleted, submenu,
-                [receive](const QString& op, const QByteArray& payload, const QString& error) {
-                    receive(op, QJsonDocument::fromJson(payload).object(), error);
-                });
-    connect(submenu, &QMenu::aboutToShow, submenu, [this, local, artist, title] {
-        if (local)
-            lastfm_->execute(QStringLiteral("info"), {artist, title});
-        else
-            mpd_controller_->lastFm(QStringLiteral("info"), {artist, title});
-    });
+    connect(lastfm_, &LastFmService::completed, submenu, receive);
+    connect(submenu, &QMenu::aboutToShow, submenu,
+            [this, artist, title] { lastfm_->execute(QStringLiteral("info"), {artist, title}); });
 }
 } // namespace trackknife::bench

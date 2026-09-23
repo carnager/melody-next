@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QWidgetAction>
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSettings>
@@ -579,13 +580,31 @@ void BenchMainWindow::rebuildDeviceMenu() {
         return action;
     };
 
+    // Headings as labels: QMenu::addSection draws its text only in some
+    // styles, and in others the two groups ran together unlabelled -- the
+    // speakers read as sound cards.
+    const auto add_heading = [this](const QString& text) {
+        auto* label = new QLabel(text, device_menu_);
+        label->setObjectName(QStringLiteral("bench-device-menu-heading"));
+        auto font = label->font();
+        font.setBold(true);
+        font.setPointSizeF(font.pointSizeF() * 0.9);
+        label->setFont(font);
+        label->setContentsMargins(10, 6, 10, 2);
+        label->setForegroundRole(QPalette::PlaceholderText);
+        auto* heading = new QWidgetAction(device_menu_);
+        heading->setDefaultWidget(label);
+        heading->setEnabled(false);
+        device_menu_->addAction(heading);
+    };
+
     // ADR-0228: which of the engine's outputs plays -- shown once there is a
     // choice, which is when an agent has ever registered.
     const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
         return !output.local;
     });
     if (agents) {
-        device_menu_->addSection(QStringLiteral("Play on"));
+        add_heading(QStringLiteral("Speakers"));
         auto* outputs = new QActionGroup(device_menu_);
         outputs->setExclusive(true);
         for (const auto& output : output_choices_) {
@@ -613,7 +632,11 @@ void BenchMainWindow::rebuildDeviceMenu() {
                 }
             });
         }
-        device_menu_->addSection(QStringLiteral("Audio device"));
+        const auto chosen = std::ranges::find_if(output_choices_, &EnginePlayback::State::Output::selected);
+        device_menu_->addSeparator();
+        add_heading(chosen != output_choices_.end()
+                        ? QStringLiteral("Sound device on %1").arg(outputLabel(*chosen))
+                        : QStringLiteral("Sound device"));
     }
 
     add_choice(QStringLiteral("System default"), std::nullopt);
@@ -1520,22 +1543,39 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     }
 
     device_button_->setEnabled(true);
-    // Playing on an agent is named on the button itself: music coming out of
-    // another room is not something to have to hover to find out.
-    if (now && !now->local) {
-        device_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        device_button_->setText(outputLabel(*now));
-        device_button_->setMinimumSize(26, 26);
-        device_button_->setMaximumSize(QWIDGETSIZE_MAX, 26);
-        device_label = QStringLiteral("%1 on %2").arg(device_label, outputLabel(*now));
-        if (!now->online) {
-            device_label += QStringLiteral(" (offline)");
-        }
-    } else {
+    // Where the sound goes, on the button itself: music coming out of another
+    // room is not something to have to hover to find out. Named when there is
+    // a choice to have made -- an agent, or a device other than the default.
+    const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
+        return !output.local;
+    });
+    const auto engine_name = remote && remote_catalogue_source_ ? remote_catalogue_source_->name()
+                                                                : QStringLiteral("This computer");
+    const auto speaker = now ? outputLabel(*now) : engine_name;
+    const auto device = selected_device_ ? label_of(*selected_device_) : QString{};
+    QString shown;
+    if (agents) {
+        shown = device.isEmpty() ? speaker : QStringLiteral("%1 · %2").arg(speaker, device);
+    } else if (!device.isEmpty()) {
+        shown = device;
+    }
+    if (now && !now->online) {
+        shown += QStringLiteral(" (offline)");
+    }
+    if (shown.isEmpty()) {
         device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
         device_button_->setText({});
         device_button_->setFixedSize(26, 26);
+    } else {
+        device_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        device_button_->setText(
+            device_button_->fontMetrics().elidedText(shown, Qt::ElideMiddle, 280));
+        device_button_->setMinimumSize(26, 26);
+        device_button_->setMaximumSize(QWIDGETSIZE_MAX, 26);
     }
+    device_label = QStringLiteral("%1 → %2 → %3%4")
+                       .arg(engine_name, speaker, device_label,
+                            now && !now->online ? QStringLiteral(" (offline)") : QString{});
     setProperty("trackknife-player-output",
                 now ? QString::fromStdString(now->id) : QString{});
     auto tooltip =

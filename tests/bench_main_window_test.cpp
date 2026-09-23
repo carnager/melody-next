@@ -4619,6 +4619,18 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
     QVERIFY(button != nullptr);
     // Music in another room is named where it can be seen.
     QCOMPARE(button->text(), QStringLiteral("bedside"));
+    // And the menu says which list is which: speakers, then the chosen
+    // speaker's devices -- in any style, not only those that draw sections.
+    {
+        QStringList headings;
+        for (const auto* heading :
+             menu->findChildren<QLabel*>(QStringLiteral("bench-device-menu-heading"))) {
+            headings << heading->text();
+        }
+        QVERIFY2(headings.contains(QStringLiteral("Speakers")), qPrintable(headings.join(u'|')));
+        QVERIFY2(headings.contains(QStringLiteral("Sound device on bedside")),
+                 qPrintable(headings.join(u'|')));
+    }
 
     // Gone, it stays chosen and says so.
     agent.terminate();
@@ -4634,7 +4646,8 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
         local->trigger();
         QTRY_COMPARE(window.property("trackknife-player-output").toString(),
                      QStringLiteral("local"));
-        QCOMPARE(button->text(), QString{});
+        // With an agent to choose, where it plays stays named.
+        QCOMPARE(button->text(), QStringLiteral("This computer"));
     }
 }
 

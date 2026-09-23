@@ -433,6 +433,9 @@ class BenchMainWindow final : public QMainWindow {
     // The row for the entry the engine is playing, wherever this window holds
     // it: the list it was played from, Up Next, or another open list.
     [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
+    // The cover of the playing entry's album, from a tab that has it.
+    void refreshHeaderCover(const QString& entry);
+    void setUpNextCount(int count);
     void playRow(ListTab& tab, int row);
     void refreshTransport();
     void buildMprisService();
@@ -510,6 +513,9 @@ class BenchMainWindow final : public QMainWindow {
     QLabel* duration_{nullptr};
     QLabel* now_playing_{nullptr};
     QLabel* now_playing_context_{nullptr};
+    QLabel* now_playing_cover_{nullptr};
+    // The group whose cover the header shows, so a tick does not rescale it.
+    QString header_cover_key_;
     QLabel* selection_status_{nullptr};
     QSlider* volume_{nullptr};
     QToolButton* device_button_{nullptr};
@@ -626,6 +632,7 @@ class BenchMainWindow final : public QMainWindow {
     std::optional<ListTab> detached_playback_;
     QDockWidget* up_next_dock_{nullptr};
     QToolButton* up_next_button_{nullptr};
+    QLabel* up_next_badge_{nullptr};
     ui::QueueTableView* up_next_view_{nullptr};
     LocalListModel* up_next_local_model_{nullptr};
     QLabel* up_next_status_{nullptr};

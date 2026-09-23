@@ -123,6 +123,7 @@
 #include <QtTest>
 
 #include <array>
+#include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -218,7 +219,8 @@ class BenchMainWindowTest final : public QObject {
     void initTestCase();
     void init();
     void cleanup();
-    void transportUsesStackedNowPlayingAndCompactDeviceButton();
+    void transportIsOneRowWithCoverAndPills();
+    void headerShowsThePlayingAlbumsCover();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
@@ -834,7 +836,34 @@ void BenchMainWindowTest::metadataGridReusesExactNativeFieldWithoutInvalidIndexe
     QCOMPARE(current.column(), 39);
 }
 
-void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton() {
+void BenchMainWindowTest::headerShowsThePlayingAlbumsCover() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      media.filePath(QStringLiteral("art.flac"))));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    window.openLocalPaths({QFile::encodeName(media.path()).toStdString()});
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    const auto group = tab->model->groupKey(0);
+    QTRY_VERIFY(tab->model->hasArtwork(group));
+
+    // Nothing playing: a placeholder tile the size of a cover.
+    window.refreshHeaderCover({});
+    QVERIFY(window.header_cover_key_.isEmpty());
+    QVERIFY(!window.now_playing_cover_->pixmap().isNull());
+
+    // Playing: the cover of that entry's album, from the tab that has it.
+    window.refreshHeaderCover(QString::fromStdString(tab->model->rows().front().entry_id.to_string()));
+    QCOMPARE(window.header_cover_key_, group);
+    QCOMPARE(window.now_playing_cover_->pixmap().deviceIndependentSize().toSize(),
+             QSize(44, 44));
+}
+
+void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
     BenchMainWindow window;
     window.show();
     QCoreApplication::processEvents();
@@ -880,22 +909,36 @@ void BenchMainWindowTest::transportUsesStackedNowPlayingAndCompactDeviceButton()
     QVERIFY(window.property("trackknife-player-output-available").isValid());
     QVERIFY(window.property("trackknife-player-output-suspended").isValid());
     QVERIFY(window.property("trackknife-player-default-output").isValid());
+    // Previous, play and next; stop lives in the Playback menu.
     QCOMPARE(transport->findChildren<QToolButton*>(QString{}, Qt::FindDirectChildrenOnly).size(),
-             5);
+             3);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-show-up-next")) != nullptr);
 
-    const QRect label_geometry{now_playing->mapTo(&window, QPoint{}), now_playing->size()};
-    const QRect context_geometry{now_playing_context->mapTo(&window, QPoint{}),
-                                 now_playing_context->size()};
-    const QRect seek_geometry{seek->mapTo(&window, QPoint{}), seek->size()};
-    const QRect volume_geometry{volume->mapTo(&window, QPoint{}), volume->size()};
-    const QRect device_geometry{device->mapTo(&window, QPoint{}), device->size()};
-    QVERIFY(label_geometry.bottom() <= context_geometry.top());
-    QVERIFY(context_geometry.bottom() <= seek_geometry.top());
-    QCOMPARE(label_geometry.center().x(), seek_geometry.center().x());
-    QCOMPARE(context_geometry.center().x(), seek_geometry.center().x());
-    QCOMPARE(volume_geometry.center().y(), seek_geometry.center().y());
-    QCOMPARE(device_geometry.center().y(), seek_geometry.center().y());
-    QVERIFY(header->height() <= 72);
+    // One row: cover, then what is playing, then the controls and position,
+    // then where it plays and what waits -- all on one line.
+    auto* cover = window.findChild<QLabel*>(QStringLiteral("bench-now-playing-cover"));
+    auto* up_next = window.findChild<QToolButton*>(QStringLiteral("action-up-next"));
+    auto* count = window.findChild<QLabel*>(QStringLiteral("bench-up-next-count"));
+    QVERIFY(cover != nullptr && up_next != nullptr && count != nullptr);
+    const auto at = [&window](const QWidget* widget) {
+        return QRect{widget->mapTo(&window, QPoint{}), widget->size()};
+    };
+    QTRY_VERIFY(!cover->pixmap().isNull());
+    QVERIFY(at(now_playing).bottom() <= at(now_playing_context).top());
+    QVERIFY(at(cover).right() < at(now_playing).left());
+    QVERIFY(at(now_playing).right() < at(transport).left());
+    QVERIFY(at(transport).right() < at(seek).left());
+    QVERIFY(at(seek).right() < at(volume).left());
+    QVERIFY(at(volume).right() < at(device).left());
+    QVERIFY(at(device).right() < at(up_next).left());
+    for (const auto* widget : std::initializer_list<const QWidget*>{cover, transport, volume, device,
+                                                                   up_next}) {
+        QVERIFY(std::abs(at(widget).center().y() - at(seek).center().y()) <= 1);
+    }
+    QVERIFY(header->height() <= 64);
+    // The count shows only when something waits.
+    QVERIFY(count->isHidden());
+    QCOMPARE(up_next->accessibleName(), QStringLiteral("Up Next"));
 }
 
 void BenchMainWindowTest::shortcutSettingsValidateSaveAndCancel() {
@@ -4259,6 +4302,10 @@ void BenchMainWindowTest::upNextMultiSelectionEdits() {
     window.enqueueLocalRequests({row, row, row, row, row});
     const auto original = window.up_next_display_ids_;
     QCOMPARE(original.size(), std::size_t{5});
+    // The header's pill counts what waits.
+    auto* count = window.findChild<QLabel*>(QStringLiteral("bench-up-next-count"));
+    QVERIFY(count != nullptr && !count->isHidden());
+    QCOMPARE(count->text(), QStringLiteral("5"));
     auto* view = window.up_next_view_;
     QCOMPARE(view->selectionMode(), QAbstractItemView::ExtendedSelection);
     QCOMPARE(view->dragDropMode(), QAbstractItemView::DragDrop);

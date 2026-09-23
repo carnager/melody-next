@@ -218,6 +218,7 @@ class LocalListModel final : public QAbstractTableModel {
     [[nodiscard]] QString groupKey(int row) const;
     [[nodiscard]] bool hasArtwork(const QString& key) const { return artwork_.contains(key); }
     void setArtwork(const QString& key, QImage image);
+    [[nodiscard]] QImage artwork(const QString& key) const { return artwork_.value(key); }
     [[nodiscard]] const std::vector<LocalTrackRow>& rows() const noexcept { return rows_; }
     [[nodiscard]] std::string rawPath(int row) const;
     [[nodiscard]] LocalTrackSource source(int row) const;

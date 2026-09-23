@@ -7,6 +7,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "uicommon/eliding_label.hpp"
 #include "uicommon/line_slider.hpp"
 #include "uicommon/list_persistence_service.hpp"
 
@@ -202,6 +203,83 @@ void BenchMainWindow::refreshMuteButton() {
     mute_button_->setAccessibleName(mute_button_->toolTip());
 }
 
+namespace {
+constexpr int header_cover_size = 44;
+} // namespace
+
+void BenchMainWindow::setUpNextCount(const int count) {
+    if (up_next_button_ == nullptr || up_next_badge_ == nullptr) {
+        return;
+    }
+    up_next_badge_->setText(QString::number(count));
+    up_next_badge_->setVisible(count > 0);
+    up_next_button_->setAccessibleName(
+        count > 0 ? QStringLiteral("Up Next, %1 waiting").arg(count) : QStringLiteral("Up Next"));
+    up_next_button_->setToolTip(up_next_button_->accessibleName());
+    up_next_button_->layout()->activate();
+    up_next_button_->setFixedWidth(up_next_button_->layout()->sizeHint().width());
+}
+
+void BenchMainWindow::refreshHeaderCover(const QString& entry) {
+    QImage cover;
+    QString key;
+    if (const auto identity = core::StableId::parse(entry.toStdString())) {
+        const auto look_in = [&](const ListTab& tab) {
+            const auto& rows = tab.model->rows();
+            const auto found = std::ranges::find(rows, *identity, &LocalTrackRow::entry_id);
+            if (found == rows.end()) {
+                return false;
+            }
+            const auto group = tab.model->groupKey(static_cast<int>(found - rows.begin()));
+            if (!tab.model->hasArtwork(group)) {
+                return false;
+            }
+            key = group;
+            cover = tab.model->artwork(group);
+            return true;
+        };
+        auto* anchored = tabForDocument(playback_.anchors.document);
+        if (anchored == nullptr || !look_in(*anchored)) {
+            for (const auto& tab : list_tabs_) {
+                if (look_in(*tab)) {
+                    break;
+                }
+            }
+        }
+    }
+    if (cover.isNull()) {
+        key.clear();
+    }
+    if (key == header_cover_key_ && !now_playing_cover_->pixmap().isNull()) {
+        return;
+    }
+    header_cover_key_ = key;
+    if (cover.isNull()) {
+        // A quiet tile rather than a hole, so the title does not jump.
+        QPixmap tile{QSize{header_cover_size, header_cover_size} * devicePixelRatioF()};
+        tile.setDevicePixelRatio(devicePixelRatioF());
+        tile.fill(Qt::transparent);
+        QPainter painter{&tile};
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(palette().color(QPalette::Mid));
+        painter.drawRoundedRect(QRectF{0, 0, header_cover_size, header_cover_size}, 3, 3);
+        const auto note = QIcon::fromTheme(QStringLiteral("audio-x-generic"));
+        if (!note.isNull()) {
+            note.paint(&painter, QRect{12, 12, 20, 20});
+        }
+        painter.end();
+        now_playing_cover_->setPixmap(tile);
+        return;
+    }
+    now_playing_cover_->setPixmap(QPixmap::fromImage(
+        cover.scaled(QSize{header_cover_size, header_cover_size} * devicePixelRatioF(),
+                     Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    auto pixmap = now_playing_cover_->pixmap();
+    pixmap.setDevicePixelRatio(devicePixelRatioF());
+    now_playing_cover_->setPixmap(pixmap);
+}
+
 void BenchMainWindow::buildTransport() {
     buildUpNext();
     auto* bar = addToolBar(QStringLiteral("Transport"));
@@ -238,92 +316,105 @@ void BenchMainWindow::buildTransport() {
         }
     });
 
+    // One row, as players read: what is playing on the left, the controls
+    // and the position in the middle, where the sound goes on the right.
     auto* header = new QWidget(bar);
     header->setObjectName(QStringLiteral("bench-player-header"));
     header->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    auto* header_layout = new QGridLayout(header);
-    header_layout->setContentsMargins(6, 3, 6, 3);
-    header_layout->setHorizontalSpacing(6);
-    header_layout->setVerticalSpacing(0);
-    header_layout->setColumnStretch(2, 1);
+    auto* header_layout = new QHBoxLayout(header);
+    header_layout->setContentsMargins(10, 6, 10, 6);
+    header_layout->setSpacing(10);
 
+    now_playing_cover_ = new QLabel(header);
+    now_playing_cover_->setObjectName(QStringLiteral("bench-now-playing-cover"));
+    now_playing_cover_->setFixedSize(header_cover_size, header_cover_size);
+    now_playing_cover_->setAlignment(Qt::AlignCenter);
+    now_playing_cover_->setAccessibleName(QStringLiteral("Cover of the current album"));
+    header_layout->addWidget(now_playing_cover_);
+
+    auto* track_display = new QWidget(header);
+    track_display->setObjectName(QStringLiteral("bench-track-display"));
+    track_display->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    track_display->setMinimumWidth(140);
+    track_display->setMaximumWidth(420);
+    auto* track_display_layout = new QVBoxLayout(track_display);
+    track_display_layout->setContentsMargins(0, 0, 0, 0);
+    track_display_layout->setSpacing(1);
+    track_display_layout->addStretch();
+
+    now_playing_ = new ui::ElidingLabel(track_display);
+    now_playing_->setObjectName(QStringLiteral("bench-now-playing"));
+    now_playing_->setAccessibleName(QStringLiteral("Current artist and title"));
+    now_playing_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    auto title_font = now_playing_->font();
+    title_font.setWeight(QFont::DemiBold);
+    title_font.setPointSizeF(title_font.pointSizeF() * 1.08);
+    now_playing_->setFont(title_font);
+    track_display_layout->addWidget(now_playing_);
+
+    now_playing_context_ = new ui::ElidingLabel(track_display);
+    now_playing_context_->setObjectName(QStringLiteral("bench-now-playing-context"));
+    now_playing_context_->setAccessibleName(QStringLiteral("Current album and date"));
+    now_playing_context_->setForegroundRole(QPalette::PlaceholderText);
+    now_playing_context_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    track_display_layout->addWidget(now_playing_context_);
+    track_display_layout->addStretch();
+    header_layout->addWidget(track_display, 3);
+    header_layout->addSpacing(6);
+
+    // Stop is in the Playback menu: pause does what it did, and the row has
+    // room for what is used.
     auto* transport = new QWidget(header);
     transport->setObjectName(QStringLiteral("bench-transport-buttons"));
     auto* transport_layout = new QHBoxLayout(transport);
-    transport_layout->setContentsMargins(0, 0, 2, 0);
-    transport_layout->setSpacing(1);
-    const auto add_transport_button = [transport, transport_layout](QAction* action) {
+    transport_layout->setContentsMargins(0, 0, 0, 0);
+    transport_layout->setSpacing(4);
+    const auto add_transport_button = [transport, transport_layout](QAction* action,
+                                                                    const int size) {
         auto* button = new QToolButton(transport);
         button->setDefaultAction(action);
         button->setAutoRaise(true);
         button->setToolButtonStyle(Qt::ToolButtonIconOnly);
-        button->setFixedSize(26, 26);
+        button->setFixedSize(size, size);
         button->setIconSize(QSize{18, 18});
         transport_layout->addWidget(button);
+        return button;
     };
-    add_transport_button(previous_action_);
-    add_transport_button(play_pause_action_);
-    add_transport_button(stop_action_);
-    add_transport_button(next_action_);
-    up_next_button_ = new QToolButton(transport);
-    up_next_button_->setObjectName(QStringLiteral("action-up-next"));
-    up_next_button_->setText(QStringLiteral("Up Next · 0"));
-    up_next_button_->setAutoRaise(true);
-    up_next_button_->setFixedHeight(26);
-    up_next_button_->setAcceptDrops(true);
-    up_next_button_->installEventFilter(this);
-    connect(up_next_button_, &QToolButton::clicked, this, [this] {
-        findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
-        refreshUpNext();
-    });
-    transport_layout->addWidget(up_next_button_);
-    header_layout->addWidget(transport, 1, 0, Qt::AlignVCenter);
-
-    auto* track_display = new QWidget(header);
-    track_display->setObjectName(QStringLiteral("bench-track-display"));
-    track_display->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    auto* track_display_layout = new QVBoxLayout(track_display);
-    track_display_layout->setContentsMargins(0, 0, 0, 1);
-    track_display_layout->setSpacing(0);
-
-    now_playing_ = new QLabel(track_display);
-    now_playing_->setObjectName(QStringLiteral("bench-now-playing"));
-    now_playing_->setTextFormat(Qt::PlainText);
-    now_playing_->setAccessibleName(QStringLiteral("Current artist and title"));
-    now_playing_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    now_playing_->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
-    track_display_layout->addWidget(now_playing_);
-
-    now_playing_context_ = new QLabel(track_display);
-    now_playing_context_->setObjectName(QStringLiteral("bench-now-playing-context"));
-    now_playing_context_->setTextFormat(Qt::PlainText);
-    now_playing_context_->setAccessibleName(QStringLiteral("Current album and date"));
-    now_playing_context_->setForegroundRole(QPalette::PlaceholderText);
-    now_playing_context_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    now_playing_context_->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
-    track_display_layout->addWidget(now_playing_context_);
-    header_layout->addWidget(track_display, 0, 2);
+    add_transport_button(previous_action_, 30);
+    auto* play = add_transport_button(play_pause_action_, 36);
+    play->setObjectName(QStringLiteral("bench-play"));
+    play->setAutoRaise(false);
+    // The one control that is always the next thing to do.
+    play->setStyleSheet(QStringLiteral("QToolButton#bench-play { border: none; border-radius: 18px;"
+                                       " background: palette(highlight); }"
+                                       "QToolButton#bench-play:hover { background: "
+                                       "palette(highlight); border: 1px solid palette(light); }"
+                                       "QToolButton#bench-play:disabled { background: palette(mid); }"));
+    add_transport_button(next_action_, 30);
+    header_layout->addWidget(transport);
 
     elapsed_ = new QLabel(QStringLiteral("0:00"), header);
     elapsed_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    elapsed_->setForegroundRole(QPalette::PlaceholderText);
     elapsed_->setFixedWidth(elapsed_->fontMetrics().horizontalAdvance(QStringLiteral("00:00:00")));
-    header_layout->addWidget(elapsed_, 1, 1, Qt::AlignVCenter);
+    header_layout->addWidget(elapsed_);
     seek_ = new ui::LineSlider(header);
     seek_->setObjectName(QStringLiteral("bench-seek"));
     seek_->setAccessibleName(QStringLiteral("Playback position"));
-    seek_->setMinimumWidth(200);
+    seek_->setMinimumWidth(120);
     seek_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(seek_, &QSlider::sliderPressed, this, [this] { seeking_ = true; });
     connect(seek_, &QSlider::sliderReleased, this, [this] {
         seeking_ = false;
         seekToMs(seek_->value());
     });
-    header_layout->addWidget(seek_, 1, 2, Qt::AlignVCenter);
+    header_layout->addWidget(seek_, 4);
     duration_ = new QLabel(QStringLiteral("0:00"), header);
     duration_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    duration_->setForegroundRole(QPalette::PlaceholderText);
     duration_->setFixedWidth(
         duration_->fontMetrics().horizontalAdvance(QStringLiteral("00:00:00")));
-    header_layout->addWidget(duration_, 1, 3, Qt::AlignVCenter);
+    header_layout->addWidget(duration_);
 
     auto* volumeBox = new QWidget(header);
     auto* volumeLayout = new QHBoxLayout(volumeBox);
@@ -353,7 +444,7 @@ void BenchMainWindow::buildTransport() {
     volume_->setAccessibleName(QStringLiteral("Volume"));
     volume_->setRange(0, 100);
     volume_->setValue(100);
-    volume_->setFixedWidth(104);
+    volume_->setFixedWidth(90);
     volume_->setToolTip(QStringLiteral("Volume"));
     connect(volume_, &QSlider::sliderPressed, this, [this] { changing_volume_ = true; });
     connect(volume_, &QSlider::sliderReleased, this, [this] { changing_volume_ = false; });
@@ -367,26 +458,67 @@ void BenchMainWindow::buildTransport() {
         refreshMuteButton();
     });
     volumeLayout->addWidget(volume_);
-    header_layout->addWidget(volumeBox, 1, 4, Qt::AlignVCenter);
+    header_layout->addSpacing(6);
+    header_layout->addWidget(volumeBox);
     refreshMuteButton();
 
+    // Where the sound goes and what is waiting: pills, so they read as
+    // places to click rather than as more labels.
+    const auto pill = QStringLiteral(
+        "QToolButton { border: 1px solid palette(mid); border-radius: 13px; padding: 0 8px; }"
+        "QToolButton:hover { border-color: palette(highlight); }"
+        "QToolButton:checked { border-color: palette(highlight); }"
+        "QToolButton::menu-indicator { image: none; width: 0; }");
     device_button_ = new QToolButton(header);
     device_button_->setObjectName(QStringLiteral("bench-device"));
     device_button_->setIcon(QIcon::fromTheme(QStringLiteral("audio-speakers"),
                                              style()->standardIcon(QStyle::SP_ComputerIcon)));
     device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    device_button_->setAutoRaise(true);
-    device_button_->setFixedSize(26, 26);
-    device_button_->setIconSize(QSize{18, 18});
+    device_button_->setFixedSize(34, 26);
+    device_button_->setIconSize(QSize{16, 16});
     device_button_->setPopupMode(QToolButton::InstantPopup);
     device_button_->setAccessibleName(QStringLiteral("Audio output device"));
+    device_button_->setStyleSheet(pill);
     device_menu_ = new QMenu(device_button_);
     device_menu_->setObjectName(QStringLiteral("bench-device-menu"));
     device_group_ = new QActionGroup(device_menu_);
     device_group_->setExclusive(true);
     device_button_->setMenu(device_menu_);
     rebuildDeviceMenu();
-    header_layout->addWidget(device_button_, 1, 5, Qt::AlignVCenter);
+    header_layout->addWidget(device_button_);
+
+    up_next_button_ = new QToolButton(header);
+    up_next_button_->setObjectName(QStringLiteral("action-up-next"));
+    up_next_button_->setFixedHeight(26);
+    up_next_button_->setAcceptDrops(true);
+    up_next_button_->installEventFilter(this);
+    up_next_button_->setStyleSheet(pill);
+    // The count as a badge beside the words, shown only when something waits.
+    auto* up_next_layout = new QHBoxLayout(up_next_button_);
+    up_next_layout->setContentsMargins(11, 0, 7, 0);
+    up_next_layout->setSpacing(6);
+    auto* up_next_text = new QLabel(QStringLiteral("Up Next"), up_next_button_);
+    up_next_text->setAttribute(Qt::WA_TransparentForMouseEvents);
+    up_next_layout->addWidget(up_next_text);
+    up_next_badge_ = new QLabel(up_next_button_);
+    up_next_badge_->setObjectName(QStringLiteral("bench-up-next-count"));
+    up_next_badge_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    up_next_badge_->setAlignment(Qt::AlignCenter);
+    up_next_badge_->setMinimumWidth(18);
+    up_next_badge_->setFixedHeight(18);
+    auto badge_font = up_next_badge_->font();
+    badge_font.setPointSizeF(badge_font.pointSizeF() * 0.85);
+    up_next_badge_->setFont(badge_font);
+    up_next_badge_->setStyleSheet(
+        QStringLiteral("QLabel { background: palette(highlight); color: palette(highlighted-text);"
+                       " border-radius: 9px; padding: 0 5px; }"));
+    up_next_layout->addWidget(up_next_badge_);
+    connect(up_next_button_, &QToolButton::clicked, this, [this] {
+        findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
+        refreshUpNext();
+    });
+    setUpNextCount(0);
+    header_layout->addWidget(up_next_button_);
     bar->addWidget(header);
 
     auto* playback_menu = menuBar()->addMenu(QStringLiteral("&Playback"));
@@ -1330,6 +1462,7 @@ void BenchMainWindow::refreshEngineTransport() {
     if (stopped || state.path.isEmpty()) {
         now_playing_->setText(QStringLiteral("Nothing playing"));
         now_playing_context_->clear();
+        refreshHeaderCover({});
         now_playing_->setToolTip({});
         now_playing_context_->setToolTip({});
     } else {
@@ -1341,9 +1474,19 @@ void BenchMainWindow::refreshEngineTransport() {
         const auto* row = playingRow(state.entry);
         if (row != nullptr && !row->title.empty()) {
             label = QString::fromStdString(row->title);
+            // "Artist — Album (Year)", as much of it as the tags have.
+            QStringList parts;
             if (!row->artist.empty()) {
-                context = QString::fromStdString(row->artist);
+                parts << QString::fromStdString(row->artist);
             }
+            if (!row->album.empty()) {
+                auto album = QString::fromStdString(row->album);
+                if (row->date.size() >= 4U) {
+                    album += QStringLiteral(" (%1)").arg(QString::fromStdString(row->date.substr(0, 4)));
+                }
+                parts << album;
+            }
+            context = parts.join(QStringLiteral(" — "));
         }
         if (auto* tab = tabForDocument(playback_.anchors.document);
             tab != nullptr && context.isEmpty()) {
@@ -1351,6 +1494,7 @@ void BenchMainWindow::refreshEngineTransport() {
         }
         now_playing_->setText(label);
         now_playing_context_->setText(context);
+        refreshHeaderCover(state.entry);
         now_playing_->setToolTip(state.path);
         now_playing_context_->setToolTip(state.path);
     }
@@ -1594,7 +1738,7 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     if (shown.isEmpty()) {
         device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
         device_button_->setText({});
-        device_button_->setFixedSize(26, 26);
+        device_button_->setFixedSize(34, 26);
     } else {
         device_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         device_button_->setText(

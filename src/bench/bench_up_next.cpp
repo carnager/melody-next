@@ -277,8 +277,7 @@ void BenchMainWindow::refreshUpNext() {
     if (count == 0 && enabled)
         up_next_status_->setText(up_next_status_->text() +
                                  tr("\nQueue tracks from any list, or drag them here."));
-    if (up_next_button_)
-        up_next_button_->setText(QStringLiteral("Up Next · %1").arg(model->rowCount()));
+    setUpNextCount(model->rowCount());
 }
 
 void BenchMainWindow::addUpNextActions(QMenu* menu, QTableView* source) {

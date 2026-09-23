@@ -288,9 +288,6 @@ void tcp_admits_only_the_token_holder() {
         return protocol::Json{{"state", "playing"}};
     });
 
-    const auto refused = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "");
-    require(!refused.has_value(), "a TCP listener without a token is refused outright");
-
     const std::string token{"a-token-only-the-owner-has"};
     auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, token);
     require(server.has_value(), "the engine binds a TCP port");
@@ -378,29 +375,32 @@ void an_endpoint_is_read_from_settings() {
             "describing an endpoint never includes its token");
 }
 
-// ADR-0223: the token is created private, kept, and never trusted once it is
-// not private any more.
-void the_token_file_stays_private(const std::filesystem::path& directory) {
-    const auto path = directory / "engine.token";
-    const auto first = engine::load_or_create_token(path);
-    require(first.has_value(), "a token is created on first use");
-    require(first->size() == 64U, "from 32 random bytes");
+// ADR-0223: without a password a TCP listener is open, like MPD's -- and a
+// client that was given a password anyway is let in rather than refused.
+void tcp_without_a_password_is_open() {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "playing"}};
+    });
+    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "");
+    require(server.has_value(), "a TCP listener needs no password");
+    (*server)->start();
+    const auto port = (*server)->port();
 
-    struct stat status{};
-    require(::stat(path.c_str(), &status) == 0, "into a file");
-    require((status.st_mode & 0777U) == 0600U, "that only its owner can read");
+    auto open = protocol::Client::connect(
+        protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = {}});
+    require(open.has_value(), "a client without a password connects");
+    const auto state = (*open)->call("playback.state");
+    require(state && state->value("state", std::string{}) == "playing",
+            "and is answered straight away");
 
-    const auto again = engine::load_or_create_token(path);
-    require(again.has_value() && *again == *first,
-            "and reused, so a client configured once keeps working across restarts");
-
-    ::chmod(path.c_str(), 0644);
-    const auto loosened = engine::load_or_create_token(path);
-    require(!loosened.has_value(), "a token others can read is refused rather than quietly used");
-    std::filesystem::remove(path);
-
-    const auto fresh = engine::load_or_create_token(path);
-    require(fresh.has_value() && *fresh != *first, "deleting the file is how it is rotated");
+    auto configured = protocol::Client::connect(
+        protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = "spare"});
+    require(configured.has_value() && (*configured)->call("playback.state").has_value(),
+            "one that brings a password to an open engine is let in too");
+    (*open)->close();
+    (*configured)->close();
+    (*server)->stop();
 }
 
 // A request that takes a while does not stop the engine reading the same
@@ -487,7 +487,7 @@ int main() {
     a_second_engine_refuses_an_occupied_socket(directory / "c.sock");
     tcp_admits_only_the_token_holder();
     an_endpoint_is_read_from_settings();
-    the_token_file_stays_private(directory);
+    tcp_without_a_password_is_open();
     a_slow_request_does_not_hold_a_cancel(directory / "d.sock");
     an_unencodable_answer_does_not_end_the_engine(directory / "e.sock");
     std::error_code ignored;

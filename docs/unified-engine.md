@@ -531,12 +531,12 @@ playlist tabs, server search and the Melody Last.fm authority were removed
 rather than kept as a second implementation of every feature.
 
 **TCP and authentication are built** ([ADR-0223](adr/0223-tcp-transport-and-authentication.md)).
-`melodyd --listen HOST:PORT` accepts TCP connections, each of which must
-present the token from `engine.token` before anything else -- loopback
-included, because any local user can reach 127.0.0.1. There is no built-in
+`melodyd --listen HOST:PORT` accepts TCP connections -- open by default, as
+MPD's are, or requiring a password the owner sets with `--password` /
+`--password-file`, the same on every agent and client. There is no built-in
 TLS: the deployments this is for are a home network and a phone reaching home
 through WireGuard, where TLS would buy only certificates to manage, and a
-reverse proxy covers the rest. The workspace takes `host:port` and a token in
+reverse proxy covers the rest. The workspace takes `host:port` and the password, if any, in
 the same setting that took a socket path. Byte access is not built yet.
 
 - TCP listener with authentication required on any non-loopback bind.

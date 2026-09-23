@@ -187,11 +187,10 @@ core::Result<int> Agent::register_with_engine() {
         ::close(descriptor);
         return std::unexpected(std::move(error));
     };
-    // ADR-0223: TCP is authenticated first, like any client; a unix socket's
-    // permissions have already said who may connect.
-    if (config_.server.tcp()) {
+    // ADR-0223: the password first, when there is one, like any client.
+    if (!config_.server.token.empty()) {
         auto admitted =
-            ask(descriptor, 1, "session.authenticate", Json{{"token", config_.server.token}});
+            ask(descriptor, 1, "session.authenticate", Json{{"password", config_.server.token}});
         if (!admitted) {
             return fail(std::move(admitted.error()));
         }

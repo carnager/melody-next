@@ -169,12 +169,17 @@ core::Result<std::unique_ptr<Client>> Client::connect(const Endpoint& endpoint) 
 
     std::unique_ptr<Client> client{new Client{descriptor}};
     client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};
-    // First, before anything a caller does: until this succeeds the engine
-    // refuses every other request, and a caller should learn that here rather
-    // than from whichever call it happens to make first.
-    auto admitted = client->call("session.authenticate", Json{{"token", endpoint.token}});
-    if (!admitted) {
-        return std::unexpected(std::move(admitted.error()));
+    // First, before anything a caller does: until this succeeds an engine
+    // with a password refuses every other request, and a caller should learn
+    // that here rather than from whichever call it happens to make first.
+    // Without a password there is nothing to give, and an open engine is
+    // simply used.
+    if (!endpoint.token.empty()) {
+        auto admitted =
+            client->call("session.authenticate", Json{{"password", endpoint.token}});
+        if (!admitted) {
+            return std::unexpected(std::move(admitted.error()));
+        }
     }
     return client;
 }

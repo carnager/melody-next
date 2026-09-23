@@ -26,12 +26,12 @@ void request_stop(int) { stop_requested.store(true); }
 
 void usage() {
     std::cerr
-        << "usage: melody-agent --server HOST:PORT [--token TOKEN | --token-file FILE]\n"
+        << "usage: melody-agent --server HOST:PORT [--password PASS | --password-file FILE]\n"
         << "                    [--name NAME] [--music-root DIR] [--stream]\n"
         << "\n"
         << "  --server        the engine: HOST:PORT (melodyd --listen), or a unix socket path\n"
-        << "  --token         the engine's token, from its engine.token (TCP only)\n"
-        << "  --token-file    read the token from FILE instead\n"
+        << "  --password      the engine's password, if it has one\n"
+        << "  --password-file read the password from FILE instead\n"
         << "  --name          what the engine calls this output (default: the host name)\n"
         << "  --music-root    where the engine's music is on this machine: files it names\n"
         << "                  relative to its own root are opened under this one\n"
@@ -64,9 +64,9 @@ int main(int argc, char** argv) {
         };
         if (argument == "--server") {
             server = value();
-        } else if (argument == "--token") {
+        } else if (argument == "--password" || argument == "--token") {
             token = value();
-        } else if (argument == "--token-file") {
+        } else if (argument == "--password-file" || argument == "--token-file") {
             token_file = value();
         } else if (argument == "--name") {
             config.name = value();
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
             token.pop_back();
         }
         if (token.empty()) {
-            std::cerr << "melody-agent: no token in " << token_file << "\n";
+            std::cerr << "melody-agent: no password in " << token_file << "\n";
             return EXIT_FAILURE;
         }
     }
@@ -98,10 +98,6 @@ int main(int argc, char** argv) {
     if (!endpoint) {
         std::cerr << "melody-agent: --server wants HOST:PORT or a socket path\n\n";
         usage();
-        return EXIT_FAILURE;
-    }
-    if (endpoint->tcp() && token.empty()) {
-        std::cerr << "melody-agent: a TCP engine needs its token (--token or --token-file)\n";
         return EXIT_FAILURE;
     }
     config.server = *endpoint;

@@ -200,9 +200,9 @@ QString CatalogueSource::describe() const {
         return QObject::tr("Library: engine at %1").arg(endpointText(*endpoint_));
     }
     if (endpoint_) {
-        // A refused token is its own case: the engine is there, and saying
+        // A refused password is its own case: the engine is there, and saying
         // "unreachable" would send someone looking at the network.
-        return refused_ ? QObject::tr("Library unavailable: the engine at %1 refused the token")
+        return refused_ ? QObject::tr("Library unavailable: the engine at %1 refused the password")
                               .arg(endpointText(*endpoint_))
                         : QObject::tr("Library unavailable: the engine at %1 is unreachable")
                               .arg(endpointText(*endpoint_));

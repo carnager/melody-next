@@ -1,6 +1,6 @@
 # ADR-0223: TCP transport and authentication
 
-Status: Accepted
+Status: Accepted; amended 2026-09-23 (the password is optional -- see the end)
 
 ## Context
 
@@ -89,3 +89,31 @@ proxy is doing that job.
 - The unix socket needs no handshake.
 - The token file is created `0600`, reused across starts, and never replaced
   while it exists.
+
+## Amendment (2026-09-23): the password is optional
+
+In use, the token was friction with nothing to show for it on the network it
+was meant for. Every agent, every client and every restart meant copying a
+64-character file between machines, when the same person owns all of them and
+the network is their home's. MPD asks for no password there, and nobody finds
+that wrong.
+
+So:
+
+- `melodyd --listen HOST:PORT` alone is **open**: any TCP connection is
+  trusted from its first line, as a unix one is.
+- `--password PASS` or `--password-file FILE` sets a password the owner
+  chooses, the same on every agent and client. With one, everything above
+  still holds: `session.authenticate` first (`{"password": "…"}`; `token` is
+  still accepted), no events until then, one wrong answer ends the
+  connection, constant-time comparison.
+- `session.authenticate` sent to a connection that is already admitted is
+  answered `authenticated: true`, so a client configured with a password
+  still works against an open engine.
+- `engine.token` is no longer made or read.
+
+What an open engine means, said once in `--help`: anyone who can reach the
+port controls playback and, with `--http` (ADR-0228), can fetch any file the
+engine's user can read by queueing it. Whether that matters is the owner's
+call. It is not tied to anything else: the engine streams the same with or
+without a password.

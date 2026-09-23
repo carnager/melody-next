@@ -27,6 +27,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -86,6 +87,7 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 
 void usage() {
     std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
+              << "               [--password PASS | --password-file FILE]\n"
               << "               [--http HOST:PORT] [--music-root DIR]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
@@ -95,14 +97,16 @@ void usage() {
               << "                 where the music is: output agents with their own copy are\n"
               << "                 sent paths relative to it (ADR-0228)\n"
               << "  --listen HOST:PORT\n"
-              << "                 also accept TCP connections. Every one must authenticate\n"
-              << "                 with the token in DIR/engine.token (created on first use).\n"
-              << "                 There is no TLS: use it on a home network or inside a\n"
-              << "                 WireGuard tunnel, or put a TLS proxy in front (ADR-0223).\n"
-              << "  --http HOST:PORT\n"
+              << "                 also accept TCP connections, from clients and output\n"
+              << "                 agents. Open to the network unless a password is set.\n"
+              << "  --password PASS, --password-file FILE\n"
+              << "                 require this password of every TCP connection. Without\n"
+              << "                 one, anyone who can reach the port can control the engine\n"
+              << "                 and, with --http, fetch any file it can read by queueing\n"
+              << "                 it. There is no TLS either way (ADR-0223).\n"              << "  --http HOST:PORT\n"
               << "                 serve the music being played to output agents that have\n"
               << "                 no copy of their own (melody-agent --stream). Only what\n"
-              << "                 the queue holds is served, with a token made at start.\n"
+              << "                 the queue holds is served.\n"
               << "\n"
               << "Speaks protocol v1: one JSON object per line. Try:\n"
               << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -122,6 +126,8 @@ int main(int argc, char** argv) {
     auto state_directory = default_state_directory();
     std::string listen_address;
     std::string http_address;
+    std::string password;
+    std::string password_file;
     std::optional<std::filesystem::path> music_root;
 
     for (int index = 1; index < argc; ++index) {
@@ -135,6 +141,10 @@ int main(int argc, char** argv) {
             state_directory = value();
         } else if (argument == "--listen") {
             listen_address = value();
+        } else if (argument == "--password") {
+            password = value();
+        } else if (argument == "--password-file") {
+            password_file = value();
         } else if (argument == "--http") {
             http_address = value();
         } else if (argument == "--music-root") {
@@ -145,6 +155,18 @@ int main(int argc, char** argv) {
         } else {
             std::cerr << "melodyd: unrecognised argument " << argument << "\n\n";
             usage();
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (!password_file.empty()) {
+        std::ifstream file{password_file};
+        std::getline(file, password);
+        while (!password.empty() && (password.back() == '\r' || password.back() == ' ')) {
+            password.pop_back();
+        }
+        if (password.empty()) {
+            std::cerr << "melodyd: no password in " << password_file << "\n";
             return EXIT_FAILURE;
         }
     }
@@ -198,7 +220,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    // ADR-0223: TCP only when asked for, and never without a token.
+    // ADR-0223: TCP only when asked for; a password only when one is set.
     std::unique_ptr<trackknife::engine::Server> tcp_server;
     if (!listen_address.empty()) {
         const auto endpoint = trackknife::protocol::Endpoint::parse(listen_address, {});
@@ -206,23 +228,16 @@ int main(int argc, char** argv) {
             std::cerr << "melodyd: --listen wants HOST:PORT, got " << listen_address << "\n";
             return EXIT_FAILURE;
         }
-        const auto token_path = state_directory / "engine.token";
-        auto token = trackknife::engine::load_or_create_token(token_path);
-        if (!token) {
-            std::cerr << "melodyd: " << token.error().message << " (" << token_path.string()
-                      << ")\n";
-            return EXIT_FAILURE;
-        }
         auto listening = trackknife::engine::Server::listen_tcp(endpoint->host, endpoint->port,
-                                                                dispatcher, std::move(*token));
+                                                                dispatcher, password);
         if (!listening) {
             std::cerr << "melodyd: could not listen on " << listen_address << ": "
                       << listening.error().message << "\n";
             return EXIT_FAILURE;
         }
         tcp_server = std::move(*listening);
-        std::cerr << "melodyd: listening on " << endpoint->describe() << " (token in "
-                  << token_path.string() << ")\n";
+        std::cerr << "melodyd: listening on " << endpoint->describe()
+                  << (password.empty() ? " (no password)" : " (with a password)") << "\n";
     }
 
     // Every listener hears every event. A client on TCP is as much a client

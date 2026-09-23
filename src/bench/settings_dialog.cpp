@@ -271,10 +271,10 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_token_ = new QLineEdit(library);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
-    engine_token_->setPlaceholderText(QStringLiteral("only for host:port -- from engine.token"));
+    engine_token_->setPlaceholderText(QStringLiteral("only if the engine has one"));
     engine_token_->setText(
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Remote token:"), engine_token_);
+    engine_form->addRow(QStringLiteral("Remote password:"), engine_token_);
     library_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("The trackknife engine (melodyd) owns the library and playback. This "
@@ -282,8 +282,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "keeps playing after the window closes. A remote engine -- on a NAS, "
                        "say -- is added beside it: its library appears next to this computer's, "
                        "and its files play in remote tabs, on that machine. Give its host:port "
-                       "(it was started with --listen) and the token from its engine.token "
-                       "file, or a unix socket path. There is no encryption; use it on a home "
+                       "(it was started with --listen) and its password if it has one, or a "
+                       "unix socket path. There is no encryption; use it on a home "
                        "network or through WireGuard. Takes effect when the workspace is "
                        "reopened."),
         library);

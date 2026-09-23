@@ -83,33 +83,46 @@ stop_ms=$(( ($(date +%s%N) - stop_started) / 1000000 ))
 daemon_pid=""
 [ -S "${socket}" ] && fail "the socket must be removed on shutdown"
 
-# ADR-0223: TCP, opt-in and authenticated. Also typed by hand: the handshake
-# is one more line in nc, not a binary preamble.
+# ADR-0223: TCP, opt-in, with a password when one is set. Also typed by
+# hand: the handshake is one more line in nc, not a binary preamble.
 port=$(( 20000 + RANDOM % 20000 ))
+printf 'correct horse\n' > "${work}/password"
 "${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
-    2>"${work}/tcp-log.txt" &
+    --password-file "${work}/password" 2>"${work}/tcp-log.txt" &
 daemon_pid=$!
 for _ in $(seq 1 100); do
-    [ -S "${socket}" ] && [ -f "${state}/engine.token" ] && break
+    grep -q "with a password" "${work}/tcp-log.txt" 2>/dev/null && break
     sleep 0.05
 done
-[ -f "${state}/engine.token" ] || fail "--listen must create the token file"
-[ "$(stat -c %a "${state}/engine.token")" = "600" ] || fail "which only its owner can read"
-grep -q "engine.token" "${work}/tcp-log.txt" || fail "and say where it is"
-token="$(head -n1 "${state}/engine.token")"
+grep -q "with a password" "${work}/tcp-log.txt" || fail "--listen must say it wants a password"
+[ -f "${state}/engine.token" ] && fail "no token file is made any more"
 
 denied="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${denied}" | grep -q '"unauthorized"' || fail "TCP without the token must be refused"
+echo "${denied}" | grep -q '"unauthorized"' || fail "TCP without the password must be refused"
 
-admitted="$(printf '{"id":1,"method":"session.authenticate","params":{"token":"%s"}}\n{"id":2,"method":"catalogue.roots"}\n' \
-    "${token}" | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${admitted}" | grep -q '"authenticated":true' || fail "the right token must be accepted"
+admitted="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"catalogue.roots"}\n' \
+    | timeout 5 nc 127.0.0.1 "${port}" || true)"
+echo "${admitted}" | grep -q '"authenticated":true' || fail "the right password must be accepted"
 echo "${admitted}" | grep -q '"roots":\[\]' || fail "and the engine must then answer over TCP"
 
 # The unix socket is unchanged: no handshake.
 plain="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
 echo "${plain}" | grep -q '"roots":\[\]' || fail "the unix socket must need no token"
 
+kill "${daemon_pid}"
+wait "${daemon_pid}" 2>/dev/null || true
+daemon_pid=""
+
+# And without one, open: nothing to type, as with MPD.
+"${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
+    2>"${work}/open-log.txt" &
+daemon_pid=$!
+for _ in $(seq 1 100); do
+    grep -q "no password" "${work}/open-log.txt" 2>/dev/null && break
+    sleep 0.05
+done
+open="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
+echo "${open}" | grep -q '"roots":\[\]' || fail "TCP without a password set must be open"
 kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
 daemon_pid=""

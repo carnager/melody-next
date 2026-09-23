@@ -67,7 +67,8 @@ class SettingsDialog final : public QDialog {
     // than the one the workspace starts. Not shown in Settings: it is for
     // tests and for developing the engine, which run their own.
     static constexpr auto library_local_engine_socket_key = "library/local-engine-socket";
-    // ADR-0223: the token a TCP engine asks for. Unused for a unix socket.
+    // ADR-0223: the password a TCP engine asks for, if it has one. The key
+    // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";

@@ -80,7 +80,7 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
     {
         CatalogueSource catalogues{database, CatalogueSource::Role::remote};
         QVERIFY(!catalogues.usingEngine());
-        QVERIFY2(catalogues.describe().contains(QStringLiteral("refused the token")),
+        QVERIFY2(catalogues.describe().contains(QStringLiteral("refused the password")),
                  qPrintable(catalogues.describe()));
     }
 

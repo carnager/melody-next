@@ -169,14 +169,7 @@ core::Result<std::unique_ptr<Server>> Server::finish(const int listener, std::fi
 core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host,
                                                          const std::uint16_t port,
                                                          protocol::Dispatcher& dispatcher,
-                                                         std::string token) {
-    if (token.empty()) {
-        // A TCP listener without a credential is exactly what ADR-0223 exists
-        // to prevent, so it is refused here rather than trusted to callers.
-        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                           .message = "a TCP listener requires a token",
-                                           .context = {}});
-    }
+                                                         std::string password) {
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -229,7 +222,7 @@ core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host
         return server;
     }
     (*server)->port_ = actual;
-    (*server)->token_ = std::move(token);
+    (*server)->token_ = std::move(password);
     return server;
 }
 
@@ -337,8 +330,9 @@ void Server::accept_loop() {
         }
         auto connection = std::make_shared<Connection>();
         connection->descriptor = accepted;
-        // A unix peer got here through the filesystem's permissions; a TCP
-        // peer has proven nothing yet.
+        // A unix peer got here through the filesystem's permissions. A TCP
+        // peer must give the password when there is one; without one the
+        // listener is open, as MPD's is (ADR-0223).
         connection->authenticated.store(token_.empty());
         {
             const std::lock_guard guard{mutex_};
@@ -446,6 +440,16 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                     }
                     continue;
                 }
+                if (request->method == "session.authenticate") {
+                    // Already admitted -- by the socket's permissions, or an
+                    // open listener -- so a client configured with a password
+                    // is told it is in, not that the method is unknown.
+                    protocol::Response admitted{.id = request->id,
+                                                .result = protocol::Json{{"authenticated", true}},
+                                                .error = std::nullopt};
+                    connection->write_line(encode_answer(admitted));
+                    continue;
+                }
                 if (request->method == "agent.register" && agent_handler_) {
                     // ADR-0228: an output agent. What it asked before is
                     // answered first; then the connection turns round and
@@ -509,7 +513,10 @@ bool Server::admit(Connection& connection, const protocol::Request& request) {
         connection.write_line(protocol::encode_message(response));
         return true;
     }
-    const auto offered = request.params.find("token");
+    auto offered = request.params.find("password");
+    if (offered == request.params.end()) {
+        offered = request.params.find("token");
+    }
     if (offered != request.params.end() && offered->is_string() &&
         same_token(offered->get<std::string>(), token_)) {
         connection.authenticated.store(true);
@@ -517,10 +524,10 @@ bool Server::admit(Connection& connection, const protocol::Request& request) {
         connection.write_line(protocol::encode_message(response));
         return true;
     }
-    // Answered once, then closed: a client holding the token gets it right
+    // Answered once, then closed: a client holding the password gets it right
     // first time, and a guesser pays a reconnect per attempt.
     response.error = protocol::to_protocol_error(core::Error{
-        .code = core::ErrorCode::unauthorized, .message = "wrong token", .context = {}});
+        .code = core::ErrorCode::unauthorized, .message = "wrong password", .context = {}});
     connection.write_line(protocol::encode_message(response));
     ::shutdown(connection.descriptor, SHUT_RDWR);
     return false;

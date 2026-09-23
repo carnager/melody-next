@@ -37,12 +37,13 @@ class Server final {
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen(std::filesystem::path socket_path, protocol::Dispatcher& dispatcher);
 
-    // ADR-0223: a TCP listener whose connections must present `token` through
-    // session.authenticate before anything else. Port 0 asks for an ephemeral
-    // port, which `port()` then reports.
+    // ADR-0223: a TCP listener. With a password, a connection must give it
+    // through session.authenticate before anything else; without one the
+    // listener is open, for a home network that wants none. Port 0 asks for
+    // an ephemeral port, which `port()` then reports.
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen_tcp(const std::string& host, std::uint16_t port, protocol::Dispatcher& dispatcher,
-               std::string token);
+               std::string password);
 
     // ADR-0228: a server with no listener, serving connections this side
     // opened -- an output agent serving the engine it connected to.

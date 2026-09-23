@@ -131,6 +131,9 @@ class BenchMainWindow final : public QMainWindow {
 
   private:
     friend class BenchMainWindowTest;
+    // Files dropped on the tab bar: into the tab under them, or into a new
+    // one when dropped on empty space.
+    bool handleTabFileDrop(QDropEvent* drop, int tab_index);
     bool handleTabTrackDrop(QAbstractItemView* source, QDropEvent* event, const QPoint& position);
     struct ListTab {
         persistence::ListDocument document;

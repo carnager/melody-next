@@ -310,6 +310,7 @@ class BenchMainWindowTest final : public QObject {
     void contextMenusTargetSelectionsListsAndFolders();
     void contextTransfersCreateTabs();
     void tabBarDropsTransferLocalRows();
+    void filesDroppedOnTheTabBarMakeATab();
     void panelLayoutPersistsAndPreservesFutureState();
     void trackViewLayoutMatchesGroupedQueueAndPersists();
     void localReorderPreservesVisibleRowGeometry();
@@ -8150,6 +8151,52 @@ void BenchMainWindowTest::contextTransfersCreateTabs() {
         qobject_cast<LocalListModel*>(qobject_cast<QTableView*>(tabs->currentWidget())->model());
     QCOMPARE(moved->rowCount(), 2);
     QCOMPARE(moved->rows()[1].raw_path, row.raw_path);
+}
+
+// Files from a file manager dropped on empty space in the tab bar make a new
+// tab of their own, named after the folder; dropped on a tab, they join it.
+void BenchMainWindowTest::filesDroppedOnTheTabBarMakeATab() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto album = media.filePath(QStringLiteral("Some Album"));
+    QVERIFY(QDir{}.mkpath(album));
+    write_wave(album + QStringLiteral("/01.wav"), wave_sample_rate);
+    write_wave(album + QStringLiteral("/02.wav"), wave_sample_rate);
+    const auto single = media.filePath(QStringLiteral("single.wav"));
+    write_wave(single, wave_sample_rate);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    const auto before = tabs->count();
+    const auto drop_files = [&](const QString& path, const QPoint position) {
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(path)});
+        QDragEnterEvent enter{position, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+        window.handleTabTrackDrop(nullptr, &enter, position);
+        if (!enter.isAccepted()) {
+            return false;
+        }
+        QDropEvent drop{QPointF{position}, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier};
+        window.handleTabTrackDrop(nullptr, &drop, position);
+        return drop.isAccepted();
+    };
+    const QPoint empty{tabs->tabBar()->tabRect(tabs->count() - 1).right() + 12,
+                       tabs->tabBar()->height() / 2};
+    QVERIFY(drop_files(album, empty));
+    QCOMPARE(tabs->count(), before + 1);
+    auto* made = window.currentListTab();
+    QVERIFY(made != nullptr && !made->document.remote);
+    QCOMPARE(QString::fromStdString(made->document.name), QStringLiteral("Some Album"));
+    QTRY_COMPARE(made->model->rowCount(), 2);
+
+    // Onto a tab: into that one, no new tab.
+    auto* first = window.list_tabs_.front().get();
+    const auto first_rows = first->model->rowCount();
+    QVERIFY(drop_files(single, tabs->tabBar()->tabRect(tabs->indexOf(first->view)).center()));
+    QCOMPARE(tabs->count(), before + 1);
+    QTRY_COMPARE(first->model->rowCount(), first_rows + 1);
 }
 
 void BenchMainWindowTest::tabBarDropsTransferLocalRows() {

@@ -212,14 +212,6 @@ int main(int argc, char** argv) {
         player = trackknife::engine::Player::create_without_audio();
     }
     trackknife::engine::register_playback_methods(dispatcher, *player);
-    // Stops the engine the way SIGTERM does -- the queue saved, restored
-    // paused next time. For a workspace that started this engine and must
-    // start it again with other settings; it has no process to signal.
-    dispatcher.on("engine.stop", [](const trackknife::protocol::Json&)
-                                     -> trackknife::core::Result<trackknife::protocol::Json> {
-        stop_requested.store(true);
-        return trackknife::protocol::Json{{"stopping", true}};
-    });
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {

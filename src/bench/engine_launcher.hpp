@@ -12,6 +12,9 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <vector>
+
+#include <sys/types.h>
 
 namespace trackknife::bench {
 
@@ -59,6 +62,9 @@ struct LocalEngineSharing final {
 // Stops this computer's engine and starts it again, with the settings as
 // they are now. Playback is saved and comes back paused.
 [[nodiscard]] core::Result<void> restartLocalEngine(const LocalEngine& engine);
+
+// The processes holding a lock file open: the engine, for its engine.lock.
+[[nodiscard]] std::vector<pid_t> lockHolders(const std::filesystem::path& lock);
 
 // The melodyd installed beside this executable, or the build tree's.
 // TRACKKNIFE_ENGINE overrides. Never a search of PATH: another program of

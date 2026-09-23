@@ -15,6 +15,7 @@
 
 #include <signal.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <thread>
@@ -154,15 +155,23 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
 }
 
 core::Result<void> restartLocalEngine(const LocalEngine& engine) {
-    const protocol::Endpoint endpoint{.socket = engine.socket, .host = {}, .port = 0, .token = {}};
-    if (auto running = protocol::Client::connect(endpoint)) {
-        static_cast<void>((*running)->call("engine.stop"));
-        (*running)->close();
-        // Gone when its socket stops answering; it saves the queue first.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
-        while (std::chrono::steady_clock::now() < deadline && protocol::Client::connect(endpoint)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{50});
-        }
+    // The engine is whoever holds its lock. Found through /proc, as fuser
+    // does, because flock(2) does not say who holds it -- and signalled,
+    // because an engine older than this workspace knows no request for it.
+    const auto holders = lockHolders(engine.state / "engine.lock");
+    for (const auto pid : holders) {
+        ::kill(pid, SIGTERM);
+    }
+    // SIGTERM saves the queue first; it comes back paused.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    const auto alive = [&holders] {
+        return std::ranges::any_of(holders, [](const pid_t pid) { return ::kill(pid, 0) == 0; });
+    };
+    while (alive() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    }
+    if (alive()) {
+        return std::unexpected(launch_error("the running engine did not stop"));
     }
     auto started = connectLocalEngine(engine);
     if (!started) {
@@ -170,6 +179,31 @@ core::Result<void> restartLocalEngine(const LocalEngine& engine) {
     }
     (*started)->close();
     return {};
+}
+
+std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
+    std::vector<pid_t> holders;
+    std::error_code error;
+    const auto target = std::filesystem::weakly_canonical(lock, error);
+    if (error) {
+        return holders;
+    }
+    for (const auto& process : std::filesystem::directory_iterator{"/proc", error}) {
+        const auto name = process.path().filename().string();
+        if (name.empty() || !std::ranges::all_of(name, [](const char c) { return c >= '0' && c <= '9'; })) {
+            continue;
+        }
+        std::error_code unreadable;
+        for (const auto& descriptor :
+             std::filesystem::directory_iterator{process.path() / "fd", unreadable}) {
+            std::error_code gone;
+            if (std::filesystem::read_symlink(descriptor.path(), gone) == target) {
+                holders.push_back(static_cast<pid_t>(std::stoi(name)));
+                break;
+            }
+        }
+    }
+    return holders;
 }
 
 core::Result<std::unique_ptr<protocol::Client>>

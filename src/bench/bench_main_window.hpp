@@ -330,6 +330,8 @@ class BenchMainWindow final : public QMainWindow {
     void renewOutdatedLocalEngine();
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
+    // Shows the source the user last chose, or a library by default.
+    void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;
     bool engine_renewal_pending_{false};
     // Quit, as opposed to closing the window: this computer's engine stops

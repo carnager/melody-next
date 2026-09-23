@@ -1121,15 +1121,38 @@ void BenchMainWindow::applyLocalLibraryVisibility() {
     const bool shown = localLibraryShown();
     local_source_tabs_->setTabVisible(library_tab, shown);
     if (!shown && local_source_tabs_->currentIndex() == library_tab) {
-        // The remote's library in its place, when there is one.
-        int replacement = 0;
-        for (int index = 0; index < local_source_tabs_->count(); ++index) {
-            if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
-                replacement = index;
-            }
-        }
-        local_source_tabs_->setCurrentIndex(replacement);
+        selectPreferredSource();
     }
+}
+
+void BenchMainWindow::selectPreferredSource() {
+    if (local_source_tabs_ == nullptr) {
+        return;
+    }
+    // A library unless Folders was chosen: this computer's, or the remote's
+    // when this computer's is hidden or the remote's was chosen.
+    auto wanted = QSettings{}.value(QStringLiteral("local-library/view")).toString();
+    if (wanted == QStringLiteral("0")) {
+        wanted = QStringLiteral("folders");
+    } else if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote")) {
+        wanted = QStringLiteral("library");
+    }
+    int remote = -1;
+    for (int index = 0; index < local_source_tabs_->count(); ++index) {
+        if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+            remote = index;
+        }
+    }
+    const bool local = localLibraryShown();
+    int target = 0;
+    if (wanted == QStringLiteral("folders")) {
+        target = 0;
+    } else if (wanted == QStringLiteral("remote") || !local) {
+        target = remote >= 0 ? remote : local ? 1 : 0;
+    } else {
+        target = 1;
+    }
+    local_source_tabs_->setCurrentIndex(target);
 }
 
 void BenchMainWindow::quitAndStopEngine() {

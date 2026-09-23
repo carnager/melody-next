@@ -1465,8 +1465,8 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
         auto* sources = window.findChild<QStackedWidget*>(QStringLiteral("bench-source-stack"));
         QVERIFY(selector && tree && search && tabs && sources);
-        QCOMPARE(selector->currentIndex(), 0);
-        selector->setCurrentIndex(1);
+        // A library opens first, not the folders.
+        QCOMPARE(selector->currentIndex(), 1);
         QCOMPARE(sources->currentWidget(), panel);
         panel->addRoot(root.native());
         QTRY_COMPARE(panel->findChild<QLabel*>(QStringLiteral("local-library-status"))->text(),
@@ -1475,8 +1475,8 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
         panel->findChild<QToolButton*>(QStringLiteral("local-library-scan"))->click();
         QTRY_VERIFY(tree->model()->index(0, 0).data().toString().contains(QStringLiteral("Björk")));
         const auto artist = tree->model()->index(0, 0);
-        QCOMPARE(artist.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
-                 QStringLiteral("1 album"));
+        // One line for an artist: the album count is drawn at the row's end.
+        QVERIFY(artist.data(ui::LibraryTreeDelegate::secondaryTextRole).toString().isEmpty());
         tree->expand(artist);
         QTRY_VERIFY(tree->model()
                         ->index(0, 0, tree->model()->index(0, 0))

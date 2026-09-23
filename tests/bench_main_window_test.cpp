@@ -268,6 +268,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void sourcePanelOpensOnALibrary();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
     void theDeviceMenuChoosesAnOutputAgent();
@@ -4723,6 +4724,41 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
 // ADR-0227: a remote tab's files are on the remote's machine and need not be
 // reachable from this one, so its tags and covers come from that engine --
 // however its rows got there.
+void BenchMainWindowTest::sourcePanelOpensOnALibrary() {
+    QSettings{}.remove(QStringLiteral("local-library/view"));
+    {
+        // Nothing chosen yet: the library, not the folders.
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QCOMPARE(window.local_source_tabs_->currentIndex(), 1);
+        // Clicking Folders is a choice, and is kept.
+        emit window.local_source_tabs_->tabBarClicked(0);
+        window.local_source_tabs_->setCurrentIndex(0);
+    }
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QCOMPARE(window.local_source_tabs_->currentIndex(), 0);
+        emit window.local_source_tabs_->tabBarClicked(1);
+    }
+
+    // This computer's library hidden: the remote's opens in its place.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_COMPARE(
+        window.local_source_tabs_->tabData(window.local_source_tabs_->currentIndex()).toString(),
+        QStringLiteral("remote"));
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
+}
+
 void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     QTemporaryDir remote_state;
     QTemporaryDir media;
@@ -6466,6 +6502,8 @@ void BenchMainWindowTest::folderBookmarksRevealTreePaths() {
         QSettings settings;
         settings.setValue(QStringLiteral("library/roots"), QVariantList{root_bytes});
         settings.setValue(QStringLiteral("library/bookmarks"), QVariantList{nested_bytes});
+        // Folders, as chosen; a library is what opens otherwise.
+        settings.setValue(QStringLiteral("local-library/view"), QStringLiteral("folders"));
     }
 
     BenchMainWindow window;

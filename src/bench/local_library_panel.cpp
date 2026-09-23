@@ -123,11 +123,15 @@ class LibraryModel final : public QStandardItemModel {
             if (!value.isValid())
                 return {};
             const auto entry = value.value<persistence::LibraryEntry>();
+            // An artist's album count is the row's quiet count instead.
             if (entry.kind == persistence::LibraryEntryKind::artist)
-                return tr("%1 album%2").arg(entry.albums).arg(entry.albums == 1U ? "" : "s");
+                return {};
+            const auto tracks =
+                tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
+            // Under its artist, an album need not name them again.
             if (entry.kind == persistence::LibraryEntryKind::album)
-                return text(entry.artist) + QStringLiteral(" · ") +
-                       tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
+                return index.parent().isValid() ? tracks
+                                                 : text(entry.artist) + QStringLiteral(" · ") + tracks;
             return {};
         }
         if (role == Qt::DecorationRole) {
@@ -261,7 +265,11 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
                 .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
                 .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
                 .root = !index.parent().isValid(),
+                .artist = value.isValid() && entry.kind == persistence::LibraryEntryKind::artist,
                 .secondary = index.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
+                .count = value.isValid() && entry.kind == persistence::LibraryEntryKind::artist
+                             ? QString::number(entry.albums)
+                             : QString{},
                 .album_rating = value.isValid() ? entry.rating : 0U};
         }));
     tree_->setEditTriggers(QAbstractItemView::NoEditTriggers);

@@ -69,7 +69,11 @@ class LibraryTreeDelegate final : public QStyledItemDelegate {
         bool track{false};
         bool album{false};
         bool root{false};
+        // An artist: one line, an initials tile, and `count` at the end.
+        bool artist{false};
         QString secondary;
+        // Shown quietly at the row's end, such as an artist's album count.
+        QString count;
         // ADR-0179: painted as stars over the album cover when non-zero.
         unsigned album_rating{0U};
     };

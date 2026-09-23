@@ -110,8 +110,9 @@ void BenchMainWindow::connectRemoteEngine() {
     const auto index = local_source_tabs_->addTab(remote_catalogue_source_->name());
     local_source_tabs_->setTabData(index, QStringLiteral("remote"));
     local_source_tabs_->setTabToolTip(index, remote_catalogue_source_->describe());
-    // Now that there is a remote to show instead.
+    // Now that there is a remote to show instead, or it was the one chosen.
     applyLocalLibraryVisibility();
+    selectPreferredSource();
 
     connect(
         remote_library_, &LocalLibraryPanel::actionRequested, this,

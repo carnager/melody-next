@@ -232,7 +232,7 @@ QSize LibraryTreeDelegate::sizeHint(const QStyleOptionViewItem& option,
                                     const QModelIndex& index) const {
     auto size = QStyledItemDelegate::sizeHint(option, index);
     const auto row = presentation_(index);
-    size.setHeight(row.track ? 34 : row.album ? 42 : row.root ? 46 : 38);
+    size.setHeight(row.track ? 26 : row.album ? 40 : row.artist ? 30 : row.root ? 34 : 30);
     return size;
 }
 
@@ -247,6 +247,18 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
     item.text.clear();
     item.icon = {};
     item.features &= ~QStyleOptionViewItem::HasDecoration;
+    // Selection as a tint, as in the lists: the text keeps its colour.
+    const bool selected = item.state.testFlag(QStyle::State_Selected);
+    if (selected) {
+        item.state &= ~QStyle::State_Selected;
+        const auto base = item.palette.color(QPalette::Base);
+        const auto accent = item.palette.color(QPalette::Highlight);
+        const auto mix = [](const int a, const int b) { return (a * 68 + b * 32) / 100; };
+        item.backgroundBrush = QColor::fromRgb(mix(base.red(), accent.red()),
+                                               mix(base.green(), accent.green()),
+                                               mix(base.blue(), accent.blue()));
+    }
+    item.state &= ~QStyle::State_HasFocus;
     const auto* widget = item.widget;
     auto* item_style = widget != nullptr ? widget->style() : QApplication::style();
     item_style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
@@ -256,11 +268,34 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
     const bool show_actions =
         view_ != nullptr && view_->actionsAvailable(index) &&
         (view_->hoverIndex() == index || (view_->hasFocus() && view_->currentIndex() == index));
-    const auto icon_extent = is_track ? 20 : is_album ? 28 : 32;
-    auto content = item.rect.adjusted(5, 3, -5, -3);
+    const auto icon_extent = is_track ? 16 : is_album ? 30 : 22;
+    auto content = item.rect.adjusted(5, 2, -8, -2);
     const auto icon_rect =
         QRect{content.left(), content.center().y() - icon_extent / 2, icon_extent, icon_extent};
-    if (!icon.isNull()) {
+    if (row.artist) {
+        // No picture of the artist to show: their initials on a quiet tile.
+        QString initials;
+        for (const auto character : primary) {
+            if (character.isLetterOrNumber()) {
+                initials += character.toUpper();
+                if (initials.size() == 2) {
+                    break;
+                }
+            }
+        }
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(item.palette.color(QPalette::Mid));
+        painter->drawRoundedRect(icon_rect, 3, 3);
+        auto tile_font = item.font;
+        tile_font.setPointSizeF(std::max(6.0, item.font.pointSizeF() * 0.72));
+        tile_font.setWeight(QFont::DemiBold);
+        painter->setFont(tile_font);
+        painter->setPen(item.palette.color(QPalette::PlaceholderText));
+        painter->drawText(icon_rect, Qt::AlignCenter, initials);
+        painter->restore();
+    } else if (!icon.isNull()) {
         const auto mode =
             item.state.testFlag(QStyle::State_Enabled) ? QIcon::Normal : QIcon::Disabled;
         icon.paint(painter, icon_rect, Qt::AlignCenter, mode);
@@ -273,12 +308,23 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
         content.setRight(LibraryTreeView::actionRect(item.rect, 0).left() - 5);
     }
 
-    const auto foreground = item.palette.color(
-        item.state.testFlag(QStyle::State_Selected) ? QPalette::HighlightedText : QPalette::Text);
-    auto muted =
-        item.palette.color(item.state.testFlag(QStyle::State_Selected) ? QPalette::HighlightedText
-                                                                       : QPalette::PlaceholderText);
-    muted.setAlpha(205);
+    const auto foreground = item.palette.color(QPalette::Text);
+    auto muted = item.palette.color(QPalette::PlaceholderText);
+    muted.setAlpha(selected ? 255 : 220);
+    // The count, quiet at the end -- unless the actions have that place.
+    if (!row.count.isEmpty() && !show_actions) {
+        auto count_font = item.font;
+        count_font.setPointSizeF(std::max(7.0, item.font.pointSizeF() - 1.0));
+        const QFontMetrics count_metrics{count_font};
+        const auto width = count_metrics.horizontalAdvance(row.count);
+        painter->save();
+        painter->setFont(count_font);
+        painter->setPen(muted);
+        painter->drawText(QRect{content.right() - width, content.top(), width, content.height()},
+                          Qt::AlignRight | Qt::AlignVCenter, row.count);
+        painter->restore();
+        content.setRight(content.right() - width - 8);
+    }
     auto primary_font = item.font;
     auto secondary_font = item.font;
     secondary_font.setPointSizeF(std::max(7.0, item.font.pointSizeF() - 1.0));

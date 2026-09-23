@@ -131,17 +131,24 @@ void BenchMainWindow::buildWorkspace() {
                                           QStringLiteral("Local music source"));
     local_source_tabs_->addTab(QStringLiteral("Folders"));
     local_source_tabs_->addTab(QStringLiteral("Library"));
-    local_source_tabs_->setCurrentIndex(
-        QSettings{}.value(QStringLiteral("local-library/view"), 0).toInt() == 1 ? 1 : 0);
     heading_row->addWidget(local_source_tabs_);
-    connect(local_source_tabs_, &QTabBar::currentChanged, this, [this](int index) {
-        // The temporary Files page (index 2, ADR-0183 addendum) is
-        // session-only and must not become the persisted default view.
-        if (index == 0 || index == 1) {
-            QSettings{}.setValue(QStringLiteral("local-library/view"), index);
+    // Remembered only when chosen: tabs appearing, hiding or being switched
+    // by the window itself do not change what the user asked for.
+    connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
+        const auto kind = local_source_tabs_->tabData(index).toString();
+        // The temporary Files page (ADR-0183 addendum) is session-only.
+        const auto choice = kind == QStringLiteral("remote") ? QStringLiteral("remote")
+                            : index == 0                    ? QStringLiteral("folders")
+                            : index == 1                    ? QStringLiteral("library")
+                                                            : QString{};
+        if (!choice.isEmpty()) {
+            QSettings{}.setValue(QStringLiteral("local-library/view"), choice);
         }
-        refreshActiveContext();
     });
+    // Before the window reacts to changes: the rest of it is not built yet.
+    selectPreferredSource();
+    connect(local_source_tabs_, &QTabBar::currentChanged, this,
+            [this](int) { refreshActiveContext(); });
     heading_row->addStretch(1);
     folders_layout->addLayout(heading_row);
     folder_bookmarks_heading_ = new QLabel(QStringLiteral("Bookmarks"), folders_panel_);

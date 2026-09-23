@@ -2833,6 +2833,11 @@ recover_metadata_operations(MetadataOperationJournal& journal,
     }
     for (auto& backup : *backups) {
         if (backup.state == BackupState::needs_reconciliation) {
+            // A damaged record can be both incomplete and backed up; it is one
+            // incident, reported once.
+            if (std::ranges::contains(results, backup.operation.id,
+                                      &MetadataRecoveryResult::journal_id))
+                continue;
             results.push_back({.journal_id = backup.operation.id,
                                .outcome = MetadataRecoveryOutcome::needs_reconciliation,
                                .issue = backup.failure});

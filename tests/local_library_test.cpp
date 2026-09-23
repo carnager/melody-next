@@ -131,6 +131,7 @@ bool dropFiles(QTableView* view, const QMimeData* mime, const QPoint& position) 
 class LocalLibraryTest final : public QObject {
     Q_OBJECT
   private slots:
+    void journalRebuildsKeepTheirEvidence();
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
     void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
@@ -889,6 +890,64 @@ void LocalLibraryTest::migrationRoundTrip() {
     const auto retained = repository->load_local_listening_history(*key);
     QVERIFY(retained && *retained);
     QCOMPARE((*retained)->play_count, 1U);
+}
+
+// Schemas 29 and 38 rebuild the operation journal to widen a CHECK. With
+// foreign keys on during migration, dropping the old table deleted every
+// journal's children and backup record by cascade: one damaged record then
+// failed recovery at every start, so no backup was ever released again.
+void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const auto database = std::filesystem::path{temporary.path().toStdString()} / "state.sqlite";
+    QVERIFY(persistence::ListRepository::open(database).has_value());
+    sqlite3* db = nullptr;
+    QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+    const auto exec = [&db](const char* sql) {
+        return sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
+    };
+    QCOMPARE(exec("INSERT INTO operation_journal(id, kind, state, source_path, prepared_path, "
+                  "backup_path, expected_device, expected_inode, expected_size, "
+                  "expected_mtime_seconds, expected_mtime_nanoseconds, content_kind) VALUES("
+                  "'j1', 0, 3, X'61', X'62', X'63', X'00', X'00', X'00', X'00', X'00', 0);"
+                  "INSERT INTO operation_journal_occurrences VALUES('j1', 0, 0);"
+                  "INSERT INTO operation_journal_changes(journal_id, position, field_index, "
+                  "canonical_name, property_name, original_present, patch_kind) "
+                  "VALUES('j1', 0, 0, X'74', X'54', 0, 0);"
+                  "INSERT INTO metadata_operation_backups(journal_id, state, "
+                  "completed_at_unix_seconds, updated_at_unix_seconds) VALUES('j1', 0, 1, 1);"),
+             SQLITE_OK);
+    for (const auto* name :
+         {"0042_engine_state", "0041_list_entry_identity", "0040_local_listening_occurrences",
+          "0039_local_listening_history", "0038_folder_image_journal"}) {
+        QFile downgrade{
+            QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.down.sql").arg(QLatin1String{name})};
+        QVERIFY(downgrade.open(QIODevice::ReadOnly));
+        QCOMPARE(exec("BEGIN IMMEDIATE"), SQLITE_OK);
+        QVERIFY2(exec(downgrade.readAll().constData()) == SQLITE_OK, sqlite3_errmsg(db));
+        QCOMPARE(exec("COMMIT"), SQLITE_OK);
+    }
+    sqlite3_close(db);
+
+    // Schema 38 runs again: the rebuild that emptied the child tables.
+    auto repository = persistence::ListRepository::open(database);
+    QVERIFY(repository.has_value());
+    QCOMPARE(*repository->schema_version(), 42U);
+    QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
+    const auto count = [&db](const char* table) {
+        sqlite3_stmt* statement = nullptr;
+        const auto sql = QByteArray{"SELECT count(*) FROM "} + table;
+        sqlite3_prepare_v2(db, sql.constData(), -1, &statement, nullptr);
+        sqlite3_step(statement);
+        const auto result = sqlite3_column_int(statement, 0);
+        sqlite3_finalize(statement);
+        return result;
+    };
+    QCOMPARE(count("operation_journal"), 1);
+    QCOMPARE(count("operation_journal_occurrences"), 1);
+    QCOMPARE(count("operation_journal_changes"), 1);
+    QCOMPARE(count("metadata_operation_backups"), 1);
+    sqlite3_close(db);
 }
 
 void LocalLibraryTest::scansOnlyOnRefresh_data() {

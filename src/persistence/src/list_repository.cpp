@@ -961,8 +961,9 @@ read_optional_revision(sqlite3_stmt* statement, const int first,
         // rebuilt. The old table must be dropped rather than renamed:
         // RENAME rewrites the child tables' REFERENCES clauses, while
         // dropping and renaming the replacement into place leaves them
-        // pointing at "operation_journal" throughout (foreign keys are
-        // off on the migration connection).
+        // pointing at "operation_journal" throughout. That needs foreign
+        // keys off, or the drop cascades. open() ensures that now; databases
+        // migrated before it did lost the journal's children here.
         constexpr auto migration =
             "DROP INDEX operation_journal_state;"
             "CREATE TABLE operation_journal_v29 ("
@@ -1310,6 +1311,20 @@ UPDATE schema_version SET version = 42;
             return result;
         }
     }
+    // Foreign keys are off while the schema changes (see open()); a rebuild
+    // that left a reference dangling is refused here rather than committed.
+    auto dangling = prepare(database, "PRAGMA foreign_key_check");
+    if (!dangling) {
+        rollback();
+        return std::unexpected(std::move(dangling.error()));
+    }
+    if (sqlite3_step(dangling->get()) == SQLITE_ROW) {
+        auto error = database_error(database, "A schema migration left a dangling reference");
+        dangling->reset();
+        rollback();
+        return std::unexpected(std::move(error));
+    }
+    dangling->reset();
     if (auto result = execute(database, "COMMIT"); !result) {
         rollback();
         return result;
@@ -1810,13 +1825,22 @@ core::Result<ListRepository> ListRepository::open(const std::filesystem::path& p
             database_error(implementation->database, "Could not open Trackknife state database"));
     }
     sqlite3_busy_timeout(implementation->database, 2'000);
-    if (auto result = execute(implementation->database, "PRAGMA foreign_keys = ON"); !result) {
-        return std::unexpected(std::move(result.error()));
-    }
     if (auto result = execute(implementation->database, "PRAGMA journal_mode = WAL"); !result) {
         return std::unexpected(std::move(result.error()));
     }
+    // Migrations run with foreign keys off. Rebuilding a table (create the
+    // new shape, copy, drop the old, rename) is how SQLite changes a CHECK,
+    // and with foreign keys on, the drop is a DELETE of every row that
+    // cascades into every child table. Schemas 29 and 38 did exactly that
+    // to the operation journal's evidence and its backup records. The pragma
+    // is a no-op inside a transaction, so it is set before migrate() begins.
+    if (auto result = execute(implementation->database, "PRAGMA foreign_keys = OFF"); !result) {
+        return std::unexpected(std::move(result.error()));
+    }
     if (auto result = migrate(implementation->database); !result) {
+        return std::unexpected(std::move(result.error()));
+    }
+    if (auto result = execute(implementation->database, "PRAGMA foreign_keys = ON"); !result) {
         return std::unexpected(std::move(result.error()));
     }
     return ListRepository{std::move(implementation)};

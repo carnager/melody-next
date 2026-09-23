@@ -776,8 +776,20 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
     return {};
 }
 
-[[nodiscard]] core::Result<std::vector<Record>> load_records(sqlite3* database, const char* sql,
-                                                             const std::string_view id = {}) {
+// How a record whose evidence does not hold together is loaded.
+enum class DamagedEvidence : std::uint8_t {
+    // Fail the load: the caller acts on this one record and cannot without it.
+    refuse,
+    // Return it as needing reconciliation. Recovery then only reports it, and
+    // save admission still refuses its source, but one damaged record no
+    // longer fails recovery of every other one and the backup maintenance
+    // that follows it.
+    reconcile,
+};
+
+[[nodiscard]] core::Result<std::vector<Record>>
+load_records(sqlite3* database, const char* sql, const std::string_view id = {},
+             const DamagedEvidence damaged = DamagedEvidence::refuse) {
     auto statement = prepare(database, sql);
     if (!statement) {
         return std::unexpected(std::move(statement.error()));
@@ -854,12 +866,31 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
     }
     statement->reset();
     for (auto& record : records) {
+        // Only ever narrows what recovery does: a record marked here is
+        // reported, never acted on, and nothing about it is written back.
+        const auto mark_damaged = [&record] {
+            record.state = State::needs_reconciliation;
+            record.failure = core::Error{
+                .code = core::ErrorCode::database,
+                .message = "The journal's record of this operation is incomplete; check the "
+                           "file before saving it again",
+                .context = {},
+            };
+        };
         auto children = load_children(database, record);
         if (!children) {
+            if (damaged == DamagedEvidence::reconcile) {
+                mark_damaged();
+                continue;
+            }
             return std::unexpected(std::move(children.error()));
         }
         if (auto validated = validate_record_structure(record);
             !validated || !valid_loaded_state_evidence(record)) {
+            if (damaged == DamagedEvidence::reconcile) {
+                mark_damaged();
+                continue;
+            }
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = "Operation journal contains inconsistent recovery evidence",
@@ -889,7 +920,8 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
 }
 
 [[nodiscard]] core::Result<std::vector<BackupRecord>>
-load_backup_records(sqlite3* database, const char* sql, const std::string_view id = {}) {
+load_backup_records(sqlite3* database, const char* sql, const std::string_view id = {},
+                    const DamagedEvidence damaged = DamagedEvidence::refuse) {
     auto statement = prepare(database, sql);
     if (!statement) {
         return std::unexpected(std::move(statement.error()));
@@ -964,7 +996,7 @@ load_backup_records(sqlite3* database, const char* sql, const std::string_view i
     std::vector<BackupRecord> backups;
     backups.reserve(rows.size());
     for (auto& row : rows) {
-        auto operations = load_records(database, operation_sql, row.journal_id);
+        auto operations = load_records(database, operation_sql, row.journal_id, damaged);
         if (!operations || operations->size() != 1U) {
             return std::unexpected(
                 operations ? database_error(database, "Metadata backup lost its journal")
@@ -979,8 +1011,18 @@ load_backup_records(sqlite3* database, const char* sql, const std::string_view i
             .failure = std::move(row.failure),
         };
         if (!valid_backup_evidence(backup)) {
-            return std::unexpected(database_error(
-                database, "Metadata backup contains inconsistent lifecycle evidence"));
+            if (damaged == DamagedEvidence::refuse) {
+                return std::unexpected(database_error(
+                    database, "Metadata backup contains inconsistent lifecycle evidence"));
+            }
+            // Kept and reported, never released: maintenance leaves a backup
+            // needing reconciliation alone.
+            backup.state = BackupState::needs_reconciliation;
+            backup.failure = backup.operation.failure.value_or(core::Error{
+                .code = core::ErrorCode::database,
+                .message = "Metadata backup contains inconsistent lifecycle evidence",
+                .context = {},
+            });
         }
         backups.push_back(std::move(backup));
     }
@@ -1346,7 +1388,7 @@ SqliteMetadataOperationJournal::load_incomplete() const {
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
         "content_kind "
         "FROM operation_journal WHERE state NOT IN (3, 4) ORDER BY rowid LIMIT 10001";
-    auto records = load_records(implementation_->database, sql);
+    auto records = load_records(implementation_->database, sql, {}, DamagedEvidence::reconcile);
     if (!records) {
         return std::unexpected(std::move(records.error()));
     }
@@ -1369,7 +1411,8 @@ SqliteMetadataOperationJournal::load_incomplete_for_source(const std::string& ra
         "content_kind "
         "FROM operation_journal WHERE source_path = ? AND state NOT IN (3, 4) ORDER BY rowid LIMIT "
         "10001";
-    auto records = load_records(implementation_->database, sql, raw_path);
+    auto records =
+        load_records(implementation_->database, sql, raw_path, DamagedEvidence::reconcile);
     if (!records) {
         return std::unexpected(std::move(records.error()));
     }
@@ -1410,7 +1453,8 @@ SqliteMetadataOperationJournal::load_backups() const {
                          "updated_at_unix_seconds, error_code, error_message "
                          "FROM metadata_operation_backups "
                          "ORDER BY completed_at_unix_seconds DESC, rowid DESC LIMIT 10001";
-    auto backups = load_backup_records(implementation_->database, sql);
+    auto backups =
+        load_backup_records(implementation_->database, sql, {}, DamagedEvidence::reconcile);
     if (!backups) {
         return std::unexpected(std::move(backups.error()));
     }

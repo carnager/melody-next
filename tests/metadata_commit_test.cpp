@@ -2767,8 +2767,15 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
               "DELETE FROM operation_journal_changes; DELETE FROM operation_journal_occurrences;",
               nullptr, nullptr, nullptr) == SQLITE_OK);
     sqlite3_close(database);
-    CHECK(!journal->load_incomplete());
-    CHECK(!journal->load_incomplete_for_source(old.native()));
+    // The damaged record is reported for attention rather than failing the
+    // load, and its own source stays closed to saves.
+    const auto damaged = journal->load_incomplete();
+    CHECK(damaged && damaged->size() == 1U &&
+          damaged->front().state ==
+              operations::MetadataOperationJournalState::needs_reconciliation &&
+          damaged->front().failure);
+    const auto for_source = journal->load_incomplete_for_source(old.native());
+    CHECK(for_source && for_source->size() == 1U);
     auto blocked = title_plan(old, "Must not save");
     CHECK(blocked && !operations::commit_flac_metadata_source(*blocked, *journal,
                                                               successful_dependent_commit));
@@ -2810,7 +2817,29 @@ void damaged_unrelated_journal_does_not_block_cover_save(const std::filesystem::
                      item.content_fingerprint == image->content_fingerprint;
         CHECK(found);
     }
-    CHECK(!journal->load_incomplete()); // Damaged evidence remains visible to recovery.
+    // Recovery reports the damaged record instead of failing, so the backup
+    // maintenance behind it runs: the new save's backup is released. This is
+    // what one damaged record had been preventing for every other backup.
+    const auto recovered =
+        operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    CHECK(recovered && recovered->size() == 1U &&
+          recovered->front().journal_id == damaged->front().id &&
+          recovered->front().outcome == operations::MetadataRecoveryOutcome::needs_reconciliation);
+    const auto maintained = operations::maintain_metadata_backups(
+        *journal, {.maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U},
+        static_cast<std::int64_t>(std::time(nullptr)) + 1);
+    CHECK(maintained && std::ranges::any_of(*maintained, [&](const auto& result) {
+              return result.journal_id == saved->journal_id &&
+                     result.outcome == operations::MetadataBackupMaintenanceOutcome::released;
+          }));
+    CHECK(saved && !std::filesystem::exists(saved->backup_raw_path));
+    // The damaged operation's own backup is kept for whoever reconciles it.
+    CHECK(maintained && std::ranges::any_of(*maintained, [&](const auto& result) {
+              return result.journal_id == damaged->front().id &&
+                     result.outcome ==
+                         operations::MetadataBackupMaintenanceOutcome::needs_reconciliation;
+          }));
+    CHECK(std::filesystem::exists(damaged->front().backup_raw_path));
 }
 
 void folder_cover_policy_publication_and_recovery(const std::filesystem::path& fixtures) {

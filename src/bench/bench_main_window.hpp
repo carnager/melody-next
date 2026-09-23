@@ -598,6 +598,12 @@ class BenchMainWindow final : public QMainWindow {
     std::optional<std::string> selected_device_;
     std::optional<std::string> default_device_;
     bool selected_device_available_{true};
+    // ADR-0228: the engine's outputs, as last shown in the device menu.
+    std::vector<EnginePlayback::State::Output> output_choices_;
+    // Whether the menu's outputs are the remote engine's, which names its
+    // own audio differently.
+    bool output_choices_remote_{false};
+    [[nodiscard]] QString outputLabel(const EnginePlayback::State::Output& output) const;
     // Whether an engine state has been seen, so the first one does not read
     // as the output changing.
     bool engine_output_seen_{false};

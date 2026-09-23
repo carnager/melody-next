@@ -105,6 +105,12 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     config.server = *endpoint;
+    if (!config.music_root && !config.stream_only) {
+        // Without a root the engine's paths mean nothing here: relative ones
+        // have nothing to join, and its absolute ones are its own machine's.
+        std::cerr << "melody-agent: no --music-root, so the engine streams the music here\n";
+        config.stream_only = true;
+    }
 
     auto agent = trackknife::agent::Agent::create(config);
     if (!agent) {
@@ -114,9 +120,9 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
     std::signal(SIGPIPE, SIG_IGN);
-    (*agent)->start();
-    std::cerr << "melody-agent: \"" << config.name << "\" playing for " << endpoint->describe()
+    std::cerr << "melody-agent: \"" << config.name << "\" connecting to " << endpoint->describe()
               << "\n";
+    (*agent)->start();
     while (!stop_requested.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }

@@ -3,6 +3,7 @@
 #include "trackknife/output/agent_audition.hpp"
 
 #include <chrono>
+#include <iostream>
 #include <utility>
 
 namespace trackknife::output {
@@ -71,6 +72,19 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
             changed();
         }
     });
+    shared->on_closed([this, weak] {
+        std::function<void()> offline;
+        {
+            const std::lock_guard guard{mutex_};
+            if (weak.lock() != client_) {
+                return;
+            }
+            offline = offline_;
+        }
+        if (offline) {
+            offline();
+        }
+    });
     std::shared_ptr<protocol::Client> previous;
     {
         const std::lock_guard guard{mutex_};
@@ -119,6 +133,11 @@ void AgentAudition::on_changed(std::function<void()> callback) {
     changed_ = std::move(callback);
 }
 
+void AgentAudition::on_offline(std::function<void()> callback) {
+    const std::lock_guard guard{mutex_};
+    offline_ = std::move(callback);
+}
+
 void AgentAudition::adopt(const Json& report) {
     auto parsed = snapshot_from_json(report);
     // A gapless handover: what was armed is what plays now.
@@ -158,6 +177,53 @@ core::Result<Json> AgentAudition::call(const std::string& method, const Json& pa
     return client->call(method, params, call_timeout);
 }
 
+core::Result<std::string> AgentAudition::stream_url(const std::string& raw_path) const {
+    if (paths_.stream_port == 0U) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::unsupported,
+            .message = "the engine serves no streams (start it with --http)",
+            .context = {{.key = "agent", .value = name_}}});
+    }
+    std::string host = paths_.stream_host;
+    if (host.empty()) {
+        const std::lock_guard guard{mutex_};
+        host = reached_;
+    }
+    if (host.empty()) {
+        host = "127.0.0.1";
+    }
+    // An IPv6 address is bracketed in a URL, so its colons are not the port's.
+    const auto authority = (host.find(':') != std::string::npos ? "[" + host + "]" : host) + ":" +
+                           std::to_string(paths_.stream_port);
+    // The engine checks the path against what it is playing before serving
+    // it; the token is what lets the agent ask.
+    return "http://" + authority +
+           "/stream?path=" + percent_encoded(protocol::encode_raw_path(raw_path)) +
+           "&token=" + percent_encoded(paths_.stream_token);
+}
+
+core::Result<Json> AgentAudition::call_with_fallback(const std::string& method, Json params,
+                                                     const std::string& raw_path) {
+    auto answered = call(method, params);
+    const auto source = params.find("source");
+    if (answered || !online() || source == params.end() || !source->contains("path")) {
+        return answered;
+    }
+    // An agent with files that cannot open this one -- not under its root,
+    // not mounted -- is streamed it instead, when the engine streams at all.
+    auto url = stream_url(raw_path);
+    if (!url) {
+        std::cerr << "melodyd: " << name_ << " could not open " << raw_path << " ("
+                  << answered.error().message << ") and " << url.error().message << "\n";
+        return answered;
+    }
+    std::cerr << "melodyd: " << name_ << " could not open " << raw_path << " ("
+              << answered.error().message << "); streaming it\n";
+    source->erase("path");
+    (*source)["url"] = std::move(*url);
+    return call(method, params);
+}
+
 core::Result<Source>
 AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelection selection,
                           std::optional<formats::SampleRange> segment,
@@ -168,13 +234,9 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
                   .segment = segment,
                   .replay_gain = std::move(replay_gain)};
     bool files = true;
-    std::string host = paths_.stream_host;
     {
         const std::lock_guard guard{mutex_};
         files = files_;
-        if (host.empty()) {
-            host = reached_;
-        }
     }
     if (files) {
         const std::filesystem::path path{raw_path};
@@ -188,31 +250,18 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
         source.path = raw_path;
         return source;
     }
-    if (paths_.stream_port == 0U) {
-        return std::unexpected(core::Error{
-            .code = core::ErrorCode::unsupported,
-            .message =
-                "this agent streams, and the engine serves no streams (start it with --http)",
-            .context = {{.key = "agent", .value = name_}}});
+    auto url = stream_url(raw_path);
+    if (!url) {
+        return std::unexpected(std::move(url.error()));
     }
-    if (host.empty()) {
-        host = "127.0.0.1";
-    }
-    // An IPv6 address is bracketed in a URL, so its colons are not the port's.
-    const auto authority = (host.find(':') != std::string::npos ? "[" + host + "]" : host) + ":" +
-                           std::to_string(paths_.stream_port);
-    // The engine checks the path against what it is playing before serving
-    // it; the token is what lets the agent ask.
-    source.url = "http://" + authority +
-                 "/stream?path=" + percent_encoded(protocol::encode_raw_path(raw_path)) +
-                 "&token=" + percent_encoded(paths_.stream_token);
+    source.url = std::move(*url);
     return source;
 }
 
 core::Result<void> AgentAudition::load(std::string raw_path, Source source, const bool play,
                                        const std::int64_t position_ms) {
     Json params{{"source", to_json(source)}, {"play", play}, {"position_ms", position_ms}};
-    auto answered = call("audition.load", params);
+    auto answered = call_with_fallback("audition.load", std::move(params), raw_path);
     if (!answered) {
         return std::unexpected(std::move(answered.error()));
     }
@@ -226,8 +275,9 @@ core::Result<void> AgentAudition::load(std::string raw_path, Source source, cons
 
 core::Result<void> AgentAudition::arm(std::string raw_path, Source source,
                                       const std::uint64_t occurrence_token) {
-    auto answered =
-        call("audition.queue_next", Json{{"source", to_json(source)}, {"token", occurrence_token}});
+    auto answered = call_with_fallback(
+        "audition.queue_next", Json{{"source", to_json(source)}, {"token", occurrence_token}},
+        raw_path);
     if (!answered) {
         return std::unexpected(std::move(answered.error()));
     }

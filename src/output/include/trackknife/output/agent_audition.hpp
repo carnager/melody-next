@@ -59,6 +59,8 @@ class AgentAudition final : public audio::Audition {
     [[nodiscard]] std::optional<LastHeard> last_heard() const;
     // Runs on the connection's reader thread after each report.
     void on_changed(std::function<void()> callback);
+    // Runs when the agent's connection drops, on its reader thread.
+    void on_offline(std::function<void()> callback);
 
     [[nodiscard]] audio::LocalAuditionSnapshot snapshot() const override;
     [[nodiscard]] core::Result<void>
@@ -97,6 +99,13 @@ class AgentAudition final : public audio::Audition {
   private:
     [[nodiscard]] core::Result<protocol::Json> call(const std::string& method,
                                                     const protocol::Json& params);
+    // Where the engine streams `raw_path` to this agent.
+    [[nodiscard]] core::Result<std::string> stream_url(const std::string& raw_path) const;
+    // A load or arm; one naming a file the agent cannot open is sent again
+    // as a stream.
+    [[nodiscard]] core::Result<protocol::Json>
+    call_with_fallback(const std::string& method, protocol::Json params,
+                       const std::string& raw_path);
     // The engine's path, as this agent can play it.
     [[nodiscard]] core::Result<Source>
     source_for(const std::string& raw_path, formats::AudioSourceSelection selection,
@@ -115,6 +124,7 @@ class AgentAudition final : public audio::Audition {
     bool files_{true};
     std::string reached_;
     std::function<void()> changed_;
+    std::function<void()> offline_;
     audio::LocalAuditionSnapshot reported_;
     bool next_armed_{false};
     // The engine's own paths for what the agent is playing and has armed;

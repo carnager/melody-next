@@ -538,8 +538,22 @@ void BenchMainWindow::refreshPlaybackBufferChecks() {
     }
 }
 
+QString BenchMainWindow::outputLabel(const EnginePlayback::State::Output& output) const {
+    if (output.local) {
+        // The engine's own audio: this computer's, or the server's.
+        return output_choices_remote_ ? QStringLiteral("The server") : QStringLiteral("This computer");
+    }
+    return displayText(output.name);
+}
+
 void BenchMainWindow::rebuildDeviceMenu() {
     device_menu_->clear();
+    // The previous rebuild's output group, whose actions clear() just took.
+    for (auto* group : device_menu_->findChildren<QActionGroup*>(Qt::FindDirectChildrenOnly)) {
+        if (group != device_group_) {
+            group->deleteLater();
+        }
+    }
     device_menu_->setToolTipsVisible(true);
 
     device_group_->setExclusive(true);
@@ -559,6 +573,43 @@ void BenchMainWindow::rebuildDeviceMenu() {
         });
         return action;
     };
+
+    // ADR-0228: which of the engine's outputs plays -- shown once there is a
+    // choice, which is when an agent has ever registered.
+    const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
+        return !output.local;
+    });
+    if (agents) {
+        device_menu_->addSection(QStringLiteral("Play on"));
+        auto* outputs = new QActionGroup(device_menu_);
+        outputs->setExclusive(true);
+        for (const auto& output : output_choices_) {
+            auto label = outputLabel(output);
+            if (!output.online) {
+                label += QStringLiteral(" (offline)");
+            }
+            auto* action = device_menu_->addAction(label);
+            action->setObjectName(
+                QStringLiteral("action-output-%1").arg(QString::fromStdString(output.id)));
+            action->setCheckable(true);
+            action->setChecked(output.selected);
+            // An offline agent can still be chosen: the music waits there
+            // and starts when it is back.
+            if (!output.online) {
+                action->setToolTip(
+                    QStringLiteral("Not connected. Chosen, it plays as soon as it is back."));
+            } else if (!output.local && !output.files) {
+                action->setToolTip(QStringLiteral("Streams the music from the engine"));
+            }
+            outputs->addAction(action);
+            connect(action, &QAction::triggered, this, [this, id = output.id] {
+                if (playingOnEngine()) {
+                    transport_->selectOutput(id);
+                }
+            });
+        }
+        device_menu_->addSection(QStringLiteral("Audio device"));
+    }
 
     add_choice(QStringLiteral("System default"), std::nullopt);
     for (const auto& [name, description] : device_choices_) {
@@ -1351,8 +1402,30 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
             statusBar()->showMessage(QStringLiteral("System audio output changed"), 5'000);
         }
     }
+    // ADR-0228: the chosen agent going away and coming back is worth saying;
+    // the music waits for it either way.
+    const auto chosen = [](const std::vector<EnginePlayback::State::Output>& outputs) {
+        const auto found = std::ranges::find_if(outputs, &EnginePlayback::State::Output::selected);
+        return found == outputs.end() ? std::optional<EnginePlayback::State::Output>{}
+                                      : std::optional{*found};
+    };
+    const auto was = chosen(output_choices_);
+    const auto now = chosen(state.outputs);
+    if (engine_output_seen_ && was && now && was->id == now->id && !now->local &&
+        was->online != now->online) {
+        statusBar()->showMessage(now->online
+                                     ? QStringLiteral("%1 is back").arg(outputLabel(*now))
+                                     : QStringLiteral("%1 went away · playback waits for it")
+                                           .arg(outputLabel(*now)),
+                                 5'000);
+    }
+    const bool remote = transport_ != nullptr && transport_ == remote_playback_;
+    const bool outputs_changed =
+        state.outputs != output_choices_ || remote != output_choices_remote_;
+    output_choices_ = state.outputs;
+    output_choices_remote_ = remote;
     engine_output_seen_ = true;
-    const bool menu_changed = choices != device_choices_ ||
+    const bool menu_changed = outputs_changed || choices != device_choices_ ||
                               state.output_target != selected_device_ ||
                               state.output_available != selected_device_available_ ||
                               state.default_output != default_device_;
@@ -1406,6 +1479,24 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     }
 
     device_button_->setEnabled(true);
+    // Playing on an agent is named on the button itself: music coming out of
+    // another room is not something to have to hover to find out.
+    if (now && !now->local) {
+        device_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        device_button_->setText(outputLabel(*now));
+        device_button_->setMinimumSize(26, 26);
+        device_button_->setMaximumSize(QWIDGETSIZE_MAX, 26);
+        device_label = QStringLiteral("%1 on %2").arg(device_label, outputLabel(*now));
+        if (!now->online) {
+            device_label += QStringLiteral(" (offline)");
+        }
+    } else {
+        device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        device_button_->setText({});
+        device_button_->setFixedSize(26, 26);
+    }
+    setProperty("trackknife-player-output",
+                now ? QString::fromStdString(now->id) : QString{});
     auto tooltip =
         QStringLiteral("Audio output: %1\nBuffer: %2 · %3 ms capacity · %4 ms start%5\n"
                        "Underruns: %6")

@@ -91,6 +91,12 @@ void answer_status(const int descriptor, const std::string_view status) {
             return std::nullopt;
         }
         head.append(buffer.data(), static_cast<std::size_t>(received));
+        // A request starts with its method. Anything else -- a protocol
+        // client sent to this port by mistake -- is answered now rather than
+        // left waiting out the timeout for a head that never comes.
+        if (head.front() < 'A' || head.front() > 'Z') {
+            return std::nullopt;
+        }
     }
     return head;
 }

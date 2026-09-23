@@ -228,6 +228,9 @@ int main(int argc, char** argv) {
                        listed.front().online && listed.front().files;
             }),
             "and is listed, online, with files of its own");
+    // An engine with no audio of its own plays on the first agent there is.
+    require(eventually([&] { return outputs.list().front().selected; }),
+            "the first agent is taken up when there is nothing else to play on");
 
     // Played on the agent, from the agent's own copy.
     require(outputs.select("agent:bedside").has_value(), "the agent can be chosen");
@@ -289,6 +292,21 @@ int main(int argc, char** argv) {
             }),
             "which the agent plays from its own copy");
 
+    // A file the agent has no copy of is streamed to it instead.
+    require(write_silence(engine_root / "three.wav", 5), "the test audio must be written");
+    const std::vector<engine::QueueEntry> missing{entry(engine_root / "three.wav")};
+    player->replace_queue(missing);
+    require(player->play_entry(missing[0].entry_id).has_value(),
+            "a file the agent lacks still plays");
+    require(eventually([&] {
+                const auto snapshot = returned->audition().snapshot();
+                return snapshot.raw_path.starts_with("http://127.0.0.1:" +
+                                                     std::to_string(stream_port) + "/stream?") &&
+                       snapshot.state == audio::LocalAuditionState::playing;
+            }),
+            "streamed from the engine");
+    static_cast<void>(player->stop());
+    player->replace_queue(entries);
     returned->stop();
 
     // The stream server hands out what the player holds, and only that.
@@ -362,6 +380,6 @@ int main(int argc, char** argv) {
     (*streams)->stop();
     (*server)->stop();
     std::filesystem::remove_all(directory);
-    std::cout << "output agent: 2 scenarios\n";
+    std::cout << "output agent: 3 scenarios\n";
     return EXIT_SUCCESS;
 }

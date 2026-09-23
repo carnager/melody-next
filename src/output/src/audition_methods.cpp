@@ -41,6 +41,20 @@ local_path(const Source& source, const std::optional<std::filesystem::path>& mus
     return (*music_root / path).native();
 }
 
+// A file that is not there is said so in the answer, not later in a report:
+// the engine can then stream it instead.
+[[nodiscard]] core::Result<std::string>
+openable_path(const Source& source, const std::optional<std::filesystem::path>& music_root) {
+    auto path = local_path(source, music_root);
+    if (!path) {
+        return path;
+    }
+    if (auto revision = core::observe_local_source_revision(*path); !revision) {
+        return std::unexpected(std::move(revision.error()));
+    }
+    return path;
+}
+
 [[nodiscard]] core::Result<Source> read_source(const Json& params) {
     const auto source = params.find("source");
     if (source == params.end()) {
@@ -73,7 +87,7 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
                 }
                 return answered(loaded);
             }
-            auto path = local_path(*source, music_root);
+            auto path = openable_path(*source, music_root);
             if (!path) {
                 return std::unexpected(std::move(path.error()));
             }
@@ -107,7 +121,7 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
                 return answered(audition.queue_gapless_network_stream(
                     *source->url, source->replay_gain, source->selection, source->segment, token));
             }
-            auto path = local_path(*source, music_root);
+            auto path = openable_path(*source, music_root);
             if (!path) {
                 return std::unexpected(std::move(path.error()));
             }

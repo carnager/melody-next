@@ -97,6 +97,19 @@ class EnginePlayback final : public QObject {
         qint64 buffer_start_threshold_ms{0};
         bool buffer_pending{false};
         quint64 underruns{0};
+        // ADR-0228: what the engine can play on -- its own audio, if it has
+        // any, and every output agent it knows -- and which it plays on.
+        struct Output final {
+            std::string id;
+            std::string name;
+            bool local{false};
+            bool online{false};
+            bool selected{false};
+            // False for an agent that streams from the engine.
+            bool files{true};
+            friend bool operator==(const Output&, const Output&) = default;
+        };
+        std::vector<Output> outputs;
     };
     [[nodiscard]] State state() const;
 
@@ -144,6 +157,9 @@ class EnginePlayback final : public QObject {
     // Nullopt is the system default sink.
     void setOutput(const std::optional<std::string>& target);
     void refreshOutputs();
+    // ADR-0228: plays on another of the engine's outputs, taking the music
+    // there where it is.
+    void selectOutput(const std::string& id);
     void setBuffer(qint64 capacity_ms, qint64 start_threshold_ms);
 
   signals:
@@ -153,6 +169,9 @@ class EnginePlayback final : public QObject {
     // was restarted. Whoever owns this hands over the settings the engine
     // cannot know and attaches to whatever it is already playing.
     void connected();
+    // The engine refused a command, with its reason -- a track the output
+    // could not play, say. Emitted on this object's thread.
+    void failed(const QString& message);
 
   private:
     // Connects if one is configured. Answers whether a connection now exists.
@@ -169,6 +188,7 @@ class EnginePlayback final : public QObject {
     void send(std::vector<std::pair<QString, protocol::Json>> calls);
     void send(const QString& method, protocol::Json params);
     void adopt(const protocol::Json& payload);
+    void adoptOutputs(const protocol::Json& payload);
 
     protocol::Endpoint endpoint_;
     std::function<bool()> revive_;

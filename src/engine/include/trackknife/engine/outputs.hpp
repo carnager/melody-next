@@ -54,6 +54,8 @@ class Outputs final {
     void restore();
 
   private:
+    // Called with mutex_ held.
+    [[nodiscard]] std::unique_ptr<output::AgentAudition> make_agent(const std::string& name);
     void announce();
 
     Player* player_;

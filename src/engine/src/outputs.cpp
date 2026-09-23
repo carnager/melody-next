@@ -83,14 +83,19 @@ void Outputs::admit(const Json& params, const int descriptor) {
     const bool files = params.value("files", true);
     output::AgentAudition* agent = nullptr;
     bool selected = false;
+    bool adopt_first = false;
     std::optional<output::AgentAudition::LastHeard> heard;
     {
         const std::lock_guard guard{mutex_};
         auto& slot = agents_[name];
         if (!slot) {
-            slot = std::make_unique<output::AgentAudition>(name, paths_);
+            slot = make_agent(name);
         }
         agent = slot.get();
+        // An engine with nothing to play on -- no audio of its own, no
+        // agent chosen yet -- plays on the first agent there is, rather than
+        // into silence until someone thinks to choose it.
+        adopt_first = selected_.empty();
         selected = selected_ == std::string{agent_prefix} + name;
         // Before the new connection wipes it: where it was when it dropped.
         heard = agent->last_heard();
@@ -99,6 +104,10 @@ void Outputs::admit(const Json& params, const int descriptor) {
     // the engine, which is where it can fetch streams.
     auto reached = local_address(descriptor);
     agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached));
+    if (adopt_first) {
+        static_cast<void>(select(std::string{agent_prefix} + name));
+        return;
+    }
     if (selected) {
         // The music was here when the agent went away; it takes up there.
         static_cast<void>(
@@ -106,6 +115,13 @@ void Outputs::admit(const Json& params, const int descriptor) {
                                    heard ? std::optional{heard->playing} : std::nullopt));
     }
     announce();
+}
+
+std::unique_ptr<output::AgentAudition> Outputs::make_agent(const std::string& name) {
+    auto agent = std::make_unique<output::AgentAudition>(name, paths_);
+    // Gone is worth telling every client: it is listed offline from now.
+    agent->on_offline([this] { announce(); });
+    return agent;
 }
 
 std::vector<Outputs::Listed> Outputs::list() const {
@@ -180,7 +196,7 @@ void Outputs::restore() {
         const std::lock_guard guard{mutex_};
         auto& slot = agents_[id.substr(agent_prefix.size())];
         if (!slot) {
-            slot = std::make_unique<output::AgentAudition>(id.substr(agent_prefix.size()), paths_);
+            slot = make_agent(id.substr(agent_prefix.size()));
         }
     }
     if (!id.empty()) {

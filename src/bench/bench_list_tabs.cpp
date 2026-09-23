@@ -79,6 +79,9 @@ void BenchMainWindow::initializePersistence() {
             refreshTransport();
         }
     });
+    connect(local_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
+        statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
+    });
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
         if (transport_ != local_playback_) {
             return;

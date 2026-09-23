@@ -82,6 +82,9 @@ class Client final {
 
     // Set before the first call; the handler runs on the reader thread.
     void on_event(EventHandler handler);
+    // Runs on the reader thread when the other side ends the connection --
+    // not when this side closes it.
+    void on_closed(std::function<void()> handler);
 
     // Sends and waits for the matching response. A timeout is an error rather
     // than a hang: an engine that has gone away must not wedge a UI thread.
@@ -150,6 +153,7 @@ class Client final {
 
     std::mutex handler_mutex_;
     EventHandler handler_;
+    std::function<void()> closed_handler_;
 };
 
 } // namespace trackknife::protocol

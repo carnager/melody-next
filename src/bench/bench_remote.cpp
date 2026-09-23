@@ -55,6 +55,9 @@ void BenchMainWindow::connectRemoteEngine() {
             refreshTransport();
         }
     });
+    connect(remote_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
+        statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
+    });
     const auto attached = [this] {
         static_cast<void>(remoteQueueTab());
         // Music the remote was already playing is followed, unless this

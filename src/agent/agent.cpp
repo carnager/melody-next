@@ -100,6 +100,11 @@ constexpr std::chrono::seconds handshake_timeout{10};
         if (!line) {
             return std::unexpected(std::move(line.error()));
         }
+        if (line->starts_with("HTTP/")) {
+            return std::unexpected(handshake_error(
+                "that is melodyd's stream port (--http); --server wants the port given to "
+                "melodyd --listen"));
+        }
         auto parsed = protocol::parse_message(*line);
         if (!parsed) {
             continue;
@@ -235,6 +240,7 @@ void Agent::connect_loop() {
 void Agent::report_loop() {
     const auto sink = server_->sink();
     Json last;
+    std::string last_problem;
     bool was_registered = false;
     while (running_.load()) {
         const bool now_registered = registered_.load();
@@ -244,6 +250,19 @@ void Agent::report_loop() {
         }
         was_registered = now_registered;
         const auto snapshot = audition_->snapshot();
+        // What went wrong is said here too: the engine hears it in the
+        // report, but whoever set this machine up is looking at this log.
+        const auto problem = snapshot.error ? snapshot.error->message : std::string{};
+        if (problem != last_problem) {
+            if (!problem.empty()) {
+                std::cerr << "melody-agent: " << problem;
+                for (const auto& [key, value] : snapshot.error->context) {
+                    std::cerr << " (" << key << ": " << value << ")";
+                }
+                std::cerr << "\n";
+            }
+            last_problem = problem;
+        }
         auto report = output::to_json(snapshot);
         const bool moving = snapshot.state == audio::LocalAuditionState::playing ||
                             snapshot.state == audio::LocalAuditionState::buffering ||

@@ -259,6 +259,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback_data();
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
+    void theDeviceMenuChoosesAnOutputAgent();
     void upNextEditingAndPersistence();
     void upNextPanelAnimationAndSettings();
     void upNextMultiSelectionEdits();
@@ -4485,6 +4486,74 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     const auto remote_tabs = std::ranges::count_if(
         restored.list_tabs_, [](const auto& tab) { return tab->document.remote; });
     QCOMPARE(remote_tabs, 1);
+}
+
+// ADR-0228: an output agent registered with the engine is offered in the
+// speaker menu, and choosing it plays there. A real melody-agent process, on
+// the engine's socket.
+void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-device-menu"));
+    QVERIFY(menu != nullptr);
+    const auto output_action = [menu](const QString& id) {
+        return menu->findChild<QAction*>(QStringLiteral("action-output-%1").arg(id));
+    };
+    // Nothing to choose between yet, so no choice is offered.
+    QVERIFY(output_action(QStringLiteral("agent:bedside")) == nullptr);
+
+    QProcess agent;
+    agent.setProgram(QStringLiteral(TRACKKNIFE_AGENT_BINARY));
+    agent.setArguments({QStringLiteral("--server"), engine_.socket(), QStringLiteral("--name"),
+                        QStringLiteral("bedside")});
+    agent.setProcessChannelMode(QProcess::MergedChannels);
+    agent.start();
+    QVERIFY(agent.waitForStarted());
+    const auto stop_agent = qScopeGuard([&agent] {
+        agent.terminate();
+        if (!agent.waitForFinished(5'000)) {
+            agent.kill();
+            agent.waitForFinished();
+        }
+    });
+    QTRY_VERIFY_WITH_TIMEOUT(output_action(QStringLiteral("agent:bedside")) != nullptr ||
+                                 agent.state() != QProcess::Running,
+                             10'000);
+    if (output_action(QStringLiteral("agent:bedside")) == nullptr) {
+        QSKIP("melody-agent has no audio output here");
+    }
+    auto* bedside = output_action(QStringLiteral("agent:bedside"));
+    QVERIFY(bedside->isEnabled() && !bedside->isChecked());
+    QVERIFY(!bedside->text().contains(QStringLiteral("offline")));
+
+    bedside->trigger();
+    QTRY_COMPARE(window.property("trackknife-player-output").toString(),
+                 QStringLiteral("agent:bedside"));
+    QTRY_VERIFY(output_action(QStringLiteral("agent:bedside")) != nullptr &&
+                output_action(QStringLiteral("agent:bedside"))->isChecked());
+    auto* button = window.findChild<QToolButton*>(QStringLiteral("bench-device"));
+    QVERIFY(button != nullptr);
+    // Music in another room is named where it can be seen.
+    QCOMPARE(button->text(), QStringLiteral("bedside"));
+
+    // Gone, it stays chosen and says so.
+    agent.terminate();
+    QVERIFY(agent.waitForFinished(5'000));
+    QTRY_VERIFY_WITH_TIMEOUT(
+        output_action(QStringLiteral("agent:bedside")) != nullptr &&
+            output_action(QStringLiteral("agent:bedside"))->text().contains(QStringLiteral("offline")),
+        10'000);
+    QVERIFY(output_action(QStringLiteral("agent:bedside"))->isChecked());
+
+    // And this computer again, if the engine has audio of its own here.
+    if (auto* local = output_action(QStringLiteral("local")); local != nullptr) {
+        local->trigger();
+        QTRY_COMPARE(window.property("trackknife-player-output").toString(),
+                     QStringLiteral("local"));
+        QCOMPARE(button->text(), QString{});
+    }
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

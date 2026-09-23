@@ -57,12 +57,15 @@ bool EnginePlayback::open() {
 
     const QPointer self{this};
     client_->on_event([self, this](const protocol::Event& event) {
-        if (event.name != "playback.changed") {
-            return;
-        }
         // Parsed here, on the reader thread, so the signal carries nothing
         // that needs decoding on the UI thread.
-        adopt(event.data);
+        if (event.name == "playback.changed") {
+            adopt(event.data);
+        } else if (event.name == "outputs.changed") {
+            adoptOutputs(event.data);
+        } else {
+            return;
+        }
         if (self) {
             QMetaObject::invokeMethod(
                 self,
@@ -78,6 +81,11 @@ bool EnginePlayback::open() {
     // Asked once, so the workspace is correct before the first event arrives.
     if (auto answer = client_->call("playback.state")) {
         adopt(*answer);
+    }
+    // An engine from before output agents has no list; it plays on its own
+    // audio, which is what an empty list means here.
+    if (auto answer = client_->call("outputs.list")) {
+        adoptOutputs(*answer);
     }
     return true;
 }
@@ -253,6 +261,57 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     }
 }
 
+void EnginePlayback::adoptOutputs(const protocol::Json& payload) {
+    std::vector<State::Output> outputs;
+    if (const auto listed = payload.find("outputs");
+        listed != payload.end() && listed->is_array()) {
+        for (const auto& output : *listed) {
+            if (!output.is_object()) {
+                continue;
+            }
+            outputs.push_back(State::Output{
+                .id = output.value("id", std::string{}),
+                .name = protocol::displayable_text(output.value("name", std::string{})),
+                .local = output.value("local", false),
+                .online = output.value("online", false),
+                .selected = output.value("selected", false),
+                .files = output.value("files", true)});
+        }
+    }
+    const std::lock_guard guard{mutex_};
+    state_.outputs = std::move(outputs);
+}
+
+void EnginePlayback::selectOutput(const std::string& id) {
+    if (!client_) {
+        return;
+    }
+    // Not through send(): the answer is no state document. The outputs and
+    // the playback state are asked for after, so the menu and the transport
+    // are right without waiting for the events.
+    const QPointer self{this};
+    static_cast<void>(QtConcurrent::run(&pool_, [self, this, id] {
+        if (!self || client_ == nullptr) {
+            return;
+        }
+        static_cast<void>(client_->call("outputs.select", protocol::Json{{"id", id}}));
+        if (auto listed = client_->call("outputs.list")) {
+            adoptOutputs(*listed);
+        }
+        if (auto state = client_->call("playback.state")) {
+            adopt(*state);
+        }
+        QMetaObject::invokeMethod(
+            self,
+            [self] {
+                if (self) {
+                    emit self->changed();
+                }
+            },
+            Qt::QueuedConnection);
+    }));
+}
+
 EnginePlayback::State EnginePlayback::state() const {
     const std::lock_guard guard{mutex_};
     return state_;
@@ -284,6 +343,21 @@ void EnginePlayback::send(std::vector<std::pair<QString, protocol::Json>> calls)
         for (const auto& [method, params] : calls) {
             auto answer = client_->call(method.toStdString(), params);
             if (!answer) {
+                // Said, not swallowed: a play that did nothing and gave no
+                // reason is how an output that cannot play looks like a
+                // broken client.
+                if (self && client_->connected()) {
+                    const auto message =
+                        QString::fromStdString(protocol::displayable_text(answer.error().message));
+                    QMetaObject::invokeMethod(
+                        self,
+                        [self, message] {
+                            if (self) {
+                                emit self->failed(message);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
                 continue;
             }
             adopt(*answer);

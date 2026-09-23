@@ -184,6 +184,11 @@ void Client::on_event(EventHandler handler) {
     handler_ = std::move(handler);
 }
 
+void Client::on_closed(std::function<void()> handler) {
+    const std::lock_guard guard{handler_mutex_};
+    closed_handler_ = std::move(handler);
+}
+
 bool Client::connected() const noexcept { return open_.load(); }
 
 void Client::close() {
@@ -330,8 +335,19 @@ void Client::read_loop() {
         }
         pending.erase(0, start);
     }
-    open_.store(false);
+    // Still open means nobody here closed it: the other side went away.
+    const bool dropped = open_.exchange(false) && !closed_.load();
     fail_everything("the engine closed the connection");
+    if (dropped) {
+        std::function<void()> handler;
+        {
+            const std::lock_guard guard{handler_mutex_};
+            handler = closed_handler_;
+        }
+        if (handler) {
+            handler();
+        }
+    }
 }
 
 core::Result<Json> Client::call(const std::string& method, const Json& params,

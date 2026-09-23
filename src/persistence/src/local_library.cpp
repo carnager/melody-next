@@ -38,6 +38,9 @@
 namespace trackknife::persistence {
 namespace {
 
+// The most any one library answer holds: a query's matches, a browse level.
+constexpr std::size_t filter_match_cap = 100'000U;
+
 [[noreturn]] void fail(const std::string& message,
                        const core::ErrorCode code = core::ErrorCode::database) {
     throw core::Error{.code = code, .message = message, .context = {}};
@@ -952,7 +955,10 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                     "NOCASE,raw_path";
             break;
         }
-        const auto limit = std::clamp<std::size_t>(query.limit, 1U, 200U);
+        // As much as is asked for, up to the library's result cap: a browse
+        // lists a whole level, and the cap here was once 200 whatever was
+        // asked, which put most of a real library behind "Show more…".
+        const auto limit = std::clamp<std::size_t>(query.limit, 1U, filter_match_cap);
         Statement statement{db,
                             "SELECT " + columns + " FROM local_library_tracks" + filter.sql +
                                 order + " LIMIT " + std::to_string(limit + 1U) + " OFFSET " +
@@ -1008,7 +1014,6 @@ constexpr auto filter_columns =
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1)";
 constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,t.album_key,t.disc,t.track,"
                               "t.title COLLATE NOCASE,t.raw_path";
-constexpr std::size_t filter_match_cap = 100'000U;
 
 struct FilterPlan {
     std::optional<FilterClause> pushed;
@@ -1323,7 +1328,7 @@ core::Result<LibraryPage> LocalLibrary::filter(const query::CompiledTkq& compile
         QueryCancellation guard{db, cancellation};
         require_complete_field_index(db);
         const auto plan = plan_filter(compiled);
-        const auto page_limit = std::clamp<std::size_t>(limit, 1U, 200U);
+        const auto page_limit = std::clamp<std::size_t>(limit, 1U, filter_match_cap);
         LibraryPage page;
         if (!plan.residual && !compiled.sort) {
             // Fully indexable and unsorted: page in SQL like ordinary queries.

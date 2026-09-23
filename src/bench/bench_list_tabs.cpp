@@ -773,7 +773,8 @@ void BenchMainWindow::openSearchDialog() {
                 tab->model->applyTechnicals(raw_path, technicals);
             }
         },
-        this);
+        this, remote_catalogue_source_.get(),
+        remote_catalogue_source_ ? remote_catalogue_source_->name() : QString{});
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
     const auto watch_tab = [this, dialog = search_dialog_] {
         if (!dialog)
@@ -785,8 +786,21 @@ void BenchMainWindow::openSearchDialog() {
     watch_tab();
     connect(search_dialog_, &SearchDialog::rowsRequested, this,
             [this](const QString& name, std::vector<LocalTrackRow> rows,
-                   const LocalLibraryAction action) {
+                   const LocalLibraryAction action, const bool remote) {
+                // ADR-0227: a library's rows go to a tab of the same engine --
+                // the current one if it is, else that engine's own tab.
                 auto* destination = currentListTab();
+                if (destination == nullptr || destination->document.remote != remote) {
+                    destination = nullptr;
+                    if (remote) {
+                        destination = remoteQueueTab();
+                    } else {
+                        const auto local = std::ranges::find_if(list_tabs_, [](const auto& tab) {
+                            return !tab->document.remote;
+                        });
+                        destination = local != list_tabs_.end() ? local->get() : nullptr;
+                    }
+                }
                 int insertion = -1;
                 if (action == LocalLibraryAction::new_list) {
                     destination =
@@ -795,7 +809,8 @@ void BenchMainWindow::openSearchDialog() {
                                                              .name = utf8Bytes(name),
                                                              .pinned = false,
                                                              .dirty = false,
-                                                             .items = {}},
+                                                             .items = {},
+                                                             .remote = remote},
                                    true);
                     schedulePersist();
                 } else if (destination != nullptr && action == LocalLibraryAction::next) {

@@ -47,8 +47,11 @@ class SearchDialog final : public QDialog {
     using TabAccess = std::function<std::optional<TabSnapshot>()>;
     using TechnicalsSink = std::function<void(std::string, LocalTrackTechnicals)>;
 
+    // `remote`: the remote engine's library, offered as a scope of its own
+    // (ADR-0227) under `remote_label`. Null when none is configured.
     SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
-                 TechnicalsSink technicals_sink, QWidget* parent = nullptr);
+                 TechnicalsSink technicals_sink, QWidget* parent = nullptr,
+                 const CatalogueSource* remote = nullptr, QString remote_label = {});
     ~SearchDialog() override;
 
     void watchCurrentModel(QAbstractItemModel* model);
@@ -58,8 +61,10 @@ class SearchDialog final : public QDialog {
     void showEvent(QShowEvent* event) override;
 
   signals:
-    // Both scopes carry cached rows directly; opening never starts file discovery.
-    void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action);
+    // Every scope carries cached rows directly; opening never starts file
+    // discovery. `remote`: the rows are the remote library's, for a remote tab.
+    void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action,
+                       bool remote);
 
   private:
     void populatePresets(QMenu* menu);
@@ -67,6 +72,11 @@ class SearchDialog final : public QDialog {
     struct Outcome {
         std::vector<std::string> labels;
         std::vector<LocalTrackRow> rows;
+        // Words in a library: artists and albums as well as tracks, each
+        // shown under its own heading.
+        bool grouped{false};
+        std::vector<persistence::LibraryEntry> artists;
+        std::vector<persistence::LibraryEntry> albums;
         std::vector<std::pair<std::string, LocalTrackTechnicals>> probed;
         QString error;
         std::size_t scanned{0U};
@@ -88,8 +98,11 @@ class SearchDialog final : public QDialog {
     void openResults(LocalLibraryAction action, bool selection_only);
     [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
     [[nodiscard]] bool databaseScope() const;
+    [[nodiscard]] bool remoteScope() const;
+    [[nodiscard]] const CatalogueSource* scopeCatalogues() const;
 
     const CatalogueSource* catalogues_{nullptr};
+    const CatalogueSource* remote_{nullptr};
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
     std::vector<QMetaObject::Connection> current_model_connections_;
@@ -119,6 +132,9 @@ class SearchDialog final : public QDialog {
     bool searching_{false};
     // The last successful search's full result payload.
     std::vector<LocalTrackRow> result_rows_;
+    std::vector<persistence::LibraryEntry> result_artists_;
+    std::vector<persistence::LibraryEntry> result_albums_;
+    bool result_remote_{false};
     QString result_query_;
 };
 

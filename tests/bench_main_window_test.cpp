@@ -4671,6 +4671,47 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     window.insertRemotePaths(*tab, {"/nowhere/on/either/machine.flac"}, -1);
     QTRY_VERIFY(tab->model->rows()[2].probed);
     QCOMPARE(tab->model->rows()[2].title, std::string{"machine.flac"});
+
+    // The search dialog searches the remote's library too, as you type, with
+    // artists, albums and tracks apart -- and what it finds goes to a remote
+    // tab.
+    window.openSearchDialog();
+    auto* dialog = window.search_dialog_.data();
+    QVERIFY(dialog != nullptr);
+    auto* scope = dialog->findChild<QComboBox*>(QStringLiteral("bench-search-scope"));
+    auto* query_mode = dialog->findChild<QCheckBox*>(QStringLiteral("bench-search-query-mode"));
+    auto* input = dialog->findChild<QLineEdit*>(QStringLiteral("bench-search-input"));
+    auto* results = dialog->findChild<QListWidget*>(QStringLiteral("bench-search-results"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-search-status"));
+    QVERIFY(scope && query_mode && input && results && status);
+    const auto remote_scope = scope->findData(QStringLiteral("remote"));
+    QVERIFY(remote_scope >= 0);
+    scope->setCurrentIndex(remote_scope);
+    query_mode->setChecked(false);
+    input->setText(QStringLiteral("fixture"));
+    QTRY_VERIFY(status->text().contains(QStringLiteral("1 album")));
+    QVERIFY(status->text().contains(QStringLiteral("1 track")));
+    QListWidgetItem* album = nullptr;
+    QStringList headings;
+    for (int row = 0; row < results->count(); ++row) {
+        auto* item = results->item(row);
+        if (item->flags() == Qt::NoItemFlags) {
+            headings << item->text();
+        } else if (album == nullptr && item->text().contains(QStringLiteral("Trackbench"))) {
+            album = item;
+        }
+    }
+    // The artist too: an artist matches by what it has, as in the library.
+    QCOMPARE(headings, (QStringList{QStringLiteral("Artists (1)"), QStringLiteral("Albums (1)"),
+                                    QStringLiteral("Tracks (1)")}));
+    QVERIFY(album != nullptr);
+    const auto before = tab->model->rowCount();
+    results->clearSelection();
+    album->setSelected(true);
+    emit results->itemActivated(album);
+    QTRY_COMPARE(tab->model->rowCount(), before + 1);
+    QCOMPARE(tab->model->rows().back().title, std::string{"Fixture Tone"});
+    dialog->close();
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

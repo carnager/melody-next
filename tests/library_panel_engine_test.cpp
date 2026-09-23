@@ -359,12 +359,20 @@ void LibraryPanelEngineTest::theSearchDialogAsksTheEngineToo() {
     engine::register_catalogue_methods(dispatcher, catalogue);
     // Wrap the method the search runs, so the engine can say whether it was
     // asked. Registering again replaces the handler.
+    // Words go through the grouped query, a tkq query through filter_paths;
+    // either one reaching the engine is the point.
     std::atomic_int searched{0};
     dispatcher.on("catalogue.filter_paths",
                   [&](const protocol::Json& params) -> core::Result<protocol::Json> {
                       searched.fetch_add(1);
                       static_cast<void>(params);
                       return protocol::Json{{"paths", protocol::Json::array()}};
+                  });
+    dispatcher.on("catalogue.query",
+                  [&](const protocol::Json& params) -> core::Result<protocol::Json> {
+                      searched.fetch_add(1);
+                      static_cast<void>(params);
+                      return protocol::Json{{"entries", protocol::Json::array()}, {"more", false}};
                   });
 
     auto server = engine::Server::listen(socket, dispatcher);

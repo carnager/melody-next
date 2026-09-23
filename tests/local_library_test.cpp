@@ -1077,12 +1077,26 @@ void LocalLibraryTest::locateLoadsAdditionalTreePages() {
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel{catalogues};
     panel.show();
-    panel.locatePath(path, true);
     auto* tree = panel.findChild<QTreeView*>();
+    // Each level whole, in one load: nothing waits behind a "Show more…" row.
+    // Looked at before locating, which follows such rows by itself.
+    const auto shows_more = [tree](const QModelIndex& parent) {
+        for (int row = 0; row < tree->model()->rowCount(parent); ++row) {
+            if (tree->model()->index(row, 0, parent).data().toString() ==
+                QStringLiteral("Show more…")) {
+                return true;
+            }
+        }
+        return false;
+    };
+    QTRY_VERIFY(tree->model()->rowCount() > 200);
+    QVERIFY(!shows_more({}));
+    panel.locatePath(path, true);
     QTRY_VERIFY(tree->currentIndex().data().toString().contains(QStringLiteral("Test album")));
     QVERIFY(tree->currentIndex().parent().data().toString().contains(QStringLiteral("Björk")));
     QVERIFY(tree->model()->rowCount() > 200);
     QVERIFY(tree->model()->rowCount(tree->currentIndex().parent()) > 200);
+    QVERIFY(!shows_more(tree->currentIndex().parent()));
     QVERIFY(!panel.property("scanning").toBool());
     panel.stop();
 }

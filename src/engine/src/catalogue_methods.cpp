@@ -103,13 +103,24 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             request.kind = static_cast<persistence::LibraryEntryKind>(raw);
         }
         request.text = params.value("text", std::string{});
+        // Keys are bytes: an album key carries its folder's path. They
+        // travel encoded like paths, so a name that is not UTF-8 neither
+        // breaks the message nor changes which album it names.
         if (const auto artist = params.find("artist");
             artist != params.end() && artist->is_string()) {
-            request.artist = artist->get<std::string>();
+            auto decoded = protocol::decode_raw_path(artist->get<std::string>());
+            if (!decoded) {
+                return std::unexpected(bad_params("artist is not an encoded key", "artist"));
+            }
+            request.artist = std::move(*decoded);
         }
         if (const auto album = params.find("album_key");
             album != params.end() && album->is_string()) {
-            request.album_key = album->get<std::string>();
+            auto decoded = protocol::decode_raw_path(album->get<std::string>());
+            if (!decoded) {
+                return std::unexpected(bad_params("album_key is not an encoded key", "album_key"));
+            }
+            request.album_key = std::move(*decoded);
         }
         if (const auto path = params.find("path"); path != params.end() && path->is_string()) {
             auto raw_path = protocol::decode_raw_path(path->get<std::string>());
@@ -128,10 +139,10 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         for (const auto& entry : page.entries) {
             Json rendered = Json::object();
             rendered["kind"] = static_cast<int>(entry.kind);
-            rendered["key"] = entry.key;
-            rendered["label"] = entry.label;
-            rendered["artist"] = entry.artist;
-            rendered["album"] = entry.album;
+            rendered["key"] = protocol::encode_raw_path(entry.key);
+            rendered["label"] = protocol::displayable_text(entry.label);
+            rendered["artist"] = protocol::displayable_text(entry.artist);
+            rendered["album"] = protocol::displayable_text(entry.album);
             rendered["tracks"] = entry.tracks;
             rendered["available"] = entry.available;
             rendered["track_number"] = entry.track_number;
@@ -244,17 +255,18 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 for (const auto& [name, values] : snapshot.facts.fields) {
                     auto pairs = Json::array();
                     for (const auto& [original, folded] : values) {
-                        pairs.push_back(Json::array({original, folded}));
+                        pairs.push_back(Json::array({protocol::displayable_text(original),
+                                                     protocol::displayable_text(folded)}));
                     }
-                    fields[name] = std::move(pairs);
+                    fields[protocol::displayable_text(name)] = std::move(pairs);
                 }
                 entry["fields"] = std::move(fields);
-                entry["search_text"] = snapshot.facts.search_text;
-                entry["title"] = snapshot.facts.title;
-                entry["artist"] = snapshot.facts.artist;
-                entry["album"] = snapshot.facts.album;
-                entry["date"] = snapshot.facts.date;
-                entry["codec"] = snapshot.facts.codec;
+                entry["search_text"] = protocol::displayable_text(snapshot.facts.search_text);
+                entry["title"] = protocol::displayable_text(snapshot.facts.title);
+                entry["artist"] = protocol::displayable_text(snapshot.facts.artist);
+                entry["album"] = protocol::displayable_text(snapshot.facts.album);
+                entry["date"] = protocol::displayable_text(snapshot.facts.date);
+                entry["codec"] = protocol::displayable_text(snapshot.facts.codec);
                 entry["sample_rate"] = snapshot.facts.sample_rate;
                 entry["bits"] = snapshot.facts.bits;
                 entry["channels"] = snapshot.facts.channels;
@@ -384,9 +396,13 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
 
     dispatcher.on(
         "catalogue.artwork_source", [&catalogue](const Json& params) -> core::Result<Json> {
-            auto key = required_string(params, "album_key");
+            auto encoded = required_string(params, "album_key");
+            if (!encoded) {
+                return std::unexpected(std::move(encoded.error()));
+            }
+            auto key = protocol::decode_raw_path(*encoded);
             if (!key) {
-                return std::unexpected(std::move(key.error()));
+                return std::unexpected(bad_params("album_key is not an encoded key", "album_key"));
             }
             auto source = catalogue.artwork_source(*key);
             if (!source) {

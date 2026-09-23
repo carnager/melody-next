@@ -185,6 +185,51 @@ std::string encode_raw_path(const std::string_view raw_path) {
     return encoded;
 }
 
+std::string displayable_text(const std::string_view text) {
+    std::string result;
+    result.reserve(text.size());
+    std::size_t index = 0;
+    while (index < text.size()) {
+        const auto lead = static_cast<unsigned char>(text[index]);
+        std::size_t length = 0;
+        std::uint32_t minimum = 0;
+        if (lead < 0x80U) {
+            result.push_back(static_cast<char>(lead));
+            ++index;
+            continue;
+        }
+        if ((lead & 0xE0U) == 0xC0U) {
+            length = 2;
+            minimum = 0x80U;
+        } else if ((lead & 0xF0U) == 0xE0U) {
+            length = 3;
+            minimum = 0x800U;
+        } else if ((lead & 0xF8U) == 0xF0U) {
+            length = 4;
+            minimum = 0x10000U;
+        }
+        bool valid = length != 0 && index + length <= text.size();
+        std::uint32_t code_point = valid ? (lead & (0xFFU >> (length + 1U))) : 0U;
+        for (std::size_t offset = 1; valid && offset < length; ++offset) {
+            const auto next = static_cast<unsigned char>(text[index + offset]);
+            valid = (next & 0xC0U) == 0x80U;
+            code_point = (code_point << 6U) | (next & 0x3FU);
+        }
+        // Overlong forms, surrogates and values past U+10FFFF are as invalid
+        // as a stray byte.
+        valid = valid && code_point >= minimum && code_point <= 0x10FFFFU &&
+                (code_point < 0xD800U || code_point > 0xDFFFU);
+        if (valid) {
+            result.append(text.substr(index, length));
+            index += length;
+        } else {
+            result.append("\xEF\xBF\xBD");
+            ++index;
+        }
+    }
+    return result;
+}
+
 core::Result<std::string> decode_raw_path(const std::string_view encoded) {
     if (encoded.size() % 4U != 0U) {
         return std::unexpected(malformed("encoded path length must be a multiple of four"));

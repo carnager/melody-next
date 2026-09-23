@@ -5,6 +5,8 @@
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/protocol/client.hpp"
 
+#include <memory>
+
 namespace trackknife::engine {
 
 // The catalogue of an engine reached over a socket.
@@ -22,10 +24,15 @@ namespace trackknife::engine {
 // from a UI thread would be a mistake, and the same mistake it would be with
 // the local one, which opens a database.
 //
-// The client must outlive this.
+// The client must outlive this, or be shared with it.
 class RemoteCatalogue final : public Catalogue {
   public:
     explicit RemoteCatalogue(protocol::Client& client) : client_(&client) {}
+    // Keeps the connection alive for as long as this is in use, so a caller
+    // that replaces its connection -- reconnecting after an engine restart --
+    // cannot pull it from under a query still running on a worker.
+    explicit RemoteCatalogue(std::shared_ptr<protocol::Client> client)
+        : owner_(std::move(client)), client_(owner_.get()) {}
 
     [[nodiscard]] core::Result<std::vector<persistence::LibraryRoot>> roots() const override;
     [[nodiscard]] core::Result<void> add_root(const std::string& raw_path) override;
@@ -65,6 +72,7 @@ class RemoteCatalogue final : public Catalogue {
          persistence::LibraryScanProgress& progress) override;
 
   private:
+    std::shared_ptr<protocol::Client> owner_;
     protocol::Client* client_;
 };
 

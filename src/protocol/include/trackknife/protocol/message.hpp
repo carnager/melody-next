@@ -79,4 +79,10 @@ using Message = std::variant<Request, Notification, Response, Event>;
 [[nodiscard]] std::string encode_raw_path(std::string_view raw_path);
 [[nodiscard]] core::Result<std::string> decode_raw_path(std::string_view encoded);
 
+// Text meant for display that may not be valid UTF-8 -- a label taken from a
+// file name, a tag written by a careless tagger -- with each invalid sequence
+// replaced by U+FFFD. Only for text a person reads: a key or a path loses
+// its meaning when altered, so those travel with encode_raw_path instead.
+[[nodiscard]] std::string displayable_text(std::string_view text);
+
 } // namespace trackknife::protocol

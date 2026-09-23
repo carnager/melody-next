@@ -16,6 +16,7 @@
 #include <QTemporaryDir>
 
 #include <chrono>
+#include <filesystem>
 #include <thread>
 
 namespace trackknife::bench::testing {
@@ -27,12 +28,15 @@ class TestEngine final {
     TestEngine& operator=(const TestEngine&) = delete;
     ~TestEngine() { stop(); }
 
-    // Starts on the application's data directory and names the engine in
-    // settings, so a window built afterwards uses it. False if it never
+    // Starts on `state_directory` -- its database is lists.sqlite there -- or
+    // on the application's data directory, and names the engine in settings,
+    // so a window or catalogue built afterwards uses it. False if it never
     // listened; the process output is then in log().
-    [[nodiscard]] bool start() {
+    [[nodiscard]] bool start(const std::filesystem::path& state_directory = {}) {
         stop();
-        const auto state = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const auto state = state_directory.empty()
+                               ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                               : QString::fromStdString(state_directory.string());
         QDir{}.mkpath(state);
         socket_ = runtime_.filePath(QStringLiteral("melodyd.sock"));
         process_.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));

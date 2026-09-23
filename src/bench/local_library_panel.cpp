@@ -329,6 +329,9 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
         auto outcome = query_watcher_.result();
         auto done = std::exchange(completion_, {});
         if (!stopped_) {
+            // Every query may have reconnected, or found the engine gone, so
+            // the label says which after each one rather than only at start.
+            refreshSourceLabel();
             if (done) {
                 done(std::move(outcome));
             }
@@ -407,15 +410,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     // Said once in the status line too, where a user is actually looking when
     // a folder they added does not appear. The source label keeps saying it
     // afterwards.
-    if (catalogues_ != nullptr && !catalogues_->usingEngine() &&
-        !catalogues_->failure().isEmpty()) {
-        QTimer::singleShot(0, this, [this] {
-            const auto where = catalogues_->endpoint()
-                                   ? pathLabel(catalogues_->endpoint()->describe())
-                                   : QString{};
-            status_->setText(tr("Using the local library: the engine at %1 is unreachable (%2)")
-                                 .arg(where, catalogues_->failure()));
-        });
+    if (catalogues_ != nullptr && !catalogues_->usingEngine()) {
+        QTimer::singleShot(0, this, [this] { status_->setText(catalogues_->describe()); });
     }
 }
 
@@ -430,11 +426,10 @@ void LocalLibraryPanel::refreshSourceLabel() {
     source_label_->setText(catalogues_->describe());
     source_label_->setToolTip(catalogues_->usingEngine()
                                   ? tr("Folders, scanning, search and covers come from that "
-                                       "engine, not from this process.")
-                              : catalogues_->failure().isEmpty()
-                                  ? tr("No engine is configured. Set library/engine-socket to "
-                                       "use one.")
-                                  : catalogues_->failure());
+                                       "engine.")
+                                  : tr("Choose an engine in Settings → Library, or leave it empty "
+                                       "to use this computer's. It is tried again on the next "
+                                       "library action."));
 }
 
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }

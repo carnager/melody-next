@@ -10,6 +10,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 
 namespace trackknife::bench {
@@ -28,9 +29,9 @@ namespace trackknife::bench {
 class CatalogueSource final {
   public:
     // Reads the engine setting once. Empty means this machine's engine,
-    // started if it is not running (ADR-0226). An engine that cannot be
-    // reached is recorded and everything falls back to the local database: an
-    // unreachable engine should cost the engine, not the library.
+    // started if it is not running (ADR-0226). There is no fallback: an
+    // engine that cannot be reached leaves the library unavailable, and says
+    // why, rather than showing some other database as if it were the library.
     explicit CatalogueSource(std::filesystem::path database);
     CatalogueSource(const CatalogueSource&) = delete;
     CatalogueSource(CatalogueSource&&) = delete;
@@ -40,16 +41,18 @@ class CatalogueSource final {
 
     // Safe to call from any thread, and the result is safe to use on the
     // thread that asked. Callers are expected to be on workers already,
-    // because both implementations block.
+    // because it blocks. A dropped connection is made again here -- starting
+    // this computer's engine again if that is the one -- so the library comes
+    // back after an engine restart without restarting the window.
     [[nodiscard]] std::unique_ptr<engine::Catalogue> open() const;
 
-    [[nodiscard]] bool usingEngine() const noexcept { return client_ != nullptr; }
+    [[nodiscard]] bool usingEngine() const;
     // Where the engine is -- a socket or a TCP address with its token
     // (ADR-0223). Empty when no engine is configured.
     [[nodiscard]] const std::optional<protocol::Endpoint>& endpoint() const noexcept {
         return endpoint_;
     }
-    [[nodiscard]] const QString& failure() const noexcept { return failure_; }
+    [[nodiscard]] QString failure() const;
     [[nodiscard]] const std::filesystem::path& database() const noexcept { return database_; }
     // Whether the engine is the one this workspace starts for itself.
     [[nodiscard]] bool startsOwnEngine() const noexcept { return local_engine_.has_value(); }
@@ -65,11 +68,15 @@ class CatalogueSource final {
     std::filesystem::path database_;
     std::optional<protocol::Endpoint> endpoint_;
     std::optional<LocalEngine> local_engine_;
-    std::unique_ptr<protocol::Client> client_;
-    QString failure_;
+    [[nodiscard]] std::shared_ptr<protocol::Client> connectLocked() const;
+
+    // Replaced on reconnect, from whichever worker notices first.
+    mutable std::mutex mutex_;
+    mutable std::shared_ptr<protocol::Client> client_;
+    mutable QString failure_;
     // Whether the engine answered and said no, as opposed to not answering.
     // Decided from the error code: a client must never parse the message.
-    bool refused_{false};
+    mutable bool refused_{false};
 };
 
 } // namespace trackknife::bench

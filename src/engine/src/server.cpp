@@ -14,7 +14,11 @@
 
 #include <array>
 #include <cerrno>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 namespace trackknife::engine {
@@ -41,6 +45,24 @@ constexpr std::size_t maximum_line_bytes = 1U << 20U;
             difference | (left ^ static_cast<unsigned char>(expected[index])));
     }
     return difference == 0U;
+}
+
+// A response as a line. JSON strings must be UTF-8, and an answer carrying
+// bytes that are not -- a file name, a tag -- cannot be encoded. That once
+// threw out of the engine and ended it; now the caller is told instead, and
+// everyone else carries on.
+[[nodiscard]] std::string encode_answer(const protocol::Response& response) {
+    try {
+        return protocol::encode_message(response);
+    } catch (const std::exception& failure) {
+        protocol::Response refused{
+            .id = response.id, .result = std::nullopt, .error = std::nullopt};
+        refused.error = protocol::to_protocol_error(
+            core::Error{.code = core::ErrorCode::invariant,
+                        .message = "the engine could not encode its answer",
+                        .context = {{.key = "reason", .value = failure.what()}}});
+        return protocol::encode_message(refused);
+    }
 }
 
 } // namespace
@@ -315,6 +337,41 @@ void Server::accept_loop() {
 }
 
 void Server::serve(std::shared_ptr<Connection> connection) {
+    // Requests are answered in order, on a worker of this connection's own,
+    // so reading carries on while one is being handled. Read and handled on
+    // one thread, a request that waited -- on the database, say -- stopped the
+    // engine reading this connection at all, and a job.cancel sent behind it
+    // arrived after the job it was meant to stop had finished.
+    std::mutex queue_mutex;
+    std::condition_variable queued;
+    std::deque<protocol::Request> requests;
+    bool reading = true;
+    std::thread worker{[&] {
+        while (true) {
+            protocol::Request request;
+            {
+                std::unique_lock lock{queue_mutex};
+                queued.wait(lock, [&] { return !requests.empty() || !reading; });
+                if (requests.empty()) {
+                    return;
+                }
+                request = std::move(requests.front());
+                requests.pop_front();
+            }
+            connection->write_line(encode_answer(dispatcher_->dispatch(request)));
+        }
+    }};
+    // Whatever ends the reading, what was already asked is still answered:
+    // `nc` sends a request and closes its side, and wants the reply.
+    const auto finish_reading = [&] {
+        {
+            const std::lock_guard lock{queue_mutex};
+            reading = false;
+        }
+        queued.notify_all();
+        worker.join();
+    };
+
     std::string pending;
     std::array<char, 4096> buffer{};
     while (connection->open.load()) {
@@ -336,6 +393,7 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             // and never closes therefore holds one entry until the engine
             // stops, which is acceptable for a local socket whose peers are
             // the user's own programs.
+            finish_reading();
             return;
         }
         pending.append(buffer.data(), static_cast<std::size_t>(received));
@@ -374,7 +432,17 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                     }
                     continue;
                 }
-                connection->write_line(protocol::encode_message(dispatcher_->dispatch(*request)));
+                if (request->method == "job.cancel") {
+                    // Answered at once rather than queued: stopping work is
+                    // the one ask that must not wait behind the work.
+                    connection->write_line(encode_answer(dispatcher_->dispatch(*request)));
+                    continue;
+                }
+                {
+                    const std::lock_guard lock{queue_mutex};
+                    requests.push_back(*request);
+                }
+                queued.notify_one();
             }
             // Notifications are answered with nothing by definition, and a
             // client sending a response or event to an engine is confused;
@@ -388,6 +456,7 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             break;
         }
     }
+    finish_reading();
     connection->open.store(false);
     const std::lock_guard guard{mutex_};
     std::erase(connections_, connection);
@@ -448,7 +517,14 @@ void Server::broadcast(const std::string& line) {
 }
 
 EventSink Server::sink() {
-    return [this](const protocol::Event& event) { broadcast(protocol::encode_message(event)); };
+    return [this](const protocol::Event& event) {
+        // An event that cannot be encoded is dropped rather than taking the
+        // engine down; the next one describes the state again.
+        try {
+            broadcast(protocol::encode_message(event));
+        } catch (const std::exception&) {
+        }
+    };
 }
 
 std::size_t Server::connections() {

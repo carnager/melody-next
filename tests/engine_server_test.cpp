@@ -403,6 +403,81 @@ void the_token_file_stays_private(const std::filesystem::path& directory) {
     require(fresh.has_value() && *fresh != *first, "deleting the file is how it is rotated");
 }
 
+// A request that takes a while does not stop the engine reading the same
+// connection, and a cancel gets through while it runs. Handled on the reading
+// thread, a slow request once held everything behind it -- the cancel for a
+// scan included, which then arrived after the scan had finished.
+void a_slow_request_does_not_hold_a_cancel(const std::filesystem::path& path) {
+    std::mutex gate_mutex;
+    std::condition_variable gate_changed;
+    bool released = false;
+    std::atomic_bool cancelled_while_waiting{false};
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("slow", [&](const protocol::Json&) -> core::Result<protocol::Json> {
+        std::unique_lock lock{gate_mutex};
+        gate_changed.wait_for(lock, std::chrono::seconds{5}, [&] { return released; });
+        return protocol::Json{{"slow", "done"}};
+    });
+    dispatcher.on("job.cancel", [&](const protocol::Json&) -> core::Result<protocol::Json> {
+        const std::lock_guard lock{gate_mutex};
+        cancelled_while_waiting.store(!released);
+        return protocol::Json{{"accepted", true}};
+    });
+    dispatcher.on("quick", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"quick", true}};
+    });
+
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the engine must bind its socket");
+    (*server)->start();
+
+    Client client{path};
+    client.send("{\"id\":1,\"method\":\"slow\"}\n{\"id\":2,\"method\":\"quick\"}\n"
+                "{\"id\":3,\"method\":\"job.cancel\",\"params\":{\"job_id\":\"x\"}}\n");
+    const auto first = protocol::Json::parse(client.line(), nullptr, false);
+    require(first.at("id") == 3, "the cancel is answered while the slow request still runs");
+    require(cancelled_while_waiting.load(), "and it reached the engine before the work finished");
+    {
+        const std::lock_guard lock{gate_mutex};
+        released = true;
+    }
+    gate_changed.notify_all();
+    // Everything else keeps its order: a client that sends two requests hears
+    // them answered in the order it asked.
+    const auto second = protocol::Json::parse(client.line(), nullptr, false);
+    const auto third = protocol::Json::parse(client.line(), nullptr, false);
+    require(second.at("id") == 1 && third.at("id") == 2, "the rest are answered in order");
+
+    (*server)->stop();
+}
+
+// An answer carrying bytes that are not UTF-8 -- a file name, a tag -- cannot
+// be written as JSON. It once threw out of the engine and ended the process
+// for every client; it is now refused to the one caller that asked.
+void an_unencodable_answer_does_not_end_the_engine(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("raw", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"name", std::string{"raw-\xff.flac"}}};
+    });
+    dispatcher.on("quick", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"quick", true}};
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the engine must bind its socket");
+    (*server)->start();
+
+    Client client{path};
+    client.send("{\"id\":1,\"method\":\"raw\"}\n");
+    const auto refused = protocol::Json::parse(client.line(), nullptr, false);
+    require(refused.at("id") == 1, "the caller is answered");
+    require(refused.contains("error"), "with an error rather than a crash");
+    client.send("{\"id\":2,\"method\":\"quick\"}\n");
+    const auto after = protocol::Json::parse(client.line(), nullptr, false);
+    require(after.at("id") == 2 && after.contains("result"), "and the engine keeps answering");
+
+    (*server)->stop();
+}
+
 int main() {
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-server-" + core::StableId::random().to_string());
@@ -413,8 +488,10 @@ int main() {
     tcp_admits_only_the_token_holder();
     an_endpoint_is_read_from_settings();
     the_token_file_stays_private(directory);
+    a_slow_request_does_not_hold_a_cancel(directory / "d.sock");
+    an_unencodable_answer_does_not_end_the_engine(directory / "e.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 6 scenarios\n";
+    std::cout << "engine server: 8 scenarios\n";
     return EXIT_SUCCESS;
 }

@@ -113,7 +113,8 @@ core::Result<void> RemoteCatalogue::set_rating(const std::string& hash, const bo
 core::Result<std::optional<std::string>>
 RemoteCatalogue::artwork_source(const std::string& album_key,
                                 const core::CancellationToken&) const {
-    auto answer = client_->call("catalogue.artwork_source", Json{{"album_key", album_key}});
+    auto answer = client_->call("catalogue.artwork_source",
+                                Json{{"album_key", protocol::encode_raw_path(album_key)}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }
@@ -190,10 +191,10 @@ namespace {
     params["kind"] = static_cast<int>(request.kind);
     params["text"] = request.text;
     if (request.artist) {
-        params["artist"] = *request.artist;
+        params["artist"] = protocol::encode_raw_path(*request.artist);
     }
     if (request.album_key) {
-        params["album_key"] = *request.album_key;
+        params["album_key"] = protocol::encode_raw_path(*request.album_key);
     }
     if (request.raw_path) {
         params["path"] = protocol::encode_raw_path(*request.raw_path);
@@ -216,7 +217,11 @@ namespace {
         }
         persistence::LibraryEntry entry;
         entry.kind = static_cast<persistence::LibraryEntryKind>(value.value("kind", 0));
-        entry.key = value.value("key", std::string{});
+        auto key = protocol::decode_raw_path(value.value("key", std::string{}));
+        if (!key) {
+            return std::unexpected(malformed("key"));
+        }
+        entry.key = std::move(*key);
         entry.label = value.value("label", std::string{});
         entry.artist = value.value("artist", std::string{});
         entry.album = value.value("album", std::string{});

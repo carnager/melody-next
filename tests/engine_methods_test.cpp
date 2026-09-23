@@ -117,10 +117,15 @@ void catalogue_methods_answer_over_the_wire(const std::filesystem::path& databas
 
     // An album with no artwork is a success carrying null: the album may
     // exist, the cover does not.
-    const auto artwork = call(dispatcher, 8, "catalogue.artwork_source",
-                              protocol::Json{{"album_key", "no-such-album"}});
+    // Keys are bytes and travel encoded, like paths.
+    const auto artwork =
+        call(dispatcher, 8, "catalogue.artwork_source",
+             protocol::Json{{"album_key", protocol::encode_raw_path("no-such-album")}});
     require(artwork.result.has_value(), "a missing cover is not an error");
     require(artwork.result->at("source").is_null(), "and reports null");
+    const auto unencoded = call(dispatcher, 13, "catalogue.artwork_source",
+                                protocol::Json{{"album_key", "not base64!"}});
+    require(unencoded.error.has_value(), "an album key that is not encoded is refused");
 
     // An unknown method is answered, never dropped.
     const auto unknown = call(dispatcher, 9, "catalogue.invented", protocol::Json::object());

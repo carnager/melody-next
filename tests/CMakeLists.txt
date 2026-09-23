@@ -584,7 +584,9 @@ if(TRACKKNIFE_BUILD_UI)
     qt_add_executable(trackknife_local_library_tests local_library_test.cpp)
     target_compile_definitions(trackknife_local_library_tests PRIVATE
         TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
-        TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations")
+        TRACKKNIFE_MIGRATION_DIR="${PROJECT_SOURCE_DIR}/src/persistence/migrations"
+        TRACKKNIFE_ENGINE_BINARY="$<TARGET_FILE:trackknife_engine_daemon>")
+    add_dependencies(trackknife_local_library_tests trackknife_engine_daemon)
     target_link_libraries(trackknife_local_library_tests PRIVATE Trackknife::BenchUi
         Qt6::Test PkgConfig::TAGLIB PkgConfig::SQLITE3 trackknife_project_options trackknife_project_warnings)
     add_test(NAME local-library COMMAND trackknife_local_library_tests)

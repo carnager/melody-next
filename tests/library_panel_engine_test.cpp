@@ -35,7 +35,7 @@ class LibraryPanelEngineTest final : public QObject {
     void init();
     void aConfiguredEngineServesThePanel();
     void everyPathReachesTheEngineNotTheDatabase();
-    void anUnreachableEngineFallsBackAndSaysSo();
+    void anUnreachableEngineIsSaidAndThenReached();
     void thePanelSaysWhichLibraryItIsShowing();
     void theSearchDialogAsksTheEngineToo();
     void aTcpEngineIsReachedWithItsToken();
@@ -176,25 +176,48 @@ void LibraryPanelEngineTest::everyPathReachesTheEngineNotTheDatabase() {
     (*server)->stop();
 }
 
-void LibraryPanelEngineTest::anUnreachableEngineFallsBackAndSaysSo() {
+// ADR-0226: there is no other library to fall back on. An engine that is
+// not there leaves the library unavailable and says so -- and once it is
+// there, the next library action reaches it, without restarting anything.
+void LibraryPanelEngineTest::anUnreachableEngineIsSaidAndThenReached() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const std::filesystem::path database{
         (directory.path() + QStringLiteral("/library.sqlite3")).toStdString()};
-    const auto absent = directory.path() + QStringLiteral("/no-engine.sock");
+    const auto socket_text = directory.path() + QStringLiteral("/late-engine.sock");
 
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), absent);
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), socket_text);
 
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel{catalogues};
     panel.show();
-
-    // An engine that is not there costs the user the engine, not the library:
-    // the panel still works, and says why it is not using what was asked for.
     auto* status = panel.findChild<QLabel*>(QStringLiteral("local-library-status"));
     QVERIFY(status != nullptr);
-    QTRY_VERIFY(status->text().contains(QStringLiteral("unreachable")));
-    QVERIFY(status->text().contains(QStringLiteral("local library")));
+    auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
+    QVERIFY(source != nullptr);
+    // The label says which situation this is; the status line says what a
+    // query ran into.
+    QTRY_VERIFY(source->text().contains(QStringLiteral("unreachable")));
+    QVERIFY(source->text().contains(QStringLiteral("unavailable")));
+    QTRY_VERIFY(status->text().contains(QStringLiteral("no engine")));
+    QVERIFY(!catalogues.usingEngine());
+
+    // The engine comes up after the window, or restarts under it.
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+    auto server = engine::Server::listen(socket_text.toStdString(), dispatcher);
+    QVERIFY(server.has_value());
+    (*server)->start();
+
+    const auto opened = catalogues.open();
+    QVERIFY(opened->roots().has_value());
+    QVERIFY(catalogues.usingEngine());
+    panel.refreshLibrary();
+    QTRY_VERIFY(source->text().contains(QStringLiteral("engine at")));
+
+    (*server)->stop();
 }
 
 // ADR-0220: a silent fallback is indistinguishable from the engine working,
@@ -213,7 +236,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
         QVERIFY(source != nullptr);
-        QVERIFY(source->text().contains(QStringLiteral("this process")));
+        QVERIFY(source->text().contains(QStringLiteral("unavailable")));
         QVERIFY(!source->text().contains(QStringLiteral("unreachable")));
     }
 
@@ -226,7 +249,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
         panel.show();
         auto* source = panel.findChild<QLabel*>(QStringLiteral("local-library-source"));
         QVERIFY(source != nullptr);
-        QVERIFY(source->text().contains(QStringLiteral("this process")));
+        QVERIFY(source->text().contains(QStringLiteral("unavailable")));
         QVERIFY(source->text().contains(QStringLiteral("unreachable")));
     }
 
@@ -252,7 +275,7 @@ void LibraryPanelEngineTest::thePanelSaysWhichLibraryItIsShowing() {
         QVERIFY(source->text().contains(QStringLiteral("engine at")));
         QVERIFY(!source->text().contains(QStringLiteral("unreachable")));
         // And it must not be mistaken for the no-engine case.
-        QVERIFY(!source->text().contains(QStringLiteral("this process")));
+        QVERIFY(!source->text().contains(QStringLiteral("unavailable")));
 
         (*server)->stop();
     }

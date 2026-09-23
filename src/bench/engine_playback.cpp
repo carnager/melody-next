@@ -15,7 +15,9 @@ namespace trackknife::bench {
 EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* parent)
     : QObject(parent) {
     pool_.setMaxThreadCount(1);
-    if (!catalogues.usingEngine()) {
+    // Whenever an engine is named, even one not answering yet: the reconnect
+    // below is how a window started before its engine catches up.
+    if (!catalogues.endpoint()) {
         return;
     }
     endpoint_ = *catalogues.endpoint();

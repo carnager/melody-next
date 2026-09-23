@@ -6,6 +6,7 @@
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/search_dialog.hpp"
+#include "test_engine.hpp"
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/persistence/list_repository.hpp"
@@ -131,6 +132,7 @@ bool dropFiles(QTableView* view, const QMimeData* mime, const QPoint& position) 
 class LocalLibraryTest final : public QObject {
     Q_OBJECT
   private slots:
+    void initTestCase();
     void journalRebuildsKeepTheirEvidence();
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
@@ -156,6 +158,9 @@ class LocalLibraryTest final : public QObject {
     void dragResolvesUnloadedPagesAndRawPaths();
     void trackNumbersAppearInTreeAndSearch();
     void albumCoversLoadAndRefresh();
+
+  private:
+    QTemporaryDir settings_directory_;
 };
 
 void LocalLibraryTest::rootsRetainOfflineMusicAndRawPaths() {
@@ -892,6 +897,15 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE((*retained)->play_count, 1U);
 }
 
+// Settings in a directory of the test's own: the engine a case starts is
+// named there, and never in a real configuration.
+void LocalLibraryTest::initTestCase() {
+    QVERIFY(settings_directory_.isValid());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings_directory_.path());
+    QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeLibraryTests"));
+}
+
 // Schemas 29 and 38 rebuild the operation journal to widen a CHECK. With
 // foreign keys on during migration, dropping the old table deleted every
 // journal's children and backup record by cascade: one damaged record then
@@ -963,10 +977,14 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
     const std::filesystem::path base{temporary.path().toStdString()};
     const auto root = base / "music";
     QVERIFY(!fixture(root, "01.flac").empty());
-    const auto database = base / "state.sqlite";
+    const auto database = base / "lists.sqlite";
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
 
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{database}.parent_path()),
+             catalogues_engine.log().constData());
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel{catalogues};
     auto* button = panel.findChild<QToolButton*>(QStringLiteral("local-library-scan"));
@@ -995,6 +1013,10 @@ void LocalLibraryTest::scansOnlyOnRefresh() {
     if (cancel) {
         panel.refreshLibrary();
         button->click();
+        // The scan runs in the engine (ADR-0226), and a cancel is a message
+        // that has to reach it: released at the same instant, the held
+        // database would let the scan finish first.
+        QTest::qWait(400);
     }
     QCOMPARE(sqlite3_exec(db, "COMMIT", nullptr, nullptr, nullptr), SQLITE_OK);
     QTRY_VERIFY(!panel.property("scanning").toBool());
@@ -1029,7 +1051,7 @@ void LocalLibraryTest::locateLoadsAdditionalTreePages() {
     const std::filesystem::path base{temporary.path().toStdString()};
     const auto root = base / "music";
     const auto path = fixture(root, "01.flac");
-    const auto database = base / "state.sqlite";
+    const auto database = base / "lists.sqlite";
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
@@ -1048,6 +1070,10 @@ void LocalLibraryTest::locateLoadsAdditionalTreePages() {
     )SQL";
     QCOMPARE(sqlite3_exec(db, insert, nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{database}.parent_path()),
+             catalogues_engine.log().constData());
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel{catalogues};
     panel.show();
@@ -1077,6 +1103,9 @@ void LocalLibraryTest::cachedSearchTabsLoadCovers() {
     QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeLibraryTests"));
     QCoreApplication::setApplicationName(QStringLiteral("CachedSearchCovers"));
     QSettings{}.clear();
+    // ADR-0226: the window's library is an engine's, on the window's data.
+    testing::TestEngine engine;
+    QVERIFY2(engine.start(), engine.log().constData());
     const auto root = std::filesystem::path{temporary.path().toStdString()} / "music";
     QVERIFY(!fixture(root, "01.flac").empty());
     QVERIFY(!fixture(root, "02.flac").empty());
@@ -1160,7 +1189,7 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     const auto root = base / "music";
     const auto alpha = fixture(root, "raw-\xff.flac", "Alpha");
     QVERIFY(!alpha.empty());
-    const auto database = base / "state.sqlite";
+    const auto database = base / "lists.sqlite";
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
@@ -1173,6 +1202,10 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
             completion(queryDynamicLibrary(catalogue, compiled, cancellation));
         }};
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{database}.parent_path()),
+             catalogues_engine.log().constData());
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel(catalogues);
     connect(&panel, &LocalLibraryPanel::libraryContentChanged, &dialog,
@@ -1224,7 +1257,7 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     const auto root = base / "music";
     const auto alpha = fixture(root, "raw-\xff.flac", "Alpha");
     const auto beta = fixture(root, "02.flac", "Beta");
-    const auto database = base / "state.sqlite";
+    const auto database = base / "lists.sqlite";
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
@@ -1243,6 +1276,10 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     const auto cancelled = library->cached_tracks({alpha}, cancellation.token());
     QVERIFY(!cancelled && cancelled.error().code == core::ErrorCode::cancelled);
 
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine search_catalogues_engine;
+    QVERIFY2(search_catalogues_engine.start(std::filesystem::path{database}.parent_path()),
+             search_catalogues_engine.log().constData());
     CatalogueSource search_catalogues{database};
     SearchDialog dialog{search_catalogues, {}, {}};
     dialog.show();
@@ -1292,13 +1329,17 @@ void LocalLibraryTest::queryModeFiltersAndCommitsResults() {
     };
     tag_genre(jazz, "Jazz");
     tag_genre(rock, "Rock");
-    const auto database = base / "state.sqlite";
+    const auto database = base / "lists.sqlite";
     auto library = persistence::LocalLibrary::open(database);
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress).has_value());
     QCOMPARE(progress.indexed.load(), 2U);
 
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{database}.parent_path()),
+             catalogues_engine.log().constData());
     CatalogueSource catalogues{database};
     LocalLibraryPanel panel{catalogues};
     panel.show();
@@ -1354,6 +1395,9 @@ void LocalLibraryTest::localViewBrowsesSearchesAndOpensFiles() {
     QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeLibraryTests"));
     QCoreApplication::setApplicationName(QStringLiteral("LocalLibrary"));
     QSettings{}.clear();
+    // ADR-0226: the window's library is an engine's, on the window's data.
+    testing::TestEngine engine;
+    QVERIFY2(engine.start(), engine.log().constData());
     const auto root = std::filesystem::path{temporary.path().toStdString()} / "music";
     const auto path = fixture(root, "01.flac");
     {
@@ -1552,11 +1596,15 @@ void LocalLibraryTest::dragResolvesUnloadedPagesAndRawPaths() {
         std::filesystem::copy_file(std::filesystem::path{raw},
                                    root / (std::to_string(index) + ".flac"));
     }
-    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    auto library = persistence::LocalLibrary::open(base / "lists.sqlite");
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
-    CatalogueSource catalogues{base / "state.sqlite"};
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{base / "lists.sqlite"}.parent_path()),
+             catalogues_engine.log().constData());
+    CatalogueSource catalogues{base / "lists.sqlite"};
     LocalLibraryPanel panel{catalogues};
     panel.resize(420, 400);
     panel.show();
@@ -1674,7 +1722,7 @@ void LocalLibraryTest::albumCoversLoadAndRefresh() {
     const auto folder_cover = QString::fromStdString((root / "cover.png").native());
     cover.fill(Qt::red);
     QVERIFY(cover.save(folder_cover));
-    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    auto library = persistence::LocalLibrary::open(base / "lists.sqlite");
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
@@ -1684,7 +1732,11 @@ void LocalLibraryTest::albumCoversLoadAndRefresh() {
     const auto representative = library->artwork_source(album_key);
     QVERIFY(representative && representative->has_value());
     QCOMPARE(**representative, source);
-    CatalogueSource catalogues{base / "state.sqlite"};
+    // ADR-0226: the catalogue is an engine's, here one on this database.
+    testing::TestEngine catalogues_engine;
+    QVERIFY2(catalogues_engine.start(std::filesystem::path{base / "lists.sqlite"}.parent_path()),
+             catalogues_engine.log().constData());
+    CatalogueSource catalogues{base / "lists.sqlite"};
     LocalLibraryPanel panel{catalogues};
     panel.resize(420, 400);
     auto* tree = panel.findChild<QTreeView*>();

@@ -187,9 +187,29 @@ void malformed_encodings_are_refused() {
 
 } // namespace
 
+// Display text keeps what is valid and marks what is not, one replacement
+// per bad byte, so a label from a stray Latin-1 file name still reads.
+void display_text_is_made_valid() {
+    namespace protocol = trackknife::protocol;
+    require(protocol::displayable_text("plain") == "plain", "ASCII is untouched");
+    require(protocol::displayable_text("Bj\xC3\xB6rk") == "Bj\xC3\xB6rk",
+            "valid UTF-8 is untouched");
+    require(protocol::displayable_text("raw-\xff.flac") == "raw-\xEF\xBF\xBD.flac",
+            "a stray byte becomes U+FFFD");
+    require(protocol::displayable_text("\xC3") == "\xEF\xBF\xBD", "a truncated sequence too");
+    require(protocol::displayable_text("\xC0\xAF") == "\xEF\xBF\xBD\xEF\xBF\xBD",
+            "an overlong form is not accepted");
+    require(protocol::displayable_text("\xED\xA0\x80") == "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD",
+            "nor is a surrogate");
+    // And the result always encodes.
+    const protocol::Json document{{"label", protocol::displayable_text("a\xff\xfe b")}};
+    require(!document.dump().empty(), "sanitised text can always be written as JSON");
+}
+
 int main(int argc, char** argv) {
     require(argc > 1, "the corpus path must be given");
     run_corpus(std::filesystem::path{argv[1]});
     malformed_encodings_are_refused();
+    display_text_is_made_valid();
     return EXIT_SUCCESS;
 }

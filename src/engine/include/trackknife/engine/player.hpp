@@ -132,6 +132,11 @@ class Player final {
     // Null chooses no output: the queue stays, nothing plays.
     [[nodiscard]] core::Result<void> set_output(audio::Audition* output);
     [[nodiscard]] audio::Audition* current_output() const;
+    // Takes up the playing entry again on the current output: an agent that
+    // dropped and came back. Without a position, where it was waiting to
+    // resume -- a restore that failed because the output was not there yet.
+    [[nodiscard]] core::Result<void> resume_output(std::optional<std::int64_t> position_ms,
+                                                   std::optional<bool> playing);
 
     // Which sink plays and how much decoded audio is held ahead of it. The
     // engine's, not a client's: they describe the machine the engine runs on,
@@ -283,6 +288,11 @@ class Player final {
     class QueueView;
 
     explicit Player(std::unique_ptr<audio::LocalAuditionService> local);
+    // Loads the anchored entry on the current output at `position_ms`, and
+    // plays it if asked.
+    [[nodiscard]] core::Result<void>
+    take_up_locked(std::int64_t position_ms, bool playing,
+                   std::optional<core::LocalSourceRevision> revision);
 
     // Callers already hold the lock. `from_request` records where ordinary
     // list playback was interrupted, so playback returns there afterwards
@@ -324,6 +334,12 @@ class Player final {
     std::unique_ptr<audio::LocalAuditionService> local_;
     std::unique_ptr<audio::Audition> silent_;
     audio::Audition* audition_{nullptr};
+    // Where playback waits to resume when its output could not take it up.
+    struct PendingResume final {
+        std::int64_t position_ms{0};
+        bool playing{false};
+    };
+    std::optional<PendingResume> pending_resume_;
     core::ListenAccounting listening_;
     std::vector<QueueEntry> queue_;
     audio::PlaybackAnchors anchors_;

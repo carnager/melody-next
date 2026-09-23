@@ -30,29 +30,74 @@ Client::Client(const int descriptor) : descriptor_(descriptor) {}
 Client::~Client() { close(); }
 
 core::Result<std::unique_ptr<Client>> Client::connect(const std::filesystem::path& socket_path) {
-    sockaddr_un address{};
-    address.sun_family = AF_UNIX;
-    const auto text = socket_path.string();
-    if (text.size() + 1U > sizeof(address.sun_path)) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                           .message = "socket path is too long",
-                                           .context = {{.key = "path", .value = text}}});
+    auto descriptor =
+        open_connection(Endpoint{.socket = socket_path, .host = {}, .port = 0, .token = {}});
+    if (!descriptor) {
+        return std::unexpected(std::move(descriptor.error()));
     }
-    std::memcpy(address.sun_path, text.c_str(), text.size() + 1U);
+    return adopt(*descriptor);
+}
 
-    const auto descriptor = ::socket(AF_UNIX, SOCK_STREAM, 0);
-    if (descriptor < 0) {
-        return std::unexpected(transport_error("could not create a socket"));
-    }
-    if (::connect(descriptor, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) < 0) {
-        auto error = transport_error("could not reach the engine");
-        ::close(descriptor);
-        return std::unexpected(std::move(error));
-    }
-
+std::unique_ptr<Client> Client::adopt(const int descriptor) {
     std::unique_ptr<Client> client{new Client{descriptor}};
     client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};
     return client;
+}
+
+core::Result<int> open_connection(const Endpoint& endpoint) {
+    if (!endpoint.tcp()) {
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        const auto text = endpoint.socket.string();
+        if (text.size() + 1U > sizeof(address.sun_path)) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                               .message = "socket path is too long",
+                                               .context = {{.key = "path", .value = text}}});
+        }
+        std::memcpy(address.sun_path, text.c_str(), text.size() + 1U);
+        const auto descriptor = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if (descriptor < 0) {
+            return std::unexpected(transport_error("could not create a socket"));
+        }
+        if (::connect(descriptor, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) <
+            0) {
+            auto error = transport_error("could not reach the engine");
+            ::close(descriptor);
+            return std::unexpected(std::move(error));
+        }
+        return descriptor;
+    }
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_NUMERICSERV;
+    addrinfo* found = nullptr;
+    const auto service = std::to_string(endpoint.port);
+    if (const auto resolved = ::getaddrinfo(endpoint.host.c_str(), service.c_str(), &hints, &found);
+        resolved != 0) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = "could not resolve the engine's address",
+                        .context = {{.key = "host", .value = endpoint.host},
+                                    {.key = "reason", .value = ::gai_strerror(resolved)}}});
+    }
+    int descriptor = -1;
+    for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
+        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        if (descriptor < 0) {
+            continue;
+        }
+        if (::connect(descriptor, candidate->ai_addr, candidate->ai_addrlen) == 0) {
+            break;
+        }
+        ::close(descriptor);
+        descriptor = -1;
+    }
+    ::freeaddrinfo(found);
+    if (descriptor < 0) {
+        return std::unexpected(transport_error("could not reach the engine"));
+    }
+    return descriptor;
 }
 
 std::optional<Endpoint> Endpoint::parse(std::string_view text, std::string token) {
@@ -116,36 +161,11 @@ core::Result<std::unique_ptr<Client>> Client::connect(const Endpoint& endpoint) 
     if (!endpoint.tcp()) {
         return connect(endpoint.socket);
     }
-    addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_NUMERICSERV;
-    addrinfo* found = nullptr;
-    const auto service = std::to_string(endpoint.port);
-    if (const auto resolved = ::getaddrinfo(endpoint.host.c_str(), service.c_str(), &hints, &found);
-        resolved != 0) {
-        return std::unexpected(
-            core::Error{.code = core::ErrorCode::io,
-                        .message = "could not resolve the engine's address",
-                        .context = {{.key = "host", .value = endpoint.host},
-                                    {.key = "reason", .value = ::gai_strerror(resolved)}}});
+    auto opened = open_connection(endpoint);
+    if (!opened) {
+        return std::unexpected(std::move(opened.error()));
     }
-    int descriptor = -1;
-    for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
-        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
-        if (descriptor < 0) {
-            continue;
-        }
-        if (::connect(descriptor, candidate->ai_addr, candidate->ai_addrlen) == 0) {
-            break;
-        }
-        ::close(descriptor);
-        descriptor = -1;
-    }
-    ::freeaddrinfo(found);
-    if (descriptor < 0) {
-        return std::unexpected(transport_error("could not reach the engine"));
-    }
+    const auto descriptor = *opened;
 
     std::unique_ptr<Client> client{new Client{descriptor}};
     client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};

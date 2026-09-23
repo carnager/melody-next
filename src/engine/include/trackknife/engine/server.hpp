@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -42,6 +43,20 @@ class Server final {
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen_tcp(const std::string& host, std::uint16_t port, protocol::Dispatcher& dispatcher,
                std::string token);
+
+    // ADR-0228: a server with no listener, serving connections this side
+    // opened -- an output agent serving the engine it connected to.
+    [[nodiscard]] static std::unique_ptr<Server> detached(protocol::Dispatcher& dispatcher);
+    // Serves `descriptor` like an accepted connection, trusted from its first
+    // line (whatever it needed happened before). Takes ownership.
+    void attach(int descriptor);
+
+    // ADR-0228: called when an authenticated connection sends
+    // agent.register, with its parameters and the connection, which is then
+    // no longer this server's: the handler owns the descriptor and drives the
+    // agent on it. Unset, agent.register is an unknown method.
+    using AgentHandler = std::function<void(const protocol::Json& params, int descriptor)>;
+    void on_agent(AgentHandler handler);
 
     Server(const Server&) = delete;
     Server(Server&&) = delete;
@@ -92,6 +107,7 @@ class Server final {
     // line. Set for TCP, whose connections are not.
     std::string token_;
     protocol::Dispatcher* dispatcher_{nullptr};
+    AgentHandler agent_handler_;
 
     std::atomic_bool running_{false};
     std::thread acceptor_;

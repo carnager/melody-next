@@ -265,8 +265,31 @@ void Server::start() {
     if (running_.exchange(true)) {
         return;
     }
-    acceptor_ = std::thread{[this] { accept_loop(); }};
+    if (listener_ >= 0) {
+        acceptor_ = std::thread{[this] { accept_loop(); }};
+    }
 }
+
+std::unique_ptr<Server> Server::detached(protocol::Dispatcher& dispatcher) {
+    std::array<int, 2> wakeup{-1, -1};
+    if (::pipe(wakeup.data()) < 0) {
+        wakeup = {-1, -1};
+    }
+    auto server = std::unique_ptr<Server>{new Server{-1, wakeup[0], wakeup[1], {}, dispatcher}};
+    server->running_.store(true);
+    return server;
+}
+
+void Server::attach(const int descriptor) {
+    auto connection = std::make_shared<Connection>();
+    connection->descriptor = descriptor;
+    connection->authenticated.store(true);
+    const std::lock_guard guard{mutex_};
+    connections_.push_back(connection);
+    workers_.emplace_back([this, connection] { serve(connection); });
+}
+
+void Server::on_agent(AgentHandler handler) { agent_handler_ = std::move(handler); }
 
 void Server::stop() {
     if (!running_.exchange(false)) {
@@ -369,7 +392,9 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             reading = false;
         }
         queued.notify_all();
-        worker.join();
+        if (worker.joinable()) {
+            worker.join();
+        }
     };
 
     std::string pending;
@@ -431,6 +456,29 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                         break;
                     }
                     continue;
+                }
+                if (request->method == "agent.register" && agent_handler_) {
+                    // ADR-0228: an output agent. What it asked before is
+                    // answered first; then the connection turns round and
+                    // belongs to whoever drives the agent. Nothing more is
+                    // read here: the agent waits for this answer before it
+                    // says anything else.
+                    finish_reading();
+                    protocol::Response accepted{.id = request->id,
+                                                .result = protocol::Json::object(),
+                                                .error = std::nullopt};
+                    accepted.result->emplace("accepted", true);
+                    connection->write_line(encode_answer(accepted));
+                    const auto handed = ::dup(connection->descriptor);
+                    connection->open.store(false);
+                    {
+                        const std::lock_guard guard{mutex_};
+                        std::erase(connections_, connection);
+                    }
+                    if (handed >= 0) {
+                        agent_handler_(request->params, handed);
+                    }
+                    return;
                 }
                 if (request->method == "job.cancel") {
                     // Answered at once rather than queued: stopping work is

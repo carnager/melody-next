@@ -45,6 +45,11 @@ struct Endpoint final {
     friend bool operator==(const Endpoint&, const Endpoint&) = default;
 };
 
+// Opens a connection to an endpoint, a unix socket or TCP, and nothing more:
+// no handshake. For callers that speak the protocol themselves first, as an
+// output agent registering does.
+[[nodiscard]] core::Result<int> open_connection(const Endpoint& endpoint);
+
 // A connection to an engine.
 //
 // ADR-0222: responses are matched to requests by id, not by arrival order, so
@@ -64,6 +69,10 @@ class Client final {
     // token is an `unauthorized` error rather than a connection that fails
     // on its first real request.
     [[nodiscard]] static core::Result<std::unique_ptr<Client>> connect(const Endpoint& endpoint);
+    // ADR-0228: a client on a connection that already exists -- the one an
+    // output agent opened to the engine, which the engine then drives. No
+    // handshake: whatever the connection needed has happened.
+    [[nodiscard]] static std::unique_ptr<Client> adopt(int descriptor);
 
     Client(const Client&) = delete;
     Client(Client&&) = delete;

@@ -332,6 +332,19 @@ add_test(
     COMMAND trackknife_engine_player_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
+# ADR-0228: an engine playing on an output agent, both real, in one process.
+add_executable(trackknife_output_agent_tests output_agent_test.cpp)
+target_link_libraries(
+    trackknife_output_agent_tests
+    PRIVATE Trackknife::Agent Trackknife::Engine Trackknife::Protocol Trackknife::Core
+            Threads::Threads trackknife_project_options trackknife_project_warnings
+)
+add_test(
+    NAME output-agent
+    COMMAND trackknife_output_agent_tests
+)
+set_tests_properties(output-agent PROPERTIES TIMEOUT 90)
+
 # ADR-0220: melodyd as a process, exercised the way an init system would.
 add_test(
     NAME engine-daemon

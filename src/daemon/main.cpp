@@ -8,6 +8,7 @@
 
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
+#include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
@@ -88,6 +89,9 @@ void usage() {
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
               << "  --state DIR    where the database lives (default\n"
               << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
+              << "  --music-root DIR\n"
+              << "                 where the music is: output agents with their own copy are\n"
+              << "                 sent paths relative to it (ADR-0228)\n"
               << "  --listen HOST:PORT\n"
               << "                 also accept TCP connections. Every one must authenticate\n"
               << "                 with the token in DIR/engine.token (created on first use).\n"
@@ -111,6 +115,7 @@ int main(int argc, char** argv) {
     auto socket_path = default_socket_path();
     auto state_directory = default_state_directory();
     std::string listen_address;
+    std::optional<std::filesystem::path> music_root;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -123,6 +128,8 @@ int main(int argc, char** argv) {
             state_directory = value();
         } else if (argument == "--listen") {
             listen_address = value();
+        } else if (argument == "--music-root") {
+            music_root = std::filesystem::path{value()};
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -249,6 +256,23 @@ int main(int argc, char** argv) {
         }
         playback_store->start();
     }
+
+    // ADR-0228: what the engine plays on -- its own audio and any output
+    // agents. After the queue is restored, so the chosen output takes it up.
+    trackknife::engine::Outputs outputs{*player,
+                                        trackknife::output::AgentPaths{.music_root = music_root,
+                                                                       .stream_base = {},
+                                                                       .stream_token = {}},
+                                        &*workspace, sink};
+    trackknife::engine::register_output_methods(dispatcher, outputs);
+    const auto admit = [&outputs](const trackknife::protocol::Json& params, const int descriptor) {
+        outputs.admit(params, descriptor);
+    };
+    (*server)->on_agent(admit);
+    if (tcp_server) {
+        tcp_server->on_agent(admit);
+    }
+    outputs.restore();
 
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);

@@ -50,8 +50,7 @@ class SilentAudition final : public audio::Audition {
         return refuse();
     }
     [[nodiscard]] core::Result<void>
-    load_selected_segment_and_play(std::string, formats::AudioSourceSelection,
-                                   formats::SampleRange,
+    load_selected_segment_and_play(std::string, formats::AudioSourceSelection, formats::SampleRange,
                                    std::optional<formats::ReplayGainInfo>) override {
         return refuse();
     }
@@ -85,7 +84,8 @@ class SilentAudition final : public audio::Audition {
     [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps) override {
         return {};
     }
-    [[nodiscard]] core::Result<void> set_buffer_config(audio::PlaybackBufferDurationConfig) override {
+    [[nodiscard]] core::Result<void>
+    set_buffer_config(audio::PlaybackBufferDurationConfig) override {
         return {};
     }
     [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
@@ -137,6 +137,9 @@ core::Result<void> Player::set_output(audio::Audition* output) {
         const auto rate = static_cast<std::int64_t>(before.format->sample_rate);
         position_ms =
             before.position_sample / rate * 1000 + before.position_sample % rate * 1000 / rate;
+    } else if (pending_resume_) {
+        // Nothing loaded where it was: whatever was waiting to resume still is.
+        position_ms = pending_resume_->position_ms;
     }
     // One output at a time: the old one falls silent before the new one
     // speaks.
@@ -149,27 +152,41 @@ core::Result<void> Player::set_output(audio::Audition* output) {
     gapless_entry_.reset();
     advanced_from_.reset();
     seen_transitions_ = audition_->snapshot().chain_transitions;
+    return take_up_locked(position_ms, was_playing, before.source_revision);
+}
 
+core::Result<void> Player::resume_output(std::optional<std::int64_t> position_ms,
+                                         std::optional<bool> playing) {
+    const std::lock_guard guard{mutex_};
+    const auto pending = pending_resume_;
+    return take_up_locked(position_ms.value_or(pending ? pending->position_ms : 0),
+                          playing.value_or(pending && pending->playing), std::nullopt);
+}
+
+core::Result<void> Player::take_up_locked(const std::int64_t position_ms, const bool playing,
+                                          std::optional<core::LocalSourceRevision> revision) {
     const auto* entry = anchors_.current.is_nil() ? nullptr : find_locked(anchors_.current);
     if (entry == nullptr || audition_ == silent_.get()) {
+        pending_resume_.reset();
         return {};
     }
-    auto revision = before.source_revision;
     if (!revision) {
-        auto observed = core::observe_local_source_revision(entry->source.raw_path);
-        if (observed) {
+        if (auto observed = core::observe_local_source_revision(entry->source.raw_path)) {
             revision = *observed;
         }
     }
-    auto restored = audition_->restore_paused(entry->source.raw_path,
-                                              revision.value_or(core::LocalSourceRevision{}),
-                                              entry->source.selection, entry->source.segment,
-                                              position_ms, entry->replay_gain);
+    auto restored = audition_->restore_paused(
+        entry->source.raw_path, revision.value_or(core::LocalSourceRevision{}),
+        entry->source.selection, entry->source.segment, position_ms, entry->replay_gain);
     if (!restored) {
+        // An output that cannot take it up yet -- an agent not connected --
+        // keeps the place, so it resumes there when it can.
+        pending_resume_ = PendingResume{.position_ms = position_ms, .playing = playing};
         return std::unexpected(std::move(restored.error()));
     }
+    pending_resume_.reset();
     seen_transitions_ = audition_->snapshot().chain_transitions;
-    if (was_playing) {
+    if (playing) {
         return audition_->play();
     }
     return {};
@@ -376,13 +393,13 @@ void Player::refresh_gapless_locked() {
     if (gapless_entry_ == entry.entry_id && holding) {
         return;
     }
-    const auto queued = entry.source.segment
-                            ? audition_->queue_gapless_next_selected_segment(
-                                  entry.source.raw_path, entry.source.selection,
-                                  *entry.source.segment, entry.replay_gain, 0U)
-                            : audition_->queue_gapless_next_selected(entry.source.raw_path,
-                                                                     entry.source.selection,
-                                                                     entry.replay_gain, 0U);
+    const auto queued =
+        entry.source.segment
+            ? audition_->queue_gapless_next_selected_segment(
+                  entry.source.raw_path, entry.source.selection, *entry.source.segment,
+                  entry.replay_gain, 0U)
+            : audition_->queue_gapless_next_selected(entry.source.raw_path, entry.source.selection,
+                                                     entry.replay_gain, 0U);
     // A rejected continuation is not an error: the formats may differ, and the
     // engine simply plays the next track the ordinary way.
     gapless_entry_ = queued ? std::optional{entry.entry_id} : std::nullopt;

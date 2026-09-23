@@ -11,6 +11,7 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/playback_methods.hpp"
+#include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/workspace.hpp"
@@ -146,11 +147,21 @@ int main(int argc, char** argv) {
     // computed and discarded. Without this the engine plays but remembers
     // nothing -- no play counts, no resume.
     std::optional<trackknife::engine::Recorder> recorder;
+    // ADR-0220: the queue is the engine's, so the engine brings it back. Without
+    // this the first client to connect after a restart decides what the engine
+    // is playing, which is the client owning the queue with extra steps.
+    std::optional<trackknife::engine::PlaybackStore> playback_store;
     if (player) {
         watcher.emplace(**player, (*server)->sink());
         watcher->start();
         recorder.emplace(**player, *workspace);
         recorder->start();
+        playback_store.emplace(**player, *workspace);
+        if (playback_store->restore()) {
+            std::cerr << "tkengine: restored " << (*player)->queue().size()
+                      << " queued entries, paused\n";
+        }
+        playback_store->start();
     }
 
     std::signal(SIGINT, request_stop);
@@ -171,6 +182,11 @@ int main(int argc, char** argv) {
     // the watcher writes to.
     if (recorder) {
         recorder->stop();
+    }
+    if (playback_store) {
+        // Stopping writes one last time, so a clean shutdown does not lose the
+        // seconds since the last tick.
+        playback_store->stop();
     }
     if (watcher) {
         watcher->stop();

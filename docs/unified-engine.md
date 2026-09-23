@@ -474,6 +474,22 @@ has already expired by then. The modes in the state document are likewise the
 engine's, so the buttons follow a one-shot expiring where playback actually
 happened.
 
+**The queue is the engine's, and it survives the engine.** The engine stores
+its queue, what was playing, where it had got to, the modes and the
+outstanding asks, and restores them on start -- paused, because coming back
+from a restart making noise unasked is a surprise rather than a restore. This
+is what makes "a window is a view of what the engine holds" true: if the
+client were what brought the queue back, the first client to connect would be
+the one deciding what the engine is playing, which is the client owning the
+queue with extra steps.
+
+Two records, because the queue changes when someone edits it and the position
+changes continuously: writing a thousand-entry queue every few seconds to note
+that playback moved on would be waste. The position is only trusted when it
+names the entry that is still anchored, and it carries what the file looked
+like -- resuming into a file that has changed underneath would seek to a
+position that no longer means anything.
+
 The engine is installed and can be run as a user service
 (`packaging/systemd/tkengine.service`), and which engine a workspace uses is a
 settings field rather than a hand-edited key: "is an engine in use" has to be

@@ -84,6 +84,14 @@ class Workspace final {
 
     // Saved searches. A saved search is user-authored, so removal is checked
     // against the expected definition rather than a bare name.
+    // ADR-0220: what the engine remembers between runs -- its queue, what was
+    // playing, where it had got to. Opaque to the workspace: the queue is the
+    // player's business and this is only where it is kept.
+    [[nodiscard]] core::Result<void> save_engine_state(std::string_view key, std::string_view value,
+                                                       std::int64_t updated_at_ms);
+    [[nodiscard]] core::Result<std::optional<std::string>>
+    load_engine_state(std::string_view key) const;
+
     [[nodiscard]] core::Result<std::vector<persistence::SavedSearch>> load_saved_searches() const;
     [[nodiscard]] core::Result<void> save_search(const persistence::SavedSearch& search);
     [[nodiscard]] core::Result<void> remove_search(const persistence::SavedSearch& expected);

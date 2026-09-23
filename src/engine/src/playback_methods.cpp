@@ -221,6 +221,40 @@ replay_gain_from_json(const Json& value) {
 
 } // namespace
 
+Json to_json(const QueueEntry& entry) {
+    Json rendered = Json::object();
+    rendered["entry"] = entry.entry_id.to_string();
+    rendered["path"] = protocol::encode_raw_path(entry.source.raw_path);
+    rendered["duration_ms"] = entry.duration_ms.value_or(-1);
+    Json group = Json::object();
+    group["album_artist"] = entry.group.album_artist;
+    group["artist"] = entry.group.artist;
+    group["album"] = entry.group.album;
+    group["date"] = entry.group.date;
+    rendered["group"] = std::move(group);
+    rendered["selection"] = selection_to_json(entry.source.selection);
+    rendered["segment"] = segment_to_json(entry.source.segment);
+    rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);
+    return rendered;
+}
+
+core::Result<QueueEntry> queue_entry_from_json(const Json& value) { return entry_from_json(value); }
+
+Json to_json(const audio::PlaybackModes& modes) { return modes_to_json(modes); }
+
+audio::PlaybackModes modes_from_json(const Json& value) {
+    audio::PlaybackModes modes;
+    if (!value.is_object()) {
+        return modes;
+    }
+    modes.repeat = value.value("repeat", false);
+    modes.random = value.value("random", false);
+    modes.album_random = value.value("album_random", false);
+    modes.single = audio::mode_state_from_int(value.value("single", 0));
+    modes.consume = audio::mode_state_from_int(value.value("consume", 0));
+    return modes;
+}
+
 Json to_json(const Player::State& state) {
     Json rendered = Json::object();
     rendered["status"] = state.status;
@@ -256,20 +290,7 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
     dispatcher.on("playback.queue", [&player](const Json&) -> core::Result<Json> {
         auto entries = Json::array();
         for (const auto& entry : player.queue()) {
-            Json rendered = Json::object();
-            rendered["entry"] = entry.entry_id.to_string();
-            rendered["path"] = protocol::encode_raw_path(entry.source.raw_path);
-            rendered["duration_ms"] = entry.duration_ms.value_or(-1);
-            Json group = Json::object();
-            group["album_artist"] = entry.group.album_artist;
-            group["artist"] = entry.group.artist;
-            group["album"] = entry.group.album;
-            group["date"] = entry.group.date;
-            rendered["group"] = std::move(group);
-            rendered["selection"] = selection_to_json(entry.source.selection);
-            rendered["segment"] = segment_to_json(entry.source.segment);
-            rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);
-            entries.push_back(std::move(rendered));
+            entries.push_back(to_json(entry));
         }
         return Json{{"entries", std::move(entries)}};
     });

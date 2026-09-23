@@ -6,8 +6,10 @@
 // being tested is who owns the state, not whether PipeWire is present.
 
 #include "trackknife/engine/playback_methods.hpp"
+#include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/recorder.hpp"
+#include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <chrono>
@@ -756,6 +758,97 @@ void album_shuffle_keeps_albums_together(engine::Player& player,
     player.replace_queue({});
 }
 
+// ADR-0220: the queue belongs to the engine, so it survives the engine. A
+// window is a view of what the engine holds, and a view cannot be what brings
+// the queue back -- if it were, the first client to connect after a restart
+// would be the one deciding what the engine is playing.
+void a_restarted_engine_comes_back_with_its_queue(const std::filesystem::path& directory,
+                                                  const std::filesystem::path& audio) {
+    const auto database = directory / "restart-workspace.sqlite3";
+    std::error_code ignored;
+    std::filesystem::remove(database, ignored);
+
+    std::vector<core::StableId> queued;
+    core::StableId playing;
+    std::int64_t left_at = 0;
+    {
+        auto workspace = engine::Workspace::open(database);
+        require(workspace.has_value(), "the workspace opens");
+        auto player = engine::Player::create();
+        require(player.has_value(), "a player is created");
+
+        std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
+                                                entry(audio.string())};
+        entries[1].group.album = "Second";
+        for (const auto& made : entries) {
+            queued.push_back(made.entry_id);
+        }
+        audio::PlaybackModes modes;
+        modes.repeat = true;
+        modes.consume = audio::ModeState::oneshot;
+        (*player)->set_modes(modes);
+        (*player)->replace_queue(entries);
+        require((*player)->request(entries[2].entry_id).has_value(), "an ask is held");
+
+        engine::PlaybackStore store{**player, *workspace};
+        require(!store.restore(), "an engine that has never run has nothing to restore");
+
+        if ((*player)->play_entry(entries[1].entry_id)) {
+            require((*player)->pause().has_value(), "pausing succeeds");
+            // The load is asynchronous, and what is being stored includes what
+            // the file looked like -- which the engine only knows once it has
+            // opened it.
+            const auto settle = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+            while (std::chrono::steady_clock::now() < settle &&
+                   (*player)->state().status != "paused") {
+                std::this_thread::sleep_for(std::chrono::milliseconds{5});
+            }
+            if ((*player)->state().status == "paused") {
+                playing = entries[1].entry_id;
+                left_at = (*player)->state().position_ms;
+            }
+        }
+        store.persist();
+    }
+
+    // A new process, with nothing but the database.
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "the workspace reopens");
+    auto player = engine::Player::create();
+    require(player.has_value(), "a player is created");
+    engine::PlaybackStore store{**player, *workspace};
+    require(store.restore(), "the stored queue is found");
+
+    const auto restored = (*player)->queue();
+    require(restored.size() == 3U, "the queue comes back whole");
+    for (std::size_t index = 0; index < restored.size(); ++index) {
+        require(restored[index].entry_id == queued[index],
+                "with its identities, so a client's rows still name the same entries");
+    }
+    require(restored[1].group.album == "Second", "and what each entry is, tags included");
+    require((*player)->modes().repeat, "the modes come back");
+    require((*player)->modes().consume == audio::ModeState::oneshot,
+            "including a one-shot that had not fired");
+    require((*player)->requests().size() == 1U, "and the asks that had not been played");
+
+    if (!playing.is_nil()) {
+        // Restoring is asynchronous too: the engine has to open the file
+        // again before it can be paused inside it.
+        const auto settle = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        while (std::chrono::steady_clock::now() < settle && (*player)->state().status != "paused") {
+            std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        }
+        const auto state = (*player)->state();
+        require(state.entry == playing, "playback is anchored where it was");
+        require(state.status == "paused",
+                "and paused rather than playing: coming back making noise unasked is a surprise");
+        require(state.position_ms >= left_at - 1'000 && state.position_ms <= left_at + 1'000,
+                "at roughly where it left off");
+    }
+
+    std::filesystem::remove(database, ignored);
+}
+
 void gapless_is_offered_and_recomputed(engine::Player& player, const std::filesystem::path& audio) {
     const std::vector<engine::QueueEntry> entries{entry(audio.string()), entry(audio.string()),
                                                   entry(audio.string())};
@@ -907,12 +1000,13 @@ int main(int argc, char** argv) {
     a_request_returns_to_where_the_list_was(**player, audio);
     consume_drops_what_has_been_played(**player, audio);
     album_shuffle_keeps_albums_together(**player, audio);
+    a_restarted_engine_comes_back_with_its_queue(directory, audio);
     the_recorder_drains_into_a_workspace(**player, directory, audio);
     the_method_surface_speaks_for_the_player(**player);
     an_explicit_replay_gain_travels_with_the_entry(**player);
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 19 scenarios\n";
+    std::cout << "engine player: 20 scenarios\n";
     return EXIT_SUCCESS;
 }

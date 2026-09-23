@@ -16,6 +16,15 @@ namespace trackknife::engine {
 // path is bytes and a JSON string must be valid UTF-8.
 [[nodiscard]] protocol::Json to_json(const Player::State& state);
 
+// A queue entry as it travels, and back. Shared with the engine's own store
+// (playback_store): what the engine remembers between runs is the same entry
+// the wire carries, and a second encoding of the same thing is a second thing
+// to keep in step.
+[[nodiscard]] protocol::Json to_json(const QueueEntry& entry);
+[[nodiscard]] core::Result<QueueEntry> queue_entry_from_json(const protocol::Json& value);
+[[nodiscard]] protocol::Json to_json(const audio::PlaybackModes& modes);
+[[nodiscard]] audio::PlaybackModes modes_from_json(const protocol::Json& value);
+
 // Binds playback.*. The player must outlive the dispatcher.
 void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player);
 

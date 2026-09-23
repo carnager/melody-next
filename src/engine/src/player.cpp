@@ -109,6 +109,7 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
     anchors_.source = entry.source;
     row_ = static_cast<int>(row);
     playing_request_ = from_request;
+    ++revision_;
     // Consume drops the entry playback just left. Done after the new one is
     // anchored, because erasing moves rows and the anchor is what survives
     // that (ADR-0221). `entry` is a reference into the queue and must not be
@@ -136,6 +137,7 @@ void Player::consume_locked(const core::StableId& entry_id) {
     }
     queue_.erase(queue_.begin() + row);
     consumed_ = entry_id;
+    ++revision_;
     std::erase(requests_, entry_id);
     // Rows moved, so the playing row is re-derived from its identity rather
     // than adjusted by hand.
@@ -227,6 +229,7 @@ void Player::follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot)
 void Player::replace_queue(std::vector<QueueEntry> entries) {
     const std::lock_guard guard{mutex_};
     queue_ = std::move(entries);
+    ++revision_;
     // ADR-0221: the playing entry is followed by identity. If it has gone,
     // playback is not silently handed to whatever now sits at its old row.
     const QueueView view{queue_};
@@ -256,6 +259,7 @@ core::Result<void> Player::request(const core::StableId& entry_id) {
                         .context = {{.key = "entry", .value = entry_id.to_string()}}});
     }
     requests_.push_back(entry_id);
+    ++revision_;
     return {};
 }
 
@@ -276,6 +280,7 @@ core::Result<void> Player::set_requests(const std::vector<core::StableId>& entri
         }
     }
     requests_ = entries;
+    ++revision_;
     refresh_gapless_locked();
     return {};
 }
@@ -289,6 +294,7 @@ void Player::enqueue(std::vector<QueueEntry> entries) {
         }
         queue_.push_back(std::move(entry));
     }
+    ++revision_;
     // The order describes a queue that just changed size, and whatever was
     // queued to follow was chosen under the old one.
     reset_order_locked();
@@ -298,6 +304,7 @@ void Player::enqueue(std::vector<QueueEntry> entries) {
 void Player::clear_requests() {
     const std::lock_guard guard{mutex_};
     requests_.clear();
+    ++revision_;
 }
 
 core::Result<void> Player::play_entry(const core::StableId& entry_id) {
@@ -392,6 +399,7 @@ audio::PlaybackModes Player::modes() const {
 void Player::set_modes(audio::PlaybackModes modes) {
     const std::lock_guard guard{mutex_};
     modes_ = modes;
+    ++revision_;
     // Random and album-random change the traversal, so the order is rebuilt
     // rather than left describing the previous mode -- and with it whatever
     // was queued to follow, which was chosen under the old one.
@@ -478,6 +486,72 @@ Player::Observations Player::observe(const std::int64_t monotonic_ms) {
         observations.resume_position_ms = audio::resume_position_ms(snapshot);
     }
     return observations;
+}
+
+Player::Persisted Player::persisted() const {
+    const std::lock_guard guard{mutex_};
+    const auto snapshot = audition_->snapshot();
+    Persisted stored;
+    stored.queue = queue_;
+    stored.entry = anchors_.current;
+    stored.request_return = anchors_.request_return;
+    stored.playing_request = playing_request_;
+    stored.requests = requests_;
+    stored.modes = modes_;
+    if (snapshot.format && snapshot.format->sample_rate > 0) {
+        const auto rate = static_cast<std::int64_t>(snapshot.format->sample_rate);
+        stored.position_ms =
+            snapshot.position_sample / rate * 1000 + snapshot.position_sample % rate * 1000 / rate;
+    }
+    stored.revision = snapshot.source_revision;
+    return stored;
+}
+
+bool Player::restore(Persisted state) {
+    const std::lock_guard guard{mutex_};
+    queue_ = std::move(state.queue);
+    modes_ = state.modes;
+    requests_ = std::move(state.requests);
+    anchors_.request_return = state.request_return;
+    playing_request_ = state.playing_request;
+    anchors_.current = state.entry;
+    consumed_ = core::StableId{};
+    ++revision_;
+
+    const QueueView view{queue_};
+    row_ = view.row_of_entry(anchors_.current, -1);
+    if (row_ < 0) {
+        // The entry is gone from the queue it was in. The queue still comes
+        // back; nothing is anchored in it.
+        anchors_.current = core::StableId{};
+        anchors_.source = {};
+        reset_order_locked();
+        return false;
+    }
+    const auto& entry = queue_[static_cast<std::size_t>(row_)];
+    anchors_.source = entry.source;
+    reset_order_locked();
+    if (!state.revision) {
+        // Nothing was playing when this was written, or the source had no
+        // revision to check. The queue is restored and nothing is loaded.
+        return false;
+    }
+    // Paused rather than playing: coming back from a restart and starting to
+    // make noise unasked is not a restore, it is a surprise.
+    auto restored =
+        audition_->restore_paused(entry.source.raw_path, *state.revision, entry.source.selection,
+                                  entry.source.segment, state.position_ms, entry.replay_gain);
+    if (!restored) {
+        return false;
+    }
+    seen_transitions_ = audition_->snapshot().chain_transitions;
+    refresh_gapless_locked();
+    return true;
+}
+
+std::uint64_t Player::revision() const {
+    const std::lock_guard guard{mutex_};
+    return revision_;
 }
 
 Player::State Player::state() const {

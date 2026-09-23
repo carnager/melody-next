@@ -184,6 +184,34 @@ class Player final {
     };
     [[nodiscard]] State state() const;
 
+    // ADR-0220: the queue is the engine's, so the engine remembers it. This is
+    // everything that has to survive a restart -- not the wire's State, which
+    // is what a client renders and includes derived things like the status.
+    struct Persisted final {
+        std::vector<QueueEntry> queue;
+        core::StableId entry;
+        core::StableId request_return;
+        bool playing_request{false};
+        std::vector<core::StableId> requests;
+        audio::PlaybackModes modes;
+        std::int64_t position_ms{0};
+        // What the file looked like when the position was taken. Resuming
+        // into a file that has changed underneath would seek to a position
+        // that no longer means anything.
+        std::optional<core::LocalSourceRevision> revision;
+    };
+    [[nodiscard]] Persisted persisted() const;
+
+    // Comes back holding the queue, paused where it left off. Answers whether
+    // the audio was restored: the queue and the modes are restored either way,
+    // because a queue whose file has changed is still a queue.
+    bool restore(Persisted state);
+
+    // Bumped whenever something worth remembering changes -- the queue, the
+    // modes, the asks, which entry is playing. A writer polls this rather than
+    // serialising a queue it has already stored.
+    [[nodiscard]] std::uint64_t revision() const;
+
     // A track that ended by itself is followed by the next one. Nothing else
     // does this: a gapless handover covers the case where the continuation was
     // accepted, and everything else -- a format change, a seek, a queue edit,
@@ -252,6 +280,7 @@ class Player final {
     // order. The return point only applies while it is.
     bool playing_request_{false};
     core::StableId consumed_;
+    std::uint64_t revision_{0};
     std::uint64_t seen_transitions_{0U};
 };
 

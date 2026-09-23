@@ -129,6 +129,17 @@ core::Result<void> Workspace::save_local_resume(const std::string_view track_has
     return repository_.save_local_resume(track_hash, position_ms, updated_at_ms);
 }
 
+core::Result<void> Workspace::save_engine_state(const std::string_view key,
+                                                const std::string_view value,
+                                                const std::int64_t updated_at_ms) {
+    return repository_.save_engine_state(key, value, updated_at_ms);
+}
+
+core::Result<std::optional<std::string>>
+Workspace::load_engine_state(const std::string_view key) const {
+    return repository_.load_engine_state(key);
+}
+
 core::Result<std::vector<persistence::SavedSearch>> Workspace::load_saved_searches() const {
     return repository_.load_saved_searches();
 }

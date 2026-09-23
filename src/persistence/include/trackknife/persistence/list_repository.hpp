@@ -294,6 +294,16 @@ class ListRepository final {
                                                        std::int64_t position_ms,
                                                        std::int64_t updated_at_ms);
 
+    // ADR-0220: whatever the engine needs to remember between runs, stored as
+    // its own document under a versioned key. Deliberately opaque here -- the
+    // repository is not the place that knows what a queue is.
+    [[nodiscard]] core::Result<void> save_engine_state(std::string_view key, std::string_view value,
+                                                       std::int64_t updated_at_ms);
+    // Absent is an empty optional, not an error: an engine that has never run
+    // has nothing to restore, and that is ordinary.
+    [[nodiscard]] core::Result<std::optional<std::string>>
+    load_engine_state(std::string_view key) const;
+
   private:
     struct Impl;
     explicit ListRepository(std::unique_ptr<Impl> implementation);

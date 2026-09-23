@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 41U;
+constexpr unsigned current_schema_version = 42U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1289,6 +1289,25 @@ UPDATE schema_version SET version = 41;
                     return result;
                 }
             }
+        }
+    }
+    if (version <= 41) {
+        // ADR-0220: the engine remembers its own queue, because the queue is
+        // the engine's and a window is a view of it. Key/value rather than
+        // modelled: what is stored is the engine's state document, versioned
+        // in the key, and columns would mean a migration for every mode the
+        // engine learns.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+CREATE TABLE engine_state (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+UPDATE schema_version SET version = 42;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
         }
     }
     if (auto result = execute(database, "COMMIT"); !result) {
@@ -5014,6 +5033,46 @@ core::Result<void> ListRepository::record_local_play(const std::string_view trac
                                          : std::move(statement.error()));
     }
     return step_done(database, statement->get(), "Could not record completed play");
+}
+
+core::Result<void> ListRepository::save_engine_state(const std::string_view key,
+                                                     const std::string_view value,
+                                                     const std::int64_t updated_at_ms) {
+    if (key.empty() || updated_at_ms <= 0) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "Invalid engine state write",
+                                           .context = {}});
+    }
+    auto* database = implementation_->database;
+    auto statement =
+        prepare(database, "INSERT INTO engine_state(key,value,updated_at_ms) VALUES(?,?,?) "
+                          "ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+                          "updated_at_ms=excluded.updated_at_ms");
+    if (!statement || !bind_text(statement->get(), 1, key) ||
+        !bind_text(statement->get(), 2, value) ||
+        sqlite3_bind_int64(statement->get(), 3, updated_at_ms) != SQLITE_OK) {
+        return std::unexpected(statement ? database_error(database, "Could not bind engine state")
+                                         : std::move(statement.error()));
+    }
+    return step_done(database, statement->get(), "Could not save engine state");
+}
+
+core::Result<std::optional<std::string>>
+ListRepository::load_engine_state(const std::string_view key) const {
+    auto* database = implementation_->database;
+    auto statement = prepare(database, "SELECT value FROM engine_state WHERE key = ?");
+    if (!statement || !bind_text(statement->get(), 1, key)) {
+        return std::unexpected(statement ? database_error(database, "Could not bind engine state")
+                                         : std::move(statement.error()));
+    }
+    const auto stepped = sqlite3_step(statement->get());
+    if (stepped == SQLITE_ROW) {
+        return std::optional{column_text(statement->get(), 0)};
+    }
+    if (stepped != SQLITE_DONE) {
+        return std::unexpected(database_error(database, "Could not read engine state"));
+    }
+    return std::optional<std::string>{};
 }
 
 core::Result<void> ListRepository::save_local_resume(const std::string_view track_hash,

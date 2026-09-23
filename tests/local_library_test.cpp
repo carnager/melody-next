@@ -536,11 +536,11 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     // Migrations unwind strictly in reverse order down to the truncation-era
     // schema before the app re-migrates forward.
     for (const auto* name :
-         {"0041_list_entry_identity.down", "0040_local_listening_occurrences.down",
-          "0039_local_listening_history.down", "0038_folder_image_journal.down",
-          "0037_mpd_list_documents.down", "0036_server_search_scope.down",
-          "0035_local_ratings.down", "0034_metadata_field_filters.down",
-          "0033_complete_library_fields.down"}) {
+         {"0042_engine_state.down", "0041_list_entry_identity.down",
+          "0040_local_listening_occurrences.down", "0039_local_listening_history.down",
+          "0038_folder_image_journal.down", "0037_mpd_list_documents.down",
+          "0036_server_search_scope.down", "0035_local_ratings.down",
+          "0034_metadata_field_filters.down", "0033_complete_library_fields.down"}) {
         QFile downgrade{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(downgrade.open(QIODevice::ReadOnly));
@@ -794,13 +794,14 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 41U);
+        QCOMPARE(*repository->schema_version(), 42U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
-    for (const auto* name : {"0041_list_entry_identity.down",
+    for (const auto* name : {"0042_engine_state.down",
+                             "0041_list_entry_identity.down",
                              "0040_local_listening_occurrences.down",
                              "0039_local_listening_history.down",
                              "0036_server_search_scope.down",
@@ -821,7 +822,8 @@ void LocalLibraryTest::migrationRoundTrip() {
                              "0036_server_search_scope.up",
                              "0039_local_listening_history.up",
                              "0040_local_listening_occurrences.up",
-                             "0041_list_entry_identity.up"}) {
+                             "0041_list_entry_identity.up",
+                             "0042_engine_state.up"}) {
         QFile migration{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
@@ -851,7 +853,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 41U);
+    QCOMPARE(*repository->schema_version(), 42U);
     QVERIFY(repository->save_local_resume(std::string(64U, 'a'), 500, 1'000));
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile history_downgrade{

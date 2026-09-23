@@ -65,6 +65,10 @@ struct Server::Connection final {
     // ADR-0223: whether this peer may do anything, including hear events.
     // True from the start on a unix socket, earned on TCP.
     std::atomic_bool authenticated{false};
+    // ADR-0228: a connection this side opened and serves -- an agent's, to
+    // the engine that drives it. Its peer closing is that engine gone, not a
+    // client that has finished asking and still listens.
+    bool ends_at_eof{false};
 
     ~Connection() {
         if (descriptor >= 0) {
@@ -266,6 +270,7 @@ void Server::attach(const int descriptor) {
     auto connection = std::make_shared<Connection>();
     connection->descriptor = descriptor;
     connection->authenticated.store(true);
+    connection->ends_at_eof = true;
     const std::lock_guard guard{mutex_};
     connections_.push_back(connection);
     workers_.emplace_back([this, connection] { serve(connection); });
@@ -388,6 +393,13 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             if (errno == EINTR) {
                 continue;
             }
+            break;
+        }
+        if (received == 0 && connection->ends_at_eof) {
+            // The engine an agent serves has gone -- restarted, say. Kept
+            // like a half-closed client, the connection stayed counted, and
+            // an idle agent, writing nothing, never learned it had to
+            // reconnect.
             break;
         }
         if (received == 0) {

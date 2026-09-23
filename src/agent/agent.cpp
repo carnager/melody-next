@@ -229,8 +229,11 @@ void Agent::connect_loop() {
         registered_.store(false);
         if (running_.load()) {
             std::cerr << "melody-agent: the engine went away; reconnecting\n";
-            // Whatever was playing belonged to that connection.
-            static_cast<void>(audition_->stop());
+            // Whatever was playing belonged to that connection. Nothing
+            // loaded is nothing to stop, and saying it could not be is noise.
+            if (audition_->snapshot().state != audio::LocalAuditionState::empty) {
+                static_cast<void>(audition_->stop());
+            }
             static_cast<void>(pause_.wait(reconnect_delay));
         }
     }

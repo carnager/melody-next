@@ -403,6 +403,28 @@ void tcp_without_a_password_is_open() {
     (*server)->stop();
 }
 
+// ADR-0228: an agent serves the engine it connected to. When that engine
+// goes -- restarted, say -- the connection ends, so the agent reconnects.
+// Kept open like a half-closed client, it stayed counted, and an idle agent
+// that wrote nothing waited forever for an engine that had long come back.
+void an_attached_connection_ends_with_its_engine() {
+    protocol::Dispatcher dispatcher;
+    auto agent_side = engine::Server::detached(dispatcher);
+    std::array<int, 2> pair{-1, -1};
+    require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0,
+            "a connection is made");
+    agent_side->attach(pair[0]);
+    require(agent_side->connections() == 1U, "the agent serves the engine's connection");
+    ::close(pair[1]);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (agent_side->connections() > 0U && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    require(agent_side->connections() == 0U,
+            "and when the engine closes it, it is gone, so the agent knows to reconnect");
+    agent_side->stop();
+}
+
 // A request that takes a while does not stop the engine reading the same
 // connection, and a cancel gets through while it runs. Handled on the reading
 // thread, a slow request once held everything behind it -- the cancel for a
@@ -488,10 +510,11 @@ int main() {
     tcp_admits_only_the_token_holder();
     an_endpoint_is_read_from_settings();
     tcp_without_a_password_is_open();
+    an_attached_connection_ends_with_its_engine();
     a_slow_request_does_not_hold_a_cancel(directory / "d.sock");
     an_unencodable_answer_does_not_end_the_engine(directory / "e.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 8 scenarios\n";
+    std::cout << "engine server: 9 scenarios\n";
     return EXIT_SUCCESS;
 }

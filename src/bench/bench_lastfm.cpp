@@ -42,38 +42,68 @@ void BenchMainWindow::buildLastFm() {
                 5000);
     };
     connect(lastfm_, &LastFmService::completed, this, feedback);
+    // Who this window is signed in as, to tell an engine already using the
+    // same account from one that is not.
+    connect(lastfm_, &LastFmService::completed, this,
+            [this](const QString&, const QJsonObject& state, const QString&) {
+                if (state.contains(QStringLiteral("user"))) {
+                    lastfm_user_ = state.value(QStringLiteral("user")).toString();
+                }
+            });
+    lastfm_->execute(QStringLiteral("status"));
 }
-void BenchMainWindow::askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state) {
+void BenchMainWindow::askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state,
+                                      QPushButton* use) {
     const QPointer<QLabel> label{state};
-    auto* watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this, [watcher, label] {
+    const QPointer<QPushButton> button{use};
+    // The line to show, and the account the engine uses (empty for none).
+    using Answer = std::pair<QString, QString>;
+    auto* watcher = new QFutureWatcher<Answer>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, label, button] {
         watcher->deleteLater();
+        const auto [text, user] = watcher->result();
         if (label) {
-            label->setText(watcher->result());
+            label->setText(text);
         }
+        showEngineAccount(button, user);
     });
-    watcher->setFuture(QtConcurrent::run([endpoint] {
+    watcher->setFuture(QtConcurrent::run([endpoint]() -> Answer {
         auto client = protocol::Client::connect(endpoint);
         if (!client) {
-            return QStringLiteral("Not reachable");
+            return {QStringLiteral("Not reachable"), {}};
         }
         auto answer = (*client)->call("lastfm.status", protocol::Json::object(),
                                       std::chrono::seconds{3});
         (*client)->close();
         if (!answer) {
-            return QStringLiteral("Cannot scrobble (engine too old)");
+            return {QStringLiteral("Cannot scrobble (engine too old)"), {}};
         }
         const auto user = answer->value("user", protocol::Json{});
-        return user.is_string() && answer->value("enabled", false)
-                   ? QStringLiteral("Scrobbling as %1 · %2 waiting")
-                         .arg(QString::fromStdString(user.get<std::string>()))
-                         .arg(answer->value("pending", 0))
-                   : QStringLiteral("Not scrobbling");
+        if (!user.is_string() || !answer->value("enabled", false)) {
+            return {QStringLiteral("Not scrobbling"), {}};
+        }
+        const auto name = QString::fromStdString(user.get<std::string>());
+        return {QStringLiteral("Scrobbling as %1 · %2 waiting")
+                    .arg(name)
+                    .arg(answer->value("pending", 0)),
+                name};
     }));
 }
 
-void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state) {
+void BenchMainWindow::showEngineAccount(QPushButton* use, const QString& engine_user) {
+    if (use == nullptr) {
+        return;
+    }
+    // Handing over the account the engine already has would do nothing.
+    const bool in_use = !engine_user.isEmpty() && engine_user == lastfm_user_;
+    use->setEnabled(!in_use);
+    use->setText(in_use ? QStringLiteral("In use") : QStringLiteral("Use this account"));
+}
+
+void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state,
+                                     QPushButton* use) {
     const QPointer<QLabel> label{state};
+    const QPointer<QPushButton> button{use};
     if (label) {
         label->setText(QStringLiteral("Handing over…"));
     }
@@ -81,7 +111,8 @@ void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel*
     auto connection = std::make_shared<QMetaObject::Connection>();
     *connection = connect(
         lastfm_, &LastFmService::completed, this,
-        [this, endpoint, label, connection](const QString& op, const QJsonObject& session,
+        [this, endpoint, label, button, connection](const QString& op,
+                                                    const QJsonObject& session,
                                             const QString& error) {
             if (op != QStringLiteral("session")) {
                 return;
@@ -99,10 +130,14 @@ void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel*
                 {"session_key", session.value("session_key").toString().toStdString()},
                 {"user", session.value("user").toString().toStdString()}};
             auto* watcher = new QFutureWatcher<QString>(this);
-            connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, label, endpoint] {
+            connect(watcher, &QFutureWatcherBase::finished, this,
+                    [this, watcher, label, button, endpoint] {
                 watcher->deleteLater();
                 if (label) {
                     label->setText(watcher->result());
+                }
+                if (watcher->result().startsWith(QStringLiteral("Scrobbling as "))) {
+                    showEngineAccount(button, lastfm_user_);
                 }
                 // The engines this window plays on may scrobble now: it
                 // stops crediting them itself.
@@ -287,9 +322,9 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         row->addWidget(state, 1);
         row->addWidget(use);
         engines_form->addRow(name + QStringLiteral(":"), row);
-        askEngineLastFm(endpoint, state);
+        askEngineLastFm(endpoint, state, use);
         connect(use, &QPushButton::clicked, this,
-                [this, endpoint, state] { handOverLastFm(endpoint, state); });
+                [this, endpoint, state, use] { handOverLastFm(endpoint, state, use); });
     };
     if (catalogue_source_ && catalogue_source_->endpoint()) {
         add_engine(QStringLiteral("This computer"), *catalogue_source_->endpoint(),

@@ -4951,6 +4951,16 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     use->click();
     QTRY_COMPARE(state->text(), QStringLiteral("Scrobbling as listener"));
     QTRY_VERIFY(window.local_playback_->scrobblesItself());
+    // The engine has this account now: handing it over again would do nothing.
+    QTRY_COMPARE(use->text(), QStringLiteral("In use"));
+    QVERIFY(!use->isEnabled());
+    // And a fresh look at the page says the same.
+    {
+        QWidget again_host;
+        auto* again = window.buildLastFmSettings(&again_host);
+        auto* again_use = again->findChild<QPushButton*>(QStringLiteral("lastfm-engine-local-use"));
+        QTRY_COMPARE(again_use->text(), QStringLiteral("In use"));
+    }
 
     // The window no longer credits what that engine plays.
     EnginePlayback::State playing;

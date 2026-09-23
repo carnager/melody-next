@@ -264,9 +264,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* engine = new QWidget(this);
     auto* engine_layout = new QVBoxLayout(engine);
     auto* engine_intro = new QLabel(
-        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. This "
-                       "computer's is always used for local files; Trackknife starts it, and it "
-                       "keeps playing after the window closes."),
+        QStringLiteral("melodyd plays the music and keeps the library. Trackknife starts this "
+                       "computer's, and it plays on after the window closes."),
         engine);
     engine_intro->setWordWrap(true);
     engine_layout->addWidget(engine_intro);
@@ -413,12 +412,9 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_form->addRow(QStringLiteral("Mounted here at:"), remote_mount_);
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("A remote engine -- on a NAS, say -- is added beside this computer's: its library appears next to this computer's, "
-                       "and its files play in remote tabs, on that machine. Give its host:port "
-                       "(it was started with --listen) and its password if it has one, or a "
-                       "unix socket path. There is no encryption; use it on a home "
-                       "network or through WireGuard. Takes effect when the workspace is "
-                       "reopened."),
+        QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
+                       "computer's: its library gets a tab and its tracks play there. Unencrypted: "
+                       "for a home network or WireGuard. Applies after restarting Trackknife."),
         remote);
     engine_note->setWordWrap(true);
     remote_layout->addWidget(engine_note);

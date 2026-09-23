@@ -49,6 +49,7 @@ class QActionGroup;
 class QDialog;
 class QDockWidget;
 class QLabel;
+class QPushButton;
 class QStyledItemDelegate;
 class QListWidget;
 class QLineEdit;
@@ -638,8 +639,11 @@ class BenchMainWindow final : public QMainWindow {
     QWidget* buildLastFmSettings(QWidget* parent);
     // ADR-0220: an engine's own Last.fm state, into `state`; and this
     // window's session handed to it, so it scrobbles what it plays.
-    void askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state);
-    void handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state);
+    void askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
+    void handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
+    // "In use" when the engine already scrobbles as this window's account.
+    void showEngineAccount(QPushButton* use, const QString& engine_user);
+    QString lastfm_user_;
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;

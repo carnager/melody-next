@@ -467,6 +467,11 @@ has already expired by then. The modes in the state document are likewise the
 engine's, so the buttons follow a one-shot expiring where playback actually
 happened.
 
+The engine is installed and can be run as a user service
+(`packaging/systemd/tkengine.service`), and which engine a workspace uses is a
+settings field rather than a hand-edited key: "is an engine in use" has to be
+answerable from the UI.
+
 A window attaches to whatever the engine is already playing. The engine
 outlives the window, so a window that only learns about playback by having
 started it shows nothing after a restart while the music is still going. The

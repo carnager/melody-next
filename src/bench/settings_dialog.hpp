@@ -92,6 +92,7 @@ class SettingsDialog final : public QDialog {
     QDoubleSpinBox* preamp_with_{nullptr};
     QDoubleSpinBox* preamp_without_{nullptr};
     QLineEdit* music_root_{nullptr};
+    QLineEdit* engine_socket_{nullptr};
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};

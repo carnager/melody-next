@@ -7857,6 +7857,15 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     auto* link = dialog->findChild<QLabel*>(QStringLiteral("bench-settings-acoustid-link"));
     QVERIFY(link && link->openExternalLinks());
     QVERIFY(link->text().contains(QStringLiteral("https://acoustid.org/new-application")));
+    // ADR-0220: which engine serves the library and owns playback, settable
+    // rather than hand-edited -- "is an engine in use" was otherwise
+    // unanswerable from the UI.
+    auto* engine_socket =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
+    QVERIFY(engine_socket);
+    QVERIFY(engine_socket->text().isEmpty());
+    engine_socket->setText(QStringLiteral("/run/user/1000/tkengine.sock"));
+
     auto* lastfm = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key"));
     QVERIFY(lastfm);
     QCOMPARE(lastfm->echoMode(), QLineEdit::Password);
@@ -7901,6 +7910,8 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
         ->button(QDialogButtonBox::Save)
         ->click();
     QTRY_VERIFY(lifetime.isNull());
+    QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::library_engine_socket_key)).toString(),
+             QStringLiteral("/run/user/1000/tkengine.sock"));
     QCOMPARE(QSettings{}.value(QLatin1String(SettingsDialog::acoustid_client_key)).toString(),
              QStringLiteral("test-client-key"));
     action->trigger();

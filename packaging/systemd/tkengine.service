@@ -1,0 +1,19 @@
+[Unit]
+# ADR-0220: the engine owns the catalogue and playback, and outlives any
+# window. Running it as a user service is what makes that true in practice --
+# music keeps playing when the workspace is closed, and starts without one.
+Description=Trackknife engine
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/tkengine
+# The socket and the databases default to $XDG_RUNTIME_DIR and $XDG_DATA_HOME.
+# Override with: systemctl --user edit tkengine
+# ExecStart=/usr/bin/tkengine --socket %t/tkengine.sock --state %h/.local/share/trackknife
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

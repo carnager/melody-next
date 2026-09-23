@@ -295,6 +295,26 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         library_layout->addWidget(note);
         library_layout->addStretch(1);
     }
+    // ADR-0220: which engine serves the catalogue and owns playback. Empty
+    // means this process does both, which is the unchanged local behaviour --
+    // stated here rather than left as a hand-edited setting, because
+    // "is an engine in use" is otherwise unanswerable from the UI.
+    auto* engine_form = new QFormLayout;
+    engine_socket_ = new QLineEdit(library);
+    engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
+    engine_socket_->setPlaceholderText(
+        QStringLiteral("empty: this process serves its own library and playback"));
+    engine_socket_->setText(
+        settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
+    engine_form->addRow(QStringLiteral("Engine socket:"), engine_socket_);
+    library_layout->addLayout(engine_form);
+    auto* engine_note = new QLabel(
+        QStringLiteral("The unix socket of a running trackknife engine (tkengine), which then owns "
+                       "the library and playback. Takes effect when the workspace is reopened."),
+        library);
+    engine_note->setWordWrap(true);
+    library_layout->addWidget(engine_note);
+
     add_page(QStringLiteral("Library"), library);
 
     auto* connections_page = new QWidget(this);
@@ -558,6 +578,7 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
     settings.setValue(QLatin1String(startup_context_key), startup_->currentData().toString());
     settings.setValue(QLatin1String(music_root_key), music_root_->text().trimmed());
+    settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());
     settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());

@@ -13,6 +13,7 @@
 #include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/lastfm.hpp"
 #include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/token.hpp"
 #include "trackknife/engine/workspace.hpp"
@@ -343,6 +344,12 @@ int main(int argc, char** argv) {
     }
     outputs.restore();
 
+    // Last.fm for what this engine plays, with its session handed over by a
+    // client (lastfm.set_session); it scrobbles with every window closed.
+    trackknife::engine::LastFm lastfm{*player, catalogue, state_directory / "lastfm.json"};
+    trackknife::engine::register_lastfm_methods(dispatcher, lastfm);
+    lastfm.start();
+
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
     // A client hanging up must not take the engine with it.
@@ -376,6 +383,7 @@ int main(int argc, char** argv) {
     if (watcher) {
         watcher->stop();
     }
+    lastfm.stop();
     if (streams) {
         streams->stop();
     }

@@ -189,6 +189,9 @@ replay_gain_from_json(const Json& value) {
         duration != value.end() && duration->is_number_integer()) {
         entry.duration_ms = duration->get<std::int64_t>();
     }
+    if (const auto title = value.find("title"); title != value.end() && title->is_string()) {
+        entry.title = title->get<std::string>();
+    }
     if (const auto found = value.find("group"); found != value.end() && found->is_object()) {
         entry.group.album_artist = found->value("album_artist", std::string{});
         entry.group.artist = found->value("artist", std::string{});
@@ -232,6 +235,7 @@ Json to_json(const QueueEntry& entry) {
     group["album"] = entry.group.album;
     group["date"] = entry.group.date;
     rendered["group"] = std::move(group);
+    rendered["title"] = entry.title;
     rendered["selection"] = selection_to_json(entry.source.selection);
     rendered["segment"] = segment_to_json(entry.source.segment);
     rendered["replay_gain"] = replay_gain_to_json(entry.replay_gain);

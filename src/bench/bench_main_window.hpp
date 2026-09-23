@@ -625,6 +625,10 @@ class BenchMainWindow final : public QMainWindow {
     qint64 lastfm_sample_time_{-1000};
     void buildLastFm();
     QWidget* buildLastFmSettings(QWidget* parent);
+    // ADR-0220: an engine's own Last.fm state, into `state`; and this
+    // window's session handed to it, so it scrobbles what it plays.
+    void askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state);
+    void handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state);
     void addLastFmActions(QMenu* menu, QTableView* view);
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;

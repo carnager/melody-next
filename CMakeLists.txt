@@ -37,6 +37,9 @@ pkg_check_modules(OPENMPT REQUIRED IMPORTED_TARGET "libopenmpt>=0.7")
 pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET "taglib>=2.0")
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET "libpipewire-0.3>=0.3.50")
 pkg_check_modules(EBUR128 REQUIRED IMPORTED_TARGET "libebur128>=1.2")
+# The engine's Last.fm client: HTTPS, and MD5 for its request signatures.
+pkg_check_modules(CURL REQUIRED IMPORTED_TARGET "libcurl>=7.68")
+pkg_check_modules(LIBCRYPTO REQUIRED IMPORTED_TARGET "libcrypto>=1.1")
 # ADR-0222: protocol v1 is line-delimited JSON. MIT licensed, so GPLv3
 # compatible; header-only, and its notice ships with the package.
 find_package(nlohmann_json 3.11 REQUIRED)

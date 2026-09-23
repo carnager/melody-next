@@ -266,6 +266,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRestoredRemoteTabGetsItsCovers();
+    void lastFmIsHandedToTheEngine();
     void theDeviceMenuChoosesAnOutputAgent();
     void upNextEditingAndPersistence();
     void upNextPanelAnimationAndSettings();
@@ -4858,6 +4859,52 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
     QTRY_VERIFY(restored.lists_restored_);
     QTRY_VERIFY(remote_tab(restored) != nullptr);
     QTRY_VERIFY(covered(remote_tab(restored)));
+}
+
+// ADR-0220: the account signed in here is handed to an engine, which then
+// scrobbles what it plays itself -- and this window stops crediting it, or
+// every listen would count twice.
+void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
+    {
+        const auto path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+                          QStringLiteral("/lastfm-v1.json");
+        QDir{}.mkpath(QFileInfo{path}.absolutePath());
+        QFile file{path};
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(QJsonDocument{QJsonObject{{"version", 1},
+                                             {"key", QString(32, QLatin1Char('k'))},
+                                             {"secret", QString(32, QLatin1Char('s'))},
+                                             {"session", "session-key"},
+                                             {"user", "listener"},
+                                             {"enabled", true}}}
+                       .toJson());
+    }
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QVERIFY(!window.local_playback_->scrobblesItself());
+
+    QWidget host;
+    auto* page = window.buildLastFmSettings(&host);
+    auto* use = page->findChild<QPushButton*>(QStringLiteral("lastfm-engine-local-use"));
+    auto* state = page->findChild<QLabel*>(QStringLiteral("lastfm-engine-local-state"));
+    QVERIFY(use != nullptr && state != nullptr);
+    QTRY_COMPARE(state->text(), QStringLiteral("Not scrobbling"));
+    use->click();
+    QTRY_COMPARE(state->text(), QStringLiteral("Scrobbling as listener"));
+    QTRY_VERIFY(window.local_playback_->scrobblesItself());
+
+    // The window no longer credits what that engine plays.
+    EnginePlayback::State playing;
+    playing.status = QStringLiteral("playing");
+    playing.position_ms = 1'000;
+    playing.duration_ms = 200'000;
+    window.lastfm_sample_time_ = -1'000'000;
+    window.sampleLastFmFromEngine(playing);
+    QCOMPARE(window.property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
+    QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+                  QStringLiteral("/lastfm-v1.json"));
 }
 
 void BenchMainWindowTest::upNextPreservesNormalPlayback_data() {

@@ -146,6 +146,18 @@ class Worker final : public QObject {
             finish(op);
             return;
         }
+        if (op == "session") {
+            // For handing to an engine (lastfm.set_session): in this process
+            // only, never shown or logged.
+            if (state_.value("session").toString().isEmpty()) {
+                finish(op, {}, "Connect Last.fm first");
+                return;
+            }
+            finish(op, {{"api_key", state_.value("key")},
+                        {"secret", state_.value("secret")},
+                        {"session_key", state_.value("session")}});
+            return;
+        }
         if (blocked_) {
             finish(op, {}, message_);
             return;

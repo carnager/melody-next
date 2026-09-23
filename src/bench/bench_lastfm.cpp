@@ -6,6 +6,12 @@
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QFormLayout>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QPointer>
+#include <QFutureWatcher>
+#include <QInputDialog>
+#include <QHBoxLayout>
+#include <QGroupBox>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
@@ -37,6 +43,94 @@ void BenchMainWindow::buildLastFm() {
     };
     connect(lastfm_, &LastFmService::completed, this, feedback);
 }
+void BenchMainWindow::askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state) {
+    const QPointer<QLabel> label{state};
+    auto* watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcherBase::finished, this, [watcher, label] {
+        watcher->deleteLater();
+        if (label) {
+            label->setText(watcher->result());
+        }
+    });
+    watcher->setFuture(QtConcurrent::run([endpoint] {
+        auto client = protocol::Client::connect(endpoint);
+        if (!client) {
+            return QStringLiteral("Not reachable");
+        }
+        auto answer = (*client)->call("lastfm.status", protocol::Json::object(),
+                                      std::chrono::seconds{3});
+        (*client)->close();
+        if (!answer) {
+            return QStringLiteral("Cannot scrobble (engine too old)");
+        }
+        const auto user = answer->value("user", protocol::Json{});
+        return user.is_string() && answer->value("enabled", false)
+                   ? QStringLiteral("Scrobbling as %1 · %2 waiting")
+                         .arg(QString::fromStdString(user.get<std::string>()))
+                         .arg(answer->value("pending", 0))
+                   : QStringLiteral("Not scrobbling");
+    }));
+}
+
+void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state) {
+    const QPointer<QLabel> label{state};
+    if (label) {
+        label->setText(QStringLiteral("Handing over…"));
+    }
+    // The session, from this window's own sign-in, then to the engine.
+    auto connection = std::make_shared<QMetaObject::Connection>();
+    *connection = connect(
+        lastfm_, &LastFmService::completed, this,
+        [this, endpoint, label, connection](const QString& op, const QJsonObject& session,
+                                            const QString& error) {
+            if (op != QStringLiteral("session")) {
+                return;
+            }
+            disconnect(*connection);
+            if (!error.isEmpty()) {
+                if (label) {
+                    label->setText(error);
+                }
+                return;
+            }
+            const protocol::Json params{
+                {"api_key", session.value("api_key").toString().toStdString()},
+                {"secret", session.value("secret").toString().toStdString()},
+                {"session_key", session.value("session_key").toString().toStdString()},
+                {"user", session.value("user").toString().toStdString()}};
+            auto* watcher = new QFutureWatcher<QString>(this);
+            connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, label, endpoint] {
+                watcher->deleteLater();
+                if (label) {
+                    label->setText(watcher->result());
+                }
+                // The engines this window plays on may scrobble now: it
+                // stops crediting them itself.
+                for (auto* playback : {local_playback_, remote_playback_}) {
+                    if (playback != nullptr) {
+                        playback->refreshScrobbling();
+                    }
+                }
+            });
+            watcher->setFuture(QtConcurrent::run([endpoint, params] {
+                auto client = protocol::Client::connect(endpoint);
+                if (!client) {
+                    return QStringLiteral("Not reachable: %1")
+                        .arg(QString::fromStdString(client.error().message));
+                }
+                auto answer = (*client)->call("lastfm.set_session", params);
+                (*client)->close();
+                if (!answer) {
+                    return QStringLiteral("Not handed over: %1")
+                        .arg(QString::fromStdString(answer.error().message));
+                }
+                return QStringLiteral("Scrobbling as %1")
+                    .arg(QString::fromStdString(answer->value("user", std::string{})));
+            }));
+        });
+    lastfm_->execute(QStringLiteral("session"));
+}
+
 // ADR-0220: an interim, and named as one. Scrobbling belongs to whoever owns
 // playback, so its eventual home is the engine -- which would also scrobble
 // with no window open. It lives here for now because the engine knows paths
@@ -48,6 +142,12 @@ void BenchMainWindow::sampleLastFmFromEngine(const EnginePlayback::State& state)
         return;
     }
     lastfm_sample_time_ = lastfm_clock_.elapsed();
+    // An engine with its own Last.fm session scrobbles what it plays; this
+    // window crediting it too would count every listen twice.
+    if (transport_ != nullptr && transport_->scrobblesItself()) {
+        setProperty("trackknife-lastfm-sample", QStringLiteral("engine"));
+        return;
+    }
     // Wherever this window holds the entry: the list it was played from, Up
     // Next, or another list. Looked for only in the first, a track from Up
     // Next was credited with no artist and no title.
@@ -81,9 +181,12 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* page = new QWidget(parent);
     page->setObjectName(QStringLiteral("lastfm-settings"));
     auto* layout = new QVBoxLayout(page);
-    auto* note = new QLabel(QStringLiteral("Playback is scrobbled while Trackknife is open. "
-                                           "Account actions take effect immediately."),
-                            page);
+    auto* note = new QLabel(
+        QStringLiteral("Sign in here once. Hand the account to an engine below and it scrobbles "
+                       "what it plays itself, with Trackknife closed; until then, playback is "
+                       "scrobbled while Trackknife is open. Account actions take effect "
+                       "immediately."),
+        page);
     note->setWordWrap(true);
     layout->addWidget(note);
     auto* credentials = new QWidget(page);
@@ -167,6 +270,62 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     status->setObjectName(QStringLiteral("lastfm-status"));
     status->setWordWrap(true);
     layout->addWidget(status);
+
+    // ADR-0220: the engines scrobble what they play. One session serves them
+    // all; it is handed over, never read back.
+    auto* engines = new QGroupBox(QStringLiteral("Engines scrobble what they play"), page);
+    engines->setObjectName(QStringLiteral("lastfm-engines"));
+    auto* engines_form = new QFormLayout(engines);
+    const auto add_engine = [this, engines, engines_form](const QString& name,
+                                                          const protocol::Endpoint& endpoint,
+                                                          const QString& object_name) {
+        auto* row = new QHBoxLayout;
+        auto* state = new QLabel(QStringLiteral("Asking…"), engines);
+        state->setObjectName(object_name + QStringLiteral("-state"));
+        auto* use = new QPushButton(QStringLiteral("Use this account"), engines);
+        use->setObjectName(object_name + QStringLiteral("-use"));
+        row->addWidget(state, 1);
+        row->addWidget(use);
+        engines_form->addRow(name + QStringLiteral(":"), row);
+        askEngineLastFm(endpoint, state);
+        connect(use, &QPushButton::clicked, this,
+                [this, endpoint, state] { handOverLastFm(endpoint, state); });
+    };
+    if (catalogue_source_ && catalogue_source_->endpoint()) {
+        add_engine(QStringLiteral("This computer"), *catalogue_source_->endpoint(),
+                   QStringLiteral("lastfm-engine-local"));
+    }
+    if (remote_catalogue_source_ && remote_catalogue_source_->endpoint()) {
+        add_engine(remote_catalogue_source_->name(), *remote_catalogue_source_->endpoint(),
+                   QStringLiteral("lastfm-engine-remote"));
+    }
+    auto* another = new QPushButton(QStringLiteral("Another engine…"), engines);
+    another->setObjectName(QStringLiteral("lastfm-engine-another"));
+    engines_form->addRow(another);
+    connect(another, &QPushButton::clicked, this, [this, engines, add_engine] {
+        bool accepted = false;
+        const auto address = QInputDialog::getText(
+            engines, QStringLiteral("Another engine"),
+            QStringLiteral("Address of the engine (host:port):"), QLineEdit::Normal, {}, &accepted)
+                                 .trimmed();
+        if (!accepted || address.isEmpty()) {
+            return;
+        }
+        const auto password =
+            QInputDialog::getText(engines, QStringLiteral("Another engine"),
+                                  QStringLiteral("Its password, if it has one:"),
+                                  QLineEdit::Password, {}, &accepted);
+        if (!accepted) {
+            return;
+        }
+        const auto endpoint = protocol::Endpoint::parse(address.toStdString(), password.toStdString());
+        if (!endpoint) {
+            statusBar()->showMessage(QStringLiteral("Not an engine address: %1").arg(address), 6'000);
+            return;
+        }
+        add_engine(address, *endpoint, QStringLiteral("lastfm-engine-other"));
+    });
+    layout->addWidget(engines);
     layout->addStretch();
     auto send = [this, status, page](const QString& op, const QStringList& args = QStringList{}) {
         if (op == QStringLiteral("begin") || op == QStringLiteral("finish"))

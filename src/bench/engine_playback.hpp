@@ -117,6 +117,11 @@ class EnginePlayback final : public QObject {
     // engine reports may predate them -- a queue without the rows just
     // added -- and is no reason to think the engine's queue has drifted.
     [[nodiscard]] bool settling() const noexcept { return in_flight_.load() > 0; }
+    // Whether the engine scrobbles what it plays itself -- it has a Last.fm
+    // session (lastfm.status). The window then does not, or a listen would
+    // count twice. Asked on connecting, and again by refreshScrobbling().
+    [[nodiscard]] bool scrobblesItself() const noexcept { return engine_scrobbles_.load(); }
+    void refreshScrobbling();
 
     // Hands the engine a queue without starting anything: an edit to the list
     // that is playing, rather than a new thing to play.
@@ -208,6 +213,7 @@ class EnginePlayback final : public QObject {
     mutable std::mutex mutex_;
     State state_;
     std::atomic<int> in_flight_{0};
+    std::atomic_bool engine_scrobbles_{false};
 };
 
 } // namespace trackknife::bench

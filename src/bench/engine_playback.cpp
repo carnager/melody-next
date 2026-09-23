@@ -87,6 +87,10 @@ bool EnginePlayback::open() {
     if (auto answer = client_->call("outputs.list")) {
         adoptOutputs(*answer);
     }
+    engine_scrobbles_.store(false);
+    if (auto answer = client_->call("lastfm.status")) {
+        engine_scrobbles_.store(answer->value("enabled", false));
+    }
     return true;
 }
 
@@ -282,6 +286,21 @@ void EnginePlayback::adoptOutputs(const protocol::Json& payload) {
     state_.outputs = std::move(outputs);
 }
 
+void EnginePlayback::refreshScrobbling() {
+    if (!client_) {
+        return;
+    }
+    const QPointer self{this};
+    static_cast<void>(QtConcurrent::run(&pool_, [self, this] {
+        if (!self || client_ == nullptr) {
+            return;
+        }
+        if (auto answer = client_->call("lastfm.status")) {
+            engine_scrobbles_.store(answer->value("enabled", false));
+        }
+    }));
+}
+
 void EnginePlayback::selectOutput(const std::string& id) {
     if (!client_) {
         return;
@@ -402,6 +421,10 @@ protocol::Json EnginePlayback::entryJson(const LocalTrackRow& row,
     // ADR-0221: the row's own identity, so the engine's queue and this
     // model agree about which entry is which with no second mapping.
     item["entry"] = row.entry_id.to_string();
+    // What a scrobble names for a file outside the engine's library.
+    if (!row.title.empty()) {
+        item["title"] = row.title;
+    }
     if (row.duration_ms) {
         item["duration_ms"] = *row.duration_ms;
     }

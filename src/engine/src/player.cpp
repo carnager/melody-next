@@ -249,6 +249,12 @@ core::Result<void> Player::start_locked(const std::size_t row, const bool from_r
     return start_entry_locked(queue_[row], from_request);
 }
 
+std::optional<QueueEntry> Player::entry(const core::StableId& entry_id) const {
+    const std::lock_guard guard{mutex_};
+    const auto* found = find_locked(entry_id);
+    return found != nullptr ? std::optional{*found} : std::nullopt;
+}
+
 const QueueEntry* Player::find_locked(const core::StableId& entry_id) const {
     if (entry_id.is_nil()) {
         return nullptr;

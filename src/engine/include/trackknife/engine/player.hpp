@@ -39,6 +39,9 @@ struct QueueEntry final {
     // track belongs to is a tagging decision the client has already made
     // (album artist falling back to artist, and so on).
     audio::AlbumRowKey group;
+    // The track's title, as the client knows it -- with the group's artist,
+    // what a scrobble names for a file the engine's library does not have.
+    std::string title;
     // ADR-0139/0141: the explicit playback override, when the client has one.
     // The decoder's own tags apply otherwise and need not be sent -- the
     // engine opens the file and reads them for itself. What it cannot know is
@@ -74,6 +77,8 @@ class Player final {
     // to whatever now occupies its row.
     void replace_queue(std::vector<QueueEntry> entries);
     [[nodiscard]] std::vector<QueueEntry> queue() const;
+    // An entry the player holds, in the queue or among the asks.
+    [[nodiscard]] std::optional<QueueEntry> entry(const core::StableId& entry_id) const;
 
     // Explicit asks, which outrank the queue's own order. ADR-0220 calls this
     // up-next; the workspace has had it locally since ADR-0196 and it has to

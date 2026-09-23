@@ -333,6 +333,12 @@ add_test(
 )
 
 # ADR-0228: an engine playing on an output agent, both real, in one process.
+add_executable(trackknife_engine_lastfm_tests engine_lastfm_test.cpp)
+target_link_libraries(trackknife_engine_lastfm_tests PRIVATE Trackknife::Engine
+    trackknife_project_options trackknife_project_warnings)
+add_test(NAME engine-lastfm COMMAND trackknife_engine_lastfm_tests)
+set_tests_properties(engine-lastfm PROPERTIES TIMEOUT 60)
+
 add_executable(trackknife_output_agent_tests output_agent_test.cpp)
 target_link_libraries(
     trackknife_output_agent_tests

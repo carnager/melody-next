@@ -136,6 +136,7 @@ void BenchMainWindow::initializePersistence() {
         // ADR-0227: the remote engine too, after the lists for the same
         // reason -- its tab may already be among them.
         connectRemoteEngine();
+        applyLocalLibraryVisibility();
         if (error.isEmpty()) {
             local_library_ = new LocalLibraryPanel(*catalogue_source_, source_stack_);
             connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,
@@ -1108,6 +1109,29 @@ void BenchMainWindow::renewOutdatedLocalEngine() {
                              8'000);
 }
 
+bool BenchMainWindow::localLibraryShown() const {
+    return QSettings{}.value(QLatin1String(SettingsDialog::library_show_local_key), true).toBool();
+}
+
+void BenchMainWindow::applyLocalLibraryVisibility() {
+    if (local_source_tabs_ == nullptr) {
+        return;
+    }
+    constexpr int library_tab = 1;
+    const bool shown = localLibraryShown();
+    local_source_tabs_->setTabVisible(library_tab, shown);
+    if (!shown && local_source_tabs_->currentIndex() == library_tab) {
+        // The remote's library in its place, when there is one.
+        int replacement = 0;
+        for (int index = 0; index < local_source_tabs_->count(); ++index) {
+            if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+                replacement = index;
+            }
+        }
+        local_source_tabs_->setCurrentIndex(replacement);
+    }
+}
+
 void BenchMainWindow::quitAndStopEngine() {
     // Closing the window leaves the music playing; quitting stops it. After
     // the close, so a close that was cancelled leaves it running.
@@ -1534,7 +1558,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
                                                                 : QStringLiteral("Locate artist"));
             locate->setObjectName(album ? QStringLiteral("action-local-locate-album")
                                         : QStringLiteral("action-local-locate-artist"));
-            locate->setEnabled(local_library_ != nullptr);
+            locate->setEnabled(local_library_ != nullptr && localLibraryShown());
             connect(locate, &QAction::triggered, this, [this, path, album] {
                 if (local_library_ == nullptr)
                     return;

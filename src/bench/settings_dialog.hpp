@@ -77,6 +77,9 @@ class SettingsDialog final : public QDialog {
     static constexpr auto library_remote_folder_key = "library/remote-folder";
     static constexpr auto library_remote_mount_key = "library/remote-mount";
     // ADR-0226/0228: how this computer's engine is shared on the network.
+    // Whether this computer's library has a tab: someone whose music is all
+    // on the remote engine may not want it.
+    static constexpr auto library_show_local_key = "library/show-local";
     static constexpr auto engine_share_key = "engine/share";
     static constexpr auto engine_listen_key = "engine/listen";
     static constexpr auto engine_listen_default = "0.0.0.0:6600";
@@ -113,6 +116,7 @@ class SettingsDialog final : public QDialog {
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
     QCheckBox* engine_share_{nullptr};
+    QCheckBox* show_local_library_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};
     QLineEdit* engine_password_{nullptr};

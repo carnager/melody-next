@@ -4429,6 +4429,20 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
     QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
+    // Someone whose music is all on the remote can hide this computer's
+    // library; its tab goes, and the remote's stays in front.
+    {
+        const auto library_tab = 1;
+        QVERIFY(sources->isTabVisible(library_tab));
+        sources->setCurrentIndex(library_tab);
+        QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+        window.applyLocalLibraryVisibility();
+        QVERIFY(!sources->isTabVisible(library_tab));
+        QCOMPARE(sources->tabData(sources->currentIndex()).toString(), QStringLiteral("remote"));
+        QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
+        window.applyLocalLibraryVisibility();
+        QVERIFY(sources->isTabVisible(library_tab));
+    }
     // Named by what the engine calls itself -- here its machine's name, as
     // it was started without one -- rather than by its socket or address.
     QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());

@@ -324,6 +324,9 @@ class BenchMainWindow final : public QMainWindow {
     // updated one keeps running the old program until it is restarted --
     // done here, at once when nothing plays, else when playback stops.
     void renewOutdatedLocalEngine();
+    // Shows or hides this computer's library tab, as Settings says.
+    void applyLocalLibraryVisibility();
+    [[nodiscard]] bool localLibraryShown() const;
     bool engine_renewal_pending_{false};
     // Quit, as opposed to closing the window: this computer's engine stops
     // too, instead of playing on.

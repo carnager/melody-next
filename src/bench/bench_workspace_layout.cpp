@@ -1060,6 +1060,7 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             }
         }
     });
+    connect(dialog, &QDialog::accepted, this, [this] { applyLocalLibraryVisibility(); });
     connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
         // ADR-0226: this computer's engine runs apart from the window, so a
         // change to how it is shared means starting it again.

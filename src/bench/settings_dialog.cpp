@@ -275,6 +275,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     // agents -- the bedside speaker -- can play what it plays.
     auto* sharing = new QGroupBox(QStringLiteral("This computer's engine"), engine);
     auto* sharing_form = new QFormLayout(sharing);
+    show_local_library_ = new QCheckBox(QStringLiteral("Show this computer's library"), sharing);
+    show_local_library_->setObjectName(QStringLiteral("bench-settings-show-local-library"));
+    show_local_library_->setToolTip(QStringLiteral(
+        "Hide it when all your music is in the remote engine's library. Files on this computer "
+        "still open and play here."));
+    show_local_library_->setChecked(
+        settings.value(QLatin1String(library_show_local_key), true).toBool());
+    sharing_form->addRow(show_local_library_);
     engine_share_ = new QCheckBox(QStringLiteral("Share on the network"), sharing);
     engine_share_->setObjectName(QStringLiteral("bench-settings-engine-share"));
     engine_share_->setToolTip(QStringLiteral(
@@ -681,6 +689,7 @@ void SettingsDialog::save() {
     settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
     settings.setValue(QLatin1String(library_remote_folder_key), remote_folder_->text().trimmed());
     settings.setValue(QLatin1String(library_remote_mount_key), remote_mount_->text().trimmed());
+    settings.setValue(QLatin1String(library_show_local_key), show_local_library_->isChecked());
     settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
     settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());
     settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());

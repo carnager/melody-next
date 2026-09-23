@@ -17,6 +17,7 @@
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -1159,7 +1160,10 @@ void LocalLibraryPanel::showFolders() {
     }
     auto* dialog = new QDialog(this);
     dialog->setObjectName(QStringLiteral("local-library-folders-dialog"));
-    dialog->setWindowTitle(tr("Local library folders"));
+    dialog->setWindowTitle(catalogues_ != nullptr &&
+                                   catalogues_->role() == CatalogueSource::Role::remote
+                               ? tr("Library folders on %1").arg(catalogues_->name())
+                               : tr("Local library folders"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->resize(560, 320);
     folders_dialog_ = dialog;
@@ -1176,9 +1180,16 @@ QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
     widget->setObjectName(QStringLiteral("local-library-folders-settings"));
     folders_widget_ = widget;
     auto* layout = new QVBoxLayout(widget);
+    const bool remote =
+        catalogues_ != nullptr && catalogues_->role() == CatalogueSource::Role::remote;
     auto* explanation = new QLabel(
-        tr("Choose the folders to browse and search as your local music library. "
-           "Folder changes are saved immediately. Removing a folder leaves its files untouched. "),
+        remote ? tr("Folders on %1 for its engine to index. Give each path as that machine "
+                    "sees it. Folder changes are saved immediately. Removing a folder leaves its "
+                    "files untouched.")
+                     .arg(catalogues_->name())
+               : tr("Choose the folders to browse and search as your local music library. "
+                    "Folder changes are saved immediately. Removing a folder leaves its files "
+                    "untouched. "),
         widget);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
@@ -1202,6 +1213,21 @@ QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
     connect(roots_list_, &QListWidget::currentRowChanged, remove,
             [remove](int row) { remove->setEnabled(row >= 0); });
     connect(add, &QPushButton::clicked, this, [this] {
+        if (catalogues_ != nullptr && catalogues_->role() == CatalogueSource::Role::remote) {
+            // ADR-0227: a folder on the remote machine cannot be browsed from
+            // here yet -- this computer's file dialog would offer this
+            // computer's folders. Until the engine can list its own, the path
+            // is typed as that machine sees it, and the engine checks it.
+            bool accepted = false;
+            const auto path = QInputDialog::getText(
+                folders_widget_, tr("Add music folder"),
+                tr("Folder on %1, as that machine sees it:").arg(catalogues_->name()),
+                QLineEdit::Normal, {}, &accepted);
+            if (accepted && !path.trimmed().isEmpty()) {
+                addRoot(QFile::encodeName(path.trimmed()).toStdString());
+            }
+            return;
+        }
         const auto path =
             QFileDialog::getExistingDirectory(folders_widget_, tr("Add music folder"));
         if (!path.isEmpty()) {

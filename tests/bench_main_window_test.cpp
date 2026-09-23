@@ -4419,12 +4419,31 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QVERIFY(sources != nullptr);
     QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
 
+    // A folder is added to the remote's library by its path there: this
+    // computer's file dialog would offer this computer's folders.
+    {
+        QWidget host;
+        auto* folders = window.remote_library_->createFoldersWidget(&host);
+        auto* add = folders->findChild<QPushButton*>(QStringLiteral("local-library-folder-add"));
+        QVERIFY(add != nullptr);
+        QTimer::singleShot(0, [music] {
+            auto* prompt = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            if (prompt != nullptr) {
+                prompt->setTextValue(music);
+                prompt->accept();
+            }
+        });
+        add->click();
+        QTRY_VERIFY([&] {
+            const auto roots = window.remote_catalogue_source_->open()->roots();
+            return roots && roots->size() == 1U &&
+                   roots->front().raw_path == QFile::encodeName(music).toStdString();
+        }());
+    }
     // The remote library fills the remote tab, from the remote's index.
     {
-        auto catalogue = window.remote_catalogue_source_->open();
-        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
-        QVERIFY(catalogue->scan({}, progress).has_value());
+        QVERIFY(window.remote_catalogue_source_->open()->scan({}, progress).has_value());
     }
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;

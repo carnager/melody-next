@@ -212,7 +212,10 @@ roles, per-file rows, archive browsing, and problems. Cover settings opens the
 Covers settings page.
 
 Settings → Covers chooses embedding, a folder image, or both. The folder name's
-extension follows the input (`.jpg` or `.png`), without recompression. Apply
+extension follows the image written (`.jpg` or `.png`). Separate longest-edge
+limits for the embedded cover and the folder image (ADR-0225, default none)
+scale a larger new cover down to JPEG, or PNG when it has transparency, each
+from the original. A cover within its limit is written without recompression. Apply
 reviews exact folder destinations and create/replace decisions before Save.
 Existing images retain recovery backups; different images targeting one shared
 folder are blocked. Folder-only front additions do not require embedded-write

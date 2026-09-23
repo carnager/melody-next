@@ -2999,6 +2999,120 @@ void folder_cover_policy_publication_and_recovery(const std::filesystem::path& f
     CHECK(!operations::plan_artwork_storage({intent, second}, policy));
 }
 
+// Size limits: each destination gets its own conversion of the original, the
+// plan carries it, and the commit writes it. The fitter here pads the donor
+// with trailing JPEG data, one pad per edge, so each conversion is a distinct
+// valid image that says which limit made it.
+void cover_size_limits_convert_each_destination(const std::filesystem::path& fixtures) {
+    TemporaryDirectory directory;
+    const auto donor =
+        materialize(fixtures, "external-blue-jpeg.b64", directory.path() / "donor.jpg");
+    const auto donor_image = metadata::read_artwork_image_file(donor.native());
+    CHECK(donor_image && donor_image->width && *donor_image->width > 2U);
+    if (!donor_image)
+        return;
+    std::vector<std::uint32_t> calls;
+    const operations::ArtworkImageFitter fitter =
+        [&](const metadata::ArtworkImageFile& image, const std::uint32_t edge,
+            const core::CancellationToken&) -> core::Result<metadata::ArtworkImageFile> {
+        calls.push_back(edge);
+        CHECK(image.content_fingerprint == donor_image->content_fingerprint);
+        auto bytes = read_bytes(donor);
+        bytes.insert(bytes.end(), edge, 0U);
+        const auto path = directory.path() / ("fitted-" + std::to_string(edge) + ".jpg");
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        out.close();
+        return metadata::read_artwork_image_file(path.native());
+    };
+    const auto fitted = [&](const std::uint32_t edge) {
+        return metadata::read_artwork_image_file(
+                   (directory.path() / ("fitted-" + std::to_string(edge) + ".jpg")).native())
+            ->content_fingerprint;
+    };
+    const auto intent_for = [&](const std::string& name) {
+        const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / name);
+        return metadata::ArtworkWritePlanIntent{
+            .occurrence_index = 0,
+            .raw_media_path = media.native(),
+            .expected_media_revision = *core::observe_local_source_revision(media.native()),
+            .target_ordinal = 0,
+            .expected_target_fingerprint = {},
+            .kind = metadata::ArtworkWritePlanIntentKind::add,
+            .replacement_raw_path = donor.native(),
+            .added_role = metadata::ArtworkRole::front,
+            .added_description = {},
+            .replacement_embedded_source = std::nullopt};
+    };
+    const auto intent = intent_for("track.flac");
+    metadata::ArtworkStoragePolicy policy;
+    policy.write_folder_image = true;
+
+    // A limit with nothing to convert with is refused, not ignored.
+    policy.max_embedded_edge = 1U;
+    CHECK(!operations::plan_artwork_storage({intent}, policy));
+
+    // Only the embedded copy is limited: the folder keeps the original.
+    auto plan = operations::plan_artwork_storage({intent}, policy, {}, fitter);
+    CHECK(plan && plan->ready() && calls == std::vector<std::uint32_t>{1U});
+    if (plan && plan->ready()) {
+        const auto& source = plan->sources.front();
+        CHECK(source.change.replacement->content_fingerprint == fitted(1U));
+        CHECK(source.folder_image &&
+              source.folder_image->image.content_fingerprint == donor_image->content_fingerprint);
+    }
+
+    // Both limited: each from the original, one conversion per input however
+    // many files share it.
+    calls.clear();
+    policy.max_folder_edge = 2U;
+    const auto second = intent_for("second.flac");
+    plan = operations::plan_artwork_storage({intent, second}, policy, {}, fitter);
+    CHECK(plan && plan->ready() && (calls == std::vector<std::uint32_t>{1U, 2U}));
+    auto journal = open_journal(directory, "limits.sqlite3");
+    if (plan && plan->ready() && journal) {
+        for (const auto& source : plan->sources) {
+            CHECK(source.change.replacement->content_fingerprint == fitted(1U));
+            CHECK(source.folder_image &&
+                  source.folder_image->image.content_fingerprint == fitted(2U));
+        }
+        const auto saved = operations::commit_artwork_source(plan->sources.front(), *journal,
+                                                             successful_dependent_commit);
+        CHECK(saved.has_value());
+        CHECK(read_bytes(directory.path() / "cover.jpg") ==
+              read_bytes(directory.path() / "fitted-2.jpg"));
+        const auto inventory =
+            metadata::read_local_artwork_inventory(plan->sources.front().raw_media_path);
+        CHECK(inventory && std::ranges::any_of(inventory->items, [&](const auto& item) {
+                  return item.provenance == metadata::ArtworkProvenance::embedded &&
+                         item.content_fingerprint == fitted(1U);
+              }));
+    }
+
+    // Folder only: the plan carries the folder's conversion itself.
+    const auto third = intent_for("third.flac");
+    calls.clear();
+    policy.embed = false;
+    policy.folder_image_name = "folder.jpg";
+    plan = operations::plan_artwork_storage({third}, policy, {}, fitter);
+    CHECK(plan && plan->ready() && calls == std::vector<std::uint32_t>{2U});
+    if (plan && plan->ready())
+        CHECK(plan->sources.front().folder_image &&
+              plan->sources.front().folder_image->image.content_fingerprint == fitted(2U));
+
+    // A cover within its limits is not touched.
+    calls.clear();
+    policy.embed = true;
+    policy.max_embedded_edge = 100'000U;
+    policy.max_folder_edge = 100'000U;
+    plan = operations::plan_artwork_storage({third}, policy, {}, fitter);
+    CHECK(plan && plan->ready() && calls.empty());
+    if (plan && plan->ready())
+        CHECK(plan->sources.front().change.replacement->content_fingerprint ==
+              donor_image->content_fingerprint);
+}
+
 } // namespace
 
 int main(const int argc, char** argv) {
@@ -3007,6 +3121,7 @@ int main(const int argc, char** argv) {
         const std::filesystem::path fixture_directory{argv[1]};
         damaged_unrelated_journal_does_not_block_cover_save(fixture_directory);
         folder_cover_policy_publication_and_recovery(fixture_directory);
+        cover_size_limits_convert_each_destination(fixture_directory);
         commits_atomically_and_retains_verified_backup(fixture_directory);
         rolls_back_dependent_and_journal_failures(fixture_directory);
         preserves_ambiguous_external_changes_for_reconciliation(fixture_directory);

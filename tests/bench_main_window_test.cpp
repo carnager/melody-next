@@ -6486,15 +6486,27 @@ void BenchMainWindowTest::coverPolicyRoundTrip() {
     auto* folder = dialog.findChild<QCheckBox*>(QStringLiteral("bench-artwork-folder-image"));
     auto* name = dialog.findChild<QComboBox*>(QStringLiteral("bench-artwork-folder-image-name"));
     auto* buttons = dialog.findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"));
-    QVERIFY(embed && folder && name && buttons);
+    auto* embedded_edge =
+        dialog.findChild<QSpinBox*>(QStringLiteral("bench-artwork-max-embedded-edge"));
+    auto* folder_edge =
+        dialog.findChild<QSpinBox*>(QStringLiteral("bench-artwork-max-folder-edge"));
+    QVERIFY(embed && folder && name && buttons && embedded_edge && folder_edge);
     QVERIFY(embed->isChecked());
     QVERIFY(!folder->isChecked());
+    // No limit until one is chosen: existing behaviour is unchanged.
+    QCOMPARE(embedded_edge->value(), 0);
+    QCOMPARE(embedded_edge->text(), QStringLiteral("No limit"));
+    QCOMPARE(SettingsDialog::artworkPolicy().max_embedded_edge, 0U);
     embed->setChecked(false);
     folder->setChecked(true);
     name->setCurrentText(QStringLiteral("front.jpg"));
+    embedded_edge->setValue(1000);
+    folder_edge->setValue(3000);
     buttons->button(QDialogButtonBox::Save)->click();
     const auto policy = SettingsDialog::artworkPolicy();
     QVERIFY(!policy.embed && policy.write_folder_image);
+    QCOMPARE(policy.max_embedded_edge, 1000U);
+    QCOMPARE(policy.max_folder_edge, 3000U);
     QCOMPARE(policy.folder_image_name, std::string{"front.jpg"});
     QCOMPARE(policy.fetch_source, std::string{"coverartarchive"});
     SettingsDialog reopened;
@@ -6504,6 +6516,9 @@ void BenchMainWindowTest::coverPolicyRoundTrip() {
     QCOMPARE(reopened.findChild<QComboBox*>(QStringLiteral("bench-artwork-folder-image-name"))
                  ->currentText(),
              QStringLiteral("front.jpg"));
+    QCOMPARE(
+        reopened.findChild<QSpinBox*>(QStringLiteral("bench-artwork-max-folder-edge"))->value(),
+        3000);
     QVERIFY(!QSettings{}.value(QStringLiteral("convert/embed-artwork")).toBool());
 }
 

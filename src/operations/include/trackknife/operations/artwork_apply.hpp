@@ -17,11 +17,25 @@
 
 namespace trackknife::operations {
 
-// Captures policy destinations and detects conflicting images for a shared folder.
+// Converts an image to one whose longer edge is at most max_edge, written as a
+// file the plan can reference, and inspected like any replacement input. It
+// may return the input when it already fits. Decoding lives with the caller,
+// so this layer stays free of an image library.
+using ArtworkImageFitter = std::function<core::Result<metadata::ArtworkImageFile>(
+    const metadata::ArtworkImageFile& image, std::uint32_t max_edge,
+    const core::CancellationToken& cancellation)>;
+
+// A cover over a size limit may be larger than a replacement input is allowed
+// to be: shrinking it is the point.
+inline constexpr std::uint64_t maximum_fittable_artwork_bytes = 64U * 1024U * 1024U;
+
+// Captures policy destinations and detects conflicting images for a shared
+// folder. A policy with a size limit needs a fitter.
 [[nodiscard]] core::Result<metadata::ArtworkWritePlan>
 plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
                      const metadata::ArtworkStoragePolicy& policy,
-                     const core::CancellationToken& cancellation = {});
+                     const core::CancellationToken& cancellation = {},
+                     const ArtworkImageFitter& fitter = {});
 
 enum class ArtworkApplySourceState : std::uint8_t {
     pending,

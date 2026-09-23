@@ -100,6 +100,11 @@ struct ArtworkStoragePolicy {
     bool write_folder_image{false};
     std::string folder_image_name{"cover.jpg"};
     std::string fetch_source{"coverartarchive"};
+    // Longest edge, in pixels, of a newly written cover; 0 means no limit. A
+    // larger front image is converted before it is embedded or saved, each
+    // destination from the original rather than from the other's copy.
+    std::uint32_t max_embedded_edge{0U};
+    std::uint32_t max_folder_edge{0U};
     friend bool operator==(const ArtworkStoragePolicy&, const ArtworkStoragePolicy&) = default;
 };
 

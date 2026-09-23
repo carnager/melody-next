@@ -72,6 +72,9 @@ class SettingsDialog final : public QDialog {
     static constexpr auto artwork_folder_image_key = "artwork/write-folder-image";
     static constexpr auto artwork_folder_image_name_key = "artwork/folder-image-name";
     static constexpr auto artwork_fetch_source_key = "artwork/fetch-source";
+    // Longest edge of a newly written cover, in pixels; 0 is no limit.
+    static constexpr auto artwork_max_embedded_edge_key = "artwork/max-embedded-edge";
+    static constexpr auto artwork_max_folder_edge_key = "artwork/max-folder-edge";
 
   private:
     void save();
@@ -98,6 +101,8 @@ class SettingsDialog final : public QDialog {
     QCheckBox* artwork_folder_image_{nullptr};
     QComboBox* artwork_folder_image_name_{nullptr};
     QComboBox* artwork_fetch_source_{nullptr};
+    QSpinBox* artwork_max_embedded_edge_{nullptr};
+    QSpinBox* artwork_max_folder_edge_{nullptr};
 };
 
 } // namespace trackknife::bench

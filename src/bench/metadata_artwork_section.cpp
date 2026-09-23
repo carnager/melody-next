@@ -2,6 +2,7 @@
 
 #include "bench/metadata_artwork_section.hpp"
 
+#include "bench/artwork_fitting.hpp"
 #include "bench/cover_review.hpp"
 #include "bench/cover_thumbnail.hpp"
 #include "bench/settings_dialog.hpp"
@@ -592,8 +593,7 @@ void MetadataArtworkSection::pasteFrontCover(const QImage& image) {
     if (!isEnabled() || isBusy() || image.isNull() ||
         static_cast<qint64>(image.width()) * image.height() > ui::maximum_artwork_pixels)
         return;
-    const auto directory = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
-                           QStringLiteral("/cover-drafts");
+    const auto directory = coverDraftDirectory();
     cover_fetch_running_ = true;
     emit operationRunningChanged(true);
     updateActionButtons();
@@ -1865,7 +1865,7 @@ void MetadataArtworkSection::savePendingChanges() {
     plan_watcher_.setFuture(
         QtConcurrent::run([intents = std::move(intents), cancellation, policy]() mutable {
             return std::make_shared<core::Result<metadata::ArtworkWritePlan>>(
-                operations::plan_artwork_storage(intents, policy, cancellation));
+                operations::plan_artwork_storage(intents, policy, cancellation, artworkFitter()));
         }));
 }
 

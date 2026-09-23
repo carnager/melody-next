@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 #include <ranges>
+#include <string>
 #include <sys/stat.h>
 #include <thread>
 #include <unordered_set>
@@ -32,13 +33,104 @@ constexpr std::size_t maximum_apply_parallelism = 8U;
     return result;
 }
 
+[[nodiscard]] bool exceeds(const metadata::ArtworkImageFile& image, const std::uint32_t edge) {
+    // Unknown dimensions go to the fitter, which decodes and knows.
+    return edge != 0U &&
+           (!image.width || !image.height || std::max(*image.width, *image.height) > edge);
+}
+
+struct FittedCovers {
+    std::vector<metadata::ArtworkWritePlanIntent> intents;
+    // The image the plan carries as a replacement, and the folder image to
+    // write instead of it: each destination is converted from the original,
+    // so a small embedded copy never becomes a blurry folder image.
+    std::vector<std::pair<core::ContentFingerprint, metadata::ArtworkImageFile>> folder_images;
+};
+
+// Points every replacement over a size limit at a converted copy, before the
+// plan inspects it. Converting here rather than after planning is what lets a
+// cover over the replacement byte limit through: shrinking it is the point.
+[[nodiscard]] core::Result<FittedCovers>
+fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
+           const metadata::ArtworkStoragePolicy& policy,
+           const core::CancellationToken& cancellation, const ArtworkImageFitter& fitter) {
+    FittedCovers fitted{.intents = intents, .folder_images = {}};
+    const auto embed_edge = policy.embed ? policy.max_embedded_edge : 0U;
+    const auto folder_edge = policy.write_folder_image ? policy.max_folder_edge : 0U;
+    if (embed_edge == 0U && folder_edge == 0U)
+        return fitted;
+    if (!fitter)
+        return std::unexpected(apply_error(core::ErrorCode::invalid_argument,
+                                           "Cover size limits need an image converter"));
+    // One conversion per distinct input, however many files it goes into.
+    std::map<std::string, std::optional<metadata::ArtworkImageFile>> carried_by_input;
+    for (auto& intent : fitted.intents) {
+        if ((intent.kind != metadata::ArtworkWritePlanIntentKind::add &&
+             intent.kind != metadata::ArtworkWritePlanIntentKind::replace) ||
+            (!intent.replacement_raw_path && !intent.replacement_embedded_source))
+            continue;
+        const auto& donor = intent.replacement_embedded_source;
+        const auto key = donor
+                             ? donor->raw_source_path + '\0' + std::to_string(donor->source_ordinal)
+                             : *intent.replacement_raw_path;
+        auto found = carried_by_input.find(key);
+        if (found == carried_by_input.end()) {
+            if (cancellation.is_cancellation_requested())
+                return std::unexpected(
+                    apply_error(core::ErrorCode::cancelled, "Cover review cancelled"));
+            core::Result<metadata::ArtworkImageFile> source =
+                donor ? core::Result<metadata::ArtworkImageFile>{metadata::ArtworkImageFile{
+                            .raw_path = donor->raw_source_path,
+                            .source_revision = donor->source_revision,
+                            .mime_type = donor->mime_type,
+                            .width = donor->width,
+                            .height = donor->height,
+                            .byte_size = donor->byte_size,
+                            .content_fingerprint = donor->content_fingerprint,
+                            .embedded_source_ordinal = donor->source_ordinal}}
+                      : metadata::read_artwork_image_file(*intent.replacement_raw_path,
+                                                          maximum_fittable_artwork_bytes,
+                                                          cancellation);
+            if (!source)
+                return std::unexpected(source.error());
+            const auto fit =
+                [&](const std::uint32_t edge) -> core::Result<metadata::ArtworkImageFile> {
+                if (!exceeds(*source, edge))
+                    return *source;
+                return fitter(*source, edge, cancellation);
+            };
+            auto carried = fit(policy.embed ? embed_edge : folder_edge);
+            if (!carried)
+                return std::unexpected(carried.error());
+            if (policy.embed && policy.write_folder_image) {
+                auto folder = fit(folder_edge);
+                if (!folder)
+                    return std::unexpected(folder.error());
+                if (folder->content_fingerprint != carried->content_fingerprint)
+                    fitted.folder_images.emplace_back(carried->content_fingerprint,
+                                                      std::move(*folder));
+            }
+            std::optional<metadata::ArtworkImageFile> changed;
+            if (carried->content_fingerprint != source->content_fingerprint)
+                changed = std::move(*carried);
+            found = carried_by_input.emplace(key, std::move(changed)).first;
+        }
+        if (found->second) {
+            intent.replacement_raw_path = found->second->raw_path;
+            intent.replacement_embedded_source = std::nullopt;
+        }
+    }
+    return fitted;
+}
+
 } // namespace
 
 core::Result<metadata::ArtworkWritePlan>
-plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
+plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& requested_intents,
                      const metadata::ArtworkStoragePolicy& policy,
-                     const core::CancellationToken& cancellation) {
-    if (intents.empty() || intents.size() > 100'000U)
+                     const core::CancellationToken& cancellation,
+                     const ArtworkImageFitter& fitter) {
+    if (requested_intents.empty() || requested_intents.size() > 100'000U)
         return std::unexpected(apply_error(core::ErrorCode::invalid_argument,
                                            "Cover review requires 1–100000 intents"));
     const auto& name = policy.folder_image_name;
@@ -50,6 +142,10 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intent
             core::ErrorCode::invalid_argument,
             "Choose embedding and/or a folder image with a plain filename in Cover settings"));
     }
+    auto fitted = fit_covers(requested_intents, policy, cancellation, fitter);
+    if (!fitted)
+        return std::unexpected(fitted.error());
+    const auto& intents = fitted->intents;
     core::Result<metadata::ArtworkWritePlan> plan = metadata::ArtworkWritePlan{};
     if (policy.embed) {
         plan = metadata::revalidate_artwork_write_plan(intents, cancellation);
@@ -159,21 +255,25 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intent
                 const auto role = change.original ? change.original->role : change.added_role;
                 if (!change.replacement || role != metadata::ArtworkRole::front)
                     continue;
+                auto image = *change.replacement;
+                const auto converted =
+                    std::ranges::find(fitted->folder_images, image.content_fingerprint,
+                                      [](const auto& entry) -> const auto& { return entry.first; });
+                if (converted != fitted->folder_images.end())
+                    image = converted->second;
                 auto filename = std::filesystem::path{name};
-                filename.replace_extension(change.replacement->mime_type == "image/png" ? ".png"
-                                                                                        : ".jpg");
+                filename.replace_extension(image.mime_type == "image/png" ? ".png" : ".jpg");
                 const auto destination =
                     (std::filesystem::path{source.raw_media_path}.parent_path() / filename)
                         .native();
                 const auto [found, inserted] =
-                    destinations.emplace(destination, change.replacement->content_fingerprint);
-                if (!inserted && found->second != change.replacement->content_fingerprint)
+                    destinations.emplace(destination, image.content_fingerprint);
+                if (!inserted && found->second != image.content_fingerprint)
                     return std::unexpected(apply_error(
                         core::ErrorCode::conflict,
                         "Different front covers target the same folder image", destination));
-                metadata::FolderImageWritePlan folder{.raw_path = destination,
-                                                      .image = *change.replacement,
-                                                      .original = std::nullopt};
+                metadata::FolderImageWritePlan folder{
+                    .raw_path = destination, .image = std::move(image), .original = std::nullopt};
                 struct stat status{};
                 if (::lstat(destination.c_str(), &status) == 0) {
                     if (!S_ISREG(status.st_mode) || status.st_nlink != 1)

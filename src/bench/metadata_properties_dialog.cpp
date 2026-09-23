@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_properties_dialog.hpp"
+#include "bench/artwork_fitting.hpp"
 #include "bench/cover_review.hpp"
 #include "bench/cover_thumbnail.hpp"
 #include "bench/file_scope_view.hpp"
@@ -2655,8 +2656,8 @@ void MetadataPropertiesDialog::startWritePlan() {
             }
 
             if (!artwork_intents.empty()) {
-                auto art =
-                    operations::plan_artwork_storage(artwork_intents, cover_policy, cancellation);
+                auto art = operations::plan_artwork_storage(artwork_intents, cover_policy,
+                                                            cancellation, artworkFitter());
                 if (!art) {
                     return std::make_shared<WritePlanResult>(std::unexpected(art.error()));
                 }

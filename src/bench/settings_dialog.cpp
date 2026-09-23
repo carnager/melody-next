@@ -27,6 +27,8 @@
 #include <QStyledItemDelegate>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <cstdint>
 #include <utility>
 
 namespace trackknife::bench {
@@ -361,11 +363,30 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     artwork_fetch_source_->addItem(QStringLiteral("Cover Art Archive (front)"),
                                    QStringLiteral("coverartarchive"));
     covers_form->addRow(QStringLiteral("Fetch covers from:"), artwork_fetch_source_);
+    const auto edge_box = [&](const char* key, const QString& name) {
+        auto* box = new QSpinBox(covers);
+        box->setObjectName(name);
+        box->setRange(0, 10'000);
+        box->setSingleStep(100);
+        box->setSuffix(QStringLiteral(" px"));
+        box->setSpecialValueText(QStringLiteral("No limit"));
+        box->setValue(settings.value(QLatin1String(key), 0).toInt());
+        return box;
+    };
+    artwork_max_embedded_edge_ =
+        edge_box(artwork_max_embedded_edge_key, QStringLiteral("bench-artwork-max-embedded-edge"));
+    covers_form->addRow(QStringLiteral("Largest embedded cover:"), artwork_max_embedded_edge_);
+    artwork_max_folder_edge_ =
+        edge_box(artwork_max_folder_edge_key, QStringLiteral("bench-artwork-max-folder-edge"));
+    covers_form->addRow(QStringLiteral("Largest folder image:"), artwork_max_folder_edge_);
     covers_layout->addLayout(covers_form);
     auto* covers_note = new QLabel(
-        QStringLiteral("Front covers use this storage policy on Apply. The filename extension "
-                       "follows the image format (.jpg or .png). Folder replacements are reviewed "
-                       "and retain recovery backups. Conversion has its own cover setting."),
+        QStringLiteral(
+            "Front covers use this storage policy on Apply. The filename extension "
+            "follows the image format (.jpg or .png). Folder replacements are reviewed "
+            "and retain recovery backups. A cover wider or taller than its limit is scaled "
+            "down and saved as JPEG (PNG if it has transparency) when it is written; "
+            "covers already in your files are left alone."),
         covers);
     covers_note->setWordWrap(true);
     covers_layout->addWidget(covers_note);
@@ -508,7 +529,11 @@ metadata::ArtworkStoragePolicy SettingsDialog::artworkPolicy() {
                                 .value(QLatin1String(artwork_fetch_source_key),
                                        QStringLiteral("coverartarchive"))
                                 .toString()
-                                .toStdString()};
+                                .toStdString(),
+            .max_embedded_edge = static_cast<std::uint32_t>(std::max(
+                0, settings.value(QLatin1String(artwork_max_embedded_edge_key), 0).toInt())),
+            .max_folder_edge = static_cast<std::uint32_t>(std::max(
+                0, settings.value(QLatin1String(artwork_max_folder_edge_key), 0).toInt()))};
 }
 
 void SettingsDialog::save() {
@@ -537,6 +562,10 @@ void SettingsDialog::save() {
                       artwork_folder_image_name_->currentText().trimmed());
     settings.setValue(QLatin1String(artwork_fetch_source_key),
                       artwork_fetch_source_->currentData().toString());
+    settings.setValue(QLatin1String(artwork_max_embedded_edge_key),
+                      artwork_max_embedded_edge_->value());
+    settings.setValue(QLatin1String(artwork_max_folder_edge_key),
+                      artwork_max_folder_edge_->value());
 }
 
 } // namespace trackknife::bench

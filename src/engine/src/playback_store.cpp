@@ -168,10 +168,11 @@ void PlaybackStore::start() {
     if (running_.exchange(true)) {
         return;
     }
+    pause_.reset();
     worker_ = std::thread{[this] {
         while (running_.load()) {
             persist();
-            std::this_thread::sleep_for(interval_);
+            static_cast<void>(pause_.wait(interval_));
         }
     }};
 }
@@ -180,6 +181,7 @@ void PlaybackStore::stop() {
     if (!running_.exchange(false)) {
         return;
     }
+    pause_.interrupt();
     if (worker_.joinable()) {
         worker_.join();
     }

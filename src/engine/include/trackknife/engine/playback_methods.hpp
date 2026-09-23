@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "trackknife/engine/interruptible_pause.hpp"
+
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/protocol/dispatch.hpp"
@@ -54,6 +56,7 @@ class PlaybackWatcher final {
     EventSink sink_;
     std::chrono::milliseconds interval_;
     std::atomic_bool running_{false};
+    InterruptiblePause pause_;
     std::thread worker_;
 };
 

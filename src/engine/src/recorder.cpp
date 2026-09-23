@@ -57,6 +57,7 @@ void Recorder::start() {
     if (running_.exchange(true)) {
         return;
     }
+    pause_.reset();
     worker_ = std::thread{[this] {
         // Monotonic for accounting, wall for timestamps: crediting listening
         // from wall time would gain or lose a track's worth whenever the
@@ -70,7 +71,7 @@ void Recorder::start() {
                                   std::chrono::system_clock::now().time_since_epoch())
                                   .count();
             drain(monotonic, wall);
-            std::this_thread::sleep_for(interval_);
+            static_cast<void>(pause_.wait(interval_));
         }
     }};
 }
@@ -79,6 +80,7 @@ void Recorder::stop() {
     if (!running_.exchange(false)) {
         return;
     }
+    pause_.interrupt();
     if (worker_.joinable()) {
         worker_.join();
     }

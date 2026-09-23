@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "trackknife/engine/interruptible_pause.hpp"
+
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -56,6 +58,7 @@ class PlaybackStore final {
     std::uint64_t written_revision_{0};
     bool written_anything_{false};
     std::atomic_bool running_{false};
+    InterruptiblePause pause_;
     std::thread worker_;
 };
 

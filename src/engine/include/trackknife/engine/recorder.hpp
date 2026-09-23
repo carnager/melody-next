@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "trackknife/engine/interruptible_pause.hpp"
+
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/workspace.hpp"
 
@@ -42,6 +44,7 @@ class Recorder final {
     Workspace* workspace_;
     std::chrono::milliseconds interval_;
     std::atomic_bool running_{false};
+    InterruptiblePause pause_;
     std::thread worker_;
 };
 

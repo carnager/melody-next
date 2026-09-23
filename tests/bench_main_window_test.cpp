@@ -901,6 +901,8 @@ void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
     QVERIFY(!window.menuBar()->isHidden());
     QCOMPARE(window.menuBar()->actions().size(), 4);
     QCOMPARE(device->toolButtonStyle(), Qt::ToolButtonIconOnly);
+    // Nothing to name, no chevron squeezed beside the icon.
+    QVERIFY(device->findChild<QLabel*>(QStringLiteral("bench-device-chevron"))->isHidden());
     QVERIFY(!device->icon().isNull());
     QVERIFY(device->menu() != nullptr);
     QCOMPARE(device->menu()->objectName(), QStringLiteral("bench-device-menu"));
@@ -4683,6 +4685,9 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
     QVERIFY(button != nullptr);
     // Music in another room is named where it can be seen.
     QCOMPARE(button->text(), QStringLiteral("bedside"));
+    // Named, the pill ends in a chevron: it opens a choice.
+    auto* chevron = button->findChild<QLabel*>(QStringLiteral("bench-device-chevron"));
+    QVERIFY(chevron != nullptr && chevron->isVisible());
     // And the menu says which list is which: speakers, then the chosen
     // speaker's devices -- in any style, not only those that draw sections.
     {
@@ -9189,12 +9194,18 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         auto* local_model = qobject_cast<LocalListModel*>(view->model());
         QVERIFY(local_model != nullptr);
         local_model->appendRows({std::move(singleton)});
-        QTRY_COMPARE(view->rowHeight(2), view->rowHeight(1));
+        // A lone track after an album: a gap above it, where its hairline goes.
+        QTRY_COMPARE(view->rowHeight(2),
+                     view->rowHeight(1) + ui::QueueItemDelegate::loose_run_gap);
         QImage singleton_cover{12, 12, QImage::Format_RGB32};
         singleton_cover.fill(Qt::red);
         local_model->setArtwork(local_model->groupKey(2), singleton_cover);
         QCoreApplication::processEvents();
-        const auto artwork_rect = view->visualRect(local_model->index(2, local_artwork_column));
+        // Its cover stands where an album track's number does, just before
+        // the title; the cover column stays empty.
+        QVERIFY(!view->isColumnHidden(local_track_number_column));
+        const auto artwork_rect =
+            view->visualRect(local_model->index(2, local_track_number_column));
         const auto artwork_render = view->viewport()->grab(artwork_rect).toImage();
         bool found_inline_cover = false;
         auto leftmost_cover_pixel = artwork_render.width();
@@ -9207,19 +9218,29 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
             }
         }
         QVERIFY(found_inline_cover);
-        QVERIFY(leftmost_cover_pixel >= artwork_render.width() / 2);
+        // Against the title side of the cell, as a number would be.
+        QVERIFY(leftmost_cover_pixel >= artwork_render.width() - 20 - 8);
 
         view->selectionModel()->select(local_model->index(2, 0),
                                        QItemSelectionModel::ClearAndSelect |
                                            QItemSelectionModel::Rows);
         QCoreApplication::processEvents();
-        const auto selected_artwork_render = view->viewport()->grab(artwork_rect).toImage();
-        QCOMPARE(selected_artwork_render, artwork_render);
+        const auto shows_cover = [](const QImage& render) {
+            for (int y = 0; y < render.height(); ++y) {
+                for (int x = 0; x < render.width(); ++x) {
+                    if (render.pixelColor(x, y) == QColor(Qt::red)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        // Selected or playing, the cover stays on top of the row's tint.
+        QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
         view->clearSelection();
         local_model->setCurrentSource(local_model->source(2), 2);
         QCoreApplication::processEvents();
-        const auto active_artwork_render = view->viewport()->grab(artwork_rect).toImage();
-        QCOMPARE(active_artwork_render, artwork_render);
+        QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
 
         plain->trigger();
         QVERIFY(plain->isChecked());

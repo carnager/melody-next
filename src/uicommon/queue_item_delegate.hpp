@@ -26,11 +26,21 @@ struct AlbumHeaderText {
 void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& palette,
                       const QFont& font, const AlbumHeaderText& text, bool separated);
 
+// The line between groups: the text colour, faint, so it reads as a line on
+// a dark theme and a light one alike.
+[[nodiscard]] QColor groupHairline(const QPalette& palette);
+
 class QueueItemDelegate final : public QStyledItemDelegate {
     Q_OBJECT
 
   public:
     static constexpr int album_header_height = 34;
+    // Space above a run of lone tracks that follows an album, where its
+    // hairline goes.
+    static constexpr int loose_run_gap = 10;
+    // Where a group's hairline is drawn, below the top of its header or gap,
+    // so it does not touch the row above.
+    static constexpr int hairline_offset = 5;
 
     explicit QueueItemDelegate(QObject* parent = nullptr);
 
@@ -43,6 +53,7 @@ class QueueItemDelegate final : public QStyledItemDelegate {
 
   private:
     [[nodiscard]] bool beginsAlbum(const QModelIndex& index) const;
+    [[nodiscard]] bool beginsLooseRun(const QModelIndex& index) const;
 };
 
 } // namespace trackknife::ui

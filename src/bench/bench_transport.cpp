@@ -42,6 +42,8 @@
 #include <QToolButton>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <cmath>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -464,21 +466,57 @@ void BenchMainWindow::buildTransport() {
 
     // Where the sound goes and what is waiting: pills, so they read as
     // places to click rather than as more labels.
-    const auto pill = QStringLiteral(
-        "QToolButton { border: 1px solid palette(mid); border-radius: 13px; padding: 0 8px; }"
-        "QToolButton:hover { border-color: palette(highlight); }"
-        "QToolButton:checked { border-color: palette(highlight); }"
-        "QToolButton::menu-indicator { image: none; width: 0; }");
+    // A shade off the header, with a soft edge -- from the palette, so a
+    // light theme gets the same relationship.
+    const auto shade = [this](const double amount) {
+        const auto from = palette().color(QPalette::Window);
+        const auto to = palette().color(QPalette::Text);
+        const auto mix = [amount](const int a, const int b) {
+            return static_cast<int>(std::lround(a + (b - a) * amount));
+        };
+        return QColor::fromRgb(mix(from.red(), to.red()), mix(from.green(), to.green()),
+                               mix(from.blue(), to.blue()))
+            .name();
+    };
+    const auto pill =
+        QStringLiteral(
+            "QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
+            " padding: 0 10px; }"
+            "QToolButton[chevron=\"true\"] { padding-right: 24px; }"
+            "QToolButton:hover { border-color: palette(highlight); }"
+            "QToolButton:pressed, QToolButton:checked { background: %2; }"
+            "QToolButton::menu-indicator { image: none; width: 0; }")
+            .arg(shade(0.06), shade(0.16));
+    auto pill_font = font();
+    pill_font.setPointSizeF(pill_font.pointSizeF() * 0.92);
     device_button_ = new QToolButton(header);
     device_button_->setObjectName(QStringLiteral("bench-device"));
-    device_button_->setIcon(QIcon::fromTheme(QStringLiteral("audio-speakers"),
-                                             style()->standardIcon(QStyle::SP_ComputerIcon)));
+    // The outline symbol, as the other header icons are drawn.
+    device_button_->setIcon(QIcon::fromTheme(
+        QStringLiteral("audio-speakers-symbolic"),
+        QIcon::fromTheme(QStringLiteral("audio-speakers"),
+                         style()->standardIcon(QStyle::SP_ComputerIcon))));
     device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
     device_button_->setFixedSize(34, 26);
-    device_button_->setIconSize(QSize{16, 16});
+    device_button_->setIconSize(QSize{14, 14});
+    device_button_->setFont(pill_font);
     device_button_->setPopupMode(QToolButton::InstantPopup);
     device_button_->setAccessibleName(QStringLiteral("Audio output device"));
     device_button_->setStyleSheet(pill);
+    // A chevron at the end says the pill opens a choice.
+    auto* device_layout = new QHBoxLayout(device_button_);
+    device_layout->setContentsMargins(0, 0, 9, 0);
+    device_layout->addStretch();
+    device_chevron_ = new QLabel(device_button_);
+    device_chevron_->setObjectName(QStringLiteral("bench-device-chevron"));
+    device_chevron_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    device_chevron_->setPixmap(
+        QIcon::fromTheme(QStringLiteral("pan-down-symbolic"),
+                         QIcon::fromTheme(QStringLiteral("arrow-down"),
+                                          style()->standardIcon(QStyle::SP_ArrowDown)))
+            .pixmap(QSize{10, 10}, devicePixelRatioF()));
+    device_chevron_->hide();
+    device_layout->addWidget(device_chevron_);
     device_menu_ = new QMenu(device_button_);
     device_menu_->setObjectName(QStringLiteral("bench-device-menu"));
     device_group_ = new QActionGroup(device_menu_);
@@ -493,11 +531,13 @@ void BenchMainWindow::buildTransport() {
     up_next_button_->setAcceptDrops(true);
     up_next_button_->installEventFilter(this);
     up_next_button_->setStyleSheet(pill);
+    up_next_button_->setFont(pill_font);
     // The count as a badge beside the words, shown only when something waits.
     auto* up_next_layout = new QHBoxLayout(up_next_button_);
     up_next_layout->setContentsMargins(11, 0, 7, 0);
     up_next_layout->setSpacing(6);
     auto* up_next_text = new QLabel(QStringLiteral("Up Next"), up_next_button_);
+    up_next_text->setFont(pill_font);
     up_next_text->setAttribute(Qt::WA_TransparentForMouseEvents);
     up_next_layout->addWidget(up_next_text);
     up_next_badge_ = new QLabel(up_next_button_);
@@ -1735,7 +1775,14 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     if (now && !now->online) {
         shown += QStringLiteral(" (offline)");
     }
-    if (shown.isEmpty()) {
+    const bool named = !shown.isEmpty();
+    if (device_button_->property("chevron").toBool() != named) {
+        device_button_->setProperty("chevron", named);
+        device_button_->style()->unpolish(device_button_);
+        device_button_->style()->polish(device_button_);
+    }
+    device_chevron_->setVisible(named);
+    if (!named) {
         device_button_->setToolButtonStyle(Qt::ToolButtonIconOnly);
         device_button_->setText({});
         device_button_->setFixedSize(34, 26);

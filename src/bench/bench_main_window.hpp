@@ -633,6 +633,7 @@ class BenchMainWindow final : public QMainWindow {
     QDockWidget* up_next_dock_{nullptr};
     QToolButton* up_next_button_{nullptr};
     QLabel* up_next_badge_{nullptr};
+    QLabel* device_chevron_{nullptr};
     ui::QueueTableView* up_next_view_{nullptr};
     LocalListModel* up_next_local_model_{nullptr};
     QLabel* up_next_status_{nullptr};

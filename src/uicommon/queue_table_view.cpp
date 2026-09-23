@@ -56,6 +56,19 @@ constexpr int artwork_padding = 6;
            model->index(row, date_column).data().toString();
 }
 
+[[nodiscard]] bool inAlbum(const QTableView* view, const int row) {
+    const auto* model = view->model();
+    const auto key = groupKey(view, row);
+    return (row > 0 && key == groupKey(view, row - 1)) ||
+           (row + 1 < model->rowCount() && key == groupKey(view, row + 1));
+}
+
+// A lone track whose row above belongs to an album: a gap and a hairline.
+[[nodiscard]] bool beginsLooseRun(const QTableView* view, const int row) {
+    return view->model() != nullptr && row > 0 && row < view->model()->rowCount() &&
+           !inAlbum(view, row) && inAlbum(view, row - 1);
+}
+
 [[nodiscard]] bool beginsAlbum(const QTableView* view, const int row) {
     const auto* model = view->model();
     if (model == nullptr || row < 0 || row >= model->rowCount()) {
@@ -68,6 +81,14 @@ constexpr int artwork_padding = 6;
     const auto key = groupKey(view, row);
     return (row == 0 || key != groupKey(view, row - 1)) && row + 1 < model->rowCount() &&
            key == groupKey(view, row + 1);
+}
+
+// What a row adds above its track: an album's header, a run's gap, or none.
+[[nodiscard]] int groupSpacing(const QTableView* view, const int row) {
+    if (beginsAlbum(view, row)) {
+        return QueueItemDelegate::album_header_height;
+    }
+    return beginsLooseRun(view, row) ? QueueItemDelegate::loose_run_gap : 0;
 }
 
 void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
@@ -146,10 +167,9 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
         if (row > 0) {
             // The hairline between albums runs the full width, over the
             // cover column too.
-            auto hairline = palette.color(QPalette::Mid);
-            hairline.setAlpha(110);
-            painter->setPen(hairline);
-            painter->drawLine(QPoint{0, top}, QPoint{view->viewport()->width(), top});
+            const auto y = top + QueueItemDelegate::hairline_offset;
+            painter->setPen(groupHairline(palette));
+            painter->drawLine(QPoint{0, y}, QPoint{view->viewport()->width(), y});
         }
 
         const QRect available =
@@ -205,8 +225,8 @@ void paintCurrentRow(QueueTableView* view, QPainter* painter) {
                       view->rowHeight(current.row())};
     if (view->itemDelegate() != nullptr) {
         const auto* delegate = qobject_cast<const QueueItemDelegate*>(view->itemDelegate());
-        if (delegate != nullptr && delegate->isAlbumHeaderHit(current.siblingAtColumn(0), 0)) {
-            rect.setTop(rect.top() + QueueItemDelegate::album_header_height);
+        if (delegate != nullptr) {
+            rect.setTop(rect.top() + groupSpacing(view, current.row()));
         }
     }
     const auto artwork = view->albumArtworkColumn();
@@ -347,7 +367,7 @@ void QueueTableView::setModel(QAbstractItemModel* model) {
                             roles.contains(track_album_artist_role) ||
                             roles.contains(track_album_group_start_role)) {
                             album_group_cache_valid_ = false;
-                            refreshAlbumRowGeometry(first.row() - 1, last.row() + 1);
+                            refreshAlbumRowGeometry(first.row() - 2, last.row() + 2);
                         }
                     }));
         album_model_connections_.push_back(
@@ -372,7 +392,7 @@ void QueueTableView::setModel(QAbstractItemModel* model) {
                     [this, refresh](const QModelIndex&, const int first, const int) {
                         refresh();
                         album_group_cache_valid_ = false;
-                        refreshAlbumRowGeometry(first - 1, first + 1);
+                        refreshAlbumRowGeometry(first - 2, first + 2);
                     }));
         album_model_connections_.push_back(
             connect(model, &QAbstractItemModel::rowsMoved, this, [this, refresh, model] {
@@ -430,7 +450,7 @@ void QueueTableView::rowsInserted(const QModelIndex& parent, const int start, co
             if (large_batch) {
                 rebuildAlbumRowGeometry();
             } else {
-                refreshAlbumRowGeometry(first_anchor.row() - 1, last_anchor.row() + 1);
+                refreshAlbumRowGeometry(first_anchor.row() - 2, last_anchor.row() + 2);
             }
         },
         Qt::QueuedConnection);
@@ -479,14 +499,14 @@ void QueueTableView::rebuildAlbumRowGeometry() {
         album_group_start_rows_.reserve(
             static_cast<std::size_t>(std::max(1, model()->rowCount() / 10)));
         for (int row = 0; row < model()->rowCount(); ++row) {
-            if (beginsAlbum(this, row)) {
+            if (groupSpacing(this, row) > 0) {
                 album_group_start_rows_.push_back(row);
             }
         }
         album_group_cache_valid_ = true;
     }
     for (const auto row : album_group_start_rows_) {
-        row_header->resizeSection(row, default_height + QueueItemDelegate::album_header_height);
+        row_header->resizeSection(row, default_height + groupSpacing(this, row));
     }
     setUpdatesEnabled(true);
     // Section-size signals are deliberately batched above. QTableView therefore
@@ -507,7 +527,7 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
     for (int row = first; row <= last; ++row) {
         verticalHeader()->resizeSection(
             row,
-            default_height + (beginsAlbum(this, row) ? QueueItemDelegate::album_header_height : 0));
+            default_height + groupSpacing(this, row));
     }
     // Section-size signals are deliberately batched above. QTableView therefore
     // needs one explicit scroll-range update after the final header heights.

@@ -130,15 +130,20 @@ AlbumHeaderText albumHeaderText(const QAbstractItemModel& model, const int first
             .details = details.join(QStringLiteral(" · "))};
 }
 
+QColor groupHairline(const QPalette& palette) {
+    auto line = palette.color(QPalette::Text);
+    line.setAlpha(38);
+    return line;
+}
+
 void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& palette,
                       const QFont& font, const AlbumHeaderText& text, const bool separated) {
     painter->save();
     painter->fillRect(rect, palette.base());
     if (separated) {
-        auto hairline = palette.color(QPalette::Mid);
-        hairline.setAlpha(110);
-        painter->setPen(hairline);
-        painter->drawLine(rect.topLeft(), rect.topRight());
+        const auto y = rect.top() + QueueItemDelegate::hairline_offset;
+        painter->setPen(groupHairline(palette));
+        painter->drawLine(QPoint{rect.left(), y}, QPoint{rect.right(), y});
     }
     auto album_font = font;
     album_font.setWeight(QFont::DemiBold);
@@ -227,6 +232,17 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         item.rect.setTop(item.rect.top() + QueueItemDelegate::album_header_height);
     }
 
+    if (beginsLooseRun(index)) {
+        painter->save();
+        painter->fillRect(QRect{option.rect.x(), option.rect.y(), option.rect.width(),
+                                QueueItemDelegate::loose_run_gap},
+                          option.palette.base());
+        const auto y = option.rect.y() + QueueItemDelegate::hairline_offset;
+        painter->setPen(groupHairline(option.palette));
+        painter->drawLine(QPoint{option.rect.left(), y}, QPoint{option.rect.right(), y});
+        painter->restore();
+        item.rect.setTop(item.rect.top() + QueueItemDelegate::loose_run_gap);
+    }
     const auto current_track = index.data(track_current_role).toBool();
     const auto in_group = !isSingleTrackGroup(index, this);
     if (!artwork_cell) {
@@ -276,8 +292,19 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             }
         }
     }
+    // A lone track's number means nothing without its album, so its cover
+    // takes the number's place, just before the title -- where the numbers
+    // above and below it stand. With no number column, it keeps to the
+    // cover column.
+    const auto number_column =
+        configuredColumn(this, track_number_column_property, track_number_column);
+    const auto numbers_shown = view == nullptr || !view->isColumnHidden(number_column);
     const auto inline_artwork =
-        index.column() == artwork_column && side_artwork && isSingleTrackGroup(index, this);
+        side_artwork && !in_group &&
+        (numbers_shown ? index.column() == number_column : index.column() == artwork_column);
+    if (inline_artwork && !artwork_cell) {
+        item.text.clear();
+    }
     // What a hidden column would have said, after the title and quieter: a
     // compilation track's artist, and a lone track's artist and album.
     QString title_suffix;
@@ -334,11 +361,12 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     }
     if (inline_artwork) {
         const auto extent =
-            std::max(0, std::min({18, item.rect.width() - 4, item.rect.height() - 4}));
+            std::max(0, std::min({20, item.rect.width() - 4, item.rect.height() - 2}));
         if (extent > 0) {
-            const QRect target{item.rect.right() - extent - 2, item.rect.center().y() - extent / 2,
+            const QRect target{item.rect.right() - extent - 4, item.rect.center().y() - extent / 2,
                                extent, extent};
-            const auto cover = index.data(track_album_artwork_role).value<QImage>();
+            const auto cover =
+                index.siblingAtColumn(artwork_column).data(track_album_artwork_role).value<QImage>();
             if (!cover.isNull()) {
                 const auto fitted = cover.size().scaled(target.size(), Qt::KeepAspectRatio);
                 const QRect centered{target.center().x() - fitted.width() / 2,
@@ -359,7 +387,9 @@ QSize QueueItemDelegate::sizeHint(const QStyleOptionViewItem& option,
                                   const QModelIndex& index) const {
     auto size = QStyledItemDelegate::sizeHint(option, index);
     size.setHeight(std::max(track_row_height, size.height()) +
-                   (beginsAlbum(index) ? album_header_height : 0));
+                   (beginsAlbum(index)      ? album_header_height
+                    : beginsLooseRun(index) ? loose_run_gap
+                                            : 0));
     return size;
 }
 
@@ -383,6 +413,12 @@ std::pair<int, int> QueueItemDelegate::albumRowRange(const QModelIndex& index) c
         ++last;
     }
     return {first, last};
+}
+
+bool QueueItemDelegate::beginsLooseRun(const QModelIndex& index) const {
+    // A lone track whose row above belongs to an album.
+    return index.isValid() && index.row() > 0 && isSingleTrackGroup(index, this) &&
+           !isSingleTrackGroup(index.sibling(index.row() - 1, 0), this);
 }
 
 bool QueueItemDelegate::beginsAlbum(const QModelIndex& index) const {

@@ -395,11 +395,21 @@ void BenchMainWindow::buildTransport() {
     play->setObjectName(QStringLiteral("bench-play"));
     play->setAutoRaise(false);
     // The one control that is always the next thing to do.
+    // With nothing to play, a shade off the header rather than a dark hole.
+    const auto idle_play = [this] {
+        const auto ground = palette().color(QPalette::Window);
+        const auto ink = palette().color(QPalette::Text);
+        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
+        return QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
+                               mix(ground.blue(), ink.blue()))
+            .name();
+    }();
     play->setStyleSheet(QStringLiteral("QToolButton#bench-play { border: none; border-radius: 18px;"
                                        " background: palette(highlight); }"
                                        "QToolButton#bench-play:hover { background: "
                                        "palette(highlight); border: 1px solid palette(light); }"
-                                       "QToolButton#bench-play:disabled { background: palette(mid); }"));
+                                       "QToolButton#bench-play:disabled { background: %1; }")
+                            .arg(idle_play));
     add_transport_button(next_action_, 30);
     header_layout->addWidget(transport);
 

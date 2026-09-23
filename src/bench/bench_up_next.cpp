@@ -274,9 +274,8 @@ void BenchMainWindow::refreshUpNext() {
         if (auto* action = up_next_dock_->findChild<QAction*>(QString::fromLatin1(name)))
             action->setEnabled(enabled && available);
     }
-    if (count == 0 && enabled)
-        up_next_status_->setText(up_next_status_->text() +
-                                 tr("\nQueue tracks from any list, or drag them here."));
+    up_next_view_->setEmptyMessage(enabled ? tr("Nothing waiting") : QString{},
+                                   tr("Queue tracks from any list, or drag them here."));
     setUpNextCount(model->rowCount());
 }
 

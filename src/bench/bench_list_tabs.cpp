@@ -553,6 +553,8 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
 
     auto* view = new ui::QueueTableView(tabs_);
     view->setObjectName(QStringLiteral("bench-list-%1").arg(id.left(8)));
+    view->setProperty("bench-remote-list", document.remote);
+    view->setEmptyMessage(emptyListTitle(document.remote), emptyListHint(document.remote));
     view->setProperty("bench-document-id", id);
     view->setModel(model);
     connect(
@@ -1111,6 +1113,20 @@ void BenchMainWindow::renewOutdatedLocalEngine() {
 
 bool BenchMainWindow::localLibraryShown() const {
     return QSettings{}.value(QLatin1String(SettingsDialog::library_show_local_key), true).toBool();
+}
+
+QString BenchMainWindow::emptyListTitle(const bool remote) const {
+    return remote ? tr("Nothing from %1 here yet").arg(remoteName()) : tr("This list is empty");
+}
+
+QString BenchMainWindow::emptyListHint(const bool remote) const {
+    return remote ? tr("Add albums from %1's library on the left, or drag them here.")
+                        .arg(remoteName())
+                  : tr("Drop files or folders here, or add albums from the library on the left.");
+}
+
+QString BenchMainWindow::remoteName() const {
+    return remote_catalogue_source_ ? remote_catalogue_source_->name() : tr("the remote");
 }
 
 void BenchMainWindow::applyLocalLibraryVisibility() {

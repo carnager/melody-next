@@ -269,6 +269,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
     void sourcePanelOpensOnALibrary();
+    void emptyListsSayHowToFillThem();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
     void theDeviceMenuChoosesAnOutputAgent();
@@ -4724,6 +4725,42 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
 // ADR-0227: a remote tab's files are on the remote's machine and need not be
 // reachable from this one, so its tags and covers come from that engine --
 // however its rows got there.
+void BenchMainWindowTest::emptyListsSayHowToFillThem() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    auto* view = static_cast<ui::QueueTableView*>(tab->view);
+    QCOMPARE(view->emptyTitle(), QStringLiteral("This list is empty"));
+    QCOMPARE(window.up_next_view_->emptyTitle(), QStringLiteral("Nothing waiting"));
+
+    // Said in the middle of the list while it is empty, and gone once filled.
+    const auto painted = [view] {
+        const auto image = view->viewport()->grab().toImage();
+        const auto ground = view->palette().color(QPalette::Base).lightness();
+        const auto ink = view->palette().color(QPalette::Text).lightness();
+        // Text shows as pixels well on the text's side of the background.
+        const auto threshold = (ground + ink) / 2;
+        for (int y = image.height() / 4; y < image.height() * 3 / 4; ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const auto lightness = image.pixelColor(x, y).lightness();
+                if (ink > ground ? lightness > threshold : lightness < threshold) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    QVERIFY(painted());
+    LocalTrackRow row;
+    row.raw_path = "/tmp/filled.flac";
+    row.title = "Filled";
+    tab->model->appendRows({row});
+    QCoreApplication::processEvents();
+    QVERIFY(!painted());
+}
+
 void BenchMainWindowTest::sourcePanelOpensOnALibrary() {
     QSettings{}.remove(QStringLiteral("local-library/view"));
     {

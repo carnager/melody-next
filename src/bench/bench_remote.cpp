@@ -6,6 +6,7 @@
 // from the engine that has them.
 
 #include "bench/bench_main_window.hpp"
+#include "uicommon/queue_table_view.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/engine_playback.hpp"
@@ -72,6 +73,9 @@ void BenchMainWindow::connectRemoteEngine() {
         // their covers and missing tags -- or while it was away: they ask now.
         for (auto& tab : list_tabs_) {
             if (tab->document.remote) {
+                // Named now that the remote has said its name.
+                static_cast<ui::QueueTableView*>(tab->view)
+                    ->setEmptyMessage(emptyListTitle(true), emptyListHint(true));
                 enqueueUnprobedRows(*tab);
                 syncArtwork(*tab);
             }

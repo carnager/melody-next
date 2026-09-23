@@ -50,6 +50,10 @@ class QueueTableView final : public QTableView {
     // artwork gutter. Covers are painted across the visible rows of each
     // album without row spans, preserving normal row hit-testing and drops.
     void setAlbumArtworkColumn(int column);
+    // What an empty list says in its middle: a line, and a quieter hint of
+    // how to fill it. Empty strings show nothing.
+    void setEmptyMessage(QString title, QString hint);
+    [[nodiscard]] QString emptyTitle() const { return empty_title_; }
     [[nodiscard]] int albumArtworkColumn() const noexcept { return album_artwork_column_; }
     // Keeps the visible columns exactly fitted to the viewport. Non-expanding
     // columns retain their preferred width; expanding columns divide the
@@ -125,6 +129,8 @@ class QueueTableView final : public QTableView {
     QHash<int, int> minimum_column_widths_;
     bool auto_fill_columns_{false};
     bool refitting_columns_{false};
+    QString empty_title_;
+    QString empty_hint_;
 };
 
 } // namespace trackknife::ui

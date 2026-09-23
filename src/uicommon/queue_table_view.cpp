@@ -535,6 +535,12 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
     viewport()->update();
 }
 
+void QueueTableView::setEmptyMessage(QString title, QString hint) {
+    empty_title_ = std::move(title);
+    empty_hint_ = std::move(hint);
+    viewport()->update();
+}
+
 void QueueTableView::setAlbumArtworkColumn(const int column) {
     album_artwork_column_ = column;
     updateArtworkOverlayGeometry();
@@ -975,6 +981,30 @@ void QueueTableView::paintEvent(QPaintEvent* event) {
     painter.setClipRegion(event->region());
     paintAlbumArtwork(this, &painter);
     paintCurrentRow(this, &painter);
+    if (model() != nullptr && model()->rowCount() == 0 && !empty_title_.isEmpty()) {
+        // An empty list says so, and how to fill it, a little above the
+        // middle -- where the eye lands.
+        auto title_font = font();
+        title_font.setPointSizeF(title_font.pointSizeF() * 1.15);
+        title_font.setWeight(QFont::DemiBold);
+        const QFontMetrics title_metrics{title_font};
+        const auto area = viewport()->rect().adjusted(24, 0, -24, 0);
+        const auto hint_rect =
+            QFontMetrics{font()}.boundingRect(area, Qt::AlignHCenter | Qt::TextWordWrap, empty_hint_);
+        const auto block = title_metrics.height() + 6 + hint_rect.height();
+        const auto top = std::max(12, area.height() * 2 / 5 - block / 2);
+        painter.setFont(title_font);
+        painter.setPen(palette().color(QPalette::Text));
+        painter.drawText(QRect{area.left(), top, area.width(), title_metrics.height()},
+                         Qt::AlignHCenter | Qt::AlignVCenter, empty_title_);
+        if (!empty_hint_.isEmpty()) {
+            painter.setFont(font());
+            painter.setPen(palette().color(QPalette::PlaceholderText));
+            painter.drawText(QRect{area.left(), top + title_metrics.height() + 6, area.width(),
+                                   hint_rect.height()},
+                             Qt::AlignHCenter | Qt::TextWordWrap, empty_hint_);
+        }
+    }
     paintDropTarget(this, &painter, drop_target_insertion_row_, drop_target_action_);
 }
 

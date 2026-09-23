@@ -330,6 +330,10 @@ class BenchMainWindow final : public QMainWindow {
     void renewOutdatedLocalEngine();
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
+    // What an empty list tab says, and how to fill it.
+    [[nodiscard]] QString emptyListTitle(bool remote) const;
+    [[nodiscard]] QString emptyListHint(bool remote) const;
+    [[nodiscard]] QString remoteName() const;
     // Shows the source the user last chose, or a library by default.
     void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;

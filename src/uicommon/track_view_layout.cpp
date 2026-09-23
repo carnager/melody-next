@@ -87,7 +87,7 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
     }
     const auto object = document.object();
     const auto schema = object.value(QStringLiteral("schema")).toInt();
-    if (schema != track_view_layout_schema_version) {
+    if (schema != track_view_layout_schema_version && schema != 1) {
         return fail(QStringLiteral("Unsupported track-view layout version"));
     }
     const auto presentation =
@@ -144,8 +144,27 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
             columns.push_back(TrackViewColumnLayout{.id = id, .width = 100, .visible = false});
         }
     }
-    return TrackViewLayout{
-        .schema_version = schema, .presentation = *presentation, .columns = std::move(columns)};
+    if (schema == 1 && *presentation == TrackViewPresentation::albums_side_artwork) {
+        bool others_visible = false;
+        for (const auto& column : columns) {
+            const bool repeated = column.id == QStringLiteral("artist") ||
+                                  column.id == QStringLiteral("album") ||
+                                  column.id == QStringLiteral("date");
+            others_visible = others_visible || (column.visible && !repeated);
+        }
+        // Only when something is left to show.
+        if (others_visible) {
+            for (auto& column : columns) {
+                if (column.id == QStringLiteral("artist") || column.id == QStringLiteral("album") ||
+                    column.id == QStringLiteral("date")) {
+                    column.visible = false;
+                }
+            }
+        }
+    }
+    return TrackViewLayout{.schema_version = track_view_layout_schema_version,
+                           .presentation = *presentation,
+                           .columns = std::move(columns)};
 }
 
 } // namespace trackknife::ui

@@ -4,6 +4,8 @@
 
 #include <QTest>
 
+#include <algorithm>
+
 namespace trackknife::ui {
 
 class TrackViewLayoutTest final : public QObject {
@@ -12,6 +14,7 @@ class TrackViewLayoutTest final : public QObject {
   private slots:
     void roundTripsPresentationAndColumns();
     void appendsNewlyRegisteredColumnsHidden();
+    void migratesAlbumViewsToLeaveRepeatsToTheHeader();
     void rejectsInvalidLayouts_data();
     void rejectsInvalidLayouts();
 };
@@ -54,11 +57,44 @@ void TrackViewLayoutTest::appendsNewlyRegisteredColumnsHidden() {
         QVERIFY(!decoded->columns[n].visible);
 }
 
+void TrackViewLayoutTest::migratesAlbumViewsToLeaveRepeatsToTheHeader() {
+    const QStringList registered{QStringLiteral("artwork"), QStringLiteral("artist"),
+                                 QStringLiteral("title"),   QStringLiteral("album"),
+                                 QStringLiteral("date"),    QStringLiteral("rating")};
+    const QByteArray columns{
+        R"("columns":[{"id":"artwork","width":110,"visible":true},)"
+        R"({"id":"artist","width":150,"visible":true},{"id":"title","width":220,"visible":true},)"
+        R"({"id":"album","width":160,"visible":true},{"id":"date","width":64,"visible":true},)"
+        R"({"id":"rating","width":84,"visible":true}]})"};
+    // A version 1 album view: artist, album and date go; the rest stays.
+    auto album = deserializeTrackViewLayout(
+        R"({"schema":1,"presentation":"albums-side-artwork",)" + columns, registered);
+    QVERIFY(album.has_value());
+    QCOMPARE(album->schema_version, track_view_layout_schema_version);
+    QStringList shown;
+    for (const auto& column : album->columns) {
+        if (column.visible) {
+            shown << column.id;
+        }
+    }
+    QCOMPARE(shown, (QStringList{QStringLiteral("artwork"), QStringLiteral("title"),
+                                 QStringLiteral("rating")}));
+    // Other presentations keep their columns, and so does a current album
+    // view, where the columns were asked for.
+    for (const auto& json :
+         {QByteArray{R"({"schema":1,"presentation":"plain-columns",)"} + columns,
+          QByteArray{R"({"schema":2,"presentation":"albums-side-artwork",)"} + columns}) {
+        const auto kept = deserializeTrackViewLayout(json, registered);
+        QVERIFY(kept.has_value());
+        QVERIFY(std::ranges::all_of(kept->columns, &TrackViewColumnLayout::visible));
+    }
+}
+
 void TrackViewLayoutTest::rejectsInvalidLayouts_data() {
     QTest::addColumn<QByteArray>("json");
     QTest::newRow("malformed") << QByteArray{"{"};
     QTest::newRow("future") << QByteArray{
-        R"({"schema":2,"presentation":"plain-columns","columns":[]})"};
+        R"({"schema":3,"presentation":"plain-columns","columns":[]})"};
     QTest::newRow("unknown-presentation")
         << QByteArray{R"({"schema":1,"presentation":"tiles","columns":[]})"};
     QTest::newRow("duplicate-column") << QByteArray{

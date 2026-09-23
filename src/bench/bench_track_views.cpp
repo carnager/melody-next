@@ -33,8 +33,14 @@ BenchMainWindow::defaultTrackViewLayout(const ui::TrackViewPresentation presenta
         // Ratings stay one click away in the Columns menu rather than
         // claiming space in every default view.
         bool visible = spec.logical < local_rating_column;
-        if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
-            spec.logical == local_artwork_column) {
+        if (presentation == ui::TrackViewPresentation::albums_side_artwork &&
+            (spec.logical == local_artist_column || spec.logical == local_album_column ||
+             spec.logical == local_date_column)) {
+            // The album's header says these; a track whose artist differs
+            // says so after its title.
+            visible = false;
+        } else if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
+                   spec.logical == local_artwork_column) {
             width = 42;
         } else if (presentation == ui::TrackViewPresentation::plain_columns &&
                    spec.logical == local_artwork_column) {
@@ -76,6 +82,9 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
                          layout.presentation == ui::TrackViewPresentation::albums_header_artwork;
     const auto side_artwork = layout.presentation == ui::TrackViewPresentation::albums_side_artwork;
     view->setProperty(ui::track_side_artwork_property, side_artwork);
+    // Albums and their headers already group the rows; stripes on top of
+    // that are noise.
+    view->setAlternatingRowColors(!grouped);
 
     auto* previous_delegate = view->itemDelegate();
     view->setItemDelegate(grouped

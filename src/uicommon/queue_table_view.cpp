@@ -23,6 +23,7 @@
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPersistentModelIndex>
 #include <QPixmap>
 #include <QResizeEvent>
@@ -69,42 +70,6 @@ constexpr int artwork_padding = 6;
            key == groupKey(view, row + 1);
 }
 
-[[nodiscard]] QString albumTitle(const QTableView* view, const int row) {
-    const auto album_column = viewColumn(view, track_album_column_property, track_album_column);
-    const auto date_column = viewColumn(view, track_date_column_property, track_date_column);
-    const auto anchor = view->model()->index(row, 0);
-    const auto artist = anchor.data(track_album_artist_role).toString();
-    const auto album = view->model()->index(row, album_column).data().toString();
-    const auto date = view->model()->index(row, date_column).data().toString();
-    auto title = artist.isEmpty() ? QStringLiteral("Unknown artist") : artist;
-    title += QStringLiteral(" — ");
-    title += album.isEmpty() ? QStringLiteral("Unknown album") : album;
-    if (!date.isEmpty()) {
-        title += QStringLiteral(" (%1)").arg(date);
-    }
-    return title;
-}
-
-[[nodiscard]] QString albumDuration(const QTableView* view, const int first_row,
-                                    const QString& key) {
-    qint64 milliseconds = 0;
-    for (int row = first_row; row < view->model()->rowCount() && groupKey(view, row) == key;
-         ++row) {
-        milliseconds += view->model()->index(row, 0).data(track_duration_ms_role).toLongLong();
-    }
-    const auto seconds = std::max<qint64>(0, milliseconds / 1'000);
-    const auto hours = seconds / 3'600;
-    const auto minutes = (seconds / 60) % 60;
-    const auto remainder = seconds % 60;
-    if (hours > 0) {
-        return QStringLiteral("%1:%2:%3")
-            .arg(hours)
-            .arg(minutes, 2, 10, QLatin1Char('0'))
-            .arg(remainder, 2, 10, QLatin1Char('0'));
-    }
-    return QStringLiteral("%1:%2").arg(minutes).arg(remainder, 2, 10, QLatin1Char('0'));
-}
-
 void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
     const auto column = view->albumArtworkColumn();
     auto* model = view->model();
@@ -125,6 +90,27 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
     const auto last_candidate = std::min(model->rowCount() - 1, last_visible + 1);
     const auto artwork_left = view->horizontalHeader()->sectionViewportPosition(column);
     const auto artwork_width = view->horizontalHeader()->sectionSize(column);
+    // With the cover column first, the header sits beside the cover, and the
+    // cover starts level with it; elsewhere the header spans the row.
+    int first_visual = 0;
+    while (first_visual < view->horizontalHeader()->count() &&
+           view->isColumnHidden(view->horizontalHeader()->logicalIndex(first_visual))) {
+        ++first_visual;
+    }
+    const bool cover_leads = view->horizontalHeader()->visualIndex(column) == first_visual;
+    // The first column after the cover, where the rows' text begins.
+    int text_left = 0;
+    if (cover_leads) {
+        for (int visual = first_visual + 1; visual < view->horizontalHeader()->count(); ++visual) {
+            const auto logical = view->horizontalHeader()->logicalIndex(visual);
+            if (!view->isColumnHidden(logical)) {
+                text_left = view->horizontalHeader()->sectionViewportPosition(logical);
+                break;
+            }
+        }
+    }
+    const auto album_column = viewColumn(view, track_album_column_property, track_album_column);
+    const auto date_column = viewColumn(view, track_date_column_property, track_date_column);
     const auto& palette = view->palette();
     for (int row = first_candidate; row <= last_candidate; ++row) {
         if (row > 0 && groupKey(view, row) == groupKey(view, row - 1)) {
@@ -138,37 +124,38 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
         if (row + 1 >= model->rowCount() || groupKey(view, row + 1) != key) {
             continue;
         }
+        const auto cover_top = cover_leads ? top : top + QueueItemDelegate::album_header_height;
         auto group_bottom = top + view->rowHeight(row);
         for (int next = row + 1;
              next < model->rowCount() && groupKey(view, next) == key &&
-             group_bottom < top + QueueItemDelegate::album_header_height +
-                                maximum_side_artwork_extent + artwork_padding * 2;
+             group_bottom < cover_top + maximum_side_artwork_extent + artwork_padding * 2;
              ++next) {
             group_bottom = view->rowViewportPosition(next) + view->rowHeight(next);
         }
 
-        const QRect header{0, top, view->viewport()->width(),
+        // The album's name starts where the rows' text does, so the titles
+        // sit under it.
+        const auto header_left = cover_leads ? artwork_left + artwork_width : 0;
+        const auto text_indent = cover_leads ? text_left - header_left : 0;
+        const QRect header{header_left, top, view->viewport()->width() - header_left,
                            QueueItemDelegate::album_header_height};
-        painter->fillRect(header, palette.alternateBase());
-        painter->setPen(palette.mid().color());
-        painter->drawLine(header.bottomLeft(), header.bottomRight());
-        auto header_font = view->font();
-        header_font.setBold(true);
-        painter->setFont(header_font);
-        painter->setPen(palette.text().color());
-        const auto duration = albumDuration(view, row, key);
-        const auto duration_width = painter->fontMetrics().horizontalAdvance(duration) + 12;
-        const auto label_rect = header.adjusted(6, 0, -duration_width, 0);
-        painter->drawText(label_rect, Qt::AlignVCenter | Qt::AlignLeft,
-                          painter->fontMetrics().elidedText(albumTitle(view, row), Qt::ElideRight,
-                                                            label_rect.width()));
-        painter->drawText(header.adjusted(6, 0, -6, 0), Qt::AlignVCenter | Qt::AlignRight,
-                          duration);
+        painter->fillRect(header, palette.base());
+        paintAlbumHeader(painter, header.adjusted(std::max(0, text_indent), 0, 0, 0), palette,
+                         view->font(), albumHeaderText(*model, row, album_column, date_column),
+                         false);
+        if (row > 0) {
+            // The hairline between albums runs the full width, over the
+            // cover column too.
+            auto hairline = palette.color(QPalette::Mid);
+            hairline.setAlpha(110);
+            painter->setPen(hairline);
+            painter->drawLine(QPoint{0, top}, QPoint{view->viewport()->width(), top});
+        }
 
         const QRect available =
-            QRect{artwork_left, top + QueueItemDelegate::album_header_height, artwork_width,
-                  std::max(0, group_bottom - top - QueueItemDelegate::album_header_height)}
-                .adjusted(artwork_padding, artwork_padding, -artwork_padding, -artwork_padding);
+            QRect{artwork_left, cover_top, artwork_width, std::max(0, group_bottom - cover_top)}
+                .adjusted(artwork_padding, artwork_padding + 2, -artwork_padding,
+                          -artwork_padding);
         const auto extent = std::max(
             0, std::min({available.width(), available.height(), maximum_side_artwork_extent}));
         if (extent <= 0 || available.bottom() < 0) {
@@ -177,21 +164,65 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
         const QRect target{available.left(), available.top(), extent, extent};
         const auto cover = model->index(row, column).data(track_album_artwork_role).value<QImage>();
         const auto album_rating = model->index(row, column).data(track_album_rating_role).toUInt();
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setRenderHint(QPainter::SmoothPixmapTransform);
         if (!cover.isNull()) {
             const auto fitted = cover.size().scaled(target.size(), Qt::KeepAspectRatio);
-            const QRect centered{target.center().x() - fitted.width() / 2,
-                                 target.center().y() - fitted.height() / 2, fitted.width(),
-                                 fitted.height()};
+            const QRect centered{target.left(), target.top(), fitted.width(), fitted.height()};
+            QPainterPath rounded;
+            rounded.addRoundedRect(centered, 3, 3);
+            painter->setClipPath(rounded, Qt::IntersectClip);
             painter->drawImage(centered, cover);
+            painter->restore();
             paintRatingOverlay(painter, centered, album_rating);
         } else {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(palette.color(QPalette::Mid));
+            painter->drawRoundedRect(target, 3, 3);
             const auto icon =
                 QIcon::fromTheme(QStringLiteral("media-optical-audio"),
                                  QApplication::style()->standardIcon(QStyle::SP_FileIcon));
-            icon.paint(painter, target, Qt::AlignCenter, QIcon::Disabled);
+            const auto glyph = std::max(16, extent / 3);
+            icon.paint(painter,
+                       QRect{target.center().x() - glyph / 2, target.center().y() - glyph / 2,
+                             glyph, glyph},
+                       Qt::AlignCenter, QIcon::Disabled);
+            painter->restore();
             paintRatingOverlay(painter, target, album_rating);
         }
     }
+}
+
+// The keyboard's place: one thin outline around the current row while the
+// list has focus, in place of the style's box around a single cell.
+void paintCurrentRow(QueueTableView* view, QPainter* painter) {
+    const auto current = view->currentIndex();
+    if (!current.isValid() || !view->hasFocus() || view->model() == nullptr) {
+        return;
+    }
+    auto rect = QRect{0, view->rowViewportPosition(current.row()), view->viewport()->width(),
+                      view->rowHeight(current.row())};
+    if (view->itemDelegate() != nullptr) {
+        const auto* delegate = qobject_cast<const QueueItemDelegate*>(view->itemDelegate());
+        if (delegate != nullptr && delegate->isAlbumHeaderHit(current.siblingAtColumn(0), 0)) {
+            rect.setTop(rect.top() + QueueItemDelegate::album_header_height);
+        }
+    }
+    const auto artwork = view->albumArtworkColumn();
+    if (artwork >= 0 && !view->isColumnHidden(artwork)) {
+        const auto left = view->horizontalHeader()->sectionViewportPosition(artwork);
+        if (left <= 0) {
+            rect.setLeft(left + view->horizontalHeader()->sectionSize(artwork));
+        }
+    }
+    auto outline = view->palette().color(QPalette::Highlight);
+    outline.setAlpha(200);
+    painter->save();
+    painter->setPen(outline);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawRect(rect.adjusted(0, 0, -1, -1));
+    painter->restore();
 }
 
 [[nodiscard]] QString dropTargetLabel(const QTableView* view, const int insertion_row,
@@ -266,6 +297,9 @@ void paintDropTarget(QueueTableView* view, QPainter* painter, const int insertio
 } // namespace
 
 QueueTableView::QueueTableView(QWidget* parent) : QTableView(parent) {
+    // The list is the page, not a box on it: no frame, and no focus ring
+    // around the whole of it -- the current row says where the keys go.
+    setFrameShape(QFrame::NoFrame);
     setProperty("trackknife-drop-insertion-row", -1);
     setProperty("trackknife-drop-target-label", QString{});
     // QVariant::toInt() maps an absent property to zero, which otherwise makes
@@ -920,7 +954,24 @@ void QueueTableView::paintEvent(QPaintEvent* event) {
     QPainter painter{viewport()};
     painter.setClipRegion(event->region());
     paintAlbumArtwork(this, &painter);
+    paintCurrentRow(this, &painter);
     paintDropTarget(this, &painter, drop_target_insertion_row_, drop_target_action_);
+}
+
+void QueueTableView::focusInEvent(QFocusEvent* event) {
+    QTableView::focusInEvent(event);
+    viewport()->update();
+}
+
+void QueueTableView::focusOutEvent(QFocusEvent* event) {
+    QTableView::focusOutEvent(event);
+    viewport()->update();
+}
+
+void QueueTableView::currentChanged(const QModelIndex& current, const QModelIndex& previous) {
+    QTableView::currentChanged(current, previous);
+    // The outline spans the row, wider than the cells Qt repaints.
+    viewport()->update();
 }
 
 void QueueTableView::resizeEvent(QResizeEvent* event) {

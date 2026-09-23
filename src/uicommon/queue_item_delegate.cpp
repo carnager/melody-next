@@ -10,6 +10,7 @@
 #include <QTableView>
 
 #include <algorithm>
+#include <cmath>
 
 namespace trackknife::ui {
 namespace {
@@ -90,7 +91,77 @@ constexpr int album_cover_extent = 22;
     return !previous_matches && !next_matches;
 }
 
+// A colour between two, `amount` of the way from `from` to `to`.
+[[nodiscard]] QColor blended(const QColor& from, const QColor& to, const double amount) {
+    const auto mix = [amount](const int a, const int b) {
+        return static_cast<int>(std::lround(a + (b - a) * amount));
+    };
+    return QColor::fromRgb(mix(from.red(), to.red()), mix(from.green(), to.green()),
+                           mix(from.blue(), to.blue()));
+}
+
 } // namespace
+
+AlbumHeaderText albumHeaderText(const QAbstractItemModel& model, const int first_row,
+                                const int album_column, const int date_column) {
+    const auto key = [&](const int row) {
+        return model.index(row, 0).data(track_album_artist_role).toString() + QChar::Null +
+               model.index(row, album_column).data().toString() + QChar::Null +
+               model.index(row, date_column).data().toString();
+    };
+    const auto group = key(first_row);
+    int tracks = 0;
+    qint64 duration = 0;
+    for (int row = first_row; row < model.rowCount() && key(row) == group; ++row) {
+        ++tracks;
+        duration += model.index(row, 0).data(track_duration_ms_role).toLongLong();
+    }
+    const auto artist = model.index(first_row, 0).data(track_album_artist_role).toString();
+    const auto album = model.index(first_row, album_column).data().toString();
+    const auto date = model.index(first_row, date_column).data().toString();
+    QStringList details;
+    details << (artist.isEmpty() ? QStringLiteral("Unknown artist") : artist);
+    if (!date.isEmpty()) {
+        details << date;
+    }
+    details << (tracks == 1 ? QStringLiteral("1 track") : QStringLiteral("%1 tracks").arg(tracks));
+    details << formatDuration(duration);
+    return {.album = album.isEmpty() ? QStringLiteral("Unknown album") : album,
+            .details = details.join(QStringLiteral(" · "))};
+}
+
+void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& palette,
+                      const QFont& font, const AlbumHeaderText& text, const bool separated) {
+    painter->save();
+    painter->fillRect(rect, palette.base());
+    if (separated) {
+        auto hairline = palette.color(QPalette::Mid);
+        hairline.setAlpha(110);
+        painter->setPen(hairline);
+        painter->drawLine(rect.topLeft(), rect.topRight());
+    }
+    auto album_font = font;
+    album_font.setWeight(QFont::DemiBold);
+    album_font.setPointSizeF(font.pointSizeF() * 1.08);
+    const QFontMetrics album_metrics{album_font};
+    // Sat on the rows below rather than floating mid-strip.
+    const auto baseline = rect.bottom() - 8;
+    const auto area = rect.adjusted(6, 0, -8, 0);
+    const auto album = album_metrics.elidedText(text.album, Qt::ElideRight, area.width());
+    painter->setFont(album_font);
+    painter->setPen(palette.color(QPalette::Text));
+    painter->drawText(QPoint{area.left(), baseline}, album);
+    const auto used = album_metrics.horizontalAdvance(album) + 12;
+    if (used < area.width()) {
+        const QFontMetrics detail_metrics{font};
+        painter->setFont(font);
+        painter->setPen(palette.color(QPalette::PlaceholderText));
+        painter->drawText(QPoint{area.left() + used, baseline},
+                          detail_metrics.elidedText(text.details, Qt::ElideRight,
+                                                    area.width() - used));
+    }
+    painter->restore();
+}
 
 QueueItemDelegate::QueueItemDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
 
@@ -106,8 +177,6 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         configuredColumn(this, track_artist_column_property, track_artist_column);
     const auto title_column =
         configuredColumn(this, track_title_column_property, track_title_column);
-    const auto length_column =
-        configuredColumn(this, track_length_column_property, track_length_column);
     const auto side_artwork = configuredFlag(this, track_side_artwork_property);
     const auto artwork_cell = index.column() == artwork_column;
     const auto selected = item.state.testFlag(QStyle::State_Selected);
@@ -121,20 +190,22 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         view->property("trackknife-hover-row").toInt() == index.row()) {
         item.state |= QStyle::State_MouseOver;
     }
+    const auto album_column =
+        configuredColumn(this, track_album_column_property, track_album_column);
+    const auto date_column = configuredColumn(this, track_date_column_property, track_date_column);
     const auto group_start = beginsAlbum(index);
     if (group_start) {
         const QRect header_rect{option.rect.x(), option.rect.y(), option.rect.width(),
                                 QueueItemDelegate::album_header_height};
-        painter->save();
-        painter->fillRect(header_rect, option.palette.alternateBase());
-        painter->setPen(option.palette.mid().color());
-        painter->drawLine(header_rect.bottomLeft(), header_rect.bottomRight());
-
-        if (index.column() == artwork_column && !side_artwork) {
+        // Side artwork: the view draws the whole header over the row, beside
+        // the cover. Here each cell draws only its share of the strip.
+        paintAlbumHeader(painter, header_rect, option.palette, option.font, {}, index.row() > 0);
+        if (!side_artwork && index.column() == artwork_column) {
             const auto cover = index.data(track_album_artwork_role).value<QImage>();
             const QRect cover_bounds{header_rect.left() + 6,
                                      header_rect.center().y() - album_cover_extent / 2,
                                      album_cover_extent, album_cover_extent};
+            painter->save();
             if (!cover.isNull()) {
                 const auto fitted = cover.size().scaled(cover_bounds.size(), Qt::KeepAspectRatio);
                 const QRect target{cover_bounds.center().x() - fitted.width() / 2,
@@ -147,54 +218,120 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                                      QApplication::style()->standardIcon(QStyle::SP_FileIcon));
                 icon.paint(painter, cover_bounds, Qt::AlignCenter, QIcon::Normal);
             }
-        } else if (index.column() == (side_artwork ? artist_column : title_column)) {
-            auto font = option.font;
-            font.setBold(true);
-            painter->setFont(font);
-            painter->setPen(option.palette.text().color());
-            painter->drawText(header_rect.adjusted(4, 0, -4, 0), Qt::AlignVCenter | Qt::AlignLeft,
-                              option.fontMetrics.elidedText(albumTitle(index), Qt::ElideRight,
-                                                            header_rect.width() - 8));
-        } else if (index.column() == length_column) {
-            auto font = option.font;
-            font.setBold(true);
-            painter->setFont(font);
-            painter->setPen(option.palette.text().color());
-            painter->drawText(header_rect.adjusted(4, 0, -6, 0), Qt::AlignVCenter | Qt::AlignRight,
-                              formatDuration(albumDurationMs(index)));
+            painter->restore();
+        } else if (!side_artwork && index.column() == title_column) {
+            paintAlbumHeader(painter, header_rect, option.palette, option.font,
+                             albumHeaderText(*index.model(), index.row(), album_column, date_column),
+                             index.row() > 0);
         }
-        painter->restore();
         item.rect.setTop(item.rect.top() + QueueItemDelegate::album_header_height);
     }
 
     const auto current_track = index.data(track_current_role).toBool();
-    if (current_track) {
-        item.font.setBold(true);
-        if (!selected && !artwork_cell) {
-            const auto base = item.palette.color(QPalette::Base);
-            const auto accent = item.palette.color(QPalette::Highlight);
-            const auto playback_fill = QColor::fromRgb((base.red() * 3 + accent.red()) / 4,
-                                                       (base.green() * 3 + accent.green()) / 4,
-                                                       (base.blue() * 3 + accent.blue()) / 4);
-            item.backgroundBrush = playback_fill;
+    const auto in_group = !isSingleTrackGroup(index, this);
+    if (!artwork_cell) {
+        // Selection as a tint, so the text keeps its colour and the row that
+        // plays still reads as playing inside a selection.
+        if (selected) {
+            item.state &= ~QStyle::State_Selected;
+            item.backgroundBrush = blended(item.palette.color(QPalette::Base),
+                                           item.palette.color(QPalette::Highlight), 0.32);
         }
+        // Focus is one outline around the current row, drawn by the view,
+        // not a box around each cell.
+        item.state &= ~QStyle::State_HasFocus;
+    }
+    if (current_track) {
+        item.font.setWeight(QFont::DemiBold);
+        const auto accent = item.palette.color(QPalette::Highlight).lighter(115);
+        item.palette.setColor(QPalette::Text, accent);
+        item.palette.setColor(QPalette::HighlightedText, accent);
         if (index.column() == (side_artwork ? title_column : artwork_column)) {
             item.icon =
-                QIcon::fromTheme(QStringLiteral("media-playback-pause"),
-                                 QApplication::style()->standardIcon(QStyle::SP_MediaPause));
+                QIcon::fromTheme(QStringLiteral("media-playback-start"),
+                                 QApplication::style()->standardIcon(QStyle::SP_MediaPlay));
             item.decorationSize = QSize{14, 14};
+        }
+    }
+    // Numbers right-aligned and quiet, so they end where the titles begin.
+    if (index.column() == configuredColumn(this, track_number_column_property,
+                                           track_number_column)) {
+        item.displayAlignment = Qt::AlignRight | Qt::AlignVCenter;
+        if (!current_track) {
+            item.palette.setColor(QPalette::Text, item.palette.color(QPalette::PlaceholderText));
+        }
+    }
+    // Inside an album, what the header already says is not said again on
+    // every row: album and date go, and the artist stays only where it
+    // differs from the album's -- a compilation's tracks, quietly.
+    if (in_group && !artwork_cell) {
+        if (index.column() == album_column || index.column() == date_column) {
+            item.text.clear();
+        } else if (index.column() == artist_column) {
+            if (item.text == index.data(track_album_artist_role).toString()) {
+                item.text.clear();
+            } else if (!current_track) {
+                item.palette.setColor(QPalette::Text,
+                                      item.palette.color(QPalette::PlaceholderText));
+            }
         }
     }
     const auto inline_artwork =
         index.column() == artwork_column && side_artwork && isSingleTrackGroup(index, this);
+    // What a hidden column would have said, after the title and quieter: a
+    // compilation track's artist, and a lone track's artist and album.
+    QString title_suffix;
     if (artwork_cell) {
         item.text.clear();
     } else if (index.column() == title_column) {
         item.text = trackLabel(index, this);
+        const auto hidden = [view](const int column) {
+            return view != nullptr && view->isColumnHidden(column);
+        };
+        const auto artist = index.siblingAtColumn(artist_column).data().toString();
+        QStringList extra;
+        if (hidden(artist_column) && !artist.isEmpty() &&
+            (!in_group || artist != index.data(track_album_artist_role).toString())) {
+            extra << artist;
+        }
+        if (!in_group && hidden(album_column)) {
+            const auto album = index.siblingAtColumn(album_column).data().toString();
+            if (!album.isEmpty()) {
+                extra << album;
+            }
+        }
+        title_suffix = extra.join(QStringLiteral(" · "));
     }
     const auto* widget = item.widget;
     auto* item_style = widget != nullptr ? widget->style() : QApplication::style();
-    item_style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+    if (title_suffix.isEmpty()) {
+        item_style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+    } else {
+        const auto title = item.text;
+        item.text.clear();
+        item_style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
+        item.text = title;
+        const auto area =
+            item_style->subElementRect(QStyle::SE_ItemViewItemText, &item, widget).adjusted(2, 0, -2, 0);
+        const QFontMetrics title_metrics{item.font};
+        const auto shown = title_metrics.elidedText(title, Qt::ElideRight, area.width());
+        painter->save();
+        painter->setFont(item.font);
+        painter->setPen(item.palette.color(QPalette::Text));
+        painter->drawText(area, Qt::AlignVCenter | Qt::AlignLeft, shown);
+        const auto used = title_metrics.horizontalAdvance(shown);
+        const auto rest = area.adjusted(used, 0, 0, 0);
+        if (rest.width() > 12) {
+            const QFontMetrics suffix_metrics{option.font};
+            painter->setFont(option.font);
+            painter->setPen(current_track ? item.palette.color(QPalette::Text)
+                                          : item.palette.color(QPalette::PlaceholderText));
+            painter->drawText(rest, Qt::AlignVCenter | Qt::AlignLeft,
+                              suffix_metrics.elidedText(QStringLiteral(" — ") + title_suffix,
+                                                        Qt::ElideRight, rest.width()));
+        }
+        painter->restore();
+    }
     if (inline_artwork) {
         const auto extent =
             std::max(0, std::min({18, item.rect.width() - 4, item.rect.height() - 4}));
@@ -215,15 +352,6 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                 icon.paint(painter, target, Qt::AlignCenter, QIcon::Disabled);
             }
         }
-    }
-    if (current_track && !selected && !artwork_cell) {
-        auto playback_line = item.palette.color(QPalette::Highlight);
-        playback_line.setAlpha(180);
-        painter->save();
-        painter->setPen(playback_line);
-        painter->drawLine(item.rect.topLeft(), item.rect.topRight());
-        painter->drawLine(item.rect.bottomLeft(), item.rect.bottomRight());
-        painter->restore();
     }
 }
 
@@ -270,39 +398,6 @@ bool QueueItemDelegate::beginsAlbum(const QModelIndex& index) const {
         index.row() == 0 || key != groupKey(index.sibling(index.row() - 1, 0), this);
     return begins_group && index.row() + 1 < index.model()->rowCount() &&
            key == groupKey(index.sibling(index.row() + 1, 0), this);
-}
-
-QString QueueItemDelegate::albumTitle(const QModelIndex& index) const {
-    const auto artist = index.data(track_album_artist_role).toString();
-    const auto album = index
-                           .siblingAtColumn(configuredColumn(this, track_album_column_property,
-                                                             track_album_column))
-                           .data()
-                           .toString();
-    const auto date =
-        index.siblingAtColumn(configuredColumn(this, track_date_column_property, track_date_column))
-            .data()
-            .toString();
-    auto title = artist.isEmpty() ? QStringLiteral("Unknown artist") : artist;
-    title += QStringLiteral(" — ");
-    title += album.isEmpty() ? QStringLiteral("Unknown album") : album;
-    if (!date.isEmpty()) {
-        title += QStringLiteral(" (%1)").arg(date);
-    }
-    return title;
-}
-
-qint64 QueueItemDelegate::albumDurationMs(const QModelIndex& index) const {
-    const auto key = groupKey(index, this);
-    qint64 duration = 0;
-    for (int row = index.row(); row < index.model()->rowCount(); ++row) {
-        const auto current = index.sibling(row, 0);
-        if (groupKey(current, this) != key) {
-            break;
-        }
-        duration += current.data(track_duration_ms_role).toLongLong();
-    }
-    return duration;
 }
 
 } // namespace trackknife::ui

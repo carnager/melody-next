@@ -11,7 +11,9 @@
 
 namespace trackknife::ui {
 
-inline constexpr int track_view_layout_schema_version = 1;
+// 2: album views no longer show artist, album and date columns by default;
+// the album header says them. Version 1 layouts are migrated on reading.
+inline constexpr int track_view_layout_schema_version = 2;
 
 enum class TrackViewPresentation {
     albums_side_artwork,
@@ -41,7 +43,9 @@ struct TrackViewLayout {
 [[nodiscard]] QByteArray serializeTrackViewLayout(const TrackViewLayout& layout);
 
 // Requires unique registered columns, at least one visible column, bounded
-// widths, and a known v1 presentation. Newly registered columns append hidden.
+// widths, and a known presentation. Newly registered columns append hidden.
+// A version 1 album view is migrated: its artist, album and date columns are
+// hidden, since every row under an album header repeated them.
 // Unknown/newer state is rejected
 // so callers can display a fallback without overwriting the original bytes.
 [[nodiscard]] std::optional<TrackViewLayout>

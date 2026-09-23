@@ -86,6 +86,9 @@ class QueueTableView final : public QTableView {
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    void currentChanged(const QModelIndex& current, const QModelIndex& previous) override;
     void resizeEvent(QResizeEvent* event) override;
     void scrollContentsBy(int dx, int dy) override;
 

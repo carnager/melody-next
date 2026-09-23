@@ -9237,8 +9237,10 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         auto* header = view->horizontalHeader();
         header->moveSection(header->visualIndex(local_title_column), 1);
         view->setColumnWidth(local_title_column, 333);
-        date->trigger();
+        // The album view leaves the date to its header; asked for, it shows.
         QVERIFY(view->isColumnHidden(local_date_column));
+        date->trigger();
+        QVERIFY(!view->isColumnHidden(local_date_column));
         QTRY_COMPARE(view->horizontalHeader()->length(), view->viewport()->width());
         persisted_title_width = view->columnWidth(local_title_column);
         window.resize(1'350, 720);
@@ -9261,7 +9263,7 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         QCOMPARE(view->horizontalHeader()->logicalIndex(1), local_title_column);
         QTRY_COMPARE(view->horizontalHeader()->length(), view->viewport()->width());
         QCOMPARE(view->columnWidth(local_title_column), persisted_title_width);
-        QVERIFY(view->isColumnHidden(local_date_column));
+        QVERIFY(!view->isColumnHidden(local_date_column));
         QVERIFY(restored.close());
     }
 

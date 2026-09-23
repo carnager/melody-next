@@ -702,3 +702,16 @@ target_link_libraries(
     PRIVATE Trackknife::UiCommon trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME debug-log COMMAND trackknife_debug_log_tests)
+
+# No test writes into the real home's data: every one gets data and cache
+# directories of its own under the build tree. Tests once left databases and
+# engine logs in ~/.local/share. The config directory stays the real one:
+# fontconfig reads it, and the layout tests measure rows in the desktop's
+# font; settings are isolated by the tests themselves.
+get_property(trackknife_all_tests DIRECTORY PROPERTY TESTS)
+foreach(trackknife_test IN LISTS trackknife_all_tests)
+    set(trackknife_test_home "${CMAKE_CURRENT_BINARY_DIR}/test-home/${trackknife_test}")
+    set_property(TEST ${trackknife_test} APPEND PROPERTY ENVIRONMENT
+        "XDG_DATA_HOME=${trackknife_test_home}/data"
+        "XDG_CACHE_HOME=${trackknife_test_home}/cache")
+endforeach()

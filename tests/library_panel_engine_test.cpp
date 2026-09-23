@@ -20,6 +20,7 @@
 #include <QLineEdit>
 #include <QFile>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QtTest>
 #include <atomic>
 
@@ -34,6 +35,7 @@ class LibraryPanelEngineTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void initTestCase();
     void init();
     void aConfiguredEngineServesThePanel();
     void everyPathReachesTheEngineNotTheDatabase();
@@ -43,6 +45,9 @@ class LibraryPanelEngineTest final : public QObject {
     void aTcpEngineIsReachedWithItsToken();
     void theEngineReadsCoversWhereTheFilesAre();
 };
+
+// Settings go to Qt's test location, never the user's own.
+void LibraryPanelEngineTest::initTestCase() { QStandardPaths::setTestModeEnabled(true); }
 
 void LibraryPanelEngineTest::init() {
     QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_socket_key));

@@ -10564,9 +10564,13 @@ void BenchMainWindowTest::localPlaybackModesPersistAndStayLocal() {
         random->trigger();
         QTRY_COMPARE(window.property("trackknife-player-replaygain").toInt(), 1);
         QCOMPARE(rg->text(), QStringLiteral("RG: Automatic"));
+        // Icons, not letters, with one-shot marked on the icon itself.
+        QVERIFY(!single->icon().isNull() && !consume->icon().isNull());
+        const auto plain_single = single->icon().pixmap(22, 22).toImage();
         single->trigger();
         single->trigger();
         QCOMPARE(single->iconText(), QStringLiteral("1×"));
+        QVERIFY(single->icon().pixmap(22, 22).toImage() != plain_single);
         consume->trigger();
         consume->trigger();
         QCOMPARE(consume->iconText(), QStringLiteral("C×"));

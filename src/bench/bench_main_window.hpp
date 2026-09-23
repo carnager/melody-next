@@ -435,6 +435,8 @@ class BenchMainWindow final : public QMainWindow {
     void buildMprisService();
     void publishMprisState();
     void rebuildDeviceMenu();
+    // A mode's icon marked as one-shot: on for one track, then off.
+    [[nodiscard]] QIcon oneShotIcon(const QIcon& plain) const;
     void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms);
     void showCustomPlaybackBufferDialog();
     void refreshPlaybackBufferChecks();

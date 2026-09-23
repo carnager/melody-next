@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QPainter>
 #include <QWidgetAction>
 #include <QMenuBar>
 #include <QPushButton>
@@ -659,6 +660,24 @@ void BenchMainWindow::rebuildDeviceMenu() {
     });
 }
 
+QIcon BenchMainWindow::oneShotIcon(const QIcon& plain) const {
+    QIcon marked;
+    for (const int extent : {16, 22, 32}) {
+        QPixmap pixmap = plain.pixmap(extent, extent);
+        if (pixmap.isNull()) {
+            continue;
+        }
+        QPainter painter{&pixmap};
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(palette().color(QPalette::Highlight));
+        const auto dot = static_cast<qreal>(extent) * 0.38;
+        painter.drawEllipse(QRectF{extent - dot, extent - dot, dot, dot});
+        marked.addPixmap(pixmap);
+    }
+    return marked.isNull() ? plain : marked;
+}
+
 void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     const QSettings settings;
     playback_.modes.repeat =
@@ -712,7 +731,8 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
                                     QStringLiteral("media-playlist-repeat"));
     local_random_action_ = add_mode(QStringLiteral("random"), QStringLiteral("Random"),
                                     QStringLiteral("media-playlist-shuffle"));
-    local_single_action_ = add_mode(QStringLiteral("single"), QStringLiteral("Single"), {});
+    local_single_action_ = add_mode(QStringLiteral("single"), QStringLiteral("Single"),
+                                    QStringLiteral("media-playlist-repeat-song"));
     local_album_random_action_ = add_mode(QStringLiteral("album-random"), tr("Album shuffle"),
                                           QStringLiteral("media-playlist-shuffle"));
     local_album_random_action_->setIcon(albumShuffleIcon(palette()));
@@ -722,7 +742,12 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
             playback_.modes.random = false;
         applyLocalPlaybackModes();
     });
-    local_consume_action_ = add_mode(QStringLiteral("consume"), QStringLiteral("Consume"), {});
+    local_consume_action_ = add_mode(QStringLiteral("consume"), QStringLiteral("Consume"),
+                                     QStringLiteral("edit-clear-list"));
+    // Their plain icons, so one-shot can be drawn as a mark on them.
+    for (auto* action : {local_single_action_, local_consume_action_}) {
+        action->setProperty("bench-plain-icon", QVariant::fromValue(action->icon()));
+    }
     connect(local_repeat_action_, &QAction::triggered, this, [this](bool on) {
         playback_.modes.repeat = on;
         applyLocalPlaybackModes();
@@ -847,14 +872,18 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     local_random_action_->setToolTip(
         QStringLiteral("Random: %1")
             .arg(playback_.modes.random ? QStringLiteral("On") : QStringLiteral("Off")));
-    const auto cycle = [](QAction* action, const audio::ModeState mode, const QString& name,
-                          const QString& symbol, const QString& help) {
+    const auto cycle = [this](QAction* action, const audio::ModeState mode, const QString& name,
+                              const QString& symbol, const QString& help) {
         const auto state = mode == audio::ModeState::off  ? QStringLiteral("Off")
                            : mode == audio::ModeState::on ? QStringLiteral("On")
                                                           : QStringLiteral("One-shot");
         action->setChecked(mode != audio::ModeState::off);
         action->setIconText(mode == audio::ModeState::oneshot ? symbol + QStringLiteral("×")
                                                               : symbol);
+        // One-shot is marked on the icon: a dot, where the letters once had
+        // an "×" -- an icon cannot carry a letter.
+        const auto plain = action->property("bench-plain-icon").value<QIcon>();
+        action->setIcon(mode == audio::ModeState::oneshot ? oneShotIcon(plain) : plain);
         action->setText(QStringLiteral("%1: %2").arg(name, state));
         action->setToolTip(QStringLiteral("%1: %2\n%3").arg(name, state, help));
     };

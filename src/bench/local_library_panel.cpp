@@ -182,7 +182,6 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(4, 4, 4, 4);
     layout->setSpacing(4);
-    auto* tools = new QHBoxLayout;
     auto* search_row = new QHBoxLayout;
     search_ = new QLineEdit(this);
     search_->setObjectName(QStringLiteral("local-library-search"));
@@ -217,14 +216,27 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
     if (query_toggle_->isChecked()) {
         search_->setPlaceholderText(tr("tkq query, e.g. genre HAS jazz"));
     }
-    auto* folders = new QToolButton(this);
-    folders->setObjectName(QStringLiteral("local-library-folders"));
-    folders->setText(tr("Folders…"));
+    // Refresh and the library's folders are icons on the search row: used
+    // now and then, they need not take a row of their own.
+    const auto icon_button = [this](const QString& name, const QString& icon,
+                                    const QString& text) {
+        auto* button = new QToolButton(this);
+        button->setObjectName(name);
+        button->setText(text);
+        button->setToolTip(text);
+        button->setAccessibleName(text);
+        button->setIcon(QIcon::fromTheme(icon));
+        button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+        button->setAutoRaise(true);
+        button->setIconSize(QSize{16, 16});
+        return button;
+    };
+    auto* folders = icon_button(QStringLiteral("local-library-folders"),
+                                QStringLiteral("folder"), tr("Folders…"));
     folders->setToolTip(tr("Choose which folders belong to your music library"));
     connect(folders, &QToolButton::clicked, this, &LocalLibraryPanel::showFolders);
-    scan_button_ = new QToolButton(this);
-    scan_button_->setObjectName(QStringLiteral("local-library-scan"));
-    scan_button_->setText(tr("Refresh"));
+    scan_button_ = icon_button(QStringLiteral("local-library-scan"),
+                               QStringLiteral("view-refresh"), tr("Refresh"));
     connect(scan_button_, &QToolButton::clicked, this, [this] {
         if (scanning_) {
             scan_cancellation_.request_cancellation();
@@ -234,10 +246,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
             startScan();
         }
     });
-    tools->addWidget(folders);
-    tools->addStretch();
-    tools->addWidget(scan_button_);
-    layout->addLayout(tools);
+    search_row->addWidget(scan_button_);
+    search_row->addWidget(folders);
     auto* library_view = new ui::LibraryTreeView(this);
     tree_ = library_view;
     tree_->setObjectName(QStringLiteral("local-library-tree"));
@@ -286,6 +296,7 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
                          index.data(query_role).value<persistence::LibraryQuery>());
         });
     tree_->setModel(model_);
+    tree_->setFrameShape(QFrame::NoFrame);
     layout->addWidget(tree_, 1);
     connect(tree_, &QTreeView::expanded, this, [this](const QModelIndex& index) {
         auto* item = model_->itemFromIndex(index);
@@ -356,6 +367,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
         scanning_ = false;
         setProperty("scanning", false);
         scan_button_->setText(tr("Refresh"));
+        scan_button_->setToolTip(tr("Refresh"));
+        scan_button_->setIcon(QIcon::fromTheme(QStringLiteral("view-refresh")));
         poll_timer_->stop();
         if (stopped_) {
             return;
@@ -1358,6 +1371,8 @@ void LocalLibraryPanel::startScan() {
     scan_cancellation_ = core::CancellationSource{};
     progress_ = std::make_shared<persistence::LibraryScanProgress>();
     scan_button_->setText(tr("Stop"));
+    scan_button_->setToolTip(tr("Stop scanning"));
+    scan_button_->setIcon(QIcon::fromTheme(QStringLiteral("process-stop")));
     poll_timer_->start();
     updateProgress();
     scan_watcher_.setFuture(QtConcurrent::run(&pool_, [catalogues = catalogues_,

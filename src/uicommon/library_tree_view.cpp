@@ -286,7 +286,13 @@ void LibraryTreeDelegate::paint(QPainter* painter, const QStyleOptionViewItem& o
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
         painter->setPen(Qt::NoPen);
-        painter->setBrush(item.palette.color(QPalette::Mid));
+        // A shade off the background, not the dark mid tone.
+        const auto base = item.palette.color(QPalette::Base);
+        const auto ink = item.palette.color(QPalette::Text);
+        const auto tint = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
+        painter->setBrush(QColor::fromRgb(tint(base.red(), ink.red()),
+                                          tint(base.green(), ink.green()),
+                                          tint(base.blue(), ink.blue())));
         painter->drawRoundedRect(icon_rect, 3, 3);
         auto tile_font = item.font;
         tile_font.setPointSizeF(std::max(6.0, item.font.pointSizeF() * 0.72));

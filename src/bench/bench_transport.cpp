@@ -264,12 +264,20 @@ void BenchMainWindow::refreshHeaderCover(const QString& entry) {
         QPainter painter{&tile};
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
-        painter.setBrush(palette().color(QPalette::Mid));
+        const auto ground = palette().color(QPalette::Window);
+        const auto ink = palette().color(QPalette::Text);
+        const auto tint = [](const int a, const int b) { return (a * 90 + b * 10) / 100; };
+        painter.setBrush(QColor::fromRgb(tint(ground.red(), ink.red()),
+                                         tint(ground.green(), ink.green()),
+                                         tint(ground.blue(), ink.blue())));
         painter.drawRoundedRect(QRectF{0, 0, header_cover_size, header_cover_size}, 3, 3);
-        const auto note = QIcon::fromTheme(QStringLiteral("audio-x-generic"));
-        if (!note.isNull()) {
-            note.paint(&painter, QRect{12, 12, 20, 20});
-        }
+        // A quiet note in the theme's own muted colour, not a file icon.
+        auto note_font = font();
+        note_font.setPointSizeF(note_font.pointSizeF() * 1.5);
+        painter.setFont(note_font);
+        painter.setPen(palette().color(QPalette::PlaceholderText));
+        painter.drawText(QRectF{0, 0, header_cover_size, header_cover_size}, Qt::AlignCenter,
+                         QStringLiteral("\u266A"));
         painter.end();
         now_playing_cover_->setPixmap(tile);
         return;

@@ -113,7 +113,7 @@ void BenchMainWindow::buildWorkspace() {
     folders_layout->setContentsMargins(0, 0, 0, 0);
     folders_layout->setSpacing(0);
     auto* heading_row = new QHBoxLayout;
-    heading_row->setContentsMargins(4, 0, 4, 0);
+    heading_row->setContentsMargins(6, 6, 6, 2);
     heading_row->setSpacing(2);
     // One-click source switching (ADR-0130): a flat tab bar per authority
     // replaces the dropdown and static heading.
@@ -122,16 +122,37 @@ void BenchMainWindow::buildWorkspace() {
         auto* bar = new QTabBar(folders_panel_);
         bar->setObjectName(object_name);
         bar->setAccessibleName(accessible_name);
-        bar->setExpanding(false);
+        bar->setExpanding(true);
         bar->setDrawBase(false);
         bar->setDocumentMode(true);
+        // A segmented control: one pill holding the sources, the chosen one
+        // filled -- choosing between views, not holding documents.
+        const auto ground = palette().color(QPalette::Window);
+        const auto ink = palette().color(QPalette::Text);
+        const auto shade = [&](const int amount) {
+            const auto mix = [amount](const int a, const int b) {
+                return (a * (100 - amount) + b * amount) / 100;
+            };
+            return QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
+                                   mix(ground.blue(), ink.blue()))
+                .name();
+        };
+        bar->setAttribute(Qt::WA_StyledBackground);
+        bar->setStyleSheet(
+            QStringLiteral("QTabBar { background: %1; border-radius: 5px; }"
+                           "QTabBar::tab { background: transparent; border: none; margin: 2px;"
+                           " padding: 3px 12px; border-radius: 4px; color: palette(placeholder-text); }"
+                           "QTabBar::tab:hover { color: palette(text); }"
+                           "QTabBar::tab:selected { background: palette(highlight);"
+                           " color: palette(highlighted-text); }")
+                .arg(shade(6)));
         return bar;
     };
     local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),
                                           QStringLiteral("Local music source"));
     local_source_tabs_->addTab(QStringLiteral("Folders"));
     local_source_tabs_->addTab(QStringLiteral("Library"));
-    heading_row->addWidget(local_source_tabs_);
+    heading_row->addWidget(local_source_tabs_, 1);
     // Remembered only when chosen: tabs appearing, hiding or being switched
     // by the window itself do not change what the user asked for.
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
@@ -149,7 +170,6 @@ void BenchMainWindow::buildWorkspace() {
     selectPreferredSource();
     connect(local_source_tabs_, &QTabBar::currentChanged, this,
             [this](int) { refreshActiveContext(); });
-    heading_row->addStretch(1);
     folders_layout->addLayout(heading_row);
     folder_bookmarks_heading_ = new QLabel(QStringLiteral("Bookmarks"), folders_panel_);
     auto* bookmarks_heading = folder_bookmarks_heading_;

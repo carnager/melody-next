@@ -82,11 +82,17 @@ the queue entry it plays. There is no agent-side queue to fall out of step.
 `--music-root`:
 
 - For an agent with files, a path under it is sent relative, and the agent
-  joins it to its own root, as satellite mode did.
-- For an agent without files, or a path outside the root, the server sends a
+  joins it to its own root, as satellite mode did. A path outside it is sent
+  as it is, which suits a mount at the same place on both machines.
+- For an agent without files (`melody-agent --stream`), the server sends a
   stream URL it built itself: its own HTTP listener (`--http HOST:PORT`),
-  `GET /stream/<entry>` with range requests, authenticated by the token. No
-  port is hard-coded in an agent.
+  `GET /stream?path=<encoded path>&token=<token>` with range requests. No port
+  is hard-coded in an agent. The host is the address the agent reached the
+  engine at, unless the listener is bound to one address.
+- The stream token is made when the engine starts and reaches agents only
+  inside the URLs the engine sends them; it is not the engine's TCP token.
+  And it opens only what the player holds -- queue entries and asks -- so a
+  path the player does not hold is answered 404 whatever the token.
 
 **Outputs.** The server lists its outputs (its own audio, if it has any, and
 every registered agent) through `outputs.list` and selects one with

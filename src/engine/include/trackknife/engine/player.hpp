@@ -132,6 +132,9 @@ class Player final {
     // Null chooses no output: the queue stays, nothing plays.
     [[nodiscard]] core::Result<void> set_output(audio::Audition* output);
     [[nodiscard]] audio::Audition* current_output() const;
+    // Whether a path is in the queue or among the asks: what the engine will
+    // stream to an agent, and nothing else (ADR-0228).
+    [[nodiscard]] bool holds(const std::string& raw_path) const;
     // Takes up the playing entry again on the current output: an agent that
     // dropped and came back. Without a position, where it was waiting to
     // resume -- a restore that failed because the output was not there yet.

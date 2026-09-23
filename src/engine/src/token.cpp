@@ -102,3 +102,19 @@ core::Result<std::string> load_or_create_token(const std::filesystem::path& path
 }
 
 } // namespace trackknife::engine
+
+namespace trackknife::engine {
+
+bool same_token(const std::string_view offered, const std::string_view expected) {
+    unsigned char difference = offered.size() == expected.size() ? 0U : 1U;
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const auto left = index < offered.size() ? static_cast<unsigned char>(offered[index]) : 0U;
+        difference = static_cast<unsigned char>(
+            difference | (left ^ static_cast<unsigned char>(expected[index])));
+    }
+    return difference == 0U;
+}
+
+core::Result<std::string> random_token() { return generate(); }
+
+} // namespace trackknife::engine

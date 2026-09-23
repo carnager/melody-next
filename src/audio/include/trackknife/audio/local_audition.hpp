@@ -166,7 +166,9 @@ class LocalAuditionService final : public Audition {
     // inode revision to observe/revalidate around decoder open.
     [[nodiscard]] core::Result<void>
     load_network_stream_and_play(std::string url,
-                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {},
+                                 formats::AudioSourceSelection selection = {},
+                                 std::optional<formats::SampleRange> segment = std::nullopt);
     [[nodiscard]] core::Result<void> load_segment_and_play(std::string raw_path,
                                                            formats::SampleRange segment);
     [[nodiscard]] core::Result<void> load_selected_segment_and_play(
@@ -183,7 +185,10 @@ class LocalAuditionService final : public Audition {
                                 std::uint64_t occurrence_token = 0U) override;
     [[nodiscard]] core::Result<void>
     queue_gapless_network_stream(std::string url,
-                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {});
+                                 std::optional<formats::ReplayGainInfo> replay_gain_override = {},
+                                 formats::AudioSourceSelection selection = {},
+                                 std::optional<formats::SampleRange> segment = std::nullopt,
+                                 std::uint64_t occurrence_token = 0U);
     [[nodiscard]] core::Result<void> queue_gapless_next_segment(std::string raw_path,
                                                                 formats::SampleRange segment);
     [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(

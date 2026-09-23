@@ -49,7 +49,8 @@ constexpr std::chrono::seconds call_timeout{5};
 AgentAudition::AgentAudition(std::string name, AgentPaths paths)
     : name_(std::move(name)), paths_(std::move(paths)) {}
 
-void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool files) {
+void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool files,
+                           std::string reached) {
     std::shared_ptr<protocol::Client> shared{std::move(client)};
     std::weak_ptr<protocol::Client> weak = shared;
     shared->on_event([this, weak](const protocol::Event& event) {
@@ -75,6 +76,7 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
         const std::lock_guard guard{mutex_};
         previous = std::exchange(client_, std::move(shared));
         files_ = files;
+        reached_ = std::move(reached);
         // A new process knows nothing of what the old one played.
         reported_ = audio::LocalAuditionSnapshot{};
         next_armed_ = false;
@@ -166,9 +168,13 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
                   .segment = segment,
                   .replay_gain = std::move(replay_gain)};
     bool files = true;
+    std::string host = paths_.stream_host;
     {
         const std::lock_guard guard{mutex_};
         files = files_;
+        if (host.empty()) {
+            host = reached_;
+        }
     }
     if (files) {
         const std::filesystem::path path{raw_path};
@@ -182,16 +188,22 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
         source.path = raw_path;
         return source;
     }
-    if (paths_.stream_base.empty()) {
+    if (paths_.stream_port == 0U) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::unsupported,
             .message =
                 "this agent streams, and the engine serves no streams (start it with --http)",
             .context = {{.key = "agent", .value = name_}}});
     }
+    if (host.empty()) {
+        host = "127.0.0.1";
+    }
+    // An IPv6 address is bracketed in a URL, so its colons are not the port's.
+    const auto authority = (host.find(':') != std::string::npos ? "[" + host + "]" : host) + ":" +
+                           std::to_string(paths_.stream_port);
     // The engine checks the path against what it is playing before serving
     // it; the token is what lets the agent ask.
-    source.url = paths_.stream_base +
+    source.url = "http://" + authority +
                  "/stream?path=" + percent_encoded(protocol::encode_raw_path(raw_path)) +
                  "&token=" + percent_encoded(paths_.stream_token);
     return source;

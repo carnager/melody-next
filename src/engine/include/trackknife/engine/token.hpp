@@ -6,6 +6,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace trackknife::engine {
 
@@ -21,5 +22,12 @@ namespace trackknife::engine {
 // loosened file is how a credential ends up world-readable without anyone
 // deciding it should be -- the same rule ssh applies to private keys.
 [[nodiscard]] core::Result<std::string> load_or_create_token(const std::filesystem::path& path);
+
+// Compares without an early exit, so how long a wrong guess takes to be
+// refused says nothing about how much of it was right.
+[[nodiscard]] bool same_token(std::string_view offered, std::string_view expected);
+
+// A fresh random token, for a credential that lives as long as the engine.
+[[nodiscard]] core::Result<std::string> random_token();
 
 } // namespace trackknife::engine

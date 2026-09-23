@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/server.hpp"
 
+#include "trackknife/engine/token.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <arpa/inet.h>
@@ -34,18 +35,6 @@ namespace {
 // control path carries no binary, so a megabyte-long line is a confused or
 // hostile sender, not a large request.
 constexpr std::size_t maximum_line_bytes = 1U << 20U;
-
-// Compares without an early exit, so how long a wrong guess takes to be
-// refused says nothing about how much of it was right.
-[[nodiscard]] bool same_token(const std::string_view offered, const std::string_view expected) {
-    unsigned char difference = offered.size() == expected.size() ? 0U : 1U;
-    for (std::size_t index = 0; index < expected.size(); ++index) {
-        const auto left = index < offered.size() ? static_cast<unsigned char>(offered[index]) : 0U;
-        difference = static_cast<unsigned char>(
-            difference | (left ^ static_cast<unsigned char>(expected[index])));
-    }
-    return difference == 0U;
-}
 
 // A response as a line. JSON strings must be UTF-8, and an answer carrying
 // bytes that are not -- a file name, a tag -- cannot be encoded. That once

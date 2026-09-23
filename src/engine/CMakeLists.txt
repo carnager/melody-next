@@ -2,7 +2,7 @@
 
 find_package(Threads REQUIRED)
 
-add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/token.cpp src/job_registry.cpp src/playback_methods.cpp src/playback_store.cpp src/player.cpp src/recorder.cpp src/remote_catalogue.cpp src/workspace.cpp src/outputs.cpp)
+add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/token.cpp src/job_registry.cpp src/playback_methods.cpp src/playback_store.cpp src/player.cpp src/recorder.cpp src/remote_catalogue.cpp src/workspace.cpp src/outputs.cpp src/stream_server.cpp)
 add_library(Trackknife::Engine ALIAS trackknife_engine)
 
 target_include_directories(

@@ -4,7 +4,12 @@
 
 #include "trackknife/protocol/client.hpp"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
+
+#include <array>
 
 #include <chrono>
 #include <utility>
@@ -26,6 +31,36 @@ constexpr std::string_view agent_prefix{"agent:"};
     return core::Error{.code = core::ErrorCode::not_found,
                        .message = "no such output",
                        .context = {{.key = "output", .value = id}}};
+}
+
+// The engine's own address on a connection, as text: an IPv4 address that
+// came in over an IPv6 socket is given as IPv4. Empty for a unix socket.
+[[nodiscard]] std::string local_address(const int descriptor) {
+    sockaddr_storage address{};
+    socklen_t length = sizeof(address);
+    if (::getsockname(descriptor, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
+        return {};
+    }
+    std::array<char, INET6_ADDRSTRLEN> text{};
+    if (address.ss_family == AF_INET) {
+        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(&address);
+        return ::inet_ntop(AF_INET, &ipv4->sin_addr, text.data(), text.size()) != nullptr
+                   ? std::string{text.data()}
+                   : std::string{};
+    }
+    if (address.ss_family == AF_INET6) {
+        const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(&address);
+        if (IN6_IS_ADDR_V4MAPPED(&ipv6->sin6_addr)) {
+            return ::inet_ntop(AF_INET, &ipv6->sin6_addr.s6_addr[12], text.data(), text.size()) !=
+                           nullptr
+                       ? std::string{text.data()}
+                       : std::string{};
+        }
+        return ::inet_ntop(AF_INET6, &ipv6->sin6_addr, text.data(), text.size()) != nullptr
+                   ? std::string{text.data()}
+                   : std::string{};
+    }
+    return {};
 }
 
 } // namespace
@@ -60,7 +95,10 @@ void Outputs::admit(const Json& params, const int descriptor) {
         // Before the new connection wipes it: where it was when it dropped.
         heard = agent->last_heard();
     }
-    agent->attach(protocol::Client::adopt(descriptor), files);
+    // Asked before the descriptor is handed over: where this agent reached
+    // the engine, which is where it can fetch streams.
+    auto reached = local_address(descriptor);
+    agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached));
     if (selected) {
         // The music was here when the agent went away; it takes up there.
         static_cast<void>(

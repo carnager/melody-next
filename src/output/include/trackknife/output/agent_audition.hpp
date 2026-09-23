@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -23,8 +24,11 @@ struct AgentPaths final {
     // it is, which suits a mount at the same place on both machines.
     std::optional<std::filesystem::path> music_root;
     // Where an agent without files fetches a path, and the token that lets
-    // it: "http://host:port". Empty when the engine serves no streams.
-    std::string stream_base;
+    // it. Port 0 when the engine serves no streams. The host is the address
+    // the agent reached the engine at, unless the streams are served at one
+    // address only, which is then `stream_host`.
+    std::uint16_t stream_port{0};
+    std::string stream_host;
     std::string stream_token;
 };
 
@@ -39,7 +43,9 @@ class AgentAudition final : public audio::Audition {
 
     // A connection from this agent, replacing any earlier one. `files` is
     // what it registered: whether it opens files itself or must stream.
-    void attach(std::unique_ptr<protocol::Client> client, bool files);
+    // `reached` is the engine's address as this agent reached it, which is
+    // where it can fetch streams too.
+    void attach(std::unique_ptr<protocol::Client> client, bool files, std::string reached = {});
     [[nodiscard]] bool online() const;
     [[nodiscard]] bool files() const;
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
@@ -107,6 +113,7 @@ class AgentAudition final : public audio::Audition {
     mutable std::mutex mutex_;
     std::shared_ptr<protocol::Client> client_;
     bool files_{true};
+    std::string reached_;
     std::function<void()> changed_;
     audio::LocalAuditionSnapshot reported_;
     bool next_armed_{false};

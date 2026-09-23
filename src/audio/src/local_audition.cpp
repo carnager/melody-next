@@ -1343,15 +1343,16 @@ core::Result<void> LocalAuditionService::load_selected_and_play(
 }
 
 core::Result<void> LocalAuditionService::load_network_stream_and_play(
-    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override,
+    const formats::AudioSourceSelection selection, const std::optional<formats::SampleRange> segment) {
     if (!url.starts_with("http://") && !url.starts_with("https://")) {
         return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
     }
     return implementation_->enqueue(Command{
         .kind = CommandKind::load_network_stream_and_play,
         .raw_path = std::move(url),
-        .selection = {},
-        .segment = std::nullopt,
+        .selection = selection,
+        .segment = segment,
         .target_sample = 0,
         .volume_percent = 100,
         .target = {},
@@ -1415,15 +1416,17 @@ core::Result<void> LocalAuditionService::queue_gapless_next_selected(
 }
 
 core::Result<void> LocalAuditionService::queue_gapless_network_stream(
-    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override) {
+    std::string url, std::optional<formats::ReplayGainInfo> replay_gain_override,
+    const formats::AudioSourceSelection selection, const std::optional<formats::SampleRange> segment,
+    const std::uint64_t occurrence_token) {
     if (!url.starts_with("http://") && !url.starts_with("https://")) {
         return std::unexpected(invalid_config("network audition URL must use HTTP or HTTPS"));
     }
     return implementation_->enqueue(Command{
         .kind = CommandKind::queue_network_stream,
         .raw_path = std::move(url),
-        .selection = {},
-        .segment = std::nullopt,
+        .selection = selection,
+        .segment = segment,
         .target_sample = 0,
         .volume_percent = 100,
         .target = {},
@@ -1432,6 +1435,7 @@ core::Result<void> LocalAuditionService::queue_gapless_network_stream(
         .relocated_pending_commands = 0U,
         .replay_gain_override = replay_gain_override,
         .relocation_completion = {},
+        .occurrence_token = occurrence_token,
     });
 }
 

@@ -13,6 +13,7 @@
 #include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/token.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/client.hpp"
@@ -85,6 +86,7 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 
 void usage() {
     std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
+              << "               [--http HOST:PORT] [--music-root DIR]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
               << "  --state DIR    where the database lives (default\n"
@@ -97,6 +99,10 @@ void usage() {
               << "                 with the token in DIR/engine.token (created on first use).\n"
               << "                 There is no TLS: use it on a home network or inside a\n"
               << "                 WireGuard tunnel, or put a TLS proxy in front (ADR-0223).\n"
+              << "  --http HOST:PORT\n"
+              << "                 serve the music being played to output agents that have\n"
+              << "                 no copy of their own (melody-agent --stream). Only what\n"
+              << "                 the queue holds is served, with a token made at start.\n"
               << "\n"
               << "Speaks protocol v1: one JSON object per line. Try:\n"
               << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -115,6 +121,7 @@ int main(int argc, char** argv) {
     auto socket_path = default_socket_path();
     auto state_directory = default_state_directory();
     std::string listen_address;
+    std::string http_address;
     std::optional<std::filesystem::path> music_root;
 
     for (int index = 1; index < argc; ++index) {
@@ -128,6 +135,8 @@ int main(int argc, char** argv) {
             state_directory = value();
         } else if (argument == "--listen") {
             listen_address = value();
+        } else if (argument == "--http") {
+            http_address = value();
         } else if (argument == "--music-root") {
             music_root = std::filesystem::path{value()};
         } else if (argument == "--help" || argument == "-h") {
@@ -257,13 +266,41 @@ int main(int argc, char** argv) {
         playback_store->start();
     }
 
+    // ADR-0228: the files an agent without its own copy fetches -- only
+    // what the player holds, with a token that lives as long as this run and
+    // reaches agents only in the URLs the engine gives them.
+    std::unique_ptr<trackknife::engine::StreamServer> streams;
+    trackknife::output::AgentPaths agent_paths{
+        .music_root = music_root, .stream_port = 0U, .stream_host = {}, .stream_token = {}};
+    if (!http_address.empty()) {
+        const auto endpoint = trackknife::protocol::Endpoint::parse(http_address, {});
+        auto token = trackknife::engine::random_token();
+        if (!endpoint || !endpoint->tcp() || !token) {
+            std::cerr << "melodyd: --http wants HOST:PORT, got " << http_address << "\n";
+            return EXIT_FAILURE;
+        }
+        auto listening = trackknife::engine::StreamServer::listen(
+            endpoint->host, endpoint->port, *token,
+            [&player](const std::string& raw_path) { return player->holds(raw_path); });
+        if (!listening) {
+            std::cerr << "melodyd: could not serve streams on " << http_address << ": "
+                      << listening.error().message << "\n";
+            return EXIT_FAILURE;
+        }
+        streams = std::move(*listening);
+        agent_paths.stream_port = streams->port();
+        agent_paths.stream_token = std::move(*token);
+        // Served on every address, each agent fetches from the one it
+        // reached the engine at; on one address, from that one.
+        if (endpoint->host != "0.0.0.0" && endpoint->host != "::" && !endpoint->host.empty()) {
+            agent_paths.stream_host = endpoint->host;
+        }
+        std::cerr << "melodyd: serving streams to agents on " << endpoint->describe() << "\n";
+    }
+
     // ADR-0228: what the engine plays on -- its own audio and any output
     // agents. After the queue is restored, so the chosen output takes it up.
-    trackknife::engine::Outputs outputs{*player,
-                                        trackknife::output::AgentPaths{.music_root = music_root,
-                                                                       .stream_base = {},
-                                                                       .stream_token = {}},
-                                        &*workspace, sink};
+    trackknife::engine::Outputs outputs{*player, std::move(agent_paths), &*workspace, sink};
     trackknife::engine::register_output_methods(dispatcher, outputs);
     const auto admit = [&outputs](const trackknife::protocol::Json& params, const int descriptor) {
         outputs.admit(params, descriptor);
@@ -282,6 +319,9 @@ int main(int argc, char** argv) {
     (*server)->start();
     if (tcp_server) {
         tcp_server->start();
+    }
+    if (streams) {
+        streams->start();
     }
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
@@ -303,6 +343,9 @@ int main(int argc, char** argv) {
     }
     if (watcher) {
         watcher->stop();
+    }
+    if (streams) {
+        streams->stop();
     }
     if (tcp_server) {
         tcp_server->stop();

@@ -63,8 +63,8 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
             const bool play = params.value("play", true);
             const auto position_ms = params.value("position_ms", std::int64_t{0});
             if (source->url) {
-                auto loaded =
-                    audition.load_network_stream_and_play(*source->url, source->replay_gain);
+                auto loaded = audition.load_network_stream_and_play(
+                    *source->url, source->replay_gain, source->selection, source->segment);
                 if (loaded && !play) {
                     loaded = audition.pause();
                 }
@@ -104,8 +104,8 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
             }
             const auto token = params.value("token", std::uint64_t{0});
             if (source->url) {
-                return answered(
-                    audition.queue_gapless_network_stream(*source->url, source->replay_gain));
+                return answered(audition.queue_gapless_network_stream(
+                    *source->url, source->replay_gain, source->selection, source->segment, token));
             }
             auto path = local_path(*source, music_root);
             if (!path) {

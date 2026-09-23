@@ -11,8 +11,14 @@
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cstdlib>
@@ -88,16 +94,65 @@ void require(const bool condition, const std::string_view message) {
     return made;
 }
 
+// One HTTP exchange with the stream server, as raw as a decoder's: the
+// response's head and body together.
+[[nodiscard]] std::string fetch(const std::uint16_t port, const std::string& request) {
+    const auto descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    ::inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+    if (::connect(descriptor, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0) {
+        ::close(descriptor);
+        return {};
+    }
+    static_cast<void>(::send(descriptor, request.data(), request.size(), MSG_NOSIGNAL));
+    std::string response;
+    std::array<char, 4096> buffer{};
+    while (true) {
+        const auto received = ::recv(descriptor, buffer.data(), buffer.size(), 0);
+        if (received <= 0) {
+            break;
+        }
+        response.append(buffer.data(), static_cast<std::size_t>(received));
+    }
+    ::close(descriptor);
+    return response;
+}
+
+[[nodiscard]] std::string percent_encoded(const std::string& text) {
+    std::string encoded;
+    for (const auto character : text) {
+        if (std::isalnum(static_cast<unsigned char>(character)) != 0) {
+            encoded.push_back(character);
+        } else {
+            static constexpr char digits[] = "0123456789ABCDEF";
+            const auto byte = static_cast<unsigned char>(character);
+            encoded.push_back('%');
+            encoded.push_back(digits[byte >> 4U]);
+            encoded.push_back(digits[byte & 0x0FU]);
+        }
+    }
+    return encoded;
+}
+
+[[nodiscard]] std::string stream_request(const std::filesystem::path& path,
+                                         const std::string& token, const std::string& range = {}) {
+    return "GET /stream?path=" + percent_encoded(protocol::encode_raw_path(path.string())) +
+           "&token=" + percent_encoded(token) + " HTTP/1.1\r\nHost: engine\r\n" +
+           (range.empty() ? std::string{} : "Range: " + range + "\r\n") + "\r\n";
+}
+
 // Over TCP with the engine's token, as an agent on another machine connects.
 [[nodiscard]] std::unique_ptr<trackknife::agent::Agent>
-start_agent(const std::uint16_t port, const std::filesystem::path& root,
-            const std::string& token = "agent-test-token") {
+start_agent(const std::uint16_t port, const std::optional<std::filesystem::path>& root,
+            const std::string& token = "agent-test-token", const std::string& name = "bedside") {
     auto agent = trackknife::agent::Agent::create(trackknife::agent::AgentConfig{
         .server =
             protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = token},
-        .name = "bedside",
+        .name = name,
         .music_root = root,
-        .stream_only = false});
+        .stream_only = !root.has_value()});
     if (!agent) {
         return nullptr;
     }
@@ -130,9 +185,20 @@ int main(int argc, char** argv) {
     auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "agent-test-token");
     require(server.has_value(), "the engine must listen");
     const auto port = (*server)->port();
+    // Streams for an agent with no copy: whatever the player holds, nothing
+    // else.
+    const std::string stream_token{"stream-test-token"};
+    auto streams = engine::StreamServer::listen(
+        "127.0.0.1", 0, stream_token,
+        [&player](const std::string& raw_path) { return player->holds(raw_path); });
+    require(streams.has_value(), "the engine must serve streams");
+    (*streams)->start();
+    const auto stream_port = (*streams)->port();
     engine::Outputs outputs{*player,
-                            trackknife::output::AgentPaths{
-                                .music_root = engine_root, .stream_base = {}, .stream_token = {}},
+                            trackknife::output::AgentPaths{.music_root = engine_root,
+                                                           .stream_port = stream_port,
+                                                           .stream_host = {},
+                                                           .stream_token = stream_token},
                             &*workspace, (*server)->sink()};
     engine::register_output_methods(dispatcher, outputs);
     (*server)->on_agent([&outputs](const protocol::Json& params, const int descriptor) {
@@ -224,9 +290,78 @@ int main(int argc, char** argv) {
             "which the agent plays from its own copy");
 
     returned->stop();
+
+    // The stream server hands out what the player holds, and only that.
+    const auto held = engine_root / "one.wav";
+    const auto whole = fetch(stream_port, stream_request(held, stream_token));
+    require(whole.starts_with("HTTP/1.1 200 OK\r\n") &&
+                whole.find("Accept-Ranges: bytes") != std::string::npos &&
+                whole.ends_with(std::string(64, '\0')),
+            "a held file is served whole");
+    const auto part = fetch(stream_port, stream_request(held, stream_token, "bytes=0-3"));
+    require(part.starts_with("HTTP/1.1 206 Partial Content\r\n") &&
+                part.find("Content-Range: bytes 0-3/") != std::string::npos &&
+                part.ends_with("\r\n\r\nRIFF"),
+            "and in part, for a decoder that seeks");
+    require(fetch(stream_port, stream_request(held, "a guess"))
+                .starts_with("HTTP/1.1 403 Forbidden\r\n"),
+            "a wrong token is refused");
+    const auto elsewhere = directory / "lists.sqlite";
+    require(fetch(stream_port, stream_request(elsewhere, stream_token))
+                .starts_with("HTTP/1.1 404 Not Found\r\n"),
+            "a file the player does not hold is not there, token or not");
+    require(fetch(stream_port, stream_request(held, stream_token, "bytes=999999999-"))
+                .starts_with("HTTP/1.1 416 "),
+            "a range past the end is refused");
+
+    // An agent with no music of its own streams from the engine, seeks in
+    // the stream and moves on to the next entry as one with files does.
+    auto kitchen = start_agent(port, std::nullopt, "agent-test-token", "kitchen");
+    require(kitchen != nullptr && eventually([&] { return kitchen->registered(); }),
+            "a streaming agent registers");
+    require(eventually([&] {
+                for (const auto& listed : outputs.list()) {
+                    if (listed.id == "agent:kitchen") {
+                        return listed.online && !listed.files;
+                    }
+                }
+                return false;
+            }),
+            "and is listed as one that streams");
+    require(outputs.select("agent:kitchen").has_value(), "the streaming agent can be chosen");
+    player->replace_queue(entries);
+    require(player->play_entry(entries[0].entry_id).has_value(), "playing on it starts");
+    const auto stream_prefix = "http://127.0.0.1:" + std::to_string(stream_port) + "/stream?";
+    require(eventually([&] {
+                const auto snapshot = kitchen->audition().snapshot();
+                return snapshot.raw_path.starts_with(stream_prefix) &&
+                       snapshot.state == audio::LocalAuditionState::playing;
+            }),
+            "the agent plays the engine's stream");
+    require(eventually([&] { return player->state().status == "playing"; }),
+            "and the engine reports it playing");
+    require(player->seek_ms(29'000).has_value(), "seeking in a stream reaches the agent");
+    require(eventually([&] { return player->state().position_ms >= 28'900; }),
+            "and the stream is read from there");
+    require(eventually(
+                [&] {
+                    static_cast<void>(player->advance_if_ended());
+                    return player->state().entry == entries[1].entry_id;
+                },
+                std::chrono::seconds{20}),
+            "a streamed track ends and the next follows");
+    require(eventually([&] {
+                const auto snapshot = kitchen->audition().snapshot();
+                return snapshot.raw_path.find(percent_encoded(protocol::encode_raw_path(
+                           (engine_root / "two.wav").string()))) != std::string::npos;
+            }),
+            "streamed as well");
+
+    kitchen->stop();
     static_cast<void>(player->stop());
+    (*streams)->stop();
     (*server)->stop();
     std::filesystem::remove_all(directory);
-    std::cout << "output agent: 1 scenario\n";
+    std::cout << "output agent: 2 scenarios\n";
     return EXIT_SUCCESS;
 }

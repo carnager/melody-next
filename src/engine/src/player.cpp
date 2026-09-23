@@ -119,6 +119,14 @@ std::unique_ptr<Player> Player::create_without_audio() {
 
 audio::LocalAuditionService* Player::local_output() const noexcept { return local_.get(); }
 
+bool Player::holds(const std::string& raw_path) const {
+    const std::lock_guard guard{mutex_};
+    const auto named = [&raw_path](const QueueEntry& entry) {
+        return entry.source.raw_path == raw_path;
+    };
+    return std::ranges::any_of(queue_, named) || std::ranges::any_of(asks_, named);
+}
+
 audio::Audition* Player::current_output() const {
     const std::lock_guard guard{mutex_};
     return audition_ == silent_.get() ? nullptr : audition_;

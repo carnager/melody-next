@@ -63,6 +63,7 @@
 #include <QMimeData>
 #include <QProxyStyle>
 #include <QStyleFactory>
+#include <QSysInfo>
 #include <QTcpServer>
 
 #include <QAbstractItemModelTester>
@@ -4426,6 +4427,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
     QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
+    // Named by what the engine calls itself -- here its machine's name, as
+    // it was started without one -- rather than by its socket or address.
+    QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());
 
     // A folder is added to the remote's library by its path there: this
     // computer's file dialog would offer this computer's folders.

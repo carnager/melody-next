@@ -96,6 +96,8 @@ class CatalogueSource final {
     mutable std::mutex mutex_;
     mutable std::shared_ptr<protocol::Client> client_;
     mutable QString failure_;
+    // The name the engine gave for itself once connected (engine.info).
+    mutable QString announced_;
     // Whether the engine answered and said no, as opposed to not answering.
     // Decided from the error code: a client must never parse the message.
     mutable bool refused_{false};

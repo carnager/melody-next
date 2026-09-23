@@ -22,6 +22,7 @@
 #include <sys/file.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -87,7 +88,7 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 
 void usage() {
     std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
-              << "               [--password PASS | --password-file FILE]\n"
+              << "               [--name NAME] [--password PASS | --password-file FILE]\n"
               << "               [--http HOST:PORT] [--music-root DIR]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
@@ -96,6 +97,7 @@ void usage() {
               << "  --music-root DIR\n"
               << "                 where the music is: output agents with their own copy are\n"
               << "                 sent paths relative to it (ADR-0228)\n"
+              << "  --name NAME    what clients call this engine (default: the host name)\n"
               << "  --listen HOST:PORT\n"
               << "                 also accept TCP connections, from clients and output\n"
               << "                 agents. Open to the network unless a password is set.\n"
@@ -128,6 +130,7 @@ int main(int argc, char** argv) {
     std::string http_address;
     std::string password;
     std::string password_file;
+    std::string engine_name;
     std::optional<std::filesystem::path> music_root;
 
     for (int index = 1; index < argc; ++index) {
@@ -141,6 +144,8 @@ int main(int argc, char** argv) {
             state_directory = value();
         } else if (argument == "--listen") {
             listen_address = value();
+        } else if (argument == "--name") {
+            engine_name = value();
         } else if (argument == "--password") {
             password = value();
         } else if (argument == "--password-file") {
@@ -169,6 +174,12 @@ int main(int argc, char** argv) {
             std::cerr << "melodyd: no password in " << password_file << "\n";
             return EXIT_FAILURE;
         }
+    }
+
+    if (engine_name.empty()) {
+        // What clients call this engine: its machine, unless told otherwise.
+        std::array<char, 256> host{};
+        engine_name = ::gethostname(host.data(), host.size()) == 0 ? host.data() : "melodyd";
     }
 
     std::error_code ignored;
@@ -212,6 +223,11 @@ int main(int argc, char** argv) {
         player = trackknife::engine::Player::create_without_audio();
     }
     trackknife::engine::register_playback_methods(dispatcher, *player);
+    // Who this is, for a client to show rather than an address.
+    dispatcher.on("engine.info", [&engine_name](const trackknife::protocol::Json&)
+                                     -> trackknife::core::Result<trackknife::protocol::Json> {
+        return trackknife::protocol::Json{{"name", engine_name}, {"protocol", 1}};
+    });
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
@@ -315,7 +331,8 @@ int main(int argc, char** argv) {
 
     // ADR-0228: what the engine plays on -- its own audio and any output
     // agents. After the queue is restored, so the chosen output takes it up.
-    trackknife::engine::Outputs outputs{*player, std::move(agent_paths), &*workspace, sink};
+    trackknife::engine::Outputs outputs{*player, std::move(agent_paths), &*workspace, sink,
+                                        engine_name};
     trackknife::engine::register_output_methods(dispatcher, outputs);
     const auto admit = [&outputs](const trackknife::protocol::Json& params, const int descriptor) {
         outputs.admit(params, descriptor);

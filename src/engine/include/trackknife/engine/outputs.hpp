@@ -27,7 +27,10 @@ class Outputs final {
     static constexpr auto selection_key = "outputs.selected.v1";
     static constexpr auto local_id = "local";
 
-    Outputs(Player& player, output::AgentPaths paths, Workspace* workspace, EventSink sink);
+    // `own_name` is what the engine's own audio is listed as: the engine's
+    // name, so a client shows "gemenon", not "this machine".
+    Outputs(Player& player, output::AgentPaths paths, Workspace* workspace, EventSink sink,
+            std::string own_name = "this machine");
     Outputs(const Outputs&) = delete;
     Outputs& operator=(const Outputs&) = delete;
     Outputs(Outputs&&) = delete;
@@ -59,6 +62,7 @@ class Outputs final {
     void announce();
 
     Player* player_;
+    std::string own_name_;
     output::AgentPaths paths_;
     Workspace* workspace_;
     EventSink sink_;

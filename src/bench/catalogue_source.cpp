@@ -2,6 +2,8 @@
 
 #include "bench/catalogue_source.hpp"
 
+#include "trackknife/protocol/message.hpp"
+
 #include "bench/engine_launcher.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/core/local_sources.hpp"
@@ -163,6 +165,14 @@ std::shared_ptr<protocol::Client> CatalogueSource::connectLocked() const {
     client_ = std::shared_ptr<protocol::Client>{std::move(*client)};
     failure_.clear();
     refused_ = false;
+    // What the engine calls itself, shown in place of its address. An
+    // engine too old to say keeps being shown by address.
+    if (auto info = client_->call("engine.info", protocol::Json::object(),
+                                  std::chrono::seconds{2});
+        info && info->contains("name") && info->at("name").is_string()) {
+        announced_ = QString::fromStdString(
+            protocol::displayable_text(info->at("name").get<std::string>()));
+    }
     return client_;
 }
 
@@ -221,6 +231,12 @@ QString CatalogueSource::describe() const {
 QString CatalogueSource::name() const {
     if (role_ == Role::local || !endpoint_) {
         return QObject::tr("This computer");
+    }
+    {
+        const std::lock_guard guard{mutex_};
+        if (!announced_.isEmpty()) {
+            return announced_;
+        }
     }
     // The host alone reads as a place; a socket path is named by its file.
     if (endpoint_->tcp()) {

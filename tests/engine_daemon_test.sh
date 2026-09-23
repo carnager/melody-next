@@ -113,9 +113,10 @@ kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
 daemon_pid=""
 
-# And without one, open: nothing to type, as with MPD.
+# And without one, open: nothing to type, as with MPD. Named, so a client
+# shows the name rather than the address.
 "${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
-    2>"${work}/open-log.txt" &
+    --name "living room" 2>"${work}/open-log.txt" &
 daemon_pid=$!
 for _ in $(seq 1 100); do
     grep -q "no password" "${work}/open-log.txt" 2>/dev/null && break
@@ -123,6 +124,8 @@ for _ in $(seq 1 100); do
 done
 open="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
 echo "${open}" | grep -q '"roots":\[\]' || fail "TCP without a password set must be open"
+named="$(printf '{"id":1,"method":"engine.info"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
+echo "${named}" | grep -q '"name":"living room"' || fail "the engine must say the name it was given"
 kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
 daemon_pid=""

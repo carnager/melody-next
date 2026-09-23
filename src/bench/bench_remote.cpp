@@ -59,6 +59,15 @@ void BenchMainWindow::connectRemoteEngine() {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     const auto attached = [this] {
+        // Connected, the remote says what it is called: the library tab shows
+        // that rather than its address (an engine too old to say keeps it).
+        static_cast<void>(remote_catalogue_source_->open());
+        for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
+             ++index) {
+            if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+                local_source_tabs_->setTabText(index, remote_catalogue_source_->name());
+            }
+        }
         static_cast<void>(remoteQueueTab());
         // Music the remote was already playing is followed, unless this
         // computer is playing: then that is what the transport shows, and

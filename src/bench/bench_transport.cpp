@@ -540,8 +540,13 @@ void BenchMainWindow::refreshPlaybackBufferChecks() {
 
 QString BenchMainWindow::outputLabel(const EnginePlayback::State::Output& output) const {
     if (output.local) {
-        // The engine's own audio: this computer's, or the server's.
-        return output_choices_remote_ ? QStringLiteral("The server") : QStringLiteral("This computer");
+        // The engine's own audio: this computer's, or the server's -- by the
+        // name the server gives it, where it gives one.
+        if (!output_choices_remote_) {
+            return QStringLiteral("This computer");
+        }
+        return output.name.empty() || output.name == "this machine" ? QStringLiteral("The server")
+                                                                    : displayText(output.name);
     }
     return displayText(output.name);
 }

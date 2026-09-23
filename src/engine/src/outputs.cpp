@@ -65,8 +65,10 @@ constexpr std::string_view agent_prefix{"agent:"};
 
 } // namespace
 
-Outputs::Outputs(Player& player, output::AgentPaths paths, Workspace* workspace, EventSink sink)
-    : player_(&player), paths_(std::move(paths)), workspace_(workspace), sink_(std::move(sink)) {}
+Outputs::Outputs(Player& player, output::AgentPaths paths, Workspace* workspace, EventSink sink,
+                 std::string own_name)
+    : player_(&player), own_name_(std::move(own_name)), paths_(std::move(paths)),
+      workspace_(workspace), sink_(std::move(sink)) {}
 
 Outputs::~Outputs() {
     // The player must not be left pointing at an agent about to go.
@@ -129,7 +131,7 @@ std::vector<Outputs::Listed> Outputs::list() const {
     std::vector<Listed> listed;
     if (player_->local_output() != nullptr) {
         listed.push_back(Listed{.id = local_id,
-                                .name = "this machine",
+                                .name = own_name_,
                                 .local = true,
                                 .online = true,
                                 .selected = selected_ == local_id,

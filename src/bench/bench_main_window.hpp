@@ -465,6 +465,11 @@ class BenchMainWindow final : public QMainWindow {
     // play a requested track rather than the next row of the list. Cheap when
     // nothing changed.
     void syncEngineRequests();
+    // Keeps the engine's queue and the playing list in step, in both
+    // directions: an edit here is pushed, and a change the engine made that
+    // this window did not cause is read back.
+    void syncEngineQueue();
+    void adoptEngineQueue();
     // Credits listening to Last.fm from the engine's state rather than from a
     // local player that is not running.
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
@@ -724,6 +729,11 @@ class BenchMainWindow final : public QMainWindow {
     // The last entry the engine reported consuming, so one drop is mirrored
     // once however often the state is sampled.
     QString engine_consumed_;
+    // The queue last pushed to the engine, and the engine revision that
+    // produced. Together they answer "is what I am showing what the engine
+    // holds, and if not, who changed it".
+    QString engine_queue_;
+    quint64 engine_queue_revision_{0};
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

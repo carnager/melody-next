@@ -591,6 +591,7 @@ Player::State Player::state() const {
     current.gapless_entry = gapless_entry_.value_or(core::StableId{});
     current.instance = snapshot.playback_instance;
     current.consumed = consumed_;
+    current.queue_revision = revision_;
     current.replay_gain_mode = snapshot.replay_gain_mode;
     current.replay_gain_preamps = snapshot.replay_gain_preamps;
     return current;

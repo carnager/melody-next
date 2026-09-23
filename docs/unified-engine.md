@@ -474,6 +474,19 @@ has already expired by then. The modes in the state document are likewise the
 engine's, so the buttons follow a one-shot expiring where playback actually
 happened.
 
+The playing list and the engine's queue are kept in step both ways. An edit
+here is pushed, because the engine keeps playing what it was handed and a
+track removed in the window would otherwise still play. A change the engine
+made -- consuming, or another client editing -- is read back and merged into
+the rows rather than replacing them: the engine's entries are paths and the
+tags it was given, while the window's rows carry everything it has read from
+the files, and replacing them would show a list of filenames.
+
+Divergence is noticed by comparing the engine's queue size against the rows,
+which is in the state document already. Fetching the queue to compare it
+properly means a blocking round trip on every sample; two queues of the same
+size with different contents slip through, and attaching re-reads it properly.
+
 **The queue is the engine's, and it survives the engine.** The engine stores
 its queue, what was playing, where it had got to, the modes and the
 outstanding asks, and restores them on start -- paused, because coming back

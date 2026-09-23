@@ -1011,6 +1011,77 @@ void BenchMainWindow::syncEngineRequests() {
     engine_playback_->setRequests(rows, gains);
 }
 
+void BenchMainWindow::syncEngineQueue() {
+    if (!playingOnEngine()) {
+        return;
+    }
+    auto* tab = tabForDocument(playback_.anchors.document);
+    if (tab == nullptr) {
+        return;
+    }
+    const auto& rows = tab->model->rows();
+    QString stated;
+    for (const auto& row : rows) {
+        stated += QString::fromStdString(row.entry_id.to_string());
+    }
+    if (stated == engine_queue_) {
+        return;
+    }
+    engine_queue_ = stated;
+    std::vector<std::optional<formats::ReplayGainInfo>> overrides;
+    overrides.reserve(rows.size());
+    for (const auto& row : rows) {
+        overrides.push_back(local_replay_gain_override(row));
+    }
+    // The engine follows identity, so the playing entry survives being handed
+    // a queue that no longer holds it in the same row -- or at all.
+    engine_playback_->replaceQueue(rows, overrides);
+}
+
+void BenchMainWindow::adoptEngineQueue() {
+    auto* tab = tabForDocument(playback_.anchors.document);
+    if (tab == nullptr) {
+        return;
+    }
+    const auto held = engine_playback_->queueEntries();
+    if (held.empty()) {
+        return;
+    }
+    // Merged rather than replaced: the engine's entries are paths and tags it
+    // was given, while these rows carry everything this window has read from
+    // the files. Replacing them would throw that away and show a list of
+    // filenames.
+    std::vector<LocalTrackRow> merged;
+    merged.reserve(held.size());
+    const auto& existing = tab->model->rows();
+    for (const auto& entry : held) {
+        const auto row = tab->model->rowOfEntry(entry.entry_id, -1);
+        if (row >= 0) {
+            merged.push_back(existing[static_cast<std::size_t>(row)]);
+            continue;
+        }
+        auto fresh = entry;
+        fresh.title =
+            core::escape_raw_path(fresh.raw_path.substr(fresh.raw_path.find_last_of('/') + 1));
+        merged.push_back(std::move(fresh));
+    }
+    QString stated;
+    for (const auto& row : merged) {
+        stated += QString::fromStdString(row.entry_id.to_string());
+    }
+    if (stated == engine_queue_) {
+        return;
+    }
+    engine_queue_ = stated;
+    tab->model->replaceRows(std::move(merged), true);
+    enqueueUnprobedRows(*tab);
+    playback_.row = resolvePlaybackRow(tab);
+    if (playback_.row >= 0) {
+        tab->model->setCurrentSource(tab->model->source(playback_.row), playback_.row);
+    }
+    markTabDirty(*tab);
+}
+
 void BenchMainWindow::reattachToEngine() {
     if (!playingOnEngine()) {
         return;
@@ -1739,6 +1810,22 @@ void BenchMainWindow::refreshEngineTransport() {
                 playback_.row = row;
                 tab->model->setCurrentSource(tab->model->source(row), row);
             }
+        }
+    }
+
+    // Has the engine's queue drifted from what this window is showing? Asked
+    // by size, which is in the state document already, rather than by fetching
+    // the queue: fetching blocks on a round trip, and this runs on every
+    // sample. Two queues of the same size with different contents slip
+    // through, which is why attaching re-reads it properly; what this catches
+    // is the case that actually happens -- something added or removed an entry
+    // behind this window's back.
+    if (state.queue_revision != engine_queue_revision_) {
+        engine_queue_revision_ = state.queue_revision;
+        if (auto* tab = tabForDocument(playback_.anchors.document);
+            tab != nullptr &&
+            state.queue_size != static_cast<std::size_t>(tab->model->rowCount())) {
+            adoptEngineQueue();
         }
     }
 

@@ -188,6 +188,7 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.requests = payload.value("requests", std::size_t{0});
     state_.volume_percent = payload.value("volume_percent", 100);
     state_.instance = payload.value("instance", std::uint64_t{0});
+    state_.queue_revision = payload.value("queue_revision", std::uint64_t{0});
     state_.consumed = payload.contains("consumed") && payload.at("consumed").is_string()
                           ? QString::fromStdString(payload.at("consumed").get<std::string>())
                           : QString{};
@@ -335,6 +336,17 @@ void EnginePlayback::setRequests(const std::vector<LocalTrackRow>& rows,
     calls.emplace_back(QStringLiteral("playback.set_requests"),
                        protocol::Json{{"entries", std::move(identities)}});
     send(std::move(calls));
+}
+
+void EnginePlayback::replaceQueue(
+    const std::vector<LocalTrackRow>& rows,
+    const std::vector<std::optional<formats::ReplayGainInfo>>& overrides) {
+    auto entries = protocol::Json::array();
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        entries.push_back(
+            entryJson(rows[index], index < overrides.size() ? overrides[index] : std::nullopt));
+    }
+    send(QStringLiteral("playback.replace_queue"), protocol::Json{{"entries", std::move(entries)}});
 }
 
 void EnginePlayback::play(const std::vector<LocalTrackRow>& rows,

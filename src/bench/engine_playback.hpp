@@ -73,6 +73,9 @@ class EnginePlayback final : public QObject {
         // Which playback this is: replaying a track is a new instance, and
         // crediting a listen has to tell those apart.
         quint64 instance{0};
+        // Changes whenever the engine's queue, modes or asks change --
+        // including when this client was not the one that changed them.
+        quint64 queue_revision{0};
         // The entry the engine's consume mode last dropped, so this client
         // can drop the same row from the list it came from.
         QString consumed;
@@ -87,6 +90,11 @@ class EnginePlayback final : public QObject {
     // nothing where the decoder's own tags should apply. The engine opens the
     // file and reads those for itself; what it cannot see is a sidecar value
     // or a CUE sheet's REM lines, which is why they travel.
+    // Hands the engine a queue without starting anything: an edit to the list
+    // that is playing, rather than a new thing to play.
+    void replaceQueue(const std::vector<LocalTrackRow>& rows,
+                      const std::vector<std::optional<formats::ReplayGainInfo>>& overrides);
+
     void play(const std::vector<LocalTrackRow>& rows,
               const std::vector<std::optional<formats::ReplayGainInfo>>& overrides,
               const core::StableId& entry);

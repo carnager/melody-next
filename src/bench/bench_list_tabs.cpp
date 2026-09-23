@@ -1240,6 +1240,12 @@ void BenchMainWindow::markTabDirty(ListTab& tab) {
     tab.document.dirty = true;
     refreshTabChrome(tab);
     schedulePersist();
+    // An edit to the list that is playing is an edit to the engine's queue.
+    // Without this the engine keeps playing the list as it was when play was
+    // pressed, and a track removed here still plays.
+    if (tab.document.id == playback_.anchors.document) {
+        syncEngineQueue();
+    }
 }
 
 void BenchMainWindow::setActiveLocalList(const QString& id) {

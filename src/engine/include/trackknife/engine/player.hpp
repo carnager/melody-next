@@ -175,6 +175,11 @@ class Player final {
         // active during the track that just ended, and a one-shot has already
         // expired by then.
         core::StableId consumed;
+        // Bumped whenever the queue, the modes or the asks change. A client
+        // holding a view of the queue watches this to know when what it is
+        // showing is out of date -- including when another client is what
+        // changed it.
+        std::uint64_t queue_revision{0};
         // Which playback this is, not which track: replaying the same file is
         // a new instance. A client that credits listening needs to tell those
         // apart, and a path cannot.

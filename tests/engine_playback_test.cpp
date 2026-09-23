@@ -121,6 +121,8 @@ class EnginePlaybackTest final : public QObject {
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
+    void editingThePlayingListReachesTheEngine();
+    void aQueueChangedElsewhereReachesTheList();
     void consumeDropsTheRowFromTheList();
     void listeningIsCreditedWhileTheEnginePlays();
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
@@ -406,6 +408,120 @@ void EnginePlaybackTest::jumpToPlayingFindsTheEnginesTrack() {
     jump->trigger();
     QCOMPARE(tabs->currentWidget(), playing);
     QCOMPARE(playing->currentIndex().row(), 0);
+
+    (*server)->stop();
+}
+
+// The engine keeps playing what it was handed. An edit to the list that is
+// playing has to reach it, or a track removed here still plays.
+void EnginePlaybackTest::editingThePlayingListReachesTheEngine() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    std::vector<std::string> raw_paths;
+    for (const auto* name : {"one.flac", "two.flac", "three.flac"}) {
+        const auto media = directory.filePath(QString::fromLatin1(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+        const auto encoded = QFile::encodeName(media);
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths(raw_paths);
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 3, 5'000);
+
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{3}, 5'000);
+
+    // Removed the way a user removes it, so the path under test is the one
+    // the application takes rather than the model's own.
+    const auto dropped = model->rows().at(2).entry_id;
+    view->selectionModel()->select(model->index(2, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    auto* remove = window.findChild<QAction*>(QStringLiteral("action-remove-selected-tracks"));
+    QVERIFY(remove != nullptr);
+    QTRY_VERIFY(remove->isEnabled());
+    remove->trigger();
+    QTRY_COMPARE(model->rowCount(), 2);
+
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{2}, 5'000);
+    const auto held = (*player)->queue();
+    QVERIFY2(std::none_of(held.begin(), held.end(),
+                          [&dropped](const auto& entry) { return entry.entry_id == dropped; }),
+             "the engine still holds a track that was removed from the list");
+
+    (*server)->stop();
+}
+
+// And the other direction. The queue is the engine's, so a change made to it
+// elsewhere -- another client, or the engine itself -- is what the window has
+// to show, rather than whatever it last pushed.
+void EnginePlaybackTest::aQueueChangedElsewhereReachesTheList() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    std::vector<std::string> raw_paths;
+    for (const auto* name : {"one.flac", "two.flac", "stranger.flac"}) {
+        const auto media = directory.filePath(QString::fromLatin1(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+        const auto encoded = QFile::encodeName(media);
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({raw_paths[0], raw_paths[1]});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 2);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{2}, 5'000);
+
+    // Somebody else appends to the engine's queue.
+    engine::QueueEntry added;
+    added.source.raw_path = raw_paths[2];
+    (*player)->enqueue({added});
+
+    QTRY_VERIFY2_WITH_TIMEOUT(model->rowOfEntry(added.entry_id, -1) >= 0,
+                              "the window is still showing a queue the engine has moved past",
+                              10'000);
+    QCOMPARE(model->rowCount(), 3);
+    // The rows it already had keep what this window read from the files;
+    // adopting must not turn them back into filenames.
+    QVERIFY(!model->rows().front().title.empty());
 
     (*server)->stop();
 }

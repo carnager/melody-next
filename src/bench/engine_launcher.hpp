@@ -15,7 +15,7 @@
 namespace trackknife::bench {
 
 // ADR-0226: with no engine configured, the workspace runs one of its own --
-// the same tkengine a NAS runs, on this machine's database. It is started
+// the same melodyd a NAS runs, on this machine's database. It is started
 // detached and outlives the window, which reconnects to it next time, the way
 // an MPD client finds its MPD.
 struct LocalEngine final {
@@ -23,8 +23,13 @@ struct LocalEngine final {
     std::filesystem::path socket;
 };
 
-// Nothing in test mode: a test must never start a daemon that outlives it,
-// and never reach the one already serving the real database.
+// Starting an engine is the application's decision, made once in main():
+// off by default, so no library user and no test ever starts a daemon that
+// outlives it, or reaches the one serving the real database. (A test once
+// did, through a guard that relied on tests enabling Qt's test mode.)
+void allowLocalEngine(bool allowed);
+
+// Nothing unless allowed.
 [[nodiscard]] std::optional<LocalEngine> localEngine();
 
 // Connects to the local engine, starting it first if nothing answers. Waits
@@ -33,8 +38,10 @@ struct LocalEngine final {
 connectLocalEngine(const LocalEngine& engine,
                    std::chrono::milliseconds timeout = std::chrono::seconds{10});
 
-// The tkengine beside this executable (installed, or in the build tree), or
-// the one on PATH. TRACKKNIFE_ENGINE overrides. Empty when there is none.
+// The melodyd installed beside this executable, or the build tree's.
+// TRACKKNIFE_ENGINE overrides. Never a search of PATH: another program of
+// the same name there is not this engine (the Go melodyd was, once, and a
+// test started it). Empty when there is none.
 [[nodiscard]] QString engineProgram();
 
 } // namespace trackknife::bench

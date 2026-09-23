@@ -282,7 +282,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_form->addRow(QStringLiteral("Engine token:"), engine_token_);
     library_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
-        QStringLiteral("The trackknife engine (tkengine) owns the library and playback. Leave "
+        QStringLiteral("The trackknife engine (melodyd) owns the library and playback. Leave "
                        "this empty to use one on this computer, which Trackknife starts and "
                        "which keeps playing after the window closes. For another machine's, "
                        "give its unix socket, or host:port when it was started with --listen. "

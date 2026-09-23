@@ -12,6 +12,7 @@
 
 #include <signal.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <thread>
 
@@ -30,7 +31,7 @@ namespace {
     return std::filesystem::temp_directory_path();
 }
 
-// What tkengine uses when started with no arguments, so the engine a
+// What melodyd uses when started with no arguments, so the engine a
 // workspace starts and one started by hand or by the user service are the
 // same engine on the same socket.
 [[nodiscard]] std::filesystem::path standard_state() {
@@ -45,10 +46,14 @@ namespace {
     return QFile::decodeName(QByteArray::fromStdString(path.native()));
 }
 
+std::atomic_bool local_engine_allowed{false};
+
 } // namespace
 
+void allowLocalEngine(const bool allowed) { local_engine_allowed.store(allowed); }
+
 std::optional<LocalEngine> localEngine() {
-    if (QStandardPaths::isTestModeEnabled()) {
+    if (!local_engine_allowed.load()) {
         return std::nullopt;
     }
     const auto data = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -61,13 +66,13 @@ std::optional<LocalEngine> localEngine() {
     // about a library it does not have.
     if (std::filesystem::weakly_canonical(engine.state) ==
         std::filesystem::weakly_canonical(standard_state())) {
-        engine.socket = runtime_directory() / "tkengine.sock";
+        engine.socket = runtime_directory() / "melodyd.sock";
     } else {
         const auto digest =
             QCryptographicHash::hash(QFile::encodeName(data), QCryptographicHash::Sha256)
                 .toHex()
                 .left(12);
-        engine.socket = runtime_directory() / ("tkengine-" + digest.toStdString() + ".sock");
+        engine.socket = runtime_directory() / ("melodyd-" + digest.toStdString() + ".sock");
     }
     return engine;
 }
@@ -79,13 +84,13 @@ QString engineProgram() {
     }
     const QDir here{QCoreApplication::applicationDirPath()};
     // Installed side by side, or the build tree's src/bench beside src/daemon.
-    for (const auto& candidate : {here.filePath(QStringLiteral("tkengine")),
-                                  here.filePath(QStringLiteral("../daemon/tkengine"))}) {
+    for (const auto& candidate : {here.filePath(QStringLiteral("melodyd")),
+                                  here.filePath(QStringLiteral("../daemon/melodyd"))}) {
         if (QFileInfo{candidate}.isExecutable()) {
             return QDir::cleanPath(candidate);
         }
     }
-    return QStandardPaths::findExecutable(QStringLiteral("tkengine"));
+    return {};
 }
 
 core::Result<std::unique_ptr<protocol::Client>>
@@ -96,11 +101,11 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
     }
     const auto program = engineProgram();
     if (program.isEmpty()) {
-        return std::unexpected(launch_error("tkengine is not installed"));
+        return std::unexpected(launch_error("melodyd is not installed"));
     }
     std::error_code ignored;
     std::filesystem::create_directories(engine.state, ignored);
-    const auto log = path_text(engine.state / "tkengine.log");
+    const auto log = path_text(engine.state / "melodyd.log");
     QProcess process;
     process.setProgram(program);
     process.setArguments({QStringLiteral("--socket"), path_text(engine.socket),
@@ -128,12 +133,12 @@ connectLocalEngine(const LocalEngine& engine, const std::chrono::milliseconds ti
                 return other;
             }
             return std::unexpected(
-                launch_error("tkengine stopped at startup; see " + log.toStdString()));
+                launch_error("melodyd stopped at startup; see " + log.toStdString()));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
     return std::unexpected(
-        launch_error("tkengine did not start listening; see " + log.toStdString()));
+        launch_error("melodyd did not start listening; see " + log.toStdString()));
 }
 
 } // namespace trackknife::bench

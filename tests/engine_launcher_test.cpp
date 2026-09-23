@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // ADR-0226: the engine a workspace starts for itself. Each case runs a real
-// tkengine on a temporary database and socket, and stops it afterwards: the
+// melodyd on a temporary database and socket, and stops it afterwards: the
 // point of the launcher is that the engine outlives its client, so a test that
 // forgot would leave one running.
 
@@ -25,7 +25,8 @@ class EngineLauncherTest final : public QObject {
     void startsItAgainAfterItStops();
     void twoClientsStartingAtOnceShareOneEngine();
     void aMissingProgramSaysSo();
-    void testModeNeverStartsOne();
+    void nothingStartsOneUnlessAllowed();
+    void onlyTheEngineBesideItIsStarted();
 };
 
 namespace {
@@ -121,16 +122,41 @@ void EngineLauncherTest::twoClientsStartingAtOnceShareOneEngine() {
 void EngineLauncherTest::aMissingProgramSaysSo() {
     Scratch scratch;
     const auto saved = qgetenv("TRACKKNIFE_ENGINE");
-    qputenv("TRACKKNIFE_ENGINE", "/nonexistent/tkengine");
+    qputenv("TRACKKNIFE_ENGINE", "/nonexistent/melodyd");
     const auto result = connectLocalEngine(scratch.engine, std::chrono::seconds{2});
     qputenv("TRACKKNIFE_ENGINE", saved);
     QVERIFY(!result.has_value());
 }
 
-void EngineLauncherTest::testModeNeverStartsOne() {
-    QStandardPaths::setTestModeEnabled(true);
+void EngineLauncherTest::nothingStartsOneUnlessAllowed() {
+    // Off until main() says otherwise, test mode or not: this process has
+    // not enabled Qt's test mode, which is how a test once started one.
+    QVERIFY(!QStandardPaths::isTestModeEnabled());
     QVERIFY(!localEngine().has_value());
-    QStandardPaths::setTestModeEnabled(false);
+    allowLocalEngine(true);
+    QVERIFY(localEngine().has_value());
+    allowLocalEngine(false);
+    QVERIFY(!localEngine().has_value());
+}
+
+void EngineLauncherTest::onlyTheEngineBesideItIsStarted() {
+    // With no override, the program is found beside the executable or not at
+    // all -- never on PATH, where another melodyd may live.
+    const auto saved = qgetenv("TRACKKNIFE_ENGINE");
+    qunsetenv("TRACKKNIFE_ENGINE");
+    QTemporaryDir bin;
+    QVERIFY(bin.isValid());
+    QFile impostor{bin.filePath(QStringLiteral("melodyd"))};
+    QVERIFY(impostor.open(QIODevice::WriteOnly));
+    impostor.write("#!/bin/sh\nexit 0\n");
+    impostor.close();
+    impostor.setPermissions(QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+    const auto path = qgetenv("PATH");
+    qputenv("PATH", bin.path().toLocal8Bit() + ":" + path);
+    const auto program = engineProgram();
+    qputenv("PATH", path);
+    qputenv("TRACKKNIFE_ENGINE", saved);
+    QVERIFY(!program.startsWith(bin.path()));
 }
 
 } // namespace trackknife::bench

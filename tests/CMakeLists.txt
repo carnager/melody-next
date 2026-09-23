@@ -332,7 +332,7 @@ add_test(
     COMMAND trackknife_engine_player_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
-# ADR-0220: tkengine as a process, exercised the way an init system would.
+# ADR-0220: melodyd as a process, exercised the way an init system would.
 add_test(
     NAME engine-daemon
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_daemon_test.sh"

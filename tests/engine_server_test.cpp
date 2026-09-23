@@ -353,7 +353,7 @@ void tcp_admits_only_the_token_holder() {
 // and an address never does, so no guessing is needed.
 void an_endpoint_is_read_from_settings() {
     using trackknife::protocol::Endpoint;
-    const auto unix_socket = Endpoint::parse("/run/user/1000/tkengine.sock", "ignored");
+    const auto unix_socket = Endpoint::parse("/run/user/1000/melodyd.sock", "ignored");
     require(unix_socket && !unix_socket->tcp(), "a path is a unix socket");
     require(unix_socket->token.empty(), "which needs no token");
 

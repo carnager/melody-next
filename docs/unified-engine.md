@@ -507,7 +507,7 @@ like -- resuming into a file that has changed underneath would seek to a
 position that no longer means anything.
 
 The engine is installed and can be run as a user service
-(`packaging/systemd/tkengine.service`), and which engine a workspace uses is a
+(`packaging/systemd/melodyd.service`), and which engine a workspace uses is a
 settings field rather than a hand-edited key: "is an engine in use" has to be
 answerable from the UI.
 
@@ -531,7 +531,7 @@ playlist tabs, server search and the Melody Last.fm authority were removed
 rather than kept as a second implementation of every feature.
 
 **TCP and authentication are built** ([ADR-0223](adr/0223-tcp-transport-and-authentication.md)).
-`tkengine --listen HOST:PORT` accepts TCP connections, each of which must
+`melodyd --listen HOST:PORT` accepts TCP connections, each of which must
 present the token from `engine.token` before anything else -- loopback
 included, because any local user can reach 127.0.0.1. There is no built-in
 TLS: the deployments this is for are a home network and a phone reaching home
@@ -796,13 +796,12 @@ Per phase, in addition to the existing 69 CTest suites:
 config layout. An existing install must not be upgraded into a different
 program by accident.
 
-- The C++ engine builds under a distinct binary name (`tkengine`, or similar)
-  through Phases 0–5. Both daemons can run side by side on different ports.
-- It takes the `melodyd` name, `melodyd.service` and
-  `~/.config/melody/melodyd.toml` only after Phase 6, as a major version bump.
-  The config layout changes and `melody.db` is abandoned rather than upgraded,
-  so the bump is the warning: an old install must not silently become the new
-  program.
+- ~~The C++ engine builds under a distinct binary name (`tkengine`) through
+  Phases 0–5 and takes the `melodyd` name only after Phase 6.~~ **Done early
+  (ADR-0226):** no install of the Go `melodyd` exists to be upgraded by
+  accident, so the C++ engine is `melodyd` now, with `melodyd.service` and
+  `melodyd.sock`. `~/.config/melody/melodyd.toml` is unused; the engine takes
+  flags, not a config file.
 - The Go daemon's server mode is removed in the same release; the repository
   keeps `melody-agent`, `melody-mpd` and the terminal clients.
 

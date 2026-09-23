@@ -44,9 +44,9 @@ package() {
   # ADR-0220: the engine, which owns the catalogue and playback and outlives
   # any window. Installed alongside rather than instead of anything: a
   # workspace with no engine configured still serves itself.
-  install -Dm755 build/release/src/daemon/tkengine "$pkgdir/usr/bin/tkengine"
-  install -Dm644 packaging/systemd/tkengine.service \
-    "$pkgdir/usr/lib/systemd/user/tkengine.service"
+  install -Dm755 build/release/src/daemon/melodyd "$pkgdir/usr/bin/melodyd"
+  install -Dm644 packaging/systemd/melodyd.service \
+    "$pkgdir/usr/lib/systemd/user/melodyd.service"
   install -Dm755 build/release/src/tools/trackknife-titleformat \
     "$pkgdir/usr/bin/trackknife-titleformat"
   install -Dm644 packaging/arch/trackknife.desktop \

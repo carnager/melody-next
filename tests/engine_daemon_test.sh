@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# ADR-0220: tkengine as a process. A shell script is the right shape for this
+# ADR-0220: melodyd as a process. A shell script is the right shape for this
 # one -- it exercises the daemon the way a person or an init system does, and
 # it is itself evidence for the "a shell script remains a debugging tool"
 # requirement.
@@ -10,7 +10,7 @@ set -euo pipefail
 
 binary="$1"
 work="$(mktemp -d)"
-socket="${work}/tkengine.sock"
+socket="${work}/melodyd.sock"
 state="${work}/state"
 daemon_pid=""
 

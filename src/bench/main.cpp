@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/engine_launcher.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 #include "uicommon/debug_log.hpp"
 
@@ -191,6 +192,9 @@ int main(int argc, char** argv) {
         QStandardPaths::setTestModeEnabled(true);
     }
 
+    // ADR-0226: only the application starts an engine, and not when it is
+    // taking screenshots against test data.
+    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty());
     startSoakLog(&application);
     trackknife::bench::BenchMainWindow window;
     window.show();

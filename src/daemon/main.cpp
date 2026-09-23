@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// ADR-0220: the engine as a process.
+// ADR-0220: the engine as a process, melodyd.
 //
-// It is deliberately not called melodyd. The Go daemon owns that name, its
-// service file and its config path, and an existing install must not be
-// upgraded into a different program by accident; this takes the name only
-// after the Phase 6 migration, as a major version bump. Until then the two
-// can run side by side.
+// It was built as tkengine while the Go daemon of that name was meant to keep
+// running beside it. No install of the Go melodyd exists to be replaced, so
+// the engine took the name early (ADR-0226).
 
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
@@ -79,15 +77,15 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 
 [[nodiscard]] std::filesystem::path default_socket_path() {
     if (const auto* runtime = std::getenv("XDG_RUNTIME_DIR")) {
-        return std::filesystem::path{runtime} / "tkengine.sock";
+        return std::filesystem::path{runtime} / "melodyd.sock";
     }
-    return std::filesystem::temp_directory_path() / "tkengine.sock";
+    return std::filesystem::temp_directory_path() / "melodyd.sock";
 }
 
 void usage() {
-    std::cerr << "usage: tkengine [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
+    std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
               << "\n"
-              << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/tkengine.sock)\n"
+              << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
               << "  --state DIR    where the database lives (default\n"
               << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
               << "  --listen HOST:PORT\n"
@@ -129,7 +127,7 @@ int main(int argc, char** argv) {
             usage();
             return EXIT_SUCCESS;
         } else {
-            std::cerr << "tkengine: unrecognised argument " << argument << "\n\n";
+            std::cerr << "melodyd: unrecognised argument " << argument << "\n\n";
             usage();
             return EXIT_FAILURE;
         }
@@ -138,11 +136,11 @@ int main(int argc, char** argv) {
     std::error_code ignored;
     std::filesystem::create_directories(state_directory, ignored);
     if (!hold_lock(state_directory / "engine.lock")) {
-        std::cerr << "tkengine: another engine is using " << state_directory.string() << "\n";
+        std::cerr << "melodyd: another engine is using " << state_directory.string() << "\n";
         return EXIT_FAILURE;
     }
     if (!hold_lock(std::filesystem::path{socket_path.string() + ".lock"})) {
-        std::cerr << "tkengine: another engine is starting on " << socket_path.string() << "\n";
+        std::cerr << "melodyd: another engine is starting on " << socket_path.string() << "\n";
         return EXIT_FAILURE;
     }
 
@@ -152,13 +150,12 @@ int main(int argc, char** argv) {
     const auto database = state_directory / database_filename;
     trackknife::engine::LocalCatalogue catalogue{database};
     if (const auto prepared = catalogue.prepare(); !prepared) {
-        std::cerr << "tkengine: could not open the catalogue: " << prepared.error().message << "\n";
+        std::cerr << "melodyd: could not open the catalogue: " << prepared.error().message << "\n";
         return EXIT_FAILURE;
     }
     auto workspace = trackknife::engine::Workspace::open(database);
     if (!workspace) {
-        std::cerr << "tkengine: could not open the workspace: " << workspace.error().message
-                  << "\n";
+        std::cerr << "melodyd: could not open the workspace: " << workspace.error().message << "\n";
         return EXIT_FAILURE;
     }
 
@@ -172,13 +169,13 @@ int main(int argc, char** argv) {
     if (player) {
         trackknife::engine::register_playback_methods(dispatcher, **player);
     } else {
-        std::cerr << "tkengine: no audio output (" << player.error().message
+        std::cerr << "melodyd: no audio output (" << player.error().message
                   << "); playback methods are unavailable\n";
     }
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
     if (!server) {
-        std::cerr << "tkengine: could not listen on " << socket_path.string() << ": "
+        std::cerr << "melodyd: could not listen on " << socket_path.string() << ": "
                   << server.error().message << "\n";
         return EXIT_FAILURE;
     }
@@ -188,25 +185,25 @@ int main(int argc, char** argv) {
     if (!listen_address.empty()) {
         const auto endpoint = trackknife::protocol::Endpoint::parse(listen_address, {});
         if (!endpoint || !endpoint->tcp()) {
-            std::cerr << "tkengine: --listen wants HOST:PORT, got " << listen_address << "\n";
+            std::cerr << "melodyd: --listen wants HOST:PORT, got " << listen_address << "\n";
             return EXIT_FAILURE;
         }
         const auto token_path = state_directory / "engine.token";
         auto token = trackknife::engine::load_or_create_token(token_path);
         if (!token) {
-            std::cerr << "tkengine: " << token.error().message << " (" << token_path.string()
+            std::cerr << "melodyd: " << token.error().message << " (" << token_path.string()
                       << ")\n";
             return EXIT_FAILURE;
         }
         auto listening = trackknife::engine::Server::listen_tcp(endpoint->host, endpoint->port,
                                                                 dispatcher, std::move(*token));
         if (!listening) {
-            std::cerr << "tkengine: could not listen on " << listen_address << ": "
+            std::cerr << "melodyd: could not listen on " << listen_address << ": "
                       << listening.error().message << "\n";
             return EXIT_FAILURE;
         }
         tcp_server = std::move(*listening);
-        std::cerr << "tkengine: listening on " << endpoint->describe() << " (token in "
+        std::cerr << "melodyd: listening on " << endpoint->describe() << " (token in "
                   << token_path.string() << ")\n";
     }
 
@@ -245,7 +242,7 @@ int main(int argc, char** argv) {
         recorder->start();
         playback_store.emplace(**player, *workspace);
         if (playback_store->restore()) {
-            std::cerr << "tkengine: restored " << (*player)->queue().size()
+            std::cerr << "melodyd: restored " << (*player)->queue().size()
                       << " queued entries, paused\n";
         }
         playback_store->start();
@@ -260,14 +257,14 @@ int main(int argc, char** argv) {
     if (tcp_server) {
         tcp_server->start();
     }
-    std::cerr << "tkengine: listening on " << socket_path.string() << "\n"
-              << "tkengine: database " << database.string() << "\n";
+    std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
+              << "melodyd: database " << database.string() << "\n";
 
     while (!stop_requested.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds{100});
     }
 
-    std::cerr << "tkengine: stopping\n";
+    std::cerr << "melodyd: stopping\n";
     // Both sample the player, so they stop before it and before the server
     // the watcher writes to.
     if (recorder) {

@@ -10,4 +10,4 @@ target_link_libraries(
 )
 # ADR-0220: melodyd is the Go daemon's name until the Phase 6 migration is
 # proven. Both must be installable side by side until then.
-set_target_properties(trackknife_engine_daemon PROPERTIES OUTPUT_NAME tkengine)
+set_target_properties(trackknife_engine_daemon PROPERTIES OUTPUT_NAME melodyd)

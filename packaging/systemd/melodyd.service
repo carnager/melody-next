@@ -8,10 +8,10 @@ Wants=pipewire.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/tkengine
+ExecStart=/usr/bin/melodyd
 # The socket and the databases default to $XDG_RUNTIME_DIR and $XDG_DATA_HOME.
-# Override with: systemctl --user edit tkengine
-# ExecStart=/usr/bin/tkengine --socket %t/tkengine.sock --state %h/.local/share/trackknife/trackknife
+# Override with: systemctl --user edit melodyd
+# ExecStart=/usr/bin/melodyd --socket %t/melodyd.sock --state %h/.local/share/trackknife/trackknife
 Restart=on-failure
 RestartSec=2
 

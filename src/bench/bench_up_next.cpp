@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/up_next_delegate.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
@@ -75,20 +76,22 @@ void BenchMainWindow::buildUpNext() {
     applyTrackViewLayout(up_next_view_, flat, flat);
     up_next_view_->setAlbumGroupingEnabled(false);
 
+    // A stack of tracks, not a table: one column, drawn two lines high with
+    // cover, title, artist and length.
     for (int col = 0; col < up_next_local_model_->columnCount(); ++col)
-        up_next_view_->setColumnHidden(col, col != ui::track_artist_column &&
-                                                col != ui::track_title_column &&
-                                                col != ui::track_length_column);
-    up_next_view_->setAlternatingRowColors(true);
+        up_next_view_->setColumnHidden(col, col != local_title_column);
+    up_next_view_->setItemDelegate(
+        new UpNextDelegate(local_artist_column, local_length_column, up_next_view_));
+    up_next_view_->horizontalHeader()->hide();
+    up_next_view_->verticalHeader()->hide();
+    up_next_view_->horizontalHeader()->setSectionResizeMode(local_title_column,
+                                                            QHeaderView::Stretch);
+    up_next_view_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    up_next_view_->verticalHeader()->setDefaultSectionSize(UpNextDelegate::row_height);
+    up_next_view_->setAlternatingRowColors(false);
     up_next_view_->setShowGrid(false);
     up_next_view_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_artist_column,
-                                                            QHeaderView::Interactive);
-    up_next_view_->setColumnWidth(ui::track_artist_column, 140);
-    up_next_view_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     up_next_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    up_next_view_->horizontalHeader()->setSectionResizeMode(ui::track_length_column,
-                                                            QHeaderView::ResizeToContents);
     up_next_view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     up_next_view_->setDragDropMode(QAbstractItemView::DragDrop);
     up_next_view_->setDragEnabled(true);
@@ -223,6 +226,20 @@ void BenchMainWindow::refreshUpNext() {
             for (const auto& entry : playback_.requests.pending())
                 up_next_display_ids_.push_back(entry.id);
             up_next_local_revision_ = playback_.requests.revision();
+        }
+        // Covers from the tabs that already have them: an album's cover is
+        // keyed the same way in every list.
+        for (int row = 0; row < up_next_local_model_->rowCount(); ++row) {
+            const auto key = up_next_local_model_->groupKey(row);
+            if (up_next_local_model_->hasArtwork(key)) {
+                continue;
+            }
+            for (const auto& list : list_tabs_) {
+                if (list->model->hasArtwork(key)) {
+                    up_next_local_model_->setArtwork(key, list->model->artwork(key));
+                    break;
+                }
+            }
         }
         // The engine decides what plays next, so it has to be told. Guarded on
         // the order actually changing, because this runs on every refresh.

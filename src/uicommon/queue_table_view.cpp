@@ -642,6 +642,10 @@ void QueueTableView::refitColumnsToViewport() {
         horizontalHeader()->resizeSection(column, target_widths.value(column, minimum(column)));
     }
     refitting_columns_ = false;
+    // The resizes above ran with the header's signals blocked, so the scroll
+    // area has not re-measured: without this a scroll bar shown while the
+    // columns were too wide stays, with nothing to scroll.
+    updateGeometries();
     updateArtworkOverlayGeometry();
 }
 

@@ -42,7 +42,7 @@ class AnimatedPanelDock final : public QDockWidget {
         titleBar->setFixedHeight(0);
         setTitleBarWidget(titleBar);
         QDockWidget::setWidget(viewport_);
-        savedWidth_ = qBound(260, QSettings{}.value(key_ + "/width", 420).toInt(), 1200);
+        savedWidth_ = qBound(260, QSettings{}.value(key_ + "/width", 300).toInt(), 1200);
         animation_.setDuration(180);
         animation_.setEasingCurve(QEasingCurve::OutCubic);
         connect(&animation_, &QVariantAnimation::valueChanged, this,
@@ -128,7 +128,7 @@ class AnimatedPanelDock final : public QDockWidget {
     QString key_;
     PanelViewport* viewport_;
     QVariantAnimation animation_;
-    int savedWidth_{420};
+    int savedWidth_{300};
     bool wanted_{false};
 };
 } // namespace trackknife::bench

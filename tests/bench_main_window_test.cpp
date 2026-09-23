@@ -2,6 +2,7 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/up_next_delegate.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -270,6 +271,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteTabRatesOnItsEngine();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
+    void narrowWindowKeepsListAndUpNextCompact();
     void aRestoredRemoteTabGetsItsCovers();
     void lastFmIsHandedToTheEngine();
     void theDeviceMenuChoosesAnOutputAgent();
@@ -4725,6 +4727,44 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
 // ADR-0227: a remote tab's files are on the remote's machine and need not be
 // reachable from this one, so its tags and covers come from that engine --
 // however its rows got there.
+void BenchMainWindowTest::narrowWindowKeepsListAndUpNextCompact() {
+    BenchMainWindow window;
+    window.resize(1'600, 1'000);
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr);
+    std::vector<LocalTrackRow> rows;
+    for (int index = 0; index < 30; ++index) {
+        LocalTrackRow row;
+        row.raw_path = "/tmp/narrow-" + std::to_string(index) + ".flac";
+        row.title = "Track " + std::to_string(index);
+        row.artist = "Artist";
+        row.album = "Album";
+        rows.push_back(std::move(row));
+    }
+    tab->model->appendRows(rows);
+    window.enqueueLocalRequests({rows[3], rows[7]});
+    // Narrowed while Up Next slides open: the columns are too wide for a
+    // moment, then fit again.
+    window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
+    window.resize(1'100, 720);
+    QTRY_VERIFY(window.up_next_dock_->isVisible());
+    QTest::qWait(600);
+
+    // Up Next: a stack of two-line rows, no table headers, and narrow enough
+    // to leave the list its room.
+    QVERIFY(dynamic_cast<UpNextDelegate*>(window.up_next_view_->itemDelegate()) != nullptr);
+    QVERIFY(window.up_next_view_->horizontalHeader()->isHidden());
+    QVERIFY(window.up_next_view_->verticalHeader()->isHidden());
+    QCOMPARE(window.up_next_view_->rowHeight(0), UpNextDelegate::row_height);
+    QTRY_VERIFY(window.up_next_dock_->width() <= 320);
+
+    // The list's columns fit, so no scroll bar is left standing under it.
+    QTRY_COMPARE(tab->view->horizontalHeader()->length(), tab->view->viewport()->width());
+    QTRY_VERIFY(!tab->view->horizontalScrollBar()->isVisible());
+}
+
 void BenchMainWindowTest::emptyListsSayHowToFillThem() {
     BenchMainWindow window;
     window.show();

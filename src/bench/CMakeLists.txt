@@ -28,6 +28,8 @@ qt_add_library(
     lastfm_service.cpp
     lastfm_service.hpp
     bench_up_next.cpp
+    up_next_delegate.cpp
+    up_next_delegate.hpp
     bench_transport.cpp
     bench_workspace_layout.cpp
     playback_tab_widget.hpp

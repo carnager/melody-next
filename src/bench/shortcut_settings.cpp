@@ -17,6 +17,7 @@ ShortcutSettings::ShortcutSettings(const QList<QAction*>& actions, QWidget* pare
            "on Save. Shortcuts operate within Trackknife, not across the desktop."),
         this);
     note->setWordWrap(true);
+    note->setForegroundRole(QPalette::PlaceholderText);
     layout->addWidget(note);
     auto* form = new QFormLayout;
     for (auto* action : actions) {

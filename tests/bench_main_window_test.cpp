@@ -6850,7 +6850,8 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     QTest::keyClick(key, Qt::Key_Tab);
     QTRY_COMPARE(QApplication::focusWidget(), static_cast<QWidget*>(reveal));
     auto* note = dialog->findChild<QLabel*>(QStringLiteral("bench-settings-save-note"));
-    QVERIFY(note->text().contains(QStringLiteral("choose Save")));
+    // Pages that wait for Save say nothing about it; the button does.
+    QVERIFY(note->isHidden());
     auto* pages = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-pages"));
     auto* stack = dialog->findChild<QStackedWidget*>(QStringLiteral("bench-settings-stack"));
     QVERIFY(pages && stack);
@@ -6865,6 +6866,12 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     }
     dialog->showPage(SettingsDialog::Page::naming);
     QVERIFY(note->text().contains(QStringLiteral("immediately")));
+    QVERIFY(!note->isHidden());
+    // Every page is titled, and a number field is not stretched across it.
+    QCOMPARE(dialog->findChildren<QLabel*>(QStringLiteral("bench-settings-page-title")).size(),
+             pages->count());
+    auto* capacity = dialog->findChild<QSpinBox*>(QStringLiteral("bench-settings-buffer-capacity"));
+    QVERIFY(capacity != nullptr && capacity->maximumWidth() <= 260);
     dialog->showPage(SettingsDialog::Page::metadata_services);
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {

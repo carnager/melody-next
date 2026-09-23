@@ -223,6 +223,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
                        "immediately."),
         page);
     note->setWordWrap(true);
+    note->setForegroundRole(QPalette::PlaceholderText);
     layout->addWidget(note);
     auto* credentials = new QWidget(page);
     credentials->setObjectName(QStringLiteral("lastfm-credentials"));
@@ -237,6 +238,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
                        "This page connects automatically once you approve."),
         credentials);
     instructions->setWordWrap(true);
+    instructions->setForegroundRole(QPalette::PlaceholderText);
     credentials_layout->addWidget(instructions);
     auto* form = new QFormLayout;
     auto* key = new QLineEdit(page);

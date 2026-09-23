@@ -8,6 +8,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
@@ -18,6 +19,7 @@
 #include <QSysInfo>
 #include <QGroupBox>
 #include <QLabel>
+#include <QKeySequenceEdit>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPainter>
@@ -101,11 +103,37 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             if (form->rowWrapPolicy() != QFormLayout::WrapAllRows)
                 form->setRowWrapPolicy(QFormLayout::WrapLongRows);
             form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+            // Fields as wide as what goes in them, not the whole page: a
+            // number or a choice stays short, text gets room for a path.
+            for (int row = 0; row < form->rowCount(); ++row) {
+                auto* item = form->itemAt(row, QFormLayout::FieldRole);
+                auto* field = item != nullptr ? item->widget() : nullptr;
+                if (qobject_cast<QAbstractSpinBox*>(field) != nullptr ||
+                    qobject_cast<QComboBox*>(field) != nullptr) {
+                    field->setMaximumWidth(260);
+                } else if (qobject_cast<QLineEdit*>(field) != nullptr ||
+                           qobject_cast<QKeySequenceEdit*>(field) != nullptr) {
+                    field->setMaximumWidth(460);
+                }
+            }
         }
+        // The page says what it is at its top.
+        auto* framed = new QWidget(stack_);
+        auto* framed_layout = new QVBoxLayout(framed);
+        framed_layout->setContentsMargins(12, 8, 12, 8);
+        framed_layout->setSpacing(10);
+        auto* heading = new QLabel(title, framed);
+        heading->setObjectName(QStringLiteral("bench-settings-page-title"));
+        auto heading_font = heading->font();
+        heading_font.setPointSizeF(heading_font.pointSizeF() * 1.3);
+        heading_font.setWeight(QFont::DemiBold);
+        heading->setFont(heading_font);
+        framed_layout->addWidget(heading);
+        framed_layout->addWidget(page, 1);
         auto* scroll = new QScrollArea(stack_);
         scroll->setWidgetResizable(true);
         scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setWidget(page);
+        scroll->setWidget(framed);
         stack_->addWidget(scroll);
     };
     connect(pages_, &QListWidget::currentRowChanged, stack_, &QStackedWidget::setCurrentIndex);
@@ -164,6 +192,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                                   "restores its queue, paused."),
                    playback);
     resume_note->setWordWrap(true);
+    resume_note->setForegroundRole(QPalette::PlaceholderText);
     playback_layout->addWidget(resume_note);
     auto* buffer_form = new QFormLayout;
     buffer_form->setVerticalSpacing(12);
@@ -217,6 +246,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "Buffer changes take effect on the next track."),
         playback);
     buffer_note->setWordWrap(true);
+    buffer_note->setForegroundRole(QPalette::PlaceholderText);
     playback_layout->addWidget(buffer_note);
     auto* preamp_form = new QFormLayout;
     preamp_form->setVerticalSpacing(12);
@@ -243,6 +273,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                                   "Album, or Automatic from the playback controls."),
                    playback);
     preamp_note->setWordWrap(true);
+    preamp_note->setForegroundRole(QPalette::PlaceholderText);
     playback_layout->addWidget(preamp_note);
     playback_layout->addStretch(1);
     add_page(QStringLiteral("Playback"), playback);
@@ -255,6 +286,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         auto* note = new QLabel(
             QStringLiteral("Library folders are available from the running workspace."), library);
         note->setWordWrap(true);
+        note->setForegroundRole(QPalette::PlaceholderText);
         library_layout->addWidget(note);
         library_layout->addStretch(1);
     }
@@ -268,6 +300,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "computer's, and it plays on after the window closes."),
         engine);
     engine_intro->setWordWrap(true);
+    engine_intro->setForegroundRole(QPalette::PlaceholderText);
     engine_layout->addWidget(engine_intro);
 
     // ADR-0226/0228: this computer's engine, shared on the network so output
@@ -417,6 +450,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "for a home network or WireGuard. Applies after restarting Trackknife."),
         remote);
     engine_note->setWordWrap(true);
+    engine_note->setForegroundRole(QPalette::PlaceholderText);
     remote_layout->addWidget(engine_note);
 
     engine_layout->addWidget(remote);
@@ -519,6 +553,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             "covers already in your files are left alone."),
         covers);
     covers_note->setWordWrap(true);
+    covers_note->setForegroundRole(QPalette::PlaceholderText);
     covers_layout->addWidget(covers_note);
     covers_layout->addStretch(1);
     add_page(QStringLiteral("Covers"), covers);
@@ -531,6 +566,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                                   "Lookups start only when you request identification."),
                    metadata_services);
     musicbrainz_note->setWordWrap(true);
+    musicbrainz_note->setForegroundRole(QPalette::PlaceholderText);
     metadata_layout->addWidget(musicbrainz_note);
     auto* key_form = new QFormLayout;
     acoustid_key_ = new QLineEdit(metadata_services);
@@ -557,6 +593,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             "The key is stored in your local application settings. Clear it to remove it."),
         metadata_services);
     acoustid_note->setWordWrap(true);
+    acoustid_note->setForegroundRole(QPalette::PlaceholderText);
     metadata_layout->addWidget(acoustid_note);
     auto* acoustid_link =
         new QLabel(QStringLiteral("<a href=\"https://acoustid.org/new-application\">Register an "
@@ -585,6 +622,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             "<a href=\"https://www.last.fm/api/account/create\">Get a Last.fm API key</a>"),
         metadata_services);
     lastfm_note->setWordWrap(true);
+    lastfm_note->setForegroundRole(QPalette::PlaceholderText);
     lastfm_note->setOpenExternalLinks(true);
     lastfm_note->setTextInteractionFlags(Qt::TextBrowserInteraction);
     metadata_layout->addWidget(lastfm_note);
@@ -602,6 +640,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* save_note = new QLabel(this);
     save_note->setObjectName(QStringLiteral("bench-settings-save-note"));
     save_note->setWordWrap(true);
+    save_note->setForegroundRole(QPalette::PlaceholderText);
     root->addWidget(save_note);
     connect(pages_, &QListWidget::currentRowChanged, save_note, [save_note](int row) {
         const auto page = static_cast<Page>(row);
@@ -612,9 +651,11 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             save_note->setText(QStringLiteral("Save layout, Save destination, and Remove take "
                                               "effect immediately. Cancel does not undo them."));
         else
-            save_note->setText(QStringLiteral("Preferences take effect when you choose Save."));
+            save_note->clear();
+        // Said only where a page does not wait for Save.
+        save_note->setVisible(!save_note->text().isEmpty());
     });
-    save_note->setText(QStringLiteral("Preferences take effect when you choose Save."));
+    save_note->hide();
     pages_->setCurrentRow(0);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);

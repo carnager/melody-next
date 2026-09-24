@@ -172,6 +172,8 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
         }
     }
     if (!sharing.share || sharing.listen.isEmpty()) {
+        // Not shared: this computer only, not melodyd's default network ports.
+        arguments << QStringLiteral("--local-only");
         std::filesystem::remove(password_file, ignored);
         return arguments;
     }

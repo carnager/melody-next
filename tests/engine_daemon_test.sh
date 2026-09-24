@@ -31,11 +31,13 @@ fail() { echo "FAILED: $1" >&2; exit 1; }
 grep -q "protocol v1" "${work}/help.txt" || fail "--help must say what it speaks"
 # The debugging idiom has to actually work, so the help must show a usable one.
 grep -q -- "-w" "${work}/help.txt" || fail "--help must show a read timeout for nc"
+grep -q "default 0.0.0.0:6603" "${work}/help.txt" || fail "--help must say it listens by default"
+grep -q -- "--local-only" "${work}/help.txt" || fail "and how not to"
 
 "${binary}" --nonsense > "${work}/bad.txt" 2>&1 && fail "an unknown argument must fail" || true
 grep -q "unrecognised argument" "${work}/bad.txt" || fail "and say which"
 
-"${binary}" --socket "${socket}" --state "${state}" 2>"${work}/log.txt" &
+"${binary}" --socket "${socket}" --state "${state}" --local-only 2>"${work}/log.txt" &
 daemon_pid=$!
 
 for _ in $(seq 1 100); do
@@ -63,11 +65,11 @@ echo "${job}" | grep -q '"job_id"' || fail "submitting must answer with an ident
 echo "${job}" | grep -q '"event":"job.finished"' || fail "and the job must report a finish"
 
 # A second engine must not steal a live socket, nor share the database.
-if "${binary}" --socket "${socket}" --state "${work}/other" > "${work}/second.txt" 2>&1; then
+if "${binary}" --socket "${socket}" --state "${work}/other" --local-only > "${work}/second.txt" 2>&1; then
     fail "a second daemon must refuse an occupied socket"
 fi
 grep -q -e "could not listen" -e "another engine" "${work}/second.txt" || fail "and say so"
-if "${binary}" --socket "${work}/other.sock" --state "${state}" > "${work}/third.txt" 2>&1; then
+if "${binary}" --socket "${work}/other.sock" --state "${state}" --local-only > "${work}/third.txt" 2>&1; then
     fail "a second daemon must refuse a database in use"
 fi
 grep -q "another engine is using" "${work}/third.txt" || fail "and say which"
@@ -83,8 +85,10 @@ stop_ms=$(( ($(date +%s%N) - stop_started) / 1000000 ))
 daemon_pid=""
 [ -S "${socket}" ] && fail "the socket must be removed on shutdown"
 
-# ADR-0223: TCP, opt-in, with a password when one is set. Also typed by
-# hand: the handshake is one more line in nc, not a binary preamble.
+# ADR-0223: TCP -- on by default, --local-only turning it off -- with a
+# password when one is set. Also typed by hand: the handshake is one more
+# line in nc, not a binary preamble. (The default ports are not bound here:
+# a test must not take the ones a real engine on this machine uses.)
 port=$(( 20000 + RANDOM % 20000 ))
 printf 'correct horse\n' > "${work}/password"
 "${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \

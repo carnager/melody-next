@@ -48,7 +48,7 @@ done
 grep -q "not announced" "${work}/alpha.log" && { echo "discovery: no multicast here; skipping"; exit 0; }
 
 "${melodyd}" --socket "${work}/beta.sock" --state "${work}/beta" --name beta \
-    --agent --agent-password "${password}" 2>"${work}/beta.log" &
+    --local-only --agent --agent-password "${password}" 2>"${work}/beta.log" &
 pids+=($!)
 "${agent}" --name gamma --password "${password}" 2>"${work}/gamma.log" &
 pids+=($!)

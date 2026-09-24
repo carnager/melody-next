@@ -92,8 +92,11 @@ constexpr std::string_view database_filename{"lists.sqlite"};
     return std::filesystem::temp_directory_path() / "melodyd.sock";
 }
 
+constexpr const char* default_listen = "0.0.0.0:6603";
+constexpr const char* default_http = "0.0.0.0:6604";
+
 void usage() {
-    std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
+    std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT | --local-only]\n"
               << "               [--name NAME] [--password PASS | --password-file FILE]\n"
               << "               [--http HOST:PORT] [--music-root DIR]\n"
               << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
@@ -109,8 +112,12 @@ void usage() {
               << "                 sent paths relative to it (ADR-0228)\n"
               << "  --name NAME    what clients call this engine (default: the host name)\n"
               << "  --listen HOST:PORT\n"
-              << "                 also accept TCP connections, from clients and output\n"
-              << "                 agents. Open to the network unless a password is set.\n"
+              << "                 where to accept TCP connections, from clients and output\n"
+              << "                 agents (default 0.0.0.0:6603, streams on 0.0.0.0:6604);\n"
+              << "                 the engine is announced there to be found by name. Open to\n"
+              << "                 the network unless a password is set.\n"
+              << "  --local-only   no TCP and no streams by default: this machine's socket\n"
+              << "                 only, unless --listen or --http names them\n"
               << "  --password PASS, --password-file FILE\n"
               << "                 require this password of every TCP connection. Without\n"
               << "                 one, anyone who can reach the port can control the engine\n"
@@ -157,6 +164,7 @@ int main(int argc, char** argv) {
     auto state_directory = default_state_directory();
     std::string listen_address;
     std::string http_address;
+    bool local_only = false;
     std::string password;
     std::string password_file;
     std::string engine_name;
@@ -181,6 +189,8 @@ int main(int argc, char** argv) {
             state_directory = value();
         } else if (argument == "--listen") {
             listen_address = value();
+        } else if (argument == "--local-only") {
+            local_only = true;
         } else if (argument == "--name") {
             engine_name = value();
         } else if (argument == "--password") {
@@ -315,6 +325,16 @@ int main(int argc, char** argv) {
 
     // ADR-0223: TCP only when asked for; a password only when one is set.
     std::unique_ptr<trackknife::engine::Server> tcp_server;
+    // On the network unless told otherwise: an engine is there to be played
+    // from and on, and found by name. The ports asked for must be had; the
+    // default ones are given up quietly for local-only when taken.
+    const bool listen_by_default = !local_only && listen_address.empty();
+    if (listen_by_default) {
+        listen_address = default_listen;
+        if (http_address.empty()) {
+            http_address = default_http;
+        }
+    }
     if (!listen_address.empty()) {
         const auto endpoint = trackknife::protocol::Endpoint::parse(listen_address, {});
         if (!endpoint || !endpoint->tcp()) {
@@ -323,14 +343,19 @@ int main(int argc, char** argv) {
         }
         auto listening = trackknife::engine::Server::listen_tcp(endpoint->host, endpoint->port,
                                                                 dispatcher, password);
-        if (!listening) {
+        if (!listening && listen_by_default) {
+            std::cerr << "melodyd: " << listen_address << " is taken ("
+                      << listening.error().message << "); this machine only\n";
+            http_address.clear();
+        } else if (!listening) {
             std::cerr << "melodyd: could not listen on " << listen_address << ": "
                       << listening.error().message << "\n";
             return EXIT_FAILURE;
+        } else {
+            tcp_server = std::move(*listening);
+            std::cerr << "melodyd: listening on " << endpoint->describe()
+                      << (password.empty() ? " (no password)" : " (with a password)") << "\n";
         }
-        tcp_server = std::move(*listening);
-        std::cerr << "melodyd: listening on " << endpoint->describe()
-                  << (password.empty() ? " (no password)" : " (with a password)") << "\n";
     }
 
     // Every listener hears every event. A client on TCP is as much a client
@@ -390,20 +415,25 @@ int main(int argc, char** argv) {
         auto listening = trackknife::engine::StreamServer::listen(
             endpoint->host, endpoint->port, *token,
             [&player](const std::string& raw_path) { return player->holds(raw_path); });
-        if (!listening) {
+        if (!listening && listen_by_default) {
+            std::cerr << "melodyd: " << http_address << " is taken ("
+                      << listening.error().message << "); agents with no copy of the music "
+                      << "cannot be streamed to\n";
+        } else if (!listening) {
             std::cerr << "melodyd: could not serve streams on " << http_address << ": "
                       << listening.error().message << "\n";
             return EXIT_FAILURE;
+        } else {
+            streams = std::move(*listening);
+            agent_paths.stream_port = streams->port();
+            agent_paths.stream_token = std::move(*token);
+            // Served on every address, each agent fetches from the one it
+            // reached the engine at; on one address, from that one.
+            if (endpoint->host != "0.0.0.0" && endpoint->host != "::" && !endpoint->host.empty()) {
+                agent_paths.stream_host = endpoint->host;
+            }
+            std::cerr << "melodyd: serving streams to agents on " << endpoint->describe() << "\n";
         }
-        streams = std::move(*listening);
-        agent_paths.stream_port = streams->port();
-        agent_paths.stream_token = std::move(*token);
-        // Served on every address, each agent fetches from the one it
-        // reached the engine at; on one address, from that one.
-        if (endpoint->host != "0.0.0.0" && endpoint->host != "::" && !endpoint->host.empty()) {
-            agent_paths.stream_host = endpoint->host;
-        }
-        std::cerr << "melodyd: serving streams to agents on " << endpoint->describe() << "\n";
     }
 
     // ADR-0228: what the engine plays on -- its own audio and any output

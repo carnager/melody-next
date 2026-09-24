@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -19,19 +20,21 @@ namespace trackknife::engine {
 // fetches, over plain HTTP so the agent's decoder can read, and seek in, them
 // as it reads any URL.
 //
-//   GET /stream?path=<encoded raw path>&token=<stream token>
+//   GET /stream?path=<encoded raw path>&token=<stream token>[&format=opus&bitrate=N]
 //
-// It serves what the engine is playing and nothing else: a path is served
-// only while `serves` says so -- the player holds it in its queue or among
-// its asks -- so the token is a key to the music being played, not to the
-// machine's disk. Ranges are honoured; every response closes its connection.
+// This is the HTTP side only. What a request gets -- whether its token or
+// ticket opens anything, and which file answers it, a converted one
+// included -- is `resolve`'s to say (MediaStreams). Ranges are honoured;
+// every response closes its connection.
 class StreamServer final {
   public:
-    using Serves = std::function<bool(const std::string& raw_path)>;
+    // The file to send for a query string; an error says why not, as a
+    // status: unauthorized is 403, not_found 404, a bad request 400.
+    using Resolve = std::function<core::Result<std::string>(std::string_view query)>;
 
     // Port 0 asks for an ephemeral port, which `port()` then reports.
     [[nodiscard]] static core::Result<std::unique_ptr<StreamServer>>
-    listen(const std::string& host, std::uint16_t port, std::string token, Serves serves);
+    listen(const std::string& host, std::uint16_t port, Resolve resolve);
 
     StreamServer(const StreamServer&) = delete;
     StreamServer(StreamServer&&) = delete;
@@ -49,7 +52,7 @@ class StreamServer final {
     struct Transfer;
 
     StreamServer(int listener, int wakeup_read, int wakeup_write, std::uint16_t port,
-                 std::string token, Serves serves);
+                 Resolve resolve);
     void accept_loop();
     void serve(const std::shared_ptr<Transfer>& transfer);
     void reap();
@@ -58,8 +61,7 @@ class StreamServer final {
     int wakeup_read_;
     int wakeup_write_;
     std::uint16_t port_;
-    const std::string token_;
-    const Serves serves_;
+    const Resolve resolve_;
     std::atomic<bool> running_{false};
     std::thread acceptor_;
     std::mutex mutex_;

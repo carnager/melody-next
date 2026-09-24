@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/cover_fitting.hpp"
 
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -153,6 +154,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             rendered["date"] = protocol::displayable_text(entry.date);
             rendered["title"] = protocol::displayable_text(entry.title);
             rendered["added"] = entry.added;
+            rendered["duration_ms"] = entry.duration_ms;
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};
@@ -426,17 +428,49 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
     dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {
-        auto encoded = required_string(params, "path");
-        if (!encoded) {
-            return std::unexpected(std::move(encoded.error()));
+        // By a track, or by an album: a grid of albums knows their keys, not
+        // their files, and asking for a file first would double the trips.
+        std::string raw_path;
+        if (const auto album = params.find("album_key");
+            album != params.end() && album->is_string()) {
+            auto key = protocol::decode_raw_path(album->get<std::string>());
+            if (!key) {
+                return std::unexpected(bad_params("album_key is not an encoded key", "album_key"));
+            }
+            auto source = catalogue.artwork_source(*key);
+            if (!source) {
+                return std::unexpected(std::move(source.error()));
+            }
+            if (!*source) {
+                Json none = Json::object();
+                none["image"] = Json(nullptr);
+                return none;
+            }
+            raw_path = std::move(**source);
+        } else {
+            auto encoded = required_string(params, "path");
+            if (!encoded) {
+                return std::unexpected(std::move(encoded.error()));
+            }
+            auto decoded = protocol::decode_raw_path(*encoded);
+            if (!decoded) {
+                return std::unexpected(bad_params("path is not an encoded path", "path"));
+            }
+            raw_path = std::move(*decoded);
         }
-        auto raw_path = protocol::decode_raw_path(*encoded);
-        if (!raw_path) {
-            return std::unexpected(bad_params("path is not an encoded path", "path"));
-        }
-        auto image = catalogue.artwork(*raw_path);
+        auto image = catalogue.artwork(raw_path);
         if (!image) {
             return std::unexpected(std::move(image.error()));
+        }
+        // A client showing it small asks for it small: a phone's grid of
+        // covers is otherwise megabytes over mobile data. Scaled here, where
+        // the original is, so only the thumbnail travels.
+        if (const auto size = params.value("size", 0); size > 0 && !image->empty()) {
+            auto fitted = fit_cover(*image, size);
+            if (!fitted) {
+                return std::unexpected(std::move(fitted.error()));
+            }
+            *image = std::move(*fitted);
         }
         Json answer = Json::object();
         answer["image"] =

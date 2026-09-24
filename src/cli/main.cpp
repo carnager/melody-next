@@ -284,6 +284,10 @@ void usage(std::ostream& out) {
                   {"artist", text_of(track, "artist")},
                   {"album", text_of(track, "album")},
                   {"date", text_of(track, "date")}}}});
+        // Known to the library, so the engine can show how long it is.
+        if (const auto duration = track.value("duration_ms", std::int64_t{-1}); duration >= 0) {
+            entries.back()["duration_ms"] = duration;
+        }
     }
     return entries;
 }

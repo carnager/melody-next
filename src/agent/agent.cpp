@@ -207,19 +207,25 @@ core::Result<int> Agent::register_with_engine() {
 }
 
 void Agent::connect_loop() {
+    // Which engine each line is about: one agent process can play for
+    // several, and "the engine went away" did not say which.
+    const auto& server = config_.server;
+    const auto engine = !server.host.empty()
+                            ? server.host + ":" + std::to_string(server.port)
+                            : server.socket.string();
     std::string last_problem;
     while (running_.load()) {
         auto descriptor = register_with_engine();
         if (!descriptor) {
             if (descriptor.error().message != last_problem) {
                 last_problem = descriptor.error().message;
-                std::cerr << "melody-agent: " << last_problem << "; retrying\n";
+                std::cerr << "melody-agent: " << engine << ": " << last_problem << "; retrying\n";
             }
             static_cast<void>(pause_.wait(reconnect_delay));
             continue;
         }
         last_problem.clear();
-        std::cerr << "melody-agent: registered as \"" << config_.name << "\"\n";
+        std::cerr << "melody-agent: " << engine << ": registered as \"" << config_.name << "\"\n";
         // The connection turns round: from here the engine asks.
         server_->attach(*descriptor);
         registered_.store(true);
@@ -228,7 +234,7 @@ void Agent::connect_loop() {
         }
         registered_.store(false);
         if (running_.load()) {
-            std::cerr << "melody-agent: the engine went away; reconnecting\n";
+            std::cerr << "melody-agent: " << engine << ": the engine went away; reconnecting\n";
             // Whatever was playing belonged to that connection. Nothing
             // loaded is nothing to stop, and saying it could not be is noise.
             if (audition_->snapshot().state != audio::LocalAuditionState::empty) {

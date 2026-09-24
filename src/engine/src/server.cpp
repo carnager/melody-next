@@ -272,6 +272,13 @@ void Server::attach(const int descriptor) {
     connection->authenticated.store(true);
     connection->ends_at_eof = true;
     const std::lock_guard guard{mutex_};
+    // Stopped already: an agent that finished registering just as it was
+    // told to stop. Its worker would never be joined, and a thread that is
+    // not joined ends the whole process when it is destroyed.
+    if (!running_.load()) {
+        ::close(descriptor);
+        return;
+    }
     connections_.push_back(connection);
     workers_.emplace_back([this, connection] { serve(connection); });
 }
@@ -289,6 +296,9 @@ void Server::stop() {
     if (acceptor_.joinable()) {
         acceptor_.join();
     }
+    // Taken under the lock that attach() holds, so a worker added while
+    // this ran is among them rather than added behind it.
+    std::vector<std::thread> workers;
     {
         const std::lock_guard guard{mutex_};
         for (const auto& connection : connections_) {
@@ -296,13 +306,13 @@ void Server::stop() {
             // Half-closing unblocks a worker parked in recv.
             ::shutdown(connection->descriptor, SHUT_RDWR);
         }
+        workers.swap(workers_);
     }
-    for (auto& worker : workers_) {
+    for (auto& worker : workers) {
         if (worker.joinable()) {
             worker.join();
         }
     }
-    workers_.clear();
     const std::lock_guard guard{mutex_};
     connections_.clear();
 }

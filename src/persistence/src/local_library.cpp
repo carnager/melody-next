@@ -995,7 +995,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         switch (query.kind) {
         case LibraryEntryKind::artist:
             columns = "artist,artist,artist,'',count(*),sum(available),0,"
-                      "count(DISTINCT album_key),'',0,'',0";
+                      "count(DISTINCT album_key),'',0,'',0,-1";
             order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
@@ -1004,7 +1004,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             // aggregate would be rejected inside the correlated subquery.
             columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1,"
                       "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
-                      "WHERE hash=album_rating_hash),0),min(date),max(added)";
+                      "WHERE hash=album_rating_hash),0),min(date),max(added),"
+                      "CASE WHEN min(duration_ms)<0 THEN -1 ELSE sum(duration_ms) END";
             order = query.newest_first
                         ? " GROUP BY album_key ORDER BY max(added) DESC,min(artist) COLLATE "
                           "NOCASE,min(album) COLLATE NOCASE,album_key"
@@ -1014,7 +1015,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         case LibraryEntryKind::track:
             columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
                       "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date,"
-                      "added";
+                      "added,duration_ms";
             order = query.newest_first
                         ? " ORDER BY added DESC,album_key,disc,track,raw_path"
                         : " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
@@ -1045,6 +1046,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                  static_cast<unsigned>(statement.number(9))});
             page.entries.back().date = statement.bytes(10);
             page.entries.back().added = statement.number(11);
+            page.entries.back().duration_ms = statement.number(12);
             if (query.kind == LibraryEntryKind::track) {
                 page.entries.back().title = page.entries.back().label;
             }
@@ -1371,6 +1373,7 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
                        1U,
                        1U,
                        row.track};
+    entry.duration_ms = row.facts.duration_ms;
     entry.label = format_label(entry, true);
     return entry;
 }

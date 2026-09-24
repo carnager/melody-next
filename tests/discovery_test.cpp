@@ -6,6 +6,14 @@
 #include "trackknife/discovery/dns.hpp"
 #include "trackknife/discovery/mdns.hpp"
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <functional>
@@ -124,10 +132,71 @@ bool engines_are_found() {
     return true;
 }
 
+// Each network hears the one address the engine has on it. gemenon once
+// told the LAN its Docker bridge's address too, and a phone that took that
+// one could not reach it. Heard as a listener on the group hears it.
+bool each_network_hears_its_own_address() {
+    const int listener = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    require(listener >= 0, "a socket opens");
+    const int on = 1;
+    static_cast<void>(::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)));
+    static_cast<void>(::setsockopt(listener, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on)));
+    sockaddr_in bound{};
+    bound.sin_family = AF_INET;
+    bound.sin_port = htons(5353);
+    bound.sin_addr.s_addr = htonl(INADDR_ANY);
+    ip_mreq membership{};
+    ::inet_pton(AF_INET, "224.0.0.251", &membership.imr_multiaddr);
+    membership.imr_interface.s_addr = htonl(INADDR_ANY);
+    if (::bind(listener, reinterpret_cast<const sockaddr*>(&bound), sizeof(bound)) != 0 ||
+        ::setsockopt(listener, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership, sizeof(membership)) != 0) {
+        ::close(listener);
+        std::cerr << "discovery: cannot listen on the mDNS port; skipping\n";
+        return false;
+    }
+    const auto service = "_melody-test-" +
+                         trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
+    auto announcer = discovery::Announcer::start(
+        discovery::Advertisement{.instance = "addresses", .port = 6603, .txt = {}}, service);
+    require(announcer.has_value(), "an engine announces itself");
+    int heard = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{3};
+    std::array<std::uint8_t, 9000> buffer{};
+    while (std::chrono::steady_clock::now() < deadline) {
+        pollfd watched{.fd = listener, .events = POLLIN, .revents = 0};
+        if (::poll(&watched, 1, 200) <= 0) {
+            continue;
+        }
+        const auto size = ::recv(listener, buffer.data(), buffer.size(), 0);
+        if (size <= 0) {
+            continue;
+        }
+        const auto message = discovery::decode(buffer.data(), static_cast<std::size_t>(size));
+        if (!message || !message->response ||
+            std::ranges::none_of(message->answers, [&service](const discovery::Record& record) {
+                return record.name == service + ".local";
+            })) {
+            continue;
+        }
+        const auto addresses = std::ranges::count_if(
+            message->additionals,
+            [](const discovery::Record& record) { return record.type == discovery::RecordType::a; });
+        require(addresses == 1, "an announcement names one address, the one on its network");
+        ++heard;
+    }
+    ::close(listener);
+    if (heard == 0) {
+        std::cerr << "discovery: no announcement heard -- no multicast here; skipping\n";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
     codec_round_trips();
+    static_cast<void>(each_network_hears_its_own_address());
     const bool networked = engines_are_found();
     std::cout << "discovery: " << (networked ? "2" : "1") << " scenarios\n";
     return EXIT_SUCCESS;

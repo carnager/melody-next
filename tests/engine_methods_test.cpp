@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -204,13 +206,63 @@ void jobs_submit_and_cancel_over_the_wire(const std::filesystem::path& database)
 
 } // namespace
 
-int main() {
+// A phone's grid of albums asks for covers by album, and small: by album
+// because it knows album keys, not files; small because every byte of a
+// 3000-pixel original crosses mobile data.
+void covers_come_by_album_and_by_size(const std::filesystem::path& directory,
+                                      const std::filesystem::path& fixtures) {
+    const auto music = directory / "covers";
+    std::filesystem::create_directories(music);
+    {
+        std::ifstream input{fixtures / "art-tone-flac.b64"};
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+        std::erase(base64, '\n');
+        const auto decoded = protocol::decode_raw_path(base64);
+        require(decoded.has_value(), "the fixture decodes");
+        std::ofstream output{music / "art.flac", std::ios::binary};
+        output.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
+    }
+    engine::LocalCatalogue catalogue{directory / "covers.sqlite3"};
+    require(catalogue.prepare().has_value(), "the catalogue opens");
+    require(catalogue.add_root(music.string()).has_value(), "the folder is added");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "and scanned");
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue);
+
+    const auto albums = call(dispatcher, 1, "catalogue.query", protocol::Json{{"kind", 1}});
+    require(albums.result && albums.result->at("entries").size() == 1U, "one album");
+    const auto key = albums.result->at("entries").at(0).at("key").get<std::string>();
+    const auto image = [&](const protocol::Json& params) {
+        const auto answer = call(dispatcher, 2, "catalogue.artwork", params);
+        require(answer.result.has_value(), "a cover is answered");
+        const auto& found = answer.result->at("image");
+        require(found.is_string(), "with an image");
+        const auto bytes = protocol::decode_raw_path(found.get<std::string>());
+        require(bytes.has_value(), "encoded");
+        return *bytes;
+    };
+    const auto whole = image(protocol::Json{{"album_key", key}});
+    require(whole.starts_with("\x89PNG"), "by album: the cover as it is");
+    const auto small = image(protocol::Json{{"album_key", key}, {"size", 16}});
+    require(small.starts_with("\xFF\xD8\xFF") && small.size() < whole.size() + 4'096U,
+            "and asked small, a JPEG that size");
+    const auto missing = call(dispatcher, 3, "catalogue.artwork",
+                              protocol::Json{{"album_key", protocol::encode_raw_path("nothing")}});
+    require(missing.result && missing.result->at("image").is_null(),
+            "an album that is not there has no cover, which is not an error");
+}
+
+int main(int argc, char** argv) {
+    require(argc == 2, "usage: engine_methods_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-engine-methods-" + core::StableId::random().to_string());
     std::filesystem::create_directory(directory);
     const auto database = directory / "library.sqlite3";
     catalogue_methods_answer_over_the_wire(database);
     jobs_submit_and_cancel_over_the_wire(database);
+    covers_come_by_album_and_by_size(directory, argv[1]);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
     return EXIT_SUCCESS;

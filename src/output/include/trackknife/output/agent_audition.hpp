@@ -5,6 +5,7 @@
 #include "trackknife/audio/audition.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/output/audition_wire.hpp"
+#include "trackknife/output/stream_query.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace trackknife::output {
 
@@ -37,6 +39,19 @@ struct AgentPaths final {
 // last reported. It outlives its connection: an agent that drops and comes
 // back is the same output, and while it is gone it reports itself paused, so
 // the player never mistakes a lost agent for a finished track.
+// What an agent without the music wants streamed to it: the codecs it can
+// decode, and whether it wants Opus rather than the original -- a phone on
+// mobile data. Told at registration, and again in its reports whenever it
+// changes its mind (on Wi-Fi again, say). What it cannot decode, and a part
+// of a file, it is sent converted whatever it wants.
+struct StreamWishes final {
+    std::vector<std::string> decodes;
+    std::optional<StreamFormat> format;
+
+    [[nodiscard]] static StreamWishes from_json(const protocol::Json& params);
+    friend bool operator==(const StreamWishes&, const StreamWishes&) = default;
+};
+
 class AgentAudition final : public audio::Audition {
   public:
     AgentAudition(std::string name, AgentPaths paths);
@@ -45,7 +60,8 @@ class AgentAudition final : public audio::Audition {
     // what it registered: whether it opens files itself or must stream.
     // `reached` is the engine's address as this agent reached it, which is
     // where it can fetch streams too.
-    void attach(std::unique_ptr<protocol::Client> client, bool files, std::string reached = {});
+    void attach(std::unique_ptr<protocol::Client> client, bool files, std::string reached = {},
+                StreamWishes wishes = {});
     [[nodiscard]] bool online() const;
     [[nodiscard]] bool files() const;
     [[nodiscard]] const std::string& name() const noexcept { return name_; }
@@ -100,7 +116,14 @@ class AgentAudition final : public audio::Audition {
     [[nodiscard]] core::Result<protocol::Json> call(const std::string& method,
                                                     const protocol::Json& params);
     // Where the engine streams `raw_path` to this agent.
-    [[nodiscard]] core::Result<std::string> stream_url(const std::string& raw_path) const;
+    struct StreamUrl final {
+        std::string url;
+        // Sent as a track of its own: no selection or segment goes with it.
+        bool converted{false};
+    };
+    [[nodiscard]] core::Result<StreamUrl>
+    stream_url(const std::string& raw_path, const formats::AudioSourceSelection& selection,
+               const std::optional<formats::SampleRange>& segment) const;
     // A load or arm; one naming a file the agent cannot open is sent again
     // as a stream.
     [[nodiscard]] core::Result<protocol::Json>
@@ -125,6 +148,7 @@ class AgentAudition final : public audio::Audition {
     std::shared_ptr<protocol::Client> client_;
     bool files_{true};
     std::string reached_;
+    StreamWishes wishes_;
     std::function<void()> changed_;
     std::function<void()> offline_;
     audio::LocalAuditionSnapshot reported_;

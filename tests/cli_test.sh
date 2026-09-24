@@ -122,6 +122,44 @@ cli seek 10 > /dev/null
 position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["position_ms"])')"
 [ "${position}" -ge 9000 ] || fail "seek moves the position (at ${position})"
 
+# Stars for what plays: stored as the engine counts, 0-10.
+cli rate 5 | grep -q "^rated 5 stars: .*gamma" || fail "rate rates what plays"
+[ "$(cli rate)" = "5" ] || fail "rate reads the stars back"
+cli --json rate | python3 -c 'import json,sys; assert json.load(sys.stdin)["rating"] == 10' \
+    || fail "five stars are a 10 to the engine"
+if cli rate 7 2>/dev/null; then
+    fail "more than five stars fails"
+fi
+
+# No Last.fm account here: love says why and fails.
+if cli love 2>"${work}/love.txt"; then
+    fail "love without a Last.fm account fails"
+fi
+grep -q "lastfm.love" "${work}/love.txt" || fail "and says why"
+
+# watch: a line as it starts, and one for each change.
+"${cli}" --server "${socket}" --json watch > "${work}/watch.txt" &
+watch_pid=$!
+for _ in $(seq 1 100); do
+    [ -s "${work}/watch.txt" ] && break
+    sleep 0.05
+done
+cli pause > /dev/null
+for _ in $(seq 1 100); do
+    grep -q '"status":"paused"' "${work}/watch.txt" && break
+    sleep 0.05
+done
+kill "${watch_pid}" 2>/dev/null || true
+wait "${watch_pid}" 2>/dev/null || true
+head -1 "${work}/watch.txt" | python3 -c '
+import json, sys
+state = json.load(sys.stdin)
+assert state["status"] == "playing", state["status"]
+assert "gamma" in state["track"]["title"], state["track"]
+assert state["track"]["rating"] == 10, state["track"]' || fail "watch starts with what plays, and its rating"
+grep -q '"status":"paused"' "${work}/watch.txt" || fail "watch prints a change"
+cli toggle > /dev/null
+
 cli outputs | grep -q "^\*" || fail "outputs marks the one in use"
 cli stop | grep -q "^stopped:" || fail "stop stops"
 

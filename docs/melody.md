@@ -85,8 +85,13 @@ melody-cli status
 melody-cli play album doors 1967      # every word must match
 melody-cli next track riders storm    # plays after the current track
 melody-cli output "Pixel 10 Pro"
-melody-cli --json status | jq .position_ms
+melody-cli rate 4                     # stars for what plays, 0-5
+melody-cli love                       # on Last.fm, with the engine's account
+melody-cli --json watch               # a line each time something changes
 ```
+
+There's a bar widget for DankMaterialShell built on these in
+[`packaging/dms/melody`](../packaging/dms/melody/).
 
 ## When something doesn't work
 

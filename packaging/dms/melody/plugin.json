@@ -1,0 +1,12 @@
+{
+  "id": "melody",
+  "name": "Melody",
+  "description": "What Melody is playing, with playback controls and a heart that rates five stars and loves on Last.fm",
+  "version": "1.0.0",
+  "author": "carnager",
+  "icon": "music_note",
+  "type": "widget",
+  "component": "./MelodyWidget.qml",
+  "settings": "./MelodySettings.qml",
+  "permissions": ["settings_read", "settings_write"]
+}

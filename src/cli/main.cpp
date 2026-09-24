@@ -10,9 +10,11 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,6 +57,10 @@ void usage(std::ostream& out) {
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
            "  engines                     the engines announcing themselves nearby\n"
+           "\n"
+           "  watch                       print the state each time it changes\n"
+           "  rate [0-5]                  say or set the playing track's stars\n"
+           "  love | unlove               the playing track, on Last.fm\n"
            "\n"
            "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
            "one found on the network -- by name with --engine when there are several.\n"
@@ -199,26 +205,6 @@ void usage(std::ostream& out) {
     return std::filesystem::path{raw}.filename().string();
 }
 
-// "Artist — Title (Album, Year)" for a queue entry, as the engine holds it.
-[[nodiscard]] std::string describe_entry(const Json& entry) {
-    const auto group = entry.value("group", Json::object());
-    auto artist = text_of(group, "artist");
-    if (artist.empty()) {
-        artist = text_of(group, "album_artist");
-    }
-    auto title = text_of(entry, "title");
-    if (title.empty()) {
-        title = std::filesystem::path{text_of(entry, "path")}.filename().string();
-    }
-    std::string text = artist.empty() ? title : artist + " — " + title;
-    const auto album = text_of(group, "album");
-    const auto date = text_of(group, "date");
-    if (!album.empty()) {
-        text += " (" + album + (date.empty() ? std::string{} : ", " + date.substr(0, 4)) + ")";
-    }
-    return text;
-}
-
 // The library's albums or tracks for these words, newest first when none.
 [[nodiscard]] std::vector<Json> find(Client& client, const bool albums, const std::string& words,
                                      const std::size_t limit) {
@@ -292,26 +278,63 @@ void usage(std::ostream& out) {
     return entries;
 }
 
+// What plays, as a script wants it: its tags from the queue entry the
+// engine holds, else from the library, and its rating from the library.
+// Null when nothing plays.
+[[nodiscard]] Json now_playing(Client& client, const Json& state) {
+    const auto entry = text_of(state, "entry");
+    if (entry.empty()) {
+        return nullptr;
+    }
+    const auto path = text_of(state, "path");
+    const auto known = call(client, "catalogue.query",
+                            Json{{"kind", 2}, {"text", ""}, {"path", path}, {"limit", 1}})
+                           .value("entries", std::vector<Json>{});
+    Json track{{"path", path}, {"artist", ""}, {"title", ""}, {"album", ""}, {"date", ""}};
+    const auto queue = call(client, "playback.queue").value("entries", std::vector<Json>{});
+    const auto queued = std::ranges::find_if(
+        queue, [&entry](const Json& candidate) { return text_of(candidate, "entry") == entry; });
+    if (queued != queue.end()) {
+        const auto group = queued->value("group", Json::object());
+        track["artist"] = first_text(group, "artist", "album_artist");
+        track["title"] = text_of(*queued, "title");
+        track["album"] = text_of(group, "album");
+        track["date"] = text_of(group, "date");
+    } else if (!known.empty()) {
+        // Up Next, outside the queue: the library knows it by its path.
+        track["artist"] = text_of(known.front(), "artist");
+        track["title"] = first_text(known.front(), "title", "label");
+        track["album"] = text_of(known.front(), "album");
+        track["date"] = text_of(known.front(), "date");
+    }
+    if (text_of(track, "title").empty()) {
+        track["title"] = decoded_name(path);
+    }
+    // Only a track in the library has a rating to show or set.
+    if (!known.empty() && !text_of(known.front(), "rating_hash").empty()) {
+        track["rating_hash"] = text_of(known.front(), "rating_hash");
+        track["rating"] = known.front().value("rating", 0);
+    }
+    return track;
+}
+
+// "Artist — Title (Album, Year)".
+[[nodiscard]] std::string describe_track(const Json& track) {
+    const auto artist = text_of(track, "artist");
+    const auto title = text_of(track, "title");
+    std::string text = artist.empty() ? title : artist + " — " + title;
+    const auto album = text_of(track, "album");
+    const auto date = text_of(track, "date");
+    if (!album.empty()) {
+        text += " (" + album + (date.empty() ? std::string{} : ", " + date.substr(0, 4)) + ")";
+    }
+    return text;
+}
+
 void print_state(const Json& state, Client& client) {
     const auto status = state.value("status", std::string{"stopped"});
-    std::string what = "nothing";
-    if (const auto entry = text_of(state, "entry"); !entry.empty()) {
-        const auto queue = call(client, "playback.queue").value("entries", std::vector<Json>{});
-        const auto found = std::ranges::find_if(queue, [&entry](const Json& queued) {
-            return text_of(queued, "entry") == entry;
-        });
-        if (found != queue.end()) {
-            what = describe_entry(*found);
-        } else {
-            // Up Next, outside the queue: described by the library, which
-            // knows the file by its path.
-            const auto path = text_of(state, "path");
-            const auto known = call(client, "catalogue.query",
-                                    Json{{"kind", 2}, {"text", ""}, {"path", path}, {"limit", 1}})
-                                   .value("entries", std::vector<Json>{});
-            what = !known.empty() ? describe_found(known.front(), false) : decoded_name(path);
-        }
-    }
+    const auto track = now_playing(client, state);
+    const auto what = track.is_null() ? std::string{"nothing"} : describe_track(track);
     std::cout << status << ": " << what << "\n";
     std::cout << clock(state.value("position_ms", std::int64_t{0})) << " / "
               << clock(state.value("duration_ms", std::int64_t{-1})) << " · volume "
@@ -538,6 +561,111 @@ int run(const Options& options) {
         }
         static_cast<void>(call(*client, "outputs.select", Json{{"id", text_of(*found, "id")}}));
         show(state());
+    } else if (command == "watch") {
+        // A line per change, for a status bar: the engine tells every
+        // client when the state changes (not as the position moves). The
+        // reader thread only hands the newest state over; asking the
+        // engine what it is happens here.
+        std::mutex lock;
+        std::condition_variable woken;
+        std::optional<Json> latest;
+        bool gone = false;
+        client->on_event([&](const trackknife::protocol::Event& event) {
+            if (event.name != "playback.changed") {
+                return;
+            }
+            const std::scoped_lock held{lock};
+            latest = event.data;
+            woken.notify_one();
+        });
+        client->on_closed([&] {
+            const std::scoped_lock held{lock};
+            gone = true;
+            woken.notify_one();
+        });
+        // The state as it is, unless a change has come in meanwhile. Asked
+        // without the lock: the reader thread, which answers the call, may
+        // be waiting for it.
+        auto first = state();
+        {
+            const std::scoped_lock held{lock};
+            if (!latest) {
+                latest = std::move(first);
+            }
+        }
+        std::string last_line;
+        while (true) {
+            Json changed;
+            {
+                std::unique_lock held{lock};
+                woken.wait(held, [&] { return latest.has_value() || gone; });
+                if (gone) {
+                    fail("the engine went away");
+                }
+                changed = std::move(*latest);
+                latest.reset();
+            }
+            auto track = now_playing(*client, changed);
+            std::string line;
+            if (options.json) {
+                changed["track"] = std::move(track);
+                line = changed.dump();
+            } else {
+                line = text_of(changed, "status") + ": " +
+                       (track.is_null() ? std::string{"nothing"} : describe_track(track));
+            }
+            // Only what a reader would see as a change.
+            if (line != last_line) {
+                std::cout << line << std::endl;
+                last_line = std::move(line);
+            }
+        }
+    } else if (command == "rate") {
+        const auto track = now_playing(*client, state());
+        if (track.is_null()) {
+            fail("nothing is playing");
+        }
+        if (!track.contains("rating_hash")) {
+            fail("what plays is not in the library, so it has no rating");
+        }
+        // Stars, as people count them; the engine keeps 0-10.
+        if (words.size() == 1U) {
+            const auto rating = track.value("rating", 0);
+            if (options.json) {
+                std::cout << Json{{"stars", rating / 2}, {"rating", rating}}.dump() << "\n";
+            } else {
+                std::cout << rating / 2 << "\n";
+            }
+            return EXIT_SUCCESS;
+        }
+        const auto& given = words[1];
+        if (given.size() != 1U || given.front() < '0' || given.front() > '5') {
+            fail("rate wants stars from 0 to 5");
+        }
+        const auto stars = given.front() - '0';
+        static_cast<void>(call(*client, "catalogue.set_rating",
+                               Json{{"hash", text_of(track, "rating_hash")}, {"rating", stars * 2}}));
+        if (!options.json) {
+            std::cout << "rated " << stars << (stars == 1 ? " star: " : " stars: ")
+                      << describe_track(track) << "\n";
+        }
+    } else if (command == "love" || command == "unlove") {
+        const auto track = now_playing(*client, state());
+        if (track.is_null()) {
+            fail("nothing is playing");
+        }
+        if (text_of(track, "artist").empty()) {
+            fail("what plays has no artist for Last.fm to know it by");
+        }
+        // The engine's Last.fm account, the one it scrobbles with.
+        const bool loved = command == "love";
+        static_cast<void>(call(*client, "lastfm.love",
+                               Json{{"artist", text_of(track, "artist")},
+                                    {"title", text_of(track, "title")},
+                                    {"loved", loved}}));
+        if (!options.json) {
+            std::cout << (loved ? "loved: " : "unloved: ") << describe_track(track) << "\n";
+        }
     } else {
         usage(std::cerr);
         return EXIT_FAILURE;

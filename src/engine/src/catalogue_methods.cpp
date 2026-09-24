@@ -40,7 +40,8 @@ using protocol::Json;
 
 } // namespace
 
-void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue) {
+void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
+                                 EventSink events) {
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {
         auto roots = catalogue.roots();
         if (!roots) {
@@ -307,7 +308,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{{"ratings", *ratings}};
     });
 
-    dispatcher.on("catalogue.set_rating", [&catalogue](const Json& params) -> core::Result<Json> {
+    dispatcher.on("catalogue.set_rating", [&catalogue, events = std::move(events)](
+                                              const Json& params) -> core::Result<Json> {
         auto hash = required_string(params, "hash");
         if (!hash) {
             return std::unexpected(std::move(hash.error()));
@@ -322,10 +324,14 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             rating->get<std::int64_t>() < 0) {
             return std::unexpected(bad_params("rating must be a non-negative integer", "rating"));
         }
-        auto stored =
-            catalogue.set_rating(*hash, album, static_cast<unsigned>(rating->get<std::int64_t>()));
+        const auto value = static_cast<unsigned>(rating->get<std::int64_t>());
+        auto stored = catalogue.set_rating(*hash, album, value);
         if (!stored) {
             return std::unexpected(std::move(stored.error()));
+        }
+        if (events) {
+            events(protocol::Event{.name = "catalogue.rating_changed",
+                                   .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
         }
         // A void operation still answers, so the caller learns it completed.
         return Json{};

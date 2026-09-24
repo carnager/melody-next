@@ -191,6 +191,12 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
     LaunchedEffect(entry?.path) {
         facts = entry?.path?.let { vm.client.track(it) }
     }
+    // Rated elsewhere -- in Trackknife, from a script -- while it plays.
+    LaunchedEffect(Unit) {
+        vm.client.ratings.collect { change ->
+            facts?.let { if (it.ratingHash == change.hash) facts = it.copy(rating = change.rating) }
+        }
+    }
 
     Surface(Modifier.fillMaxSize(), color = colours.ground, contentColor = colours.text) {
         Column(

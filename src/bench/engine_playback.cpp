@@ -59,6 +59,21 @@ bool EnginePlayback::open() {
     client_->on_event([self, this](const protocol::Event& event) {
         // Parsed here, on the reader thread, so the signal carries nothing
         // that needs decoding on the UI thread.
+        if (event.name == "catalogue.rating_changed") {
+            const auto hash = QString::fromStdString(event.data.value("hash", std::string{}));
+            const auto rating = event.data.value("rating", 0U);
+            if (self && !hash.isEmpty()) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, hash, rating] {
+                        if (self) {
+                            emit self->ratingChanged(hash, rating);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "playback.changed") {
             adopt(event.data);
         } else if (event.name == "outputs.changed") {

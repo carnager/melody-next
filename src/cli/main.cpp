@@ -569,13 +569,19 @@ int run(const Options& options) {
         std::mutex lock;
         std::condition_variable woken;
         std::optional<Json> latest;
+        // A rating set anywhere: what plays is looked at again, in case it
+        // is its own.
+        bool rated = false;
         bool gone = false;
         client->on_event([&](const trackknife::protocol::Event& event) {
-            if (event.name != "playback.changed") {
+            const std::scoped_lock held{lock};
+            if (event.name == "playback.changed") {
+                latest = event.data;
+            } else if (event.name == "catalogue.rating_changed") {
+                rated = true;
+            } else {
                 return;
             }
-            const std::scoped_lock held{lock};
-            latest = event.data;
             woken.notify_one();
         });
         client->on_closed([&] {
@@ -594,17 +600,24 @@ int run(const Options& options) {
             }
         }
         std::string last_line;
+        Json last_state;
         while (true) {
             Json changed;
             {
                 std::unique_lock held{lock};
-                woken.wait(held, [&] { return latest.has_value() || gone; });
+                woken.wait(held, [&] { return latest.has_value() || rated || gone; });
                 if (gone) {
                     fail("the engine went away");
                 }
-                changed = std::move(*latest);
-                latest.reset();
+                if (latest) {
+                    changed = std::move(*latest);
+                    latest.reset();
+                } else {
+                    changed = last_state;
+                }
+                rated = false;
             }
+            last_state = changed;
             auto track = now_playing(*client, changed);
             std::string line;
             if (options.json) {

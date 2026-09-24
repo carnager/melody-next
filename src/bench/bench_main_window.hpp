@@ -192,6 +192,9 @@ class BenchMainWindow final : public QMainWindow {
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
     void addLocalRateMenus(QMenu* menu, QTableView* view);
     void refreshLocalRatings();
+    // A rating an engine says was set -- here, on the phone, from a script:
+    // shown in the tabs whose tracks are that engine's.
+    void adoptEngineRating(bool remote, const QString& hash, unsigned rating);
 
     void showDynamicPlaylists();
 

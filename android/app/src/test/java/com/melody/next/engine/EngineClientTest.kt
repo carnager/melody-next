@@ -3,8 +3,10 @@ package com.melody.next.engine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
@@ -197,6 +199,20 @@ class EngineClientTest {
             assertEquals(1, entries.length())
             assertEquals(5, entries.getJSONObject(0).getJSONObject("segment").getInt("start_sample"))
             client.disconnect()
+        }
+    }
+
+    @Test
+    fun aRatingSetElsewhereIsPassedOn() = runBlocking {
+        FakeEngine().use { engine ->
+            val client = EngineClient(scope, clock = { 0L })
+            client.connect(engine.endpoint)
+            eventually("connected", { client.connection.value }) { it is ConnectionState.Connected }
+            val heard = scope.async { client.ratings.first() }
+            // Subscribed before the engine speaks, as the screens are.
+            delay(100)
+            engine.push("catalogue.rating_changed", JSONObject().put("hash", "abc").put("album", false).put("rating", 8))
+            assertEquals(RatingChange("abc", 8), withTimeout(5_000) { heard.await() })
         }
     }
 

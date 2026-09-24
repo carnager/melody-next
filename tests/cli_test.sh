@@ -158,6 +158,22 @@ assert state["status"] == "playing", state["status"]
 assert "gamma" in state["track"]["title"], state["track"]
 assert state["track"]["rating"] == 10, state["track"]' || fail "watch starts with what plays, and its rating"
 grep -q '"status":"paused"' "${work}/watch.txt" || fail "watch prints a change"
+
+# A rating set by another client reaches watch, without a playback change.
+"${cli}" --server "${socket}" --json watch > "${work}/rated.txt" &
+watch_pid=$!
+for _ in $(seq 1 100); do
+    [ -s "${work}/rated.txt" ] && break
+    sleep 0.05
+done
+cli rate 2 > /dev/null
+for _ in $(seq 1 100); do
+    grep -q '"rating":4' "${work}/rated.txt" && break
+    sleep 0.05
+done
+kill "${watch_pid}" 2>/dev/null || true
+wait "${watch_pid}" 2>/dev/null || true
+grep -q '"rating":4' "${work}/rated.txt" || fail "watch hears of a rating set elsewhere"
 cli toggle > /dev/null
 
 cli outputs | grep -q "^\*" || fail "outputs marks the one in use"

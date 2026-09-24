@@ -187,6 +187,9 @@ class EnginePlayback final : public QObject {
     // The engine refused a command, with its reason -- a track the output
     // could not play, say. Emitted on this object's thread.
     void failed(const QString& message);
+    // A rating was set on this engine, by any client: a track's or an
+    // album's, by its rating hash. Emitted on this object's thread.
+    void ratingChanged(const QString& hash, unsigned rating);
 
   private:
     // Connects if one is configured. Answers whether a connection now exists.

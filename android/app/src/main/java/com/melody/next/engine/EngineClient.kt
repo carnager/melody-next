@@ -42,6 +42,7 @@ class EngineClient(
     private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
     private val _outputs = MutableStateFlow<List<Output>>(emptyList())
     private val _problems = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    private val _ratings = MutableSharedFlow<RatingChange>(extraBufferCapacity = 16)
 
     val connection: StateFlow<ConnectionState> = _connection
     val state: StateFlow<PlaybackState> = _state
@@ -50,6 +51,8 @@ class EngineClient(
     val outputs: StateFlow<List<Output>> = _outputs
     /** Something asked for that failed, said for a person. */
     val problems: SharedFlow<String> = _problems
+    /** A rating set on the engine, by any client: this one, Trackknife, a script. */
+    val ratings: SharedFlow<RatingChange> = _ratings
 
     @Volatile private var control: EngineConnection? = null
     @Volatile private var covers: EngineConnection? = null
@@ -137,6 +140,9 @@ class EngineClient(
         when (event.name) {
             "playback.changed" -> adoptState(event.data)
             "outputs.changed" -> _outputs.value = event.data.optJSONArray("outputs").objects().map(Output::from)
+            "catalogue.rating_changed" -> event.data.optString("hash").takeIf { it.isNotEmpty() }?.let { hash ->
+                _ratings.tryEmit(RatingChange(hash, event.data.optInt("rating")))
+            }
         }
     }
 

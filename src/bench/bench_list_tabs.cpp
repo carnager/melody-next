@@ -12,6 +12,7 @@
 #include "uicommon/local_files_mime_data.hpp"
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "uicommon/list_persistence_service.hpp"
@@ -87,6 +88,10 @@ void BenchMainWindow::initializePersistence() {
             QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         }
     });
+    connect(local_playback_, &EnginePlayback::ratingChanged, this,
+            [this](const QString& hash, const unsigned rating) {
+                adoptEngineRating(false, hash, rating);
+            });
     connect(local_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
@@ -1684,6 +1689,24 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->addSeparator();
     addLastFmActions(track_context_menu_, view);
     track_context_menu_->popup(view->viewport()->mapToGlobal(position));
+}
+
+void BenchMainWindow::adoptEngineRating(const bool remote, const QString& hash,
+                                        const unsigned rating) {
+    const QHash<QString, unsigned> ratings{{hash, rating}};
+    for (const auto& tab : list_tabs_) {
+        if (tab->document.remote == remote) {
+            tab->model->applyRatings(ratings);
+        }
+    }
+    // Dynamic results from that library show it, and rules on ratings
+    // look again.
+    if (auto* dialog = findChild<DynamicPlaylistDialog*>(); dialog && dialog->remote() == remote) {
+        if (auto* results = qobject_cast<LocalListModel*>(dialog->view()->model())) {
+            results->applyRatings(ratings);
+        }
+        dialog->libraryChanged();
+    }
 }
 
 void BenchMainWindow::refreshLocalRatings() {

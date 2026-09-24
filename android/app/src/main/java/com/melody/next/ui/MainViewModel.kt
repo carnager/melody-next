@@ -91,6 +91,19 @@ class MainViewModel : ViewModel() {
                 }
         }
         viewModelScope.launch { client.problems.collect { message = it } }
+        // A rating set anywhere shows on what is open.
+        viewModelScope.launch {
+            client.ratings.collect { change ->
+                entries = entries.map { if (it.ratingHash == change.hash) it.copy(rating = change.rating) else it }
+                levels.replaceAll { level ->
+                    if (level is LibraryLevel.Tracks && level.album.ratingHash == change.hash) {
+                        LibraryLevel.Tracks(level.album.copy(rating = change.rating))
+                    } else {
+                        level
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             app.offline.problems.collect { problem ->
                 if (problem != null) {

@@ -38,6 +38,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -311,7 +313,21 @@ int main(int argc, char** argv) {
     }
 
     trackknife::protocol::Dispatcher dispatcher;
-    trackknife::engine::register_catalogue_methods(dispatcher, catalogue);
+    // A rating is told to every client, through the listeners -- which are
+    // made further down, once the dispatcher has its methods. Until then
+    // there is no one to tell, and the relay drops it.
+    struct EventRelay {
+        std::mutex lock;
+        trackknife::engine::EventSink sink;
+    };
+    const auto relay = std::make_shared<EventRelay>();
+    trackknife::engine::register_catalogue_methods(
+        dispatcher, catalogue, [relay](const trackknife::protocol::Event& event) {
+            const std::scoped_lock held{relay->lock};
+            if (relay->sink) {
+                relay->sink(event);
+            }
+        });
 
     // A machine with no audio device still plays: through output agents
     // (ADR-0228). Its player keeps the queue and plays nothing until one is
@@ -383,6 +399,11 @@ int main(int argc, char** argv) {
             tcp_sink(event);
         }
     };
+
+    {
+        const std::scoped_lock held{relay->lock};
+        relay->sink = sink;
+    }
 
     // Jobs report through the sockets, so the registry is given its sink and
     // must be destroyed before the servers it writes to.

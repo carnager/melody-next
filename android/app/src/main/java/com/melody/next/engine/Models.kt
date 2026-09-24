@@ -203,3 +203,6 @@ data class Output(
         )
     }
 }
+
+/** A track's or an album's rating, 0-10, by the key the library rates it under. */
+data class RatingChange(val hash: String, val rating: Int)

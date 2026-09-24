@@ -56,6 +56,10 @@ void BenchMainWindow::connectRemoteEngine() {
             refreshTransport();
         }
     });
+    connect(remote_playback_, &EnginePlayback::ratingChanged, this,
+            [this](const QString& hash, const unsigned rating) {
+                adoptEngineRating(true, hash, rating);
+            });
     connect(remote_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });

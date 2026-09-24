@@ -281,6 +281,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void aRatingSetElsewhereShowsInTheTabs();
     void dynamicPlaylistsReadTheLibraryChosen();
     void replacingARemoteTabFromItsLibraryPlays();
     void locateFindsARemoteTracksAlbumInTheRemoteLibrary();
@@ -5328,6 +5329,51 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && page->entries.size() == 1U);
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QTRY_VERIFY(!tab->model->rows().front().rating_hash.empty());
+    const auto hash = tab->model->rows().front().rating_hash;
+    QCOMPARE(tab->model->rows().front().rating, 0U);
+
+    // Another client -- the phone, a script -- rates it on the engine.
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    QVERIFY((*other)->call("catalogue.set_rating",
+                           protocol::Json{{"hash", hash}, {"rating", 8}}).has_value());
+    (*other)->close();
+
+    // Shown without anyone asking again.
+    QTRY_COMPARE(tab->model->rows().front().rating, 8U);
 }
 
 void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {

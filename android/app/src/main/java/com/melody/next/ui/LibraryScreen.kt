@@ -69,7 +69,31 @@ fun LibraryScreen(vm: MainViewModel) {
                 vm.loading && vm.entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-                vm.entries.isEmpty() && !vm.loading -> Centered("Nothing here")
+                vm.entries.isEmpty() && !vm.loading -> {
+                    val connection by vm.client.connection.collectAsState()
+                    val kept by vm.app.offline.albums.collectAsState()
+                    if (connection is com.melody.next.engine.ConnectionState.Connected) {
+                        Centered("Nothing here")
+                    } else Column(
+                        Modifier.fillMaxSize().padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        // No engine in reach: said, and what still plays offered,
+                        // rather than an empty library that looks like a broken one.
+                        Text("No engine in reach", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (kept.isEmpty()) "The library shows once the engine can be reached."
+                            else "Albums kept on this phone still play.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (kept.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = { vm.showTop(LibraryLevel.Offline) }) { Text("Albums on this phone") }
+                        }
+                    }
+                }
                 else -> when (level) {
                     LibraryLevel.Artists -> ArtistList(vm)
                     LibraryLevel.Latest -> AlbumList(vm, vm.entries, newest = true)

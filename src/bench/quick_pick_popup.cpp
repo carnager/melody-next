@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "bench/quick_album_popup.hpp"
+#include "bench/quick_pick_popup.hpp"
 
 #include "trackknife/engine/catalogue.hpp"
 
@@ -21,7 +21,7 @@ namespace {
 
 constexpr int row_height = 30;
 constexpr std::size_t result_limit = 60U;
-constexpr int album_role = Qt::UserRole + 1;
+constexpr int name_role = Qt::UserRole + 1;
 constexpr int details_role = Qt::UserRole + 2;
 
 [[nodiscard]] QString text(const std::string& value) {
@@ -53,7 +53,7 @@ class AlbumRowDelegate final : public QStyledItemDelegate {
                                                            mix(base.blue(), accent.blue())));
         }
         const auto area = option.rect.adjusted(12, 0, -12, 0);
-        const auto album = index.data(album_role).toString();
+        const auto album = index.data(name_role).toString(); // the album or the title
         const auto details = index.data(details_role).toString();
         auto album_font = option.font;
         album_font.setWeight(QFont::DemiBold);
@@ -74,10 +74,12 @@ class AlbumRowDelegate final : public QStyledItemDelegate {
 
 } // namespace
 
-QuickAlbumPopup::QuickAlbumPopup(std::shared_ptr<engine::Catalogue> catalogue,
-                                 const QString& scope, QWidget* parent)
-    : QFrame(parent, Qt::Popup), catalogue_(std::move(catalogue)) {
-    setObjectName(QStringLiteral("bench-quick-album"));
+QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
+                               std::shared_ptr<engine::Catalogue> catalogue, const QString& scope,
+                               QWidget* parent)
+    : QFrame(parent, Qt::Popup), kind_(kind), catalogue_(std::move(catalogue)) {
+    const bool albums = kind_ == QuickPickKind::album;
+    setObjectName(albums ? QStringLiteral("bench-quick-album") : QStringLiteral("bench-quick-track"));
     setAttribute(Qt::WA_DeleteOnClose);
     setFrameShape(QFrame::StyledPanel);
     auto* layout = new QVBoxLayout(this);
@@ -87,7 +89,8 @@ QuickAlbumPopup::QuickAlbumPopup(std::shared_ptr<engine::Catalogue> catalogue,
     auto* row = new QHBoxLayout;
     input_ = new QLineEdit(this);
     input_->setObjectName(QStringLiteral("bench-quick-album-input"));
-    input_->setPlaceholderText(tr("Album, artist or year — e.g. doors 1967"));
+    input_->setPlaceholderText(albums ? tr("Album, artist or year — e.g. doors 1967")
+                                      : tr("Title, artist, album or year — e.g. crystal doors"));
     input_->setClearButtonEnabled(true);
     input_->installEventFilter(this);
     auto input_font = input_->font();
@@ -113,7 +116,7 @@ QuickAlbumPopup::QuickAlbumPopup(std::shared_ptr<engine::Catalogue> catalogue,
             [this] { choose(LocalLibraryAction::append); });
     layout->addWidget(results_, 1);
 
-    status_ = new QLabel(tr("Type part of an album, its artist or its year."), this);
+    status_ = new QLabel(idleText(), this);
     status_->setObjectName(QStringLiteral("bench-quick-album-status"));
     status_->setForegroundRole(QPalette::PlaceholderText);
     layout->addWidget(status_);
@@ -134,16 +137,16 @@ QuickAlbumPopup::QuickAlbumPopup(std::shared_ptr<engine::Catalogue> catalogue,
     debounce_->setSingleShot(true);
     debounce_->setInterval(120);
     connect(input_, &QLineEdit::textChanged, debounce_, qOverload<>(&QTimer::start));
-    connect(debounce_, &QTimer::timeout, this, &QuickAlbumPopup::search);
-    connect(&watcher_, &QFutureWatcher<Found>::finished, this, &QuickAlbumPopup::showResults);
+    connect(debounce_, &QTimer::timeout, this, &QuickPickPopup::search);
+    connect(&watcher_, &QFutureWatcher<Found>::finished, this, &QuickPickPopup::showResults);
 }
 
-QuickAlbumPopup::~QuickAlbumPopup() {
+QuickPickPopup::~QuickPickPopup() {
     // The search holds the catalogue it was given; let it finish with it.
     watcher_.waitForFinished();
 }
 
-void QuickAlbumPopup::popUp(const QWidget* over) {
+void QuickPickPopup::popUp(const QWidget* over) {
     const auto width = std::min(640, std::max(420, over->width() - 80));
     resize(width, 420);
     const auto top_left = over->mapToGlobal(QPoint{(over->width() - width) / 2, 90});
@@ -152,13 +155,13 @@ void QuickAlbumPopup::popUp(const QWidget* over) {
     input_->setFocus(Qt::PopupFocusReason);
 }
 
-void QuickAlbumPopup::search() {
+void QuickPickPopup::search() {
     const auto words = input_->text().simplified();
     ++generation_;
     if (words.isEmpty()) {
-        albums_.clear();
+        entries_.clear();
         results_->clear();
-        status_->setText(tr("Type part of an album, its artist or its year."));
+        status_->setText(idleText());
         return;
     }
     // One search at a time: a newer text waits for it, then runs.
@@ -168,7 +171,8 @@ void QuickAlbumPopup::search() {
     }
     status_->setText(tr("Searching…"));
     persistence::LibraryQuery query;
-    query.kind = persistence::LibraryEntryKind::album;
+    query.kind = kind_ == QuickPickKind::album ? persistence::LibraryEntryKind::album
+                                               : persistence::LibraryEntryKind::track;
     query.text = words.toStdString();
     query.limit = result_limit;
     watcher_.setFuture(QtConcurrent::run(
@@ -180,13 +184,13 @@ void QuickAlbumPopup::search() {
                 found.error = QString::fromStdString(page.error().message);
                 return found;
             }
-            found.albums = std::move(page->entries);
+            found.entries = std::move(page->entries);
             found.more = page->more;
             return found;
         }));
 }
 
-void QuickAlbumPopup::showResults() {
+void QuickPickPopup::showResults() {
     auto found = watcher_.result();
     if (pending_) {
         pending_ = false;
@@ -200,40 +204,56 @@ void QuickAlbumPopup::showResults() {
         status_->setText(found.error);
         return;
     }
-    albums_ = std::move(found.albums);
+    entries_ = std::move(found.entries);
     results_->clear();
-    for (const auto& album : albums_) {
+    const bool albums = kind_ == QuickPickKind::album;
+    for (const auto& entry : entries_) {
+        // Album: who, when, how long. Track: who, from what, when.
         QStringList details;
-        details << text(album.artist);
-        if (!album.date.empty()) {
-            details << text(album.date);
+        details << text(entry.artist);
+        if (!albums && !entry.album.empty()) {
+            details << text(entry.album);
         }
-        details << (album.tracks == 1U ? tr("1 track") : tr("%1 tracks").arg(album.tracks));
+        if (!entry.date.empty()) {
+            details << text(entry.date);
+        }
+        if (albums) {
+            details << (entry.tracks == 1U ? tr("1 track") : tr("%1 tracks").arg(entry.tracks));
+        }
+        const auto name = text(albums ? entry.album : (entry.title.empty() ? entry.label : entry.title));
         auto* item = new QListWidgetItem(results_);
-        item->setData(album_role, text(album.album));
+        item->setData(name_role, name);
         item->setData(details_role, details.join(QStringLiteral(" · ")));
-        item->setText(text(album.album) + QStringLiteral(" — ") + details.join(QStringLiteral(" · ")));
+        item->setText(name + QStringLiteral(" — ") + details.join(QStringLiteral(" · ")));
     }
-    if (!albums_.empty()) {
+    if (!entries_.empty()) {
         results_->setCurrentRow(0);
     }
-    status_->setText(albums_.empty() ? tr("No albums match.")
-                     : found.more    ? tr("First %1 albums — type more to narrow them.")
-                                        .arg(albums_.size())
-                     : albums_.size() == 1U ? tr("1 album")
-                                            : tr("%1 albums").arg(albums_.size()));
+    const auto count = entries_.size();
+    const auto noun = [albums](const std::size_t n) {
+        return albums ? (n == 1U ? tr("1 album") : tr("%1 albums").arg(n))
+                      : (n == 1U ? tr("1 track") : tr("%1 tracks").arg(n));
+    };
+    status_->setText(count == 0U ? (albums ? tr("No albums match.") : tr("No tracks match."))
+                     : found.more ? tr("First %1 — type more to narrow them.").arg(noun(count))
+                                  : noun(count));
 }
 
-void QuickAlbumPopup::choose(const LocalLibraryAction action) {
+QString QuickPickPopup::idleText() const {
+    return kind_ == QuickPickKind::album ? tr("Type part of an album, its artist or its year.")
+                                         : tr("Type part of a title, its artist, album or year.");
+}
+
+void QuickPickPopup::choose(const LocalLibraryAction action) {
     const auto row = results_->currentRow();
-    if (row < 0 || row >= static_cast<int>(albums_.size())) {
+    if (row < 0 || row >= static_cast<int>(entries_.size())) {
         return;
     }
-    emit chosen({albums_[static_cast<std::size_t>(row)]}, action);
+    emit chosen({entries_[static_cast<std::size_t>(row)]}, action);
     close();
 }
 
-bool QuickAlbumPopup::eventFilter(QObject* watched, QEvent* event) {
+bool QuickPickPopup::eventFilter(QObject* watched, QEvent* event) {
     if (watched != input_ || event->type() != QEvent::KeyPress) {
         return QFrame::eventFilter(watched, event);
     }

@@ -235,6 +235,13 @@ void LocalLibraryTest::incrementalScanSearchAndPaging() {
     QCOMPARE(library->query(albums)->entries.size(), 1U);
     albums.text = "björk 1999";
     QVERIFY(library->query(albums)->entries.empty());
+    // A track by its title, artist, album or year; its own title kept apart
+    // from how the tree labels it.
+    const auto found_tracks = library->query(tracks("needle 2026"));
+    QVERIFY(found_tracks && found_tracks->entries.size() == 1U);
+    QCOMPARE(found_tracks->entries.front().title, std::string{"Needle in a song"});
+    QCOMPARE(found_tracks->entries.front().date, std::string{"2026"});
+    QVERIFY(library->query(tracks("needle 1999"))->entries.empty());
     auto page = tracks();
     page.limit = 1;
     const auto one = library->query(page);

@@ -150,6 +150,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             rendered["rating_hash"] = entry.rating_hash;
             rendered["rating"] = entry.rating;
             rendered["date"] = protocol::displayable_text(entry.date);
+            rendered["title"] = protocol::displayable_text(entry.title);
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};

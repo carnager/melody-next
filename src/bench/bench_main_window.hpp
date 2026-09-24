@@ -86,6 +86,7 @@ class LocalFilesMimeData;
 }
 
 namespace trackknife::bench {
+enum class QuickPickKind;
 struct ConvertDialogItem;
 
 struct MetadataOperationJobOutcome;
@@ -233,8 +234,9 @@ class BenchMainWindow final : public QMainWindow {
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
     void showCommandPalette();
-    // Ctrl+Shift+A: find an album by words and add, replace or queue it.
-    void openQuickAlbum();
+    // Ctrl+Shift+A / Ctrl+Shift+T: find an album or a track by words and
+    // add, replace or queue it.
+    void openQuickPick(QuickPickKind kind);
     QList<QAction*> configurable_shortcuts_;
     QAction* follow_playback_action_{};
     QPointer<QTableView> followed_playback_view_;

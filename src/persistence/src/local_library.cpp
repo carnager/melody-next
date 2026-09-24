@@ -749,7 +749,9 @@ struct Filter {
                 fail("Search supports up to 16 words", core::ErrorCode::limit_exceeded);
             }
             if (query.kind == LibraryEntryKind::track) {
-                sql += " AND instr(search_track,?)>0";
+                // A track by its title, artists, album -- or year.
+                sql += " AND (instr(search_track,?)>0 OR instr(date,?)>0)";
+                values.emplace_back(word, false);
             } else if (query.kind == LibraryEntryKind::album) {
                 // An album is found by its artist, its title or its date:
                 // "doors 1967" finds the one from that year.
@@ -986,6 +988,9 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                  static_cast<std::size_t>(statement.number(7)), statement.bytes(8),
                  static_cast<unsigned>(statement.number(9))});
             page.entries.back().date = statement.bytes(10);
+            if (query.kind == LibraryEntryKind::track) {
+                page.entries.back().title = page.entries.back().label;
+            }
             page.entries.back().label = format_label(page.entries.back(), !query.text.empty());
         }
         return page;

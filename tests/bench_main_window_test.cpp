@@ -3,7 +3,7 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/up_next_delegate.hpp"
-#include "bench/quick_album_popup.hpp"
+#include "bench/quick_pick_popup.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
@@ -227,6 +227,7 @@ class BenchMainWindowTest final : public QObject {
     void libraryDragsIntoUpNextWithCovers();
     void quickAlbumFindsByWordsAndPutsItAway();
     void quickAlbumShiftEnterReplacesAndPlays();
+    void quickTrackFindsATrackByItsTitle();
     void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
@@ -870,6 +871,45 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
     QCOMPARE(probed_semantic_alias("ENCODER"), std::optional<std::string_view>{"encoding"});
 }
 
+void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    {
+        auto catalogue = window.catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr && !tab->document.remote);
+    tab->model->replaceRows({}, true);
+    auto* action = window.findChild<QAction*>(QStringLiteral("action-quick-track"));
+    QVERIFY(action != nullptr);
+    QCOMPARE(action->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+T")));
+    action->trigger();
+    QuickPickPopup* popup = nullptr;
+    for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
+        if (candidate->isVisible() && candidate->objectName() == QStringLiteral("bench-quick-track")) {
+            popup = candidate;
+        }
+    }
+    QVERIFY(popup != nullptr);
+    // Words of the title and the artist, in any order and case.
+    QTest::keyClicks(popup->input(), QStringLiteral("TONE trackknife"));
+    QTRY_COMPARE(popup->results()->count(), 1);
+    QVERIFY(popup->results()->item(0)->text().startsWith(QStringLiteral("Fixture Tone — ")));
+    QTest::keyClick(popup->input(), Qt::Key_Return);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
+}
+
 void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -888,8 +928,8 @@ void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
     auto* tab = window.currentListTab();
     QVERIFY(tab != nullptr && !tab->document.remote);
     window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
-    QuickAlbumPopup* popup = nullptr;
-    for (auto* candidate : window.findChildren<QuickAlbumPopup*>()) {
+    QuickPickPopup* popup = nullptr;
+    for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
         if (candidate->isVisible()) {
             popup = candidate;
         }
@@ -933,10 +973,10 @@ void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
     const auto words = QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0).toUpper() +
                        QStringLiteral(" ") + QString::fromStdString(album.date);
 
-    const auto open = [&window]() -> QuickAlbumPopup* {
+    const auto open = [&window]() -> QuickPickPopup* {
         window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
-        QuickAlbumPopup* popup = nullptr;
-        for (auto* candidate : window.findChildren<QuickAlbumPopup*>()) {
+        QuickPickPopup* popup = nullptr;
+        for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
             if (candidate->isVisible()) {
                 popup = candidate;
             }
@@ -952,7 +992,7 @@ void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
     QTest::keyClicks(popup->input(), words);
     QTRY_COMPARE(popup->results()->count(), 1);
     // Enter: added to the list in front.
-    const QPointer<QuickAlbumPopup> chosen{popup};
+    const QPointer<QuickPickPopup> chosen{popup};
     QTest::keyClick(popup->input(), Qt::Key_Return);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     // Done once chosen: it closes itself.

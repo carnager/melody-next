@@ -61,6 +61,8 @@ struct LibraryEntry {
     unsigned rating{0};
     // An album's or a track's date, as tagged; empty for artists.
     std::string date{};
+    // A track's own title, as tagged -- `label` is how the tree shows it.
+    std::string title{};
 };
 
 struct LibraryPage {

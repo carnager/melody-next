@@ -85,6 +85,10 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
+        with:
+          # What android/app/build.gradle.kts builds with. The action's own
+          # default asks for the long-gone "tools" package and fails.
+          packages: platform-tools platforms;android-36 build-tools;37.0.0
       - name: Build
         working-directory: android
         run: |

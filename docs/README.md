@@ -2,21 +2,22 @@
 
 ## Using Trackknife
 
-- [Melody](melody.md): the engine, servers, speakers, the phone app and
-  `melody-cli`.
+- [Installation](install.md) and [setup](setup.md).
+- [Engines, agents and the phone](melody.md): how they connect, a headless
+  `melodyd`, and `melody-cli`.
 - [Local library](local-library.md#using-the-library): add folders, browse albums,
   search, and save searches.
 - [Last.fm accounts and scrobbling](lastfm.md): independent local/server accounts and Love/Unlove.
-- [Dynamic playlists](dynamic-playlists.md): shared local/server rules and Last.fm sources.
+- [Dynamic playlists](dynamic-playlists.md): rules and Last.fm sources, on either library.
 - [Search syntax](query-language.md): field filters such as
   `bitspersample EQUAL 24` and `REPLAYGAIN_ALBUM_GAIN MISSING`.
-- [Formatting and scripts](tkfmt.md): naming patterns and tag transformations.
+- [Formatting syntax](formatting.md): fields, functions and examples; the full
+  reference is [tkfmt.md](tkfmt.md).
 - [Tagging and artwork](metadata-and-files.md#reviewing-fields-and-identifying-untagged-albums):
   review edits, match MusicBrainz tracks, and manage covers.
 
-The [README](../README.md) has build instructions and screenshots. The more
-technical documents below describe how the features work and where their
-limits are.
+The more technical documents below describe how the features work and where
+their limits are.
 
 ## Current state
 

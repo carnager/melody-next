@@ -716,14 +716,12 @@ void BenchMainWindow::refreshPlaybackBufferChecks() {
 }
 
 QString BenchMainWindow::outputLabel(const EnginePlayback::State::Output& output) const {
-    if (output.local) {
-        // The engine's own audio: this computer's, or the server's -- by the
-        // name the server gives it, where it gives one.
-        if (!output_choices_remote_) {
-            return QStringLiteral("This computer");
-        }
-        return output.name.empty() || output.name == "this machine" ? QStringLiteral("The server")
-                                                                    : displayText(output.name);
+    // A machine has one name wherever it is listed: this computer is
+    // "caprica" in its own engine's speakers as in the server's, where it
+    // plays as an agent. Only an engine that gives no name is described.
+    if (output.local && (output.name.empty() || output.name == "this machine")) {
+        return output_choices_remote_ ? QStringLiteral("The server")
+                                      : QStringLiteral("This computer");
     }
     return displayText(output.name);
 }
@@ -1832,8 +1830,14 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
         return !output.local;
     });
-    const auto engine_name = remote && remote_catalogue_source_ ? remote_catalogue_source_->name()
-                                                                : QStringLiteral("This computer");
+    // Nothing chosen yet: the engine's own speakers, by the same name.
+    const auto own = std::ranges::find_if(output_choices_,
+                                          [](const auto& output) { return output.local; });
+    const auto engine_name = own != output_choices_.end()
+                                 ? outputLabel(*own)
+                                 : (remote && remote_catalogue_source_
+                                        ? remote_catalogue_source_->name()
+                                        : QStringLiteral("This computer"));
     const auto speaker = now ? outputLabel(*now) : engine_name;
     const auto device = selected_device_ ? label_of(*selected_device_) : QString{};
     QString shown;

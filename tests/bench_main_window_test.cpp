@@ -5197,11 +5197,15 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
 
     // And this computer again, if the engine has audio of its own here.
     if (auto* local = output_action(QStringLiteral("local")); local != nullptr) {
+        // Read before choosing it: choosing rebuilds the menu.
+        const auto own_name = local->text();
         local->trigger();
         QTRY_COMPARE(window.property("trackknife-player-output").toString(),
                      QStringLiteral("local"));
-        // With an agent to choose, where it plays stays named.
-        QCOMPARE(button->text(), QStringLiteral("This computer"));
+        // With an agent to choose, where it plays stays named -- by the
+        // engine's name for its machine, as other engines list it too.
+        QVERIFY(!own_name.isEmpty() && own_name != QStringLiteral("This computer"));
+        QCOMPARE(button->text(), own_name);
     }
 }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,31 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                 },
                 trailingContent = { Text("Change", color = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clickable(onClick = onChangeEngine),
+            )
+            Section("This phone as a speaker")
+            ListItem(
+                headlineContent = { Text("Offer it to the engine") },
+                supportingContent = { Text("The engine, Trackknife and the other clients can then play on it") },
+                trailingContent = {
+                    Switch(settings.speaker, onCheckedChange = {
+                        settings.updateSpeaker(it)
+                        vm.app.updateSpeaker()
+                    })
+                },
+            )
+            var name by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(settings.speakerName) }
+            androidx.compose.material3.OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Its name") },
+                singleLine = true,
+                enabled = settings.speaker,
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = {
+                    settings.updateSpeakerName(name)
+                    vm.app.updateSpeaker()
+                }),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
             )
             Section("Appearance")
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

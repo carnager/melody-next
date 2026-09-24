@@ -76,6 +76,7 @@ fun OutputsSheet(vm: MainViewModel, onDismiss: () -> Unit) {
                             when {
                                 !output.online -> "Offline"
                                 output.local -> "The engine's own speakers"
+                                output.name == vm.app.settings.speakerName -> "This phone"
                                 else -> "Agent"
                             }
                         )

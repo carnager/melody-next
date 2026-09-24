@@ -4,14 +4,19 @@ import android.app.Application
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.media3.common.util.UnstableApi
 import com.melody.next.engine.ConnectionState
+import com.melody.next.engine.Endpoint
 import com.melody.next.engine.EngineClient
+import com.melody.next.speaker.PhoneAgent
+import com.melody.next.speaker.PhoneAudition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /** The one engine client, the settings and the covers, for the whole app. */
+@UnstableApi
 class MelodyApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var settings: Settings
@@ -20,6 +25,10 @@ class MelodyApp : Application() {
         private set
     lateinit var covers: Covers
         private set
+    /** This phone as an output: its player, and its link to the engine. */
+    lateinit var audition: PhoneAudition
+        private set
+    private var agent: PhoneAgent? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -32,12 +41,29 @@ class MelodyApp : Application() {
                 if (state is ConnectionState.Connected) covers.engine = state.name
             }
         }
-        settings.endpoint?.let(client::connect)
+        audition = PhoneAudition(this) { agent?.noteChange() }
+        settings.endpoint?.let(::useEngine)
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) = client.reconnectNow()
         })
+    }
+
+    /** Talks to this engine, and offers it this phone to play on. */
+    fun useEngine(endpoint: Endpoint) {
+        settings.endpoint = endpoint
+        client.connect(endpoint)
+        updateSpeaker()
+    }
+
+    /** The speaker follows the settings: on or off, under its name, for the engine chosen. */
+    fun updateSpeaker() {
+        agent?.stop()
+        agent = null
+        val endpoint = settings.endpoint ?: return
+        if (!settings.speaker) return
+        agent = PhoneAgent(scope, audition, settings.speakerName).also { it.start(endpoint) }
     }
 
     companion object {

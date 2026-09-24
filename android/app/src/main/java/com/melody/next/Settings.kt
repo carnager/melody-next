@@ -27,6 +27,24 @@ class Settings(context: Context) {
             }.apply()
         }
 
+    /** Whether this phone offers itself to the engine as somewhere to play. */
+    var speaker by mutableStateOf(preferences.getBoolean("speaker", true))
+        private set
+
+    /** What the engine and the other clients call this phone. */
+    var speakerName by mutableStateOf(preferences.getString("speaker_name", null) ?: android.os.Build.MODEL)
+        private set
+
+    fun updateSpeaker(on: Boolean) {
+        speaker = on
+        preferences.edit().putBoolean("speaker", on).apply()
+    }
+
+    fun updateSpeakerName(name: String) {
+        speakerName = name.trim().ifEmpty { android.os.Build.MODEL }
+        preferences.edit().putString("speaker_name", speakerName).apply()
+    }
+
     /** "system", "dark" or "light". */
     var theme by mutableStateOf(preferences.getString("theme", "system") ?: "system")
         private set

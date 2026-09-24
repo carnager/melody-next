@@ -68,8 +68,7 @@ fun SetupScreen(onChosen: () -> Unit) {
 
     fun connect(endpoint: Endpoint) {
         problem = ""
-        app.settings.endpoint = endpoint
-        app.client.connect(endpoint)
+        app.useEngine(endpoint)
     }
 
     // Connected: done. Refused, or not reachable: said here.

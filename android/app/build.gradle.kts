@@ -93,6 +93,8 @@ dependencies {
     // player that is the engine, not this phone.
     implementation("androidx.media3:media3-session:1.6.1")
     implementation("androidx.media3:media3-common:1.6.1")
+    // The phone as a speaker: what the engine sends, played here.
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 

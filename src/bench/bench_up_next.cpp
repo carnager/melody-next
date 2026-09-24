@@ -677,7 +677,13 @@ void BenchMainWindow::restoreUpNext() {
                                    playback_.requests.pending().empty() &&
                                    !playback_.requests.active();
             if (untouched) {
-                up_next_remote_ = state.value(QStringLiteral("remote")).toBool();
+                // Saved before the engine was: whose the tab it returns to is.
+                if (state.contains(QStringLiteral("remote"))) {
+                    up_next_remote_ = state.value(QStringLiteral("remote")).toBool();
+                } else if (const auto* returns_to =
+                               tabForDocument(state.value(QStringLiteral("document")).toString())) {
+                    up_next_remote_ = returns_to->document.remote;
+                }
                 if (!playback_.requests.insert(std::move(rows), 0)) {
                     statusBar()->showMessage(
                         tr("Saved Up Next exceeds the pending queue limit; it has been preserved."),

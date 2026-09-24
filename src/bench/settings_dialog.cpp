@@ -443,6 +443,15 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     remote_mount_->setText(
         settings.value(QLatin1String(library_remote_mount_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Mounted here at:"), remote_mount_);
+    play_for_remote_ =
+        new QCheckBox(QStringLiteral("Let it play on this computer's speakers"), remote);
+    play_for_remote_->setObjectName(QStringLiteral("bench-settings-play-for-remote"));
+    play_for_remote_->setToolTip(QStringLiteral(
+        "This computer's engine appears among the remote engine's outputs, so no melody-agent "
+        "is needed here. Whichever engine starts playing last has the speakers."));
+    play_for_remote_->setChecked(
+        settings.value(QLatin1String(engine_play_for_remote_key), true).toBool());
+    engine_form->addRow(QString{}, play_for_remote_);
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
@@ -732,6 +741,7 @@ void SettingsDialog::save() {
     settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());
     settings.setValue(QLatin1String(engine_password_key), engine_password_->text());
     settings.setValue(QLatin1String(engine_music_root_key), engine_music_root_->text().trimmed());
+    settings.setValue(QLatin1String(engine_play_for_remote_key), play_for_remote_->isChecked());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());
     settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());

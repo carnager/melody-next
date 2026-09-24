@@ -10,6 +10,7 @@
 
 #include <QSettings>
 #include <QStandardPaths>
+#include <QProcess>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -32,6 +33,7 @@ class EngineLauncherTest final : public QObject {
     void nothingStartsOneUnlessAllowed();
     void onlyTheEngineBesideItIsStarted();
     void sharingSettingsReachTheEngine();
+    void theEnginePlaysForTheRemoteWithoutAnAgent();
     void anOutdatedEngineIsSeenAndStopped();
 };
 
@@ -228,6 +230,78 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     QVERIFY(restartLocalEngine(scratch.engine).has_value());
     QVERIFY(!tcp({}).has_value());
     settings.clear();
+}
+
+// ADR-0228: with a remote engine configured, this computer's engine offers
+// itself as one of the remote's outputs -- no melody-agent needed here.
+void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
+    Scratch scratch;
+    QVERIFY(scratch.directory.isValid());
+    QTcpServer probe;
+    probe.listen(QHostAddress::LocalHost, 0);
+    const auto port = probe.serverPort();
+    probe.close();
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    QProcess remote;
+    remote.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
+    remote.setArguments({QStringLiteral("--socket"), remote_state.filePath(QStringLiteral("r.sock")),
+                         QStringLiteral("--state"), remote_state.path(), QStringLiteral("--name"),
+                         QStringLiteral("remote"), QStringLiteral("--listen"),
+                         QStringLiteral("127.0.0.1:%1").arg(port)});
+    remote.setProcessChannelMode(QProcess::MergedChannels);
+    remote.start();
+    QVERIFY(remote.waitForStarted());
+    const protocol::Endpoint remote_endpoint{
+        .socket = {}, .host = "127.0.0.1", .port = port, .token = {}};
+    QTRY_VERIFY_WITH_TIMEOUT(protocol::Client::connect(remote_endpoint).has_value(), 10'000);
+
+    QSettings settings;
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                      QStringLiteral("127.0.0.1:%1").arg(port));
+    settings.sync();
+    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
+                .contains(QStringLiteral("--play-for")));
+    auto started = connectLocalEngine(scratch.engine);
+    QVERIFY2(started.has_value(), started ? "" : started.error().message.c_str());
+
+    // The remote lists this computer's engine among its outputs.
+    const auto listed = [&remote_endpoint] {
+        auto client = protocol::Client::connect(remote_endpoint);
+        if (!client) {
+            return false;
+        }
+        auto outputs = (*client)->call("outputs.list");
+        (*client)->close();
+        if (!outputs) {
+            return false;
+        }
+        for (const auto& output : outputs->value("outputs", protocol::Json::array())) {
+            if (output.value("id", std::string{}).starts_with("agent:") &&
+                output.value("online", false)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto audio_here = [&scratch] {
+        QFile log{QString::fromStdString((scratch.engine.state / "melodyd.log").string())};
+        return !(log.open(QIODevice::ReadOnly) && log.readAll().contains("no audio here"));
+    };
+    if (!audio_here()) {
+        QSKIP("no audio output here for the built-in agent");
+    }
+    QTRY_VERIFY_WITH_TIMEOUT(listed(), 10'000);
+
+    // Turned off: the engine starts without it.
+    settings.setValue(QLatin1String(SettingsDialog::engine_play_for_remote_key), false);
+    settings.sync();
+    QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
+                 .contains(QStringLiteral("--play-for")));
+    settings.clear();
+    stop(scratch.engine);
+    remote.terminate();
+    remote.waitForFinished(5'000);
 }
 
 // ADR-0226: this computer's engine outlives the window, so after a rebuild it

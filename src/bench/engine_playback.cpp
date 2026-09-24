@@ -222,6 +222,7 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.default_output.reset();
     state_.output_available = true;
     state_.output_suspended = false;
+    state_.speakers_taken_by.clear();
     state_.devices.clear();
     state_.underruns = 0;
     if (const auto output = payload.find("output");
@@ -236,6 +237,7 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
         state_.default_output = text("default");
         state_.output_available = output->value("available", true);
         state_.output_suspended = output->value("suspended", false);
+        state_.speakers_taken_by = QString::fromStdString(output->value("taken_by", std::string{}));
         state_.underruns = output->value("underruns", std::uint64_t{0});
         if (const auto devices = output->find("devices");
             devices != output->end() && devices->is_array()) {

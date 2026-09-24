@@ -1588,6 +1588,12 @@ void BenchMainWindow::refreshEngineTransport() {
             tab != nullptr && context.isEmpty()) {
             context = QString::fromStdString(tab->document.name);
         }
+        // Paused because another engine is playing on these speakers: said
+        // where the album would be, so the silence has a reason.
+        if (!state.speakers_taken_by.isEmpty() && state.status != QStringLiteral("playing")) {
+            const auto taker = remote_catalogue_source_ ? remoteName() : state.speakers_taken_by;
+            context = tr("Paused · %1 is playing on these speakers").arg(taker);
+        }
         now_playing_->setText(label);
         now_playing_context_->setText(context);
         refreshHeaderCover(state.entry);

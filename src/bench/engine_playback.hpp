@@ -93,6 +93,8 @@ class EnginePlayback final : public QObject {
         std::optional<std::string> default_output;
         bool output_available{true};
         bool output_suspended{false};
+        // Another engine took this one's speakers (newest wins): its name.
+        QString speakers_taken_by;
         std::vector<Device> devices;
         qint64 buffer_capacity_ms{0};
         qint64 buffer_start_threshold_ms{0};

@@ -50,6 +50,11 @@ struct LocalEngineSharing final {
     int stream_port{0}; // the stream port for agents without the files
     QString password;   // empty: open
     QString music_root; // empty: none
+    // The remote engine this one plays for on this computer's speakers
+    // (ADR-0228): its address, password, and where its music is mounted here.
+    QString play_for;          // empty: none
+    QString play_for_password; // empty: open
+    QString play_for_music_root;
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
 };
 [[nodiscard]] LocalEngineSharing localEngineSharing();

@@ -87,6 +87,9 @@ class SettingsDialog final : public QDialog {
     static constexpr int engine_stream_port_default = 6601;
     static constexpr auto engine_password_key = "engine/password";
     static constexpr auto engine_music_root_key = "engine/music-root";
+    // ADR-0228: the remote engine may play on this computer's speakers
+    // through this computer's engine -- no melody-agent needed here.
+    static constexpr auto engine_play_for_remote_key = "engine/play-for-remote";
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";
@@ -116,6 +119,7 @@ class SettingsDialog final : public QDialog {
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
     QCheckBox* engine_share_{nullptr};
+    QCheckBox* play_for_remote_{nullptr};
     QCheckBox* show_local_library_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};

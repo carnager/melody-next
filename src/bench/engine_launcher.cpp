@@ -121,6 +121,18 @@ LocalEngineSharing localEngineSharing() {
             settings.value(QLatin1String(SettingsDialog::engine_music_root_key), QString{})
                 .toString()
                 .trimmed(),
+        .play_for = settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
+                            .toBool()
+                        ? settings.value(QLatin1String(SettingsDialog::library_engine_socket_key))
+                              .toString()
+                              .trimmed()
+                        : QString{},
+        .play_for_password =
+            settings.value(QLatin1String(SettingsDialog::library_engine_token_key)).toString(),
+        .play_for_music_root =
+            settings.value(QLatin1String(SettingsDialog::library_remote_mount_key))
+                .toString()
+                .trimmed(),
     };
 }
 
@@ -130,6 +142,26 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     std::error_code ignored;
     if (!sharing.music_root.isEmpty()) {
         arguments << QStringLiteral("--music-root") << sharing.music_root;
+    }
+    // Only a remote on the network: one on this computer's own socket plays
+    // here already.
+    const auto guest_password = engine.state / "play-for.password";
+    std::filesystem::remove(guest_password, ignored);
+    if (sharing.play_for.contains(QLatin1Char(':'))) {
+        arguments << QStringLiteral("--play-for") << sharing.play_for;
+        if (!sharing.play_for_music_root.isEmpty()) {
+            arguments << QStringLiteral("--play-for-music-root") << sharing.play_for_music_root;
+        }
+        if (!sharing.play_for_password.isEmpty()) {
+            QFile file{path_text(guest_password)};
+            if (file.open(QIODevice::WriteOnly | QIODevice::Truncate,
+                          QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
+                file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+                file.write(sharing.play_for_password.toUtf8() + '\n');
+                file.close();
+                arguments << QStringLiteral("--play-for-password-file") << path_text(guest_password);
+            }
+        }
     }
     if (!sharing.share || sharing.listen.isEmpty()) {
         std::filesystem::remove(password_file, ignored);

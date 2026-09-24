@@ -230,6 +230,7 @@ class BenchMainWindowTest final : public QObject {
     void quickAlbumShiftEnterReplacesAndPlays();
     void quickTrackFindsATrackByItsTitle();
     void settingsListEnginesFoundOnTheNetwork();
+    void recentlyAddedComesFirstWhereAskedFor();
     void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
@@ -871,6 +872,70 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
     QCOMPARE(document.fields.size(), std::size_t{1});
     QCOMPARE(document.fields.front().canonical_name, std::string{"encoding"});
     QCOMPARE(probed_semantic_alias("ENCODER"), std::optional<std::string_view>{"encoding"});
+}
+
+void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
+    QSettings{}.remove(QStringLiteral("library/newest-first"));
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/old")));
+    // One album there from the start, dated by its file: years ago.
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/old/old.flac")));
+    {
+        QFile old{music + QStringLiteral("/old/old.flac")};
+        QVERIFY(old.open(QIODevice::ReadWrite));
+        QVERIFY(old.setFileTime(QDateTime::fromSecsSinceEpoch(1'000'000'000),
+                                QFileDevice::FileModificationTime));
+    }
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto catalogue = window.catalogue_source_->open();
+    QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue->scan({}, progress).has_value());
+    // And one that arrives later.
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/new")));
+    write_wave(music + QStringLiteral("/new/new.wav"), wave_sample_rate);
+    QVERIFY(catalogue->scan({}, progress).has_value());
+
+    // The quick album popup, before anything is typed: newest first.
+    window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
+    QuickPickPopup* popup = nullptr;
+    for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
+        if (candidate->isVisible()) {
+            popup = candidate;
+        }
+    }
+    QVERIFY(popup != nullptr);
+    QTRY_COMPARE(popup->results()->count(), 2);
+    QVERIFY2(popup->results()->item(0)->text().contains(QStringLiteral("added today")),
+             qPrintable(popup->results()->item(0)->text()));
+    QVERIFY(popup->results()->item(1)->text().contains(QStringLiteral("years ago")));
+    QVERIFY(popup->findChild<QLabel*>(QStringLiteral("bench-quick-album-status"))
+                ->text()
+                .startsWith(QStringLiteral("Recently added")));
+    QTest::keyClick(popup->input(), Qt::Key_Escape);
+
+    // The library panel's Recently added: albums, the new one first.
+    window.local_library_->refreshLibrary();
+    auto* newest = window.local_library_->findChild<QToolButton*>(QStringLiteral("local-library-newest"));
+    QVERIFY(newest != nullptr && newest->isCheckable());
+    newest->setChecked(true);
+    auto* tree = window.local_library_->findChild<QTreeView*>();
+    QTRY_COMPARE(tree->model()->rowCount(), 2);
+    const auto first = tree->model()->index(0, 0).data(library_entry_role);
+    QVERIFY(first.isValid());
+    QCOMPARE(first.value<persistence::LibraryEntry>().kind, persistence::LibraryEntryKind::album);
+    QVERIFY(first.value<persistence::LibraryEntry>().added >
+            tree->model()->index(1, 0).data(library_entry_role).value<persistence::LibraryEntry>().added);
+    newest->setChecked(false);
+    QTRY_VERIFY(tree->model()->rowCount() >= 1 &&
+                tree->model()->index(0, 0).data(library_entry_role).value<persistence::LibraryEntry>().kind ==
+                    persistence::LibraryEntryKind::artist);
+    QSettings{}.remove(QStringLiteral("library/newest-first"));
 }
 
 void BenchMainWindowTest::settingsListEnginesFoundOnTheNetwork() {

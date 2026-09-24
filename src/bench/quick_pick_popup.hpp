@@ -58,6 +58,8 @@ class QuickPickPopup final : public QFrame {
     struct Found {
         std::vector<persistence::LibraryEntry> entries;
         bool more{false};
+        // The newest in the library, asked for with nothing typed.
+        bool newest{false};
         QString error;
         quint64 generation{0};
     };

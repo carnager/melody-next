@@ -36,6 +36,9 @@ class QTreeView;
 
 namespace trackknife::bench {
 
+// The tree's items carry their persistence::LibraryEntry under this role.
+inline constexpr int library_entry_role = Qt::UserRole + 1;
+
 // Set on a library drag's data: the dragged entries, as a QVariantList of
 // persistence::LibraryEntry.
 inline constexpr const char* library_entries_property = "trackknife-library-entries";
@@ -162,6 +165,7 @@ class LocalLibraryPanel final : public QWidget {
     std::optional<bool> has_roots_;
     [[nodiscard]] QString emptyLibraryText() const;
     QLabel* status_{nullptr};
+    QToolButton* newest_toggle_{nullptr};
     QToolButton* scan_button_{nullptr};
     QTimer* search_timer_{nullptr};
     QTimer* poll_timer_{nullptr};

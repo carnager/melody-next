@@ -41,7 +41,7 @@
 
 namespace trackknife::bench {
 namespace {
-constexpr int entry_role = Qt::UserRole + 1;
+constexpr int entry_role = library_entry_role;
 constexpr int query_role = Qt::UserRole + 2;
 constexpr int loaded_role = Qt::UserRole + 3;
 constexpr int more_role = Qt::UserRole + 4;
@@ -255,6 +255,17 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget*
             startScan();
         }
     });
+    newest_toggle_ = icon_button(QStringLiteral("local-library-newest"),
+                                 QStringLiteral("document-open-recent"), tr("Recently added"));
+    newest_toggle_->setCheckable(true);
+    newest_toggle_->setToolTip(tr("Show albums newest first, as they came into the library"));
+    newest_toggle_->setChecked(
+        QSettings{}.value(QStringLiteral("library/newest-first"), false).toBool());
+    connect(newest_toggle_, &QToolButton::toggled, this, [this](const bool on) {
+        QSettings{}.setValue(QStringLiteral("library/newest-first"), on);
+        reloadTree();
+    });
+    search_row->addWidget(newest_toggle_);
     search_row->addWidget(scan_button_);
     search_row->addWidget(folders);
     auto* library_view = new ui::LibraryTreeView(this);
@@ -621,6 +632,15 @@ void LocalLibraryPanel::reloadTree() {
     if (query_text.empty()) {
         if (query_error_ != nullptr) {
             query_error_->hide();
+        }
+        // Recently added: albums newest first, where artists would be.
+        if (newest_toggle_ != nullptr && newest_toggle_->isChecked()) {
+            persistence::LibraryQuery newest;
+            newest.kind = persistence::LibraryEntryKind::album;
+            newest.newest_first = true;
+            newest.limit = 500;
+            loadChildren({}, newest);
+            return;
         }
         loadChildren({}, {});
         return;

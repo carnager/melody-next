@@ -5,6 +5,7 @@
 #include "trackknife/engine/catalogue.hpp"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -71,6 +72,27 @@ class AlbumRowDelegate final : public QStyledItemDelegate {
         painter->restore();
     }
 };
+
+// "today", "yesterday", "5 days ago", "3 weeks ago", "4 months ago".
+[[nodiscard]] QString added_ago(const std::int64_t added) {
+    const auto days = (QDateTime::currentSecsSinceEpoch() - added) / 86'400;
+    if (days <= 0) {
+        return QObject::tr("added today");
+    }
+    if (days == 1) {
+        return QObject::tr("added yesterday");
+    }
+    if (days < 14) {
+        return QObject::tr("added %1 days ago").arg(days);
+    }
+    if (days < 61) {
+        return QObject::tr("added %1 weeks ago").arg(days / 7);
+    }
+    if (days < 730) {
+        return QObject::tr("added %1 months ago").arg(days / 30);
+    }
+    return QObject::tr("added %1 years ago").arg(days / 365);
+}
 
 } // namespace
 
@@ -153,17 +175,14 @@ void QuickPickPopup::popUp(const QWidget* over) {
     move(top_left);
     show();
     input_->setFocus(Qt::PopupFocusReason);
+    search();
 }
 
 void QuickPickPopup::search() {
     const auto words = input_->text().simplified();
     ++generation_;
-    if (words.isEmpty()) {
-        entries_.clear();
-        results_->clear();
-        status_->setText(idleText());
-        return;
-    }
+    // Nothing typed: what came in most recently, newest first.
+    const bool newest = words.isEmpty();
     // One search at a time: a newer text waits for it, then runs.
     if (watcher_.isRunning()) {
         pending_ = true;
@@ -175,10 +194,12 @@ void QuickPickPopup::search() {
                                                : persistence::LibraryEntryKind::track;
     query.text = words.toStdString();
     query.limit = result_limit;
+    query.newest_first = newest;
     watcher_.setFuture(QtConcurrent::run(
-        [catalogue = catalogue_, query = std::move(query), generation = generation_] {
+        [catalogue = catalogue_, query = std::move(query), generation = generation_, newest] {
             Found found;
             found.generation = generation;
+            found.newest = newest;
             auto page = catalogue->query(query);
             if (!page) {
                 found.error = QString::fromStdString(page.error().message);
@@ -220,6 +241,10 @@ void QuickPickPopup::showResults() {
         if (albums) {
             details << (entry.tracks == 1U ? tr("1 track") : tr("%1 tracks").arg(entry.tracks));
         }
+        // Listed for being new, so it says how new.
+        if (found.newest && entry.added > 0) {
+            details << added_ago(entry.added);
+        }
         const auto name = text(albums ? entry.album : (entry.title.empty() ? entry.label : entry.title));
         auto* item = new QListWidgetItem(results_);
         item->setData(name_role, name);
@@ -234,6 +259,11 @@ void QuickPickPopup::showResults() {
         return albums ? (n == 1U ? tr("1 album") : tr("%1 albums").arg(n))
                       : (n == 1U ? tr("1 track") : tr("%1 tracks").arg(n));
     };
+    if (found.newest) {
+        status_->setText(count == 0U ? idleText()
+                                     : tr("Recently added — type to search the whole library"));
+        return;
+    }
     status_->setText(count == 0U ? (albums ? tr("No albums match.") : tr("No tracks match."))
                      : found.more ? tr("First %1 — type more to narrow them.").arg(noun(count))
                                   : noun(count));

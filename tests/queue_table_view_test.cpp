@@ -36,6 +36,13 @@ class CueBatchModel final : public QAbstractTableModel {
         endInsertRows();
     }
 
+    // Tags read after the rows came in: only the rows from `first` on say
+    // so, though the album's first disc gets its name from them too.
+    void learnDiscs(const int size, const int first) {
+        disc_size = size;
+        emit dataChanged(index(first, 0), index(rows_ - 1, track_column_count - 1));
+    }
+
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override {
         return parent.isValid() ? 0 : rows_;
     }
@@ -108,6 +115,7 @@ class QueueTableViewTest final : public QObject {
   private slots:
     void preGroupedBatchReservesHeaderAboveFirstTrack();
     void eachDiscOfAnAlbumGetsItsName();
+    void aDiscLearnedLaterNamesTheFirstToo();
     void largeGroupedResultsScrollToLastRow();
     void homeAndEndSelectQueueBoundaries();
     void shiftHomeAndEndExtendFromSelectionAnchor();
@@ -329,6 +337,27 @@ void QueueTableViewTest::eachDiscOfAnAlbumGetsItsName() {
     // The track itself sits below the name, not under it.
     const auto second_disc = view.visualRect(model.index(5, track_title_column));
     QVERIFY(second_disc.height() > QueueItemDelegate::disc_header_height);
+}
+
+void QueueTableViewTest::aDiscLearnedLaterNamesTheFirstToo() {
+    QueueTableView view{nullptr};
+    CueBatchModel model;
+    view.setModel(&model);
+    view.setItemDelegate(new QueueItemDelegate{&view});
+    view.verticalHeader()->setDefaultSectionSize(22);
+    view.verticalHeader()->setMinimumSectionSize(18);
+    view.setAlbumGroupingEnabled(true);
+    view.resize(640, 480);
+    view.show();
+    model.appendCueAlbum(12);
+    QTRY_COMPARE(view.rowHeight(0), 22 + QueueItemDelegate::album_header_height);
+
+    // The second disc's tags come in, far below the first disc's start.
+    model.learnDiscs(6, 6);
+    QCOMPARE(view.rowHeight(6), 22 + QueueItemDelegate::disc_header_height);
+    // The first disc's name gets room of its own, not drawn over its track.
+    QCOMPARE(view.rowHeight(0),
+             22 + QueueItemDelegate::album_header_height + QueueItemDelegate::disc_header_height);
 }
 
 void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {

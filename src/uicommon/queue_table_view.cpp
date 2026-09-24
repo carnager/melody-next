@@ -524,8 +524,28 @@ void QueueTableView::refreshAlbumRowGeometry(const int first_row, const int last
         verticalHeader() == nullptr) {
         return;
     }
-    const auto first = std::max(0, first_row);
-    const auto last = std::min(model()->rowCount() - 1, last_row);
+    auto first = std::max(0, first_row);
+    auto last = std::min(model()->rowCount() - 1, last_row);
+    // A disc's name depends on the whole album: disc 1 is only named once a
+    // row further down turns out to be on disc 2. So the albums at either
+    // end are measured whole. Rows without an album name yet (still being
+    // read) are no album, or one probe would sweep every unread row.
+    const auto album_column = viewColumn(this, track_album_column_property, track_album_column);
+    const auto named = [this, album_column](const int row) {
+        return !model()->index(row, album_column).data().toString().isEmpty();
+    };
+    if (first <= last && named(first)) {
+        const auto key = groupKey(this, first);
+        while (first > 0 && groupKey(this, first - 1) == key) {
+            --first;
+        }
+    }
+    if (first <= last && named(last)) {
+        const auto key = groupKey(this, last);
+        while (last + 1 < model()->rowCount() && groupKey(this, last + 1) == key) {
+            ++last;
+        }
+    }
     const auto default_height = verticalHeader()->defaultSectionSize();
     const QSignalBlocker blocker{verticalHeader()};
     for (int row = first; row <= last; ++row) {

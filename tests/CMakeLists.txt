@@ -30,6 +30,16 @@ add_test(
     COMMAND trackknife_metadata_artwork_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 
+add_executable(trackknife_media_streams_tests media_streams_test.cpp)
+target_link_libraries(
+    trackknife_media_streams_tests
+    PRIVATE Trackknife::Engine trackknife_project_options trackknife_project_warnings
+)
+add_test(
+    NAME media-streams
+    COMMAND trackknife_media_streams_tests "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
+)
+
 add_executable(trackknife_cover_fitting_tests cover_fitting_test.cpp)
 target_link_libraries(
     trackknife_cover_fitting_tests

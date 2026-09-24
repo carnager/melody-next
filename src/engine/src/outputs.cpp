@@ -105,7 +105,8 @@ void Outputs::admit(const Json& params, const int descriptor) {
     // Asked before the descriptor is handed over: where this agent reached
     // the engine, which is where it can fetch streams.
     auto reached = local_address(descriptor);
-    agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached));
+    agent->attach(protocol::Client::adopt(descriptor), files, std::move(reached),
+                  output::StreamWishes::from_json(params));
     if (adopt_first) {
         static_cast<void>(select(std::string{agent_prefix} + name));
         return;

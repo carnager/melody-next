@@ -12,6 +12,7 @@
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/media_streams.hpp"
 #include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -224,9 +225,11 @@ int main(int argc, char** argv) {
     // Streams for an agent with no copy: whatever the player holds, nothing
     // else.
     const std::string stream_token{"stream-test-token"};
+    engine::MediaStreams media{stream_token,
+                               [&player](const std::string& raw_path) { return player->holds(raw_path); },
+                               nullptr};
     auto streams = engine::StreamServer::listen(
-        "127.0.0.1", 0, stream_token,
-        [&player](const std::string& raw_path) { return player->holds(raw_path); });
+        "127.0.0.1", 0, [&media](const std::string_view query) { return media.resolve(query); });
     require(streams.has_value(), "the engine must serve streams");
     (*streams)->start();
     const auto stream_port = (*streams)->port();

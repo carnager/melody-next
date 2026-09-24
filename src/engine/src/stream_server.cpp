@@ -101,61 +101,6 @@ void answer_status(const int descriptor, const std::string_view status) {
     return head;
 }
 
-[[nodiscard]] int hex_value(const char digit) {
-    if (digit >= '0' && digit <= '9') {
-        return digit - '0';
-    }
-    if (digit >= 'a' && digit <= 'f') {
-        return digit - 'a' + 10;
-    }
-    if (digit >= 'A' && digit <= 'F') {
-        return digit - 'A' + 10;
-    }
-    return -1;
-}
-
-[[nodiscard]] std::optional<std::string> percent_decoded(const std::string_view text) {
-    std::string decoded;
-    decoded.reserve(text.size());
-    for (std::size_t index = 0; index < text.size(); ++index) {
-        // '+' stays '+': this is a URL, not a form, and base64 is full of them.
-        if (text[index] == '%') {
-            if (index + 2U >= text.size()) {
-                return std::nullopt;
-            }
-            const auto high = hex_value(text[index + 1U]);
-            const auto low = hex_value(text[index + 2U]);
-            if (high < 0 || low < 0) {
-                return std::nullopt;
-            }
-            decoded.push_back(static_cast<char>((high << 4) | low));
-            index += 2U;
-        } else {
-            decoded.push_back(text[index]);
-        }
-    }
-    return decoded;
-}
-
-// The value of `name` in a query string, decoded.
-[[nodiscard]] std::optional<std::string> query_value(std::string_view query,
-                                                     const std::string_view name) {
-    while (!query.empty()) {
-        const auto end = query.find('&');
-        const auto pair = query.substr(0, end);
-        if (const auto equals = pair.find('='); equals != std::string_view::npos) {
-            if (pair.substr(0, equals) == name) {
-                return percent_decoded(pair.substr(equals + 1U));
-            }
-        }
-        if (end == std::string_view::npos) {
-            break;
-        }
-        query.remove_prefix(end + 1U);
-    }
-    return std::nullopt;
-}
-
 [[nodiscard]] bool equal_ignoring_case(const std::string_view left, const std::string_view right) {
     if (left.size() != right.size()) {
         return false;
@@ -269,10 +214,10 @@ struct StreamServer::Transfer final {
 
 core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::string& host,
                                                                  const std::uint16_t port,
-                                                                 std::string token, Serves serves) {
-    if (token.empty() || !serves) {
+                                                                 Resolve resolve) {
+    if (!resolve) {
         return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                           .message = "a stream server needs a token and a rule",
+                                           .message = "a stream server needs something to say what it serves",
                                            .context = {}});
     }
     addrinfo hints{};
@@ -331,13 +276,13 @@ core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::stri
         return std::unexpected(failed);
     }
     return std::unique_ptr<StreamServer>{new StreamServer{
-        listener, wakeup[0], wakeup[1], bound_port, std::move(token), std::move(serves)}};
+        listener, wakeup[0], wakeup[1], bound_port, std::move(resolve)}};
 }
 
 StreamServer::StreamServer(const int listener, const int wakeup_read, const int wakeup_write,
-                           const std::uint16_t port, std::string token, Serves serves)
+                           const std::uint16_t port, Resolve resolve)
     : listener_(listener), wakeup_read_(wakeup_read), wakeup_write_(wakeup_write), port_(port),
-      token_(std::move(token)), serves_(std::move(serves)) {}
+      resolve_(std::move(resolve)) {}
 
 StreamServer::~StreamServer() {
     stop();
@@ -471,22 +416,19 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
         return;
     }
     const auto query = target.substr(question + 1U);
-    const auto token = query_value(query, "token");
-    if (!token || !same_token(*token, token_)) {
-        answer_status(descriptor, "403 Forbidden");
+    // Which file, if any, is the engine's to say; this only turns its
+    // answer into a status.
+    const auto resolved = resolve_(query);
+    if (!resolved) {
+        const auto code = resolved.error().code;
+        answer_status(descriptor, code == core::ErrorCode::unauthorized       ? "403 Forbidden"
+                                  : code == core::ErrorCode::not_found        ? "404 Not Found"
+                                  : code == core::ErrorCode::invalid_argument ? "400 Bad Request"
+                                                                              : "503 Service Unavailable");
         finish();
         return;
     }
-    const auto encoded = query_value(query, "path");
-    auto raw_path = encoded ? protocol::decode_raw_path(*encoded)
-                            : core::Result<std::string>{std::unexpected(core::Error{})};
-    // Not being played is the same answer as not existing: the token opens
-    // what the engine plays, and says nothing about anything else.
-    if (!raw_path || !serves_(*raw_path)) {
-        answer_status(descriptor, "404 Not Found");
-        finish();
-        return;
-    }
+    const auto* raw_path = &*resolved;
     const auto file = ::open(raw_path->c_str(), O_RDONLY | O_CLOEXEC);
     struct stat status{};
     if (file < 0 || ::fstat(file, &status) != 0 || !S_ISREG(status.st_mode)) {

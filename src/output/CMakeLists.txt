@@ -9,6 +9,7 @@ add_library(
     src/agent_audition.cpp
     src/audition_methods.cpp
     src/audition_wire.cpp
+    src/stream_query.cpp
 )
 add_library(Trackknife::Output ALIAS trackknife_output)
 

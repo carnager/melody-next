@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/output/agent_audition.hpp"
+#include <algorithm>
+#include "trackknife/formats/probe.hpp"
 
 #include "trackknife/formats/decoder.hpp"
 
@@ -29,24 +31,6 @@ constexpr std::chrono::seconds call_timeout{5};
            state == audio::LocalAuditionState::draining;
 }
 
-[[nodiscard]] std::string percent_encoded(const std::string& text) {
-    static constexpr char digits[] = "0123456789ABCDEF";
-    std::string encoded;
-    for (const auto character : text) {
-        const auto byte = static_cast<unsigned char>(character);
-        if ((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
-            (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.' ||
-            byte == '~') {
-            encoded.push_back(character);
-        } else {
-            encoded.push_back('%');
-            encoded.push_back(digits[byte >> 4U]);
-            encoded.push_back(digits[byte & 0x0FU]);
-        }
-    }
-    return encoded;
-}
-
 // A file's ReplayGain tags, or nothing when it has none. Opus keeps its
 // loudness elsewhere (R128), which the playing side reads itself.
 [[nodiscard]] std::optional<formats::ReplayGainInfo>
@@ -62,13 +46,52 @@ file_replay_gain(const std::string& raw_path, const formats::AudioSourceSelectio
     return gain;
 }
 
+// The codec of the audio a selection plays: what decides whether an agent
+// can take the original.
+[[nodiscard]] std::string codec_of(const std::string& raw_path,
+                                   const formats::AudioSourceSelection& selection) {
+    auto probed = formats::probe_local_media(raw_path);
+    if (!probed || probed->audio_streams.empty()) {
+        return {};
+    }
+    const auto wanted = selection.stream_index ? selection.stream_index : probed->best_audio_stream;
+    for (const auto& stream : probed->audio_streams) {
+        if (wanted && stream.stream_index == *wanted) {
+            return stream.codec_name;
+        }
+    }
+    return probed->audio_streams.front().codec_name;
+}
+
+[[nodiscard]] std::optional<StreamFormat> format_from_json(const Json& value) {
+    if (!value.is_object() || value.value("format", std::string{}) != "opus") {
+        return std::nullopt;
+    }
+    return StreamFormat{.bitrate_kbps = std::clamp(value.value("bitrate", 128), 16, 512)};
+}
+
 } // namespace
+
+StreamWishes StreamWishes::from_json(const Json& params) {
+    StreamWishes wishes;
+    if (const auto decodes = params.find("decodes"); decodes != params.end() && decodes->is_array()) {
+        for (const auto& codec : *decodes) {
+            if (codec.is_string()) {
+                wishes.decodes.push_back(codec.get<std::string>());
+            }
+        }
+    }
+    if (const auto stream = params.find("stream"); stream != params.end()) {
+        wishes.format = format_from_json(*stream);
+    }
+    return wishes;
+}
 
 AgentAudition::AgentAudition(std::string name, AgentPaths paths)
     : name_(std::move(name)), paths_(std::move(paths)) {}
 
 void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool files,
-                           std::string reached) {
+                           std::string reached, StreamWishes wishes) {
     std::shared_ptr<protocol::Client> shared{std::move(client)};
     std::weak_ptr<protocol::Client> weak = shared;
     shared->on_event([this, weak](const protocol::Event& event) {
@@ -108,6 +131,7 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
         previous = std::exchange(client_, std::move(shared));
         files_ = files;
         reached_ = std::move(reached);
+        wishes_ = std::move(wishes);
         // A new process knows nothing of what the old one played.
         reported_ = audio::LocalAuditionSnapshot{};
         next_armed_ = false;
@@ -193,6 +217,10 @@ void AgentAudition::adopt(const Json& report) {
         seen_transitions_ = parsed.chain_transitions;
     }
     next_armed_ = report.value("next_armed", false);
+    // A change of mind -- off Wi-Fi, say -- for what is sent from now on.
+    if (const auto stream = report.find("stream"); stream != report.end()) {
+        wishes_.format = format_from_json(*stream);
+    }
     reported_ = std::move(parsed);
 }
 
@@ -232,7 +260,10 @@ core::Result<Json> AgentAudition::call(const std::string& method, const Json& pa
     return client->call(method, params, call_timeout);
 }
 
-core::Result<std::string> AgentAudition::stream_url(const std::string& raw_path) const {
+core::Result<AgentAudition::StreamUrl>
+AgentAudition::stream_url(const std::string& raw_path,
+                          const formats::AudioSourceSelection& selection,
+                          const std::optional<formats::SampleRange>& segment) const {
     if (paths_.stream_port == 0U) {
         return std::unexpected(core::Error{
             .code = core::ErrorCode::unsupported,
@@ -240,21 +271,37 @@ core::Result<std::string> AgentAudition::stream_url(const std::string& raw_path)
             .context = {{.key = "agent", .value = name_}}});
     }
     std::string host = paths_.stream_host;
-    if (host.empty()) {
+    StreamWishes wishes;
+    {
         const std::lock_guard guard{mutex_};
-        host = reached_;
+        if (host.empty()) {
+            host = reached_;
+        }
+        wishes = wishes_;
     }
     if (host.empty()) {
         host = "127.0.0.1";
+    }
+    StreamRequest request{.raw_path = raw_path, .format = wishes.format, .selection = {}, .segment = {}};
+    // Converted when it asks, and whatever it asks when it could not play
+    // the original: a part of a file, or a codec it does not decode.
+    const bool part = segment || selection.stream_index || selection.subsong_index;
+    if (!request.format && (part || (!wishes.decodes.empty() &&
+                                     !std::ranges::contains(wishes.decodes, codec_of(raw_path, selection))))) {
+        request.format = StreamFormat{};
+    }
+    if (request.format) {
+        request.selection = selection;
+        request.segment = segment;
     }
     // An IPv6 address is bracketed in a URL, so its colons are not the port's.
     const auto authority = (host.find(':') != std::string::npos ? "[" + host + "]" : host) + ":" +
                            std::to_string(paths_.stream_port);
     // The engine checks the path against what it is playing before serving
     // it; the token is what lets the agent ask.
-    return "http://" + authority +
-           "/stream?path=" + percent_encoded(protocol::encode_raw_path(raw_path)) +
-           "&token=" + percent_encoded(paths_.stream_token);
+    return StreamUrl{.url = "http://" + authority + "/stream?" + stream_query(request) +
+                            "&token=" + percent_encoded(paths_.stream_token),
+                     .converted = request.format.has_value()};
 }
 
 core::Result<Json> AgentAudition::call_with_fallback(const std::string& method, Json params,
@@ -265,8 +312,9 @@ core::Result<Json> AgentAudition::call_with_fallback(const std::string& method, 
         return answered;
     }
     // An agent with files that cannot open this one -- not under its root,
-    // not mounted -- is streamed it instead, when the engine streams at all.
-    auto url = stream_url(raw_path);
+    // not mounted -- is streamed it instead, when the engine streams at all:
+    // the file whole, as it would have opened it, its part still named.
+    auto url = stream_url(raw_path, {}, std::nullopt);
     if (!url) {
         std::cerr << "melodyd: " << name_ << " could not open " << raw_path << " ("
                   << answered.error().message << ") and " << url.error().message << "\n";
@@ -275,7 +323,7 @@ core::Result<Json> AgentAudition::call_with_fallback(const std::string& method, 
     std::cerr << "melodyd: " << name_ << " could not open " << raw_path << " ("
               << answered.error().message << "); streaming it\n";
     source->erase("path");
-    (*source)["url"] = std::move(*url);
+    (*source)["url"] = std::move(url->url);
     return call(method, params);
 }
 
@@ -312,11 +360,16 @@ AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelec
         source.path = raw_path;
         return source;
     }
-    auto url = stream_url(raw_path);
+    auto url = stream_url(raw_path, selection, segment);
     if (!url) {
         return std::unexpected(std::move(url.error()));
     }
-    source.url = std::move(*url);
+    source.url = std::move(url->url);
+    if (url->converted) {
+        // Converted, the part is the whole of what is sent.
+        source.selection = {};
+        source.segment = std::nullopt;
+    }
     return source;
 }
 

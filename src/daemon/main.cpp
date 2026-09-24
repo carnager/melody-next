@@ -19,7 +19,9 @@
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/lastfm.hpp"
+#include "trackknife/engine/media_streams.hpp"
 #include "trackknife/engine/stream_server.hpp"
+#include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/token.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/client.hpp"
@@ -125,7 +127,11 @@ void usage() {
               << "                 it. There is no TLS either way (ADR-0223).\n"              << "  --http HOST:PORT\n"
               << "                 serve the music being played to output agents that have\n"
               << "                 no copy of their own (melody-agent --stream). Only what\n"
-              << "                 the queue holds is served.\n"
+              << "                 the queue holds is served -- converted to Opus for an agent\n"
+              << "                 that asks, and to clients with a ticket (offline copies).\n"
+              << "  --transcode-cache MB\n"
+              << "                 how much converted music to keep for streams and\n"
+              << "                 downloads (default 2048)\n"
               << "  --play-for HOST:PORT\n"
               << "                 let another engine play on this machine's speakers, as an\n"
               << "                 output agent built in -- no melody-agent needed here. The\n"
@@ -164,6 +170,7 @@ int main(int argc, char** argv) {
     auto state_directory = default_state_directory();
     std::string listen_address;
     std::string http_address;
+    std::uint64_t transcode_cache_mb = 2048;
     bool local_only = false;
     std::string password;
     std::string password_file;
@@ -199,6 +206,14 @@ int main(int argc, char** argv) {
             password_file = value();
         } else if (argument == "--http") {
             http_address = value();
+        } else if (argument == "--transcode-cache") {
+            const auto text = value();
+            try {
+                transcode_cache_mb = std::stoull(text);
+            } catch (const std::exception&) {
+                std::cerr << "melodyd: --transcode-cache wants megabytes, got " << text << "\n";
+                return EXIT_FAILURE;
+            }
         } else if (argument == "--music-root") {
             music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for") {
@@ -402,6 +417,8 @@ int main(int argc, char** argv) {
     // ADR-0228: the files an agent without its own copy fetches -- only
     // what the player holds, with a token that lives as long as this run and
     // reaches agents only in the URLs the engine gives them.
+    std::unique_ptr<trackknife::engine::TranscodeCache> transcodes;
+    std::unique_ptr<trackknife::engine::MediaStreams> media;
     std::unique_ptr<trackknife::engine::StreamServer> streams;
     trackknife::output::AgentPaths agent_paths{
         .music_root = music_root, .stream_port = 0U, .stream_host = {}, .stream_token = {}};
@@ -412,9 +429,14 @@ int main(int argc, char** argv) {
             std::cerr << "melodyd: --http wants HOST:PORT, got " << http_address << "\n";
             return EXIT_FAILURE;
         }
+        transcodes = std::make_unique<trackknife::engine::TranscodeCache>(
+            state_directory / "transcodes", transcode_cache_mb * 1024U * 1024U);
+        media = std::make_unique<trackknife::engine::MediaStreams>(
+            *token, [&player](const std::string& raw_path) { return player->holds(raw_path); },
+            transcodes.get());
         auto listening = trackknife::engine::StreamServer::listen(
-            endpoint->host, endpoint->port, *token,
-            [&player](const std::string& raw_path) { return player->holds(raw_path); });
+            endpoint->host, endpoint->port,
+            [&media](const std::string_view query) { return media->resolve(query); });
         if (!listening && listen_by_default) {
             std::cerr << "melodyd: " << http_address << " is taken ("
                       << listening.error().message << "); agents with no copy of the music "
@@ -426,6 +448,8 @@ int main(int argc, char** argv) {
         } else {
             streams = std::move(*listening);
             agent_paths.stream_port = streams->port();
+            trackknife::engine::register_stream_methods(dispatcher, *media, catalogue,
+                                                        streams->port());
             agent_paths.stream_token = std::move(*token);
             // Served on every address, each agent fetches from the one it
             // reached the engine at; on one address, from that one.

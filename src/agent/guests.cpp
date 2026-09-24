@@ -61,7 +61,7 @@ bool Guests::start() {
 void Guests::stop() {
     browser_.reset();
     const std::lock_guard guard{mutex_};
-    for (auto& [where, guest] : guests_) {
+    for (auto& [identity, guest] : guests_) {
         arbiter_->remove_guest(*guest.agent);
         guest.agent->stop();
     }
@@ -71,7 +71,7 @@ void Guests::stop() {
 std::vector<std::string> Guests::engines() const {
     const std::lock_guard guard{mutex_};
     std::vector<std::string> names;
-    for (const auto& [where, guest] : guests_) {
+    for (const auto& [identity, guest] : guests_) {
         names.push_back(guest.name);
     }
     return names;
@@ -87,8 +87,13 @@ void Guests::update(const std::vector<discovery::Found>& found) {
             std::ranges::contains(config_.already, where)) {
             continue;
         }
-        present.insert(where);
-        if (guests_.contains(where)) {
+        // An engine is itself, whichever address it was heard from: keyed
+        // by address, one on this machine -- heard once per interface --
+        // was a new engine with every announcement, and each new guest
+        // replaced the last one's registration.
+        const auto identity = id.empty() ? engine.instance : id;
+        present.insert(identity);
+        if (guests_.contains(identity)) {
             continue;
         }
         const bool wants_password = engine.txt.contains("auth") && engine.txt.at("auth") == "1";
@@ -122,7 +127,7 @@ void Guests::update(const std::vector<discovery::Found>& found) {
         (*agent)->start();
         arbiter_->add_guest(engine.instance, **agent);
         std::cerr << "melody: playing for " << engine.instance << " at " << where << "\n";
-        guests_.emplace(where, Guest{.name = engine.instance, .agent = std::move(*agent)});
+        guests_.emplace(identity, Guest{.name = engine.instance, .where = where, .agent = std::move(*agent)});
     }
     for (auto guest = guests_.begin(); guest != guests_.end();) {
         if (present.contains(guest->first)) {

@@ -403,6 +403,14 @@ void Browser::take(const std::uint8_t* data, const std::size_t size, const std::
             }
         }
         auto& entry = entries_[srv->name];
+        // Heard again from another address -- an engine on this machine is
+        // heard on every interface -- it is the same engine where it was:
+        // the address first heard is kept while it keeps announcing, so
+        // what was found does not flip with every packet.
+        if (!entry.found.address.empty() && entry.found.instance == found.instance &&
+            entry.found.port == found.port) {
+            found.address = entry.found.address;
+        }
         if (!(entry.found == found)) {
             entry.found = std::move(found);
             changed = true;

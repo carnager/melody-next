@@ -49,6 +49,10 @@ class Guests final {
 
     struct Guest final {
         std::string name;
+        // Where it was reached. An engine on this machine is heard on every
+        // interface, from a different address each time; any of them
+        // reaches it, so the first is kept.
+        std::string where;
         std::unique_ptr<Agent> agent;
     };
 
@@ -56,7 +60,7 @@ class Guests final {
     SpeakerArbiter* arbiter_;
     std::unique_ptr<discovery::Browser> browser_;
     mutable std::mutex mutex_;
-    std::map<std::string, Guest> guests_; // by address:port
+    std::map<std::string, Guest> guests_; // by the engine's identity
 };
 
 } // namespace trackknife::agent

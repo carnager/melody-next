@@ -3,6 +3,7 @@
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
+#include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAbstractTableModel>
@@ -15,6 +16,7 @@
 #include <QHeaderView>
 #include <QMimeData>
 #include <QScrollBar>
+#include <QStandardItemModel>
 #include <QUrl>
 #include <QtTest>
 
@@ -116,6 +118,7 @@ class QueueTableViewTest final : public QObject {
     void preGroupedBatchReservesHeaderAboveFirstTrack();
     void eachDiscOfAnAlbumGetsItsName();
     void aDiscLearnedLaterNamesTheFirstToo();
+    void thePlayingRowsStarsKeepTheirColour();
     void largeGroupedResultsScrollToLastRow();
     void homeAndEndSelectQueueBoundaries();
     void shiftHomeAndEndExtendFromSelectionAnchor();
@@ -358,6 +361,38 @@ void QueueTableViewTest::aDiscLearnedLaterNamesTheFirstToo() {
     // The first disc's name gets room of its own, not drawn over its track.
     QCOMPARE(view.rowHeight(0),
              22 + QueueItemDelegate::album_header_height + QueueItemDelegate::disc_header_height);
+}
+
+void QueueTableViewTest::thePlayingRowsStarsKeepTheirColour() {
+    QStandardItemModel model{1, track_column_count};
+    model.setData(model.index(0, track_title_column), QStringLiteral("Playing"));
+    // Every cell of the playing row says so, as LocalListModel's do.
+    for (int column = 0; column < track_column_count; ++column) {
+        model.setData(model.index(0, column), true, track_current_role);
+    }
+    const auto stars = model.index(0, track_rating_column);
+    model.setData(stars, track_rating_stars(10));
+    model.setData(stars, QBrush{ratingStarColor()}, Qt::ForegroundRole);
+    QueueTableView view{nullptr};
+    view.setModel(&model);
+    view.setItemDelegate(new QueueItemDelegate{&view});
+    view.setColumnWidth(track_rating_column, 90);
+    view.resize(900, 200);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    // The playing row's text takes the accent; its stars stay yellow.
+    const auto image = view.viewport()->grab(view.visualRect(stars)).toImage();
+    int yellow = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            const QColor pixel = image.pixelColor(x, y);
+            if (pixel.red() > 200 && pixel.green() > 150 && pixel.blue() < 100) {
+                ++yellow;
+            }
+        }
+    }
+    QVERIFY2(yellow > 10, qPrintable(QStringLiteral("%1 yellow pixels").arg(yellow)));
 }
 
 void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {

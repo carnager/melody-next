@@ -277,9 +277,13 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     }
     if (current_track) {
         item.font.setWeight(QFont::DemiBold);
-        const auto accent = item.palette.color(QPalette::Highlight).lighter(115);
-        item.palette.setColor(QPalette::Text, accent);
-        item.palette.setColor(QPalette::HighlightedText, accent);
+        // The row's text takes the accent; a cell with a colour of its own
+        // -- the rating's stars -- keeps it.
+        if (!index.data(Qt::ForegroundRole).isValid()) {
+            const auto accent = item.palette.color(QPalette::Highlight).lighter(115);
+            item.palette.setColor(QPalette::Text, accent);
+            item.palette.setColor(QPalette::HighlightedText, accent);
+        }
         if (index.column() == (side_artwork ? title_column : artwork_column)) {
             item.icon =
                 QIcon::fromTheme(QStringLiteral("media-playback-start"),

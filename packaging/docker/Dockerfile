@@ -7,7 +7,7 @@
 FROM debian:trixie AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake ninja-build pkg-config ca-certificates \
-        libavformat-dev libavcodec-dev libavutil-dev libswresample-dev \
+        libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev \
         libopenmpt-dev libtag-dev libpipewire-0.3-dev libebur128-dev libutf8proc-dev \
         libsqlite3-dev libcurl4-openssl-dev libssl-dev nlohmann-json3-dev \
     && rm -rf /var/lib/apt/lists/*

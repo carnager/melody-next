@@ -153,15 +153,15 @@ For a bug report, run `trackknife --debug` in a terminal and include the output.
 
 ## More screenshots
 
-![Album and track search](Screenshots/search.png)
-
-![Bulk tag editing](Screenshots/tagger.png)
-
-![MusicBrainz lookup](Screenshots/musicbrainz.png)
-
-![Conversion](Screenshots/converter.png)
-
-![Renaming](Screenshots/renaming.png)
+<p>
+  <a href="Screenshots/search.png"><img src="Screenshots/search.png" height="180" alt="Album and track search"></a>
+  <a href="Screenshots/tagger.png"><img src="Screenshots/tagger.png" height="180" alt="Editing the tags of a whole album"></a>
+  <a href="Screenshots/musicbrainz.png"><img src="Screenshots/musicbrainz.png" height="180" alt="MusicBrainz lookup"></a>
+  <a href="Screenshots/replaygain.png"><img src="Screenshots/replaygain.png" height="180" alt="ReplayGain scan"></a>
+  <a href="Screenshots/converter.png"><img src="Screenshots/converter.png" height="180" alt="Converting to Opus"></a>
+  <a href="Screenshots/renaming.png"><img src="Screenshots/renaming.png" height="180" alt="Renaming, with the new paths shown first"></a>
+  <a href="Screenshots/settings.png"><img src="Screenshots/settings.png" height="180" alt="Settings"></a>
+</p>
 
 ## License
 

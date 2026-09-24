@@ -15,17 +15,22 @@
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <taglib/flacfile.h>
+#include <taglib/tpropertymap.h>
+
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <thread>
 
@@ -91,6 +96,10 @@ void require(const bool condition, const std::string_view message) {
 [[nodiscard]] engine::QueueEntry entry(const std::filesystem::path& path) {
     engine::QueueEntry made;
     made.source.raw_path = path.string();
+    // Gain as a client sends it with the queue, so what an agent applies can
+    // be measured.
+    made.replay_gain = trackknife::formats::ReplayGainInfo{
+        .track_gain_db = -6.0, .track_peak = 0.5, .album_gain_db = -8.0, .album_peak = 0.5};
     return made;
 }
 
@@ -141,6 +150,32 @@ void require(const bool condition, const std::string_view message) {
     return "GET /stream?path=" + percent_encoded(protocol::encode_raw_path(path.string())) +
            "&token=" + percent_encoded(token) + " HTTP/1.1\r\nHost: engine\r\n" +
            (range.empty() ? std::string{} : "Range: " + range + "\r\n") + "\r\n";
+}
+
+// A fixture, decoded from its base64 text.
+[[nodiscard]] bool write_fixture(const std::string& name, const std::filesystem::path& destination) {
+    std::ifstream input{std::filesystem::path{TRACKKNIFE_AUDIO_FIXTURE_DIR} / name};
+    const std::string encoded{std::istreambuf_iterator<char>{input}, {}};
+    static constexpr std::string_view alphabet{
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"};
+    std::string decoded;
+    std::uint32_t buffer = 0U;
+    int bits = 0;
+    for (const auto character : encoded) {
+        const auto value = alphabet.find(character);
+        if (value == std::string_view::npos) {
+            continue;
+        }
+        buffer = (buffer << 6U) | static_cast<std::uint32_t>(value);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            decoded.push_back(static_cast<char>((buffer >> static_cast<unsigned>(bits)) & 0xFFU));
+        }
+    }
+    std::ofstream output{destination, std::ios::binary};
+    output.write(decoded.data(), static_cast<std::streamsize>(decoded.size()));
+    return !decoded.empty() && output.good();
 }
 
 // Over TCP with the engine's token, as an agent on another machine connects.
@@ -265,11 +300,14 @@ int main(int argc, char** argv) {
                                                                      .without_gain_db = -2.0F})
                 .has_value(),
             "and a preamp");
-    require(eventually([&] {
-                return agent->audition().snapshot().replay_gain_mode ==
-                       audio::ReplayGainMode::album;
-            }),
-            "the agent takes them");
+    // Album gain -8 dB with a +3 dB preamp: the track plays at -5 dB.
+    const auto expected = static_cast<float>(std::pow(10.0, -5.0 / 20.0));
+    const auto applies = [&expected](trackknife::agent::Agent& playing) {
+        const auto snapshot = playing.audition().snapshot();
+        return snapshot.replay_gain_mode == audio::ReplayGainMode::album &&
+               std::abs(snapshot.effective_replay_gain_multiplier - expected) < 0.01F;
+    };
+    require(eventually([&] { return applies(*agent); }), "the agent plays at album gain");
 
     // The agent goes away -- a reboot -- and comes back under its name. The
     // music is still there, where it was, still paused.
@@ -296,6 +334,8 @@ int main(int argc, char** argv) {
                        snapshot.replay_gain_preamps.without_gain_db == -2.0F;
             }),
             "with the gain it was set to, not a new agent's off");
+    require(eventually([&] { return applies(*returned); }),
+            "and the track it takes up plays at that gain, not louder");
 
     // The engine's player decides what comes next, and the agent plays it.
     require(player->seek_ms(29'000).has_value(), "seeking reaches the agent");
@@ -395,6 +435,50 @@ int main(int argc, char** argv) {
                            (engine_root / "two.wav").string()))) != std::string::npos;
             }),
             "streamed as well");
+
+    // A file's own gain tags, no gain from the client: taken up partway
+    // through by a restarted agent, the stream starts past the tags, so the
+    // engine sends the gain it reads from its copy.
+    const auto tagged = engine_root / "tagged.flac";
+    require(write_fixture("rich-metadata-long-flac.b64", tagged), "the tagged file is written");
+    {
+        TagLib::FLAC::File file{tagged.c_str()};
+        auto properties = file.properties();
+        properties.replace("REPLAYGAIN_TRACK_GAIN", TagLib::String{"-6.00 dB"});
+        properties.replace("REPLAYGAIN_TRACK_PEAK", TagLib::String{"0.5"});
+        properties.replace("REPLAYGAIN_ALBUM_GAIN", TagLib::String{"-8.00 dB"});
+        properties.replace("REPLAYGAIN_ALBUM_PEAK", TagLib::String{"0.5"});
+        file.setProperties(properties);
+        require(file.save(), "and tagged with ReplayGain");
+    }
+    auto untold = entry(tagged);
+    untold.replay_gain.reset();
+    player->replace_queue({untold});
+    require(player->play_entry(untold.entry_id).has_value(), "the tagged file plays");
+    require(eventually([&] { return kitchen->audition().snapshot().format.has_value(); }),
+            "on the streaming agent");
+    std::this_thread::sleep_for(std::chrono::milliseconds{300});
+    require(player->pause().has_value(), "and is paused partway through");
+    require(eventually([&] { return player->state().status == "paused"; }), "paused");
+    kitchen->stop();
+    kitchen.reset();
+    require(eventually([&] {
+                for (const auto& listed : outputs.list()) {
+                    if (listed.id == "agent:kitchen") {
+                        return !listed.online;
+                    }
+                }
+                return false;
+            }),
+            "the streaming agent goes away");
+    kitchen = start_agent(port, std::nullopt, "agent-test-token", "kitchen");
+    require(kitchen != nullptr && eventually([&] { return kitchen->registered(); }),
+            "and comes back");
+    require(eventually([&] {
+                const auto snapshot = kitchen->audition().snapshot();
+                return snapshot.format.has_value() && applies(*kitchen);
+            }),
+            "taking the track up at its tagged gain, not at full level");
 
     kitchen->stop();
     static_cast<void>(player->stop());

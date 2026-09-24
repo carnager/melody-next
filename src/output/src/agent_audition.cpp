@@ -2,6 +2,8 @@
 
 #include "trackknife/output/agent_audition.hpp"
 
+#include "trackknife/formats/decoder.hpp"
+
 #include <chrono>
 #include <iostream>
 #include <utility>
@@ -43,6 +45,21 @@ constexpr std::chrono::seconds call_timeout{5};
         }
     }
     return encoded;
+}
+
+// A file's ReplayGain tags, or nothing when it has none. Opus keeps its
+// loudness elsewhere (R128), which the playing side reads itself.
+[[nodiscard]] std::optional<formats::ReplayGainInfo>
+file_replay_gain(const std::string& raw_path, const formats::AudioSourceSelection& selection) {
+    auto decoder = formats::AudioDecoder::open_selected(raw_path, selection);
+    if (!decoder || decoder->opus_stream()) {
+        return std::nullopt;
+    }
+    auto gain = decoder->replay_gain();
+    if (!gain.track_gain_db && !gain.album_gain_db) {
+        return std::nullopt;
+    }
+    return gain;
 }
 
 } // namespace
@@ -266,6 +283,13 @@ core::Result<Source>
 AgentAudition::source_for(const std::string& raw_path, formats::AudioSourceSelection selection,
                           std::optional<formats::SampleRange> segment,
                           std::optional<formats::ReplayGainInfo> replay_gain) const {
+    // The gain as the engine reads it from its own copy, when the client
+    // sent none: an agent streaming the file cannot count on finding the
+    // tags in the stream -- not in one opened partway through, which is how
+    // a restarted agent takes a track up -- and played it at full level.
+    if (!replay_gain) {
+        replay_gain = file_replay_gain(raw_path, selection);
+    }
     Source source{.path = std::nullopt,
                   .url = std::nullopt,
                   .selection = selection,

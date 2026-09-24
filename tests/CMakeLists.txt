@@ -343,7 +343,12 @@ add_executable(trackknife_output_agent_tests output_agent_test.cpp)
 target_link_libraries(
     trackknife_output_agent_tests
     PRIVATE Trackknife::Agent Trackknife::Engine Trackknife::Protocol Trackknife::Core
-            Threads::Threads trackknife_project_options trackknife_project_warnings
+            Threads::Threads PkgConfig::TAGLIB trackknife_project_options
+            trackknife_project_warnings
+)
+target_compile_definitions(
+    trackknife_output_agent_tests
+    PRIVATE TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio"
 )
 add_test(
     NAME output-agent

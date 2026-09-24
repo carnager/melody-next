@@ -5,6 +5,8 @@
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/output/audition_wire.hpp"
 
+#include <iostream>
+#include <sstream>
 #include <utility>
 
 namespace trackknife::output {
@@ -63,6 +65,30 @@ openable_path(const Source& source, const std::optional<std::filesystem::path>& 
     return source_from_json(*source);
 }
 
+[[nodiscard]] const char* mode_name(const audio::ReplayGainMode mode) {
+    return mode == audio::ReplayGainMode::album   ? "album"
+           : mode == audio::ReplayGainMode::track ? "track"
+                                                  : "off";
+}
+
+// What gain a track came with, for the agent's log: with the mode it is
+// told, this is what decides how loud it plays.
+[[nodiscard]] std::string gain_text(const std::optional<formats::ReplayGainInfo>& gain) {
+    if (!gain || (!gain->track_gain_db && !gain->album_gain_db)) {
+        return "no gain given (read from the file, if it has any)";
+    }
+    std::ostringstream text;
+    text.setf(std::ios::fixed);
+    text.precision(2);
+    if (gain->track_gain_db) {
+        text << "track " << *gain->track_gain_db << " dB";
+    }
+    if (gain->album_gain_db) {
+        text << (gain->track_gain_db ? ", " : "") << "album " << *gain->album_gain_db << " dB";
+    }
+    return text.str();
+}
+
 } // namespace
 
 void register_audition_methods(protocol::Dispatcher& dispatcher,
@@ -76,6 +102,9 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
             }
             const bool play = params.value("play", true);
             const auto position_ms = params.value("position_ms", std::int64_t{0});
+            std::cerr << "melody-agent: loading " << (source->url ? "a stream" : "a file") << ", "
+                      << gain_text(source->replay_gain) << "; ReplayGain "
+                      << mode_name(audition.snapshot().replay_gain_mode) << "\n";
             if (source->url) {
                 auto loaded = audition.load_network_stream_and_play(
                     *source->url, source->replay_gain, source->selection, source->segment);
@@ -169,6 +198,8 @@ void register_audition_methods(protocol::Dispatcher& dispatcher,
                 !set) {
                 return std::unexpected(std::move(set.error()));
             }
+            std::cerr << "melody-agent: ReplayGain "
+                      << mode_name(static_cast<audio::ReplayGainMode>(value)) << "\n";
         }
         if (params.contains("preamp_with_gain_db") || params.contains("preamp_without_gain_db")) {
             const auto current = audition.snapshot().replay_gain_preamps;

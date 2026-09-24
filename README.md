@@ -1,87 +1,68 @@
 # Trackknife
 
-Trackknife is a Linux music player and tag editor built with Qt 6. Playback
-belongs to Melody, an engine that runs beside the app or on a server and keeps
-playing when the window is closed. You can browse folders directly or add them
-to a searchable library, and play on this computer, another one, or your phone.
+A music player and tag editor for Linux, written in Qt 6. Think foobar2000
+and Cantata: playlists grouped by album, lots of keyboard control, and tools
+for keeping a collection in order.
 
-It takes ideas from foobar2000 and Cantata: album-grouped playlists, keyboard
-controls, and tools for looking after a music collection. The name comes from
-foobar2000's reputation as a Swiss Army knife for audio files.
+Playback is done by Melody, a separate engine. Trackknife starts one for the
+music on your computer; you can also run one on a server. Close the window and
+the music keeps playing.
 
 ![A queue grouped by album, with the library beside it](Screenshots/queue.png)
 
-## Listening and browsing
+## Playing music
 
-Playback is gapless. Trackknife starts its own engine for the music on this
-computer, and a server's library opens in tabs of its own. The tab you play
-from decides which engine plays it. Lists survive a restart.
+Playback is gapless. Local folders and your library open in tabs, and so does
+a server's library. Whichever tab you play from decides which engine plays it.
+Lists are kept across restarts.
 
-The list driving playback carries an **Active** label and accent text color.
-It stays active through Stop and Pause, even while you browse another tab.
-**Workspace → Jump to playing** (**Ctrl+J**) returns to the playing track.
-The optional **Cursor follows playback** toggle follows new tracks when their
-list is visible, without switching away from a tab you're browsing.
+The tab that's playing is marked **Active**. **Ctrl+J** jumps back to the
+playing track. **Cursor follows playback** (Ctrl+Shift+J) moves the cursor
+along with the music, but won't pull you out of a tab you're looking at.
 
-Both libraries browse artists, albums, and tracks, with covers and album counts.
-Search results can be opened as a tab. For local files, searches use the library
-database; opening results doesn't reread all your music. Press **Refresh** when
-you want to scan for changes made outside the app.
+The library shows artists, albums and tracks with covers. Searches go to the
+library database, so they're fast; press **Refresh** after you've changed
+files outside Trackknife.
 
-Use **Copy to list → New tab…** or **Move to list → New tab…** to split out a
-selection. You can also drop tracks from a local list onto empty tab-bar space
-to create a tab. Dragging moves the entries; hold **Ctrl** to copy them. The
-files stay where they are.
+To split a selection into a new tab, use **Copy to list → New tab…** or
+**Move to list → New tab…**, or drop tracks on the empty space in the tab bar
+(hold Ctrl to copy instead of move). Files on disk are never touched by this.
 
 ## Up Next and dynamic playlists
 
-**Queue next** (**Ctrl+Return**) and **Queue at end** (**Ctrl+Shift+Return**)
-add temporary requests. When they finish, normal playlist playback resumes.
-Open the **Up Next** panel with **Ctrl+Shift+U** to reorder, remove, or clear
-requests. The engine keeps handling them after Trackknife closes. See the
-[Up Next guide](docs/up-next.md).
+**Ctrl+Return** plays a track next, **Ctrl+Shift+Return** puts it at the end
+of Up Next. After those, the playlist carries on where it was. **Ctrl+Shift+U**
+opens the Up Next panel. It lives in the engine, so it works with Trackknife
+closed too. More in the [Up Next guide](docs/up-next.md).
 
-**File → Dynamic playlists…** uses the same editor for local and server
-libraries. Build rules from tags, ratings, and other supported fields, or use
-Last.fm similar, loved, top, or tagged tracks. Recommendations are matched to
-music in your library; repeated refreshes prefer tracks outside the previous
-selection when enough matches are available. Open results as a normal tab with
-one line per track. See the [dynamic playlist guide](docs/dynamic-playlists.md)
-for matching limits and server requirements.
+**File → Dynamic playlists…** builds a list from rules (tags, ratings and so
+on) or from Last.fm: similar, loved, top or tagged tracks, matched against
+what's in your library. Refreshing tries to pick different tracks than last
+time. See [dynamic playlists](docs/dynamic-playlists.md).
 
-Connect a Last.fm account under **Settings → Last.fm** and give it to each
-engine: an engine scrobbles what it plays, with Trackknife open or not. A
-track's Last.fm submenu has **Love track / Unlove track**.
-[Account setup and scrobbling](docs/lastfm.md) explains the API credentials and
-browser authorization.
+For scrobbling, connect Last.fm under **Settings → Last.fm** and hand the
+account to each engine. The engine scrobbles, so it works without Trackknife
+running. [Last.fm setup](docs/lastfm.md) covers the API key.
 
-## Tagging and file tools
+## Tags and files
 
-**Tools → Edit tags…** in the track menu opens a tab where you can edit one file
-or a whole selection. Use the checked file list in the sidebar to choose which
-files you are editing.
-Changes stay in a draft until you apply them. MusicBrainz lookup works with
-untagged albums too: search for a release, then arrange your files beside its
-track list to check the assignments.
+**Alt+Return** opens the tag editor for one file or a whole selection. Nothing
+is written until you apply. MusicBrainz lookup works on untagged albums as
+well: pick a release and line your files up against its track list.
 
-You can remove covers, fetch replacements, or add your own images. Review a
-fetched cover before applying it; **Settings → Covers** chooses embedded artwork,
-a folder image, or both. Tags and embedded artwork share the save workflow.
-**Tools → ReplayGain…** scans the selection, and **Tools → Convert files…** can
-copy a cover, resample audio, and name its output from tags. Rename and move operations show the proposed paths
-before changing files.
+Covers can be removed, fetched or added by hand, embedded or as a folder image
+(**Settings → Covers**). **Tools → ReplayGain…** scans, **Tools → Convert
+files…** converts (FLAC, MP3, Vorbis, Opus, whatever your FFmpeg has encoders
+for). Renaming and moving show you the new paths before anything happens.
 
-Text editing supports FLAC, WavPack, MP3, Vorbis, Opus, and MP4/M4A. Embedded
-artwork editing supports FLAC, MP3, and MP4/M4A. Conversion presets cover FLAC,
-MP3, Vorbis, and Opus, depending on the installed FFmpeg encoders. Playback
-supports more formats than editing; see the [format table](docs/feature-matrix.md#format-support-dimensions)
-for the limits.
+Tag editing: FLAC, WavPack, MP3, Vorbis, Opus, MP4/M4A. Embedded covers:
+FLAC, MP3, MP4/M4A. Playback handles more; the
+[format table](docs/feature-matrix.md#format-support-dimensions) has details.
 
-## Searching your collection
+## Search
 
-Open **Workspace → Search…** (**Ctrl+Shift+F**) and choose **Library database**
-to search the collection, or **Current tab** to search a local list. For a word search,
-type an artist, album, or title. Enable **Query** for expressions such as:
+**Ctrl+Shift+F**. Search the library or the current tab. Type a name, or
+switch on **Query** for things like:
 
 ```text
 bitspersample EQUAL 24
@@ -89,20 +70,20 @@ REPLAYGAIN_ALBUM_GAIN MISSING
 artist HAS "Nina Simone" AND date GREATER 1960
 ```
 
-**Save as…** keeps a search so you can run it again. Result tabs contain the
-matches from that run; they don't update automatically.
+**Save as…** keeps a search for later. A result tab is a snapshot, it doesn't
+update. See the [library guide](docs/local-library.md#using-the-library) and
+the [query reference](docs/query-language.md).
 
-See the [library guide](docs/local-library.md#using-the-library) and
-[query reference](docs/query-language.md) for more examples and details.
+## Servers, speakers, phone
 
-## Servers, speakers and the phone
+Run `melodyd` on the box with the music; clients find it on the network by
+themselves. Any machine running an engine can be used as a speaker by the
+others, and you can move playback between them mid-track.
 
-Run `melodyd` on the machine with the music and every client finds it by name.
-Any machine with an engine can lend its speakers to the others, a phone can be
-a speaker too, and the music moves between them without stopping. The Android
-app in `android/` browses and controls the library, plays on the phone with
-Opus on mobile data, and keeps albums for listening offline. `melody-cli`
-does the same from a shell. [Melody](docs/melody.md) explains the setup.
+The Android app (`android/`) is a remote for the engine, and can also play
+on the phone itself: Opus over mobile data, and albums downloaded for offline
+use. `melody-cli` is the same thing for the shell. Setup is in
+[docs/melody.md](docs/melody.md).
 
 <p>
   <img src="Screenshots/android-newest.jpg" width="160" alt="The newest albums as covers">
@@ -112,12 +93,10 @@ does the same from a shell. [Melody](docs/melody.md) explains the setup.
   <img src="Screenshots/android-nowplaying.jpg" width="160" alt="Now playing, coloured from the cover">
 </p>
 
-## Settings and keyboard controls
+## Shortcuts
 
-Settings brings together connection profiles, local library folders, playback,
-naming layouts, ReplayGain, covers, metadata services, Last.fm, and shortcuts.
-**Settings → Shortcuts** lets you change or clear bindings, checks for conflicts,
-and offers Restore defaults. Changes apply on Save; Cancel leaves bindings alone.
+All of these can be changed under **Settings → Shortcuts**. They only work
+inside Trackknife, not desktop-wide.
 
 | Action | Default shortcut |
 | --- | --- |
@@ -133,19 +112,25 @@ and offers Restore defaults. Changes apply on Save; Cancel leaves bindings alone
 | New / Duplicate / Close tab | Ctrl+N / Ctrl+Shift+D / Ctrl+W |
 | Edit tags / Settings | Alt+Return / Ctrl+, |
 
-These shortcuts work within Trackknife, not globally across the desktop.
+## Installing
 
-## Building
+Arch: `trackknife-git` and `melody-git` are in the AUR, or build from
+`packaging/arch` with `makepkg -si`.
 
-You need a C++23 compiler, CMake ≥ 3.28, Ninja, and pkg-config, plus these
-libraries and their development headers:
+Releases ([v0.1.0](https://github.com/carnager/melody-next/releases/tag/v0.1.0))
+have the engine, agent and CLI built for Debian 13 (amd64 and arm64), the
+Android APK, and a Docker image for servers, see
+[docs/melody.md](docs/melody.md#a-server).
 
-- Qt ≥ 6.4, including Widgets, Concurrent, DBus, Network, and Test
-- FFmpeg ≥ 6 (including swscale), TagLib ≥ 2.0, and libopenmpt ≥ 0.7
-- PipeWire ≥ 0.3.50, libebur128 ≥ 1.2, SQLite ≥ 3.37, and libutf8proc ≥ 2.9
-- libcurl, OpenSSL (libcrypto), and nlohmann-json
+### Building from source
 
-Chromaprint's `fpcalc` is optional, for AcoustID fingerprinting.
+C++23 compiler, CMake ≥ 3.28, Ninja, pkg-config, and:
+
+- Qt ≥ 6.4 (Widgets, Concurrent, DBus, Network, Test)
+- FFmpeg ≥ 6 with swscale, TagLib ≥ 2.0, libopenmpt ≥ 0.7
+- PipeWire ≥ 0.3.50, libebur128 ≥ 1.2, SQLite ≥ 3.37, libutf8proc ≥ 2.9
+- libcurl, OpenSSL (libcrypto), nlohmann-json
+- optional: Chromaprint's `fpcalc`, for AcoustID
 
 ```sh
 cmake --preset release
@@ -153,31 +138,18 @@ cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
 
-On Arch Linux, the package recipe builds Trackknife, `melodyd`,
-`melody-agent` and `melody-cli` as separate packages from the default branch:
+This is new software and still moving. The [roadmap](docs/roadmap.md) lists
+what isn't done.
 
-```sh
-cd packaging/arch
-makepkg -si
-```
+## Docs and bugs
 
-For a server there is also a Docker image; see [Melody](docs/melody.md#a-server).
+For a bug report, run `trackknife --debug` in a terminal and include the output.
 
-There are no versioned releases yet. The [roadmap](docs/roadmap.md) lists the
-unfinished work.
-
-## Help and development
-
-Run `trackknife --debug` from a terminal to collect diagnostic traces for a bug
-report. Debug tracing is off by default; warnings and errors remain visible.
-
-
-- [Melody](docs/melody.md): the engine, servers, speakers, the phone and `melody-cli`.
-- [Local library](docs/local-library.md): adding folders, searching, and refreshing.
-- [Formatting and scripts](docs/tkfmt.md): tag transformations and naming patterns.
-  The app uses its own language, `tkfmt-1`; foobar2000 and Picard scripts aren't
-  interchangeable with it.
-- [Documentation index](docs/README.md): guides, specifications, and build checks.
+- [Melody](docs/melody.md): engine, servers, speakers, phone, `melody-cli`
+- [Local library](docs/local-library.md)
+- [Formatting and scripts](docs/tkfmt.md): Trackknife's own `tkfmt-1`
+  language, not compatible with foobar2000 or Picard scripts
+- [Everything else](docs/README.md)
 
 ## More screenshots
 

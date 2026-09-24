@@ -19,10 +19,13 @@ RUN cmake -S /source -B /build -G Ninja \
     && cmake --build /build --target trackknife_engine_daemon melody_agent melody_cli \
     && for part in engine agent cli; do DESTDIR=/out cmake --install /build --component $part; done
 # The runtime needs the packages these binaries link, and no more: found
-# from the binaries themselves rather than kept by hand.
+# from the binaries themselves rather than kept by hand. ldd names the
+# /lib path, dpkg the merged /usr one it was installed under; and a library
+# no package owns fails the build rather than the container at start.
 RUN for binary in /out/usr/bin/*; do ldd "$binary"; done \
-        | awk '/=> \// {print $3}' | sort -u \
-        | xargs -r dpkg -S 2>/dev/null | cut -d: -f1 | sort -u > /out/runtime-packages
+        | awk '/=> \// {print $3}' | sed 's|^/lib/|/usr/lib/|' | sort -u \
+        | xargs dpkg -S | cut -d: -f1 | sort -u > /out/runtime-packages \
+    && test -s /out/runtime-packages
 
 # Just the binaries and the units, for release downloads:
 #   docker buildx build -f packaging/docker/Dockerfile --target binaries \
@@ -32,8 +35,12 @@ COPY --from=build /out/usr/ /
 
 FROM debian:trixie-slim
 COPY --from=build /out/runtime-packages /tmp/runtime-packages
+# PipeWire's client modules and its client.conf are loaded at run time, so
+# the binaries do not name them: without them a mounted PipeWire socket
+# shows no speakers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         $(cat /tmp/runtime-packages) ca-certificates \
+        libpipewire-0.3-modules pipewire-bin \
     && rm -rf /var/lib/apt/lists/* /tmp/runtime-packages \
     && useradd --uid 1000 --create-home melody \
     && mkdir -p /state && chown melody:melody /state

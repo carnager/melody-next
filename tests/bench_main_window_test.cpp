@@ -234,6 +234,7 @@ class BenchMainWindowTest final : public QObject {
     void recentlyAddedComesFirstWhereAskedFor();
     void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
+    void doubleClickOnEmptyTabBarMakesAList();
     void activeTabAccentSurvivesThemeTextColor();
     void followPlaybackAndJumpRespectBrowsing();
     void commandPaletteFindsAndRunsRegisteredActions();
@@ -1470,6 +1471,45 @@ void BenchMainWindowTest::activeTabAccentSurvivesThemeTextColor() {
     bar.setTabData(0, false);
     bar.setTabIcon(0, QIcon{});
     QCOMPARE(colored_pixels(), 0);
+}
+
+void BenchMainWindowTest::doubleClickOnEmptyTabBarMakesAList() {
+    BenchMainWindow window;
+    window.resize(1200, 700);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QTRY_VERIFY(!window.list_tabs_.empty());
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    auto* bar = tabs->tabBar();
+    const auto before = tabs->count();
+    const auto prompt = [&window] {
+        for (auto* dialog : window.findChildren<QInputDialog*>())
+            if (dialog->isVisible())
+                return dialog;
+        return static_cast<QInputDialog*>(nullptr);
+    };
+
+    // On a tab it is no new list.
+    QTest::mouseDClick(bar, Qt::LeftButton, {}, bar->tabRect(0).center());
+    QTest::qWait(50);
+    QVERIFY(prompt() == nullptr);
+    QCOMPARE(tabs->count(), before);
+
+    // Beside the tabs it is, named as File -> New list names one.
+    QTimer answer;
+    connect(&answer, &QTimer::timeout, &window, [&prompt] {
+        if (auto* dialog = prompt()) {
+            dialog->setTextValue(QStringLiteral("Fresh"));
+            dialog->accept();
+        }
+    });
+    answer.start(10);
+    const QPoint beside(tabs->width() - 8, bar->geometry().center().y());
+    QVERIFY(bar->tabAt(bar->mapFrom(tabs, beside)) < 0);
+    QTest::mouseDClick(tabs, Qt::LeftButton, {}, beside);
+    QTRY_COMPARE(tabs->count(), before + 1);
+    QCOMPARE(tabs->tabText(tabs->currentIndex()), QStringLiteral("Fresh"));
 }
 
 void BenchMainWindowTest::activePlaybackTabRemainsMarkedWhileBrowsing() {

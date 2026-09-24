@@ -27,6 +27,7 @@ files outside Trackknife.
 To split a selection into a new tab, use **Copy to list → New tab…** or
 **Move to list → New tab…**, or drop tracks on the empty space in the tab bar
 (hold Ctrl to copy instead of move). Files on disk are never touched by this.
+Double-click the empty part of the tab bar for a new, empty list.
 
 ## Up Next and dynamic playlists
 

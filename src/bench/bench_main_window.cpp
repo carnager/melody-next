@@ -20,6 +20,7 @@
 #include <QItemSelectionModel>
 #include <QMetaObject>
 #include <QMimeData>
+#include <QMouseEvent>
 #include <QPointer>
 #include <QTabBar>
 #include <QTabWidget>
@@ -120,6 +121,22 @@ bool BenchMainWindow::eventFilter(QObject* watched, QEvent* event) {
         drop->setDropAction(Qt::CopyAction);
         drop->accept();
         return true;
+    }
+    // A double click on the tab bar's empty space -- in the bar or in the
+    // strip of the tab widget beyond it -- makes a new list, as in a browser.
+    if (tabs_ != nullptr && (watched == tabs_ || watched == tabs_->tabBar()) &&
+        event->type() == QEvent::MouseButtonDblClick) {
+        auto* click = static_cast<QMouseEvent*>(event);
+        const auto position = watched == tabs_->tabBar()
+                                  ? click->position().toPoint()
+                                  : tabs_->tabBar()->mapFrom(tabs_, click->position().toPoint());
+        if (click->button() == Qt::LeftButton && position.y() >= 0 &&
+            position.y() < tabs_->tabBar()->height() && tabs_->tabBar()->tabAt(position) < 0) {
+            // Not inside the mouse event: the name is asked in a dialog of its own.
+            QMetaObject::invokeMethod(this, &BenchMainWindow::createList, Qt::QueuedConnection);
+            return true;
+        }
+        return QMainWindow::eventFilter(watched, event);
     }
     if (tabs_ == nullptr || (watched != tabs_ && watched != tabs_->tabBar()) ||
         (event->type() != QEvent::DragEnter && event->type() != QEvent::DragMove &&

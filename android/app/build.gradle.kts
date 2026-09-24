@@ -37,8 +37,10 @@ android {
         applicationId = "com.melody.next"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // From the release tag in CI (-PmelodyVersionName=0.2.0
+        // -PmelodyVersionCode=12); a local build is 0.0.0-dev.
+        versionCode = providers.gradleProperty("melodyVersionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("melodyVersionName").orNull ?: "0.0.0-dev"
     }
 
     signingConfigs {

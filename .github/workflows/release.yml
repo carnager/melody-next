@@ -4,6 +4,10 @@
 # container registry, and attaches melodyd, melody-agent and melody-cli for
 # both, built on Debian 13 (they need its FFmpeg 7, PipeWire and TagLib 2,
 # or newer). Arch Linux users build the packages from packaging/arch.
+#
+# And the Android app. Signed with the keystore in the repository secrets
+# (see the android job); without them it is a debug build, which installs
+# but cannot be updated in place by a later signed one.
 name: release
 
 on:
@@ -64,16 +68,55 @@ jobs:
           name: binaries-${{ matrix.arch }}
           path: melody-*.tar.gz
 
+  android:
+    runs-on: ubuntu-latest
+    env:
+      # Base64 of the keystore file, and what opens it. Set with e.g.
+      #   base64 -w0 release.keystore | gh secret set MELODY_ANDROID_KEYSTORE
+      KEYSTORE: ${{ secrets.MELODY_ANDROID_KEYSTORE }}
+      MELODY_ANDROID_STORE_PASSWORD: ${{ secrets.MELODY_ANDROID_STORE_PASSWORD }}
+      MELODY_ANDROID_KEY_ALIAS: ${{ secrets.MELODY_ANDROID_KEY_ALIAS }}
+      MELODY_ANDROID_KEY_PASSWORD: ${{ secrets.MELODY_ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Build
+        working-directory: android
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = tag ] || version="0.0.0-${GITHUB_SHA::7}"
+          properties="-PmelodyVersionName=${version} -PmelodyVersionCode=${GITHUB_RUN_NUMBER}"
+          if [ -n "${KEYSTORE}" ]; then
+            echo "${KEYSTORE}" | base64 -d > "${RUNNER_TEMP}/release.keystore"
+            export MELODY_ANDROID_STORE_FILE="${RUNNER_TEMP}/release.keystore"
+            ./gradlew --no-daemon assembleRelease ${properties}
+            cp app/build/outputs/apk/release/app-release.apk "../melody-${version}.apk"
+          else
+            echo "::warning::No MELODY_ANDROID_KEYSTORE secret: attaching a debug build"
+            ./gradlew --no-daemon assembleDebug ${properties}
+            cp app/build/outputs/apk/debug/app-debug.apk "../melody-${version}-debug.apk"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: melody-*.apk
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [image, binaries]
+    needs: [image, binaries, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: binaries-*
+          pattern: "*"
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: melody-*.tar.gz
+          files: |
+            melody-*.tar.gz
+            melody-*.apk
           generate_release_notes: true

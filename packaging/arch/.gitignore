@@ -1,5 +1,5 @@
 # makepkg works in this directory: VCS clone, build/package trees, products.
-/trackknife/
+/melody-next/
 /src/
 /pkg/
 *.pkg.tar.zst

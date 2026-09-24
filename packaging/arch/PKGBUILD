@@ -8,20 +8,20 @@ pkgname=(trackknife-git melodyd-git melody-agent-git melody-cli-git)
 pkgver=r0
 pkgrel=1
 arch=(x86_64 aarch64)
-url="https://github.com/carnager/trackknife"
+url="https://github.com/carnager/melody-next"
 license=(GPL-3.0-only)
 makedepends=(cmake git ninja nlohmann-json qt6-base
              curl ffmpeg libebur128 libopenmpt libpipewire libutf8proc openssl sqlite taglib)
-source=("trackknife::git+https://github.com/carnager/trackknife.git")
+source=("melody-next::git+https://github.com/carnager/melody-next.git")
 sha256sums=('SKIP')
 
 pkgver() {
-  cd trackknife
+  cd melody-next
   printf "r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-  cd trackknife
+  cd melody-next
   # Warnings-as-errors stays off so packaging never fails on warnings a
   # future compiler invents. Tests are opt-in: export TRACKKNIFE_CHECK=1.
   local testing=OFF
@@ -34,12 +34,12 @@ build() {
 
 check() {
   [[ -n ${TRACKKNIFE_CHECK:-} ]] || return 0
-  cd trackknife/build/release
+  cd melody-next/build/release
   QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 }
 
 _install() {
-  DESTDIR="$pkgdir" cmake --install "$srcdir/trackknife/build/release" --component "$1"
+  DESTDIR="$pkgdir" cmake --install "$srcdir/melody-next/build/release" --component "$1"
 }
 
 package_trackknife-git() {
@@ -52,7 +52,7 @@ package_trackknife-git() {
   conflicts=(trackknife trackbench-git)
   replaces=(trackbench-git)
   _install app
-  cd "$srcdir/trackknife"
+  cd "$srcdir/melody-next"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 THIRD_PARTY.md "$pkgdir/usr/share/doc/$pkgname/THIRD_PARTY.md"
 }
@@ -63,7 +63,7 @@ package_melodyd-git() {
   provides=(melodyd)
   conflicts=(melodyd)
   _install engine
-  install -Dm644 "$srcdir/trackknife/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/melody-next/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 package_melody-agent-git() {
@@ -72,7 +72,7 @@ package_melody-agent-git() {
   provides=(melody-agent)
   conflicts=(melody-agent)
   _install agent
-  install -Dm644 "$srcdir/trackknife/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/melody-next/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 
 package_melody-cli-git() {
@@ -81,5 +81,5 @@ package_melody-cli-git() {
   provides=(melody-cli)
   conflicts=(melody-cli)
   _install cli
-  install -Dm644 "$srcdir/trackknife/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/melody-next/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

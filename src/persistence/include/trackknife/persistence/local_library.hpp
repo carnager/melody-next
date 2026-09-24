@@ -43,6 +43,9 @@ struct LibraryQuery {
     std::optional<std::string> raw_path;
     std::size_t offset{0};
     std::size_t limit{200};
+    // Albums and tracks by when they came into the library, newest first,
+    // rather than by artist and name.
+    bool newest_first{false};
 };
 
 struct LibraryEntry {
@@ -63,6 +66,9 @@ struct LibraryEntry {
     std::string date{};
     // A track's own title, as tagged -- `label` is how the tree shows it.
     std::string title{};
+    // When it came into the library (an album: its newest track), in Unix
+    // seconds; 0 for artists.
+    std::int64_t added{0};
 };
 
 struct LibraryPage {

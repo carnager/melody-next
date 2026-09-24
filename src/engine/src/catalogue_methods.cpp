@@ -131,6 +131,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         }
         request.offset = params.value("offset", std::size_t{0});
         request.limit = params.value("limit", std::size_t{200});
+        request.newest_first = params.value("newest_first", false);
         return request;
     };
 
@@ -151,6 +152,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             rendered["rating"] = entry.rating;
             rendered["date"] = protocol::displayable_text(entry.date);
             rendered["title"] = protocol::displayable_text(entry.title);
+            rendered["added"] = entry.added;
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};

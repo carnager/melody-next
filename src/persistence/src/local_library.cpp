@@ -22,6 +22,7 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
+#include <ctime>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -530,13 +531,21 @@ translate_predicate(const query::TkqPredicate& predicate) {
         return clause;
     }
     const auto canonical = internal::tkq_canonical_field(predicate.field);
-    if (canonical == "rating" || canonical == "albumrating") {
+    if (canonical == "rating" || canonical == "albumrating" || canonical == "dayssinceadded" ||
+        canonical == "albumdayssinceadded") {
         // ADR-0179: the stored rating joined by content identity; NULL means
-        // unrated (a zero rating deletes the row, so no value is 0).
+        // unrated (a zero rating deletes the row, so no value is 0). Days
+        // since a track -- or its album's newest -- came into the library
+        // read the same way: NULL when that is not known.
         const std::string value =
             canonical == "rating"
                 ? "(SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash)"
-                : "(SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash)";
+            : canonical == "albumrating"
+                ? "(SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash)"
+            : canonical == "dayssinceadded"
+                ? "(CASE WHEN t.added>0 THEN (strftime('%s','now')-t.added)/86400 END)"
+                : "(SELECT CASE WHEN max(a.added)>0 THEN (strftime('%s','now')-max(a.added))/86400 "
+                  "END FROM local_library_tracks a WHERE a.album_key=t.album_key)";
         switch (predicate.comparison) {
         case TkqComparison::is:
             clause.sql = "(CAST(" + value + " AS TEXT)=?)";
@@ -860,6 +869,46 @@ void backfill_rating_identities(sqlite3* db) {
 
 } // namespace
 
+namespace {
+
+// Tracks indexed before the library kept when they came: dated by their
+// file's modification time, from the revision recorded when last read
+// ("2:device:inode:size:seconds:nanoseconds"). Runs once; nothing is 0 after.
+void backfill_added(sqlite3* db) {
+    Statement pending{db, "SELECT count(*) FROM local_library_tracks WHERE added=0"};
+    if (!pending.next() || pending.number(0) == 0) {
+        return;
+    }
+    Transaction transaction{db};
+    Statement rows{db, "SELECT raw_path,revision FROM local_library_tracks WHERE added=0"};
+    Statement update{db, "UPDATE local_library_tracks SET added=? WHERE raw_path=?"};
+    while (rows.next()) {
+        const auto revision = rows.bytes(1);
+        std::int64_t seconds = 1;
+        // The fifth field; an unreadable one still leaves the row dated, so
+        // this does not run again for it.
+        std::size_t field = 0;
+        std::size_t start = 0;
+        for (std::size_t index = 0; index <= revision.size(); ++index) {
+            if (index == revision.size() || revision[index] == ':') {
+                if (field == 4) {
+                    std::from_chars(revision.data() + start, revision.data() + index, seconds);
+                    break;
+                }
+                ++field;
+                start = index + 1;
+            }
+        }
+        update.number(1, std::max<std::int64_t>(seconds, 1));
+        update.blob(2, rows.bytes(0));
+        update.next();
+        update.reset();
+    }
+    transaction.commit();
+}
+
+} // namespace
+
 core::Result<LocalLibrary> LocalLibrary::open(const std::filesystem::path& path) {
     return checked([&] {
         auto migrated = ListRepository::open(path);
@@ -878,6 +927,7 @@ core::Result<LocalLibrary> LocalLibrary::open(const std::filesystem::path& path)
         // dominated large scans. The journals keep synchronous=FULL.
         execute(impl->db, "PRAGMA synchronous=NORMAL");
         backfill_rating_identities(impl->db);
+        backfill_added(impl->db);
         return LocalLibrary{std::move(impl)};
     });
 }
@@ -945,7 +995,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         switch (query.kind) {
         case LibraryEntryKind::artist:
             columns = "artist,artist,artist,'',count(*),sum(available),0,"
-                      "count(DISTINCT album_key),'',0,''";
+                      "count(DISTINCT album_key),'',0,'',0";
             order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
@@ -954,15 +1004,21 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             // aggregate would be rejected inside the correlated subquery.
             columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1,"
                       "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
-                      "WHERE hash=album_rating_hash),0),min(date)";
-            order = " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),min(album) "
-                    "COLLATE NOCASE,album_key";
+                      "WHERE hash=album_rating_hash),0),min(date),max(added)";
+            order = query.newest_first
+                        ? " GROUP BY album_key ORDER BY max(added) DESC,min(artist) COLLATE "
+                          "NOCASE,min(album) COLLATE NOCASE,album_key"
+                        : " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),"
+                          "min(album) COLLATE NOCASE,album_key";
             break;
         case LibraryEntryKind::track:
             columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
-                      "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date";
-            order = " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
-                    "NOCASE,raw_path";
+                      "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date,"
+                      "added";
+            order = query.newest_first
+                        ? " ORDER BY added DESC,album_key,disc,track,raw_path"
+                        : " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
+                          "NOCASE,raw_path";
             break;
         }
         // As much as is asked for, up to the library's result cap: a browse
@@ -988,6 +1044,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                  static_cast<std::size_t>(statement.number(7)), statement.bytes(8),
                  static_cast<unsigned>(statement.number(9))});
             page.entries.back().date = statement.bytes(10);
+            page.entries.back().added = statement.number(11);
             if (query.kind == LibraryEntryKind::track) {
                 page.entries.back().title = page.entries.back().label;
             }
@@ -1025,7 +1082,8 @@ constexpr auto filter_columns =
     "t.raw_path,t.title,t.artist,t.album,t.album_key,t.date,t.search_track,t.disc,t.track,"
     "t.codec_name,t.sample_rate,t.bits,t.channels,t.duration_ms,"
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash),-1),"
-    "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1)";
+    "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1),"
+    "t.added,(SELECT max(a.added) FROM local_library_tracks a WHERE a.album_key=t.album_key)";
 constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,t.album_key,t.disc,t.track,"
                               "t.title COLLATE NOCASE,t.raw_path";
 
@@ -1258,6 +1316,8 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
         row.facts.duration_ms = select.number(13);
         row.facts.rating = select.number(14);
         row.facts.album_rating = select.number(15);
+        row.facts.added = select.number(16);
+        row.facts.album_added = select.number(17);
         if (need_rows) {
             load_field_rows(fields, row.raw_path, row);
         }
@@ -1454,6 +1514,10 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
             row.facts.duration_ms = select.number(13);
             row.facts.rating = select.number(14);
             row.facts.album_rating = select.number(15);
+            row.facts.added = select.number(16);
+            row.facts.album_added = select.number(17);
+        row.facts.added = select.number(16);
+        row.facts.album_added = select.number(17);
             load_field_rows(fields, path, row);
             result.push_back({path, std::move(row.facts)});
         }
@@ -1599,8 +1663,11 @@ enum class CommitOutcome : std::uint8_t { committed, failed, root_lost };
 // Stores one prepared file in its own transaction, with the scan's guards:
 // the file unchanged since it was read, and its root still scanning under
 // `generation` -- the token the row is marked seen with.
+// `first_scan`: the root had no tracks when this scan began, so what it finds
+// has been there all along, as far as anyone knows -- dated by its file.
+// Otherwise a track first stored now arrived now.
 CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
-                                   const std::string& generation) {
+                                   const std::string& generation, const bool first_scan) {
     if (prepared.failed) {
         Statement incomplete{
             db,
@@ -1629,8 +1696,8 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
             "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
             "release_id,date,disc,track,search_track,search_album,available,seen,"
             "codec_name,sample_rate,bits,channels,duration_ms,"
-            "rating_hash,album_rating_hash) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?) "
+            "rating_hash,album_rating_hash,added) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(raw_path) DO UPDATE SET "
             "root=excluded.root,revision=excluded.revision,title=excluded.title,artist="
             "excluded.artist,album=excluded.album,album_key=excluded.album_key,"
@@ -1653,6 +1720,10 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
     upsert.number(19, prepared.technicals.duration_ms);
     upsert.text(20, identity.track_hash);
     upsert.text(21, identity.album_hash);
+    // Only a new row takes it: a track rescanned or retagged keeps when it
+    // came, which the update below leaves alone.
+    upsert.number(22, first_scan ? prepared.before.modification_time_seconds
+                                 : static_cast<std::int64_t>(std::time(nullptr)));
     upsert.next();
     write_field_rows(db, prepared.raw_path, prepared.document);
     transaction.commit();
@@ -1844,7 +1915,8 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
                                                      .revision = revision_key(*before),
                                                      .before = *before},
                                          cancellation);
-            if (commit_prepared_file(db, prepared, root->scan_token) ==
+            // A file refreshed into a known root is new to the library now.
+            if (commit_prepared_file(db, prepared, root->scan_token, false) ==
                 CommitOutcome::committed) {
                 ++refreshed;
             }
@@ -1889,6 +1961,13 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
             }
             bool complete = true;
             bool root_lost = false;
+            // Decided before anything is stored: a first scan stores tracks
+            // too, and they must not make the rest of it look like a later one.
+            const bool first_scan = [&] {
+                Statement any{db, "SELECT 1 FROM local_library_tracks WHERE root=? LIMIT 1"};
+                any.blob(1, root.raw_path);
+                return !any.next();
+            }();
             PreparationPipeline pipeline{scan_worker_count(), cancellation};
             // Commits one prepared file in its own transaction with the
             // unchanged guards: fresh revision, current root scan token.
@@ -1896,7 +1975,7 @@ core::Result<LibraryScanResult> LocalLibrary::scan(const core::CancellationToken
                 if (root_lost) {
                     return;
                 }
-                switch (commit_prepared_file(db, prepared, generation)) {
+                switch (commit_prepared_file(db, prepared, generation, first_scan)) {
                 case CommitOutcome::committed:
                     ++progress.indexed;
                     break;

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <ctime>
 #include <utility>
 
 namespace trackknife::persistence {
@@ -41,6 +42,12 @@ std::string tkq_canonical_field(const std::string& field) {
 } // namespace internal
 
 namespace {
+
+// Whole days from `seconds` (Unix) to now, as SQLite's
+// (strftime('%s','now') - added) / 86400 gives them.
+[[nodiscard]] std::int64_t days_since(const std::int64_t seconds) {
+    return (static_cast<std::int64_t>(std::time(nullptr)) - seconds) / 86'400;
+}
 
 std::string lower(const std::string& value) {
     const auto result = core::unicodeSimpleLower(value);
@@ -106,6 +113,12 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         }
         if (canonical == "albumrating" && row_.album_rating >= 0) {
             return std::to_string(row_.album_rating);
+        }
+        if (canonical == "dayssinceadded" && row_.added > 0) {
+            return std::to_string(days_since(row_.added));
+        }
+        if (canonical == "albumdayssinceadded" && row_.album_added > 0) {
+            return std::to_string(days_since(row_.album_added));
         }
         return std::nullopt;
     }
@@ -212,10 +225,15 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         return compare_number(value, predicate.comparison, predicate.number);
     }
     const auto canonical = internal::tkq_canonical_field(predicate.field);
-    if (canonical == "rating" || canonical == "albumrating") {
+    if (canonical == "rating" || canonical == "albumrating" || canonical == "dayssinceadded" ||
+        canonical == "albumdayssinceadded") {
         // ADR-0179: the rating store shadows same-named tags, exactly like
-        // the technical pseudo-fields shadow theirs.
-        const auto value = canonical == "rating" ? row.rating : row.album_rating;
+        // the technical pseudo-fields shadow theirs; so do days since added.
+        const auto added = canonical == "dayssinceadded" ? row.added : row.album_added;
+        const auto value = canonical == "rating"        ? row.rating
+                           : canonical == "albumrating" ? row.album_rating
+                           : added > 0                  ? days_since(added)
+                                                        : -1;
         const auto present = value >= 0;
         switch (predicate.comparison) {
         case TkqComparison::present:

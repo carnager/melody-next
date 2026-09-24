@@ -8,11 +8,14 @@
 #include "trackknife/persistence/rating_identity.hpp"
 #include "trackknife/query/tkq.hpp"
 
+#include <sqlite3.h>
 #include <taglib/flacfile.h>
 #include <taglib/tpropertymap.h>
 
 #include <cstddef>
 #include <filesystem>
+#include <ctime>
+#include <utime.h>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -124,6 +127,12 @@ int main(const int argc, char** argv) {
     const auto bare = fixture(fixtures, root, "c.flac",
                               {{"TITLE", "Gamma"}, {"ARTIST", "Someone"}, {"ALBUM", "Quiet"}});
     CHECK(!jazz.empty() && !rock.empty() && !bare.empty());
+    // An old file, as a library found in a folder already holds.
+    constexpr std::time_t long_ago = 1'000'000'000; // 2001-09-09
+    {
+        const utimbuf times{.actime = long_ago, .modtime = long_ago};
+        CHECK(::utime(jazz.c_str(), &times) == 0);
+    }
 
     auto library = persistence::LocalLibrary::open(base / "state.sqlite");
     CHECK(library.has_value());
@@ -134,6 +143,18 @@ int main(const int argc, char** argv) {
     persistence::LibraryScanProgress progress;
     CHECK(library->scan({}, progress).has_value());
     CHECK(progress.indexed.load() == 3U);
+    // A folder's first scan dates what it finds by its files.
+    {
+        persistence::LibraryQuery albums;
+        albums.kind = persistence::LibraryEntryKind::album;
+        const auto first = library->query(albums);
+        CHECK(first.has_value());
+        bool dated_by_file = false;
+        for (const auto& entry : first->entries) {
+            dated_by_file = dated_by_file || (entry.album == "Kind of Blue" && entry.added == long_ago);
+        }
+        CHECK(dated_by_file);
+    }
 
     const auto paths_of = [&](const std::string& source) {
         auto compiled = query::compile_tkq(source);
@@ -284,6 +305,73 @@ int main(const int argc, char** argv) {
     ten.history = std::array<std::int64_t, 6>{10, -1, -1, 10, -1, -1};
     CHECK(*persistence::tkq_sort_key(*numeric_sort, two) <
           *persistence::tkq_sort_key(*numeric_sort, ten));
+
+    // When things came into the library. A folder's first scan dates them by
+    // their files; one found later arrived when it was found.
+    persistence::LibraryQuery newest;
+    newest.kind = persistence::LibraryEntryKind::album;
+    newest.newest_first = true;
+    const auto dated = library->query(newest);
+    CHECK(dated.has_value());
+    const auto added_of = [&](const std::string& album) -> std::int64_t {
+        for (const auto& entry : dated->entries) {
+            if (entry.album == album) {
+                return entry.added;
+            }
+        }
+        return -1;
+    };
+    // An album is as new as its newest track: "Kind of Blue" gained one
+    // above, found by a later scan.
+    CHECK(added_of("Kind of Blue") > long_ago);
+    const auto fresh = fixture(fixtures, root, "e.flac",
+                               {{"TITLE", "Epsilon"}, {"ARTIST", "Newcomer"}, {"ALBUM", "Arrival"}});
+    {
+        const utimbuf times{.actime = long_ago, .modtime = long_ago};
+        // Copied in with its old date kept (cp -p): still new to the library.
+        CHECK(::utime(fresh.c_str(), &times) == 0);
+    }
+    const auto before_scan = static_cast<std::int64_t>(std::time(nullptr));
+    CHECK(library->scan({}, progress).has_value());
+    const auto rescanned = library->query(newest);
+    CHECK(rescanned && !rescanned->entries.empty());
+    // Newest first: the one just found, however old its file.
+    CHECK(rescanned->entries.front().added >= before_scan);
+    bool arrived = false;
+    for (const auto& entry : rescanned->entries) {
+        arrived = arrived || (entry.album == "Arrival" && entry.added >= before_scan);
+    }
+    CHECK(arrived);
+    CHECK(contains(paths_of("dayssinceadded LESS 1"), fresh));
+    CHECK(!contains(paths_of("dayssinceadded LESS 1"), jazz));
+    CHECK(contains(paths_of("dayssinceadded GREATER 3650"), jazz));
+    CHECK(paths_of("albumdayssinceadded GREATER 3650").empty());
+    // Retagged, a track keeps when it came.
+    {
+        TagLib::FLAC::File file{jazz.c_str()};
+        auto properties = file.properties();
+        properties.replace("GENRE", TagLib::String{"Cool Jazz"});
+        file.setProperties(properties);
+        CHECK(file.save());
+    }
+    CHECK(library->scan({}, progress).has_value());
+    CHECK(contains(paths_of("dayssinceadded GREATER 3650"), jazz));
+
+    // A library indexed before tracks were dated is dated by their files'
+    // recorded times when it next opens: e.flac's is from 2001, though it
+    // came in today.
+    {
+        sqlite3* raw = nullptr;
+        CHECK(sqlite3_open((base / "state.sqlite").c_str(), &raw) == SQLITE_OK);
+        CHECK(sqlite3_exec(raw, "UPDATE local_library_tracks SET added=0", nullptr, nullptr,
+                           nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    library = persistence::LocalLibrary::open(base / "state.sqlite");
+    CHECK(library.has_value());
+    CHECK(contains(paths_of("dayssinceadded GREATER 3650"), fresh));
+    CHECK(paths_of("dayssinceadded MISSING").empty());
+
     std::filesystem::remove_all(base, fs_error);
     return failures == 0 ? 0 : 1;
 }

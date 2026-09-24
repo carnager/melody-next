@@ -43,6 +43,11 @@ struct TkqRowFacts {
     // shadow same-named file tags.
     std::int64_t rating{-1};
     std::int64_t album_rating{-1};
+    // When the track, and its album's newest track, came into the library
+    // (Unix seconds); 0 when not known. Read as days since by the
+    // `dayssinceadded` and `albumdayssinceadded` pseudo-fields.
+    std::int64_t added{0};
+    std::int64_t album_added{0};
     // Explicit HISTORY accessors; absence means unavailable, not unplayed.
     // playcount, lastplayed, dayssinceplayed, and their three album equivalents.
     std::optional<std::array<std::int64_t, 6>> history;

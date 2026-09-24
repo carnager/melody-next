@@ -79,7 +79,7 @@ add_test(NAME query-tkq COMMAND trackknife_query_tkq_tests)
 add_executable(trackknife_local_library_filter_tests local_library_filter_test.cpp)
 target_link_libraries(
     trackknife_local_library_filter_tests
-    PRIVATE Trackknife::Persistence Trackknife::Query PkgConfig::TAGLIB
+    PRIVATE Trackknife::Persistence Trackknife::Query PkgConfig::TAGLIB PkgConfig::SQLITE3
             trackknife_project_options trackknife_project_warnings
 )
 add_test(NAME local-library-filter COMMAND trackknife_local_library_filter_tests

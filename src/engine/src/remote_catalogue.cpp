@@ -290,6 +290,9 @@ namespace {
     }
     params["offset"] = request.offset;
     params["limit"] = request.limit;
+    if (request.newest_first) {
+        params["newest_first"] = true;
+    }
     return params;
 }
 
@@ -323,6 +326,7 @@ namespace {
         // Absent from an engine older than dates on entries.
         entry.date = value.value("date", std::string{});
         entry.title = value.value("title", std::string{});
+        entry.added = value.value("added", std::int64_t{0});
         page.entries.push_back(std::move(entry));
     }
     return page;

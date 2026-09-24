@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 43U;
+constexpr unsigned current_schema_version = 44U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1323,6 +1323,19 @@ UPDATE schema_version SET version = 42;
         constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
 ALTER TABLE list_documents ADD COLUMN remote INTEGER NOT NULL DEFAULT 0;
 UPDATE schema_version SET version = 43;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 43) {
+        // When each track came into the library; 0 until filled from the
+        // file's modification time when the library next opens.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE local_library_tracks ADD COLUMN added INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX local_library_added ON local_library_tracks(added);
+UPDATE schema_version SET version = 44;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

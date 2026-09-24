@@ -5,6 +5,8 @@
 // machine's audio. The engine's player decides what plays; this makes sound.
 
 #include "agent/agent.hpp"
+#include "agent/guests.hpp"
+#include "agent/speaker_arbiter.hpp"
 
 #include <unistd.h>
 
@@ -26,10 +28,12 @@ void request_stop(int) { stop_requested.store(true); }
 
 void usage() {
     std::cerr
-        << "usage: melody-agent --server HOST:PORT [--password PASS | --password-file FILE]\n"
+        << "usage: melody-agent [--server HOST:PORT] [--password PASS | --password-file FILE]\n"
         << "                    [--name NAME] [--music-root DIR] [--stream]\n"
         << "\n"
-        << "  --server        the engine: HOST:PORT (melodyd --listen), or a unix socket path\n"
+        << "  --server        the engine: HOST:PORT (melodyd --listen), or a unix socket path.\n"
+        << "                  Without one, every engine on the network that announces itself\n"
+        << "                  is played for, the newest to start playing having the speakers\n"
         << "  --password      the engine's password, if it has one\n"
         << "  --password-file read the password from FILE instead\n"
         << "  --name          what the engine calls this output (default: the host name)\n"
@@ -94,6 +98,34 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
         }
     }
+    std::signal(SIGINT, request_stop);
+    std::signal(SIGTERM, request_stop);
+    std::signal(SIGPIPE, SIG_IGN);
+    if (server.empty()) {
+        // No engine named: every engine on the network that announces itself,
+        // the newest to start playing having the speakers.
+        trackknife::agent::SpeakerArbiter arbiter{nullptr};
+        trackknife::agent::Guests guests{
+            trackknife::agent::Guests::Config{.name = config.name,
+                                              .password = token,
+                                              .music_root = config.music_root,
+                                              .own_id = {},
+                                              .already = {}},
+            arbiter};
+        if (!guests.start()) {
+            std::cerr << "melody-agent: name an engine with --server\n";
+            return EXIT_FAILURE;
+        }
+        arbiter.start();
+        std::cerr << "melody-agent: \"" << config.name
+                  << "\" playing for the engines on the network\n";
+        while (!stop_requested.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        }
+        arbiter.stop();
+        guests.stop();
+        return EXIT_SUCCESS;
+    }
     const auto endpoint = trackknife::protocol::Endpoint::parse(server, token);
     if (!endpoint) {
         std::cerr << "melody-agent: --server wants HOST:PORT or a socket path\n\n";
@@ -113,9 +145,6 @@ int main(int argc, char** argv) {
         std::cerr << "melody-agent: " << agent.error().message << "\n";
         return EXIT_FAILURE;
     }
-    std::signal(SIGINT, request_stop);
-    std::signal(SIGTERM, request_stop);
-    std::signal(SIGPIPE, SIG_IGN);
     std::cerr << "melody-agent: \"" << config.name << "\" connecting to " << endpoint->describe()
               << "\n";
     (*agent)->start();

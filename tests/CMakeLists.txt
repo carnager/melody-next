@@ -364,6 +364,13 @@ add_test(
 )
 set_tests_properties(engine-daemon PROPERTIES TIMEOUT 60)
 
+add_test(
+    NAME engine-discovery
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_discovery_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_agent>"
+)
+set_tests_properties(engine-discovery PROPERTIES TIMEOUT 60)
+
 if(TARGET trackknife_bench_ui)
     qt_add_executable(trackknife_remote_mount_tests remote_mount_test.cpp)
     target_link_libraries(trackknife_remote_mount_tests PRIVATE Trackknife::BenchUi Qt6::Test
@@ -715,6 +722,15 @@ target_link_libraries(
 )
 add_test(NAME debug-log COMMAND trackknife_debug_log_tests)
 
+add_executable(trackknife_discovery_tests discovery_test.cpp)
+target_link_libraries(
+    trackknife_discovery_tests
+    PRIVATE Trackknife::Discovery Trackknife::Core trackknife_project_options
+            trackknife_project_warnings
+)
+add_test(NAME discovery COMMAND trackknife_discovery_tests)
+set_tests_properties(discovery PROPERTIES TIMEOUT 60)
+
 # No test writes into the real home's data: every one gets data and cache
 # directories of its own under the build tree. Tests once left databases and
 # engine logs in ~/.local/share. The config directory stays the real one:
@@ -725,14 +741,8 @@ foreach(trackknife_test IN LISTS trackknife_all_tests)
     set(trackknife_test_home "${CMAKE_CURRENT_BINARY_DIR}/test-home/${trackknife_test}")
     set_property(TEST ${trackknife_test} APPEND PROPERTY ENVIRONMENT
         "XDG_DATA_HOME=${trackknife_test_home}/data"
-        "XDG_CACHE_HOME=${trackknife_test_home}/cache")
+        "XDG_CACHE_HOME=${trackknife_test_home}/cache"
+        # Engines a test starts are announced under a service of the test's
+        # own: not found by the real ones on the network, nor by other tests.
+        "TRACKKNIFE_DISCOVERY_SERVICE=_mt-${trackknife_test}._tcp")
 endforeach()
-
-add_executable(trackknife_discovery_tests discovery_test.cpp)
-target_link_libraries(
-    trackknife_discovery_tests
-    PRIVATE Trackknife::Discovery Trackknife::Core trackknife_project_options
-            trackknife_project_warnings
-)
-add_test(NAME discovery COMMAND trackknife_discovery_tests)
-set_tests_properties(discovery PROPERTIES TIMEOUT 60)

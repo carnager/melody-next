@@ -494,7 +494,8 @@ int main(int argc, char** argv) {
         auto built_in = start_agent(port, agent_root, "agent-test-token", "desk");
         require(built_in != nullptr && eventually([&] { return built_in->registered(); }),
                 "its built-in agent registers with the other engine");
-        trackknife::agent::SpeakerArbiter arbiter{**host, *built_in, "the server"};
+        trackknife::agent::SpeakerArbiter arbiter{&**host};
+        arbiter.add_guest("the server", *built_in);
         arbiter.start();
         require(outputs.select("agent:desk").has_value(), "the other engine chooses it");
         player->replace_queue(entries);

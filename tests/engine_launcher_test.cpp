@@ -262,6 +262,9 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     settings.sync();
     QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
                 .contains(QStringLiteral("--play-for")));
+    // And every engine found on the network may play here too.
+    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
+                .contains(QStringLiteral("--agent")));
     auto started = connectLocalEngine(scratch.engine);
     QVERIFY2(started.has_value(), started ? "" : started.error().message.c_str());
 
@@ -298,6 +301,8 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     settings.sync();
     QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
                  .contains(QStringLiteral("--play-for")));
+    QVERIFY(!localEngineArguments(scratch.engine, localEngineSharing())
+                 .contains(QStringLiteral("--agent")));
     settings.clear();
     stop(scratch.engine);
     remote.terminate();

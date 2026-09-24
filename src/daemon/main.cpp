@@ -7,7 +7,10 @@
 // the engine took the name early (ADR-0226).
 
 #include "agent/agent.hpp"
+#include "agent/guests.hpp"
 #include "agent/speaker_arbiter.hpp"
+#include "trackknife/core/stable_id.hpp"
+#include "trackknife/discovery/mdns.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
@@ -96,6 +99,7 @@ void usage() {
               << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
               << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
               << "                [--play-for-music-root DIR]]\n"
+              << "               [--agent [--agent-password PASS] [--agent-music-root DIR]]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
               << "  --state DIR    where the database lives (default\n"
@@ -126,6 +130,14 @@ void usage() {
               << "                 its password, if it has one\n"
               << "  --play-for-music-root DIR\n"
               << "                 where its music is mounted here; without one it streams\n"
+              << "  --agent        play for every other engine found on the network, on this\n"
+              << "                 machine's speakers: no melody-agent needed. Engines listening\n"
+              << "                 on the network (--listen) announce themselves to be found.\n"
+              << "  --agent-password PASS, --agent-password-file FILE\n"
+              << "                 for engines that want one (default: --play-for's, else\n"
+              << "                 this engine's own)\n"
+              << "  --agent-music-root DIR\n"
+              << "                 where their music is mounted here; without one it streams\n"
               << "\n"
               << "Speaks protocol v1: one JSON object per line. Try:\n"
               << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -154,6 +166,9 @@ int main(int argc, char** argv) {
     std::string play_for_password;
     std::string play_for_password_file;
     std::optional<std::filesystem::path> play_for_music_root;
+    bool agent_for_all = false;
+    std::string agent_password;
+    std::optional<std::filesystem::path> agent_music_root;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -184,6 +199,19 @@ int main(int argc, char** argv) {
             play_for_password = value();
         } else if (argument == "--play-for-password-file") {
             play_for_password_file = value();
+        } else if (argument == "--agent") {
+            agent_for_all = true;
+        } else if (argument == "--agent-password") {
+            agent_password = value();
+        } else if (argument == "--agent-password-file") {
+            std::ifstream file{value()};
+            std::getline(file, agent_password);
+            while (!agent_password.empty() &&
+                   (agent_password.back() == '\r' || agent_password.back() == ' ')) {
+                agent_password.pop_back();
+            }
+        } else if (argument == "--agent-music-root") {
+            agent_music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for-music-root") {
             play_for_music_root = std::filesystem::path{value()};
         } else if (argument == "--help" || argument == "-h") {
@@ -420,10 +448,51 @@ int main(int argc, char** argv) {
                           << made.error().message << "\n";
             } else {
                 guest = std::move(*made);
-                arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(
-                    *player, *guest,
-                    play_for_name.empty() ? guest_endpoint->describe() : play_for_name);
+                arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(&*player);
+                arbiter->add_guest(
+                    play_for_name.empty() ? guest_endpoint->describe() : play_for_name, *guest);
             }
+        }
+    }
+
+    // This run's identity among engines on the network: what an engine that
+    // plays for others looks for, so it does not play for itself.
+    const auto engine_id = trackknife::core::StableId::random().to_string();
+    std::unique_ptr<trackknife::agent::Guests> guests;
+    if (agent_for_all) {
+        if (!arbiter) {
+            arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(player.get());
+        }
+        guests = std::make_unique<trackknife::agent::Guests>(
+            trackknife::agent::Guests::Config{
+                .name = engine_name,
+                // Asked for, else the one given for --play-for, else this
+                // engine's own: one password set everywhere is the usual case.
+                .password = !agent_password.empty()      ? agent_password
+                            : !play_for_password.empty() ? play_for_password
+                                                         : password,
+                .music_root = agent_music_root,
+                .own_id = engine_id,
+                .already = play_for.empty() ? std::vector<std::string>{}
+                                            : std::vector<std::string>{play_for}},
+            *arbiter);
+    }
+    // Listening on the network, it says so there: agents and clients find it
+    // by name without being told where it is.
+    std::unique_ptr<trackknife::discovery::Announcer> announcer;
+    if (tcp_server) {
+        auto announced = trackknife::discovery::Announcer::start(trackknife::discovery::Advertisement{
+            .instance = engine_name,
+            .port = tcp_server->port(),
+            .txt = {{"id", engine_id},
+                    {"proto", "1"},
+                    {"auth", password.empty() ? "0" : "1"},
+                    {"http", streams ? std::to_string(streams->port()) : std::string{}}}});
+        if (announced) {
+            announcer = std::move(*announced);
+        } else {
+            std::cerr << "melodyd: not announced on the network: " << announced.error().message
+                      << "\n";
         }
     }
 
@@ -439,9 +508,15 @@ int main(int argc, char** argv) {
     if (streams) {
         streams->start();
     }
+    if (guests && guests->start()) {
+        std::cerr << "melodyd: playing for the engines on the network as \"" << engine_name
+                  << "\"\n";
+    }
+    if (arbiter) {
+        arbiter->start();
+    }
     if (guest) {
         guest->start();
-        arbiter->start();
         std::cerr << "melodyd: playing for " << guest_endpoint->describe() << " as \""
                   << engine_name << "\"\n";
     }
@@ -453,8 +528,12 @@ int main(int argc, char** argv) {
     }
 
     std::cerr << "melodyd: stopping\n";
+    announcer.reset();
     if (arbiter) {
         arbiter->stop();
+    }
+    if (guests) {
+        guests->stop();
     }
     if (guest) {
         guest->stop();

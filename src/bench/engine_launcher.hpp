@@ -55,6 +55,8 @@ struct LocalEngineSharing final {
     QString play_for;          // empty: none
     QString play_for_password; // empty: open
     QString play_for_music_root;
+    // Plays for every engine found on the network, too.
+    bool play_for_found{false};
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
 };
 [[nodiscard]] LocalEngineSharing localEngineSharing();

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 # ADR-0228: melody-agent, an output a melodyd plays on.
-add_library(trackknife_agent STATIC agent.cpp speaker_arbiter.cpp)
+add_library(trackknife_agent STATIC agent.cpp guests.cpp speaker_arbiter.cpp)
 add_library(Trackknife::Agent ALIAS trackknife_agent)
 target_include_directories(trackknife_agent PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(
     trackknife_agent
-    PUBLIC Trackknife::Output Trackknife::Engine trackknife_project_options
+    PUBLIC Trackknife::Output Trackknife::Engine Trackknife::Discovery trackknife_project_options
     PRIVATE trackknife_project_warnings
 )
 target_compile_features(trackknife_agent PUBLIC cxx_std_23)

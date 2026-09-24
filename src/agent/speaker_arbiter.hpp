@@ -7,36 +7,47 @@
 #include "trackknife/engine/player.hpp"
 
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace trackknife::agent {
 
-// One machine's speakers, two engines wanting them: this one's own player,
-// and another engine playing here through this engine's built-in agent. The
-// newest to start playing gets them; the other is paused, and this engine's
-// player says who took them.
+// One machine's speakers, several engines wanting them: this machine's own
+// engine, if it has one, and every other engine playing here through an
+// agent. The newest to start playing gets them; the rest are paused, and
+// this machine's engine says who took them.
 class SpeakerArbiter final {
   public:
-    SpeakerArbiter(engine::Player& player, Agent& guest, std::string guest_name);
+    // `player` is this machine's own engine, or nullptr where there is none
+    // (a melody-agent on its own).
+    explicit SpeakerArbiter(engine::Player* player);
     SpeakerArbiter(const SpeakerArbiter&) = delete;
     SpeakerArbiter& operator=(const SpeakerArbiter&) = delete;
     ~SpeakerArbiter();
 
+    // Another engine playing here, by the name to show when it takes them.
+    void add_guest(std::string name, Agent& guest);
+    void remove_guest(const Agent& guest);
+
     void start();
     void stop();
-    // One look at both sides: what the watcher does every tenth of a second.
+    // One look at every side: what the watcher does every tenth of a second.
     void settle();
 
   private:
-    [[nodiscard]] bool local_playing() const;
-    [[nodiscard]] bool guest_playing();
+    struct Party final {
+        std::string name;
+        Agent* guest{nullptr}; // nullptr: this machine's own engine
+        bool was_playing{false};
+    };
+    [[nodiscard]] bool playing(const Party& party) const;
+    void pause(const Party& party) const;
 
     engine::Player* player_;
-    Agent* guest_;
-    const std::string guest_name_;
-    bool local_was_playing_{false};
-    bool guest_was_playing_{false};
+    std::mutex mutex_;
+    std::vector<Party> parties_;
     std::atomic_bool running_{false};
     engine::InterruptiblePause pause_;
     std::thread watcher_;

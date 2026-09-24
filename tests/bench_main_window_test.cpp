@@ -4,6 +4,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/up_next_delegate.hpp"
 #include "bench/quick_pick_popup.hpp"
+#include "trackknife/discovery/mdns.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
@@ -228,6 +229,7 @@ class BenchMainWindowTest final : public QObject {
     void quickAlbumFindsByWordsAndPutsItAway();
     void quickAlbumShiftEnterReplacesAndPlays();
     void quickTrackFindsATrackByItsTitle();
+    void settingsListEnginesFoundOnTheNetwork();
     void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
@@ -869,6 +871,37 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
     QCOMPARE(document.fields.size(), std::size_t{1});
     QCOMPARE(document.fields.front().canonical_name, std::string{"encoding"});
     QCOMPARE(probed_semantic_alias("ENCODER"), std::optional<std::string_view>{"encoding"});
+}
+
+void BenchMainWindowTest::settingsListEnginesFoundOnTheNetwork() {
+    // An engine announcing itself -- under this test's own service name, set
+    // by the test environment, so nothing real is listed or disturbed.
+    auto announcer = discovery::Announcer::start(discovery::Advertisement{
+        .instance = "lounge", .port = 6603, .txt = {{"id", "lounge-id"}, {"auth", "1"}}});
+    if (!announcer) {
+        QSKIP("no multicast DNS here");
+    }
+    BenchMainWindow window;
+    window.show();
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    auto* menu = dialog->findChild<QMenu*>(QStringLiteral("bench-settings-found-engines-menu"));
+    QVERIFY(menu != nullptr);
+    const auto lounge = [menu]() -> QAction* {
+        for (auto* action : menu->actions()) {
+            if (action->text().startsWith(QStringLiteral("lounge — "))) {
+                return action;
+            }
+        }
+        return nullptr;
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(lounge() != nullptr, 8'000);
+    QVERIFY(lounge()->text().contains(QStringLiteral(":6603")));
+    QVERIFY(lounge()->text().endsWith(QStringLiteral("· password")));
+    // Chosen, not typed: its address fills the field.
+    lounge()->trigger();
+    auto* field = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
+    QVERIFY(field->text().endsWith(QStringLiteral(":6603")));
+    dialog->reject();
 }
 
 void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {

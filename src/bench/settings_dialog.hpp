@@ -7,6 +7,8 @@
 
 #include <QDialog>
 
+#include <memory>
+
 class QAction;
 class QCheckBox;
 class QComboBox;
@@ -16,6 +18,10 @@ class QListWidget;
 class QStackedWidget;
 class QSpinBox;
 class QDoubleSpinBox;
+
+namespace trackknife::discovery {
+class Browser;
+}
 
 namespace trackknife::bench {
 
@@ -53,6 +59,7 @@ class SettingsDialog final : public QDialog {
                             std::function<QWidget*(QWidget*)> library_folders = {},
                             std::function<QWidget*(QWidget*)> lastfm = {},
                             QList<QAction*> shortcuts = {});
+    ~SettingsDialog() override;
     void showPage(Page page);
     void editCustomBuffer();
     void focusReplayGainPreamp();
@@ -120,6 +127,8 @@ class SettingsDialog final : public QDialog {
     QLineEdit* remote_mount_{nullptr};
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
+    // Looks for engines while the dialog is open.
+    std::unique_ptr<discovery::Browser> engine_browser_;
     QCheckBox* show_local_library_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -158,6 +159,18 @@ void send_to_group(const int socket, const Message& message) {
     return static_cast<std::size_t>(received);
 }
 
+// The engines' service, unless the environment names another: tests do, so
+// their engines are neither found by nor find the real ones on the network.
+[[nodiscard]] std::string resolved_service(std::string service) {
+    if (service == engine_service) {
+        if (const char* other = std::getenv("TRACKKNIFE_DISCOVERY_SERVICE");
+            other != nullptr && *other != '\0') {
+            return other;
+        }
+    }
+    return service;
+}
+
 } // namespace
 
 // --- Announcer ---------------------------------------------------------------
@@ -169,7 +182,7 @@ core::Result<std::unique_ptr<Announcer>> Announcer::start(Advertisement advertis
         return std::unexpected(std::move(socket.error()));
     }
     return std::unique_ptr<Announcer>{
-        new Announcer{*socket, std::move(advertisement), std::move(service)}};
+        new Announcer{*socket, std::move(advertisement), resolved_service(std::move(service))}};
 }
 
 Announcer::Announcer(const int socket, Advertisement advertisement, std::string service)
@@ -278,7 +291,8 @@ Browser::start(std::function<void(const std::vector<Found>&)> changed, std::stri
     if (!socket) {
         return std::unexpected(std::move(socket.error()));
     }
-    return std::unique_ptr<Browser>{new Browser{*socket, std::move(changed), std::move(service)}};
+    return std::unique_ptr<Browser>{
+        new Browser{*socket, std::move(changed), resolved_service(std::move(service))}};
 }
 
 Browser::Browser(const int socket, std::function<void(const std::vector<Found>&)> changed,

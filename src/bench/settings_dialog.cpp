@@ -5,6 +5,7 @@
 #include "bench/shortcut_settings.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/local_playback.hpp"
+#include "trackknife/discovery/mdns.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -21,6 +22,8 @@
 #include <QLabel>
 #include <QKeySequenceEdit>
 #include <QLineEdit>
+#include <QToolButton>
+#include <QMenu>
 #include <QListWidget>
 #include <QPainter>
 #include <QPushButton>
@@ -74,6 +77,8 @@ class SettingsPageDelegate final : public QStyledItemDelegate {
     }
 };
 } // namespace
+
+SettingsDialog::~SettingsDialog() = default;
 
 SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store,
                                std::function<QWidget*(QWidget*)> library_folders,
@@ -421,7 +426,49 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         QStringLiteral("host:port or socket path; empty: no remote engine"));
     engine_socket_->setText(
         settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Remote engine:"), engine_socket_);
+    // Engines that announce themselves on the network, by name: chosen
+    // rather than typed. The list fills as they answer.
+    auto* found_engines = new QToolButton(remote);
+    found_engines->setObjectName(QStringLiteral("bench-settings-found-engines"));
+    found_engines->setText(QStringLiteral("On the network"));
+    found_engines->setToolTip(QStringLiteral("Engines that announce themselves on this network"));
+    found_engines->setPopupMode(QToolButton::InstantPopup);
+    auto* found_menu = new QMenu(found_engines);
+    found_menu->setObjectName(QStringLiteral("bench-settings-found-engines-menu"));
+    found_engines->setMenu(found_menu);
+    const auto fill_found = [this, found_menu](const std::vector<discovery::Found>& engines) {
+        found_menu->clear();
+        if (engines.empty()) {
+            found_menu->addAction(QStringLiteral("None found yet"))->setEnabled(false);
+            return;
+        }
+        for (const auto& announced : engines) {
+            const auto where = QStringLiteral("%1:%2")
+                                   .arg(QString::fromStdString(announced.address))
+                                   .arg(announced.port);
+            const bool locked = announced.txt.contains("auth") && announced.txt.at("auth") == "1";
+            auto* choice = found_menu->addAction(
+                QStringLiteral("%1 — %2%3")
+                    .arg(QString::fromStdString(announced.instance), where,
+                         locked ? QStringLiteral(" · password") : QString{}));
+            connect(choice, &QAction::triggered, this, [this, where] { engine_socket_->setText(where); });
+        }
+    };
+    fill_found({});
+    if (auto browser = discovery::Browser::start([this, fill_found](
+                                                     const std::vector<discovery::Found>& engines) {
+            QMetaObject::invokeMethod(this, [fill_found, engines] { fill_found(engines); },
+                                      Qt::QueuedConnection);
+        })) {
+        engine_browser_ = std::move(*browser);
+    } else {
+        found_engines->setEnabled(false);
+        found_engines->setToolTip(QString::fromStdString(browser.error().message));
+    }
+    auto* engine_row = new QHBoxLayout;
+    engine_row->addWidget(engine_socket_, 1);
+    engine_row->addWidget(found_engines);
+    engine_form->addRow(QStringLiteral("Remote engine:"), engine_row);
     engine_token_ = new QLineEdit(remote);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
@@ -444,11 +491,12 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         settings.value(QLatin1String(library_remote_mount_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Mounted here at:"), remote_mount_);
     play_for_remote_ =
-        new QCheckBox(QStringLiteral("Let it play on this computer's speakers"), remote);
+        new QCheckBox(QStringLiteral("Let other engines play on this computer's speakers"), remote);
     play_for_remote_->setObjectName(QStringLiteral("bench-settings-play-for-remote"));
     play_for_remote_->setToolTip(QStringLiteral(
-        "This computer's engine appears among the remote engine's outputs, so no melody-agent "
-        "is needed here. Whichever engine starts playing last has the speakers."));
+        "This computer's engine appears among the outputs of the remote engine and of any "
+        "engine found on the network, so no melody-agent is needed here. Whichever starts "
+        "playing last has the speakers."));
     play_for_remote_->setChecked(
         settings.value(QLatin1String(engine_play_for_remote_key), true).toBool());
     engine_form->addRow(QString{}, play_for_remote_);

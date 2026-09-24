@@ -133,6 +133,9 @@ LocalEngineSharing localEngineSharing() {
             settings.value(QLatin1String(SettingsDialog::library_remote_mount_key))
                 .toString()
                 .trimmed(),
+        .play_for_found =
+            settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
+                .toBool(),
     };
 }
 
@@ -142,6 +145,11 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     std::error_code ignored;
     if (!sharing.music_root.isEmpty()) {
         arguments << QStringLiteral("--music-root") << sharing.music_root;
+    }
+    // Any engine found on the network may play here -- and the configured
+    // remote by name as well, for one multicast does not reach (WireGuard).
+    if (sharing.play_for_found) {
+        arguments << QStringLiteral("--agent");
     }
     // Only a remote on the network: one on this computer's own socket plays
     // here already.

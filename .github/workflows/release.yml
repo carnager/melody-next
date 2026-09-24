@@ -1,0 +1,79 @@
+# A release: tag vX.Y.Z and push the tag.
+#
+# Builds the server image for x86_64 and arm64 and publishes it to GitHub's
+# container registry, and attaches melodyd, melody-agent and melody-cli for
+# both, built on Debian 13 (they need its FFmpeg 7, PipeWire and TagLib 2,
+# or newer). Arch Linux users build the packages from packaging/arch.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: names
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/melodyd"
+          echo "tags=${image}:${GITHUB_REF_NAME},${image}:latest" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          tags: ${{ steps.names.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  binaries:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - run: |
+          docker buildx build -f packaging/docker/Dockerfile --target binaries \
+            --platform "linux/${{ matrix.arch }}" --output type=local,dest=dist .
+          name="melody-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
+          mkdir "${name}"
+          cp dist/bin/* "${name}/"
+          cp dist/lib/systemd/user/*.service "${name}/"
+          cp LICENSE "${name}/"
+          tar -czf "${name}.tar.gz" "${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: melody-*.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [image, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: melody-*.tar.gz
+          generate_release_notes: true

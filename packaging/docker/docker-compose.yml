@@ -1,0 +1,35 @@
+# melodyd on a server: TrueNAS, a NAS, anything with Docker.
+#
+#   docker compose up -d
+#
+# Then in Trackknife: Settings → Engine → Remote engine → On the network
+# picks it by name. Add the music folder as the engine sees it -- /music --
+# with Folders… in its library, and Refresh.
+services:
+  melodyd:
+    build:
+      context: ../..
+      dockerfile: packaging/docker/Dockerfile
+    image: melodyd:latest
+    container_name: melodyd
+    # Host networking: agents connect straight to it, and it is announced
+    # on the network by name (multicast DNS does not cross a bridge).
+    network_mode: host
+    restart: unless-stopped
+    # The owner of the state directory below; match your own user.
+    user: "1000:1000"
+    environment:
+      # --name: what Trackknife and the agents call it.
+      # --password-file /state/password: when one is wanted (default: open).
+      MELODYD_OPTIONS: "--name gemenon"
+    volumes:
+      # The library, database and saved queue: keep this.
+      - ./state:/state
+      # The music, read-only: tags are edited in Trackknife over the
+      # network share, not by the engine.
+      - /mnt/music:/music:ro
+      # Speakers on this machine, optional: its PipeWire, handed in. Without
+      # it the engine plays on agents only.
+      # - /run/user/1000/pipewire-0:/run/pipewire/pipewire-0
+    # environment for the PipeWire mount above:
+    #   PIPEWIRE_RUNTIME_DIR: /run/pipewire

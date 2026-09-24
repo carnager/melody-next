@@ -154,7 +154,6 @@ For a bug report, run `trackknife --debug` in a terminal and include the output.
 ## More screenshots
 
 <p>
-  <a href="Screenshots/search.png"><img src="Screenshots/search.png" height="180" alt="Album and track search"></a>
   <a href="Screenshots/tagger.png"><img src="Screenshots/tagger.png" height="180" alt="Editing the tags of a whole album"></a>
   <a href="Screenshots/musicbrainz.png"><img src="Screenshots/musicbrainz.png" height="180" alt="MusicBrainz lookup"></a>
   <a href="Screenshots/replaygain.png"><img src="Screenshots/replaygain.png" height="180" alt="ReplayGain scan"></a>

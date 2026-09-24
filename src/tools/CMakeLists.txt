@@ -6,3 +6,6 @@ target_link_libraries(
     PRIVATE Trackknife::TitleFormat trackknife_project_options trackknife_project_warnings
 )
 set_target_properties(trackknife_titleformat_cli PROPERTIES OUTPUT_NAME trackknife-titleformat)
+
+install(TARGETS trackknife_titleformat_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT app)

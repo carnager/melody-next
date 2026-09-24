@@ -26,6 +26,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UTF8PROC REQUIRED IMPORTED_TARGET "libutf8proc>=2.9")
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET "sqlite3>=3.37")

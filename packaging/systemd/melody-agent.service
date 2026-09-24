@@ -1,0 +1,21 @@
+[Unit]
+# ADR-0228: speakers for the engines on the network. With no --server it
+# finds every engine that announces itself and plays for each, the newest to
+# start playing having the speakers. Not needed where an engine runs: that
+# engine plays for the others itself (melodyd --agent).
+Description=melody-agent, speakers for Melody engines
+After=pipewire.service network-online.target
+Wants=pipewire.service network-online.target
+
+[Service]
+Type=simple
+# Options in ~/.config/melody/agent.conf, e.g.
+#   MELODY_AGENT_OPTIONS=--name kitchen --password-file /home/you/.config/melody/password
+#   MELODY_AGENT_OPTIONS=--server 192.168.0.200:6603 --music-root /mnt/music
+EnvironmentFile=-%h/.config/melody/agent.conf
+ExecStart=/usr/bin/melody-agent $MELODY_AGENT_OPTIONS
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

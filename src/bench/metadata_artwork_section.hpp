@@ -130,9 +130,11 @@ class MetadataArtworkSection final : public QWidget {
     void present(const BatchResult& result);
     void updateActionButtons();
     [[nodiscard]] bool coverServiceReady() const;
-    void startCoverArtFetch();
-    void startArchivePicker();
-    void presentArchivePicker(musicbrainz::CoverArtListing listing);
+    // One picker for a cover: the images beside the files, then what the
+    // Cover Art Archive has for the release.
+    void openCoverPicker();
+    [[nodiscard]] bool localCoversOffered() const;
+    [[nodiscard]] bool archiveReady() const;
     void useArchiveImage(const musicbrainz::CoverArtImage& image);
     void reviewFetchedCover(const std::string& replacement_raw_path);
     void dispatchReview(std::vector<metadata::ArtworkWritePlanIntent> intents,
@@ -188,7 +190,6 @@ class MetadataArtworkSection final : public QWidget {
     QTableView* items_{nullptr};
     QTableView* issues_{nullptr};
     QPushButton* fetch_cover_button_{nullptr};
-    QPushButton* archive_button_{nullptr};
     QPushButton* add_button_{nullptr};
     QPushButton* copy_button_{nullptr};
     QPushButton* export_button_{nullptr};
@@ -215,7 +216,15 @@ class MetadataArtworkSection final : public QWidget {
     std::shared_ptr<ArtworkApplyProgressState> apply_progress_state_;
     std::shared_ptr<std::atomic_size_t> export_completed_items_;
     QPointer<QDialog> feedback_dialog_;
-    QPointer<QDialog> archive_dialog_;
+    QPointer<QDialog> picker_dialog_;
+    // Front images found beside the files -- cover.jpg and the like -- as
+    // choices for the picker, not as the files' own cover.
+    struct LocalCover {
+        std::string raw_path;
+        QImage thumbnail;
+        QString details;
+    };
+    std::vector<LocalCover> local_covers_;
     std::size_t generation_{0U};
     std::size_t job_generation_{0U};
     std::size_t displayed_generation_{0U};

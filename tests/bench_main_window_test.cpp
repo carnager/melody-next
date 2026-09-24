@@ -18,6 +18,7 @@
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/metadata_grid_model.hpp"
+#include "bench/metadata_artwork_section.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
@@ -124,6 +125,7 @@
 #include <QToolButton>
 #include <QTreeView>
 #include <QTreeWidget>
+#include <QDeadlineTimer>
 #include <QtTest>
 
 #include <array>
@@ -326,6 +328,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataApplyCombinesTagsAndArtwork_data();
     void metadataApplyCombinesTagsAndArtwork();
     void artworkArchivePickerAddsChosenImageWithItsRole();
+    void aCoverBesideTheFilesIsOfferedNotShown();
     void automaticScriptsStageOnOpen();
     void metadataStartupPresentsReconciliation();
     void filePublicationStartupPresentsReconciliation();
@@ -365,6 +368,43 @@ class BenchMainWindowTest final : public QObject {
     QTemporaryDir settings_directory_;
     testing::TestEngine engine_;
 };
+
+namespace {
+
+// Fetch cover opens a picker; choose the row from this place with this type.
+[[nodiscard]] bool chooseInCoverPicker(QWidget* owner, const QString& from, const QString& type) {
+    QTreeWidget* list = nullptr;
+    QPushButton* use = nullptr;
+    QTreeWidgetItem* wanted = nullptr;
+    const QDeadlineTimer deadline{5'000};
+    while (wanted == nullptr && !deadline.hasExpired()) {
+        if (auto* picker =
+                owner->findChild<QDialog*>(QStringLiteral("bench-metadata-artwork-picker"))) {
+            list = picker->findChild<QTreeWidget*>(
+                QStringLiteral("bench-metadata-artwork-picker-list"));
+            use = picker->findChild<QPushButton*>(
+                QStringLiteral("bench-metadata-artwork-picker-use"));
+            for (int row = 0; list != nullptr && row < list->topLevelItemCount(); ++row) {
+                auto* item = list->topLevelItem(row);
+                if (item->text(1) == from && item->text(2) == type) {
+                    wanted = item;
+                    break;
+                }
+            }
+        }
+        if (wanted == nullptr) {
+            QTest::qWait(20);
+        }
+    }
+    if (wanted == nullptr || use == nullptr) {
+        return false;
+    }
+    list->setCurrentItem(wanted);
+    QTest::mouseClick(use, Qt::LeftButton);
+    return true;
+}
+
+} // namespace
 
 void BenchMainWindowTest::initTestCase() {
     QVERIFY(settings_directory_.isValid());
@@ -8301,6 +8341,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     // download stages an addition; Save artwork is the explicit commit.
     QTRY_VERIFY(fetch->isEnabled());
     QTest::mouseClick(fetch, Qt::LeftButton);
+    QVERIFY(chooseInCoverPicker(properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
     auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(save != nullptr);
     QTRY_VERIFY(save->isEnabled());
@@ -8436,6 +8477,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QTRY_COMPARE_WITH_TIMEOUT(second_items->model()->rowCount(), 2, 5'000);
     QTRY_VERIFY(second_fetch->isEnabled());
     QTest::mouseClick(second_fetch, Qt::LeftButton);
+    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
     auto* second_save =
         second_properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(second_save != nullptr);
@@ -8459,6 +8501,7 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QCOMPARE(second_pending->model()->rowCount(), 0);
     QTRY_VERIFY(second_fetch->isEnabled());
     second_fetch->click();
+    QVERIFY(chooseInCoverPicker(second_properties, QStringLiteral("Cover Art Archive"), QStringLiteral("Front")));
     QTRY_VERIFY(second_save->isEnabled());
     QTRY_VERIFY(
         !second_pending->model()->index(1, 5).data(Qt::DecorationRole).value<QImage>().isNull());
@@ -8491,6 +8534,81 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QPointer second_guard{second_properties};
     second_properties->close();
     QTRY_VERIFY(second_guard.isNull());
+}
+
+// With covers embedded in the files, a cover.jpg beside them is not the
+// files' cover: the editor does not show it as theirs, and Fetch offers it.
+void BenchMainWindowTest::aCoverBesideTheFilesIsOfferedNotShown() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto media_path = media.filePath(QStringLiteral("track.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("tagged-tone-flac.b64"), media_path));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("external-blue-jpeg.b64"),
+                                      media.filePath(QStringLiteral("cover.jpg"))));
+    const auto encoded = QFile::encodeName(media_path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    const auto read = metadata::read_local_metadata(raw_path);
+    QVERIFY(read.has_value());
+    const MetadataPropertiesSource source{
+        .source =
+            metadata::StagedMetadataSource{
+                .raw_path = raw_path,
+                .source_revision = read->source_revision,
+                .baseline = read->document,
+            },
+        .track_label = QStringLiteral("Beside fixture"),
+    };
+    auto* properties = new MetadataPropertiesDialog(
+        1U,
+        [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+            return index == 0U ? std::optional{source} : std::nullopt;
+        },
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, {});
+    // Nothing is saved here; changes only need to be possible.
+    properties->setArtworkMutationServices(
+        [] {
+            return ArtworkWritePlanApplier{
+                [](const metadata::ArtworkWritePlan&, const operations::ArtworkApplyProgressCallback&,
+                   const core::CancellationToken&) -> core::Result<operations::ArtworkApplyResult> {
+                    return std::unexpected(core::Error{.code = core::ErrorCode::invariant,
+                                                       .message = "not in this test",
+                                                       .context = {}});
+                }};
+        },
+        {});
+    properties->show();
+    QTabWidget* sections = nullptr;
+    QTRY_VERIFY((sections = properties->findChild<QTabWidget*>(
+                     QStringLiteral("bench-metadata-sections"))) != nullptr);
+    MetadataArtworkSection* section = nullptr;
+    QTRY_VERIFY((section = properties->findChild<MetadataArtworkSection*>()) != nullptr);
+    // Watched before the Artwork page is opened, which is when it reads.
+    QSignalSpy shown{section, &MetadataArtworkSection::frontCoverChanged};
+    sections->setCurrentIndex(1);
+    auto* fetch =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-fetch-cover"));
+    QVERIFY(fetch != nullptr);
+    // No release to ask the archive about: the image beside the file is
+    // what makes Fetch worth pressing.
+    QTRY_VERIFY_WITH_TIMEOUT(fetch->isEnabled(), 5'000);
+    QVERIFY(!shown.isEmpty());
+    QVERIFY2(shown.back().front().value<QImage>().isNull(),
+             "the files carry no cover, so none is shown as theirs");
+
+    QTest::mouseClick(fetch, Qt::LeftButton);
+    QVERIFY(chooseInCoverPicker(properties, QStringLiteral("cover.jpg"), QStringLiteral("Front")));
+    auto* pending =
+        properties->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-pending"));
+    QVERIFY(pending != nullptr);
+    QTRY_COMPARE(pending->model()->rowCount(), 1);
+    // The staged front is that image: blue, as the fixture is.
+    QTRY_VERIFY(!pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>().isNull());
+    const auto staged = pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>();
+    const auto centre = staged.pixelColor(staged.width() / 2, staged.height() / 2);
+    QVERIFY2(centre.blue() > 150 && centre.red() < 100,
+             qPrintable(QStringLiteral("staged image centre %1").arg(centre.name())));
+    section->discardPendingChanges();
+    properties->close();
 }
 
 void BenchMainWindowTest::artworkArchivePickerAddsChosenImageWithItsRole() {
@@ -8609,7 +8727,7 @@ void BenchMainWindowTest::artworkArchivePickerAddsChosenImageWithItsRole() {
     auto* items =
         properties->findChild<QTableView*>(QStringLiteral("bench-metadata-artwork-items"));
     auto* covers =
-        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-covers"));
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-fetch-cover"));
     QVERIFY(items != nullptr);
     QVERIFY(covers != nullptr);
     QTRY_COMPARE_WITH_TIMEOUT(items->model()->rowCount(), 1, 5'000);
@@ -8619,23 +8737,23 @@ void BenchMainWindowTest::artworkArchivePickerAddsChosenImageWithItsRole() {
     // The picker lists every archive image with its type and comment.
     QDialog* picker = nullptr;
     QTRY_VERIFY((picker = properties->findChild<QDialog*>(
-                     QStringLiteral("bench-metadata-artwork-archive"))) != nullptr);
+                     QStringLiteral("bench-metadata-artwork-picker"))) != nullptr);
     auto* list =
-        picker->findChild<QTreeWidget*>(QStringLiteral("bench-metadata-artwork-archive-list"));
+        picker->findChild<QTreeWidget*>(QStringLiteral("bench-metadata-artwork-picker-list"));
     auto* use =
-        picker->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-archive-use"));
+        picker->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-picker-use"));
     QVERIFY(list != nullptr);
     QVERIFY(use != nullptr);
-    QCOMPARE(list->topLevelItemCount(), 2);
-    QCOMPARE(list->topLevelItem(0)->text(1), QStringLiteral("Front"));
-    QCOMPARE(list->topLevelItem(1)->text(1), QStringLiteral("Back"));
+    QTRY_COMPARE(list->topLevelItemCount(), 2);
+    QCOMPARE(list->topLevelItem(0)->text(2), QStringLiteral("Front"));
+    QCOMPARE(list->topLevelItem(1)->text(2), QStringLiteral("Back"));
     QCOMPARE(list->topLevelItem(1)->text(3), QStringLiteral("tray insert"));
     // The scripted service already answered the thumbnail request.
     QTRY_VERIFY(!list->topLevelItem(1)->icon(0).isNull());
 
     list->setCurrentItem(list->topLevelItem(1));
     QTest::mouseClick(use, Qt::LeftButton);
-    QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-metadata-artwork-archive")) ==
+    QTRY_VERIFY(properties->findChild<QDialog*>(QStringLiteral("bench-metadata-artwork-picker")) ==
                 nullptr);
     auto* save = properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-artwork-save"));
     QVERIFY(save != nullptr);

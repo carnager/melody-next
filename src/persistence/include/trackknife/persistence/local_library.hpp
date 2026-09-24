@@ -69,6 +69,9 @@ struct LibraryEntry {
     // When it came into the library (an album: its newest track), in Unix
     // seconds; 0 for artists.
     std::int64_t added{0};
+    // A track's length, an album's total; -1 when any of it is unknown, as
+    // for an artist. What a client queues needs it to show a duration.
+    std::int64_t duration_ms{-1};
 };
 
 struct LibraryPage {

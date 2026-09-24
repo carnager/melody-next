@@ -96,6 +96,7 @@ cli volume 0 > /dev/null
 [ "$(cli volume)" = "0" ] || fail "the volume is set and read back"
 cli play track alpha 2>/dev/null | grep -q "^playing: .*alpha" || fail "play track plays it"
 cli status | grep -q "queue 1" || fail "status shows the queue it replaced"
+cli status | grep -q " / ?" && fail "the library's duration travels with what is queued"
 
 # Pause and toggle.
 cli pause | grep -q "^paused:" || fail "pause pauses"

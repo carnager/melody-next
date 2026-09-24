@@ -323,6 +323,7 @@ namespace {
         entry.albums = value.value("albums", std::size_t{0});
         entry.rating_hash = value.value("rating_hash", std::string{});
         entry.rating = value.value("rating", 0U);
+        entry.duration_ms = value.value("duration_ms", std::int64_t{-1});
         // Absent from an engine older than dates on entries.
         entry.date = value.value("date", std::string{});
         entry.title = value.value("title", std::string{});

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/cover_fitting.hpp"
 
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
@@ -153,6 +154,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             rendered["date"] = protocol::displayable_text(entry.date);
             rendered["title"] = protocol::displayable_text(entry.title);
             rendered["added"] = entry.added;
+            rendered["duration_ms"] = entry.duration_ms;
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};
@@ -437,6 +439,16 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         auto image = catalogue.artwork(*raw_path);
         if (!image) {
             return std::unexpected(std::move(image.error()));
+        }
+        // A client showing it small asks for it small: a phone's grid of
+        // covers is otherwise megabytes over mobile data. Scaled here, where
+        // the original is, so only the thumbnail travels.
+        if (const auto size = params.value("size", 0); size > 0 && !image->empty()) {
+            auto fitted = fit_cover(*image, size);
+            if (!fitted) {
+                return std::unexpected(std::move(fitted.error()));
+            }
+            *image = std::move(*fitted);
         }
         Json answer = Json::object();
         answer["image"] =

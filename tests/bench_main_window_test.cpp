@@ -281,6 +281,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteTabRatesOnItsEngine();
     void replacingARemoteTabFromItsLibraryPlays();
     void locateFindsARemoteTracksAlbumInTheRemoteLibrary();
+    void remoteUpNextKeepsItsIdentityAcrossARestart();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
     void narrowWindowKeepsListAndUpNextCompact();
@@ -5244,6 +5245,87 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    write_wave(music + QStringLiteral("/first.wav"), wave_sample_rate * 60U);
+    write_wave(music + QStringLiteral("/asked.wav"), wave_sample_rate * 60U);
+    const auto engine_requests = [&remote] {
+        auto client = protocol::Client::connect(protocol::Endpoint{
+            .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+        std::vector<std::string> ids;
+        if (!client) {
+            return ids;
+        }
+        if (auto answer = (*client)->call("playback.requests")) {
+            for (const auto& id : answer->value("entries", protocol::Json::array())) {
+                ids.push_back(id.get<std::string>());
+            }
+        }
+        (*client)->close();
+        return ids;
+    };
+
+    std::string asked_id;
+    std::string asked_title;
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+        QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+        {
+            auto catalogue = window.remote_catalogue_source_->open();
+            QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+            persistence::LibraryScanProgress progress;
+            QVERIFY(catalogue->scan({}, progress).has_value());
+        }
+        auto* tab = window.remoteQueueTab();
+        QVERIFY(tab != nullptr);
+        persistence::LibraryQuery tracks;
+        tracks.kind = persistence::LibraryEntryKind::track;
+        const auto page = window.remote_catalogue_source_->open()->query(tracks);
+        QVERIFY(page && page->entries.size() == 2U);
+        emit window.remote_library_->actionRequested({page->entries[0]}, LocalLibraryAction::replace);
+        QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
+        window.remote_playback_->setVolume(0);
+        std::vector<LocalTrackRow> asked;
+        window.remote_library_->resolveEntryRows(
+            {page->entries[1]}, [&asked](std::vector<LocalTrackRow> rows) { asked = std::move(rows); });
+        QTRY_COMPARE(asked.size(), std::size_t{1});
+        asked_title = asked.front().title;
+        window.enqueueLocalRequests(asked, -1, true);
+        // An ask is an occurrence of its own, with an identity of its own.
+        QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
+        asked_id = window.playback_.requests.pending().front().source.entry_id.to_string();
+        // The engine holds it by the window's identity.
+        QTRY_VERIFY(engine_requests() == std::vector<std::string>{asked_id});
+        window.persistUpNext();
+        QTest::qWait(300);
+    }
+
+    // Trackknife restarted: the same Up Next, on the same engine, by the same
+    // identity -- so the engine and the window still agree what it is.
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
+    QCOMPARE(window.playback_.requests.pending().front().source.entry_id.to_string(), asked_id);
+    QVERIFY(window.up_next_remote_);
+    QVERIFY(engine_requests() == std::vector<std::string>{asked_id});
+    // Played, it is named in the header by its title, and leaves the waiting list.
+    QTRY_VERIFY(window.transport_ == window.remote_playback_);
+    window.remote_playback_->next();
+    QTRY_VERIFY(window.playback_.requests.pending().empty());
+    QTRY_COMPARE(window.now_playing_->text(), QString::fromStdString(asked_title));
+    window.remote_playback_->stop();
 }
 
 void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {

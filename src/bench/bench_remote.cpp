@@ -81,6 +81,10 @@ void BenchMainWindow::connectRemoteEngine() {
             }
         }
         refreshLocalRatings();
+        // A remote that restarted holds the Up Next it saved; this window's
+        // is the one the user sees, so it is stated again.
+        engine_requests_.clear();
+        syncEngineRequests();
         static_cast<void>(remoteQueueTab());
         // Music the remote was already playing is followed, unless this
         // computer is playing: then that is what the transport shows, and

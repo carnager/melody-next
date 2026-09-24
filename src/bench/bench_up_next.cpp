@@ -512,7 +512,10 @@ void BenchMainWindow::persistUpNext() {
         QJsonObject item{{QStringLiteral("path"),
                           QString::fromLatin1(QByteArray::fromStdString(row.raw_path).toBase64())},
                          {QStringLiteral("title"), QString::fromStdString(row.title)},
-                         {QStringLiteral("artist"), QString::fromStdString(row.artist)}};
+                         {QStringLiteral("artist"), QString::fromStdString(row.artist)},
+                         // The identity the engine holds it by: kept, so after a
+                         // restart both still name the same entry.
+                         {QStringLiteral("entry"), QString::fromStdString(row.entry_id.to_string())}};
         if (row.selection.stream_index)
             item[QStringLiteral("stream")] = *row.selection.stream_index;
         if (row.selection.subsong_index)
@@ -557,6 +560,8 @@ void BenchMainWindow::persistUpNext() {
     QJsonObject state{
         {QStringLiteral("version"), 1},
         {QStringLiteral("rows"), rows},
+        // Whose files these are: Up Next holds one engine's asks.
+        {QStringLiteral("remote"), up_next_remote_},
         {QStringLiteral("document"), document_text(playback_.anchors.document)},
         {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_.anchors.document))}};
     state[QStringLiteral("anchor")] = QString::fromLatin1(
@@ -616,6 +621,11 @@ void BenchMainWindow::restoreUpNext() {
                     continue;
                 row.title = item.value(QStringLiteral("title")).toString().toStdString();
                 row.artist = item.value(QStringLiteral("artist")).toString().toStdString();
+                // Saved before identities were: a new one, as then.
+                if (const auto identity = core::StableId::parse(
+                        item.value(QStringLiteral("entry")).toString().toStdString())) {
+                    row.entry_id = *identity;
+                }
                 if (item.contains(QStringLiteral("stream")))
                     row.selection.stream_index = item.value(QStringLiteral("stream")).toInt();
                 if (item.contains(QStringLiteral("subsong")))
@@ -667,6 +677,7 @@ void BenchMainWindow::restoreUpNext() {
                                    playback_.requests.pending().empty() &&
                                    !playback_.requests.active();
             if (untouched) {
+                up_next_remote_ = state.value(QStringLiteral("remote")).toBool();
                 if (!playback_.requests.insert(std::move(rows), 0)) {
                     statusBar()->showMessage(
                         tr("Saved Up Next exceeds the pending queue limit; it has been preserved."),

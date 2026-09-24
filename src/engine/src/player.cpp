@@ -479,10 +479,15 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
     std::erase_if(requests_,
                   [this](const core::StableId& wanted) { return find_locked(wanted) == nullptr; });
     row_ = view.row_of_entry(anchors_.current, -1);
-    // An ask that is playing has no row and is still playing.
+    // An ask that is playing has no row and is still playing. Anything else
+    // that plays and has gone -- the queue cleared, its row removed -- stops:
+    // playing, or paused on, what no queue holds any more would leave a
+    // track that toggle resumes and nothing shows.
     if (row_ < 0 && !anchors_.current.is_nil() &&
         !std::ranges::contains(asks_, anchors_.current, &QueueEntry::entry_id)) {
+        static_cast<void>(audition_->stop());
         anchors_.current = core::StableId{};
+        anchors_.source = {};
     }
     reset_order_locked();
     refresh_gapless_locked();
@@ -625,6 +630,14 @@ void Player::restore_local_settings(const Output& settings) {
 
 core::Result<void> Player::resume() {
     const std::lock_guard guard{mutex_};
+    // Only what the engine holds as playing is resumed: the output may still
+    // have a track loaded after its entry left the queue, and that is not
+    // something to bring back.
+    if (anchors_.current.is_nil()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::not_found,
+                                           .message = "nothing to resume",
+                                           .context = {}});
+    }
     return audition_->play();
 }
 

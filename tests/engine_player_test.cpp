@@ -1141,6 +1141,33 @@ void a_failure_to_play_says_why() {
     require(player->set_output(nullptr).has_value(), "choosing no output succeeds");
 }
 
+// Clearing the list that plays ends playback: nothing is left playing, or
+// paused, that no queue holds and a toggle would bring back.
+void clearing_the_queue_ends_what_plays() {
+    auto player = engine::Player::create_without_audio();
+    const std::vector<engine::QueueEntry> entries{entry("/music/one.flac"),
+                                                  entry("/music/two.flac")};
+    player->replace_queue(entries);
+    RecordingAudition speakers;
+    require(player->set_output(&speakers).has_value(), "an output is chosen");
+    require(player->play_entry(entries[0].entry_id).has_value(), "it plays");
+    require(player->state().status == "playing", "and says so");
+
+    player->replace_queue({});
+    const auto cleared = player->state();
+    require(cleared.status == "stopped", "a cleared queue stops what played");
+    require(cleared.entry.is_nil(), "and holds no entry");
+    require(!player->resume().has_value() || player->state().status != "playing",
+            "a toggle brings nothing back");
+
+    // Removing the playing row from a list that goes on stops it too.
+    player->replace_queue(entries);
+    require(player->play_entry(entries[0].entry_id).has_value(), "it plays again");
+    player->replace_queue({entries[1]});
+    require(player->state().status == "stopped", "its row removed, it stops");
+    require(player->set_output(nullptr).has_value(), "choosing no output succeeds");
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: engine_player_test <audio-fixture-dir>\n";
@@ -1171,6 +1198,7 @@ int main(int argc, char** argv) {
     // Needs no audio device, so it runs before the check for one.
     the_player_plays_on_the_output_it_is_given();
     a_failure_to_play_says_why();
+    clearing_the_queue_ends_what_plays();
 
     auto player = engine::Player::create();
     if (!player) {

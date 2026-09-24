@@ -97,20 +97,25 @@ void join_group(const int socket) {
     return socket;
 }
 
-// To the group, out of every interface: a machine on two networks is found
-// on both.
-void send_to_group(const int socket, const Message& message) {
+// To the group, out of the interface with this address.
+void send_via(const int socket, const Message& message, const std::uint32_t address) {
     const auto bytes = encode(message);
     sockaddr_in group{};
     group.sin_family = AF_INET;
     group.sin_port = htons(mdns_port);
     ::inet_pton(AF_INET, mdns_group, &group.sin_addr);
+    in_addr out{};
+    out.s_addr = address;
+    static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_IF, &out, sizeof(out)));
+    static_cast<void>(::sendto(socket, bytes.data(), bytes.size(), MSG_NOSIGNAL,
+                               reinterpret_cast<const sockaddr*>(&group), sizeof(group)));
+}
+
+// To the group, out of every interface: a machine on two networks is found
+// on both.
+void send_to_group(const int socket, const Message& message) {
     for (const auto address : interface_addresses()) {
-        in_addr out{};
-        out.s_addr = address;
-        static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_IF, &out, sizeof(out)));
-        static_cast<void>(::sendto(socket, bytes.data(), bytes.size(), MSG_NOSIGNAL,
-                                   reinterpret_cast<const sockaddr*>(&group), sizeof(group)));
+        send_via(socket, message, address);
     }
 }
 
@@ -232,16 +237,20 @@ void Announcer::answer(const bool goodbye) {
         text.strings.push_back(key + "=" + value);
     }
     message.additionals.push_back(std::move(text));
+    // Each network hears the address this machine has on it, and only that
+    // (RFC 6762 §15): gemenon told the LAN its Docker bridge's address as
+    // well, and a phone that picked it could not reach the engine.
     for (const auto address : interface_addresses()) {
-        message.additionals.push_back(Record{.name = host_name_,
-                                             .type = RecordType::a,
-                                             .ttl = ttl,
-                                             .target = {},
-                                             .port = 0,
-                                             .strings = {},
-                                             .address = ntohl(address)});
+        auto on_this_network = message;
+        on_this_network.additionals.push_back(Record{.name = host_name_,
+                                                     .type = RecordType::a,
+                                                     .ttl = ttl,
+                                                     .target = {},
+                                                     .port = 0,
+                                                     .strings = {},
+                                                     .address = ntohl(address)});
+        send_via(socket_, on_this_network, address);
     }
-    send_to_group(socket_, message);
 }
 
 void Announcer::run() {

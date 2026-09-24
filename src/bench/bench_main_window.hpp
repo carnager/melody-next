@@ -233,6 +233,8 @@ class BenchMainWindow final : public QMainWindow {
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
     void showCommandPalette();
+    // Ctrl+Shift+A: find an album by words and add, replace or queue it.
+    void openQuickAlbum();
     QList<QAction*> configurable_shortcuts_;
     QAction* follow_playback_action_{};
     QPointer<QTableView> followed_playback_view_;

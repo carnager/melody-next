@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "bench/quick_album_popup.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -462,6 +463,11 @@ void BenchMainWindow::buildWorkspace() {
     search_action->setObjectName(QStringLiteral("action-search-dialog"));
     search_action->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
     connect(search_action, &QAction::triggered, this, &BenchMainWindow::openSearchDialog);
+    auto* quick_album = workspace_menu->addAction(tr("Quick album…"));
+    quick_album->setObjectName(QStringLiteral("action-quick-album"));
+    quick_album->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+    quick_album->setShortcutContext(Qt::WindowShortcut);
+    connect(quick_album, &QAction::triggered, this, &BenchMainWindow::openQuickAlbum);
     duplicate_tab_action_ = workspace_menu->addAction(QStringLiteral("Duplicate tab"));
     duplicate_tab_action_->setObjectName(QStringLiteral("action-duplicate-tab"));
     duplicate_tab_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+D")));
@@ -1025,6 +1031,27 @@ void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index
 
 } // namespace trackknife::bench
 
+void trackknife::bench::BenchMainWindow::openQuickAlbum() {
+    // The library of the tab in front: a remote tab's albums come from its
+    // engine and go where that tab's would.
+    const auto* current = currentListTab();
+    const bool remote = current != nullptr && current->document.remote &&
+                        remote_catalogue_source_ != nullptr && remote_library_ != nullptr;
+    auto* library = remote ? remote_library_ : local_library_;
+    const auto* source = remote ? remote_catalogue_source_.get() : catalogue_source_.get();
+    if (library == nullptr || source == nullptr) {
+        return;
+    }
+    auto* popup = new QuickAlbumPopup(std::shared_ptr<engine::Catalogue>{source->open()},
+                                      source->name(), this);
+    connect(popup, &QuickAlbumPopup::chosen, library,
+            [library](std::vector<persistence::LibraryEntry> albums, LocalLibraryAction action) {
+                // Exactly what the library's own menu does with an album.
+                emit library->actionRequested(std::move(albums), action);
+            });
+    popup->popUp(centralWidget() != nullptr ? centralWidget() : this);
+}
+
 void trackknife::bench::BenchMainWindow::showCommandPalette() {
     for (auto* existing : findChildren<ui::CommandPalette*>()) {
         if (existing->isVisible()) {
@@ -1040,6 +1067,7 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
                            "action-new-list",         "action-import-m3u8",
                            "action-export-m3u8",      "action-dynamic-playlists",
                            "action-settings",         "action-search-dialog",
+                           "action-quick-album",
                            "action-find-in-list",     "action-jump-to-playing",
                            "action-follow-playback",  "action-show-up-next",
                            "action-play-pause",       "action-stop",

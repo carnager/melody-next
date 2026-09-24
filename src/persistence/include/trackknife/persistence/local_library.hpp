@@ -59,6 +59,8 @@ struct LibraryEntry {
     // and its stored 0-10 rating; empty/0 for artists and unrated entries.
     std::string rating_hash{};
     unsigned rating{0};
+    // An album's or a track's date, as tagged; empty for artists.
+    std::string date{};
 };
 
 struct LibraryPage {

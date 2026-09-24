@@ -227,6 +227,14 @@ void LocalLibraryTest::incrementalScanSearchAndPaging() {
     albums.text = "test björk";
     QCOMPARE(library->query(albums)->entries.size(), 1U);
     QCOMPARE(library->query(albums)->entries.front().tracks, 2U);
+    // Every word in the album's artist, title or date: the year narrows it.
+    QCOMPARE(library->query(albums)->entries.front().date, std::string{"2026"});
+    albums.text = "björk 2026";
+    QCOMPARE(library->query(albums)->entries.size(), 1U);
+    albums.text = "test 26";
+    QCOMPARE(library->query(albums)->entries.size(), 1U);
+    albums.text = "björk 1999";
+    QVERIFY(library->query(albums)->entries.empty());
     auto page = tracks();
     page.limit = 1;
     const auto one = library->query(page);

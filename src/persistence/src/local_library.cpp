@@ -343,7 +343,7 @@ Tags tags_from(const metadata::MetadataDocument& document, const std::string& pa
     Tags tags;
     tags.title = value("title");
     if (tags.title.empty()) {
-        tags.title = core::escape_raw_path(std::filesystem::path{path}.stem().native());
+        tags.title = core::display_raw_path(std::filesystem::path{path}.stem().native());
     }
     tags.artist = value("albumartist");
     if (tags.artist.empty()) {
@@ -748,8 +748,16 @@ struct Filter {
             if (++count > 16U) {
                 fail("Search supports up to 16 words", core::ErrorCode::limit_exceeded);
             }
-            sql += query.kind == LibraryEntryKind::track ? " AND instr(search_track,?)>0"
-                                                         : " AND instr(search_album,?)>0";
+            if (query.kind == LibraryEntryKind::track) {
+                sql += " AND instr(search_track,?)>0";
+            } else if (query.kind == LibraryEntryKind::album) {
+                // An album is found by its artist, its title or its date:
+                // "doors 1967" finds the one from that year.
+                sql += " AND (instr(search_album,?)>0 OR instr(date,?)>0)";
+                values.emplace_back(word, false);
+            } else {
+                sql += " AND instr(search_album,?)>0";
+            }
             values.emplace_back(word, false);
         }
     }
@@ -935,7 +943,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         switch (query.kind) {
         case LibraryEntryKind::artist:
             columns = "artist,artist,artist,'',count(*),sum(available),0,"
-                      "count(DISTINCT album_key),'',0";
+                      "count(DISTINCT album_key),'',0,''";
             order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
@@ -944,13 +952,13 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             // aggregate would be rejected inside the correlated subquery.
             columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1,"
                       "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
-                      "WHERE hash=album_rating_hash),0)";
+                      "WHERE hash=album_rating_hash),0),min(date)";
             order = " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),min(album) "
                     "COLLATE NOCASE,album_key";
             break;
         case LibraryEntryKind::track:
             columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
-                      "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0)";
+                      "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date";
             order = " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
                     "NOCASE,raw_path";
             break;
@@ -977,6 +985,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                  static_cast<int>(statement.number(6)),
                  static_cast<std::size_t>(statement.number(7)), statement.bytes(8),
                  static_cast<unsigned>(statement.number(9))});
+            page.entries.back().date = statement.bytes(10);
             page.entries.back().label = format_label(page.entries.back(), !query.text.empty());
         }
         return page;

@@ -179,6 +179,11 @@ void BenchMainWindow::connectRemoteEngine() {
                     syncArtwork(*destination);
                     schedulePersist();
                     tabs_->setCurrentWidget(destination->view);
+                    // "Replace list and play", as this computer's library does.
+                    if (action == LocalLibraryAction::replace &&
+                        destination->model->rowCount() > 0) {
+                        playRow(*destination, 0);
+                    }
                 });
         });
     connect(remote_library_, &LocalLibraryPanel::searchCommitted, this,

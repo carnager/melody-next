@@ -3,6 +3,7 @@
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
 #include "bench/up_next_delegate.hpp"
+#include "bench/quick_album_popup.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
@@ -224,6 +225,8 @@ class BenchMainWindowTest final : public QObject {
     void transportIsOneRowWithCoverAndPills();
     void headerShowsThePlayingAlbumsCover();
     void libraryDragsIntoUpNextWithCovers();
+    void quickAlbumFindsByWordsAndPutsItAway();
+    void quickAlbumShiftEnterReplacesAndPlays();
     void ffmpegEncoderIsTheTagTagLibCallsEncoding();
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void activeTabAccentSurvivesThemeTextColor();
@@ -272,6 +275,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void replacingARemoteTabFromItsLibraryPlays();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
     void narrowWindowKeepsListAndUpNextCompact();
@@ -864,6 +868,115 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
     QCOMPARE(document.fields.size(), std::size_t{1});
     QCOMPARE(document.fields.front().canonical_name, std::string{"encoding"});
     QCOMPARE(probed_semantic_alias("ENCODER"), std::optional<std::string_view>{"encoding"});
+}
+
+void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    write_wave(music + QStringLiteral("/long.wav"), wave_sample_rate * 60U);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.playingOnEngine());
+    {
+        auto catalogue = window.catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr && !tab->document.remote);
+    window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
+    QuickAlbumPopup* popup = nullptr;
+    for (auto* candidate : window.findChildren<QuickAlbumPopup*>()) {
+        if (candidate->isVisible()) {
+            popup = candidate;
+        }
+    }
+    QVERIFY(popup != nullptr);
+    QTest::keyClicks(popup->input(), QStringLiteral("unknown"));
+    QTRY_COMPARE(popup->results()->count(), 1);
+    QTest::keyClick(popup->input(), Qt::Key_Return, Qt::ShiftModifier);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(window.local_playback_->state().status, QStringLiteral("playing"),
+                              10'000);
+    window.local_playback_->stop();
+}
+
+void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto music = media.filePath(QStringLiteral("music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
+    persistence::LibraryEntry album;
+    {
+        auto catalogue = window.catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+        persistence::LibraryQuery albums;
+        albums.kind = persistence::LibraryEntryKind::album;
+        const auto page = catalogue->query(albums);
+        QVERIFY(page && page->entries.size() == 1U && !page->entries.front().date.empty());
+        album = page->entries.front();
+    }
+    auto* tab = window.currentListTab();
+    QVERIFY(tab != nullptr && !tab->document.remote);
+    tab->model->replaceRows({}, true);
+    // A word of the album and its year, in any case.
+    const auto words = QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0).toUpper() +
+                       QStringLiteral(" ") + QString::fromStdString(album.date);
+
+    const auto open = [&window]() -> QuickAlbumPopup* {
+        window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
+        QuickAlbumPopup* popup = nullptr;
+        for (auto* candidate : window.findChildren<QuickAlbumPopup*>()) {
+            if (candidate->isVisible()) {
+                popup = candidate;
+            }
+        }
+        return popup;
+    };
+    auto* popup = open();
+    QVERIFY(popup != nullptr);
+    QCOMPARE(window.findChild<QAction*>(QStringLiteral("action-quick-album"))->shortcut(),
+             QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+    QCOMPARE(popup->findChild<QLabel*>(QStringLiteral("bench-quick-album-scope"))->text(),
+             QStringLiteral("This computer"));
+    QTest::keyClicks(popup->input(), words);
+    QTRY_COMPARE(popup->results()->count(), 1);
+    // Enter: added to the list in front.
+    const QPointer<QuickAlbumPopup> chosen{popup};
+    QTest::keyClick(popup->input(), Qt::Key_Return);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    // Done once chosen: it closes itself.
+    QTRY_VERIFY(chosen.isNull() || !chosen->isVisible());
+
+    // Ctrl+Shift+Enter: onto the end of Up Next instead.
+    const auto waiting = window.playback_.requests.pending().size();
+    popup = open();
+    QVERIFY(popup != nullptr);
+    QTest::keyClicks(popup->input(), words);
+    QTRY_COMPARE(popup->results()->count(), 1);
+    QTest::keyClick(popup->input(), Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
+    QTRY_COMPARE(window.playback_.requests.pending().size(), waiting + 1U);
+    QCOMPARE(tab->model->rowCount(), 1);
+
+    // Another year finds nothing, and says so.
+    popup = open();
+    QVERIFY(popup != nullptr);
+    QTest::keyClicks(popup->input(),
+                     QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0) +
+                         QStringLiteral(" 1066"));
+    QTRY_COMPARE(popup->findChild<QLabel*>(QStringLiteral("bench-quick-album-status"))->text(),
+                 QStringLiteral("No albums match."));
+    QTest::keyClick(popup->input(), Qt::Key_Escape);
 }
 
 void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
@@ -4992,6 +5105,42 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    // Long enough to still be playing when looked at.
+    write_wave(music + QStringLiteral("/long.wav"), wave_sample_rate * 60U);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    window.tabs_->setCurrentWidget(tab->view);
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && page->entries.size() == 1U);
+    // "Replace list and play" -- from the menu, or Shift+Enter in the quick
+    // album popup -- plays, on the remote as it does here.
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::replace);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(window.remote_playback_->state().status, QStringLiteral("playing"),
+                              10'000);
+    window.remote_playback_->stop();
 }
 
 void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {

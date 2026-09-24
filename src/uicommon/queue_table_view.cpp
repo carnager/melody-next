@@ -83,12 +83,16 @@ constexpr int artwork_padding = 6;
            key == groupKey(view, row + 1);
 }
 
-// What a row adds above its track: an album's header, a run's gap, or none.
+// What a row adds above its track: an album's header, a run's gap, or none
+// -- and a disc's name where one of several begins.
 [[nodiscard]] int groupSpacing(const QTableView* view, const int row) {
+    const auto disc = view->model() != nullptr && !discStart(view->model()->index(row, 0)).isEmpty()
+                          ? QueueItemDelegate::disc_header_height
+                          : 0;
     if (beginsAlbum(view, row)) {
-        return QueueItemDelegate::album_header_height;
+        return QueueItemDelegate::album_header_height + disc;
     }
-    return beginsLooseRun(view, row) ? QueueItemDelegate::loose_run_gap : 0;
+    return (beginsLooseRun(view, row) ? QueueItemDelegate::loose_run_gap : 0) + disc;
 }
 
 void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {

@@ -40,6 +40,11 @@ enum TrackRowRole : int {
     track_album_group_start_role,
     track_rating_role,       // uint 0-10 track rating (ADR-0179); 0/absent unrated
     track_album_rating_role, // uint 0-10 album rating painted over covers
+    // QString: "Disc 2" (with its subtitle when tagged) on the row where a
+    // disc begins, in an album of more than one; empty everywhere else.
+    // Without it an album's discs ran together and its numbers restarted
+    // at 1 halfway down.
+    track_disc_start_role,
 };
 
 // Complete physical column layout used by both authority-bound queues:

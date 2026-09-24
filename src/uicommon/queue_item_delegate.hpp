@@ -41,6 +41,8 @@ class QueueItemDelegate final : public QStyledItemDelegate {
     // Where a group's hairline is drawn, below the top of its header or gap,
     // so it does not touch the row above.
     static constexpr int hairline_offset = 5;
+    // Above the first track of each disc, in an album of several.
+    static constexpr int disc_header_height = 26;
 
     explicit QueueItemDelegate(QObject* parent = nullptr);
 
@@ -55,5 +57,8 @@ class QueueItemDelegate final : public QStyledItemDelegate {
     [[nodiscard]] bool beginsAlbum(const QModelIndex& index) const;
     [[nodiscard]] bool beginsLooseRun(const QModelIndex& index) const;
 };
+
+// "Disc 2" where a disc begins in an album of several, else empty.
+[[nodiscard]] QString discStart(const QModelIndex& index);
 
 } // namespace trackknife::ui

@@ -243,6 +243,24 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         painter->restore();
         item.rect.setTop(item.rect.top() + QueueItemDelegate::loose_run_gap);
     }
+    if (const auto disc = discStart(index); !disc.isEmpty()) {
+        // The disc's name where its tracks start, in line with their titles.
+        const QRect strip{option.rect.x(), item.rect.top(), option.rect.width(), disc_header_height};
+        painter->save();
+        painter->fillRect(strip, option.palette.base());
+        if (index.column() == title_column) {
+            auto font = option.font;
+            font.setWeight(QFont::DemiBold);
+            font.setPointSizeF(font.pointSizeF() * 0.92);
+            painter->setFont(font);
+            painter->setPen(option.palette.color(QPalette::PlaceholderText));
+            const auto area = strip.adjusted(6, 0, -8, -4);
+            painter->drawText(area, Qt::AlignLeft | Qt::AlignBottom,
+                              QFontMetrics{font}.elidedText(disc, Qt::ElideRight, area.width()));
+        }
+        painter->restore();
+        item.rect.setTop(item.rect.top() + disc_header_height);
+    }
     const auto current_track = index.data(track_current_role).toBool();
     const auto in_group = !isSingleTrackGroup(index, this);
     if (!artwork_cell) {
@@ -389,7 +407,8 @@ QSize QueueItemDelegate::sizeHint(const QStyleOptionViewItem& option,
     size.setHeight(std::max(track_row_height, size.height()) +
                    (beginsAlbum(index)      ? album_header_height
                     : beginsLooseRun(index) ? loose_run_gap
-                                            : 0));
+                                            : 0) +
+                   (discStart(index).isEmpty() ? 0 : disc_header_height));
     return size;
 }
 
@@ -434,6 +453,10 @@ bool QueueItemDelegate::beginsAlbum(const QModelIndex& index) const {
         index.row() == 0 || key != groupKey(index.sibling(index.row() - 1, 0), this);
     return begins_group && index.row() + 1 < index.model()->rowCount() &&
            key == groupKey(index.sibling(index.row() + 1, 0), this);
+}
+
+QString discStart(const QModelIndex& index) {
+    return index.isValid() ? index.siblingAtColumn(0).data(track_disc_start_role).toString() : QString{};
 }
 
 } // namespace trackknife::ui

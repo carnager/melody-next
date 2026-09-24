@@ -966,6 +966,8 @@ QVariant LocalListModel::data(const QModelIndex& index, const int role) const {
         return QVariant::fromValue(artwork_.value(groupKey(index.row())));
     case ui::track_album_artwork_key_role:
         return groupKey(index.row());
+    case ui::track_disc_start_role:
+        return discStart(index.row());
     case ui::track_album_group_start_role: {
         const auto row_index = static_cast<std::size_t>(index.row());
         const auto begins_group = (row_index == 0U || !same_album(rows_[row_index - 1U], row)) &&
@@ -1030,6 +1032,54 @@ Qt::DropActions LocalListModel::supportedDropActions() const {
     // but Qt only tracks and paints the drop indicator for actions the target
     // model advertises.
     return Qt::MoveAction | Qt::CopyAction;
+}
+
+namespace {
+
+// A disc number as it reads: "2" from "2", "02" or "2/3".
+[[nodiscard]] std::string disc_of(const LocalTrackRow& row) {
+    auto disc = metadata_value(row.metadata, {"discnumber", "disc"});
+    disc = disc.substr(0, disc.find('/'));
+    const auto first = disc.find_first_not_of(" 0");
+    return first == std::string::npos ? std::string{} : disc.substr(first, disc.find_last_not_of(' ') - first + 1);
+}
+
+} // namespace
+
+QString LocalListModel::discStart(const int row) const {
+    if (row < 0 || row >= static_cast<int>(rows_.size())) {
+        return {};
+    }
+    const auto at = static_cast<std::size_t>(row);
+    const auto disc = disc_of(rows_[at]);
+    if (disc.empty()) {
+        return {};
+    }
+    // Where this disc starts: the album's first row, or a change of disc.
+    if (at > 0 && same_album(rows_[at - 1], rows_[at]) && disc_of(rows_[at - 1]) == disc) {
+        return {};
+    }
+    // Only an album with another disc beside this one says which it is.
+    auto first = at;
+    while (first > 0 && same_album(rows_[first - 1], rows_[at])) {
+        --first;
+    }
+    bool other = false;
+    for (auto next = first; next < rows_.size() && same_album(rows_[next], rows_[at]); ++next) {
+        const auto theirs = disc_of(rows_[next]);
+        if (!theirs.empty() && theirs != disc) {
+            other = true;
+            break;
+        }
+    }
+    if (!other) {
+        return {};
+    }
+    auto label = QStringLiteral("Disc ") + display_utf8(disc);
+    if (const auto subtitle = metadata_value(rows_[at].metadata, {"discsubtitle", "setsubtitle"}); !subtitle.empty()) {
+        label += QStringLiteral(" · ") + display_utf8(subtitle);
+    }
+    return label;
 }
 
 QString LocalListModel::groupKey(const int row) const {

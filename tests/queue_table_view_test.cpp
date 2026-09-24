@@ -24,6 +24,8 @@ namespace {
 class CueBatchModel final : public QAbstractTableModel {
   public:
     int group_size{0};
+    // Rows per disc, when the album has discs to show.
+    int disc_size{0};
     void appendCueAlbum(const int tracks) {
         if (tracks <= 0) {
             return;
@@ -48,6 +50,11 @@ class CueBatchModel final : public QAbstractTableModel {
         }
         if (role == track_album_group_start_role) {
             return group_size > 0 ? index.row() % group_size == 0 : index.row() == 0;
+        }
+        if (role == track_disc_start_role) {
+            return disc_size > 0 && index.row() % disc_size == 0
+                       ? QStringLiteral("Disc %1").arg(index.row() / disc_size + 1)
+                       : QString{};
         }
         if (role == track_album_artist_role) {
             return QStringLiteral("Cue Artist");
@@ -100,6 +107,7 @@ class QueueTableViewTest final : public QObject {
 
   private slots:
     void preGroupedBatchReservesHeaderAboveFirstTrack();
+    void eachDiscOfAnAlbumGetsItsName();
     void largeGroupedResultsScrollToLastRow();
     void homeAndEndSelectQueueBoundaries();
     void shiftHomeAndEndExtendFromSelectionAnchor();
@@ -292,6 +300,35 @@ void QueueTableViewTest::preGroupedBatchReservesHeaderAboveFirstTrack() {
     const QPoint first_track_bottom{first.center().x(), first.bottom() - 1};
     QCOMPARE(view.resolvedDropInsertionRow(album_header_target), 0);
     QCOMPARE(view.resolvedDropInsertionRow(first_track_bottom), 1);
+}
+
+// A two-disc album read as one run of 27 tracks, numbered 1 to 12 and then
+// 1 to 15 again with nothing between. Each disc now starts under its name.
+void QueueTableViewTest::eachDiscOfAnAlbumGetsItsName() {
+    QueueTableView view{nullptr};
+    CueBatchModel model;
+    model.disc_size = 5;
+    view.setModel(&model);
+    view.setItemDelegate(new QueueItemDelegate{&view});
+    view.setShowGrid(false);
+    view.verticalHeader()->setDefaultSectionSize(22);
+    view.verticalHeader()->setMinimumSectionSize(18);
+    view.setAlbumGroupingEnabled(true);
+    view.resize(640, 480);
+    view.show();
+
+    model.appendCueAlbum(10);
+
+    // The album's header, and under it the first disc's name.
+    QTRY_COMPARE(view.rowHeight(0),
+                 22 + QueueItemDelegate::album_header_height + QueueItemDelegate::disc_header_height);
+    QCOMPARE(view.rowHeight(1), 22);
+    // The second disc: its name, no second album header.
+    QCOMPARE(view.rowHeight(5), 22 + QueueItemDelegate::disc_header_height);
+    QCOMPARE(view.rowHeight(6), 22);
+    // The track itself sits below the name, not under it.
+    const auto second_disc = view.visualRect(model.index(5, track_title_column));
+    QVERIFY(second_disc.height() > QueueItemDelegate::disc_header_height);
 }
 
 void QueueTableViewTest::handledDropRestoresRowsAndShowsExactInsertionTarget() {

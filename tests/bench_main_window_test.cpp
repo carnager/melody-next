@@ -221,6 +221,7 @@ class BenchMainWindowTest final : public QObject {
 
   private slots:
     void initTestCase();
+    void discsOfAnAlbumAreNamed();
     void init();
     void cleanup();
     void transportIsOneRowWithCoverAndPills();
@@ -373,6 +374,47 @@ void BenchMainWindowTest::initTestCase() {
 }
 
 // ADR-0226: every window runs against an engine, as the application does.
+// OK Computer with its bonus disc read as one album numbered 1 to 12 and
+// then 1 to 15 again. Each disc's first row now names it -- but only in an
+// album of more than one: a single disc says nothing.
+void BenchMainWindowTest::discsOfAnAlbumAreNamed() {
+    const auto track = [](const char* album, const char* disc, const char* subtitle, const char* title) {
+        LocalTrackRow row;
+        row.raw_path = std::string{"/music/"} + album + "/" + disc + "/" + title + ".flac";
+        row.title = title;
+        row.artist = "Radiohead";
+        row.album = album;
+        row.date = "1997";
+        const auto field = [&row](const char* name, const char* value) {
+            if (*value != 0) {
+                row.metadata.fields.push_back(metadata::MetadataField{
+                    .canonical_name = name, .native_name = QByteArray{name}.toUpper().toStdString(),
+                    .values = {value}, .qualifier = {}, .provenance = metadata::FieldProvenance::embedded});
+            }
+        };
+        field("discnumber", disc);
+        field("discsubtitle", subtitle);
+        row.probed = true;
+        return row;
+    };
+    LocalListModel model;
+    model.replaceRows({
+        track("OK Computer", "1/2", "", "Airbag"),
+        track("OK Computer", "1/2", "", "Paranoid Android"),
+        track("OK Computer", "02/2", "B-sides", "Polyethylene"),
+        track("OK Computer", "02/2", "B-sides", "Pearly"),
+        track("The Bends", "1", "", "Planet Telex"),
+        track("The Bends", "1", "", "The Bends"),
+    });
+    const auto disc = [&model](const int row) { return model.index(row, 0).data(ui::track_disc_start_role).toString(); };
+    QCOMPARE(disc(0), QStringLiteral("Disc 1"));
+    QCOMPARE(disc(1), QString{});
+    QCOMPARE(disc(2), QStringLiteral("Disc 2 · B-sides"));
+    QCOMPARE(disc(3), QString{});
+    QCOMPARE(disc(4), QString{});
+    QCOMPARE(disc(5), QString{});
+}
+
 void BenchMainWindowTest::init() { QVERIFY2(engine_.start(), engine_.log().constData()); }
 
 void BenchMainWindowTest::cleanup() {

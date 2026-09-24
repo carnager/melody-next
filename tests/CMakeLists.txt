@@ -430,7 +430,8 @@ target_link_libraries(
     PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
-add_test(NAME engine-methods COMMAND trackknife_engine_methods_tests)
+add_test(NAME engine-methods COMMAND trackknife_engine_methods_tests
+                                 "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
 
 add_executable(trackknife_playback_state_tests playback_state_test.cpp)
 target_link_libraries(

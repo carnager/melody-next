@@ -428,15 +428,37 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
     dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {
-        auto encoded = required_string(params, "path");
-        if (!encoded) {
-            return std::unexpected(std::move(encoded.error()));
+        // By a track, or by an album: a grid of albums knows their keys, not
+        // their files, and asking for a file first would double the trips.
+        std::string raw_path;
+        if (const auto album = params.find("album_key");
+            album != params.end() && album->is_string()) {
+            auto key = protocol::decode_raw_path(album->get<std::string>());
+            if (!key) {
+                return std::unexpected(bad_params("album_key is not an encoded key", "album_key"));
+            }
+            auto source = catalogue.artwork_source(*key);
+            if (!source) {
+                return std::unexpected(std::move(source.error()));
+            }
+            if (!*source) {
+                Json none = Json::object();
+                none["image"] = Json(nullptr);
+                return none;
+            }
+            raw_path = std::move(**source);
+        } else {
+            auto encoded = required_string(params, "path");
+            if (!encoded) {
+                return std::unexpected(std::move(encoded.error()));
+            }
+            auto decoded = protocol::decode_raw_path(*encoded);
+            if (!decoded) {
+                return std::unexpected(bad_params("path is not an encoded path", "path"));
+            }
+            raw_path = std::move(*decoded);
         }
-        auto raw_path = protocol::decode_raw_path(*encoded);
-        if (!raw_path) {
-            return std::unexpected(bad_params("path is not an encoded path", "path"));
-        }
-        auto image = catalogue.artwork(*raw_path);
+        auto image = catalogue.artwork(raw_path);
         if (!image) {
             return std::unexpected(std::move(image.error()));
         }

@@ -862,6 +862,10 @@ void a_restarted_engine_comes_back_with_its_queue(const std::filesystem::path& d
         (*player)->set_modes(modes);
         (*player)->replace_queue(entries);
         require((*player)->request(entries[2].entry_id).has_value(), "an ask is held");
+        // The engine's gain setting, whatever its output does with it.
+        static_cast<void>((*player)->set_replay_gain_mode(audio::ReplayGainMode::album));
+        static_cast<void>((*player)->set_replay_gain_preamps(
+            audio::ReplayGainPreamps{.with_gain_db = 2.5F, .without_gain_db = -4.0F}));
 
         engine::PlaybackStore store{**player, *workspace};
         require(!store.restore(), "an engine that has never run has nothing to restore");
@@ -903,6 +907,13 @@ void a_restarted_engine_comes_back_with_its_queue(const std::filesystem::path& d
     require((*player)->modes().consume == audio::ModeState::oneshot,
             "including a one-shot that had not fired");
     require((*player)->requests().size() == 1U, "and the asks that had not been played");
+    // Gain as it was set: an output agent connecting to the restarted engine
+    // is told album, not off.
+    require((*player)->state().replay_gain_mode == audio::ReplayGainMode::album,
+            "the ReplayGain mode comes back");
+    require((*player)->state().replay_gain_preamps ==
+                audio::ReplayGainPreamps{.with_gain_db = 2.5F, .without_gain_db = -4.0F},
+            "and its preamps");
 
     if (!playing.is_nil()) {
         // Restoring is asynchronous too: the engine has to open the file

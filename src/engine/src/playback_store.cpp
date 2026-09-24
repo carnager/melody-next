@@ -4,6 +4,7 @@
 
 #include "trackknife/engine/playback_methods.hpp"
 
+#include <cmath>
 #include <utility>
 
 namespace trackknife::engine {
@@ -137,6 +138,22 @@ bool PlaybackStore::restore() {
     if (const auto modes = document.find("modes"); modes != document.end()) {
         state.modes = modes_from_json(*modes);
     }
+    // Absent from an engine that kept no gain setting: off, as it was.
+    if (const auto gain = document.find("replay_gain"); gain != document.end() && gain->is_object()) {
+        const auto mode = gain->value("mode", std::string{"off"});
+        state.replay_gain_mode = mode == "album"   ? audio::ReplayGainMode::album
+                                 : mode == "track" ? audio::ReplayGainMode::track
+                                                   : audio::ReplayGainMode::off;
+        const audio::ReplayGainPreamps preamps{
+            .with_gain_db = gain->value("preamp_with_gain_db", 0.0F),
+            .without_gain_db = gain->value("preamp_without_gain_db", 0.0F)};
+        // A value this engine would refuse is left at none.
+        if (std::isfinite(preamps.with_gain_db) && std::isfinite(preamps.without_gain_db) &&
+            std::abs(preamps.with_gain_db) <= audio::maximum_replay_gain_preamp_db &&
+            std::abs(preamps.without_gain_db) <= audio::maximum_replay_gain_preamp_db) {
+            state.replay_gain_preamps = preamps;
+        }
+    }
 
     // The position is a separate record because it is written far more often.
     // Its absence just means the queue comes back with nothing loaded.
@@ -196,6 +213,12 @@ void PlaybackStore::persist() {
         }
         document["requests"] = std::move(asks);
         document["modes"] = to_json(state.modes);
+        document["replay_gain"] = Json{
+            {"mode", state.replay_gain_mode == audio::ReplayGainMode::album   ? "album"
+                     : state.replay_gain_mode == audio::ReplayGainMode::track ? "track"
+                                                                              : "off"},
+            {"preamp_with_gain_db", state.replay_gain_preamps.with_gain_db},
+            {"preamp_without_gain_db", state.replay_gain_preamps.without_gain_db}};
         if (workspace_->save_engine_state(queue_key, document.dump(), now_ms())) {
             written_revision_ = revision;
             written_anything_ = true;

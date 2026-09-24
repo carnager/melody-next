@@ -154,8 +154,8 @@ core::Result<void> Player::set_output(audio::Audition* output) {
     static_cast<void>(audition_->stop());
     // How loud a track is meant to be travels with the music; the volume is
     // the device's own.
-    static_cast<void>(next->set_replay_gain_mode(before.replay_gain_mode));
-    static_cast<void>(next->set_replay_gain_preamps(before.replay_gain_preamps));
+    static_cast<void>(next->set_replay_gain_mode(replay_gain_mode_));
+    static_cast<void>(next->set_replay_gain_preamps(replay_gain_preamps_));
     audition_ = next;
     gapless_entry_.reset();
     advanced_from_.reset();
@@ -564,11 +564,19 @@ core::Result<void> Player::set_volume_percent(const int percent) {
 
 core::Result<void> Player::set_replay_gain_mode(const audio::ReplayGainMode mode) {
     const std::lock_guard guard{mutex_};
+    if (mode != replay_gain_mode_) {
+        replay_gain_mode_ = mode;
+        ++revision_;
+    }
     return audition_->set_replay_gain_mode(mode);
 }
 
 core::Result<void> Player::set_replay_gain_preamps(const audio::ReplayGainPreamps preamps) {
     const std::lock_guard guard{mutex_};
+    if (preamps != replay_gain_preamps_) {
+        replay_gain_preamps_ = preamps;
+        ++revision_;
+    }
     return audition_->set_replay_gain_preamps(preamps);
 }
 
@@ -768,6 +776,8 @@ Player::Persisted Player::persisted() const {
     stored.playing_request = playing_request_;
     stored.requests = requests_;
     stored.modes = modes_;
+    stored.replay_gain_mode = replay_gain_mode_;
+    stored.replay_gain_preamps = replay_gain_preamps_;
     if (snapshot.format && snapshot.format->sample_rate > 0) {
         const auto rate = static_cast<std::int64_t>(snapshot.format->sample_rate);
         stored.position_ms =
@@ -782,6 +792,10 @@ bool Player::restore(Persisted state) {
     queue_ = std::move(state.queue);
     asks_ = std::move(state.asks);
     modes_ = state.modes;
+    replay_gain_mode_ = state.replay_gain_mode;
+    replay_gain_preamps_ = state.replay_gain_preamps;
+    static_cast<void>(audition_->set_replay_gain_mode(replay_gain_mode_));
+    static_cast<void>(audition_->set_replay_gain_preamps(replay_gain_preamps_));
     requests_ = std::move(state.requests);
     anchors_.request_return = state.request_return;
     playing_request_ = state.playing_request;
@@ -865,8 +879,8 @@ Player::State Player::state() const {
     current.instance = snapshot.playback_instance;
     current.consumed = consumed_;
     current.queue_revision = revision_;
-    current.replay_gain_mode = snapshot.replay_gain_mode;
-    current.replay_gain_preamps = snapshot.replay_gain_preamps;
+    current.replay_gain_mode = replay_gain_mode_;
+    current.replay_gain_preamps = replay_gain_preamps_;
     current.output_target = snapshot.output_target;
     current.default_output = snapshot.default_output_target;
     current.output_available = snapshot.output_target_available;

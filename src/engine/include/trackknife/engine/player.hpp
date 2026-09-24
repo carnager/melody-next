@@ -262,6 +262,10 @@ class Player final {
         bool playing_request{false};
         std::vector<core::StableId> requests;
         audio::PlaybackModes modes;
+        // How loud tracks are meant to be: the engine's setting, whichever
+        // output plays them, and still the same after a restart.
+        audio::ReplayGainMode replay_gain_mode{audio::ReplayGainMode::off};
+        audio::ReplayGainPreamps replay_gain_preamps;
         std::int64_t position_ms{0};
         // What the file looked like when the position was taken. Resuming
         // into a file that has changed underneath would seek to a position
@@ -358,6 +362,10 @@ class Player final {
     std::vector<QueueEntry> queue_;
     audio::PlaybackAnchors anchors_;
     audio::PlaybackModes modes_;
+    // Kept here, not left to the output: an output that is replaced, or an
+    // agent that starts afresh, knows nothing of it.
+    audio::ReplayGainMode replay_gain_mode_{audio::ReplayGainMode::off};
+    audio::ReplayGainPreamps replay_gain_preamps_;
     audio::PlaybackOrder order_;
     int row_{-1};
     // Identities rather than sources, so a request survives the queue being

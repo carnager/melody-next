@@ -1595,18 +1595,30 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         const auto path =
             source_tab->model->rows()[static_cast<std::size_t>(target.row())].raw_path;
         track_context_menu_->addSeparator();
+        // Found in the library of the engine the tab plays on: a remote
+        // tab's file is in the remote's library, which also shows it.
+        const bool remote = source_tab->document.remote;
+        auto* library = remote ? remote_library_ : local_library_;
+        const bool available = library != nullptr && (remote || localLibraryShown());
         for (const bool album : {false, true}) {
             auto* locate = track_context_menu_->addAction(album ? QStringLiteral("Locate album")
                                                                 : QStringLiteral("Locate artist"));
             locate->setObjectName(album ? QStringLiteral("action-local-locate-album")
                                         : QStringLiteral("action-local-locate-artist"));
-            locate->setEnabled(local_library_ != nullptr && localLibraryShown());
-            connect(locate, &QAction::triggered, this, [this, path, album] {
-                if (local_library_ == nullptr)
+            locate->setEnabled(available);
+            connect(locate, &QAction::triggered, this, [this, path, album, remote] {
+                auto* finder = remote ? remote_library_ : local_library_;
+                if (finder == nullptr)
                     return;
-                local_source_tabs_->setCurrentIndex(1);
+                int source = 1;
+                for (int index = 0; remote && index < local_source_tabs_->count(); ++index) {
+                    if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+                        source = index;
+                    }
+                }
+                local_source_tabs_->setCurrentIndex(source);
                 refreshActiveContext();
-                local_library_->locatePath(path, album);
+                finder->locatePath(path, album);
             });
         }
     }

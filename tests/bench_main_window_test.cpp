@@ -280,6 +280,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
     void replacingARemoteTabFromItsLibraryPlays();
+    void locateFindsARemoteTracksAlbumInTheRemoteLibrary();
     void sourcePanelOpensOnALibrary();
     void emptyListsSayHowToFillThem();
     void narrowWindowKeepsListAndUpNextCompact();
@@ -5243,6 +5244,66 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+    // All music on the remote: this computer's library hidden, as it is
+    // for someone who keeps none here.
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    window.tabs_->setCurrentWidget(tab->view);
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    QVERIFY(page && page->entries.size() == 1U);
+    const auto album_name = QString::fromStdString(page->entries.front().album);
+    const auto artist_name = QString::fromStdString(page->entries.front().artist);
+    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::replace);
+    QTRY_COMPARE(tab->model->rowCount(), 1);
+    window.remote_library_->refreshLibrary();
+
+    auto* tree = window.remote_library_->findChild<QTreeView*>();
+    for (const bool album : {true, false}) {
+        const auto position = tab->view->visualRect(tab->model->index(0, local_title_column)).center();
+        QVERIFY(QMetaObject::invokeMethod(tab->view, "customContextMenuRequested",
+                                          Qt::DirectConnection, Q_ARG(QPoint, position)));
+        auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-track-context-menu"));
+        auto* locate = menu->findChild<QAction*>(album ? QStringLiteral("action-local-locate-album")
+                                                       : QStringLiteral("action-local-locate-artist"));
+        QVERIFY(locate != nullptr);
+        QVERIFY2(locate->isEnabled(), "a remote tab's track is located in the remote's library");
+        locate->trigger();
+        menu->close();
+        // The remote's library comes forward, on the album or its artist.
+        QTRY_COMPARE(window.local_source_tabs_
+                         ->tabData(window.local_source_tabs_->currentIndex())
+                         .toString(),
+                     QStringLiteral("remote"));
+        QTRY_VERIFY(tree->currentIndex().data().toString().contains(album ? album_name
+                                                                          : artist_name));
+    }
+    window.remote_playback_->stop();
+    QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
 void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {

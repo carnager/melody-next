@@ -583,8 +583,11 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
                  return;
              }
              if (outcome.page.entries.empty()) {
-                 status_->setText(tr(
-                     "This file is not in the local library. Add its folder and Refresh first."));
+                 status_->setText(remote()
+                                      ? tr("This file is not in this library yet; it is found "
+                                           "after the engine's next scan.")
+                                      : tr("This file is not in the local library. Add its folder "
+                                           "and Refresh first."));
                  return;
              }
              if (generation != generation_)
@@ -593,6 +596,12 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
              {
                  const QSignalBlocker blocker{search_};
                  search_->clear();
+             }
+             // Found under its artist, so the artist tree, not the newest.
+             if (newest_toggle_ != nullptr && newest_toggle_->isChecked()) {
+                 const QSignalBlocker blocker{newest_toggle_};
+                 newest_toggle_->setChecked(false);
+                 QSettings{}.setValue(QStringLiteral("library/newest-first"), false);
              }
              expanded_entries_.clear();
              current_entry_.clear();

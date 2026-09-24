@@ -35,7 +35,11 @@ class MainActivity : ComponentActivity() {
             MelodyTheme(app.settings) {
                 var choosing by rememberSaveable { mutableStateOf(app.settings.endpoint == null) }
                 if (choosing) {
-                    SetupScreen(onChosen = { choosing = false })
+                    // Opened to change the engine, it can be left as it was.
+                    SetupScreen(
+                        onChosen = { choosing = false },
+                        onCancel = if (app.settings.endpoint != null) ({ choosing = false }) else null,
+                    )
                 } else {
                     val vm: MainViewModel = viewModel()
                     MainScreen(vm, onChangeEngine = { choosing = true })

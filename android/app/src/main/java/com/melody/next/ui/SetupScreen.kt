@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,7 +56,7 @@ import com.melody.next.engine.discoverEngines
  * them, or an address typed in -- over a VPN from elsewhere, say.
  */
 @Composable
-fun SetupScreen(onChosen: () -> Unit) {
+fun SetupScreen(onChosen: () -> Unit, onCancel: (() -> Unit)? = null) {
     val app = MelodyApp.instance
     val context = LocalContext.current
     val found by remember { discoverEngines(context) }.collectAsState(initial = emptyList())
@@ -65,18 +66,25 @@ fun SetupScreen(onChosen: () -> Unit) {
     var password by remember { mutableStateOf(saved?.password ?: "") }
     var chosen by remember { mutableStateOf<FoundEngine?>(null) }
     var problem by remember { mutableStateOf("") }
+    // The engine asked for here. Closing on any working connection closed
+    // this screen the moment it opened, connected as it already was to the
+    // engine it was opened to change.
+    var asked by remember { mutableStateOf<Endpoint?>(null) }
 
     fun connect(endpoint: Endpoint) {
         problem = ""
+        asked = endpoint
         app.useEngine(endpoint)
     }
 
-    // Connected: done. Refused, or not reachable: said here.
+    if (onCancel != null) androidx.activity.compose.BackHandler(onBack = onCancel)
+
+    // Connected to what was asked for: done. Refused, or not reachable: said here.
     val state = connection
-    if (state is ConnectionState.Connected && state.endpoint == app.settings.endpoint) {
+    if (state is ConnectionState.Connected && asked != null && state.endpoint == asked) {
         androidx.compose.runtime.LaunchedEffect(state) { onChosen() }
     }
-    val connectionProblem = when (state) {
+    val connectionProblem = if (asked == null && onCancel != null) "" else when (state) {
         is ConnectionState.Refused -> "${state.endpoint}: ${state.reason}"
         is ConnectionState.Connecting -> if (state.lastError.isNotEmpty()) "${state.endpoint}: ${state.lastError}" else ""
         else -> ""
@@ -173,6 +181,10 @@ fun SetupScreen(onChosen: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 val connecting = connection is ConnectionState.Connecting
+                if (onCancel != null) {
+                    androidx.compose.material3.TextButton(onClick = onCancel) { Text("Cancel") }
+                    Spacer(Modifier.width(8.dp))
+                }
                 Button(
                     onClick = {
                         val picked = chosen

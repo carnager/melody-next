@@ -78,6 +78,7 @@ add_subdirectory(src/convert)
 add_subdirectory(src/tools)
 add_subdirectory(src/daemon)
 add_subdirectory(src/agent)
+add_subdirectory(src/cli)
 
 if(TRACKKNIFE_BUILD_UI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Test Widgets)

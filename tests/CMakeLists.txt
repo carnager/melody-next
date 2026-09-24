@@ -371,6 +371,13 @@ add_test(
 )
 set_tests_properties(engine-discovery PROPERTIES TIMEOUT 60)
 
+add_test(
+    NAME melody-cli
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/cli_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_cli>"
+)
+set_tests_properties(melody-cli PROPERTIES TIMEOUT 90)
+
 if(TARGET trackknife_bench_ui)
     qt_add_executable(trackknife_remote_mount_tests remote_mount_test.cpp)
     target_link_libraries(trackknife_remote_mount_tests PRIVATE Trackknife::BenchUi Qt6::Test

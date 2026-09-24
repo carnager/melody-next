@@ -49,7 +49,13 @@ interface Audition {
  * handovers, and which playback this is.
  */
 @UnstableApi
-class PhoneAudition(context: Context, private val onChange: () -> Unit) : Audition {
+class PhoneAudition(
+    context: Context,
+    // A copy kept on the phone, by the path the engine names: played instead
+    // of fetched, which on mobile data is the point of keeping it.
+    private val localCopy: (path: String) -> java.io.File? = { null },
+    private val onChange: () -> Unit,
+) : Audition {
     /** The engine's states, by their number on the wire. */
     enum class State { Empty, Loading, Ready, Buffering, Playing, Paused, Draining, Ended, Failed }
 
@@ -269,7 +275,12 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) : Auditi
             gain?.optDoubleOrNull("track_gain_db"), gain?.optDoubleOrNull("track_peak"),
             gain?.optDoubleOrNull("album_gain_db"), gain?.optDoubleOrNull("album_peak"),
         )
-        return MediaItem.Builder().setUri(url).setMediaId(url).build()
+        val path = url.substringAfter('?', "").let { com.melody.next.speaker.queryValue(it, "path") }
+        val kept = path?.let(localCopy)
+        return MediaItem.Builder()
+            .setUri(kept?.let(android.net.Uri::fromFile) ?: android.net.Uri.parse(url))
+            .setMediaId(url)
+            .build()
     }
 
     /**
@@ -300,3 +311,9 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) : Auditi
 
 /** A refusal with a code the engine understands (`core::ErrorCode`'s names). */
 class AgentError(val code: String, message: String) : Exception(message)
+
+/** A query parameter, percent-decoded: the path the engine's stream URL names. */
+internal fun queryValue(query: String, name: String): String? =
+    query.split('&').firstOrNull { it.substringBefore('=') == name }
+        ?.substringAfter('=', "")
+        ?.let { java.net.URLDecoder.decode(it.replace("+", "%2B"), "UTF-8") }

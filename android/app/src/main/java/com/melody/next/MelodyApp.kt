@@ -31,6 +31,11 @@ class MelodyApp : Application() {
     private var agent: PhoneAgent? = null
     lateinit var network: com.melody.next.speaker.Network
         private set
+    /** Albums kept on the phone, and the player for them when no engine is in reach. */
+    lateinit var offline: com.melody.next.offline.OfflineStore
+        private set
+    lateinit var offlinePlayer: com.melody.next.offline.OfflinePlayer
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -43,8 +48,12 @@ class MelodyApp : Application() {
                 if (state is ConnectionState.Connected) covers.engine = state.name
             }
         }
-        audition = PhoneAudition(this) { agent?.noteChange() }
         network = com.melody.next.speaker.Network(this)
+        offline = com.melody.next.offline.OfflineStore(this, scope, client, covers) {
+            com.melody.next.offline.OfflineStore.Wanted(settings.downloadBitrate, settings.downloadOnWifiOnly, network.metered)
+        }
+        offlinePlayer = com.melody.next.offline.OfflinePlayer(this)
+        audition = PhoneAudition(this, localCopy = { path -> offline.fileFor(path) }) { agent?.noteChange() }
         // Off Wi-Fi, Opus; on it, what Settings say. The engine hears the
         // change in the next report and sends the next track that way.
         scope.launch {

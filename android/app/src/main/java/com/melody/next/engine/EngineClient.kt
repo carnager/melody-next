@@ -167,6 +167,9 @@ class EngineClient(
         }
     }
 
+    /** The engine's address as this phone reaches it: where its stream port is too. */
+    fun engineHost(): String? = (_connection.value as? ConnectionState.Connected)?.endpoint?.host
+
     /** A request whose answer is wanted; throws when not connected or refused. */
     suspend fun call(method: String, params: JSONObject? = null): JSONObject {
         val connection = control ?: throw IOException("not connected to an engine")

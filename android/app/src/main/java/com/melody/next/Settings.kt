@@ -63,6 +63,24 @@ class Settings(context: Context) {
         preferences.edit().putInt("wifi_bitrate", kbps).apply()
     }
 
+    /** Opus bit rate for offline copies in kbps, or 0 for the original files. */
+    var downloadBitrate by mutableStateOf(preferences.getInt("download_bitrate", 160))
+        private set
+
+    /** Downloads wait for an unmetered network. */
+    var downloadOnWifiOnly by mutableStateOf(preferences.getBoolean("download_wifi_only", true))
+        private set
+
+    fun updateDownloadBitrate(kbps: Int) {
+        downloadBitrate = kbps
+        preferences.edit().putInt("download_bitrate", kbps).apply()
+    }
+
+    fun updateDownloadOnWifiOnly(on: Boolean) {
+        downloadOnWifiOnly = on
+        preferences.edit().putBoolean("download_wifi_only", on).apply()
+    }
+
     /** "system", "dark" or "light". */
     var theme by mutableStateOf(preferences.getString("theme", "system") ?: "system")
         private set

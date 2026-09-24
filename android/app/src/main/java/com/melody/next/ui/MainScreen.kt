@@ -74,6 +74,8 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
             LibraryLevel.Latest -> "Newest"
             is LibraryLevel.Albums -> level.artist.label
             is LibraryLevel.Tracks -> level.album.album.ifEmpty { level.album.label }
+            LibraryLevel.Offline -> "On this phone"
+            is LibraryLevel.OfflineAlbum -> vm.app.offline.album(level.key)?.album?.album ?: "On this phone"
         }
         1 -> "Search"
         else -> "Queue"

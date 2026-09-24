@@ -114,6 +114,17 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            Section("Keeping albums on this phone")
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(128 to "Opus 128", 160 to "Opus 160", 192 to "Opus 192", 0 to "Original").forEach { (kbps, label) ->
+                    FilterChip(selected = settings.downloadBitrate == kbps, onClick = { settings.updateDownloadBitrate(kbps) }, label = { Text(label) })
+                }
+            }
+            ListItem(
+                headlineContent = { Text("Only on Wi-Fi") },
+                supportingContent = { Text("Downloads wait for a network that is not metered") },
+                trailingContent = { Switch(settings.downloadOnWifiOnly, onCheckedChange = settings::updateDownloadOnWifiOnly) },
+            )
             Section("Appearance")
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->

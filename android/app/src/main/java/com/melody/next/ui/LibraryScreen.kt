@@ -43,15 +43,29 @@ import com.melody.next.engine.LibraryEntry
 fun LibraryScreen(vm: MainViewModel) {
     Column(Modifier.fillMaxSize()) {
         val level = vm.level
-        if (level == LibraryLevel.Artists || level == LibraryLevel.Latest) {
+        if (level == LibraryLevel.Artists || level == LibraryLevel.Latest || level == LibraryLevel.Offline) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = level == LibraryLevel.Artists, onClick = { vm.showLatest(false) }, label = { Text("Artists") })
-                FilterChip(selected = level == LibraryLevel.Latest, onClick = { vm.showLatest(true) }, label = { Text("Newest") })
+                FilterChip(selected = level == LibraryLevel.Artists, onClick = { vm.showTop(LibraryLevel.Artists) }, label = { Text("Artists") })
+                FilterChip(selected = level == LibraryLevel.Latest, onClick = { vm.showTop(LibraryLevel.Latest) }, label = { Text("Newest") })
+                FilterChip(selected = level == LibraryLevel.Offline, onClick = { vm.showTop(LibraryLevel.Offline) }, label = { Text("On this phone") })
             }
         }
         Box(Modifier.fillMaxSize()) {
             when {
-                vm.libraryError.isNotEmpty() -> Centered(vm.libraryError)
+                level == LibraryLevel.Offline -> OfflineAlbums(vm)
+                level is LibraryLevel.OfflineAlbum -> OfflineAlbumPage(vm, level.key)
+                vm.libraryError.isNotEmpty() -> Column(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(vm.libraryError, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // No engine in reach: what is kept here still plays.
+                    if (vm.app.offline.albums.collectAsState().value.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = { vm.showTop(LibraryLevel.Offline) }) { Text("Albums on this phone") }
+                    }
+                }
                 vm.loading && vm.entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
@@ -61,6 +75,7 @@ fun LibraryScreen(vm: MainViewModel) {
                     LibraryLevel.Latest -> AlbumList(vm, vm.entries, newest = true)
                     is LibraryLevel.Albums -> AlbumList(vm, vm.entries, newest = false)
                     is LibraryLevel.Tracks -> AlbumTracks(vm, level.album, vm.entries)
+                    else -> Unit
                 }
             }
         }
@@ -164,6 +179,7 @@ private fun AlbumTracks(vm: MainViewModel, album: LibraryEntry, tracks: List<Lib
                         Spacer(Modifier.width(4.dp))
                         Text("Up Next")
                     }
+                    DownloadButton(vm, album)
                     IconButton(onClick = { vm.act(Target.Album(album)) }) { Icon(Icons.Default.MoreVert, "More") }
                 }
             }

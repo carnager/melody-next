@@ -137,6 +137,12 @@ data class LibraryEntry(
 ) {
     val year: String get() = date.take(4)
 
+    fun toJson(): JSONObject = JSONObject()
+        .put("kind", kind.wire).put("key", key).put("label", label).put("artist", artist)
+        .put("album", album).put("title", title).put("date", date).put("tracks", tracks)
+        .put("albums", albums).put("track_number", trackNumber).put("rating_hash", ratingHash)
+        .put("rating", rating).put("added", added).put("duration_ms", durationMs)
+
     companion object {
         fun from(json: JSONObject) = LibraryEntry(
             kind = EntryKind.entries.firstOrNull { it.wire == json.optInt("kind") } ?: EntryKind.Track,

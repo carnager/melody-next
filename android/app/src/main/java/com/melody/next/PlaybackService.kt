@@ -142,6 +142,7 @@ private class EnginePlayer(private val client: EngineClient, private val covers:
 @UnstableApi
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
+    private var offlineSession: MediaSession? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -157,14 +158,20 @@ class PlaybackService : MediaSessionService() {
             // session -- so it is handed over here; without it Media3 never
             // takes charge of the notification.
             .also(::addSession)
+        // Albums kept on the phone, played on it: their own controls.
+        offlineSession = MediaSession.Builder(this, app.offlinePlayer.player)
+            .setId("offline")
+            .setSessionActivity(open)
+            .build()
+            .also(::addSession)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Swiped away while the engine is not playing: nothing to control.
-        val player = session?.player
-        if (player == null || !player.playWhenReady) stopSelf()
+        val playing = session?.player?.playWhenReady == true || offlineSession?.player?.playWhenReady == true
+        if (!playing) stopSelf()
     }
 
     override fun onDestroy() {
@@ -173,6 +180,9 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         session = null
+        // The offline player belongs to the app, not to this service.
+        offlineSession?.release()
+        offlineSession = null
         super.onDestroy()
     }
 }

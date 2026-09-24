@@ -109,6 +109,11 @@ fun ConnectionBanner(connection: ConnectionState) {
 
 @Composable
 fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
+    val offline by vm.app.offlinePlayer.state.collectAsState()
+    if (offline.active) {
+        OfflineMiniPlayer(vm, onOpen)
+        return
+    }
     val state by vm.client.state.collectAsState()
     val entry = currentEntry(vm)
     if (state.entry.isEmpty() && state.error.isEmpty()) return
@@ -157,6 +162,11 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
 @Composable
 fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
+    val offline by vm.app.offlinePlayer.state.collectAsState()
+    if (offline.active) {
+        OfflineNowPlaying(vm, onClose)
+        return
+    }
     val state by vm.client.state.collectAsState()
     val outputs by vm.client.outputs.collectAsState()
     val entry = currentEntry(vm)
@@ -303,6 +313,109 @@ private fun VolumeBar(volume: Int, onVolume: (Int) -> Unit) {
         Box(Modifier.width(32.dp)) {
             Text("${(fraction * 100).toInt()}", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** The offline player's position, polled while it plays: ExoPlayer has no flow for it. */
+@Composable
+private fun offlinePosition(vm: MainViewModel): Pair<Long, Long> {
+    val offline by vm.app.offlinePlayer.state.collectAsState()
+    val player = vm.app.offlinePlayer.player
+    val position by produceState(0L to 0L, offline) {
+        while (true) {
+            value = player.currentPosition to player.duration.coerceAtLeast(0)
+            delay(250)
+        }
+    }
+    return position
+}
+
+@Composable
+private fun OfflineMiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
+    val offline by vm.app.offlinePlayer.state.collectAsState()
+    val (position, duration) = offlinePosition(vm)
+    val album = offline.album ?: return
+    Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Column {
+            LinearProgressIndicator(
+                progress = { if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f },
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                trackColor = Color.Transparent,
+            )
+            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                KeptCover(album, 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(offline.track?.entry?.title ?: "—", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("On this phone · ${album.album.artist}", style = MaterialTheme.typography.bodySmall, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(onClick = vm.app.offlinePlayer::previous) { Icon(Icons.Default.SkipPrevious, "Previous") }
+                IconButton(onClick = vm.app.offlinePlayer::toggle) {
+                    Icon(if (offline.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(28.dp))
+                }
+                IconButton(onClick = vm.app.offlinePlayer::next) { Icon(Icons.Default.SkipNext, "Next") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineNowPlaying(vm: MainViewModel, onClose: () -> Unit) {
+    val offline by vm.app.offlinePlayer.state.collectAsState()
+    val (position, duration) = offlinePosition(vm)
+    val album = offline.album ?: return
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClose) { Icon(Icons.Default.KeyboardArrowDown, "Close", Modifier.size(32.dp)) }
+                Spacer(Modifier.weight(1f))
+                // Back to the engine's controls: this player stops.
+                TextButton(onClick = { vm.app.offlinePlayer.close(); onClose() }) { Text("Stop playing offline") }
+            }
+            Spacer(Modifier.weight(0.4f))
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                KeptCover(album, maxWidth * 0.85f, corner = 20.dp)
+            }
+            Spacer(Modifier.height(28.dp))
+            Text(offline.track?.entry?.title ?: "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(4.dp))
+            Text(listOf(offline.track?.entry?.artist.orEmpty(), album.album.album).filter { it.isNotEmpty() }.joinToString(" — "),
+                style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            Text("Playing on this phone, from its own copy", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(16.dp))
+            val fraction = dragging ?: if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+            Slider(
+                value = fraction,
+                onValueChange = { dragging = it },
+                onValueChangeFinished = { dragging?.let { vm.app.offlinePlayer.seek((it * duration).toLong()) }; dragging = null },
+                enabled = duration > 0,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                Text(formatTime((fraction * duration).toLong()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text(formatTime(duration), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = vm.app.offlinePlayer::previous, modifier = Modifier.size(64.dp)) { Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(36.dp)) }
+                Spacer(Modifier.width(20.dp))
+                FilledIconButton(onClick = vm.app.offlinePlayer::toggle, modifier = Modifier.size(72.dp), shape = CircleShape) {
+                    Icon(if (offline.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(40.dp))
+                }
+                Spacer(Modifier.width(20.dp))
+                IconButton(onClick = vm.app.offlinePlayer::next, modifier = Modifier.size(64.dp)) { Icon(Icons.Default.SkipNext, "Next", Modifier.size(36.dp)) }
+            }
+            Spacer(Modifier.weight(1f))
         }
     }
 }

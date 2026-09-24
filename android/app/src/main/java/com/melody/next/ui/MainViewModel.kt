@@ -26,6 +26,9 @@ sealed interface LibraryLevel {
     data object Latest : LibraryLevel
     data class Albums(val artist: LibraryEntry) : LibraryLevel
     data class Tracks(val album: LibraryEntry) : LibraryLevel
+    /** Albums kept on the phone: there with no engine in reach. */
+    data object Offline : LibraryLevel
+    data class OfflineAlbum(val key: String) : LibraryLevel
 }
 
 /** What an action applies to: an album, or some tracks. */
@@ -88,6 +91,14 @@ class MainViewModel : ViewModel() {
                 }
         }
         viewModelScope.launch { client.problems.collect { message = it } }
+        viewModelScope.launch {
+            app.offline.problems.collect { problem ->
+                if (problem != null) {
+                    message = problem
+                    app.offline.problems.value = null
+                }
+            }
+        }
     }
 
     fun messageShown() {
@@ -106,12 +117,14 @@ class MainViewModel : ViewModel() {
         return true
     }
 
-    /** Artists, or the newest albums: the library's two ways in. */
-    fun showLatest(latest: Boolean) {
+    /** The library's ways in: artists, the newest albums, or what is kept here. */
+    fun showTop(top: LibraryLevel) {
         levels.clear()
-        levels.add(if (latest) LibraryLevel.Latest else LibraryLevel.Artists)
+        levels.add(top)
         reload()
     }
+
+    fun showLatest(latest: Boolean) = showTop(if (latest) LibraryLevel.Latest else LibraryLevel.Artists)
 
     fun reload() {
         loadingJob?.cancel()
@@ -125,6 +138,8 @@ class MainViewModel : ViewModel() {
                     LibraryLevel.Latest -> client.query(EntryKind.Album, newestFirst = true, limit = 200).entries
                     is LibraryLevel.Albums -> client.query(EntryKind.Album, artist = shown.artist.key, limit = 2_000).entries
                     is LibraryLevel.Tracks -> client.tracksOf(shown.album)
+                    // Kept on the phone: read from there, not asked for.
+                    LibraryLevel.Offline, is LibraryLevel.OfflineAlbum -> emptyList()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

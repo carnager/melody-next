@@ -7,8 +7,9 @@
 #
 #   scripts/release.sh [VERSION]      # default: from git, e.g. 0.1.0-12-gabc1234
 #
-# Needs Docker (for binaries that run on any recent distribution, built on
-# Debian 13 as the workflow does) and the Android SDK. The APK is signed
+# Needs Docker and the Android SDK. The binaries are built on Debian 13 and
+# linked against its libraries, so they are Debian 13 binaries; Arch Linux
+# has packaging/arch, other distributions the Docker image or a source build. The APK is signed
 # when the release key is found (see android/app/build.gradle.kts), and a
 # debug build otherwise. Everything lands in dist/VERSION/.
 
@@ -42,7 +43,7 @@ container="$(docker create "${image}" /nothing)"
 trap 'docker rm -f "${container}" >/dev/null 2>&1 || true' EXIT
 staging="$(mktemp -d)"
 docker cp "${container}:/" "${staging}/usr"
-name="melody-${version}-linux-${arch}"
+name="melody-${version}-debian13-${arch}"
 mkdir -p "${staging}/${name}"
 cp "${staging}"/usr/bin/* "${staging}/${name}/"
 cp "${staging}"/usr/lib/systemd/user/*.service "${staging}/${name}/"

@@ -2,8 +2,9 @@
 #
 # Builds the server image for x86_64 and arm64 and publishes it to GitHub's
 # container registry, and attaches melodyd, melody-agent and melody-cli for
-# both, built on Debian 13 (they need its FFmpeg 7, PipeWire and TagLib 2,
-# or newer). Arch Linux users build the packages from packaging/arch.
+# both as Debian 13 binaries: linked against its FFmpeg 7, PipeWire and
+# TagLib, they run where those same libraries are. Arch Linux has
+# packaging/arch (and the AUR); anything else, the image or a source build.
 #
 # And the Android app. Signed with the keystore in the repository secrets
 # (see the android job); without them it is a debug build, which installs
@@ -57,7 +58,7 @@ jobs:
       - run: |
           docker buildx build -f packaging/docker/Dockerfile --target binaries \
             --platform "linux/${{ matrix.arch }}" --output type=local,dest=dist .
-          name="melody-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
+          name="melody-${GITHUB_REF_NAME}-debian13-${{ matrix.arch }}"
           mkdir "${name}"
           cp dist/bin/* "${name}/"
           cp dist/lib/systemd/user/*.service "${name}/"

@@ -727,3 +727,12 @@ foreach(trackknife_test IN LISTS trackknife_all_tests)
         "XDG_DATA_HOME=${trackknife_test_home}/data"
         "XDG_CACHE_HOME=${trackknife_test_home}/cache")
 endforeach()
+
+add_executable(trackknife_discovery_tests discovery_test.cpp)
+target_link_libraries(
+    trackknife_discovery_tests
+    PRIVATE Trackknife::Discovery Trackknife::Core trackknife_project_options
+            trackknife_project_warnings
+)
+add_test(NAME discovery COMMAND trackknife_discovery_tests)
+set_tests_properties(discovery PROPERTIES TIMEOUT 60)

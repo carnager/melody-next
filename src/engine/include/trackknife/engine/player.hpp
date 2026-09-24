@@ -126,6 +126,8 @@ class Player final {
     // "Auto" is not here. Choosing album gain unless shuffling is a client's
     // policy about its own modes, and it resolves to track or album before it
     // is sent -- the engine is told what to do, not what the user picked.
+    // Says which engine took this machine's speakers, or none (empty).
+    void set_speakers_taken_by(std::string engine);
     [[nodiscard]] core::Result<void> set_replay_gain_mode(audio::ReplayGainMode mode);
     [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps preamps);
 
@@ -243,6 +245,9 @@ class Player final {
         std::vector<audio::PipeWireDevice> devices;
         // Reconnecting after the sink went away and came back.
         bool output_suspended{false};
+        // Another engine is playing on this machine's speakers, so this one
+        // paused (newest wins): its name, or empty.
+        std::string speakers_taken_by;
         audio::PlaybackBufferDurationConfig buffer;
         // A buffer change waits for the next track; this says one is waiting.
         bool buffer_pending{false};
@@ -364,6 +369,7 @@ class Player final {
     audio::PlaybackModes modes_;
     // Kept here, not left to the output: an output that is replaced, or an
     // agent that starts afresh, knows nothing of it.
+    std::string speakers_taken_by_;
     audio::ReplayGainMode replay_gain_mode_{audio::ReplayGainMode::off};
     audio::ReplayGainPreamps replay_gain_preamps_;
     audio::PlaybackOrder order_;

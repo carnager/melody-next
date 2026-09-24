@@ -562,6 +562,11 @@ core::Result<void> Player::set_volume_percent(const int percent) {
     return audition_->set_volume_percent(percent);
 }
 
+void Player::set_speakers_taken_by(std::string engine) {
+    const std::lock_guard guard{mutex_};
+    speakers_taken_by_ = std::move(engine);
+}
+
 core::Result<void> Player::set_replay_gain_mode(const audio::ReplayGainMode mode) {
     const std::lock_guard guard{mutex_};
     if (mode != replay_gain_mode_) {
@@ -886,6 +891,7 @@ Player::State Player::state() const {
     current.output_available = snapshot.output_target_available;
     current.devices = snapshot.devices;
     current.output_suspended = snapshot.output_suspended;
+    current.speakers_taken_by = speakers_taken_by_;
     current.buffer = snapshot.configured_buffer;
     current.buffer_pending =
         snapshot.active_buffer && *snapshot.active_buffer != snapshot.configured_buffer;

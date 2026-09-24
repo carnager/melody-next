@@ -6,6 +6,8 @@
 // running beside it. No install of the Go melodyd exists to be replaced, so
 // the engine took the name early (ADR-0226).
 
+#include "agent/agent.hpp"
+#include "agent/speaker_arbiter.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
@@ -91,6 +93,9 @@ void usage() {
     std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT]\n"
               << "               [--name NAME] [--password PASS | --password-file FILE]\n"
               << "               [--http HOST:PORT] [--music-root DIR]\n"
+              << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
+              << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
+              << "                [--play-for-music-root DIR]]\n"
               << "\n"
               << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
               << "  --state DIR    where the database lives (default\n"
@@ -110,6 +115,17 @@ void usage() {
               << "                 serve the music being played to output agents that have\n"
               << "                 no copy of their own (melody-agent --stream). Only what\n"
               << "                 the queue holds is served.\n"
+              << "  --play-for HOST:PORT\n"
+              << "                 let another engine play on this machine's speakers, as an\n"
+              << "                 output agent built in -- no melody-agent needed here. The\n"
+              << "                 newest to start playing gets the speakers; the other pauses.\n"
+              << "  --play-for-name NAME\n"
+              << "                 what to call that engine when it takes them (default: its\n"
+              << "                 address)\n"
+              << "  --play-for-password PASS, --play-for-password-file FILE\n"
+              << "                 its password, if it has one\n"
+              << "  --play-for-music-root DIR\n"
+              << "                 where its music is mounted here; without one it streams\n"
               << "\n"
               << "Speaks protocol v1: one JSON object per line. Try:\n"
               << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -133,6 +149,11 @@ int main(int argc, char** argv) {
     std::string password_file;
     std::string engine_name;
     std::optional<std::filesystem::path> music_root;
+    std::string play_for;
+    std::string play_for_name;
+    std::string play_for_password;
+    std::string play_for_password_file;
+    std::optional<std::filesystem::path> play_for_music_root;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -155,6 +176,16 @@ int main(int argc, char** argv) {
             http_address = value();
         } else if (argument == "--music-root") {
             music_root = std::filesystem::path{value()};
+        } else if (argument == "--play-for") {
+            play_for = value();
+        } else if (argument == "--play-for-name") {
+            play_for_name = value();
+        } else if (argument == "--play-for-password") {
+            play_for_password = value();
+        } else if (argument == "--play-for-password-file") {
+            play_for_password_file = value();
+        } else if (argument == "--play-for-music-root") {
+            play_for_music_root = std::filesystem::path{value()};
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -173,6 +204,23 @@ int main(int argc, char** argv) {
         }
         if (password.empty()) {
             std::cerr << "melodyd: no password in " << password_file << "\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (!play_for_password_file.empty()) {
+        std::ifstream file{play_for_password_file};
+        std::getline(file, play_for_password);
+        while (!play_for_password.empty() &&
+               (play_for_password.back() == '\r' || play_for_password.back() == ' ')) {
+            play_for_password.pop_back();
+        }
+    }
+    std::optional<trackknife::protocol::Endpoint> guest_endpoint;
+    if (!play_for.empty()) {
+        guest_endpoint = trackknife::protocol::Endpoint::parse(play_for, play_for_password);
+        if (!guest_endpoint) {
+            std::cerr << "melodyd: --play-for wants HOST:PORT or a socket path\n";
             return EXIT_FAILURE;
         }
     }
@@ -350,6 +398,35 @@ int main(int argc, char** argv) {
     trackknife::engine::register_lastfm_methods(dispatcher, lastfm);
     lastfm.start();
 
+    // Another engine on these speakers, through an agent built in: newest
+    // wins them (ADR-0228).
+    std::unique_ptr<trackknife::agent::Agent> guest;
+    std::unique_ptr<trackknife::agent::SpeakerArbiter> arbiter;
+    if (guest_endpoint) {
+        auto audition = trackknife::audio::LocalAuditionService::create();
+        if (!audition) {
+            std::cerr << "melodyd: no audio here to play " << play_for << " on: "
+                      << audition.error().message << "\n";
+        } else {
+            static_cast<void>((*audition)->refresh_output_devices());
+            auto made = trackknife::agent::Agent::create(
+                trackknife::agent::AgentConfig{.server = *guest_endpoint,
+                                               .name = engine_name,
+                                               .music_root = play_for_music_root,
+                                               .stream_only = !play_for_music_root.has_value()},
+                std::move(*audition));
+            if (!made) {
+                std::cerr << "melodyd: cannot play for " << play_for << ": "
+                          << made.error().message << "\n";
+            } else {
+                guest = std::move(*made);
+                arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(
+                    *player, *guest,
+                    play_for_name.empty() ? guest_endpoint->describe() : play_for_name);
+            }
+        }
+    }
+
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);
     // A client hanging up must not take the engine with it.
@@ -362,6 +439,12 @@ int main(int argc, char** argv) {
     if (streams) {
         streams->start();
     }
+    if (guest) {
+        guest->start();
+        arbiter->start();
+        std::cerr << "melodyd: playing for " << guest_endpoint->describe() << " as \""
+                  << engine_name << "\"\n";
+    }
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
 
@@ -370,6 +453,12 @@ int main(int argc, char** argv) {
     }
 
     std::cerr << "melodyd: stopping\n";
+    if (arbiter) {
+        arbiter->stop();
+    }
+    if (guest) {
+        guest->stop();
+    }
     // Both sample the player, so they stop before it and before the server
     // the watcher writes to.
     if (recorder) {

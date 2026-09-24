@@ -295,6 +295,7 @@ Json to_json(const Player::State& state) {
     }
     output["devices"] = std::move(devices);
     output["suspended"] = state.output_suspended;
+    output["taken_by"] = state.speakers_taken_by;
     output["underruns"] = state.underruns;
     rendered["output"] = std::move(output);
     rendered["buffer"] = Json{{"capacity_ms", state.buffer.capacity.count()},

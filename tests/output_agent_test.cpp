@@ -7,6 +7,7 @@
 // mapping.
 
 #include "agent/agent.hpp"
+#include "agent/speaker_arbiter.hpp"
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
@@ -482,9 +483,44 @@ int main(int argc, char** argv) {
 
     kitchen->stop();
     static_cast<void>(player->stop());
+
+    // An engine with speakers of its own and this engine playing on them
+    // through its built-in agent: the newest to start playing has them.
+    if (auto host = engine::Player::create(); host) {
+        (*host)->replace_queue({entry(engine_root / "one.wav")});
+        require((*host)->play_entry((*host)->queue().front().entry_id).has_value(),
+                "the host plays its own music");
+        require(eventually([&] { return (*host)->state().status == "playing"; }), "playing");
+        auto built_in = start_agent(port, agent_root, "agent-test-token", "desk");
+        require(built_in != nullptr && eventually([&] { return built_in->registered(); }),
+                "its built-in agent registers with the other engine");
+        trackknife::agent::SpeakerArbiter arbiter{**host, *built_in, "the server"};
+        arbiter.start();
+        require(outputs.select("agent:desk").has_value(), "the other engine chooses it");
+        player->replace_queue(entries);
+        require(player->play_entry(entries[0].entry_id).has_value(),
+                "and starts playing on those speakers");
+        require(eventually([&] { return (*host)->state().status == "paused"; }),
+                "the host's own music pauses: the other engine is newest");
+        require((*host)->state().speakers_taken_by == "the server", "and it says who took them");
+        require((*host)->resume().has_value(), "the host plays again");
+        require(eventually([&] {
+                    return built_in->audition().snapshot().state ==
+                           audio::LocalAuditionState::paused;
+                }),
+                "now it is newest: the other engine's music pauses here");
+        require(eventually([&] { return player->state().status == "paused"; }),
+                "and that engine hears so");
+        require(eventually([&] { return (*host)->state().speakers_taken_by.empty(); }),
+                "the speakers are the host's again");
+        arbiter.stop();
+        built_in->stop();
+        static_cast<void>((*host)->stop());
+    }
+    static_cast<void>(player->stop());
     (*streams)->stop();
     (*server)->stop();
     std::filesystem::remove_all(directory);
-    std::cout << "output agent: 3 scenarios\n";
+    std::cout << "output agent: 4 scenarios\n";
     return EXIT_SUCCESS;
 }

@@ -5,7 +5,7 @@ find_package(Threads REQUIRED)
 add_executable(trackknife_engine_daemon main.cpp)
 target_link_libraries(
     trackknife_engine_daemon
-    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
+    PRIVATE Trackknife::Agent Trackknife::Engine Trackknife::Protocol Trackknife::Core Threads::Threads
             trackknife_project_options trackknife_project_warnings
 )
 # ADR-0220: melodyd is the Go daemon's name until the Phase 6 migration is

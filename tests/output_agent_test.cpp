@@ -257,6 +257,20 @@ int main(int argc, char** argv) {
             "and the engine hears that it did");
     const auto paused_at = player->state().position_ms;
 
+    // What the engine was asked holds for whichever agent plays: gain set now
+    // must reach an agent that starts afresh, which begins with it off.
+    require(player->set_replay_gain_mode(audio::ReplayGainMode::album).has_value(),
+            "album gain is set");
+    require(player->set_replay_gain_preamps(audio::ReplayGainPreamps{.with_gain_db = 3.0F,
+                                                                     .without_gain_db = -2.0F})
+                .has_value(),
+            "and a preamp");
+    require(eventually([&] {
+                return agent->audition().snapshot().replay_gain_mode ==
+                       audio::ReplayGainMode::album;
+            }),
+            "the agent takes them");
+
     // The agent goes away -- a reboot -- and comes back under its name. The
     // music is still there, where it was, still paused.
     agent->stop();
@@ -275,6 +289,13 @@ int main(int argc, char** argv) {
             "and takes up the same track, paused");
     require(eventually([&] { return player->state().position_ms >= paused_at - 50; }),
             "at the same place");
+    require(eventually([&] {
+                const auto snapshot = returned->audition().snapshot();
+                return snapshot.replay_gain_mode == audio::ReplayGainMode::album &&
+                       snapshot.replay_gain_preamps.with_gain_db == 3.0F &&
+                       snapshot.replay_gain_preamps.without_gain_db == -2.0F;
+            }),
+            "with the gain it was set to, not a new agent's off");
 
     // The engine's player decides what comes next, and the agent plays it.
     require(player->seek_ms(29'000).has_value(), "seeking reaches the agent");

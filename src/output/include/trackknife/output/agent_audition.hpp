@@ -116,6 +116,8 @@ class AgentAudition final : public audio::Audition {
     [[nodiscard]] core::Result<void> arm(std::string raw_path, Source source,
                                          std::uint64_t occurrence_token);
     void adopt(const protocol::Json& report);
+    // Tells a newly connected agent what it was asked before.
+    void send_wanted_settings();
 
     const std::string name_;
     const AgentPaths paths_;
@@ -132,6 +134,12 @@ class AgentAudition final : public audio::Audition {
     std::string current_raw_;
     std::string next_raw_;
     std::uint64_t seen_transitions_{0U};
+    // What the engine asked of this output, kept here rather than trusted to
+    // the agent: a freshly started agent, or one offline when it was asked,
+    // knows none of it, and is told again on connecting.
+    std::optional<audio::ReplayGainMode> wanted_mode_;
+    std::optional<audio::ReplayGainPreamps> wanted_preamps_;
+    std::optional<audio::PlaybackBufferDurationConfig> wanted_buffer_;
 };
 
 } // namespace trackknife::output

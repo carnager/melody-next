@@ -101,6 +101,34 @@ void AgentAudition::attach(std::unique_ptr<protocol::Client> client, const bool 
     if (previous) {
         previous->close();
     }
+    send_wanted_settings();
+}
+
+void AgentAudition::send_wanted_settings() {
+    std::optional<audio::ReplayGainMode> mode;
+    std::optional<audio::ReplayGainPreamps> preamps;
+    std::optional<audio::PlaybackBufferDurationConfig> buffer;
+    {
+        const std::lock_guard guard{mutex_};
+        mode = wanted_mode_;
+        preamps = wanted_preamps_;
+        buffer = wanted_buffer_;
+    }
+    // Best effort: an agent that does not answer is told again on its next
+    // connection.
+    if (mode) {
+        static_cast<void>(call("audition.replay_gain", Json{{"mode", static_cast<int>(*mode)}}));
+    }
+    if (preamps) {
+        static_cast<void>(
+            call("audition.replay_gain", Json{{"preamp_with_gain_db", preamps->with_gain_db},
+                                              {"preamp_without_gain_db", preamps->without_gain_db}}));
+    }
+    if (buffer) {
+        static_cast<void>(call("audition.buffer",
+                               Json{{"capacity_ms", buffer->capacity.count()},
+                                    {"start_threshold_ms", buffer->start_threshold.count()}}));
+    }
 }
 
 bool AgentAudition::online() const {
@@ -154,6 +182,16 @@ void AgentAudition::adopt(const Json& report) {
 audio::LocalAuditionSnapshot AgentAudition::snapshot() const {
     const std::lock_guard guard{mutex_};
     auto current = reported_;
+    // The engine's settings, not what an agent that has just started says.
+    if (wanted_mode_) {
+        current.replay_gain_mode = *wanted_mode_;
+    }
+    if (wanted_preamps_) {
+        current.replay_gain_preamps = *wanted_preamps_;
+    }
+    if (wanted_buffer_) {
+        current.configured_buffer = *wanted_buffer_;
+    }
     current.raw_path = current_raw_;
     current.next_raw_path = next_armed_ ? next_raw_ : std::string{};
     current.chain_transitions = seen_transitions_;
@@ -387,11 +425,19 @@ core::Result<void> AgentAudition::set_volume_percent(const int percent) {
 }
 
 core::Result<void> AgentAudition::set_replay_gain_mode(const audio::ReplayGainMode mode) {
+    {
+        const std::lock_guard guard{mutex_};
+        wanted_mode_ = mode;
+    }
     auto answered = call("audition.replay_gain", Json{{"mode", static_cast<int>(mode)}});
     return answered ? core::Result<void>{} : std::unexpected(std::move(answered.error()));
 }
 
 core::Result<void> AgentAudition::set_replay_gain_preamps(const audio::ReplayGainPreamps preamps) {
+    {
+        const std::lock_guard guard{mutex_};
+        wanted_preamps_ = preamps;
+    }
     auto answered =
         call("audition.replay_gain", Json{{"preamp_with_gain_db", preamps.with_gain_db},
                                           {"preamp_without_gain_db", preamps.without_gain_db}});
@@ -400,6 +446,10 @@ core::Result<void> AgentAudition::set_replay_gain_preamps(const audio::ReplayGai
 
 core::Result<void>
 AgentAudition::set_buffer_config(const audio::PlaybackBufferDurationConfig buffer_config) {
+    {
+        const std::lock_guard guard{mutex_};
+        wanted_buffer_ = buffer_config;
+    }
     auto answered = call("audition.buffer",
                          Json{{"capacity_ms", buffer_config.capacity.count()},
                               {"start_threshold_ms", buffer_config.start_threshold.count()}});

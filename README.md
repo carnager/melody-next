@@ -104,6 +104,14 @@ app in `android/` browses and controls the library, plays on the phone with
 Opus on mobile data, and keeps albums for listening offline. `melody-cli`
 does the same from a shell. [Melody](docs/melody.md) explains the setup.
 
+<p>
+  <img src="Screenshots/android-newest.jpg" width="160" alt="The newest albums as covers">
+  <img src="Screenshots/android-artists.jpg" width="160" alt="Artists, with letters down the side to jump through them">
+  <img src="Screenshots/android-album.jpg" width="160" alt="An album page">
+  <img src="Screenshots/android-queue.jpg" width="160" alt="The queue, grouped by album">
+  <img src="Screenshots/android-nowplaying.jpg" width="160" alt="Now playing, coloured from the cover">
+</p>
+
 ## Settings and keyboard controls
 
 Settings brings together connection profiles, local library folders, playback,

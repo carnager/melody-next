@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,7 +51,10 @@ fun Cover(key: CoverKey?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 
     }
     val covers = MelodyApp.instance.covers
     var image by remember(key, asked) { mutableStateOf(key?.let { covers.cached(it, asked) }) }
-    LaunchedEffect(key, asked) {
+    // Asked again once connected: a cover asked for while the app was
+    // still connecting -- the mini player's, at start -- found no engine.
+    val connected = MelodyApp.instance.client.connection.collectAsState().value is com.melody.next.engine.ConnectionState.Connected
+    LaunchedEffect(key, asked, connected) {
         if (key != null && image == null) image = covers.load(key, asked)
     }
     Box(
@@ -75,12 +79,18 @@ fun Cover(key: CoverKey?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 
 
 /** Five stars over the engine's 0-10 rating; a tap on a star's left half sets a half. */
 @Composable
-fun RatingBar(rating: Int, onRate: (Int) -> Unit, starSize: Dp = 28.dp) {
+fun RatingBar(
+    rating: Int,
+    onRate: (Int) -> Unit,
+    starSize: Dp = 28.dp,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
+    idle: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         for (star in 1..5) {
             val full = rating >= star * 2
             val half = !full && rating == star * 2 - 1
-            Box(Modifier.size(starSize + 8.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(starSize + 6.dp), contentAlignment = Alignment.Center) {
                 Icon(
                     when {
                         full -> Icons.Default.Star
@@ -88,8 +98,7 @@ fun RatingBar(rating: Int, onRate: (Int) -> Unit, starSize: Dp = 28.dp) {
                         else -> Icons.Default.StarOutline
                     },
                     contentDescription = "$star stars",
-                    tint = if (full || half) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = if (full || half) tint else idle,
                     modifier = Modifier.size(starSize),
                 )
                 // Two halves: the left one gives a half star, the right one a
@@ -159,5 +168,15 @@ fun formatAdded(addedSeconds: Long, nowSeconds: Long = System.currentTimeMillis(
         minutes < 60 * 24 * 30 -> "${minutes / (60 * 24)} days ago"
         minutes < 60 * 24 * 365 -> "${minutes / (60 * 24 * 30)} months ago"
         else -> "${minutes / (60 * 24 * 365)} years ago"
+    }
+}
+
+/** Consume, drawn as the old app drew it, in a given colour. */
+@Composable
+fun ConsumeMark(active: Boolean, once: Boolean, color: androidx.compose.ui.graphics.Color) {
+    Canvas(Modifier.size(22.dp)) {
+        drawArc(color = color, startAngle = 35f, sweepAngle = 290f, useCenter = true,
+            style = if (active) androidx.compose.ui.graphics.drawscope.Fill else androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8.dp.toPx()))
+        if (active) drawCircle(color.copy(alpha = if (once) 0.5f else 1f), radius = 2.dp.toPx(), center = center.copy(y = size.height + 6.dp.toPx()))
     }
 }

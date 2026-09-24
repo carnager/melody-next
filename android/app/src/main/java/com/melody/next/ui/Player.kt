@@ -2,6 +2,16 @@ package com.melody.next.ui
 
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -119,15 +130,17 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
     if (state.entry.isEmpty() && state.error.isEmpty()) return
     val position = livePosition(state)
     val duration = state.durationMs.takeIf { it > 0 } ?: entry?.durationMs ?: -1
-    Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    Surface(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen),
+        color = LocalTones.current.raised,
+    ) {
         Column {
-            LinearProgressIndicator(
-                progress = { if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-                trackColor = Color.Transparent,
-            )
             Row(
-                Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Cover(entry?.let { CoverKey(path = it.path, group = it.albumGroup) }, 40.dp)
@@ -149,12 +162,12 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
                         )
                     }
                 }
-                IconButton(onClick = vm.client::previous) { Icon(Icons.Default.SkipPrevious, "Previous") }
                 IconButton(onClick = vm.client::togglePlay) {
                     Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(28.dp))
                 }
                 IconButton(onClick = vm.client::next) { Icon(Icons.Default.SkipNext, "Next") }
             }
+            MiniProgress(if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f)
         }
     }
 }
@@ -171,94 +184,128 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
     val outputs by vm.client.outputs.collectAsState()
     val entry = currentEntry(vm)
     val scope = rememberCoroutineScope()
+    val cover = entry?.let { CoverKey(path = it.path, group = it.albumGroup) }
+    val colours = coverColours(cover)
     // The library's view of this file: its rating and the key to set one.
     var facts by remember { mutableStateOf<LibraryEntry?>(null) }
     LaunchedEffect(entry?.path) {
         facts = entry?.path?.let { vm.client.track(it) }
     }
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(Modifier.fillMaxSize(), color = colours.ground, contentColor = colours.text) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.Default.KeyboardArrowDown, "Close", Modifier.size(32.dp)) }
+                IconButton(onClick = onClose, modifier = Modifier.offset(x = (-12).dp)) {
+                    Icon(Icons.Default.KeyboardArrowDown, "Close", Modifier.size(30.dp))
+                }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onOutputs) {
-                    Icon(Icons.Default.Speaker, null, Modifier.size(18.dp))
+                // Where it plays, as a chip: tapping it is how to change it.
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(colours.text.copy(alpha = 0.08f))
+                        .clickable(onClick = onOutputs)
+                        .padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Speaker, null, Modifier.size(18.dp), tint = colours.soft)
                     Spacer(Modifier.width(6.dp))
-                    Text(outputs.firstOrNull { it.selected }?.name ?: "Outputs")
+                    Text(outputs.firstOrNull { it.selected }?.name ?: "Outputs", style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold, color = colours.soft)
                 }
             }
-            Spacer(Modifier.weight(0.4f))
+            Spacer(Modifier.weight(0.35f))
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Cover(entry?.let { CoverKey(path = it.path, group = it.albumGroup) }, maxWidth * 0.85f, corner = 20.dp)
+                val side = maxWidth
+                Box(Modifier.shadow(28.dp, RoundedCornerShape(16.dp))) {
+                    Cover(cover, side, corner = 16.dp)
+                }
             }
-            Spacer(Modifier.height(28.dp))
-            Text(
-                entry?.title ?: "Nothing playing",
-                style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                listOfNotNull(entry?.artist?.ifEmpty { null }, entry?.album?.ifEmpty { null },
-                    entry?.date?.take(4)?.ifEmpty { null }).joinToString(" — "),
-                style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Spacer(Modifier.weight(0.3f))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Text(entry?.title ?: "Nothing playing", style = MaterialTheme.typography.headlineSmall,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(entry?.artist?.ifEmpty { null }, entry?.album?.ifEmpty { null }).joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium, color = colours.soft,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                facts?.let { track ->
+                    Box(Modifier.padding(bottom = 2.dp)) {
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.material3.LocalContentColor provides colours.accent,
+                        ) {
+                            RatingBar(track.rating, onRate = { rating ->
+                                scope.launch {
+                                    runCatching { vm.client.setRating(track.ratingHash, false, rating) }
+                                        .onSuccess { facts = track.copy(rating = rating) }
+                                }
+                            }, starSize = 15.dp, tint = colours.accent, idle = colours.muted)
+                        }
+                    }
+                }
+            }
             if (state.error.isNotEmpty() && !state.playing) {
                 Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.ErrorOutline, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Could not play: ${state.error}", color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall)
-                }
+                Text("Could not play: ${state.error}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.fillMaxWidth())
             }
-            Spacer(Modifier.height(12.dp))
-            facts?.let { track ->
-                RatingBar(track.rating, onRate = { rating ->
-                    scope.launch {
-                        runCatching { vm.client.setRating(track.ratingHash, false, rating) }
-                            .onSuccess { facts = track.copy(rating = rating) }
-                    }
-                })
-            }
-            Spacer(Modifier.height(16.dp))
-            SeekBar(vm, state, entry)
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(22.dp))
+            SeekBar(vm, state, entry, colours)
+            Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = vm.client::previous, modifier = Modifier.size(64.dp)) {
-                    Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(36.dp))
+                IconButton(onClick = vm.client::previous, modifier = Modifier.size(60.dp)) {
+                    Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(34.dp))
                 }
-                Spacer(Modifier.width(20.dp))
-                FilledIconButton(onClick = vm.client::togglePlay, modifier = Modifier.size(72.dp), shape = CircleShape) {
-                    Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(40.dp))
+                Spacer(Modifier.width(24.dp))
+                Box(
+                    Modifier.size(76.dp).clip(CircleShape).background(colours.text).clickable(onClick = vm.client::togglePlay),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause",
+                        Modifier.size(36.dp), tint = colours.ground)
                 }
-                Spacer(Modifier.width(20.dp))
-                IconButton(onClick = vm.client::next, modifier = Modifier.size(64.dp)) {
-                    Icon(Icons.Default.SkipNext, "Next", Modifier.size(36.dp))
+                Spacer(Modifier.width(24.dp))
+                IconButton(onClick = vm.client::next, modifier = Modifier.size(60.dp)) {
+                    Icon(Icons.Default.SkipNext, "Next", Modifier.size(34.dp))
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
             val modes = state.modes
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                ModeButton(Icons.Default.Repeat, "Repeat", modes.repeat, onClick = vm.client::toggleRepeat)
-                ModeButton(Icons.Default.Shuffle, "Random", modes.random, onClick = vm.client::toggleRandom)
-                ModeButton(Icons.Default.LooksOne, "Single", modes.single != 0, once = modes.single == 2, onClick = vm.client::cycleSingle)
-                ConsumeButton(modes.consume != 0, once = modes.consume == 2, onClick = vm.client::cycleConsume)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                ModeToggle(Icons.Default.Repeat, "Repeat", modes.repeat, false, colours, vm.client::toggleRepeat)
+                ModeToggle(Icons.Default.Shuffle, "Random", modes.random, false, colours, vm.client::toggleRandom)
+                ModeToggle(Icons.Default.LooksOne, "Single", modes.single != 0, modes.single == 2, colours, vm.client::cycleSingle)
+                IconButton(onClick = vm.client::cycleConsume) {
+                    ConsumeMark(modes.consume != 0, modes.consume == 2, if (modes.consume != 0) colours.accent else colours.muted)
+                }
             }
-            VolumeBar(state.volume, vm.client::setVolume)
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
+            VolumeBar(state.volume, colours, vm.client::setVolume)
+            Spacer(Modifier.weight(0.35f))
+        }
+    }
+}
+
+/** A mode: its icon in the accent when on, with a dot beneath when it's a one-shot. */
+@Composable
+private fun ModeToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, on: Boolean, once: Boolean,
+                       colours: CoverColours, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, label, Modifier.size(22.dp), tint = if (on) colours.accent else colours.muted)
+            if (on) Box(Modifier.offset(y = 16.dp).size(4.dp).clip(CircleShape).background(colours.accent.copy(alpha = if (once) 0.5f else 1f)))
         }
     }
 }
 
 @Composable
-private fun SeekBar(vm: MainViewModel, state: PlaybackState, entry: QueueEntry?) {
+private fun SeekBar(vm: MainViewModel, state: PlaybackState, entry: QueueEntry?, colours: CoverColours) {
     val duration = state.durationMs.takeIf { it > 0 } ?: entry?.durationMs ?: -1
     val position = livePosition(state)
     var dragging by remember { mutableStateOf<Float?>(null) }
@@ -272,47 +319,98 @@ private fun SeekBar(vm: MainViewModel, state: PlaybackState, entry: QueueEntry?)
         duration > 0 -> position.toFloat() / duration
         else -> 0f
     }.coerceIn(0f, 1f)
-    Slider(
+    ThinSlider(
         value = fraction,
-        onValueChange = { dragging = it },
-        onValueChangeFinished = {
+        enabled = duration > 0,
+        fill = colours.accent,
+        track = colours.text.copy(alpha = 0.14f),
+        thumb = colours.text,
+        onChange = { dragging = it },
+        onDone = {
             dragging?.let { chosen ->
                 sought = (chosen * duration).toLong()
                 vm.client.seek(sought)
             }
             dragging = null
         },
-        enabled = duration > 0,
-        modifier = Modifier.fillMaxWidth(),
     )
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Text(formatTime(if (duration > 0) (fraction * duration).toLong() else position),
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            style = MaterialTheme.typography.labelMedium, color = colours.muted)
         Spacer(Modifier.weight(1f))
-        Text(formatTime(duration), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(formatTime(duration), style = MaterialTheme.typography.labelMedium, color = colours.muted)
     }
 }
 
 @Composable
-private fun VolumeBar(volume: Int, onVolume: (Int) -> Unit) {
+private fun VolumeBar(volume: Int, colours: CoverColours, onVolume: (Int) -> Unit) {
     var dragging by remember { mutableStateOf<Float?>(null) }
-    val fraction = dragging ?: (volume / 100f)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.AutoMirrored.Filled.VolumeUp, "Volume", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(8.dp))
-        Slider(
-            value = fraction,
-            onValueChange = { dragging = it },
-            onValueChangeFinished = {
-                dragging?.let { onVolume((it * 100).toInt()) }
-                dragging = null
+        Icon(Icons.AutoMirrored.Filled.VolumeDown, "Volume", Modifier.size(18.dp), tint = colours.muted)
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f)) {
+            ThinSlider(
+                value = dragging ?: (volume / 100f),
+                enabled = true,
+                fill = colours.soft,
+                track = colours.text.copy(alpha = 0.14f),
+                thumb = null,
+                height = 3.dp,
+                onChange = { dragging = it },
+                onDone = {
+                    dragging?.let { onVolume((it * 100).toInt()) }
+                    dragging = null
+                },
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Icon(Icons.AutoMirrored.Filled.VolumeUp, null, Modifier.size(18.dp), tint = colours.muted)
+    }
+}
+
+/**
+ * A thin line to drag along, with a small round thumb: the seek and volume
+ * bars. Material's slider is thicker than this screen wants.
+ */
+@Composable
+private fun ThinSlider(
+    value: Float,
+    enabled: Boolean,
+    fill: Color,
+    track: Color,
+    thumb: Color?,
+    height: androidx.compose.ui.unit.Dp = 4.dp,
+    onChange: (Float) -> Unit,
+    onDone: () -> Unit,
+) {
+    var width by remember { mutableIntStateOf(1) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .onSizeChanged { width = it.width.coerceAtLeast(1) }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures { offset ->
+                    onChange((offset.x / width).coerceIn(0f, 1f))
+                    onDone()
+                }
+            }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { onChange((it.x / width).coerceIn(0f, 1f)) },
+                    onDragEnd = onDone,
+                    onDragCancel = onDone,
+                ) { change, _ -> onChange((change.position.x / width).coerceIn(0f, 1f)) }
             },
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Box(Modifier.width(32.dp)) {
-            Text("${(fraction * 100).toInt()}", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(2.dp)).background(track))
+        Box(Modifier.fillMaxWidth(value).height(height).clip(RoundedCornerShape(2.dp)).background(fill))
+        if (thumb != null && enabled) {
+            val offset = with(LocalDensity.current) { (value * width).toDp() - 7.dp }
+            Box(Modifier.offset(x = offset.coerceAtLeast(0.dp)).size(14.dp).clip(CircleShape).background(thumb))
         }
     }
 }
@@ -336,14 +434,16 @@ private fun OfflineMiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
     val offline by vm.app.offlinePlayer.state.collectAsState()
     val (position, duration) = offlinePosition(vm)
     val album = offline.album ?: return
-    Surface(Modifier.fillMaxWidth().clickable(onClick = onOpen), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+    Surface(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 10.dp, end = 10.dp, bottom = 8.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpen),
+        color = LocalTones.current.raised,
+    ) {
         Column {
-            LinearProgressIndicator(
-                progress = { if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-                trackColor = Color.Transparent,
-            )
-            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 KeptCover(album, 40.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -352,12 +452,12 @@ private fun OfflineMiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
                     Text("On this phone · ${album.album.artist}", style = MaterialTheme.typography.bodySmall, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
                 }
-                IconButton(onClick = vm.app.offlinePlayer::previous) { Icon(Icons.Default.SkipPrevious, "Previous") }
                 IconButton(onClick = vm.app.offlinePlayer::toggle) {
                     Icon(if (offline.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(28.dp))
                 }
                 IconButton(onClick = vm.app.offlinePlayer::next) { Icon(Icons.Default.SkipNext, "Next") }
             }
+            MiniProgress(if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f)
         }
     }
 }
@@ -417,5 +517,13 @@ private fun OfflineNowPlaying(vm: MainViewModel, onClose: () -> Unit) {
             }
             Spacer(Modifier.weight(1f))
         }
+    }
+}
+
+/** The thin line along the mini player's bottom edge. */
+@Composable
+private fun MiniProgress(fraction: Float) {
+    Box(Modifier.fillMaxWidth().height(2.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))) {
+        Box(Modifier.fillMaxWidth(fraction).height(2.dp).background(MaterialTheme.colorScheme.primary))
     }
 }

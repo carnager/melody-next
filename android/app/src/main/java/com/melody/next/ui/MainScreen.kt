@@ -1,6 +1,16 @@
 package com.melody.next.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -68,57 +78,77 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
     }
 
     val engineName = (connection as? ConnectionState.Connected)?.name
-    val title = when (tab) {
-        0 -> when (val level = vm.level) {
-            LibraryLevel.Artists -> engineName ?: "Library"
-            LibraryLevel.Latest -> "Newest"
-            is LibraryLevel.Albums -> level.artist.label
-            is LibraryLevel.Tracks -> level.album.album.ifEmpty { level.album.label }
-            LibraryLevel.Offline -> "On this phone"
-            is LibraryLevel.OfflineAlbum -> vm.app.offline.album(level.key)?.album?.album ?: "On this phone"
-        }
-        1 -> "Search"
-        else -> "Queue"
-    }
+    val upNext by vm.client.upNext.collectAsState()
+    val tones = LocalTones.current
+    val drilling = tab == 0 && vm.levels.size > 1
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    navigationIcon = {
-                        if (tab == 0 && vm.levels.size > 1) {
+                Column(Modifier.statusBarsPadding()) {
+                    if (drilling) {
+                        // Inside the library: back, and the artist's name
+                        // when it is their albums; an album shows its own.
+                        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                            val level = vm.level
+                            if (level is LibraryLevel.Albums) {
+                                Text(level.artist.label, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f).padding(start = 4.dp))
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
                         }
-                    },
-                    actions = {
-                        if (tab == 2 && queue.isNotEmpty()) {
-                            IconButton(onClick = { clearing = true }) { Icon(Icons.Default.DeleteSweep, "Clear the queue") }
+                    } else {
+                        val all = queue.size + upNext.size
+                        ScreenHeader(
+                            title = when (tab) { 0 -> "Library"; 1 -> "Search"; else -> "Queue" },
+                            subtitle = when (tab) {
+                                0 -> engineName
+                                2 -> if (all == 0) null else "$all tracks · ${formatMinutes((queue + upNext).sumOf { it.durationMs.coerceAtLeast(0) })}"
+                                else -> null
+                            },
+                        ) {
+                            if (tab == 2 && queue.isNotEmpty()) {
+                                IconButton(onClick = { clearing = true }) { Icon(Icons.Default.DeleteSweep, "Clear the queue", tint = tones.secondary) }
+                            }
+                            IconButton(onClick = { outputs = true }) { Icon(Icons.Default.Speaker, "Where it plays", tint = tones.secondary) }
+                            IconButton(onClick = { settings = true }) { Icon(Icons.Default.Tune, "Settings", tint = tones.secondary) }
                         }
-                        IconButton(onClick = { outputs = true }) { Icon(Icons.Default.Speaker, "Where it plays") }
-                        IconButton(onClick = { settings = true }) { Icon(Icons.Default.Settings, "Settings") }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                )
+                    }
+                }
             },
             bottomBar = {
                 Column {
                     ConnectionBanner(connection)
                     MiniPlayer(vm) { nowPlaying = true }
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                        val colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onSurface,
+                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unselectedIconColor = tones.muted,
+                            unselectedTextColor = tones.muted,
+                            indicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                        )
                         NavigationBarItem(
                             selected = tab == 0,
-                            onClick = { if (tab == 0) vm.showLatest(vm.level == LibraryLevel.Latest) else tab = 0 },
+                            onClick = { if (tab == 0) vm.showTop(vm.levels.first()) else tab = 0 },
                             icon = { Icon(Icons.Default.LibraryMusic, null) },
-                            label = { Text("Library") },
+                            label = { Text("Library", style = MaterialTheme.typography.labelMedium) },
+                            colors = colors,
                         )
                         NavigationBarItem(
                             selected = tab == 1, onClick = { tab = 1 },
-                            icon = { Icon(Icons.Default.Search, null) }, label = { Text("Search") },
+                            icon = { Icon(Icons.Default.Search, null) },
+                            label = { Text("Search", style = MaterialTheme.typography.labelMedium) },
+                            colors = colors,
                         )
                         NavigationBarItem(
                             selected = tab == 2, onClick = { tab = 2 },
-                            icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, label = { Text("Queue") },
+                            icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                            label = { Text("Queue", style = MaterialTheme.typography.labelMedium) },
+                            colors = colors,
                         )
                     }
                 }

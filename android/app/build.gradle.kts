@@ -98,6 +98,8 @@ dependencies {
     // The phone as a speaker: what the engine sends, played here.
     implementation("androidx.media3:media3-exoplayer:1.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Now playing takes its colours from the cover.
+    implementation("androidx.palette:palette-ktx:1.0.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")

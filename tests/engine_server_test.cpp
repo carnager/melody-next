@@ -28,7 +28,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -425,6 +427,50 @@ void an_attached_connection_ends_with_its_engine() {
     agent_side->stop();
 }
 
+// An agent told to stop while it was still registering attached the new
+// connection to a server that had stopped. Its worker was never joined, and
+// destroying it ended the process -- the engine with the agent in it, which
+// went offline everywhere. Attaching to a stopped server closes the
+// connection instead, and attaching while it stops is joined like the rest.
+void attaching_to_a_stopping_server_does_not_end_the_process() {
+    protocol::Dispatcher dispatcher;
+    {
+        auto stopped = engine::Server::detached(dispatcher);
+        stopped->stop();
+        std::array<int, 2> pair{-1, -1};
+        require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0,
+                "a connection is made");
+        stopped->attach(pair[0]);
+        require(stopped->connections() == 0U, "a stopped server takes nothing on");
+        char byte = 0;
+        require(::recv(pair[1], &byte, 1, 0) == 0, "and the connection is closed, not left hanging");
+        ::close(pair[1]);
+    }
+    // And racing: attaches from another thread while the server stops.
+    for (int round = 0; round < 50; ++round) {
+        auto server = engine::Server::detached(dispatcher);
+        std::vector<int> peers;
+        std::mutex peers_mutex;
+        std::thread attaching{[&] {
+            for (int count = 0; count < 20; ++count) {
+                std::array<int, 2> pair{-1, -1};
+                if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) != 0) {
+                    return;
+                }
+                server->attach(pair[0]);
+                const std::lock_guard guard{peers_mutex};
+                peers.push_back(pair[1]);
+            }
+        }};
+        server->stop();
+        attaching.join();
+        server.reset();
+        for (const auto peer : peers) {
+            ::close(peer);
+        }
+    }
+}
+
 // A request that takes a while does not stop the engine reading the same
 // connection, and a cancel gets through while it runs. Handled on the reading
 // thread, a slow request once held everything behind it -- the cancel for a
@@ -511,10 +557,11 @@ int main() {
     an_endpoint_is_read_from_settings();
     tcp_without_a_password_is_open();
     an_attached_connection_ends_with_its_engine();
+    attaching_to_a_stopping_server_does_not_end_the_process();
     a_slow_request_does_not_hold_a_cancel(directory / "d.sock");
     an_unencodable_answer_does_not_end_the_engine(directory / "e.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 9 scenarios\n";
+    std::cout << "engine server: 10 scenarios\n";
     return EXIT_SUCCESS;
 }

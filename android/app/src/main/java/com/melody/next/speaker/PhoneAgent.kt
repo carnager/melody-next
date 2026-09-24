@@ -3,6 +3,7 @@ package com.melody.next.speaker
 import androidx.media3.common.util.UnstableApi
 import com.melody.next.engine.Endpoint
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,8 +34,11 @@ import java.util.UUID
 @UnstableApi
 class PhoneAgent(
     private val scope: CoroutineScope,
-    private val audition: PhoneAudition,
+    private val audition: Audition,
     private val name: String,
+    // Where the player lives: ExoPlayer wants the thread it was made on.
+    private val playerThread: CoroutineDispatcher = Dispatchers.Main,
+    private val retryMs: Long = 2_000,
 ) {
     sealed interface Status {
         data object Off : Status
@@ -61,7 +65,7 @@ class PhoneAgent(
         session?.cancel()
         session = null
         _status.value = Status.Off
-        scope.launch(Dispatchers.Main) { audition.stop() }
+        scope.launch(playerThread) { audition.stop() }
     }
 
     /** Something changed in playback: reported at the next chance. */
@@ -91,7 +95,7 @@ class PhoneAgent(
                 _status.value = Status.Registered(endpoint)
                 problem = ""
                 changed = true
-                val reporting = scope.launch(Dispatchers.Main) { report() }
+                val reporting = scope.launch(playerThread) { report() }
                 try {
                     serve(reader)
                 } finally {
@@ -99,7 +103,7 @@ class PhoneAgent(
                 }
                 problem = "the engine went away"
                 // What played belonged to that connection.
-                withContext(Dispatchers.Main) { if (audition.state() != PhoneAudition.State.Empty) audition.pause() }
+                withContext(playerThread) { if (audition.loaded) audition.pause() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -108,7 +112,7 @@ class PhoneAgent(
                 writer = null
                 runCatching { socket.close() }
             }
-            delay(2_000)
+            delay(retryMs)
         }
     }
 
@@ -133,7 +137,7 @@ class PhoneAgent(
             if (!request.has("method")) continue
             val id = if (request.has("id")) request.get("id") else null
             val answer = try {
-                val result = withContext(Dispatchers.Main) {
+                val result = withContext(playerThread) {
                     handle(request.getString("method"), request.optJSONObject("params") ?: JSONObject())
                 }
                 changed = true
@@ -185,10 +189,10 @@ class PhoneAgent(
         var lastSent = 0L
         while (true) {
             val snapshot = audition.snapshot()
-            val playing = audition.state() == PhoneAudition.State.Playing
+            val playing = audition.playing
             val now = System.currentTimeMillis()
             val text = snapshot.toString()
-            if (changed || text != last && (playing && now - lastSent >= 250 || !playing)) {
+            if (changed || (playing && now - lastSent >= 250) || (!playing && text != last)) {
                 changed = false
                 last = text
                 lastSent = now

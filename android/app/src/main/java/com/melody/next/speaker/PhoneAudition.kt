@@ -17,6 +17,29 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /**
+ * What the agent needs of a player: the engine's audition calls, and the
+ * snapshot it reports. Apart from ExoPlayer so the protocol can be held to
+ * account without a device.
+ */
+interface Audition {
+    fun load(source: JSONObject, play: Boolean, positionMs: Long)
+    fun queueNext(source: JSONObject, token: Long)
+    fun clearNext()
+    fun play()
+    fun pause()
+    fun stop()
+    fun seek(seconds: Double)
+    fun setVolume(percent: Int)
+    fun setReplayGain(params: JSONObject)
+    fun setBuffer(capacityMs: Long, startMs: Long)
+    /** Playing now: reported four times a second rather than only on change. */
+    val playing: Boolean
+    /** Anything loaded, playing or paused. */
+    val loaded: Boolean
+    fun snapshot(): JSONObject
+}
+
+/**
  * The engine's audition service, on a phone: what an output agent is from
  * the engine's side (ADR-0228). It plays what it is sent and says how that
  * goes; the queue, the order and what comes next stay the engine's.
@@ -26,7 +49,7 @@ import kotlin.math.pow
  * handovers, and which playback this is.
  */
 @UnstableApi
-class PhoneAudition(context: Context, private val onChange: () -> Unit) {
+class PhoneAudition(context: Context, private val onChange: () -> Unit) : Audition {
     /** The engine's states, by their number on the wire. */
     enum class State { Empty, Loading, Ready, Buffering, Playing, Paused, Draining, Ended, Failed }
 
@@ -96,7 +119,7 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     // --- What the engine asks ------------------------------------------------
 
     @MainThread
-    fun load(source: JSONObject, play: Boolean, positionMs: Long) {
+    override fun load(source: JSONObject, play: Boolean, positionMs: Long) {
         val item = item(source)
         failure = null
         playbackInstance++
@@ -109,7 +132,7 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     }
 
     @MainThread
-    fun queueNext(source: JSONObject, token: Long) {
+    override fun queueNext(source: JSONObject, token: Long) {
         val item = item(source)
         clearNext()
         if (player.mediaItemCount == 0) throw AgentError("unsupported", "nothing plays to continue from")
@@ -118,7 +141,7 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     }
 
     @MainThread
-    fun clearNext() {
+    override fun clearNext() {
         while (player.mediaItemCount > player.currentMediaItemIndex + 1) {
             player.removeMediaItem(player.mediaItemCount - 1)
         }
@@ -126,16 +149,16 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     }
 
     @MainThread
-    fun play() {
+    override fun play() {
         if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) player.prepare()
         player.play()
     }
 
     @MainThread
-    fun pause() = player.pause()
+    override fun pause() = player.pause()
 
     @MainThread
-    fun stop() {
+    override fun stop() {
         player.stop()
         player.clearMediaItems()
         failure = null
@@ -144,16 +167,16 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     }
 
     @MainThread
-    fun seek(seconds: Double) = player.seekTo((seconds * 1000).toLong().coerceAtLeast(0))
+    override fun seek(seconds: Double) = player.seekTo((seconds * 1000).toLong().coerceAtLeast(0))
 
     @MainThread
-    fun setVolume(percent: Int) {
+    override fun setVolume(percent: Int) {
         volumePercent = percent.coerceIn(0, 100)
         applyVolume()
     }
 
     @MainThread
-    fun setReplayGain(params: JSONObject) {
+    override fun setReplayGain(params: JSONObject) {
         if (params.has("mode")) {
             gainMode = Gain.entries.getOrNull(params.getInt("mode"))
                 ?: throw AgentError("invalid_argument", "mode is off, track or album")
@@ -164,11 +187,14 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
     }
 
     @MainThread
-    fun setBuffer(capacityMs: Long, startMs: Long) {
+    override fun setBuffer(capacityMs: Long, startMs: Long) {
         // Kept to report back; ExoPlayer sizes its own buffer.
         bufferCapacityMs = capacityMs
         bufferStartMs = startMs
     }
+
+    override val playing: Boolean get() = state() == State.Playing
+    override val loaded: Boolean get() = state() != State.Empty
 
     fun release() = main.post { player.release() }
 
@@ -188,7 +214,7 @@ class PhoneAudition(context: Context, private val onChange: () -> Unit) {
 
     /** The snapshot, as the engine's audition would render it (`audition_wire`). */
     @MainThread
-    fun snapshot(): JSONObject {
+    override fun snapshot(): JSONObject {
         val state = state()
         // Positions travel in samples: at the stream's rate when it is known,
         // else in milliseconds as samples at 1 kHz, which the engine reads the same.

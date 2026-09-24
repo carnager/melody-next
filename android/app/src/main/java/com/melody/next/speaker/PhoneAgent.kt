@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -40,6 +41,20 @@ class PhoneAgent(
     private val playerThread: CoroutineDispatcher = Dispatchers.Main,
     private val retryMs: Long = 2_000,
 ) {
+    /**
+     * What this phone wants streamed: the original, or Opus at a bit rate
+     * (0 for the original). Told at registration and in every report, so
+     * a change -- off Wi-Fi -- applies to the next track the engine sends.
+     */
+    @Volatile var bitrateKbps: Int = 0
+        set(value) {
+            field = value
+            changed = true
+        }
+
+    private fun wish(): JSONObject =
+        if (bitrateKbps > 0) JSONObject().put("format", "opus").put("bitrate", bitrateKbps)
+        else JSONObject().put("format", "original")
     sealed interface Status {
         data object Off : Status
         data class Connecting(val endpoint: Endpoint, val problem: String = "") : Status
@@ -90,7 +105,8 @@ class PhoneAgent(
                 }
                 ask(
                     reader, 2, "agent.register",
-                    JSONObject().put("name", name).put("instance", instance).put("files", false).put("protocol", 1),
+                    JSONObject().put("name", name).put("instance", instance).put("files", false).put("protocol", 1)
+                        .put("decodes", JSONArray(DECODES)).put("stream", wish()),
                 )
                 _status.value = Status.Registered(endpoint)
                 problem = ""
@@ -188,7 +204,7 @@ class PhoneAgent(
         var last = ""
         var lastSent = 0L
         while (true) {
-            val snapshot = audition.snapshot()
+            val snapshot = audition.snapshot().put("stream", wish())
             val playing = audition.playing
             val now = System.currentTimeMillis()
             val text = snapshot.toString()
@@ -211,5 +227,16 @@ class PhoneAgent(
                 out.flush()
             }
         }
+    }
+
+    companion object {
+        /**
+         * What Android plays from a stream on every phone, by FFmpeg's names:
+         * the engine converts anything else -- WavPack, APE, a tracker file.
+         */
+        val DECODES = listOf(
+            "flac", "mp3", "aac", "opus", "vorbis",
+            "pcm_s16le", "pcm_s24le", "pcm_u8", "pcm_f32le",
+        )
     }
 }

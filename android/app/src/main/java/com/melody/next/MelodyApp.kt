@@ -29,6 +29,8 @@ class MelodyApp : Application() {
     lateinit var audition: PhoneAudition
         private set
     private var agent: PhoneAgent? = null
+    lateinit var network: com.melody.next.speaker.Network
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -42,6 +44,16 @@ class MelodyApp : Application() {
             }
         }
         audition = PhoneAudition(this) { agent?.noteChange() }
+        network = com.melody.next.speaker.Network(this)
+        // Off Wi-Fi, Opus; on it, what Settings say. The engine hears the
+        // change in the next report and sends the next track that way.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(
+                network.metered,
+                androidx.compose.runtime.snapshotFlow { settings.mobileBitrate to settings.wifiBitrate },
+            ) { metered, (mobile, wifi) -> if (metered) mobile else wifi }
+                .collect { bitrate -> agent?.bitrateKbps = bitrate }
+        }
         settings.endpoint?.let(::useEngine)
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
@@ -63,7 +75,10 @@ class MelodyApp : Application() {
         agent = null
         val endpoint = settings.endpoint ?: return
         if (!settings.speaker) return
-        agent = PhoneAgent(scope, audition, settings.speakerName).also { it.start(endpoint) }
+        agent = PhoneAgent(scope, audition, settings.speakerName).also {
+            it.bitrateKbps = if (network.metered.value) settings.mobileBitrate else settings.wifiBitrate
+            it.start(endpoint)
+        }
     }
 
     companion object {

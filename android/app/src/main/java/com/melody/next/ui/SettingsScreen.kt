@@ -3,6 +3,8 @@ package com.melody.next.ui
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,7 +38,7 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
     val settings = vm.app.settings
     val connection by vm.client.connection.collectAsState()
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
                 IconButton(onClick = onClose) { Icon(Icons.Default.KeyboardArrowDown, "Close") }
                 Text("Settings", style = MaterialTheme.typography.titleLarge)
@@ -84,6 +86,33 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                 }),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
                 modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+            )
+            Section("Streaming to this phone")
+            Text(
+                "On Wi-Fi",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+            )
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(0 to "Original", 192 to "Opus 192", 128 to "Opus 128").forEach { (kbps, label) ->
+                    FilterChip(selected = settings.wifiBitrate == kbps, onClick = { settings.updateWifiBitrate(kbps) }, label = { Text(label) })
+                }
+            }
+            Text(
+                "On mobile data",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp),
+            )
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(64, 96, 128, 160).forEach { kbps ->
+                    FilterChip(selected = settings.mobileBitrate == kbps, onClick = { settings.updateMobileBitrate(kbps) }, label = { Text("$kbps") })
+                }
+            }
+            Text(
+                "Opus kbps. What the phone cannot play itself is always sent as Opus.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
             Section("Appearance")
             Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

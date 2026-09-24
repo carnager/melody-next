@@ -45,6 +45,24 @@ class Settings(context: Context) {
         preferences.edit().putString("speaker_name", speakerName).apply()
     }
 
+    /** Opus bit rate on mobile data, in kbps. */
+    var mobileBitrate by mutableStateOf(preferences.getInt("mobile_bitrate", 128))
+        private set
+
+    /** Opus bit rate on Wi-Fi in kbps, or 0 for the original files. */
+    var wifiBitrate by mutableStateOf(preferences.getInt("wifi_bitrate", 0))
+        private set
+
+    fun updateMobileBitrate(kbps: Int) {
+        mobileBitrate = kbps
+        preferences.edit().putInt("mobile_bitrate", kbps).apply()
+    }
+
+    fun updateWifiBitrate(kbps: Int) {
+        wifiBitrate = kbps
+        preferences.edit().putInt("wifi_bitrate", kbps).apply()
+    }
+
     /** "system", "dark" or "light". */
     var theme by mutableStateOf(preferences.getString("theme", "system") ?: "system")
         private set

@@ -11,7 +11,7 @@ Wants=pipewire.service network-online.target
 Type=simple
 # Options in ~/.config/melody/agent.conf, e.g.
 #   MELODY_AGENT_OPTIONS=--name kitchen --password-file /home/you/.config/melody/password
-#   MELODY_AGENT_OPTIONS=--server 192.168.0.200:6603 --music-root /mnt/music
+#   MELODY_AGENT_OPTIONS=--server music.local:6603 --music-root /mnt/music
 EnvironmentFile=-%h/.config/melody/agent.conf
 ExecStart=/usr/bin/melody-agent $MELODY_AGENT_OPTIONS
 Restart=on-failure

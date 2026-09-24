@@ -386,10 +386,8 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
                   [](const auto& a, const auto& b) { return a.row() < b.row(); });
         for (const auto& index : indices)
             rows.push_back(local->rows().at(static_cast<std::size_t>(index.row())));
-        const auto* tab =
-            static_cast<ListTab*>(source->property("bench-tab-pointer").value<void*>());
         enqueueLocalRequests(std::move(rows), position >= 0 ? position : (prepend ? 0 : -1),
-                             tab != nullptr && tab->document.remote);
+                             isRemoteView(source));
     }
     refreshUpNext();
 }

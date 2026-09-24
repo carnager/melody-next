@@ -1267,8 +1267,8 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
     DynamicPlaylistDialog dialog{
-        QStringLiteral("local"), QStringLiteral("Local library"),
-        [database](query::CompiledTkq compiled, core::CancellationToken cancellation,
+        QStringLiteral("local"), QString{},
+        [database](bool, query::CompiledTkq compiled, core::CancellationToken cancellation,
                    DynamicPlaylistService::Completion completion) {
             const engine::LocalCatalogue catalogue{database};
             completion(queryDynamicLibrary(catalogue, compiled, cancellation));

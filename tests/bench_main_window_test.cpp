@@ -281,6 +281,7 @@ class BenchMainWindowTest final : public QObject {
     void aRemoteEnginePlaysItsOwnTabs();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
+    void dynamicPlaylistsReadTheLibraryChosen();
     void replacingARemoteTabFromItsLibraryPlays();
     void locateFindsARemoteTracksAlbumInTheRemoteLibrary();
     void remoteUpNextKeepsItsIdentityAcrossARestart();
@@ -644,8 +645,8 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
     using Service = DynamicPlaylistService;
     std::vector<Service::Completion> pending;
     DynamicPlaylistDialog dialog(
-        QStringLiteral("local"), QStringLiteral("Local library"),
-        [&](query::CompiledTkq, core::CancellationToken, Service::Completion done) {
+        QStringLiteral("local"), QString{},
+        [&](bool, query::CompiledTkq, core::CancellationToken, Service::Completion done) {
             pending.push_back(std::move(done));
         });
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
@@ -678,8 +679,8 @@ void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
     using Service = DynamicPlaylistService;
     {
         Service::Completion pending;
-        DynamicPlaylistDialog dialog(QStringLiteral("local"), QStringLiteral("Test"),
-                                     [&](query::CompiledTkq, core::CancellationToken,
+        DynamicPlaylistDialog dialog(QStringLiteral("local"), QString{},
+                                     [&](bool, query::CompiledTkq, core::CancellationToken,
                                          Service::Completion done) { pending = std::move(done); });
         dialog.setAttribute(Qt::WA_DeleteOnClose, false);
         dialog.show();
@@ -5327,6 +5328,63 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
+}
+
+void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto music = media.filePath(QStringLiteral("remote-music"));
+    QVERIFY(QDir{}.mkpath(music));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("art-tone-flac.b64"),
+                                      music + QStringLiteral("/art.flac")));
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    {
+        auto catalogue = window.remote_catalogue_source_->open();
+        QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+        persistence::LibraryScanProgress progress;
+        QVERIFY(catalogue->scan({}, progress).has_value());
+    }
+    auto* remote_tab = window.remoteQueueTab();
+    QVERIFY(remote_tab != nullptr);
+
+    // Opened from a remote tab, it starts on the remote's library.
+    window.tabs_->setCurrentWidget(remote_tab->view);
+    window.showDynamicPlaylists();
+    auto* dialog = window.findChild<DynamicPlaylistDialog*>();
+    QVERIFY(dialog != nullptr);
+    auto* library = dialog->findChild<QComboBox*>(QStringLiteral("dynamic-library"));
+    QVERIFY(library != nullptr);
+    QCOMPARE(library->count(), 2);
+    QVERIFY(dialog->remote());
+    dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-query"))->setText(QStringLiteral("ALL"));
+    dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
+    const auto remote_path = QFile::encodeName(music + QStringLiteral("/art.flac")).toStdString();
+    QTRY_COMPARE(dialog->tracks().size(), 1U);
+    QCOMPARE(dialog->tracks().front().raw_path, remote_path);
+
+    // What it finds opens on the remote's engine.
+    const auto before = window.list_tabs_.size();
+    dialog->findChild<QPushButton*>(QStringLiteral("dynamic-open"))->click();
+    QTRY_COMPARE(window.list_tabs_.size(), before + 1);
+    QVERIFY(window.list_tabs_.back()->document.remote);
+    QCOMPARE(window.list_tabs_.back()->model->rows().front().raw_path, remote_path);
+
+    // This computer's library, which has no such track.
+    library->setCurrentIndex(library->findData(false));
+    QVERIFY(!dialog->remote());
+    dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
+    QTRY_VERIFY(dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->isEnabled());
+    QVERIFY(std::ranges::none_of(dialog->tracks(), [&remote_path](const auto& row) {
+        return row.raw_path == remote_path;
+    }));
+    dialog->close();
 }
 
 void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {

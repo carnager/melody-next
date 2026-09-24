@@ -6,6 +6,7 @@
 #include "trackknife/persistence/local_library.hpp"
 
 #include <QIcon>
+#include <QObject>
 #include <QPalette>
 #include <QString>
 #include <QStringList>
@@ -19,6 +20,12 @@
 namespace trackknife::bench {
 
 [[nodiscard]] QIcon albumShuffleIcon(const QPalette& palette);
+
+// Whether a track view's rows are files on the remote engine's machine
+// (ADR-0227): a remote tab's, or dynamic results drawn from its library.
+[[nodiscard]] inline bool isRemoteView(const QObject* view) {
+    return view != nullptr && view->property("bench-remote-list").toBool();
+}
 
 struct TrackColumnSpec {
     int logical;

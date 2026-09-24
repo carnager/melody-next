@@ -1,8 +1,10 @@
 # Dynamic playlists
 
-Choose **File → Dynamic playlists**. The same editor works with this
-computer's library or a server's, and each library keeps its own saved
-definitions.
+Choose **File → Dynamic playlists**. The dropdown at the top picks the
+library: this computer's or the server's. It starts on the library of the tab
+you opened it from, like Search. Saved definitions are shared, so the same rule
+can run against either library, and what it finds plays on that library's
+engine.
 
 Choose **Library rules**, enter a name and a `tkq-1` rule, then **Refresh**:
 
@@ -22,8 +24,8 @@ committed tag/path changes. Changes arriving during a query trigger a fresh
 evaluation. **Stop** cancels the current work and automatic refresh.
 **Open snapshot in new tab** creates an ordinary playlist you can play or edit;
 that snapshot stays stable as the dynamic definition changes. Results and
-snapshot tabs show one line per track, without album grouping. Server results
-also offer **Add to queue**. Refresh never replaces your playing queue.
+snapshot tabs show one line per track, without album grouping. Refresh never
+replaces your playing queue.
 
 Results support row/multi-selection, keyboard navigation, Enter/double-click
 playback, ratings, Go to artist/album, local or explicitly mapped file tools,

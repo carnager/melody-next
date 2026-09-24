@@ -274,9 +274,8 @@ void BenchMainWindow::showConvertDialog() {
 }
 
 std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QTableView* view) {
-    const auto* tab =
-        view ? static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>()) : nullptr;
-    if (tab == nullptr || !tab->document.remote || view->selectionModel() == nullptr) {
+    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
+    if (!isRemoteView(view) || model == nullptr || view->selectionModel() == nullptr) {
         return std::nullopt;
     }
     // ADR-0227: the tools read and write files here, so a remote tab's are
@@ -289,10 +288,10 @@ std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QT
     std::size_t unreachable = 0U;
     for (const auto& index : selected) {
         const auto row = static_cast<std::size_t>(index.row());
-        if (row >= tab->model->rows().size()) {
+        if (row >= model->rows().size()) {
             continue;
         }
-        auto local = tab->model->rows()[row];
+        auto local = model->rows()[row];
         const auto remote_path = local.raw_path;
         auto here = mount.to_local(remote_path);
         if (!here) {

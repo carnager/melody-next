@@ -18,10 +18,18 @@ namespace trackknife::bench {
 class DynamicPlaylistDialog final : public QDialog {
     Q_OBJECT
   public:
-    DynamicPlaylistDialog(QString profile, QString authority_label,
-                          DynamicPlaylistService::Search search, QWidget* parent = nullptr);
+    // Which library a refresh searches: this computer's, or the remote's.
+    using LibrarySearch = std::function<void(bool remote, query::CompiledTkq,
+                                             core::CancellationToken,
+                                             DynamicPlaylistService::Completion)>;
+    // `remote_label` names the remote's library; empty when there is none.
+    DynamicPlaylistDialog(QString profile, QString remote_label, LibrarySearch search,
+                          QWidget* parent = nullptr);
     ~DynamicPlaylistDialog() override;
     ui::QueueTableView* view() const { return view_; }
+    // The library the results come from, and so the engine they play on.
+    bool remote() const;
+    void followLibrary(bool remote);
     void libraryChanged();
     void invalidateAuthority();
     bool authorityValid() const { return authority_valid_; }
@@ -32,6 +40,7 @@ class DynamicPlaylistDialog final : public QDialog {
     void playRequested(int row);
     void resultsChanged();
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
+    void libraryChosen(bool remote);
 
   private:
     DynamicPlaylistDefinition definition() const;
@@ -49,6 +58,7 @@ class DynamicPlaylistDialog final : public QDialog {
     bool authority_valid_{true};
     DynamicPlaylistService* service_;
     DynamicPlaylistService::Tracks tracks_;
+    QComboBox* library_;
     QComboBox* catalog_;
     QComboBox* source_;
     QLineEdit* name_;

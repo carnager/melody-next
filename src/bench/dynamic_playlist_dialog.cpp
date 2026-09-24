@@ -40,28 +40,44 @@ QList<QByteArray> resultKeys(QAbstractItemModel* model) {
     return keys;
 }
 } // namespace
-DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_label,
-                                             DynamicPlaylistService::Search search, QWidget* parent)
+DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString remote_label,
+                                             LibrarySearch search, QWidget* parent)
     : QDialog(parent), profile_(std::move(profile)),
-      service_(new DynamicPlaylistService(std::move(search), this)) {
+      service_(new DynamicPlaylistService(
+          [this, search = std::move(search)](query::CompiledTkq compiled,
+                                             core::CancellationToken cancellation,
+                                             DynamicPlaylistService::Completion completion) {
+              search(remote(), std::move(compiled), std::move(cancellation),
+                     std::move(completion));
+          },
+          this)) {
     setObjectName(QStringLiteral("bench-dynamic-playlists"));
-    setWindowTitle(QStringLiteral("Dynamic playlists — %1").arg(authority_label));
+    setWindowTitle(QStringLiteral("Dynamic playlists"));
     setAttribute(Qt::WA_DeleteOnClose);
     resize(900, 720);
     auto* layout = new QVBoxLayout(this);
     auto* explanation = new QLabel(
-        QStringLiteral("Save rules or a Last.fm source, then refresh to see matching tracks in %1. "
+        QStringLiteral("Save rules or a Last.fm source, then refresh to see the matching tracks. "
                        "Rules update while this window is open. Last.fm refreshes draw a fresh "
                        "selection when requested. "
-                       "Opening a snapshot keeps that list stable while you listen.")
-            .arg(authority_label),
+                       "Opening a snapshot keeps that list stable while you listen."),
         this);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
+    // As in Search: the library searched, and so the engine that plays what
+    // is found (ADR-0227). The definitions are the same for both.
+    library_ = new QComboBox(this);
+    library_->setObjectName(QStringLiteral("dynamic-library"));
+    library_->setAccessibleName(QStringLiteral("Library"));
+    library_->addItem(QStringLiteral("This computer"), false);
+    if (!remote_label.isEmpty()) {
+        library_->addItem(remote_label, true);
+    }
     auto* catalog_row = new QHBoxLayout;
     catalog_ = new QComboBox(this);
     catalog_->setObjectName(QStringLiteral("dynamic-catalog"));
     catalog_->setAccessibleName(QStringLiteral("Saved dynamic playlists"));
+    catalog_row->addWidget(library_);
     catalog_row->addWidget(catalog_, 1);
     auto* save = new QPushButton(QStringLiteral("Save definition"), this);
     save->setObjectName(QStringLiteral("dynamic-save"));
@@ -241,6 +257,17 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
     connect(open_, &QPushButton::clicked, this,
             [this] { emit snapshotRequested(name_->text().trimmed(), tracks_); });
     connect(catalog_, &QComboBox::activated, this, [this](int) { loadSelection(); });
+    connect(library_, &QComboBox::currentIndexChanged, this, [this](int) {
+        view_->setProperty("bench-remote-list", remote());
+        emit libraryChosen(remote());
+        // The same definition, run against the other library.
+        const bool saved_rules = !catalog_->currentData().toString().isEmpty() &&
+                                 source_->currentData() == QStringLiteral("rules");
+        discardResults();
+        status_->setText(QStringLiteral("Choose Refresh to evaluate this definition."));
+        if (saved_rules)
+            refresh();
+    });
     connect(source_, &QComboBox::currentIndexChanged, this, [this](int) {
         updateFields();
         discardResults();
@@ -307,6 +334,12 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString authority_
         status_->setText(QString::fromStdString(loaded.error().message));
 }
 DynamicPlaylistDialog::~DynamicPlaylistDialog() { service_->cancel(); }
+bool DynamicPlaylistDialog::remote() const { return library_->currentData().toBool(); }
+void DynamicPlaylistDialog::followLibrary(const bool remote) {
+    const auto wanted = library_->findData(remote);
+    if (wanted >= 0)
+        library_->setCurrentIndex(wanted);
+}
 QString DynamicPlaylistDialog::playlistName() const { return name_->text().trimmed(); }
 void DynamicPlaylistDialog::playCurrent() {
     if (authority_valid_ && view_->currentIndex().isValid())

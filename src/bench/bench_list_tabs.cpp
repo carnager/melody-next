@@ -953,8 +953,7 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
     if (!source_model || source_tab == target || (!source_tab && !dynamic) || (dynamic && move)) {
         return false;
     }
-    const bool crossing = (source_tab != nullptr && source_tab->document.remote) !=
-                          target->document.remote;
+    const bool crossing = isRemoteView(source) != target->document.remote;
     std::vector<LocalTrackRow> transferred;
     std::vector<int> source_rows;
     transferred.reserve(static_cast<std::size_t>(rows.size()));
@@ -1075,7 +1074,7 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
                                              .pinned = false,
                                              .dirty = false,
                                              .items = {},
-                                             .remote = source_tab && source_tab->document.remote},
+                                             .remote = isRemoteView(source)},
                    false);
     const auto transferred = transferRows(
         source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
@@ -1784,8 +1783,7 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
     }
     // A rating belongs to the engine whose library holds the track: a
     // remote tab's ratings are stored there, where its queries see them.
-    const auto* tab = static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
-    const bool remote = tab != nullptr && tab->document.remote;
+    const bool remote = isRemoteView(view);
     auto* const library = remote ? remote_library_ : local_library_;
     const auto store_ready = library != nullptr;
     menu->addSeparator();

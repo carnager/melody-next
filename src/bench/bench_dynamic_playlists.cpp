@@ -9,6 +9,7 @@
 #include <QAction>
 #include <QFutureWatcher>
 #include <QMenu>
+#include <QPointer>
 #include <QSettings>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -17,8 +18,14 @@
 
 namespace trackknife::bench {
 void BenchMainWindow::showDynamicPlaylists() {
+    // As Search does: opened from a remote tab, it starts on the remote's
+    // library; the dropdown switches.
+    const auto* current = currentListTab();
+    const bool from_remote =
+        current != nullptr && current->document.remote && remote_catalogue_source_ != nullptr;
     if (auto* existing = findChild<DynamicPlaylistDialog*>()) {
         if (existing->authorityValid()) {
+            existing->followLibrary(from_remote);
             existing->show();
             existing->raise();
             existing->activateWindow();
@@ -26,29 +33,39 @@ void BenchMainWindow::showDynamicPlaylists() {
         }
         existing->close();
     }
+    // One set of definitions: a rule reads the same on either library.
     const auto profile = QStringLiteral("local");
     // ADR-0220: through the catalogue source, like every other library read.
     // Opening the database directly here meant that with an engine
     // configured, dynamic playlists quietly queried this process's library
     // instead of the engine's.
-    DynamicPlaylistService::Search search = [this](query::CompiledTkq compiled,
-                                                   core::CancellationToken cancellation,
-                                                   DynamicPlaylistService::Completion completion) {
-        auto* watcher = new QFutureWatcher<DynamicPlaylistService::Result>(this);
-        connect(watcher, &QFutureWatcher<DynamicPlaylistService::Result>::finished, this,
-                [watcher, completion = std::move(completion)] {
-                    completion(watcher->future().takeResult());
-                    watcher->deleteLater();
-                });
-        watcher->setFuture(
-            QtConcurrent::run([catalogues = catalogue_source_.get(), compiled = std::move(compiled),
-                               cancellation]() -> DynamicPlaylistService::Result {
-                const auto catalogue = catalogues->open();
-                return queryDynamicLibrary(*catalogue, compiled, cancellation);
-            }));
-    };
-    auto* dialog =
-        new DynamicPlaylistDialog(profile, QStringLiteral("Library"), std::move(search), this);
+    DynamicPlaylistDialog::LibrarySearch search =
+        [this](const bool remote, query::CompiledTkq compiled,
+               core::CancellationToken cancellation,
+               DynamicPlaylistService::Completion completion) {
+            auto* catalogues = remote ? remote_catalogue_source_.get() : catalogue_source_.get();
+            if (catalogues == nullptr) {
+                completion(std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                                       .message = "No remote engine is configured",
+                                                       .context = {}}));
+                return;
+            }
+            auto* watcher = new QFutureWatcher<DynamicPlaylistService::Result>(this);
+            connect(watcher, &QFutureWatcher<DynamicPlaylistService::Result>::finished, this,
+                    [watcher, completion = std::move(completion)] {
+                        completion(watcher->future().takeResult());
+                        watcher->deleteLater();
+                    });
+            watcher->setFuture(
+                QtConcurrent::run([catalogues, compiled = std::move(compiled),
+                                   cancellation]() -> DynamicPlaylistService::Result {
+                    const auto catalogue = catalogues->open();
+                    return queryDynamicLibrary(*catalogue, compiled, cancellation);
+                }));
+        };
+    auto* dialog = new DynamicPlaylistDialog(
+        profile, remote_catalogue_source_ ? remote_catalogue_source_->name() : QString{},
+        std::move(search), this);
     auto layout = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(dialog->view(), layout, layout);
     auto* result_view = dialog->view();
@@ -83,7 +100,8 @@ void BenchMainWindow::showDynamicPlaylists() {
                                                  .name = utf8Bytes(name),
                                                  .pinned = false,
                                                  .dirty = false,
-                                                 .items = {}},
+                                                 .items = {},
+                                                 .remote = dialog->remote()},
                        false);
         destination->model->replaceRows(rows);
         dialog->setProperty("playback-context",
@@ -139,11 +157,14 @@ void BenchMainWindow::showDynamicPlaylists() {
                     auto* locate = menu.addAction(album ? tr("Go to album") : tr("Go to artist"));
                     auto* model = qobject_cast<LocalListModel*>(view->model());
                     const auto path = model->rawPath(index.row());
-                    locate->setEnabled(local_library_ != nullptr);
-                    connect(locate, &QAction::triggered, dialog, [this, path, album] {
-                        if (local_library_)
-                            local_library_->locatePath(path, album);
-                    });
+                    // In the library the result came from.
+                    auto* library = dialog->remote() ? remote_library_ : local_library_;
+                    locate->setEnabled(library != nullptr);
+                    connect(locate, &QAction::triggered, dialog,
+                            [library = QPointer{library}, path, album] {
+                                if (library)
+                                    library->locatePath(path, album);
+                            });
                 }
                 auto* tools = menu.addMenu(tr("Tools"));
                 connect(tools->addAction(tr("Edit tags…")), &QAction::triggered, dialog,
@@ -181,16 +202,23 @@ void BenchMainWindow::showDynamicPlaylists() {
                 addLastFmActions(&menu, view);
                 menu.exec(view->viewport()->mapToGlobal(position));
             });
-    if (local_library_) {
-        connect(persistence_, &ui::ListPersistenceService::listeningHistoryChanged, dialog,
-                &DynamicPlaylistDialog::libraryChanged);
-        connect(local_library_, &LocalLibraryPanel::ratingsChanged, dialog,
-                &DynamicPlaylistDialog::libraryChanged);
-        connect(local_library_, &LocalLibraryPanel::libraryContentChanged, dialog,
-                &DynamicPlaylistDialog::libraryChanged);
+    // Rules follow changes to the library they read, and only that one.
+    connect(persistence_, &ui::ListPersistenceService::listeningHistoryChanged, dialog,
+            &DynamicPlaylistDialog::libraryChanged);
+    for (auto* library : {local_library_, remote_library_}) {
+        if (library == nullptr)
+            continue;
+        const bool remote = library == remote_library_;
+        const auto changed = [dialog, remote] {
+            if (dialog->remote() == remote)
+                dialog->libraryChanged();
+        };
+        connect(library, &LocalLibraryPanel::ratingsChanged, dialog, changed);
+        connect(library, &LocalLibraryPanel::libraryContentChanged, dialog, changed);
     }
     connect(dialog, &DynamicPlaylistDialog::snapshotRequested, this,
-            [this, layout](const QString& name, const DynamicPlaylistService::Tracks& tracks) {
+            [this, dialog, layout](const QString& name,
+                                   const DynamicPlaylistService::Tracks& tracks) {
                 const auto title =
                     name.isEmpty() ? QStringLiteral("Dynamic playlist snapshot") : name;
                 auto* destination =
@@ -199,7 +227,8 @@ void BenchMainWindow::showDynamicPlaylists() {
                                                          .name = utf8Bytes(title),
                                                          .pinned = false,
                                                          .dirty = false,
-                                                         .items = {}},
+                                                         .items = {},
+                                                         .remote = dialog->remote()},
                                true);
                 applyTrackViewLayout(*destination, layout);
                 destination->model->replaceRows(tracks);
@@ -207,6 +236,7 @@ void BenchMainWindow::showDynamicPlaylists() {
                 syncArtwork(*destination);
                 schedulePersist();
             });
+    dialog->followLibrary(from_remote);
     dialog->show();
 }
 } // namespace trackknife::bench

@@ -118,7 +118,7 @@ inside Trackknife, not desktop-wide.
 Arch: `trackknife-git` and `melody-git` are in the AUR, or build from
 `packaging/arch` with `makepkg -si`.
 
-Releases ([v0.1.0](https://github.com/carnager/melody-next/releases/tag/v0.1.0))
+[Releases](https://github.com/carnager/melody-next/releases/latest)
 have the engine, agent and CLI built for Debian 13 (amd64 and arm64), the
 Android APK, and a Docker image for servers, see
 [docs/melody.md](docs/melody.md#a-server).

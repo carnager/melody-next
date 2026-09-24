@@ -58,7 +58,7 @@ jobs:
       - run: |
           docker buildx build -f packaging/docker/Dockerfile --target binaries \
             --platform "linux/${{ matrix.arch }}" --output type=local,dest=dist .
-          name="melody-${GITHUB_REF_NAME}-debian13-${{ matrix.arch }}"
+          name="melody-${GITHUB_REF_NAME#v}-debian13-${{ matrix.arch }}"
           mkdir "${name}"
           cp dist/bin/* "${name}/"
           cp dist/lib/systemd/user/*.service "${name}/"

@@ -19,10 +19,12 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1049,15 +1051,19 @@ class RecordingAudition final : public audio::Audition {
         current.position_sample = position_ms_;
         current.replay_gain_mode = gain_mode_;
         current.output_target = target_;
+        current.playback_instance = instance_;
+        current.error = error_;
         return current;
     }
     [[nodiscard]] core::Result<void>
     load_selected_and_play(std::string raw_path, trackknife::formats::AudioSourceSelection,
                            std::optional<trackknife::formats::ReplayGainInfo>) override {
         const std::lock_guard guard{mutex_};
-        loaded_ = std::move(raw_path);
-        position_ms_ = 0;
-        state_ = audio::LocalAuditionState::playing;
+        if (deferred_) {
+            pending_ = std::move(raw_path);
+            return {};
+        }
+        load_locked(std::move(raw_path));
         return {};
     }
     [[nodiscard]] core::Result<void>
@@ -1133,8 +1139,45 @@ class RecordingAudition final : public audio::Audition {
         position_ms_ = position_ms;
     }
 
+    // As a real output does: loads are taken up later, on its own thread,
+    // and may fail -- no speakers, say.
+    void defer_loads(const bool deferred) {
+        const std::lock_guard guard{mutex_};
+        deferred_ = deferred;
+    }
+    void fail_loads(std::optional<std::string> reason) {
+        const std::lock_guard guard{mutex_};
+        failing_ = std::move(reason);
+    }
+    void take_up() {
+        const std::lock_guard guard{mutex_};
+        if (pending_) {
+            load_locked(*std::exchange(pending_, std::nullopt));
+        }
+    }
+
   private:
+    void load_locked(std::string raw_path) {
+        ++instance_;
+        position_ms_ = 0;
+        if (failing_) {
+            loaded_.clear();
+            error_ = core::Error{
+                .code = core::ErrorCode::backend, .message = *failing_, .context = {}};
+            state_ = audio::LocalAuditionState::failed;
+            return;
+        }
+        loaded_ = std::move(raw_path);
+        error_.reset();
+        state_ = audio::LocalAuditionState::playing;
+    }
+
     mutable std::mutex mutex_;
+    bool deferred_{false};
+    std::optional<std::string> pending_;
+    std::optional<std::string> failing_;
+    std::optional<core::Error> error_;
+    std::uint64_t instance_{0U};
     audio::LocalAuditionState state_{audio::LocalAuditionState::empty};
     std::string loaded_;
     std::int64_t position_ms_{0};
@@ -1212,6 +1255,39 @@ void the_player_plays_on_the_output_it_is_given() {
     require(player->current_output() == nullptr, "with nothing chosen");
 }
 
+// A server with no speakers stopped when asked to play and said nothing,
+// so a script took it for playing. The reason is in the state -- the
+// current one: a load is taken up on the output's own thread, and until
+// then the output still reports the last track's failure.
+void a_failure_to_play_says_why() {
+    auto player = engine::Player::create_without_audio();
+    const std::vector<engine::QueueEntry> entries{entry("/music/one.flac"),
+                                                  entry("/music/two.flac")};
+    player->replace_queue(entries);
+    RecordingAudition silent;
+    silent.fail_loads("no speakers");
+    require(player->set_output(&silent).has_value(), "an output is chosen");
+    require(player->play_entry(entries[0].entry_id).has_value(), "the ask is taken");
+    auto state = player->state();
+    require(state.status == "stopped", "nothing plays");
+    require(state.error == "no speakers", "and the state says why");
+
+    silent.defer_loads(true);
+    require(player->play_entry(entries[1].entry_id).has_value(), "asked again");
+    require(player->state().error.empty(),
+            "the last track's failure is not this one's while it loads");
+    silent.take_up();
+    require(player->state().error == "no speakers", "the same failure again is reported again");
+
+    silent.fail_loads(std::nullopt);
+    require(player->play_entry(entries[0].entry_id).has_value(), "and once more");
+    require(player->state().error.empty(), "nothing stale while it loads");
+    silent.take_up();
+    state = player->state();
+    require(state.status == "playing" && state.error.empty(), "and a load that works clears it");
+    require(player->set_output(nullptr).has_value(), "choosing no output succeeds");
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: engine_player_test <audio-fixture-dir>\n";
@@ -1241,6 +1317,7 @@ int main(int argc, char** argv) {
 
     // Needs no audio device, so it runs before the check for one.
     the_player_plays_on_the_output_it_is_given();
+    a_failure_to_play_says_why();
 
     auto player = engine::Player::create();
     if (!player) {

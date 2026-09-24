@@ -1099,6 +1099,8 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                 schedulePersist();
             }
         });
+    connect(properties, &MetadataPropertiesDialog::statusMessage, this,
+            [this](const QString& message) { statusBar()->showMessage(message, 12'000); });
     connect(properties, &MetadataPropertiesDialog::openSettingsRequested, this,
             [this](const SettingsDialog::Page page) { showSettingsDialog(page); });
     // ADR-0221: the tagger is a window, not a tab. Every tab is a list of

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_properties_dialog.hpp"
+#include "uicommon/debug_log.hpp"
 #include "bench/artwork_fitting.hpp"
 #include "bench/cover_review.hpp"
 #include "bench/cover_thumbnail.hpp"
@@ -3191,40 +3192,42 @@ void MetadataPropertiesDialog::finishFileApply() {
     const auto changed = outcome.committed_source_count();
     const auto unchanged = outcome.unchanged_source_count();
     // Limited destination filesystems publish successfully but may skip
-    // preservation (ADR-0111); those notes surface problems-only instead of
-    // silently closing.
-    std::vector<PreparationFeedbackRow> note_rows;
+    // preservation (ADR-0111): ownership on an NFS share, say, which is
+    // refused for every file on every save and leaves nothing to do about
+    // it. Said once in the status bar, per file in the debug log -- never a
+    // window to close, which would teach closing windows unread.
+    QStringList notes;
     for (const auto& source : outcome.sources) {
         if (!source.commit) {
             continue;
         }
         for (const auto& note : source.commit->notes) {
-            note_rows.push_back(PreparationFeedbackRow{
-                .file = QString::fromStdString(core::display_raw_path(source.source_raw_path)),
-                .detail = display_utf8(note),
-            });
+            const auto text = display_utf8(note);
+            qCDebug(tkDebug).noquote()
+                << QString::fromStdString(core::display_raw_path(source.source_raw_path)) << ":"
+                << text;
+            if (!notes.contains(text)) {
+                notes.push_back(text);
+            }
         }
     }
     if (changed + unchanged == outcome.sources.size()) {
         if (artwork_section_) {
             artwork_section_->discardPendingChanges();
         }
-        read_only_->setText(
+        const auto updated =
             QStringLiteral("Updated %1 %2")
                 .arg(changed)
-                .arg(pluralized(changed, QStringLiteral("file"), QStringLiteral("files"))));
-        if (!note_rows.empty()) {
-            showPreparationFeedback(
-                QStringLiteral("Updated with notes"),
-                QStringLiteral("Every file updated; the destination filesystem could not "
-                               "preserve everything."),
-                std::move(note_rows));
-            return;
+                .arg(pluralized(changed, QStringLiteral("file"), QStringLiteral("files")));
+        read_only_->setText(updated);
+        if (!notes.isEmpty()) {
+            emit statusMessage(updated + QStringLiteral(". ") + notes.join(QStringLiteral(". ")) +
+                               QStringLiteral("."));
         }
         QTimer::singleShot(0, this, &QDialog::close);
         return;
     }
-    std::vector<PreparationFeedbackRow> rows = std::move(note_rows);
+    std::vector<PreparationFeedbackRow> rows;
     for (const auto& source : outcome.sources) {
         if (source.state == operations::FilePublicationApplySourceState::committed ||
             source.state == operations::FilePublicationApplySourceState::unchanged) {

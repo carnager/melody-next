@@ -41,9 +41,12 @@ strict single-link topology verification rightly refuses.
   mode preservation tolerates ENOTSUP. Verification and recovery enforce
   only what was achievable; recovery no longer compares ownership at all,
   as host identity mapping is not content.
-- Notes travel on `FilePublicationCommitResult::notes` and render
-  problems-only after Apply: an all-success run with notes shows
-  "Updated with notes" instead of silently closing. Tag commits
+- Notes travel on `FilePublicationCommitResult::notes`. An all-success
+  run with notes closes as any success does and says them once in the
+  window's status bar; each file's note goes to the `--debug` log.
+  (It first opened an "Updated with notes" window, but on an NFS share
+  the ownership note comes with every file of every save and leaves
+  nothing to do, so the window only taught closing it unread.) Tag commits
   (source and prepared copy share one filesystem) degrade silently —
   a filesystem without xattrs has none to lose on either side.
 

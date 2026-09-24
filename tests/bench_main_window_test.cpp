@@ -2630,7 +2630,9 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
                         .source_revision = checked_source.planned.source_revision,
                         .target_revision = checked_source.observed_revision,
                         .occurrence_indexes = checked_source.planned.item_indexes,
-                        .notes = {},
+                        // As on an NFS share: done, but ownership not kept.
+                        .notes = {"File ownership was not preserved: the destination "
+                                  "filesystem refused the change"},
                     };
                     return operations::FilePublicationApplyResult{
                         .sources = {operations::FilePublicationApplySourceResult{
@@ -2649,6 +2651,7 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
                 }};
         },
         [&observed](const operations::FilePublicationApplyResult& result) { observed = result; });
+    QSignalSpy status{properties, &MetadataPropertiesDialog::statusMessage};
     properties->show();
     // Success auto-closes the WA_DeleteOnClose dialog; only a pointer
     // guarded from the start may observe that.
@@ -2693,7 +2696,10 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QVERIFY(!expected_target.endsWith(QStringLiteral("/Draft path title.flac")));
     QVERIFY(!expected_target.endsWith(QStringLiteral("/Synthetic path title.flac")));
     QCOMPARE(QString::fromStdString(reviewed_target), expected_target);
+    // A note is a line in the status bar, not a window to close first.
     QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
+    QCOMPARE(status.count(), 1);
+    QVERIFY(status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
 }
 
 void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {

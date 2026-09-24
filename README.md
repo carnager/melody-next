@@ -1,21 +1,21 @@
 # Trackknife
 
-Trackknife is a Linux music player and tag editor built with Qt 6. Connect to
-MPD or Melody, or play local files through PipeWire. You can browse folders
-directly or add them to a searchable library.
+Trackknife is a Linux music player and tag editor built with Qt 6. Playback
+belongs to Melody, an engine that runs beside the app or on a server and keeps
+playing when the window is closed. You can browse folders directly or add them
+to a searchable library, and play on this computer, another one, or your phone.
 
 It takes ideas from foobar2000 and Cantata: album-grouped playlists, keyboard
 controls, and tools for looking after a music collection. The name comes from
 foobar2000's reputation as a Swiss Army knife for audio files.
 
-![MPD queue with grouped albums and the server library](Screenshots/queue.png)
+![A queue grouped by album, with the library beside it](Screenshots/queue.png)
 
 ## Listening and browsing
 
-Local playback is gapless. MPD and local files have separate queues; the selected
-tab determines which player the transport controls. Local lists survive a
-restart, and server playlists can be opened and edited in their own tabs.
-MPD Queue and named server lists share the same track actions.
+Playback is gapless. Trackknife starts its own engine for the music on this
+computer, and a server's library opens in tabs of its own. The tab you play
+from decides which engine plays it. Lists survive a restart.
 
 The list driving playback carries an **Active** label and accent text color.
 It stays active through Stop and Pause, even while you browse another tab.
@@ -38,9 +38,8 @@ files stay where they are.
 **Queue next** (**Ctrl+Return**) and **Queue at end** (**Ctrl+Shift+Return**)
 add temporary requests. When they finish, normal playlist playback resumes.
 Open the **Up Next** panel with **Ctrl+Shift+U** to reorder, remove, or clear
-requests. This works for local playback and updated Melody servers; Melody
-keeps handling requests after Trackknife closes. Stock MPD does not provide
-this separate request queue. See the [Up Next guide](docs/up-next.md).
+requests. The engine keeps handling them after Trackknife closes. See the
+[Up Next guide](docs/up-next.md).
 
 **File → Dynamic playlists…** uses the same editor for local and server
 libraries. Build rules from tags, ratings, and other supported fields, or use
@@ -50,11 +49,11 @@ selection when enough matches are available. Open results as a normal tab with
 one line per track. See the [dynamic playlist guide](docs/dynamic-playlists.md)
 for matching limits and server requirements.
 
-Configure independent local and Melody accounts under **Settings → Last.fm**
-for scrobbling and **Love track / Unlove track** from a track's Last.fm submenu.
-Scrobbling follows the player doing the listening, independently of the tab
-you're browsing. [Account setup and scrobbling](docs/lastfm.md) explains the
-API credentials and browser authorization.
+Connect a Last.fm account under **Settings → Last.fm** and give it to each
+engine: an engine scrobbles what it plays, with Trackknife open or not. A
+track's Last.fm submenu has **Love track / Unlove track**.
+[Account setup and scrobbling](docs/lastfm.md) explains the API credentials and
+browser authorization.
 
 ## Tagging and file tools
 
@@ -96,6 +95,15 @@ matches from that run; they don't update automatically.
 See the [library guide](docs/local-library.md#using-the-library) and
 [query reference](docs/query-language.md) for more examples and details.
 
+## Servers, speakers and the phone
+
+Run `melodyd` on the machine with the music and every client finds it by name.
+Any machine with an engine can lend its speakers to the others, a phone can be
+a speaker too, and the music moves between them without stopping. The Android
+app in `android/` browses and controls the library, plays on the phone with
+Opus on mobile data, and keeps albums for listening offline. `melody-cli`
+does the same from a shell. [Melody](docs/melody.md) explains the setup.
+
 ## Settings and keyboard controls
 
 Settings brings together connection profiles, local library folders, playback,
@@ -125,9 +133,9 @@ You need a C++23 compiler, CMake ≥ 3.28, Ninja, and pkg-config, plus these
 libraries and their development headers:
 
 - Qt ≥ 6.4, including Widgets, Concurrent, DBus, Network, and Test
-- FFmpeg ≥ 6, TagLib ≥ 2.0, and libopenmpt ≥ 0.7
-- libmpdclient ≥ 2.22 and libutf8proc ≥ 2.9
-- PipeWire ≥ 0.3.50, libebur128 ≥ 1.2, and SQLite ≥ 3.37
+- FFmpeg ≥ 6 (including swscale), TagLib ≥ 2.0, and libopenmpt ≥ 0.7
+- PipeWire ≥ 0.3.50, libebur128 ≥ 1.2, SQLite ≥ 3.37, and libutf8proc ≥ 2.9
+- libcurl, OpenSSL (libcrypto), and nlohmann-json
 
 Chromaprint's `fpcalc` is optional, for AcoustID fingerprinting.
 
@@ -137,12 +145,15 @@ cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
 
-On Arch Linux, the package recipe builds from the repository's default branch:
+On Arch Linux, the package recipe builds Trackknife, `melodyd`,
+`melody-agent` and `melody-cli` as separate packages from the default branch:
 
 ```sh
 cd packaging/arch
 makepkg -si
 ```
+
+For a server there is also a Docker image; see [Melody](docs/melody.md#a-server).
 
 There are no versioned releases yet. The [roadmap](docs/roadmap.md) lists the
 unfinished work.
@@ -153,7 +164,7 @@ Run `trackknife --debug` from a terminal to collect diagnostic traces for a bug
 report. Debug tracing is off by default; warnings and errors remain visible.
 
 
-- [Melody setup](docs/melody.md): connecting and using remote speakers.
+- [Melody](docs/melody.md): the engine, servers, speakers, the phone and `melody-cli`.
 - [Local library](docs/local-library.md): adding folders, searching, and refreshing.
 - [Formatting and scripts](docs/tkfmt.md): tag transformations and naming patterns.
   The app uses its own language, `tkfmt-1`; foobar2000 and Picard scripts aren't

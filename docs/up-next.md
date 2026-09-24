@@ -9,7 +9,7 @@ Right-click selected tracks and choose **Queue next** to put them first, or
 results offer the same actions. Selected tracks retain their order, and
 intentional duplicates are separate requests. The old track-selection append /
 insert-next actions are removed; use **Send to tab** for ordinary list edits.
-MPD Queue and named server-list tabs share the same track menu and action order.
+Every list tab, this computer's or a server's, has the same track menu.
 
 Click **Up Next · N** in the transport, or press **Ctrl+Shift+U**, to open its
 side panel. The panel shows the current authority, pending tracks, and normal
@@ -21,8 +21,7 @@ Dropping onto the transport button appends.
 The compact toolbar and right-click menu offer Remove, Move up/down, Clear,
 and Undo for pending requests. Ctrl/Shift-click selects multiple rows; Delete
 removes the selection, and move/drag operations retain its order. A batch is one
-Undo step. Melody batch editing requires a server advertising `melody_upnext_edit`.
-Enter or
+Undo step. Enter or
 double-click starts a selected request now. **Return to playlist now** skips the
 active request, clears pending requests, and returns immediately.
 
@@ -40,11 +39,10 @@ Single/stop-after-current still stops at a boundary. Requests cannot be kept
 repeating by repeat-current. Missing local files surface a playback error;
 Next explicitly skips a failed request.
 
-Local playback and Melody use the same panel and actions but retain separate
-queues. Melody owns the remote request queue, including progression after the
-client disconnects. Rebuild/restart Melody as well as Trackknife to expose the
-new `melody_upnext` capability. Stock MPD retains ordinary positional insertion;
-the panel explains that it does not support this separate request queue.
+Each engine has its own Up Next: this computer's and a server's are separate,
+and the panel says whose it is showing. The engine plays through its requests
+with Trackknife closed, and the phone app and `melody-cli` see and edit the
+same list.
 
 Pending local requests are stored on the workspace persistence worker, including
 raw path bytes, logical source ranges, and metadata. Restore never starts audio

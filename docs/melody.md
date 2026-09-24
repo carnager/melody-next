@@ -1,176 +1,183 @@
-# Using Trackknife with Melody
+# Melody: the engine, speakers and the phone
 
-Melody speaks MPD, so it connects like any other MPD server. Trackknife
-controls its queue and outputs and automatically registers itself as a Melody
-playback output when the server advertises `melody_version`. Stock MPD remains
-an ordinary client connection.
+Melody is the part of Trackknife that plays music. It is one program,
+`melodyd`, and it owns the library and playback: the queue, Up Next,
+ratings, listening history, Last.fm. Everything else is a way of talking to
+it:
 
-## Configure melodyd
+- **Trackknife**, the desktop app, for browsing, playlists and file work.
+- **The Android app**, a remote control that can also be a speaker.
+- **`melody-cli`**, for scripts, key bindings and status bars.
 
-Install `melodyd` following the [Melody build instructions](https://github.com/carnager/melody-music#getting-started).
-Install `mpv` on machines that will play audio.
+Music comes out of *outputs*: the engine's own speakers, or any other
+machine or phone that has registered with it as an *agent*. You pick one,
+and you can move the music between them without it stopping.
 
-Run setup in a terminal **before enabling the service**:
+## On one computer
 
-```sh
-melodyd setup
-```
+Nothing to set up. Trackknife starts its own engine when it starts, and the
+engine keeps running when you close the window, so the music doesn't stop.
+Add your music with **Folders…** in the library panel and press **Refresh**.
 
-For a source build, use `./bin/melodyd setup` from the Melody checkout.
-The wizard asks for an existing music folder, the MPD port, the HTTP listening
-address, an optional web password, and the server name. Press Enter to keep a
-suggested value. Keep MPD enabled (normally port `6600`) for Trackknife.
+## A server
 
-Setup writes `~/.config/melody/melodyd.toml`, or
-`$XDG_CONFIG_HOME/melody/melodyd.toml`. It configures the daemon and exits;
-it does not start playback or enable the service. Starting `melodyd` without a
-usable configuration runs the wizard automatically only when attached to a
-terminal. A systemd service cannot answer its questions.
+Run `melodyd` on the machine that holds the music, a NAS or a home server,
+and use it from everywhere else.
 
-You can rerun `melodyd setup`: existing settings become the defaults, additional
-settings are kept, and the old file is backed up as `melodyd.toml.bak`.
-Comments are not preserved. Pressing Enter at the password prompt keeps an
-existing password; to remove it, edit `server.web_secret` in the config.
-Restart the daemon after reconfiguration.
-
-If you prefer to write the configuration by hand, this is a local-only HTTP
-example:
-
-```toml
-[server]
-name = "Music server"
-bind_to_address = ["127.0.0.1:6701"]
-
-[library]
-music_dir = "/srv/music"
-
-[player]
-mpv_path = "mpv"
-
-[mpd]
-port = 6600
-```
-
-Replace `/srv/music` with your music folder. The user running `melodyd` needs
-read access to it. If a config already exists, edit the matching sections
-instead of adding duplicate headings.
-
-Port `6600` is for MPD control. Port `6701` serves Melody's HTTP API, artwork,
-and streams. `bind_to_address` controls the HTTP listener, not the MPD listener.
-Melody's TCP MPD listener binds to all IPv4 interfaces and does not enforce
-password authentication. Restrict it with a firewall to trusted machines;
-do not expose it to the public internet. `server.web_secret` does not protect
-the TCP MPD port.
-
-Start the daemon in a terminal:
+**Arch Linux.** `packaging/arch/PKGBUILD` builds split packages; on a server
+you only need `melodyd-git`:
 
 ```sh
-melodyd
+cd packaging/arch
+makepkg -s
+sudo pacman -U melodyd-git-*.pkg.tar.zst melody-cli-git-*.pkg.tar.zst
 ```
 
-For a source build, run `./bin/melodyd` from the Melody checkout instead.
-The daemon scans the music folder on startup.
+Put its options in `~/.config/melody/melodyd.conf`:
 
-If your package installed the user service, use this instead of running it
-manually:
+```sh
+MELODYD_OPTIONS=--name gemenon --agent
+```
+
+and start it:
 
 ```sh
 systemctl --user enable --now melodyd
+loginctl enable-linger $USER    # so it runs without you logged in
 ```
 
-After config changes, restart it with `systemctl --user restart melodyd`.
-Service logs are available with `journalctl --user -u melodyd -e`.
+**Docker.** `packaging/docker/docker-compose.yml` runs the engine with host
+networking, which it needs to be found by name. Change the music path and
+the name, then:
 
-## Connect Trackknife
-
-Open **File → Connect to MPD…**:
-
-- **Host or socket:** `127.0.0.1`, or the Melody server's hostname/IP.
-- **Port:** `6600`, matching `[mpd] port`.
-- **Password:** leave blank for Melody.
-- **Local music root:** leave blank unless you also want to edit server files.
-
-Connect, select **MPD Queue**, and browse or search the server library. Use the
-output controls to enable the server's speakers, **Trackknife @ computer-name**, or another
-connected agent. Trackknife becomes offline when this connection or the app is
-closed and reconnects with the same process identity after transient failures.
-The output name includes the computer hostname and stays stable across app
-restarts. Computers must have distinct hostnames: Melody identifies outputs by
-name, so the former shared “Trackknife” name made clients disconnect each other.
-After updating, select the newly named output on each computer.
-
-Melody servers advertise their native rating extension, so the queue's Rate
-menu writes 0-10 track ratings with Melody's `rate` command (keyed by the
-server's stable song identity, never the queue id) and **Rate album** writes
-album ratings with `albumrate`. Ratings other clients set appear whenever a
-listing reloads; Melody's custom rating idle subsystem is not observable
-through libmpdclient, so a live cross-client refresh is a recorded limit.
-
-If **Local music root** contains the same relative paths as Melody's library,
-Trackknife decodes those files directly. Otherwise it streams by Melody's
-stable song identity from the server HTTP endpoint on port `6701`. The endpoint
-uses the MPD queue's identity and clock in either mode; it does not transfer the
-row into a Local Queue tab.
-
-## Lists, Up Next, and Last.fm
-
-Named server lists remain owned by Melody; opening another tab does not switch
-playback. The **Active** label identifies the playback list, independently of
-which tab you are browsing, and stays in place through Stop and Pause.
-
-Supporting Melody versions expose **Queue next / Queue at end** as a temporary
-request queue that returns to normal playback when requests finish. The daemon
-owns progression, so closing Trackknife does not interrupt it. See
-[Up Next](up-next.md) for panel controls and server requirements.
-
-Under **Settings → Last.fm**, choose **Melody server** to authorize the server's
-own scrobbler and enable Love/Unlove. Its account is independent of local
-Trackknife playback. Avoid running a second scrobbler for the same Melody
-playback. See [Last.fm setup](lastfm.md) and [dynamic playlists](dynamic-playlists.md)
-for using loved tracks in recommendations.
-
-## Play on another machine
-
-Install `melody-agent` and `mpv` on the playback machine. In its
-`~/.config/melody/melody-agent.toml`, set:
-
-```toml
-[agent]
-name = "Desktop"
-master = "192.168.1.10:6600"
-music_dir = ""
+```sh
+docker compose -f packaging/docker/docker-compose.yml up -d
 ```
 
-Replace the address with your server's. Leaving `music_dir` empty makes the
-agent stream from Melody. On the server, update the existing `[server]`
-section so the agent can reach those streams:
+The music is mounted read-only. The engine never writes to your files;
+tagging happens in Trackknife over a network share (see below).
 
-```toml
-[server]
-name = "Music server"
-bind_to_address = ["192.168.1.10:6701"]
-base_url = "http://192.168.1.10:6701"
+**Adding the music.** In Trackknife, go to **Settings → Engine**, choose the
+server under **Remote engine → On the network**, then add its music folder
+with **Folders…** in the library panel, as the server sees it (`/music` in the Docker
+setup) and press **Refresh**.
+
+**What it listens on.** Port 6603 for clients and agents, 6604 for streams,
+and multicast DNS (5353/udp) so it can be found by name. `--local-only`
+turns the network off. `--password-file FILE` makes every connection give a
+password first; without one, anyone on your network can control it. There is
+no encryption either way, so keep these ports off the internet (see
+[Away from home](#away-from-home)).
+
+## Speakers
+
+The engine plays on the speakers of the machine it runs on. To play
+somewhere else, that machine or phone has to offer itself as an output.
+There are three ways to do that:
+
+- **Another engine.** If the other machine runs `melodyd` anyway (a
+  desktop with Trackknife, say), start it with `--agent`, or tick
+  **Settings → Engine → Let other engines play on this computer's
+  speakers** in Trackknife. It then plays for every engine it finds on the
+  network. You don't need a separate agent on a machine that already has
+  an engine.
+- **`melody-agent`** on a machine with no engine: a Pi next to the stereo,
+  for example. Without `--server` it plays for every engine it finds; with
+  `--server HOST:6603` only for that one.
+- **The phone**, see below.
+
+When two engines want the same speakers, the one that started playing last
+gets them and the other pauses. Trackknife shows who took them.
+
+**Files or streams.** An agent that can see the music, because it's on the
+same NFS mount for example, opens the files itself. Tell it where:
+`--agent-music-root /mnt/music` (or `--music-root` for `melody-agent`), with
+the engine started with `--music-root` pointing at its own copy. Without
+that, the engine streams the tracks to the agent. That's fine on a LAN; a
+phone on mobile data gets them as Opus instead.
+
+**Choosing where it plays.** Trackknife's output menu in the header, the
+speaker button in the phone app, or `melody-cli output NAME`. The music moves
+to the new output at the same position.
+
+## The phone
+
+The Android app is in `android/`. Build it with:
+
+```sh
+cd android && ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Use the server's actual LAN address in both fields. Allow ports `6600` and
-`6701` only from trusted machines; this example has no HTTP authentication.
-Restart `melodyd`, run `melody-agent` on the playback machine, and enable
-**Desktop** in Trackknife's MPD outputs. Disable other outputs if you only
-want that machine to play.
+It finds engines on your network by name. **Or by address** takes a host
+and port instead, for when you're connected over a VPN. After that it's a
+remote control: the library, search, the queue and Up Next, ratings, and
+the media controls on the lock screen.
 
-## Edit files from the server library
+**The phone as a speaker.** By default the phone registers with the engine
+under its model name, so it shows up as an output next to everything else.
+Pick it and the engine plays there, gapless and with ReplayGain. You can
+turn this off or rename the phone in the app's settings.
 
-Mount the server's music folder locally, for example through NFS or sshfs.
-Set **Local music root** in Trackknife's connection dialog to that mount.
-The relative paths must match: if Melody reports `Artist/Album/01.flac`, a
-root of `/mnt/music` must contain `/mnt/music/Artist/Album/01.flac`.
+**Mobile data.** On Wi-Fi the phone gets the original files. On a metered
+network it asks for Opus instead (128 kbps unless you change it), and that
+applies from the next track. Formats Android can't play, like WavPack, APE,
+tracker files and single tracks from a CUE sheet, always arrive as Opus.
 
-Right-click any server selection and choose **Tools → Edit tags…**,
-**Tools → ReplayGain…**, or **Tools → Convert files…** — Trackknife opens the mapped files in a local tab and
-starts the dialog for you ("Load as local files" remains available to just
-open the tab). Melody's file watcher picks up the changes automatically.
-Writes need filesystem permissions; the MPD connection does not grant them.
-The mapping is separate from the optional local library and does not add
-folders to it.
+**Albums on the phone.** The download button on an album page keeps it on
+the phone, as Opus 160 by default and on Wi-Fi only unless you change that.
+Kept albums are listed under **On this phone** in the library and play
+without the engine. If the engine can't be reached, the library says so and
+takes you there. When the engine plays a track the phone has kept, the phone
+plays its own copy instead of streaming it.
 
-For more server options, see [Melody's configuration reference](https://github.com/carnager/melody-music/blob/main/docs/melodyd.md).
+## Away from home
+
+Use a VPN (WireGuard, Tailscale or similar) and connect to the engine's VPN
+address. The engine has no TLS, so don't forward its ports to the internet.
+Over a VPN the phone counts as on mobile data if the underlying network is
+metered, so streams stay small.
+
+## Scripting
+
+`melody-cli` finds the engine the same way the others do: `--server`,
+`$MELODY_SERVER`, the one on this machine, or one on the network (pick it
+with `--engine NAME` if there are several).
+
+```sh
+melody-cli status
+melody-cli play album doors 1967      # every word must match
+melody-cli next track riders storm    # plays after the current track
+melody-cli latest 10
+melody-cli output "Pixel 10 Pro"
+melody-cli --json status | jq .position_ms
+```
+
+A command that fails exits non-zero and says why. `--json` prints the
+engine's own answers, which is what to use in scripts. Anything the CLI
+doesn't cover is one line of JSON away: the protocol is readable with `nc`.
+`melodyd --help` shows an example.
+
+## Editing files from a server library
+
+The engine doesn't write tags. Trackknife does, on files it can open. Mount
+the server's music on your desktop (NFS, sshfs) and tell Trackknife where,
+under **Settings → Engine**: **Remote music folder** is the path as the
+engine sees it, **Mounted here at** is where it is on your machine. Then
+**Tools → Edit tags…**, **ReplayGain…** and **Convert files…** work on server
+tracks, and the engine picks the changes up.
+
+## When something doesn't work
+
+- **The engine isn't found by name.** Multicast DNS needs 5353/udp between
+  the machines, and doesn't cross a Docker bridge (use host networking).
+  Connecting by address always works.
+- **"Could not play: …"** in Trackknife or the phone, or an error from
+  `melody-cli`, is the engine's own reason: an output that couldn't be
+  opened, a file that couldn't be read.
+- **An output shows as offline.** Check the agent's log. Every line names
+  the engine it's about, e.g.
+  `melody-agent: 192.168.0.13:6603: the engine went away; reconnecting`.
+- **Converted tracks** are kept in `transcodes/` in the engine's state
+  directory, 2 GB by default (`--transcode-cache MB`). Deleting the folder
+  is safe.

@@ -1,8 +1,8 @@
 # Dynamic playlists
 
-Choose **File → Dynamic playlists** in a local or MPD tab. The same editor
-works with the local library index or the current Melody connection. Each
-library has its own saved definitions.
+Choose **File → Dynamic playlists**. The same editor works with this
+computer's library or a server's, and each library keeps its own saved
+definitions.
 
 Choose **Library rules**, enter a name and a `tkq-1` rule, then **Refresh**:
 
@@ -10,14 +10,10 @@ Choose **Library rules**, enter a name and a `tkq-1` rule, then **Refresh**:
 - `rating MISSING` — unrated tracks.
 - `genre HAS jazz SORT BY %album%` — jazz ordered by album.
 
-Ratings use 0–10, so 8 means four stars. Local rules support the complete
-[query language](query-language.md). Server rules use the subset supported by
-the connected Melody server; unsupported expressions produce an explanation.
-Stock MPD supports compatible tag rules and Last.fm matching; rating and
-technical-field rules require Melody’s extensions. Older servers can reject
-filter expressions they do not support. Server rules reaching the 20,000-track
-query boundary ask you to narrow the rule; results are not silently sampled
-from a truncated response.
+Ratings use 0–10, so 8 means four stars. Rules use the complete
+[query language](query-language.md) on either library, because the engine
+evaluates them the same way. A rule matching more than 20,000 tracks asks you
+to narrow it; results are never a silent sample of a cut-off answer.
 
 Set a maximum of 1–500 tracks and optionally shuffle. **Save definition** keeps
 the rule/source. Saved rules refresh when selected and remain current while the
@@ -36,10 +32,8 @@ act on the result selection, not the tab behind the editor. Outward drag is
 copy-only; dropping into or manually reordering/removing dynamic results is
 not a definition edit. Choose **Open editable snapshot…** for those operations.
 
-Play captures a stable playback list. Melody owns a fresh scratch-list playback
-context; stock MPD uses its ordinary queue replacement fallback. Local playback
-uses an ordinary local scratch list. Subsequent refreshes never rewrite those
-lists. Selection, current row, and scroll anchors survive refresh by raw source
+Play captures the results as a playback list on the engine the library belongs
+to. Later refreshes never rewrite it. Selection, current row, and scroll anchors survive refresh by raw source
 identity and duplicate ordinal. Playing markers follow the source, including
 duplicate occurrences within the captured playback context. Editing metadata
 captures the selected inputs so a result refresh cannot retarget the operation.

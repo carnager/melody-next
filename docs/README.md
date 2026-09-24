@@ -2,7 +2,8 @@
 
 ## Using Trackknife
 
-- [Melody setup](melody.md): connect to the server and set up speakers.
+- [Melody](melody.md): the engine, servers, speakers, the phone app and
+  `melody-cli`.
 - [Local library](local-library.md#using-the-library): add folders, browse albums,
   search, and save searches.
 - [Last.fm accounts and scrobbling](lastfm.md): independent local/server accounts and Love/Unlove.
@@ -19,14 +20,25 @@ limits are.
 
 ## Current state
 
-Updated on 2026-09-22, through ADR-0222 and database schema 41.
+Updated on 2026-09-24, through ADR-0231 and database schema 44.
 
-**Accepted direction — the unified engine.** The Trackknife core becomes
-`melodyd`, reachable over a protocol that works remotely, with Trackknife as its
-client and audio produced by output agents. This supersedes the two-authority
-model in older ADRs and in `architecture.md`. Start with
-[the migration plan](unified-engine.md).
+**The unified engine is in place.** `melodyd` owns the library and playback
+and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
+`melody-cli` are its clients, and audio comes out of output agents: the
+engine's own speakers, other machines and phones. This supersedes the
+two-authority model in older ADRs and in `architecture.md`.
+[The migration plan](unified-engine.md) says how far along each phase is;
+[melody.md](melody.md) says how to run it.
 
+- [ADR-0231: The Android client](adr/0231-android-client.md).
+- [ADR-0230: Opus streams and download tickets](adr/0230-opus-streams-and-download-tickets.md).
+- [ADR-0229: Engines find each other and play for each other](adr/0229-engines-find-each-other.md).
+- [ADR-0228: Output agents on protocol v1](adr/0228-output-agents-on-protocol-v1.md).
+- [ADR-0227: This computer's engine and a remote one](adr/0227-local-and-remote-engines.md).
+- [ADR-0226: Trackknife runs its own engine](adr/0226-trackknife-runs-its-own-engine.md).
+- [ADR-0225: Cover size limits](adr/0225-cover-size-limits.md).
+- [ADR-0224: Retire the MPD backend](adr/0224-retire-the-mpd-backend.md).
+- [ADR-0223: TCP transport and authentication](adr/0223-tcp-transport-and-authentication.md).
 - [ADR-0222: Protocol v1 framing and envelope](adr/0222-protocol-v1-framing.md).
 
 - [ADR-0221: Entry identity and track identity](adr/0221-entry-and-track-identity.md).

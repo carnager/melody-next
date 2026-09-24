@@ -4,6 +4,25 @@ Plan for [ADR-0220](adr/0220-unified-engine-and-remote-agents.md): one engine
 process owning catalogue, mutation and playback; thin clients that may be
 remote; audio produced by output agents.
 
+## Where it stands (2026-09-24)
+
+The plan below is kept as written, with notes where later decisions changed
+it. In short:
+
+- **Phases 0–4 are done.** The engine owns the library and playback, speaks
+  protocol v1 over a socket and TCP, and plays on its own speakers or on
+  agents. The agent is C++, not Go (ADR-0228), and engines find and play for
+  each other without configuration (ADR-0229).
+- **Phase 5, the MPD bridge, hasn't started**, and nothing waits for it.
+- **Phase 6 is mostly done**: one catalogue, ratings and history in the
+  engine. Trackknife still does the file work itself, over the mount.
+- **Phase 7** has `melody-cli` and the Android client (ADR-0231), with Opus
+  streams and offline albums for the phone (ADR-0230). There is no TUI yet.
+- **Repository layout is settled:** everything lives in this repository.
+  The Go tree isn't needed any more.
+
+How to run all of this is in [melody.md](melody.md).
+
 ## Why this, and why now
 
 Every feature in the workspace is currently built twice, once per authority,
@@ -622,6 +641,9 @@ than reinventing:
 Port the agent contract onto protocol v1. Multi-room *synchronized* output stays
 out of scope.
 
+*Superseded by ADR-0228: the agent became C++, so every output plays
+through the same audition code as the engine.*
+
 **The agent stays Go on purpose.** A static Go binary is copied to a Pi, a NAS
 or a spare box and run — no toolchain, no Qt, no cross-compilation of the C++
 tree per target. That deployment property is the reason for the language split;
@@ -752,6 +774,11 @@ lives; the context-menu love/unlove path can wait for Phase 6.
 
 ### Phase 7 — Clients
 
+*Status: `melody-cli` is done and written in C++ against protocol v1, with
+`--json` for scripts and exit codes that mean something. The Android client
+is done (ADR-0231). There is no TUI yet, and file operations from the phone
+are not planned for now.*
+
 `melody-cli` (due a rewrite regardless), `melody-tui` and Android move onto
 protocol v1 natively and gain file operations — tagging from the terminal, a
 ReplayGain scan from a phone. `melody-mpd` stays for third-party clients if
@@ -802,7 +829,8 @@ program by accident.
 
 ## Open decisions
 
-**Repository layout.** `melodyd` is now a Melody-named binary built from the
+**Repository layout.** *Settled: one repository, this one. The engine, the
+agent, the CLI, the Android client and the packaging all live here.* `melodyd` is now a Melody-named binary built from the
 C++ tree, while `melody-agent` and the clients are Go. Either the C++ tree
 becomes the home of `melodyd` and the Melody repository keeps agents and
 clients, or the two merge. This determines the build and CI shape and is worth

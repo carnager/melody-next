@@ -1,41 +1,28 @@
 # Last.fm accounts, scrobbling, and loved tracks
 
-Open **Settings → Last.fm** and choose **Local playback** or **Melody server**.
-The two accounts are independent; each player submits only its own playback.
-Melody continues when Trackbench is closed. Stock MPD does not offer this
-extension, and Trackbench does not scrobble the audio it receives as a Melody
-endpoint.
+Scrobbling is done by the engine that plays the music, so it happens with
+Trackknife closed too. You connect a Last.fm account once in Trackknife, then
+tell each engine to use it.
 
-1. Follow **Create a Last.fm API account**, choose an application name such as
-   Melody or Trackknife, and copy the API key and shared secret into Settings.
-   Desktop authorization does not need a callback URL. The same pair can be used
-   for both players, but authorize each player separately. No shared application
-   credentials are bundled with either app.
-2. Leave **Use this API key for dynamic playlists too** checked to avoid entering
-   the key again in Metadata services. This saves the key locally when connecting;
-   the shared secret stays with the selected player.
-3. Choose **Connect to Last.fm…** and grant access in your browser. Trackknife
-   checks automatically and shows the connected account when approved. No
-   account password is entered in Trackknife.
-4. Scrobbling is enabled after the first successful connection. Uncheck
-   **Scrobble playback to Last.fm** if you only want account actions such as Love.
-   Reconnecting the same account preserves your previous scrobbling choice.
+1. Open **Settings → Last.fm** and follow the link to register a Last.fm API
+   application. Any name will do; no callback URL is needed. Paste the API key
+   and shared secret. No credentials ship with Trackknife.
+2. Leave **Use this API key for dynamic playlists too** ticked unless you want
+   to enter a different key under Metadata services.
+3. Choose **Connect to Last.fm…** and approve access in your browser. Trackknife
+   notices the approval by itself and shows the account. You never type your
+   Last.fm password into Trackknife.
+4. Under **Engines scrobble what they play**, press **Use this account** for
+   **This computer**, and for any server with **Another engine…**. Each engine
+   keeps its own copy of the session and its own queue of scrobbles waiting to
+   be sent, in `lastfm.json` in its state directory.
 
-While waiting, **Cancel** stops further checks; it does not revoke an approval
-already processed by Last.fm. Waiting ends after five minutes, on errors, or
-when the settings page is closed. Connect again to retry. Checks run every three
-seconds after the previous response, with no overlapping requests.
+While Trackknife waits for your approval, **Cancel** stops asking. It doesn't
+undo an approval Last.fm already has. Waiting gives up after five minutes.
 
-Once credentials are saved, the entry fields are hidden and **Reconnect in
-browser…** reuses them. This requires an updated Melody daemon for server
-accounts. **Disconnect / clear pending** removes those saved credentials.
-
-Account actions and API-key reuse take effect immediately, independently of the Settings Save
-button. Server setup requires the updated Melody daemon and sends credentials
-through your MPD connection; use a trusted network or tunnel. Credentials and
-the pending outbox are stored in a private, atomically replaced file on the
-selected player. Local state is `lastfm-v1.json` in Trackbench's application
-data directory; Melody uses the same filename beside `playqueue.json`.
+The credentials are saved privately on this computer. **Disconnect / clear
+pending** removes them. Untick **Scrobble playback to Last.fm** if you only want
+Love and Unlove. An engine too old to scrobble says so next to its name.
 
 Scrobbling requires artist, title, and duration greater than 30 seconds.
 Advancing playback counts toward half the duration or four minutes, whichever

@@ -372,6 +372,45 @@ int main(const int argc, char** argv) {
     CHECK(contains(paths_of("dayssinceadded GREATER 3650"), fresh));
     CHECK(paths_of("dayssinceadded MISSING").empty());
 
+    // An artist's albums in the order they came out. Tagged from
+    // MusicBrainz, an album's key is its release id, which sorts no way in
+    // particular: adding an artist put them out of order, year-named folders
+    // or not. Here the ids and the folders both sort against the years.
+    {
+        const auto kate = base / "kate";
+        const auto album = [&](const std::string& folder, const std::string& title,
+                               const std::string& year, const std::string& release) {
+            std::vector<std::string> tracks;
+            for (const auto* number : {"1", "2"}) {
+                tracks.push_back(fixture(fixtures, kate / folder, std::string{number} + ".flac",
+                                         {{"TITLE", title + " " + number},
+                                          {"ARTIST", "Kate Bush"},
+                                          {"ALBUM", title},
+                                          {"DATE", year},
+                                          {"TRACKNUMBER", number},
+                                          {"MUSICBRAINZ_ALBUMID", release}}));
+            }
+            return tracks;
+        };
+        const auto sensual = album("a", "The Sensual World", "1989", "00000000-0000-0000-0000-000000000001");
+        const auto hounds = album("b", "Hounds of Love", "1985", "33333333-3333-3333-3333-333333333333");
+        const auto kick = album("c", "The Kick Inside", "1978", "ffffffff-ffff-ffff-ffff-ffffffffffff");
+        CHECK(library->add_root(kate.native()).has_value());
+        CHECK(library->scan({}, progress).has_value());
+        persistence::LibraryQuery artist;
+        artist.kind = persistence::LibraryEntryKind::track;
+        artist.artist = "Kate Bush";
+        const auto added = library->paths(artist);
+        CHECK(added.has_value());
+        const std::vector<std::string> by_year{kick[0], kick[1], hounds[0], hounds[1], sensual[0], sensual[1]};
+        CHECK(added && *added == by_year);
+        // And her tracks listed, and found by a query, the same way.
+        const auto listed = library->query(artist);
+        CHECK(listed && listed->entries.size() == 6U && listed->entries.front().key == kick[0] &&
+              listed->entries.back().key == sensual[1]);
+        CHECK(paths_of("artist IS \"Kate Bush\"") == by_year);
+    }
+
     std::filesystem::remove_all(base, fs_error);
     return failures == 0 ? 0 : 1;
 }

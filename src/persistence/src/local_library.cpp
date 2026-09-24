@@ -984,6 +984,20 @@ core::Result<void> LocalLibrary::remove_root(const std::string& path) {
     return {};
 }
 
+namespace {
+
+// Each album's year for ordering: the earliest date among its tracks, so an
+// album whose tracks disagree about it stays in one piece. Joined once per
+// query rather than looked up per row, which on one huge album went
+// quadratic.
+[[nodiscard]] std::string with_album_years(const std::string& table) {
+    return " LEFT JOIN (SELECT album_key AS year_key, min(date) AS album_year"
+           " FROM local_library_tracks GROUP BY album_key) years ON years.year_key=" +
+           table + ".album_key";
+}
+
+} // namespace
+
 core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                                               const core::CancellationToken& cancellation) const {
     return checked([&] {
@@ -1018,8 +1032,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                       "added,duration_ms";
             order = query.newest_first
                         ? " ORDER BY added DESC,album_key,disc,track,raw_path"
-                        : " ORDER BY artist COLLATE NOCASE,album_key,disc,track,title COLLATE "
-                          "NOCASE,raw_path";
+                        : " ORDER BY artist COLLATE NOCASE,years.album_year,album_key,disc,track,"
+                          "title COLLATE NOCASE,raw_path";
             break;
         }
         // As much as is asked for, up to the library's result cap: a browse
@@ -1027,7 +1041,11 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         // asked, which put most of a real library behind "Show more…".
         const auto limit = std::clamp<std::size_t>(query.limit, 1U, filter_match_cap);
         Statement statement{db,
-                            "SELECT " + columns + " FROM local_library_tracks" + filter.sql +
+                            "SELECT " + columns + " FROM local_library_tracks" +
+                                (query.kind == LibraryEntryKind::track && !query.newest_first
+                                     ? with_album_years("local_library_tracks")
+                                     : std::string{}) +
+                                filter.sql +
                                 order + " LIMIT " + std::to_string(limit + 1U) + " OFFSET " +
                                 std::to_string(std::min<std::size_t>(query.offset, 1'000'000U))};
         filter.bind(statement);
@@ -1062,9 +1080,12 @@ LocalLibrary::paths(const LibraryQuery& query, const core::CancellationToken& ca
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
         const Filter filter{query};
-        Statement statement{db, "SELECT raw_path FROM local_library_tracks" + filter.sql +
-                                    " AND available=1 ORDER BY artist COLLATE "
-                                    "NOCASE,album_key,disc,track,raw_path LIMIT 100001"};
+        // An artist's albums in the order they came out, not the order of
+        // their folders' names.
+        Statement statement{db, "SELECT raw_path FROM local_library_tracks" +
+                                    with_album_years("local_library_tracks") + filter.sql +
+                                    " AND available=1 ORDER BY artist COLLATE NOCASE,"
+                                    "years.album_year,album_key,disc,track,raw_path LIMIT 100001"};
         filter.bind(statement);
         std::vector<std::string> result;
         while (statement.next()) {
@@ -1086,8 +1107,9 @@ constexpr auto filter_columns =
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash),-1),"
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1),"
     "t.added,(SELECT max(a.added) FROM local_library_tracks a WHERE a.album_key=t.album_key)";
-constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,t.album_key,t.disc,t.track,"
-                              "t.title COLLATE NOCASE,t.raw_path";
+const auto filter_from = " FROM local_library_tracks t" + with_album_years("t");
+constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,years.album_year,t.album_key,"
+                              "t.disc,t.track,t.title COLLATE NOCASE,t.raw_path";
 
 struct FilterPlan {
     std::optional<FilterClause> pushed;
@@ -1287,7 +1309,7 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
         (plan.residual && std::ranges::any_of(compiled.predicates, [](const auto& p) {
              return p.operand != query::TkqOperandKind::history;
          }));
-    Statement select{db, std::string{"SELECT "} + filter_columns + " FROM local_library_tracks t" +
+    Statement select{db, std::string{"SELECT "} + filter_columns + filter_from +
                              filter_where(plan) + filter_order};
     if (plan.pushed) {
         bind_clause(select, *plan.pushed);
@@ -1410,7 +1432,7 @@ core::Result<LibraryPage> LocalLibrary::filter(const query::CompiledTkq& compile
         if (!plan.residual && !compiled.sort) {
             // Fully indexable and unsorted: page in SQL like ordinary queries.
             Statement statement{db, std::string{"SELECT "} + filter_columns +
-                                        " FROM local_library_tracks t" + filter_where(plan) +
+                                        filter_from + filter_where(plan) +
                                         filter_order + " LIMIT " + std::to_string(page_limit + 1U) +
                                         " OFFSET " +
                                         std::to_string(std::min<std::size_t>(offset, 1'000'000U))};
@@ -1453,7 +1475,7 @@ LocalLibrary::filter_paths(const query::CompiledTkq& compiled,
         require_complete_field_index(db);
         const auto plan = plan_filter(compiled);
         if (!plan.residual && !compiled.sort) {
-            Statement statement{db, std::string{"SELECT t.raw_path FROM local_library_tracks t"} +
+            Statement statement{db, std::string{"SELECT t.raw_path"} + filter_from +
                                         filter_where(plan) + filter_order + " LIMIT 100001"};
             if (plan.pushed) {
                 bind_clause(statement, *plan.pushed);

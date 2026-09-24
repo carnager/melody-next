@@ -9,8 +9,13 @@ melodyd="$1"
 cli="$2"
 work="$(mktemp -d)"
 daemon_pid=""
+second_pid=""
 
 cleanup() {
+    if [ -n "${second_pid}" ] && kill -0 "${second_pid}" 2>/dev/null; then
+        kill "${second_pid}" 2>/dev/null || true
+        wait "${second_pid}" 2>/dev/null || true
+    fi
     if [ -n "${daemon_pid}" ] && kill -0 "${daemon_pid}" 2>/dev/null; then
         kill "${daemon_pid}" 2>/dev/null || true
         wait "${daemon_pid}" 2>/dev/null || true
@@ -51,7 +56,7 @@ done
 # One request, read until the line that answers it -- or, for a job, the line
 # that says it finished: the engine keeps the connection open, as it must.
 engine() {
-    python3 - "${socket}" "$1" "${2:-}" <<'PY'
+    python3 - "${ENGINE_SOCKET:-${socket}}" "$1" "${2:-}" <<'PY'
 import json, socket, sys
 path, request, until = sys.argv[1], sys.argv[2], sys.argv[3]
 connection = socket.socket(socket.AF_UNIX)
@@ -175,6 +180,53 @@ kill "${watch_pid}" 2>/dev/null || true
 wait "${watch_pid}" 2>/dev/null || true
 grep -q '"rating":4' "${work}/rated.txt" || fail "watch hears of a rating set elsewhere"
 cli toggle > /dev/null
+
+# watch --all: two engines, and the line is about the one that plays --
+# the latest to start. Named with --server, so no other engine nearby is
+# asked.
+second="${work}/second.sock"
+"${melodyd}" --socket "${second}" --state "${work}/second-state" --local-only \
+    2>"${work}/second.log" &
+second_pid=$!
+for _ in $(seq 1 100); do
+    [ -S "${second}" ] && break
+    sleep 0.05
+done
+[ -S "${second}" ] || fail "a second engine starts"
+ENGINE_SOCKET="${second}" engine \
+    "{\"id\":1,\"method\":\"catalogue.add_root\",\"params\":{\"path\":\"${encoded}\"}}" > /dev/null
+ENGINE_SOCKET="${second}" engine '{"id":2,"method":"job.submit","params":{"job":"catalogue.scan"}}' \
+    job.finished | grep -q job.finished || fail "the second library is scanned"
+cli2() { "${cli}" --server "${second}" "$@"; }
+cli2 volume 0 > /dev/null
+"${cli}" --server "${socket}" --server "${second}" --json watch --all > "${work}/all.txt" &
+watch_pid=$!
+for _ in $(seq 1 100); do
+    [ -s "${work}/all.txt" ] && break
+    sleep 0.05
+done
+last_all() { tail -1 "${work}/all.txt" | python3 -c '
+import json, sys
+state = json.load(sys.stdin)
+print(state["engine"]["server"], state["status"], (state.get("track") or {}).get("title", ""))'; }
+last_all | grep -q "^${socket} playing .*gamma" || fail "watch --all starts on the engine that plays"
+cli2 play track alpha 2>/dev/null > /dev/null
+for _ in $(seq 1 100); do
+    last_all | grep -q "^${second} playing .*alpha" && break
+    sleep 0.05
+done
+last_all | grep -q "^${second} playing .*alpha" || fail "it follows the engine that started last"
+cli2 stop > /dev/null
+for _ in $(seq 1 100); do
+    last_all | grep -q "^${socket} playing" && break
+    sleep 0.05
+done
+last_all | grep -q "^${socket} playing .*gamma" || fail "and back to the one still playing"
+kill "${watch_pid}" 2>/dev/null || true
+wait "${watch_pid}" 2>/dev/null || true
+kill "${second_pid}" 2>/dev/null || true
+wait "${second_pid}" 2>/dev/null || true
+second_pid=""
 
 cli outputs | grep -q "^\*" || fail "outputs marks the one in use"
 cli stop | grep -q "^stopped:" || fail "stop stops"

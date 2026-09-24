@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -29,6 +30,8 @@ using Json = nlohmann::json;
 
 struct Options final {
     std::string server;
+    // Every --server given, for watch --all: those engines and no others.
+    std::vector<std::string> servers;
     std::string password;
     std::string engine;
     bool json{false};
@@ -58,7 +61,9 @@ void usage(std::ostream& out) {
            "  output NAME                 play on those instead\n"
            "  engines                     the engines announcing themselves nearby\n"
            "\n"
-           "  watch                       print the state each time it changes\n"
+           "  watch [--all]               print the state each time it changes; with\n"
+           "                              --all, of whichever engine here or nearby plays\n"
+           "                              (only those named, with --server given for each)\n"
            "  rate [0-5]                  say or set the playing track's stars\n"
            "  love | unlove               the playing track, on Last.fm\n"
            "\n"
@@ -356,6 +361,216 @@ void print_state(const Json& state, Client& client) {
     }
 }
 
+// watch --all: every engine reachable -- this computer's and those on the
+// network -- and a line for the one that matters: the one playing (the
+// latest to start, if several are), else the one that changed last. Each
+// line names the engine, so what acts on it reaches the same one.
+int watch_all(const Options& options) {
+    struct Watched final {
+        std::string id;
+        std::string name;
+        // What --server takes to reach it again.
+        std::string server;
+        std::unique_ptr<Client> client;
+        Json state;
+        std::chrono::steady_clock::time_point changed{};
+        std::chrono::steady_clock::time_point started{};
+        bool fresh{false};
+        bool gone{false};
+    };
+    std::mutex lock;
+    std::condition_variable woken;
+    std::vector<std::shared_ptr<Watched>> engines;
+
+    // Under the lock: a state that came in, and when it began to play.
+    const auto take = [](Watched& engine, Json state) {
+        const auto now = std::chrono::steady_clock::now();
+        const bool was = text_of(engine.state, "status") == "playing";
+        const bool is = text_of(state, "status") == "playing";
+        if (is && (!was || text_of(state, "entry") != text_of(engine.state, "entry"))) {
+            engine.started = now;
+        }
+        engine.state = std::move(state);
+        engine.changed = now;
+        engine.fresh = true;
+    };
+    const auto attach = [&](const Endpoint& endpoint, std::string server,
+                            const std::string& announced_id) {
+        {
+            const std::scoped_lock held{lock};
+            if (!announced_id.empty() &&
+                std::ranges::any_of(engines, [&](const auto& known) {
+                    return known->id == announced_id && !known->gone;
+                })) {
+                return;
+            }
+        }
+        auto connected = Client::connect(endpoint);
+        if (!connected) {
+            return;
+        }
+        auto engine = std::make_shared<Watched>();
+        engine->server = std::move(server);
+        engine->client = std::move(*connected);
+        const std::weak_ptr<Watched> weak{engine};
+        engine->client->on_event([&, weak](const trackknife::protocol::Event& event) {
+            const auto watched = weak.lock();
+            if (!watched) {
+                return;
+            }
+            const std::scoped_lock held{lock};
+            if (event.name == "playback.changed") {
+                take(*watched, event.data);
+            } else if (event.name == "catalogue.rating_changed") {
+                watched->fresh = true;
+            } else {
+                return;
+            }
+            woken.notify_one();
+        });
+        engine->client->on_closed([&, weak] {
+            if (const auto watched = weak.lock()) {
+                const std::scoped_lock held{lock};
+                watched->gone = true;
+                woken.notify_one();
+            }
+        });
+        const auto info = engine->client->call("engine.info");
+        const auto state = engine->client->call("playback.state");
+        if (!info || !state) {
+            engine->client->close();
+            return;
+        }
+        engine->id = text_of(*info, "id").empty() ? announced_id : text_of(*info, "id");
+        engine->name = text_of(*info, "name");
+        const std::scoped_lock held{lock};
+        // Reached twice -- here and over the network -- it is one engine.
+        if (std::ranges::any_of(engines, [&](const auto& known) {
+                // By id where both say one; an engine too old to say is
+                // known by its name.
+                return !known->gone && (!engine->id.empty() && !known->id.empty()
+                                            ? known->id == engine->id
+                                            : known->name == engine->name);
+            })) {
+            engine->client->close();
+            return;
+        }
+        engine->state = *state;
+        engine->fresh = true;
+        engines.push_back(std::move(engine));
+        woken.notify_one();
+    };
+
+    // Named engines are all there is; otherwise this computer's, and the
+    // network's as they come and go.
+    const auto named = [&] {
+        for (const auto& server : options.servers) {
+            {
+                const std::scoped_lock held{lock};
+                if (std::ranges::any_of(engines, [&](const auto& known) {
+                        return known->server == server && !known->gone;
+                    })) {
+                    continue;
+                }
+            }
+            if (const auto endpoint = Endpoint::parse(server, options.password)) {
+                attach(*endpoint, server, {});
+            }
+        }
+    };
+    if (options.servers.empty()) {
+        if (const auto socket = local_socket(); std::filesystem::exists(socket)) {
+            attach(Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}}, socket.string(),
+                   {});
+        }
+    }
+    auto browser = options.servers.empty()
+                       ? trackknife::discovery::Browser::start()
+                       : std::unexpected(trackknife::core::Error{
+                             .code = trackknife::core::ErrorCode::unsupported,
+                             .message = "engines named",
+                             .context = {}});
+    const auto look = [&] {
+        if (!options.servers.empty()) {
+            named();
+            return;
+        }
+        if (!browser) {
+            return;
+        }
+        for (const auto& found : (*browser)->found()) {
+            const auto id = found.txt.contains("id") ? found.txt.at("id") : std::string{};
+            attach(Endpoint{.socket = {},
+                            .host = found.address,
+                            .port = found.port,
+                            .token = options.password},
+                   found.address + ":" + std::to_string(found.port), id);
+        }
+    };
+
+    std::string last_line;
+    // The network answers within a second; named engines are there at once.
+    if (!options.servers.empty()) {
+        named();
+    }
+    auto next_look = std::chrono::steady_clock::now() + (options.servers.empty()
+                                                             ? std::chrono::milliseconds{1'200}
+                                                             : std::chrono::milliseconds{5'000});
+    while (true) {
+        std::shared_ptr<Watched> chosen;
+        Json state;
+        bool tell = false;
+        {
+            std::unique_lock held{lock};
+            woken.wait_until(held, next_look, [&] {
+                return std::ranges::any_of(engines,
+                                           [](const auto& engine) { return engine->fresh || engine->gone; });
+            });
+            std::erase_if(engines, [](const auto& engine) { return engine->gone; });
+            // Playing beats paused beats stopped; then the latest.
+            const auto rank = [](const Watched& engine) {
+                const auto status = text_of(engine.state, "status");
+                return std::tuple{status == "playing" ? 2 : !text_of(engine.state, "entry").empty() ? 1 : 0,
+                                  status == "playing" ? engine.started : engine.changed};
+            };
+            for (const auto& engine : engines) {
+                if (!chosen || rank(*engine) > rank(*chosen)) {
+                    chosen = engine;
+                }
+            }
+            tell = std::ranges::any_of(engines, [](const auto& engine) { return engine->fresh; });
+            for (const auto& engine : engines) {
+                engine->fresh = false;
+            }
+            if (chosen) {
+                state = chosen->state;
+            }
+        }
+        if (std::chrono::steady_clock::now() >= next_look) {
+            look();
+            next_look = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+        }
+        if (!chosen || !tell) {
+            continue;
+        }
+        // Asked without the lock: its reader thread answers the call.
+        auto track = now_playing(*chosen->client, state);
+        std::string line;
+        if (options.json) {
+            state["track"] = std::move(track);
+            state["engine"] = Json{{"name", chosen->name}, {"server", chosen->server}};
+            line = state.dump();
+        } else {
+            line = chosen->name + ": " + text_of(state, "status") + ": " +
+                   (track.is_null() ? std::string{"nothing"} : describe_track(track));
+        }
+        if (line != last_line) {
+            std::cout << line << std::endl;
+            last_line = std::move(line);
+        }
+    }
+}
+
 int run(const Options& options) {
     const auto& words = options.words;
     const auto command = words.front();
@@ -381,6 +596,10 @@ int run(const Options& options) {
                       << "\n";
         }
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+    }
+
+    if (command == "watch" && words.size() == 2U && words[1] == "--all") {
+        return watch_all(options);
     }
 
     auto client = connect(options);
@@ -708,6 +927,7 @@ int main(int argc, char** argv) {
             options.words.emplace_back(argument);
         } else if (argument == "--server") {
             options.server = value();
+            options.servers.push_back(options.server);
         } else if (argument == "--password") {
             options.password = value();
         } else if (argument == "--engine") {

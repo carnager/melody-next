@@ -11,6 +11,7 @@ It runs `melody-cli`, so that has to be installed.
 ln -s "$PWD" ~/.config/DankMaterialShell/plugins/melody
 ```
 
-Then enable it under **Settings → Plugins** and add it to the bar. In its
-settings, **Engine** picks which engine to follow: a name on the network or
-`HOST:PORT`. Left empty, it's the engine on this computer.
+Then enable it under **Settings → Plugins** and add it to the bar. Left as
+it is, it follows whichever engine is playing, on this computer or on the
+network, and its buttons act on that one. **Engine** in its settings pins it
+to one: a name on the network or `HOST:PORT`.

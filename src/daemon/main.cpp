@@ -341,10 +341,14 @@ int main(int argc, char** argv) {
         player = trackknife::engine::Player::create_without_audio();
     }
     trackknife::engine::register_playback_methods(dispatcher, *player);
-    // Who this is, for a client to show rather than an address.
-    dispatcher.on("engine.info", [&engine_name](const trackknife::protocol::Json&)
+    // Who this is, for a client to show rather than an address -- and its
+    // id, the one it is announced with, so a client that reaches it both
+    // here and over the network knows it is one engine.
+    const auto engine_id = trackknife::core::StableId::random().to_string();
+    dispatcher.on("engine.info", [&engine_name, engine_id](const trackknife::protocol::Json&)
                                      -> trackknife::core::Result<trackknife::protocol::Json> {
-        return trackknife::protocol::Json{{"name", engine_name}, {"protocol", 1}};
+        return trackknife::protocol::Json{
+            {"name", engine_name}, {"id", engine_id}, {"protocol", 1}};
     });
 
     auto server = trackknife::engine::Server::listen(socket_path, dispatcher);
@@ -532,7 +536,6 @@ int main(int argc, char** argv) {
 
     // This run's identity among engines on the network: what an engine that
     // plays for others looks for, so it does not play for itself.
-    const auto engine_id = trackknife::core::StableId::random().to_string();
     std::unique_ptr<trackknife::agent::Guests> guests;
     if (agent_for_all) {
         if (!arbiter) {

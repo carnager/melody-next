@@ -88,6 +88,7 @@ melody-cli output "Pixel 10 Pro"
 melody-cli rate 4                     # stars for what plays, 0-5
 melody-cli love                       # on Last.fm, with the engine's account
 melody-cli --json watch               # a line each time something changes
+melody-cli watch --all                # the same, for whichever engine plays
 ```
 
 There's a bar widget for DankMaterialShell built on these in

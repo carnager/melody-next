@@ -16,6 +16,9 @@ PluginComponent {
     property string password: String(pluginData.password || "")
     property int maxWidthSetting: Math.max(0, parseInt(String(pluginData.maxWidth || "320"), 10) || 0)
 
+    // The engine the last line was about, when following all of them: what
+    // the buttons act on.
+    property string shownServer: ""
     property bool connected: false
     property string status: "stopped"
     property var track: null
@@ -37,10 +40,13 @@ PluginComponent {
         return track.artist ? track.artist + " — " + track.title : track.title;
     }
 
-    // Which engine: a name, HOST:PORT or a socket path.
+    // Which engine: a name, HOST:PORT or a socket path -- or, with none
+    // set, whichever one plays, as the watcher last said.
     function engineArguments() {
         const args = [];
-        if (engine.length > 0) {
+        if (engine.length === 0 && shownServer.length > 0) {
+            args.push("--server", shownServer);
+        } else if (engine.length > 0) {
             if (engine.indexOf(":") >= 0 || engine.startsWith("/"))
                 args.push("--server", engine);
             else
@@ -83,7 +89,10 @@ PluginComponent {
     }
 
     function startWatcher() {
-        watcher.command = [cli].concat(engineArguments(), ["--json", "watch"]);
+        shownServer = "";
+        watcher.command = engine.length > 0
+            ? [cli].concat(engineArguments(), ["--json", "watch"])
+            : [cli].concat(password.length > 0 ? ["--password", password] : [], ["--json", "watch", "--all"]);
         watcher.running = true;
     }
 
@@ -107,6 +116,7 @@ PluginComponent {
                     root.connected = true;
                     root.status = String(state.status || "stopped");
                     root.track = state.track || null;
+                    root.shownServer = state.engine && state.engine.server ? String(state.engine.server) : "";
                 } catch (error) {
                 }
             }

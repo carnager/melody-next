@@ -33,8 +33,8 @@ PluginSettings {
     StringSetting {
         settingKey: "engine"
         label: "Engine"
-        description: "Its name on the network, or HOST:PORT. Empty: the engine on this computer."
-        placeholder: "this computer"
+        description: "Its name on the network, or HOST:PORT. Empty: whichever engine, here or on the network, is playing."
+        placeholder: "whichever plays"
         defaultValue: ""
     }
 

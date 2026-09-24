@@ -117,7 +117,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: "*"
+          # Only what the release carries: the image job's build action
+          # uploads a .dockerbuild record too, which this cannot download.
+          pattern: "{binaries-*,android}"
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:

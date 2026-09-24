@@ -12,6 +12,7 @@
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
+#include "recording_audition.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -19,10 +20,12 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1033,114 +1036,7 @@ void the_recorder_drains_into_a_workspace(engine::Player& player,
 
 } // namespace
 
-// ADR-0228: the player plays on whatever output it is given. A fake one here
-// records what it is asked, which is all an output agent is from the
-// player's side: the decisions stay in the player.
-class RecordingAudition final : public audio::Audition {
-  public:
-    [[nodiscard]] audio::LocalAuditionSnapshot snapshot() const override {
-        const std::lock_guard guard{mutex_};
-        audio::LocalAuditionSnapshot current;
-        current.state = state_;
-        current.raw_path = loaded_;
-        // Milliseconds as samples at 1 kHz: exact, and what the player's
-        // arithmetic expects.
-        current.format = trackknife::formats::PcmFormat{1000, 2, "stereo"};
-        current.position_sample = position_ms_;
-        current.replay_gain_mode = gain_mode_;
-        current.output_target = target_;
-        return current;
-    }
-    [[nodiscard]] core::Result<void>
-    load_selected_and_play(std::string raw_path, trackknife::formats::AudioSourceSelection,
-                           std::optional<trackknife::formats::ReplayGainInfo>) override {
-        const std::lock_guard guard{mutex_};
-        loaded_ = std::move(raw_path);
-        position_ms_ = 0;
-        state_ = audio::LocalAuditionState::playing;
-        return {};
-    }
-    [[nodiscard]] core::Result<void>
-    load_selected_segment_and_play(std::string raw_path, trackknife::formats::AudioSourceSelection,
-                                   trackknife::formats::SampleRange,
-                                   std::optional<trackknife::formats::ReplayGainInfo>) override {
-        return load_selected_and_play(std::move(raw_path), {}, {});
-    }
-    [[nodiscard]] core::Result<void>
-    restore_paused(std::string raw_path, core::LocalSourceRevision,
-                   trackknife::formats::AudioSourceSelection,
-                   std::optional<trackknife::formats::SampleRange>, const std::int64_t position_ms,
-                   std::optional<trackknife::formats::ReplayGainInfo>) override {
-        const std::lock_guard guard{mutex_};
-        loaded_ = std::move(raw_path);
-        position_ms_ = position_ms;
-        state_ = audio::LocalAuditionState::paused;
-        return {};
-    }
-    [[nodiscard]] core::Result<void>
-    queue_gapless_next_selected(std::string, trackknife::formats::AudioSourceSelection,
-                                std::optional<trackknife::formats::ReplayGainInfo>,
-                                std::uint64_t) override {
-        return {};
-    }
-    [[nodiscard]] core::Result<void> queue_gapless_next_selected_segment(
-        std::string, trackknife::formats::AudioSourceSelection, trackknife::formats::SampleRange,
-        std::optional<trackknife::formats::ReplayGainInfo>, std::uint64_t) override {
-        return {};
-    }
-    [[nodiscard]] core::Result<void> clear_gapless_next() override { return {}; }
-    [[nodiscard]] core::Result<void> play() override {
-        const std::lock_guard guard{mutex_};
-        state_ = audio::LocalAuditionState::playing;
-        return {};
-    }
-    [[nodiscard]] core::Result<void> pause() override {
-        const std::lock_guard guard{mutex_};
-        state_ = audio::LocalAuditionState::paused;
-        return {};
-    }
-    [[nodiscard]] core::Result<void> stop() override {
-        const std::lock_guard guard{mutex_};
-        state_ = audio::LocalAuditionState::empty;
-        loaded_.clear();
-        return {};
-    }
-    [[nodiscard]] core::Result<void> seek_to_seconds(double) override { return {}; }
-    [[nodiscard]] core::Result<void> set_volume_percent(int) override { return {}; }
-    [[nodiscard]] core::Result<void>
-    set_replay_gain_mode(const audio::ReplayGainMode mode) override {
-        const std::lock_guard guard{mutex_};
-        gain_mode_ = mode;
-        return {};
-    }
-    [[nodiscard]] core::Result<void> set_replay_gain_preamps(audio::ReplayGainPreamps) override {
-        return {};
-    }
-    [[nodiscard]] core::Result<void>
-    set_buffer_config(audio::PlaybackBufferDurationConfig) override {
-        return {};
-    }
-    [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
-    [[nodiscard]] core::Result<void>
-    set_output_target(std::optional<std::string> target) override {
-        const std::lock_guard guard{mutex_};
-        target_ = std::move(target);
-        return {};
-    }
-
-    void advance_to(const std::int64_t position_ms) {
-        const std::lock_guard guard{mutex_};
-        position_ms_ = position_ms;
-    }
-
-  private:
-    mutable std::mutex mutex_;
-    audio::LocalAuditionState state_{audio::LocalAuditionState::empty};
-    std::string loaded_;
-    std::int64_t position_ms_{0};
-    audio::ReplayGainMode gain_mode_{audio::ReplayGainMode::off};
-    std::optional<std::string> target_;
-};
+using trackknife::testing::RecordingAudition;
 
 // A sink is a device on one machine. One chosen for an agent while playing
 // there was once saved as this machine's own, and after a restart this
@@ -1212,6 +1108,39 @@ void the_player_plays_on_the_output_it_is_given() {
     require(player->current_output() == nullptr, "with nothing chosen");
 }
 
+// A server with no speakers stopped when asked to play and said nothing,
+// so a script took it for playing. The reason is in the state -- the
+// current one: a load is taken up on the output's own thread, and until
+// then the output still reports the last track's failure.
+void a_failure_to_play_says_why() {
+    auto player = engine::Player::create_without_audio();
+    const std::vector<engine::QueueEntry> entries{entry("/music/one.flac"),
+                                                  entry("/music/two.flac")};
+    player->replace_queue(entries);
+    RecordingAudition silent;
+    silent.fail_loads("no speakers");
+    require(player->set_output(&silent).has_value(), "an output is chosen");
+    require(player->play_entry(entries[0].entry_id).has_value(), "the ask is taken");
+    auto state = player->state();
+    require(state.status == "stopped", "nothing plays");
+    require(state.error == "no speakers", "and the state says why");
+
+    silent.defer_loads(true);
+    require(player->play_entry(entries[1].entry_id).has_value(), "asked again");
+    require(player->state().error.empty(),
+            "the last track's failure is not this one's while it loads");
+    silent.take_up();
+    require(player->state().error == "no speakers", "the same failure again is reported again");
+
+    silent.fail_loads(std::nullopt);
+    require(player->play_entry(entries[0].entry_id).has_value(), "and once more");
+    require(player->state().error.empty(), "nothing stale while it loads");
+    silent.take_up();
+    state = player->state();
+    require(state.status == "playing" && state.error.empty(), "and a load that works clears it");
+    require(player->set_output(nullptr).has_value(), "choosing no output succeeds");
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "usage: engine_player_test <audio-fixture-dir>\n";
@@ -1241,6 +1170,7 @@ int main(int argc, char** argv) {
 
     // Needs no audio device, so it runs before the check for one.
     the_player_plays_on_the_output_it_is_given();
+    a_failure_to_play_says_why();
 
     auto player = engine::Player::create();
     if (!player) {

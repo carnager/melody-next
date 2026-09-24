@@ -95,6 +95,9 @@ class EnginePlayback final : public QObject {
         bool output_suspended{false};
         // Another engine took this one's speakers (newest wins): its name.
         QString speakers_taken_by;
+        // Why the last play failed -- no speakers, an unreadable file -- or
+        // empty. Stopped alone reads as nothing having been asked.
+        QString error;
         std::vector<Device> devices;
         qint64 buffer_capacity_ms{0};
         qint64 buffer_start_threshold_ms{0};

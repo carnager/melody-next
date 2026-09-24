@@ -11,3 +11,9 @@ target_link_libraries(
 # ADR-0220: melodyd is the Go daemon's name until the Phase 6 migration is
 # proven. Both must be installable side by side until then.
 set_target_properties(trackknife_engine_daemon PROPERTIES OUTPUT_NAME melodyd)
+
+# Packaged as "engine": the daemon and its systemd user unit.
+install(TARGETS trackknife_engine_daemon RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT engine)
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/systemd/melodyd.service
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user COMPONENT engine)

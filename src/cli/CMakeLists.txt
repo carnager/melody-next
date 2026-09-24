@@ -8,3 +8,5 @@ target_link_libraries(
     PRIVATE Trackknife::Protocol Trackknife::Discovery Trackknife::Core
             trackknife_project_options trackknife_project_warnings
 )
+
+install(TARGETS melody_cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT cli)

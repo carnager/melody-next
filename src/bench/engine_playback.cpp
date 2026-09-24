@@ -223,6 +223,10 @@ void EnginePlayback::adopt(const protocol::Json& payload) {
     state_.output_available = true;
     state_.output_suspended = false;
     state_.speakers_taken_by.clear();
+    state_.error.clear();
+    if (const auto error = payload.find("error"); error != payload.end() && error->is_string()) {
+        state_.error = QString::fromStdString(error->get<std::string>());
+    }
     state_.devices.clear();
     state_.underruns = 0;
     if (const auto output = payload.find("output");

@@ -252,6 +252,11 @@ class Player final {
         // A buffer change waits for the next track; this says one is waiting.
         bool buffer_pending{false};
         std::uint64_t underruns{0U};
+        // Why playback stopped, when it failed: the output could not be
+        // opened, the file could not be read. Kept until the next track is
+        // loaded, so a client asking after the fact still learns it --
+        // stopped alone reads as success.
+        std::string error;
     };
     [[nodiscard]] State state() const;
 
@@ -399,6 +404,15 @@ class Player final {
     core::StableId consumed_;
     std::uint64_t revision_{0};
     std::uint64_t seen_transitions_{0U};
+    // The failure standing when a track was last asked for, and the playback
+    // instance then. The audition loads on its own thread, so until it takes
+    // the new track up it still reports the old failure; that one is not
+    // this track's and is not passed on.
+    struct StaleFailure final {
+        std::uint64_t instance{0U};
+        std::string message;
+    };
+    std::optional<StaleFailure> stale_failure_;
 };
 
 } // namespace trackknife::engine

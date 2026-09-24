@@ -298,6 +298,7 @@ Json to_json(const Player::State& state) {
     output["taken_by"] = state.speakers_taken_by;
     output["underruns"] = state.underruns;
     rendered["output"] = std::move(output);
+    rendered["error"] = state.error.empty() ? Json(nullptr) : Json(state.error);
     rendered["buffer"] = Json{{"capacity_ms", state.buffer.capacity.count()},
                               {"start_threshold_ms", state.buffer.start_threshold.count()},
                               {"pending", state.buffer_pending}};

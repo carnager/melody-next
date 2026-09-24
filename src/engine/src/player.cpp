@@ -298,6 +298,7 @@ core::Result<void> Player::start_entry_locked(QueueEntry entry, const bool from_
                                       ? queue_[static_cast<std::size_t>(resume_at->row)].entry_id
                                       : core::StableId{};
     }
+    const auto before = audition_->snapshot();
     // A segment is optional, and the audition service spells the two cases as
     // separate calls rather than an optional parameter.
     auto started =
@@ -310,6 +311,9 @@ core::Result<void> Player::start_entry_locked(QueueEntry entry, const bool from_
     if (!started) {
         return std::unexpected(std::move(started.error()));
     }
+    stale_failure_ = before.error ? std::optional{StaleFailure{.instance = before.playback_instance,
+                                                               .message = before.error->message}}
+                                  : std::nullopt;
     const auto left = anchors_.current;
     anchors_.current = entry.entry_id;
     anchors_.source = entry.source;
@@ -896,6 +900,11 @@ Player::State Player::state() const {
     current.buffer_pending =
         snapshot.active_buffer && *snapshot.active_buffer != snapshot.configured_buffer;
     current.underruns = snapshot.underrun_count;
+    if (snapshot.error &&
+        !(stale_failure_ && stale_failure_->instance == snapshot.playback_instance &&
+          stale_failure_->message == snapshot.error->message)) {
+        current.error = snapshot.error->message;
+    }
     return current;
 }
 

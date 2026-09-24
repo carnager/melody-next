@@ -17,3 +17,8 @@ target_link_libraries(
     melody_agent
     PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
 )
+
+# Packaged as "agent": the output agent and its systemd user unit.
+install(TARGETS melody_agent RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT agent)
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/systemd/melody-agent.service
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/systemd/user COMPONENT agent)

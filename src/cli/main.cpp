@@ -324,6 +324,9 @@ void print_state(const Json& state, Client& client) {
         std::cout << " · " << taken << " has the speakers";
     }
     std::cout << "\n";
+    if (const auto error = text_of(state, "error"); !error.empty() && status != "playing") {
+        std::cout << "error: " << error << "\n";
+    }
 }
 
 int run(const Options& options) {
@@ -362,27 +365,43 @@ int run(const Options& options) {
         }
     };
     const auto state = [&client] { return call(*client, "playback.state"); };
-    // After asking to play: the engine opens the file before it plays, so
-    // its answer is a moment early. What it says once it has started, within
-    // two seconds.
-    const auto settled = [&client](Json answer, const std::string& wanted) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-        while (text_of(answer, "status") != wanted && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds{50});
-            answer = call(*client, "playback.state");
+    // Asked to play and it did not: the engine's reason, and a failing exit,
+    // so a script does not take a stopped engine for a playing one.
+    const auto failed = [](const Json& answer) {
+        return text_of(answer, "status") != "playing" && !text_of(answer, "error").empty();
+    };
+    const auto playing_or_fail = [&failed, &show](Json answer) {
+        if (failed(answer)) {
+            show(answer);
+            fail("could not play: " + text_of(answer, "error"));
         }
         return answer;
     };
-    const auto started = [&settled](Json answer) { return settled(std::move(answer), "playing"); };
-    // A skip is done when another entry plays, whatever the status was.
-    const auto moved_on = [&client](Json answer, const std::string& before) {
+    // After asking to play: the engine opens the file before it plays, so
+    // its answer is a moment early. What it says once it has started, within
+    // two seconds -- or once it has given up.
+    const auto settled = [&client, &failed](Json answer, const std::string& wanted) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-        while ((text_of(answer, "entry") == before || text_of(answer, "status") != "playing") &&
+        while (text_of(answer, "status") != wanted && !(wanted == "playing" && failed(answer)) &&
                std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds{50});
             answer = call(*client, "playback.state");
         }
         return answer;
+    };
+    const auto started = [&settled, &playing_or_fail](Json answer) {
+        return playing_or_fail(settled(std::move(answer), "playing"));
+    };
+    // A skip is done when another entry plays, whatever the status was.
+    const auto moved_on = [&client, &failed, &playing_or_fail](Json answer,
+                                                                 const std::string& before) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+        while ((text_of(answer, "entry") == before || text_of(answer, "status") != "playing") &&
+               !failed(answer) && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+            answer = call(*client, "playback.state");
+        }
+        return playing_or_fail(std::move(answer));
     };
 
     if (command == "status") {

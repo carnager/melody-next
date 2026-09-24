@@ -114,3 +114,8 @@ target_link_libraries(
             trackknife_project_warnings
 )
 set_target_properties(trackknife PROPERTIES OUTPUT_NAME trackknife)
+
+# Packaged as "app": the window, its desktop entry, and the documents.
+install(TARGETS trackknife RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/trackknife.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT app)

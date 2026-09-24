@@ -1555,7 +1555,15 @@ void BenchMainWindow::refreshEngineTransport() {
     }
     refreshMuteButton();
 
-    if (stopped || state.path.isEmpty()) {
+    if (stopped && !state.error.isEmpty()) {
+        // Asked to play and could not: said where the track would be, or
+        // the engine reads as idle and the ask as lost.
+        now_playing_->setText(tr("Could not play"));
+        now_playing_context_->setText(state.error);
+        refreshHeaderCover({});
+        now_playing_->setToolTip(state.error);
+        now_playing_context_->setToolTip(state.error);
+    } else if (stopped || state.path.isEmpty()) {
         now_playing_->setText(QStringLiteral("Nothing playing"));
         now_playing_context_->clear();
         refreshHeaderCover({});

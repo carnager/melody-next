@@ -17,6 +17,7 @@
 #include "bench/local_list_model.hpp"
 #include "bench/mpris_service.hpp"
 #include "bench/settings_dialog.hpp"
+#include "recording_audition.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/server.hpp"
@@ -27,6 +28,7 @@
 #include <QDir>
 #include <QFile>
 #include <QInputDialog>
+#include <QLabel>
 #include <QSettings>
 #include <QSlider>
 #include <QStandardPaths>
@@ -137,6 +139,7 @@ class EnginePlaybackTest final : public QObject {
     void cleanup();
     void playingATrackDrivesTheEnginesPlayer();
     void transportControlsDriveTheEngine();
+    void aFailureToPlaySaysWhy();
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
@@ -237,6 +240,56 @@ void EnginePlaybackTest::playingATrackDrivesTheEnginesPlayer() {
              "the engine was asked to play an entry before it was given the queue");
 
     (*server)->stop();
+}
+
+// A server with no speakers stopped when asked to play, and the header said
+// "Nothing playing" as though nothing had been asked. It says why instead.
+void EnginePlaybackTest::aFailureToPlaySaysWhy() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("unheard.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    // Declared first so it outlives the player, which holds it.
+    trackknife::testing::RecordingAudition silent;
+    auto player = engine::Player::create_without_audio();
+    silent.fail_loads("could not connect PipeWire playback stream");
+    QVERIFY(player->set_output(&silent).has_value());
+    RecordingEngine recorder{*player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    {
+        BenchMainWindow window;
+        window.show();
+        window.openLocalPaths({raw_path});
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+        QVERIFY(view != nullptr);
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        QVERIFY(model != nullptr);
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+        emit view->doubleClicked(model->index(0, 0));
+
+        auto* title = window.findChild<QLabel*>(QStringLiteral("bench-now-playing"));
+        auto* context = window.findChild<QLabel*>(QStringLiteral("bench-now-playing-context"));
+        QVERIFY(title != nullptr && context != nullptr);
+        QTRY_COMPARE_WITH_TIMEOUT(title->text(), QStringLiteral("Could not play"), 5'000);
+        QCOMPARE(context->text(), QStringLiteral("could not connect PipeWire playback stream"));
+    }
+
+    (*server)->stop();
+    QVERIFY(player->set_output(nullptr).has_value());
 }
 
 // The buttons and the volume slider. Each was wired to the window's own

@@ -1,17 +1,22 @@
 [Unit]
-# ADR-0220: the engine owns the catalogue and playback, and outlives any
-# window. Running it as a user service is what makes that true in practice --
-# music keeps playing when the workspace is closed, and starts without one.
-Description=Trackknife engine
-After=pipewire.service
-Wants=pipewire.service
+# ADR-0220: the engine owns the library and playback, and outlives any
+# window: music keeps playing with Trackknife closed, and starts without it.
+# On a desktop Trackknife starts the engine itself; this unit is for a
+# machine that plays without anyone logged in -- a server, a Pi -- with
+#   loginctl enable-linger $USER
+# so it runs from boot.
+Description=melodyd, the Melody music engine
+After=pipewire.service network-online.target
+Wants=pipewire.service network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/melodyd
-# The socket and the databases default to $XDG_RUNTIME_DIR and $XDG_DATA_HOME.
-# Override with: systemctl --user edit melodyd
-# ExecStart=/usr/bin/melodyd --socket %t/melodyd.sock --state %h/.local/share/trackknife/trackknife
+# Options in ~/.config/melody/melodyd.conf, e.g.
+#   MELODYD_OPTIONS=--name gemenon --agent --password-file /home/you/.config/melody/password
+# By default it listens on port 6603 (streams on 6604) and announces itself
+# on the network; --local-only keeps it to this machine.
+EnvironmentFile=-%h/.config/melody/melodyd.conf
+ExecStart=/usr/bin/melodyd $MELODYD_OPTIONS
 Restart=on-failure
 RestartSec=2
 

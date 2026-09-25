@@ -9,11 +9,13 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
+#include <span>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -94,6 +96,30 @@ void join_group(const int socket) {
     static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)));
     static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
     join_group(socket);
+    return socket;
+}
+
+// A socket on a port of its own, to ask from: a question from any port but
+// 5353 is answered at that port, directly (RFC 6762 §6.7) -- where only
+// this socket hears it, rather than whichever of those sharing 5353 the
+// system hands it to.
+[[nodiscard]] int open_direct_socket() {
+    const int socket = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (socket < 0) {
+        return -1;
+    }
+    sockaddr_in bound{};
+    bound.sin_family = AF_INET;
+    bound.sin_port = 0;
+    bound.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(socket, reinterpret_cast<const sockaddr*>(&bound), sizeof(bound)) != 0) {
+        ::close(socket);
+        return -1;
+    }
+    const unsigned char loop = 1U;
+    const unsigned char ttl = 255U;
+    static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)));
+    static_cast<void>(::setsockopt(socket, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)));
     return socket;
 }
 
@@ -364,22 +390,33 @@ Browser::start(std::function<void(const std::vector<Found>&)> changed, std::stri
     if (!socket) {
         return std::unexpected(std::move(socket.error()));
     }
-    return std::unique_ptr<Browser>{
-        new Browser{*socket, std::move(changed), resolved_service(std::move(service))}};
+    return std::unique_ptr<Browser>{new Browser{*socket, open_direct_socket(), std::move(changed),
+                                                resolved_service(std::move(service))}};
 }
 
-Browser::Browser(const int socket, std::function<void(const std::vector<Found>&)> changed,
-                 std::string service)
-    : socket_(socket), changed_(std::move(changed)), service_(std::move(service)) {
+Browser::Browser(const int socket, const int direct,
+                 std::function<void(const std::vector<Found>&)> changed, std::string service)
+    : socket_(socket), direct_(direct), wake_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)),
+      changed_(std::move(changed)), service_(std::move(service)) {
     worker_ = std::thread{[this] { run(); }};
 }
 
 Browser::~Browser() {
     running_.store(false);
+    if (wake_ >= 0) {
+        const std::uint64_t ring = 1U;
+        static_cast<void>(::write(wake_, &ring, sizeof(ring)));
+    }
     if (worker_.joinable()) {
         worker_.join();
     }
     ::close(socket_);
+    if (direct_ >= 0) {
+        ::close(direct_);
+    }
+    if (wake_ >= 0) {
+        ::close(wake_);
+    }
 }
 
 std::vector<Found> Browser::found() const {
@@ -396,7 +433,8 @@ void Browser::ask(const bool unicast) {
     Message question;
     question.questions.push_back(
         Question{.name = service_ + ".local", .type = RecordType::ptr, .unicast = unicast});
-    send_to_group(socket_, question);
+    // Asked from its own port, a direct answer comes back to this browser.
+    send_to_group(unicast && direct_ >= 0 ? direct_ : socket_, question);
 }
 
 void Browser::run() {
@@ -419,10 +457,26 @@ void Browser::run() {
             next_question = asked < early.size() ? started + early[asked]
                                                  : now + std::chrono::seconds{30};
         }
-        std::uint32_t from = 0;
-        const auto size = receive(socket_, buffer, from, std::chrono::milliseconds{250});
-        if (size > 0U) {
-            take(buffer.data(), size, from);
+        // Whichever of the two has something first: the group's port, and
+        // the one direct answers come to.
+        // (A socket that could not be made is -1, which poll passes over.)
+        std::array<pollfd, 3> ready{pollfd{.fd = socket_, .events = POLLIN, .revents = 0},
+                                    pollfd{.fd = direct_, .events = POLLIN, .revents = 0},
+                                    pollfd{.fd = wake_, .events = POLLIN, .revents = 0}};
+        if (::poll(ready.data(), ready.size(), 250) > 0) {
+            if ((ready[2].revents & POLLIN) != 0) {
+                break;
+            }
+            for (const auto& one : std::span{ready}.first(2)) {
+                if ((one.revents & POLLIN) == 0) {
+                    continue;
+                }
+                std::uint32_t from = 0;
+                const auto size = receive(one.fd, buffer, from, std::chrono::milliseconds{0});
+                if (size > 0U) {
+                    take(buffer.data(), size, from);
+                }
+            }
         }
         expire();
     }

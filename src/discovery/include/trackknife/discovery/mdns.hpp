@@ -88,7 +88,7 @@ class Browser final {
         Found found;
         std::chrono::steady_clock::time_point expires;
     };
-    Browser(int socket, std::function<void(const std::vector<Found>&)> changed,
+    Browser(int socket, int direct, std::function<void(const std::vector<Found>&)> changed,
             std::string service);
     void run();
     void ask(bool unicast = false);
@@ -97,6 +97,12 @@ class Browser final {
     void notify();
 
     int socket_;
+    // Its own port, for direct answers: one sent to 5353 reaches only one of
+    // the sockets that share it on this machine, often not this one.
+    int direct_;
+    // Rung when it stops, so a short-lived browser -- melody-cli's -- is not
+    // kept waiting out the next quarter second.
+    int wake_{-1};
     std::function<void(const std::vector<Found>&)> changed_;
     std::string service_;
     mutable std::mutex mutex_;

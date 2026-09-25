@@ -624,7 +624,10 @@ void EnginePlaybackTest::aSameSizeReplacementElsewhereReachesTheList() {
     std::vector<std::string> raw_paths;
     for (const auto* name : {"one.flac", "two.flac", "three.flac", "four.flac"}) {
         const auto media = directory.filePath(QString::fromLatin1(name));
-        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+        // Long enough to still be playing when the window looks: the short
+        // fixture ended first under a slow, parallel run, and the list was
+        // over before its mark could be checked.
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
         const auto encoded = QFile::encodeName(media);
         raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
     }
@@ -653,11 +656,18 @@ void EnginePlaybackTest::aSameSizeReplacementElsewhereReachesTheList() {
     QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
     emit view->doubleClicked(model->index(0, 0));
     QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{2}, 5'000);
+    // Until the window's play has arrived too: it follows its list on the
+    // window's own connection, and on a slow run came after the other
+    // client's, playing into the list that replaced it.
+    QTRY_VERIFY_WITH_TIMEOUT((*player)->state().status == "playing" &&
+                                 (*player)->state().entry == model->rows().front().entry_id,
+                             10'000);
 
     engine::QueueEntry third;
     third.source.raw_path = raw_paths[2];
     engine::QueueEntry fourth;
     fourth.source.raw_path = raw_paths[3];
+    const auto before = recorder.commands().size();
     (*player)->replace_queue({third, fourth});
     // Not its first row: the row the window was on means nothing now.
     QVERIFY((*player)->play_entry(fourth.entry_id).has_value());
@@ -676,7 +686,27 @@ void EnginePlaybackTest::aSameSizeReplacementElsewhereReachesTheList() {
     const auto is_marked = [model](const core::StableId& entry) {
         return model->index(model->rowOfEntry(entry, -1), 0).data(ui::track_current_role).toBool();
     };
-    QTRY_VERIFY2(is_marked(fourth.entry_id), "the playing row of the new list is not marked");
+    // As long as the other waits here: under a full, parallel test run the
+    // engine can take a while to open and start the track.
+    static_cast<void>(QTest::qWaitFor(
+        [&] { return is_marked(fourth.entry_id) || !(*player)->state().error.empty(); }, 10'000));
+    const auto engine_state = (*player)->state();
+    QVERIFY2(is_marked(fourth.entry_id),
+             qPrintable(QStringLiteral("the playing row of the new list is not marked; the engine "
+                                       "is %1 on %2 (%3 is the one), error '%4'; the window "
+                                       "then asked %5")
+                            .arg(QString::fromStdString(engine_state.status),
+                                 QString::fromStdString(engine_state.entry.to_string()),
+                                 QString::fromStdString(fourth.entry_id.to_string()),
+                                 QString::fromStdString(engine_state.error))
+                            .arg([&] {
+                                QStringList asked;
+                                const auto all = recorder.commands();
+                                for (auto index = before; index < all.size(); ++index) {
+                                    asked << QString::fromStdString(all[index]);
+                                }
+                                return asked.join(QStringLiteral(", "));
+                            }())));
     QVERIFY2(!is_marked(third.entry_id), "the row at the old position is marked instead");
 
     (*server)->stop();

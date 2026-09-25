@@ -29,9 +29,10 @@ play_random() {
 }
 
 kind=album
+icon=vinyl
 case "${1:-}" in
     albums) shift ;;
-    tracks) kind=track; shift ;;
+    tracks) kind=track; icon=media-album-track; shift ;;
     random-album)
         shift
         play_random "$@" play random album
@@ -56,26 +57,34 @@ esac
 # so, asking the engine for no more than the lines need. rofi shows the
 # first column and hands back the whole line.
 #
-# Kept in a cache with the library's revision on its first line: while the
+# Kept in a file with the library's revision on its first line: while the
 # engine says the same revision, the library has not changed and the list
-# is read from there. An engine too old to have a revision is listed every
-# time.
+# is read from there. rofi reads it straight from the file -- through a
+# shell variable, 67,000 tracks took three times as long as rofi needs. An
+# engine too old to have a revision is listed every time.
 cache="${XDG_CACHE_HOME:-${HOME}/.cache}/melody-rofi/$(printf '%s\n' "${kind}" "$@" |
     md5sum | cut -c1-16)"
+mkdir -p "${cache%/*}"
 revision="$(cli "$@" revision 2>/dev/null)" || revision=
+list="${cache}"
 if [ -z "${revision}" ] || [ ! -f "${cache}" ] || [ "$(head -n 1 "${cache}")" != "${revision}" ]; then
-    lines="$(cli "$@" --keys "${kind}s")" || { say "Melody" "Could not list the ${kind}s"; exit 1; }
+    list="$(mktemp "${cache}.XXXXXX")"
+    trap 'rm -f "${list}"' EXIT
+    { printf '%s\n' "${revision}" && cli "$@" --keys "${kind}s"; } > "${list}" ||
+        { say "Melody" "Could not list the ${kind}s"; exit 1; }
     if [ -n "${revision}" ]; then
-        mkdir -p "${cache%/*}"
-        printf '%s\n%s\n' "${revision}" "${lines}" > "${cache}.new" && mv "${cache}.new" "${cache}"
+        mv "${list}" "${cache}"
+        list="${cache}"
+        trap - EXIT
     fi
-else
-    lines="$(tail -n +2 "${cache}")"
 fi
-prompt="${kind^}"
 
-chosen="$(printf '%s\n' "${lines}" |
-    rofi -dmenu -i -p "${prompt}" -display-columns 1 -display-column-separator $'\t')" || exit 0
+# Each line gets an icon from the icon theme (Papirus has both); rofi shows
+# it beside the line and hands back the line without it.
+chosen="$(tail -n +2 "${list}" |
+    awk -v icon="${icon}" '{ printf "%s%cicon%c%s\n", $0, 0, 31, icon }' |
+    rofi -dmenu -i -show-icons -p "${kind^}" \
+        -display-columns 1 -display-column-separator $'\t')" || exit 0
 name="${chosen%%$'\t'*}"
 key="${chosen##*$'\t'}"
 [ -n "${key}" ] || exit 0

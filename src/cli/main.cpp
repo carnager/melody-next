@@ -62,6 +62,9 @@ void usage(std::ostream& out) {
            "      melody-cli play album doors 1967\n"
            "      Or name one exactly by the key albums or tracks --json gives it:\n"
            "      melody-cli add album --key KEY\n"
+           "      Or let the engine choose: random album (an album of a random album\n"
+           "      artist), random tracks [COUNT] (default 25):\n"
+           "      melody-cli play random tracks 50\n"
            "\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
@@ -309,6 +312,53 @@ void usage(std::ostream& out) {
 // these words find first, each with an identity of its own.
 [[nodiscard]] std::vector<Json> entries_for(Client& client, const std::string& kind,
                                             const std::string& words, std::string& chosen) {
+    // Chosen by the engine: an album of a random album artist -- so an artist
+    // with forty albums is no likelier than one with a single one -- or as
+    // many random tracks as asked for.
+    if (kind == "random") {
+        std::istringstream parts{words};
+        std::string what;
+        std::string count_text;
+        parts >> what >> count_text;
+        const auto random = [&client](Json params) {
+            params["text"] = "";
+            params["random"] = true;
+            params["offset"] = 0;
+            return call(client, "catalogue.query", params).value("entries", std::vector<Json>{});
+        };
+        if (what == "album") {
+            const auto artists = random(Json{{"kind", 0}, {"limit", 1}});
+            if (artists.empty()) {
+                fail("the library has no albums");
+            }
+            const auto albums =
+                random(Json{{"kind", 1}, {"artist", text_of(artists.front(), "key")}, {"limit", 1}});
+            if (albums.empty()) {
+                fail("no album of " + text_of(artists.front(), "label") + " was found");
+            }
+            chosen = describe_found(albums.front(), true);
+            return queue_entries(call(client, "catalogue.query",
+                                      Json{{"kind", 2},
+                                           {"text", ""},
+                                           {"album_key", text_of(albums.front(), "key")},
+                                           {"offset", 0},
+                                           {"limit", 5'000}})
+                                     .value("entries", std::vector<Json>{}));
+        }
+        if (what == "tracks") {
+            const auto count = count_text.empty() ? 25 : std::atoi(count_text.c_str());
+            if (count < 1) {
+                fail("random tracks wants a count of at least one");
+            }
+            auto tracks = random(Json{{"kind", 2}, {"limit", count}});
+            if (tracks.empty()) {
+                fail("the library has no tracks");
+            }
+            chosen = std::to_string(tracks.size()) + " random tracks";
+            return queue_entries(tracks);
+        }
+        fail("say random album, or random tracks [COUNT]");
+    }
     const bool album = kind == "album";
     if (!album && kind != "track") {
         fail("say album or track, then the words to find it by");

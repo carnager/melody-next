@@ -134,6 +134,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         request.offset = params.value("offset", std::size_t{0});
         request.limit = params.value("limit", std::size_t{200});
         request.newest_first = params.value("newest_first", false);
+        request.random = params.value("random", false);
         return request;
     };
 

@@ -1010,7 +1010,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         case LibraryEntryKind::artist:
             columns = "artist,artist,artist,'',count(*),sum(available),0,"
                       "count(DISTINCT album_key),'',0,'',0,-1";
-            order = " GROUP BY artist ORDER BY artist COLLATE NOCASE";
+            order = query.random ? " GROUP BY artist ORDER BY random()"
+                                 : " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
         case LibraryEntryKind::album:
             // Every row of an album shares album_rating_hash, so the bare
@@ -1020,7 +1021,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                       "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
                       "WHERE hash=album_rating_hash),0),min(date),max(added),"
                       "CASE WHEN min(duration_ms)<0 THEN -1 ELSE sum(duration_ms) END";
-            order = query.newest_first
+            order = query.random ? " GROUP BY album_key ORDER BY random()"
+                    : query.newest_first
                         ? " GROUP BY album_key ORDER BY max(added) DESC,min(artist) COLLATE "
                           "NOCASE,min(album) COLLATE NOCASE,album_key"
                         : " GROUP BY album_key ORDER BY min(artist) COLLATE NOCASE,min(date),"
@@ -1030,7 +1032,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
                       "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date,"
                       "added,duration_ms";
-            order = query.newest_first
+            order = query.random ? " ORDER BY random()"
+                    : query.newest_first
                         ? " ORDER BY added DESC,album_key,disc,track,raw_path"
                         : " ORDER BY artist COLLATE NOCASE,years.album_year,album_key,disc,track,"
                           "title COLLATE NOCASE,raw_path";
@@ -1042,7 +1045,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         const auto limit = std::clamp<std::size_t>(query.limit, 1U, filter_match_cap);
         Statement statement{db,
                             "SELECT " + columns + " FROM local_library_tracks" +
-                                (query.kind == LibraryEntryKind::track && !query.newest_first
+                                (query.kind == LibraryEntryKind::track && !query.newest_first &&
+                                         !query.random
                                      ? with_album_years("local_library_tracks")
                                      : std::string{}) +
                                 filter.sql +

@@ -46,6 +46,9 @@ struct LibraryQuery {
     // Albums and tracks by when they came into the library, newest first,
     // rather than by artist and name.
     bool newest_first{false};
+    // In no order at all: a random artist, album or tracks, as many as the
+    // limit asks for. Outranks newest_first.
+    bool random{false};
 };
 
 struct LibraryEntry {

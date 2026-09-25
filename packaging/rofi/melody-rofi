@@ -6,20 +6,51 @@
 #
 #   melody-rofi                          # albums, from the engine melody-cli finds
 #   melody-rofi tracks                   # tracks
+#   melody-rofi random-album             # play an album of a random album artist
+#   melody-rofi random-tracks [COUNT]    # play random tracks; asks how many
 #   melody-rofi tracks --engine gemenon  # any melody-cli options go to melody-cli
 #
 # Needs melody-cli and rofi.
 
 set -euo pipefail
 
+cli() { melody-cli "$@"; }
+say() { notify-send -a Melody "$1" "${2:-}" 2>/dev/null || printf '%s\n' "$1 ${2:-}" >&2; }
+
+# Played at once, as the engine chooses; what it chose is said.
+play_random() {
+    local chosen
+    if chosen="$(cli "$@" 2>&1 >/dev/null)"; then
+        say "Melody" "${chosen#melody-cli: }"
+    else
+        say "Melody" "${chosen#melody-cli: }"
+        exit 1
+    fi
+}
+
 kind=album
 case "${1:-}" in
     albums) shift ;;
     tracks) kind=track; shift ;;
+    random-album)
+        shift
+        play_random "$@" play random album
+        exit 0
+        ;;
+    random-tracks)
+        shift
+        count=
+        if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+            count="$1"
+            shift
+        else
+            count="$(printf '%s\n' 10 25 50 100 | rofi -dmenu -p 'Random tracks')" || exit 0
+        fi
+        [[ "${count}" =~ ^[1-9][0-9]*$ ]] || { say "Melody" "How many tracks: a number"; exit 1; }
+        play_random "$@" play random tracks "${count}"
+        exit 0
+        ;;
 esac
-
-cli() { melody-cli "$@"; }
-say() { notify-send -a Melody "$1" "${2:-}" 2>/dev/null || printf '%s\n' "$1 ${2:-}" >&2; }
 
 # A line to show, then a tab and the key -- melody-cli --keys writes them
 # so, asking the engine for no more than the lines need. rofi shows the

@@ -297,6 +297,27 @@ cli status | head -1 | grep -qF "${library_says}" \
     || fail "a bare entry is shown as the library knows it (${library_says}), not by its name"
 cli stop > /dev/null
 
+# Chosen by the engine: random tracks, as many as asked, each once; and a
+# whole album.
+cli play random tracks 2 2>/dev/null | grep -q "^playing:" || fail "play random tracks plays"
+cli --json status | python3 -c '
+import json, sys
+assert json.load(sys.stdin)["queue_size"] == 2' || fail "as many as asked for"
+engine '{"id":11,"method":"playback.queue"}' | python3 -c '
+import json, sys
+paths = [entry["path"] for entry in json.load(sys.stdin)["result"]["entries"]]
+assert len(set(paths)) == 2, paths' || fail "each track once"
+cli play random album 2>/dev/null | grep -q "^playing:" || fail "play random album plays"
+album_size="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
+cli --json albums | python3 -c "
+import json, sys
+assert ${album_size} in [album['tracks'] for album in json.load(sys.stdin)]" \
+    || fail "a whole album of the library (${album_size} tracks)"
+if cli play random tracks 0 2>/dev/null; then
+    fail "no tracks is refused"
+fi
+cli stop > /dev/null
+
 # Wrong words say so, and fail.
 if cli play album nothing-like-this 2>"${work}/none.txt"; then
     fail "an album that is not there fails"

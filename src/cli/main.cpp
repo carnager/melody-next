@@ -322,9 +322,11 @@ void usage(std::ostream& out) {
 }
 
 
-// What plays, as a script wants it: its tags from the queue entry the
-// engine holds, else from the library, and its rating from the library.
-// Null when nothing plays.
+// What plays, as a script wants it: its tags from the engine's library,
+// which read them from the file -- the queue entry says only what the
+// client that queued it knew then, which may be nothing but the path -- and
+// from the entry for a file the library does not have. Its rating from the
+// library. Null when nothing plays.
 [[nodiscard]] Json now_playing(Client& client, const Json& state) {
     const auto entry = text_of(state, "entry");
     if (entry.empty()) {
@@ -335,21 +337,23 @@ void usage(std::ostream& out) {
                             Json{{"kind", 2}, {"text", ""}, {"path", path}, {"limit", 1}})
                            .value("entries", std::vector<Json>{});
     Json track{{"path", path}, {"artist", ""}, {"title", ""}, {"album", ""}, {"date", ""}};
-    const auto queue = call(client, "playback.queue").value("entries", std::vector<Json>{});
-    const auto queued = std::ranges::find_if(
-        queue, [&entry](const Json& candidate) { return text_of(candidate, "entry") == entry; });
-    if (queued != queue.end()) {
-        const auto group = queued->value("group", Json::object());
-        track["artist"] = first_text(group, "artist", "album_artist");
-        track["title"] = text_of(*queued, "title");
-        track["album"] = text_of(group, "album");
-        track["date"] = text_of(group, "date");
-    } else if (!known.empty()) {
-        // Up Next, outside the queue: the library knows it by its path.
+    if (!known.empty()) {
         track["artist"] = text_of(known.front(), "artist");
         track["title"] = first_text(known.front(), "title", "label");
         track["album"] = text_of(known.front(), "album");
         track["date"] = text_of(known.front(), "date");
+    } else {
+        const auto queue = call(client, "playback.queue").value("entries", std::vector<Json>{});
+        const auto queued = std::ranges::find_if(queue, [&entry](const Json& candidate) {
+            return text_of(candidate, "entry") == entry;
+        });
+        if (queued != queue.end()) {
+            const auto group = queued->value("group", Json::object());
+            track["artist"] = first_text(group, "artist", "album_artist");
+            track["title"] = text_of(*queued, "title");
+            track["album"] = text_of(group, "album");
+            track["date"] = text_of(group, "date");
+        }
     }
     if (text_of(track, "title").empty()) {
         track["title"] = decoded_name(path);

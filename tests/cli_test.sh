@@ -243,6 +243,19 @@ if cli add album --key nothing-like-this 2>/dev/null; then
     fail "a key no album has fails"
 fi
 
+# A queue entry with nothing but its path -- queued by a client that had
+# not read the file yet: what plays is still told by the library's tags,
+# not by its file name.
+bare="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' \
+    "${work}/music/first/beta.wav")"
+entry="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+engine "{\"id\":1,\"method\":\"playback.replace_queue\",\"params\":{\"entries\":[{\"entry\":\"${entry}\",\"path\":\"${bare}\"}]}}" > /dev/null
+engine "{\"id\":2,\"method\":\"playback.play\",\"params\":{\"entry\":\"${entry}\"}}" > /dev/null
+library_says="$(cli tracks beta | head -1)"
+cli status | head -1 | grep -qF "${library_says}" \
+    || fail "a bare entry is shown as the library knows it (${library_says}), not by its name"
+cli stop > /dev/null
+
 # Wrong words say so, and fail.
 if cli play album nothing-like-this 2>"${work}/none.txt"; then
     fail "an album that is not there fails"

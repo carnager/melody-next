@@ -252,10 +252,10 @@ void usage(std::ostream& out) {
         auto page = call(client, "catalogue.query", params);
         // Moved out, not copied: the whole library can be one page.
         std::size_t taken = 0;
-        if (const auto entries = page.find("entries");
-            entries != page.end() && entries->is_array()) {
-            taken = entries->size();
-            for (auto& entry : *entries) {
+        if (page.contains("entries") && page["entries"].is_array()) {
+            auto& entries = page["entries"].get_ref<Json::array_t&>();
+            taken = entries.size();
+            for (auto& entry : entries) {
                 found.push_back(std::move(entry));
             }
         }

@@ -404,8 +404,8 @@ Browser::Browser(const int socket, const int direct,
 Browser::~Browser() {
     running_.store(false);
     if (wake_ >= 0) {
-        const std::uint64_t ring = 1U;
-        static_cast<void>(::write(wake_, &ring, sizeof(ring)));
+        // Failing, it wakes within a quarter second anyway.
+        static_cast<void>(::eventfd_write(wake_, 1U));
     }
     if (worker_.joinable()) {
         worker_.join();

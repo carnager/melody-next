@@ -90,6 +90,27 @@ cli() { "${cli}" --server "${socket}" "$@"; }
 
 cli --help | grep -q "play  album|track WORDS" || fail "--help says how to play an album"
 
+# The library's revision: the same after a scan that finds nothing new,
+# another once a track comes.
+first_revision="$(cli revision)"
+[ -n "${first_revision}" ] || fail "revision says one"
+engine '{"id":7,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+[ "$(cli revision)" = "${first_revision}" ] || fail "a scan finding nothing new leaves the revision"
+python3 - "${work}/music/second/delta.wav" <<'PY'
+import sys, wave
+with wave.open(sys.argv[1], "wb") as out:
+    out.setnchannels(2)
+    out.setsampwidth(2)
+    out.setframerate(44100)
+    out.writeframes(b"\0" * 44100 * 4)
+PY
+engine '{"id":8,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+second_revision="$(cli revision)"
+[ "${second_revision}" != "${first_revision}" ] || fail "a track that came changes the revision"
+rm "${work}/music/second/delta.wav"
+engine '{"id":9,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+[ "$(cli revision)" != "${second_revision}" ] || fail "and one that went"
+
 # The library, by words and by what is newest.
 cli tracks alpha | grep -q "alpha" || fail "a track is found by its title"
 [ "$(cli latest 5 | wc -l)" -ge 1 ] || fail "the newest albums are listed"

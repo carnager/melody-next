@@ -1584,6 +1584,17 @@ core::Result<void> LocalLibrary::set_rating(const std::string& hash, const bool 
     return {};
 }
 
+core::Result<std::string> LocalLibrary::revision() const {
+    return checked([&] {
+        Statement select{implementation_->db,
+                         "SELECT id, revision FROM local_library_revision LIMIT 1"};
+        if (!select.next()) {
+            fail("The library has no revision");
+        }
+        return select.bytes(0) + ":" + std::to_string(select.number(1));
+    });
+}
+
 core::Result<std::vector<unsigned>>
 LocalLibrary::ratings(const std::vector<std::string>& hashes,
                       const core::CancellationToken& cancellation) const {

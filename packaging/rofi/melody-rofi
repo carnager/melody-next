@@ -24,13 +24,24 @@ say() { notify-send -a Melody "$1" "${2:-}" 2>/dev/null || printf '%s\n' "$1 ${2
 # A line to show, then a tab and the key -- melody-cli --keys writes them
 # so, asking the engine for no more than the lines need. rofi shows the
 # first column and hands back the whole line.
-if [ "${kind}" = album ]; then
-    lines="$(cli "$@" --keys albums)" || { say "Melody" "Could not list the albums"; exit 1; }
-    prompt=Album
+#
+# Kept in a cache with the library's revision on its first line: while the
+# engine says the same revision, the library has not changed and the list
+# is read from there. An engine too old to have a revision is listed every
+# time.
+cache="${XDG_CACHE_HOME:-${HOME}/.cache}/melody-rofi/$(printf '%s\n' "${kind}" "$@" |
+    md5sum | cut -c1-16)"
+revision="$(cli "$@" revision 2>/dev/null)" || revision=
+if [ -z "${revision}" ] || [ ! -f "${cache}" ] || [ "$(head -n 1 "${cache}")" != "${revision}" ]; then
+    lines="$(cli "$@" --keys "${kind}s")" || { say "Melody" "Could not list the ${kind}s"; exit 1; }
+    if [ -n "${revision}" ]; then
+        mkdir -p "${cache%/*}"
+        printf '%s\n%s\n' "${revision}" "${lines}" > "${cache}.new" && mv "${cache}.new" "${cache}"
+    fi
 else
-    lines="$(cli "$@" --keys tracks)" || { say "Melody" "Could not list the tracks"; exit 1; }
-    prompt=Track
+    lines="$(tail -n +2 "${cache}")"
 fi
+prompt="${kind^}"
 
 chosen="$(printf '%s\n' "${lines}" |
     rofi -dmenu -i -p "${prompt}" -display-columns 1 -display-column-separator $'\t')" || exit 0

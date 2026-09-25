@@ -21,7 +21,7 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-09-24, through ADR-0231 and database schema 44.
+Updated on 2026-09-25, through ADR-0231 and database schema 45.
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and

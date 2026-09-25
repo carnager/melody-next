@@ -139,6 +139,10 @@ class LocalLibrary final {
     // Rating 0 deletes the stored row; hashes come from rating_identity() or
     // library entries, so files outside the library rate identically.
     core::Result<void> set_rating(const std::string& hash, bool album, unsigned rating);
+    // Whether the library changed since a listing: its id and a count that
+    // goes up when a track comes, goes, or changes what a listing shows, as
+    // "id:count". Equal means a cached listing is still true.
+    core::Result<std::string> revision() const;
     // Stored ratings for each hash in input order; 0 means unrated.
     core::Result<std::vector<unsigned>>
     ratings(const std::vector<std::string>& hashes,

@@ -73,6 +73,15 @@ class Catalogue {
     filter(const query::CompiledTkq& compiled, std::size_t offset, std::size_t limit,
            const core::CancellationToken& cancellation = {}) const = 0;
 
+    // Whether the library changed since a listing -- see
+    // LocalLibrary::revision. A catalogue that cannot say answers
+    // unsupported, and a client lists afresh.
+    [[nodiscard]] virtual core::Result<std::string> revision() const {
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "this catalogue has no revision",
+                                           .context = {}});
+    }
+
     // ADR-0179: 0-10 content-identity ratings, by hash. Reading is bulk
     // because a view asks for a screenful at once; writing is one at a time
     // because a rating is a deliberate act.
@@ -155,6 +164,7 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<persistence::LibraryPage>
     filter(const query::CompiledTkq& compiled, std::size_t offset, std::size_t limit,
            const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<std::string> revision() const override;
     [[nodiscard]] core::Result<std::vector<unsigned>>
     ratings(const std::vector<std::string>& hashes,
             const core::CancellationToken& cancellation = {}) const override;

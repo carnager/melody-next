@@ -66,6 +66,7 @@ void usage(std::ostream& out) {
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
+           "  revision                    changes when the library does, for caches\n"
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
            "  engines                     the engines announcing themselves nearby\n"
@@ -856,6 +857,10 @@ int run(const Options& options) {
         }
         std::cout << lines;
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+    } else if (command == "revision") {
+        // The library's revision: a picker keeps its list while it stays
+        // the same. An engine too old to say fails, and it lists afresh.
+        std::cout << text_of(call(*client, "catalogue.revision"), "revision") << "\n";
     } else if (command == "outputs") {
         const auto outputs = call(*client, "outputs.list").value("outputs", std::vector<Json>{});
         if (options.json) {

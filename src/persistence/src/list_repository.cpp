@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 44U;
+constexpr unsigned current_schema_version = 45U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1336,6 +1336,42 @@ UPDATE schema_version SET version = 43;
 ALTER TABLE local_library_tracks ADD COLUMN added INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX local_library_added ON local_library_tracks(added);
 UPDATE schema_version SET version = 44;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 44) {
+        // Whether the library changed since a client last listed it.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+-- Whether the library changed since a client last listed it: a counter
+-- that goes up when a track comes, goes, or changes what a listing shows,
+-- and an id, so a library made anew is not taken for the old one at the
+-- same count. A scan that finds nothing new touches every row's seen
+-- column and leaves the count alone.
+CREATE TABLE local_library_revision (
+    id TEXT NOT NULL,
+    revision INTEGER NOT NULL
+);
+INSERT INTO local_library_revision(id, revision) VALUES (lower(hex(randomblob(8))), 1);
+CREATE TRIGGER local_library_revision_insert AFTER INSERT ON local_library_tracks
+BEGIN
+    UPDATE local_library_revision SET revision = revision + 1;
+END;
+CREATE TRIGGER local_library_revision_delete AFTER DELETE ON local_library_tracks
+BEGIN
+    UPDATE local_library_revision SET revision = revision + 1;
+END;
+CREATE TRIGGER local_library_revision_update AFTER UPDATE ON local_library_tracks
+WHEN OLD.title IS NOT NEW.title OR OLD.artist IS NOT NEW.artist OR OLD.album IS NOT NEW.album
+    OR OLD.album_key IS NOT NEW.album_key OR OLD.date IS NOT NEW.date OR OLD.disc IS NOT NEW.disc
+    OR OLD.track IS NOT NEW.track OR OLD.available IS NOT NEW.available
+    OR OLD.duration_ms IS NOT NEW.duration_ms
+BEGIN
+    UPDATE local_library_revision SET revision = revision + 1;
+END;
+UPDATE schema_version SET version = 45;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

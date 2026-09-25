@@ -319,6 +319,16 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             return Json{{"tracks", std::move(rendered)}};
         });
 
+    // Whether the library changed since a listing, for a client that keeps
+    // one: equal revisions, the same library.
+    dispatcher.on("catalogue.revision", [&catalogue](const Json&) -> core::Result<Json> {
+        auto revision = catalogue.revision();
+        if (!revision) {
+            return std::unexpected(std::move(revision.error()));
+        }
+        return Json{{"revision", *revision}};
+    });
+
     dispatcher.on("catalogue.ratings", [&catalogue](const Json& params) -> core::Result<Json> {
         const auto found = params.find("hashes");
         if (found == params.end() || !found->is_array()) {

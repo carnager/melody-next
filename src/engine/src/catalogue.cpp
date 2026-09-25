@@ -154,6 +154,14 @@ LocalCatalogue::filter(const query::CompiledTkq& compiled, const std::size_t off
     return library->filter(compiled, offset, limit, cancellation);
 }
 
+core::Result<std::string> LocalCatalogue::revision() const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->revision();
+}
+
 core::Result<std::vector<unsigned>>
 LocalCatalogue::ratings(const std::vector<std::string>& hashes,
                         const core::CancellationToken& cancellation) const {

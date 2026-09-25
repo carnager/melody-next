@@ -93,8 +93,8 @@ cli --help | grep -q "play  album|track WORDS" || fail "--help says how to play 
 # The library, by words and by what is newest.
 cli tracks alpha | grep -q "alpha" || fail "a track is found by its title"
 [ "$(cli latest 5 | wc -l)" -ge 1 ] || fail "the newest albums are listed"
-cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) >= 1' \
-    || fail "--json answers in JSON"
+cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) == 2' \
+    || fail "--json answers in JSON, every album"
 
 # Quiet first, then play a track: the queue is replaced and it plays.
 cli volume 0 > /dev/null
@@ -230,6 +230,18 @@ second_pid=""
 
 cli outputs | grep -q "^\*" || fail "outputs marks the one in use"
 cli stop | grep -q "^stopped:" || fail "stop stops"
+
+# One album exactly, by the key albums gives it -- as a picker does.
+key="$(cli --json albums | python3 -c '
+import json, sys
+print(next(album["key"] for album in json.load(sys.stdin) if album["tracks"] == 1))')"
+before="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
+cli add album --key "${key}" 2>/dev/null > /dev/null || fail "add album --key adds it"
+after="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
+[ "${after}" = "$((before + 1))" ] || fail "the keyed album's one track is appended (${before} -> ${after})"
+if cli add album --key nothing-like-this 2>/dev/null; then
+    fail "a key no album has fails"
+fi
 
 # Wrong words say so, and fail.
 if cli play album nothing-like-this 2>"${work}/none.txt"; then

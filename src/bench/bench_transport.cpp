@@ -1671,13 +1671,11 @@ void BenchMainWindow::refreshEngineTransport() {
         }
     }
 
-    // Has the engine's queue drifted from what this window is showing? Asked
-    // by size, which is in the state document already, rather than by fetching
-    // the queue: fetching blocks on a round trip, and this runs on every
-    // sample. Two queues of the same size with different contents slip
-    // through, which is why attaching re-reads it properly; what this catches
-    // is the case that actually happens -- something added or removed an entry
-    // behind this window's back.
+    // Has the engine's queue drifted from what this window is showing? Only
+    // a new revision says it might have, so the queue is fetched then and not
+    // on every sample -- and whatever its size: another client replacing the
+    // list with one as long must show too. Its own edits come back unchanged
+    // and are dropped by the comparison inside.
     // Not while this window's own commands are on their way: until they are
     // answered, the engine may report a queue from before them, and adopting
     // it would trade the rows just added for the engine's older list -- and
@@ -1685,9 +1683,7 @@ void BenchMainWindow::refreshEngineTransport() {
     // revision is left unread so the check runs once they are answered.
     if (state.queue_revision != engine_queue_revision_ && !transport_->settling()) {
         engine_queue_revision_ = state.queue_revision;
-        if (auto* tab = tabForDocument(playback_.anchors.document);
-            tab != nullptr &&
-            state.queue_size != static_cast<std::size_t>(tab->model->rowCount())) {
+        if (tabForDocument(playback_.anchors.document) != nullptr) {
             adoptEngineQueue();
         }
     }

@@ -53,8 +53,10 @@ void usage(std::ostream& out) {
            "  queue album|track WORDS...  add it to Up Next, last\n"
            "      Every word must appear in its artist, title, album or year:\n"
            "      melody-cli play album doors 1967\n"
+           "      Or name one album exactly by the key albums --json gives it:\n"
+           "      melody-cli add album --key KEY\n"
            "\n"
-           "  albums [WORDS...]           list albums; with no words, the newest\n"
+           "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks WORDS...             list tracks\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
            "  outputs                     the speakers this engine can play on\n"
@@ -210,15 +212,28 @@ void usage(std::ostream& out) {
     return std::filesystem::path{raw}.filename().string();
 }
 
-// The library's albums or tracks for these words, newest first when none.
+// The library's albums or tracks for these words -- every one, page by
+// page -- or, with none and newest set, the most recently added.
 [[nodiscard]] std::vector<Json> find(Client& client, const bool albums, const std::string& words,
-                                     const std::size_t limit) {
-    Json params{{"kind", albums ? 1 : 2}, {"text", words}, {"offset", 0}, {"limit", limit}};
-    if (words.empty()) {
-        params["newest_first"] = true;
+                                     const std::size_t limit, const bool newest = false) {
+    std::vector<Json> found;
+    constexpr std::size_t page_size = 1'000;
+    for (std::size_t offset = 0;;) {
+        const auto wanted = limit == 0U ? page_size : std::min(page_size, limit - found.size());
+        Json params{{"kind", albums ? 1 : 2}, {"text", words}, {"offset", offset}, {"limit", wanted}};
+        if (newest) {
+            params["newest_first"] = true;
+        }
+        const auto page = call(client, "catalogue.query", params);
+        auto entries = page.value("entries", std::vector<Json>{});
+        offset += entries.size();
+        found.insert(found.end(), std::make_move_iterator(entries.begin()),
+                     std::make_move_iterator(entries.end()));
+        if (!page.value("more", false) || entries.empty() ||
+            (limit != 0U && found.size() >= limit)) {
+            return found;
+        }
     }
-    const auto page = call(client, "catalogue.query", params);
-    return page.value("entries", std::vector<Json>{});
 }
 
 [[nodiscard]] std::string describe_found(const Json& entry, const bool album) {
@@ -236,34 +251,9 @@ void usage(std::ostream& out) {
     return text;
 }
 
-// What the engine is given to hold: the tracks of the album or the track
-// these words find first, each with an identity of its own.
-[[nodiscard]] std::vector<Json> entries_for(Client& client, const std::string& kind,
-                                            const std::string& words, std::string& chosen) {
-    const bool album = kind == "album";
-    if (!album && kind != "track") {
-        fail("say album or track, then the words to find it by");
-    }
-    if (words.empty()) {
-        fail("which " + kind + "? Give words from its artist, title, album or year");
-    }
-    const auto found = find(client, album, words, 1);
-    if (found.empty()) {
-        fail("no " + kind + " matches \"" + words + "\"");
-    }
-    chosen = describe_found(found.front(), album);
-    std::vector<Json> tracks;
-    if (album) {
-        const auto page = call(client, "catalogue.query",
-                               Json{{"kind", 2},
-                                    {"text", ""},
-                                    {"album_key", text_of(found.front(), "key")},
-                                    {"offset", 0},
-                                    {"limit", 5'000}});
-        tracks = page.value("entries", std::vector<Json>{});
-    } else {
-        tracks = found;
-    }
+// What the engine is given to hold for these library tracks, each with an
+// identity of its own.
+[[nodiscard]] std::vector<Json> queue_entries(const std::vector<Json>& tracks) {
     std::vector<Json> entries;
     for (const auto& track : tracks) {
         entries.push_back(Json{
@@ -282,6 +272,55 @@ void usage(std::ostream& out) {
     }
     return entries;
 }
+
+// What the engine is given to hold: the tracks of the album or the track
+// these words find first, each with an identity of its own.
+[[nodiscard]] std::vector<Json> entries_for(Client& client, const std::string& kind,
+                                            const std::string& words, std::string& chosen) {
+    const bool album = kind == "album";
+    if (!album && kind != "track") {
+        fail("say album or track, then the words to find it by");
+    }
+    if (words.empty()) {
+        fail("which " + kind + "? Give words from its artist, title, album or year");
+    }
+    // One album by its key: exactly the one a picker showed, not the first
+    // that the words happen to find.
+    if (album && words.starts_with("--key ")) {
+        const auto key = words.substr(6);
+        const auto page = call(client, "catalogue.query",
+                               Json{{"kind", 2},
+                                    {"text", ""},
+                                    {"album_key", key},
+                                    {"offset", 0},
+                                    {"limit", 5'000}});
+        auto tracks = page.value("entries", std::vector<Json>{});
+        if (tracks.empty()) {
+            fail("no album has the key " + key);
+        }
+        chosen = describe_found(tracks.front(), true);
+        return queue_entries(tracks);
+    }
+    const auto found = find(client, album, words, 1);
+    if (found.empty()) {
+        fail("no " + kind + " matches \"" + words + "\"");
+    }
+    chosen = describe_found(found.front(), album);
+    std::vector<Json> tracks;
+    if (album) {
+        const auto page = call(client, "catalogue.query",
+                               Json{{"kind", 2},
+                                    {"text", ""},
+                                    {"album_key", text_of(found.front(), "key")},
+                                    {"offset", 0},
+                                    {"limit", 5'000}});
+        tracks = page.value("entries", std::vector<Json>{});
+    } else {
+        tracks = found;
+    }
+    return queue_entries(tracks);
+}
+
 
 // What plays, as a script wants it: its tags from the queue entry the
 // engine holds, else from the library, and its rating from the library.
@@ -740,12 +779,13 @@ int run(const Options& options) {
         if (command == "tracks" && text.empty()) {
             fail("tracks wants words to find them by");
         }
-        std::size_t limit = 500;
+        // Everything that matches; only latest is a count.
+        std::size_t limit = 0;
         if (command == "latest") {
             limit = words.size() > 1U ? static_cast<std::size_t>(std::max(1, std::atoi(words[1].c_str())))
                                       : 20U;
         }
-        const auto found = find(*client, albums, text, limit);
+        const auto found = find(*client, albums, text, limit, command == "latest");
         if (options.json) {
             std::cout << Json(found).dump() << "\n";
         } else {

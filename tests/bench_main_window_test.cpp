@@ -282,6 +282,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
+    void aListReplacedOnTheFollowedEngineMarksWhatPlays();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
     void aRatingSetElsewhereShowsInTheTabs();
@@ -4950,8 +4951,12 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QVERIFY(remote_state.isValid() && media.isValid());
     testing::TestEngine remote;
     QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
-    const auto there = media.filePath(QStringLiteral("there.wav"));
-    write_wave(there, wave_sample_rate * 60U);
+    std::vector<std::string> paths;
+    for (const auto* name : {"old.wav", "one.wav", "two.wav", "three.wav"}) {
+        const auto path = media.filePath(QString::fromLatin1(name));
+        write_wave(path, wave_sample_rate * 60U);
+        paths.push_back(QFile::encodeName(path).toStdString());
+    }
 
     BenchMainWindow window;
     window.show();
@@ -4962,26 +4967,112 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
-    const auto entry = core::StableId::random().to_string();
-    QVERIFY((*other)
-                ->call("playback.replace_queue",
-                       protocol::Json{{"entries",
-                                       protocol::Json::array(
-                                           {protocol::Json{{"entry", entry},
-                                                           {"path", protocol::encode_raw_path(
-                                                                        QFile::encodeName(there)
-                                                                            .toStdString())},
-                                                           {"title", "Elsewhere"}}})}})
-                .has_value());
-    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", entry}}).has_value());
-
-    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    const auto queue = [&](const std::vector<std::size_t>& which) {
+        std::vector<std::string> ids;
+        auto entries = protocol::Json::array();
+        for (const auto index : which) {
+            ids.push_back(core::StableId::random().to_string());
+            entries.push_back(protocol::Json{{"entry", ids.back()},
+                                             {"path", protocol::encode_raw_path(paths[index])},
+                                             {"title", "Track " + std::to_string(index)}});
+        }
+        static_cast<void>((*other)->call("playback.replace_queue",
+                                         protocol::Json{{"entries", std::move(entries)}}));
+        return ids;
+    };
+    // The server's tab already shows a list: an album played there before.
+    static_cast<void>(queue({0}));
     auto* tab = window.remoteQueueTab();
     QVERIFY(tab != nullptr);
-    const auto id = core::StableId::parse(entry);
-    QVERIFY(id.has_value());
-    QTRY_VERIFY(tab->model->rowOfEntry(*id, -1) >= 0);
+
+    // A picker replaces it with an album and plays its second track -- both
+    // reaching the window in one report.
+    const auto album = queue({1, 2, 3});
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", album[1]}}).has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds{600});
+
+    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    const auto id = [](const std::string& text) { return *core::StableId::parse(text); };
+    QTRY_VERIFY(tab->model->rowOfEntry(id(album[0]), -1) >= 0 &&
+                tab->model->rowOfEntry(id(album[2]), -1) >= 0);
+    QCOMPARE(tab->model->rowCount(), 3);
     QCOMPARE(window.playback_.anchors.document, tab->document.id);
+    // Its row is marked as the one playing, and stays so -- not the row
+    // where the list's old track was, and not only once the next one plays.
+    const auto marked = [&](const std::string& entry) {
+        const auto row = tab->model->rowOfEntry(id(entry), -1);
+        return row >= 0 && tab->model->index(row, 0).data(ui::track_current_role).toBool();
+    };
+    QTRY_VERIFY2(marked(album[1]), "the playing row is not marked");
+    QVERIFY(!marked(album[0]) && !marked(album[2]));
+    QTest::qWait(1'500);
+    QVERIFY2(marked(album[1]), "the playing row lost its mark");
+    static_cast<void>((*other)->call("playback.stop"));
+    (*other)->close();
+}
+
+// The engine the window already follows has its list replaced by another
+// client, and plays the new one's first track: that row is marked at once
+// -- not the row where the old list's track was, and not only once the
+// next track starts.
+void BenchMainWindowTest::aListReplacedOnTheFollowedEngineMarksWhatPlays() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    std::vector<std::string> paths;
+    for (const auto* name : {"old-a.wav", "old-b.wav", "old-c.wav", "new-a.wav", "new-b.wav"}) {
+        const auto path = media.filePath(QString::fromLatin1(name));
+        write_wave(path, wave_sample_rate * 60U);
+        paths.push_back(QFile::encodeName(path).toStdString());
+    }
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto queue = [&](const std::vector<std::size_t>& which) {
+        std::vector<std::string> ids;
+        auto entries = protocol::Json::array();
+        for (const auto index : which) {
+            ids.push_back(core::StableId::random().to_string());
+            entries.push_back(protocol::Json{{"entry", ids.back()},
+                                             {"path", protocol::encode_raw_path(paths[index])},
+                                             {"title", "Track " + std::to_string(index)}});
+        }
+        static_cast<void>((*other)->call("playback.replace_queue",
+                                         protocol::Json{{"entries", std::move(entries)}}));
+        return ids;
+    };
+    const auto id = [](const std::string& text) { return *core::StableId::parse(text); };
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    const auto marked = [&](const std::string& entry) {
+        const auto row = tab->model->rowOfEntry(id(entry), -1);
+        return row >= 0 && tab->model->index(row, 0).data(ui::track_current_role).toBool();
+    };
+
+    // The server plays the old list's second track; the window follows it.
+    const auto old_list = queue({0, 1, 2});
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", old_list[1]}}).has_value());
+    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    QTRY_VERIFY(marked(old_list[1]));
+
+    // Replaced, and its first track played -- in one report.
+    const auto album = queue({3, 4});
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", album[0]}}).has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds{600});
+
+    QTRY_VERIFY(tab->model->rowOfEntry(id(album[0]), -1) >= 0);
+    QTRY_VERIFY2(marked(album[0]), "the new list's playing row is not marked");
+    QVERIFY2(!marked(album[1]), "the row where the old track was is marked instead");
+    QTest::qWait(1'500);
+    QVERIFY2(marked(album[0]), "the playing row lost its mark");
     static_cast<void>((*other)->call("playback.stop"));
     (*other)->close();
 }

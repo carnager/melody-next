@@ -659,12 +659,25 @@ void EnginePlaybackTest::aSameSizeReplacementElsewhereReachesTheList() {
     engine::QueueEntry fourth;
     fourth.source.raw_path = raw_paths[3];
     (*player)->replace_queue({third, fourth});
+    // Not its first row: the row the window was on means nothing now.
+    QVERIFY((*player)->play_entry(fourth.entry_id).has_value());
+    // Both reach the window in one report, as a picker's replace-and-play
+    // does: its first look at the engine sees the new list and what plays
+    // of it together.
+    std::this_thread::sleep_for(std::chrono::milliseconds{600});
 
     QTRY_VERIFY2_WITH_TIMEOUT(model->rowOfEntry(third.entry_id, -1) >= 0 &&
                                   model->rowOfEntry(fourth.entry_id, -1) >= 0,
                               "the window still shows the list another client replaced",
                               10'000);
     QCOMPARE(model->rowCount(), 2);
+    // What plays of it is marked at once -- not only when the next track
+    // starts -- though the entry the window knew as playing is gone.
+    const auto is_marked = [model](const core::StableId& entry) {
+        return model->index(model->rowOfEntry(entry, -1), 0).data(ui::track_current_role).toBool();
+    };
+    QTRY_VERIFY2(is_marked(fourth.entry_id), "the playing row of the new list is not marked");
+    QVERIFY2(!is_marked(third.entry_id), "the row at the old position is marked instead");
 
     (*server)->stop();
 }

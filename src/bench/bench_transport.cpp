@@ -1223,6 +1223,16 @@ void BenchMainWindow::adoptEngineQueue() {
     engine_queue_ = stated;
     tab->model->replaceRows(std::move(merged), true);
     enqueueUnprobedRows(*tab);
+    // What plays is the engine's to say. A list replaced elsewhere and
+    // started at once reaches the window in one report: the entry it knew as
+    // playing is gone, and its row number -- where the old track was -- says
+    // nothing of the new list.
+    const auto state = transport_->state();
+    if (const auto playing = core::StableId::parse(state.entry.toStdString());
+        playing && tab->model->rowOfEntry(*playing, -1) >= 0) {
+        playback_.anchors.current = *playing;
+        engine_entry_ = state.entry;
+    }
     playback_.row = resolvePlaybackRow(tab);
     if (playback_.row >= 0) {
         tab->model->setCurrentSource(tab->model->source(playback_.row), playback_.row);

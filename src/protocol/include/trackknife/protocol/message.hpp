@@ -71,7 +71,7 @@ using Message = std::variant<Request, Notification, Response, Event>;
 
 // Encodes one message as a single line, without the terminator. Never
 // pretty-prints: a raw newline would break framing.
-[[nodiscard]] std::string encode_message(const Message& message);
+[[nodiscard]] std::string encode_message(Message message);
 
 // Raw OS paths are bytes, not text, and JSON strings must be valid UTF-8, so
 // paths travel base64 encoded. This is the same convention the workspace

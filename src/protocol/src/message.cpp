@@ -122,22 +122,24 @@ core::Result<Message> parse_message(const std::string_view line) {
                            .params = std::move(*params)}};
 }
 
-std::string encode_message(const Message& message) {
+std::string encode_message(Message message) {
+    // Taken by value and moved from: an answer can be a whole library, and a
+    // copy of it only to write it out was a second tree of allocations.
     Json document = Json::object();
     std::visit(
-        [&document](const auto& value) {
+        [&document](auto& value) {
             using Kind = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<Kind, Request>) {
                 document["id"] = value.id;
                 document["method"] = value.method;
-                document["params"] = value.params;
+                document["params"] = std::move(value.params);
             } else if constexpr (std::is_same_v<Kind, Notification>) {
                 document["method"] = value.method;
-                document["params"] = value.params;
+                document["params"] = std::move(value.params);
             } else if constexpr (std::is_same_v<Kind, Response>) {
                 document["id"] = value.id;
                 if (value.result) {
-                    document["result"] = *value.result;
+                    document["result"] = std::move(*value.result);
                 } else if (value.error) {
                     Json failure = Json::object();
                     failure["code"] = value.error->code;
@@ -147,7 +149,7 @@ std::string encode_message(const Message& message) {
                 }
             } else {
                 document["event"] = value.name;
-                document["data"] = value.data;
+                document["data"] = std::move(value.data);
             }
         },
         message);

@@ -40,12 +40,12 @@ constexpr std::size_t maximum_line_bytes = 1U << 20U;
 // bytes that are not -- a file name, a tag -- cannot be encoded. That once
 // threw out of the engine and ended it; now the caller is told instead, and
 // everyone else carries on.
-[[nodiscard]] std::string encode_answer(const protocol::Response& response) {
+[[nodiscard]] std::string encode_answer(protocol::Response response) {
+    const auto id = response.id;
     try {
-        return protocol::encode_message(response);
+        return protocol::encode_message(std::move(response));
     } catch (const std::exception& failure) {
-        protocol::Response refused{
-            .id = response.id, .result = std::nullopt, .error = std::nullopt};
+        protocol::Response refused{.id = id, .result = std::nullopt, .error = std::nullopt};
         refused.error = protocol::to_protocol_error(
             core::Error{.code = core::ErrorCode::invariant,
                         .message = "the engine could not encode its answer",

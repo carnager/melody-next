@@ -235,7 +235,7 @@ std::vector<std::uint8_t> encode(const Message& message) {
     for (const auto& question : message.questions) {
         out.name(question.name);
         out.u16(static_cast<std::uint16_t>(question.type));
-        out.u16(class_in);
+        out.u16(static_cast<std::uint16_t>(class_in | (question.unicast ? 0x8000U : 0U)));
     }
     for (const auto& record : message.answers) {
         write_record(out, record);
@@ -268,6 +268,7 @@ std::optional<Message> decode(const std::uint8_t* data, const std::size_t size) 
             return std::nullopt;
         }
         question.type = static_cast<RecordType>(type);
+        question.unicast = (klass & 0x8000U) != 0U;
         message.questions.push_back(std::move(question));
     }
     const auto read_section = [&in](const std::uint16_t count, std::vector<Record>& into) {

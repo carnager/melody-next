@@ -11,8 +11,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace trackknife::discovery {
@@ -54,6 +56,9 @@ class Announcer final {
     Announcer(int socket, Advertisement advertisement, std::string service);
     void run();
     void answer(bool goodbye);
+    // To the group on every network, or -- asked for directly -- to the one
+    // who asked, at its address and port.
+    void answer_to(bool goodbye, std::optional<std::pair<std::uint32_t, std::uint16_t>> asker);
 
     int socket_;
     Advertisement advertisement_;
@@ -86,7 +91,7 @@ class Browser final {
     Browser(int socket, std::function<void(const std::vector<Found>&)> changed,
             std::string service);
     void run();
-    void ask();
+    void ask(bool unicast = false);
     void take(const std::uint8_t* data, std::size_t size, std::uint32_t from);
     void expire();
     void notify();

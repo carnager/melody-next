@@ -33,7 +33,7 @@ void require(const bool condition, const std::string_view message) {
 }
 
 [[nodiscard]] bool eventually(const std::function<bool()>& condition,
-                              const std::chrono::seconds patience = std::chrono::seconds{8}) {
+                              const std::chrono::milliseconds patience = std::chrono::seconds{8}) {
     const auto deadline = std::chrono::steady_clock::now() + patience;
     while (std::chrono::steady_clock::now() < deadline) {
         if (condition()) {
@@ -48,6 +48,9 @@ void codec_round_trips() {
     discovery::Message message;
     message.response = true;
     message.questions.push_back({.name = "_melody._tcp.local", .type = discovery::RecordType::ptr});
+    // And one asking to be answered directly: the bit survives too.
+    message.questions.push_back(
+        {.name = "_melody._tcp.local", .type = discovery::RecordType::ptr, .unicast = true});
     message.answers.push_back({.name = "_melody._tcp.local",
                                .type = discovery::RecordType::ptr,
                                .ttl = 120,
@@ -192,12 +195,41 @@ bool each_network_hears_its_own_address() {
     return true;
 }
 
+// Someone asking just after someone else is answered at once: an engine
+// multicasts its answer at most once a second, so a client starting a
+// moment after another heard nothing until it asked again -- and melody-cli
+// --engine NAME, waiting a little over a second, now and then gave up.
+bool a_late_asker_is_answered_at_once() {
+    const auto service = "_melody-test-" +
+                         trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
+    auto announcer = discovery::Announcer::start(
+        discovery::Advertisement{.instance = "late", .port = 6603, .txt = {{"id", "engine-2"}}},
+        service);
+    require(announcer.has_value(), "an engine announces itself");
+    // Past its first announcement, well before its second.
+    std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    auto first = discovery::Browser::start({}, service);
+    if (!first) {
+        return false;
+    }
+    // However long it takes: this only tells a network without multicast.
+    if (!eventually([&] { return !(*first)->found().empty(); }, std::chrono::seconds{3})) {
+        std::cerr << "discovery: nothing heard -- no multicast here; skipping\n";
+        return false;
+    }
+    auto second = discovery::Browser::start({}, service);
+    require(second.has_value(), "a second browser starts");
+    require(eventually([&] { return !(*second)->found().empty(); }, std::chrono::milliseconds{400}),
+            "one asking right after another is answered at once, not a second later");
+    return true;
+}
+
 } // namespace
 
 int main() {
     codec_round_trips();
     static_cast<void>(each_network_hears_its_own_address());
-    const bool networked = engines_are_found();
+    const bool networked = engines_are_found() && a_late_asker_is_answered_at_once();
     std::cout << "discovery: " << (networked ? "2" : "1") << " scenarios\n";
     return EXIT_SUCCESS;
 }

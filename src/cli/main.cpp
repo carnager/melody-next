@@ -99,13 +99,23 @@ void usage(std::ostream& out) {
     return std::filesystem::temp_directory_path() / "melodyd.sock";
 }
 
-[[nodiscard]] std::vector<trackknife::discovery::Found> look_around() {
+// The engines on the network. Their answers come within a second, so that
+// long is waited for -- unless one is wanted by name, which ends the wait
+// as soon as it has answered.
+[[nodiscard]] std::vector<trackknife::discovery::Found> look_around(const std::string& wanted = {}) {
     auto browser = trackknife::discovery::Browser::start();
     if (!browser) {
         return {};
     }
-    // The first answers come within a second; engines answer at once.
-    std::this_thread::sleep_for(std::chrono::milliseconds{1'200});
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{1'200};
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (!wanted.empty() && std::ranges::any_of((*browser)->found(), [&wanted](const auto& engine) {
+                return engine.instance == wanted;
+            })) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
     return (*browser)->found();
 }
 
@@ -130,7 +140,7 @@ void usage(std::ostream& out) {
             return open(Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}});
         }
     }
-    auto found = look_around();
+    auto found = look_around(options.engine);
     if (!options.engine.empty()) {
         std::erase_if(found, [&options](const auto& engine) {
             return engine.instance != options.engine;
@@ -217,7 +227,7 @@ void usage(std::ostream& out) {
 [[nodiscard]] std::vector<Json> find(Client& client, const bool albums, const std::string& words,
                                      const std::size_t limit, const bool newest = false) {
     std::vector<Json> found;
-    constexpr std::size_t page_size = 1'000;
+    constexpr std::size_t page_size = 10'000;
     for (std::size_t offset = 0;;) {
         const auto wanted = limit == 0U ? page_size : std::min(page_size, limit - found.size());
         Json params{{"kind", albums ? 1 : 2}, {"text", words}, {"offset", offset}, {"limit", wanted}};

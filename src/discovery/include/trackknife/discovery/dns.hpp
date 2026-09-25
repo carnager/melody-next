@@ -21,6 +21,9 @@ enum class RecordType : std::uint16_t {
 struct Question final {
     std::string name;
     RecordType type{RecordType::any};
+    // mDNS "QU": answer me directly (RFC 6762 §5.4), at once, rather than
+    // to the group -- which an engine does at most once a second.
+    bool unicast{false};
 
     friend bool operator==(const Question&, const Question&) = default;
 };

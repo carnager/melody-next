@@ -111,6 +111,28 @@ void send_via(const int socket, const Message& message, const std::uint32_t addr
                                reinterpret_cast<const sockaddr*>(&group), sizeof(group)));
 }
 
+// This machine's address on the network `peer` is on: the one a packet to
+// it leaves from. Zero when there is no route.
+[[nodiscard]] std::uint32_t address_facing(const std::uint32_t peer) {
+    const int probe = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (probe < 0) {
+        return 0U;
+    }
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(mdns_port);
+    to.sin_addr.s_addr = peer;
+    sockaddr_in local{};
+    socklen_t length = sizeof(local);
+    std::uint32_t address = 0U;
+    if (::connect(probe, reinterpret_cast<const sockaddr*>(&to), sizeof(to)) == 0 &&
+        ::getsockname(probe, reinterpret_cast<sockaddr*>(&local), &length) == 0) {
+        address = local.sin_addr.s_addr;
+    }
+    ::close(probe);
+    return address;
+}
+
 // To the group, out of every interface: a machine on two networks is found
 // on both.
 void send_to_group(const int socket, const Message& message) {
@@ -146,9 +168,11 @@ void send_to_group(const int socket, const Message& message) {
            same_name(name.substr(name.size() - suffix.size()), suffix);
 }
 
-// Waits for a packet, up to `timeout`; its sender goes to `from`.
+// Waits for a packet, up to `timeout`; its sender goes to `from` (and the
+// port it sent from to `port`).
 [[nodiscard]] std::size_t receive(const int socket, std::array<std::uint8_t, 9000>& buffer,
-                                  std::uint32_t& from, const std::chrono::milliseconds timeout) {
+                                  std::uint32_t& from, const std::chrono::milliseconds timeout,
+                                  std::uint16_t* port = nullptr) {
     pollfd ready{.fd = socket, .events = POLLIN, .revents = 0};
     if (::poll(&ready, 1, static_cast<int>(timeout.count())) <= 0) {
         return 0U;
@@ -161,6 +185,9 @@ void send_to_group(const int socket, const Message& message) {
         return 0U;
     }
     from = sender.sin_addr.s_addr;
+    if (port != nullptr) {
+        *port = ntohs(sender.sin_port);
+    }
     return static_cast<std::size_t>(received);
 }
 
@@ -208,7 +235,10 @@ Announcer::~Announcer() {
     ::close(socket_);
 }
 
-void Announcer::answer(const bool goodbye) {
+void Announcer::answer(const bool goodbye) { answer_to(goodbye, std::nullopt); }
+
+void Announcer::answer_to(const bool goodbye,
+                          const std::optional<std::pair<std::uint32_t, std::uint16_t>> asker) {
     const auto ttl = goodbye ? 0U : record_ttl;
     Message message;
     message.response = true;
@@ -237,6 +267,29 @@ void Announcer::answer(const bool goodbye) {
         text.strings.push_back(key + "=" + value);
     }
     message.additionals.push_back(std::move(text));
+    // One who asked to be answered directly is, with the address this
+    // machine has on its network.
+    if (asker) {
+        const auto address = address_facing(asker->first);
+        if (address == 0U) {
+            return;
+        }
+        message.additionals.push_back(Record{.name = host_name_,
+                                             .type = RecordType::a,
+                                             .ttl = ttl,
+                                             .target = {},
+                                             .port = 0,
+                                             .strings = {},
+                                             .address = ntohl(address)});
+        const auto bytes = encode(message);
+        sockaddr_in to{};
+        to.sin_family = AF_INET;
+        to.sin_port = htons(asker->second);
+        to.sin_addr.s_addr = asker->first;
+        static_cast<void>(::sendto(socket_, bytes.data(), bytes.size(), MSG_NOSIGNAL,
+                                   reinterpret_cast<const sockaddr*>(&to), sizeof(to)));
+        return;
+    }
     // Each network hears the address this machine has on it, and only that
     // (RFC 6762 §15): gemenon told the LAN its Docker bridge's address as
     // well, and a phone that picked it could not reach the engine.
@@ -272,7 +325,8 @@ void Announcer::run() {
             last_answer = now;
         }
         std::uint32_t from = 0;
-        const auto size = receive(socket_, buffer, from, std::chrono::milliseconds{250});
+        std::uint16_t port = 0;
+        const auto size = receive(socket_, buffer, from, std::chrono::milliseconds{250}, &port);
         if (size == 0U) {
             continue;
         }
@@ -280,10 +334,20 @@ void Announcer::run() {
         if (!message || message->response) {
             continue;
         }
-        const bool asked = std::ranges::any_of(message->questions, [this](const Question& q) {
+        const auto ours = [this](const Question& q) {
             return same_name(q.name, service_ + ".local") || same_name(q.name, instance_name_) ||
                    same_name(q.name, host_name_);
-        });
+        };
+        const bool asked = std::ranges::any_of(message->questions, ours);
+        // Asked to answer directly (RFC 6762 §5.4): at once, to the one who
+        // asked -- the once-a-second limit is for the group. A client that
+        // starts just after another asked would otherwise hear nothing
+        // until it asked again, a second later.
+        if (std::ranges::any_of(message->questions,
+                                [&ours](const Question& q) { return q.unicast && ours(q); })) {
+            answer_to(false, std::pair{from, port});
+            continue;
+        }
         // At most once a second, however many ask.
         if (asked && clock::now() - last_answer >= std::chrono::seconds{1}) {
             answer(false);
@@ -328,9 +392,10 @@ std::vector<Found> Browser::found() const {
     return listed;
 }
 
-void Browser::ask() {
+void Browser::ask(const bool unicast) {
     Message question;
-    question.questions.push_back(Question{.name = service_ + ".local", .type = RecordType::ptr});
+    question.questions.push_back(
+        Question{.name = service_ + ".local", .type = RecordType::ptr, .unicast = unicast});
     send_to_group(socket_, question);
 }
 
@@ -347,7 +412,9 @@ void Browser::run() {
         const auto now = clock::now();
         if (now >= next_question) {
             join_group(socket_);
-            ask();
+            // The first question asks for direct answers: an engine answers
+            // those at once, whoever else asked a moment ago.
+            ask(asked == 0U);
             ++asked;
             next_question = asked < early.size() ? started + early[asked]
                                                  : now + std::chrono::seconds{30};

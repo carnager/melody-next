@@ -52,6 +52,7 @@ void BenchMainWindow::connectRemoteEngine() {
     }
     remote_playback_ = new EnginePlayback(*remote_catalogue_source_, this);
     connect(remote_playback_, &EnginePlayback::changed, this, [this] {
+        followIfStartedElsewhere(remote_playback_);
         if (transport_ == remote_playback_) {
             refreshTransport();
         }
@@ -64,6 +65,8 @@ void BenchMainWindow::connectRemoteEngine() {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     const auto attached = [this] {
+        // What it is doing now is not news; a start after this is.
+        rememberEngineState(remote_playback_);
         // Connected, the remote says what it is called: the library tab shows
         // that rather than its address (an engine too old to say keeps it).
         static_cast<void>(remote_catalogue_source_->open());

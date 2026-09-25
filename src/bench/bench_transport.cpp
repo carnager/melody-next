@@ -1306,18 +1306,25 @@ EnginePlayback* BenchMainWindow::playbackFor(const bool remote) const {
     return remote ? remote_playback_ : local_playback_;
 }
 
-void BenchMainWindow::followPlayback(EnginePlayback* playback) {
+void BenchMainWindow::followPlayback(EnginePlayback* playback, const bool stop_other) {
     if (playback == nullptr || playback == transport_) {
         return;
     }
     // ADR-0227: one engine plays at a time. Starting on one stops the other,
     // in that order, so an output agent the two share is released first.
-    if (transport_ != nullptr && transport_->active() &&
+    if (stop_other && transport_ != nullptr && transport_->active() &&
         transport_->state().status != QStringLiteral("stopped")) {
         transport_->stop();
     }
     if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
         tab->model->setCurrentSource({}, -1);
+    }
+    // The engine left behind is known: a report of it playing that arrives
+    // after this -- it was started a moment ago -- is not a start elsewhere.
+    if (transport_ != nullptr) {
+        rememberEngineState(transport_);
+        auto& left = transport_ == local_playback_ ? local_seen_ : remote_seen_;
+        left.status = QStringLiteral("playing");
     }
     transport_ = playback;
     // What the window knew about the other engine says nothing about this one.
@@ -1329,6 +1336,42 @@ void BenchMainWindow::followPlayback(EnginePlayback* playback) {
     engine_consumed_.clear();
     engine_queue_revision_ = 0;
     refreshTransport();
+}
+
+void BenchMainWindow::rememberEngineState(EnginePlayback* playback) {
+    if (playback == nullptr) {
+        return;
+    }
+    const auto state = playback->state();
+    auto& seen = playback == local_playback_ ? local_seen_ : remote_seen_;
+    seen = SeenEngine{
+        .status = state.status, .entry = state.entry, .queue_revision = state.queue_revision};
+}
+
+void BenchMainWindow::followIfStartedElsewhere(EnginePlayback* playback) {
+    if (playback == nullptr || !playback->active()) {
+        return;
+    }
+    const auto state = playback->state();
+    auto& seen = playback == local_playback_ ? local_seen_ : remote_seen_;
+    // Started: playing where it was not, or on another entry of a queue
+    // someone changed -- replaced, as a picker does. Moving on to the next
+    // track of the same queue is not, or two engines playing at once would
+    // take the window back and forth with every track.
+    const bool playing = state.status == QStringLiteral("playing");
+    const bool started =
+        playing && (seen.status != QStringLiteral("playing") ||
+                    (seen.entry != state.entry && seen.queue_revision != state.queue_revision));
+    seen = SeenEngine{
+        .status = state.status, .entry = state.entry, .queue_revision = state.queue_revision};
+    if (!started || playback == transport_) {
+        return;
+    }
+    // Where the music is, as the window's own play would have done: the
+    // list the entry came from if one is open, else the engine's queue as a
+    // list of its own.
+    followPlayback(playback, false);
+    reattachToEngine();
 }
 
 bool BenchMainWindow::playingOnEngine() const {

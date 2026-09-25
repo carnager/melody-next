@@ -281,6 +281,7 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback_data();
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
+    void theWindowFollowsAnEngineStartedElsewhere();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
     void aRatingSetElsewhereShowsInTheTabs();
@@ -4940,6 +4941,51 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
 // ADR-0227: this computer's engine and a remote one, side by side. Local tabs
 // play here and remote tabs there, never both at once; the remote library
 // fills remote tabs from its own index; and nothing mixes the two.
+// Another client -- a picker, a script -- starts the remote engine while the
+// window follows this computer's: the window follows the music there, and
+// the remote's tab shows what plays, rather than the list it had.
+void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
+    QTemporaryDir remote_state;
+    QTemporaryDir media;
+    QVERIFY(remote_state.isValid() && media.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto there = media.filePath(QStringLiteral("there.wav"));
+    write_wave(there, wave_sample_rate * 60U);
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QVERIFY(window.transport_ == window.local_playback_);
+
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto entry = core::StableId::random().to_string();
+    QVERIFY((*other)
+                ->call("playback.replace_queue",
+                       protocol::Json{{"entries",
+                                       protocol::Json::array(
+                                           {protocol::Json{{"entry", entry},
+                                                           {"path", protocol::encode_raw_path(
+                                                                        QFile::encodeName(there)
+                                                                            .toStdString())},
+                                                           {"title", "Elsewhere"}}})}})
+                .has_value());
+    QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", entry}}).has_value());
+
+    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    const auto id = core::StableId::parse(entry);
+    QVERIFY(id.has_value());
+    QTRY_VERIFY(tab->model->rowOfEntry(*id, -1) >= 0);
+    QCOMPARE(window.playback_.anchors.document, tab->document.id);
+    static_cast<void>((*other)->call("playback.stop"));
+    (*other)->close();
+}
+
 void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

@@ -422,7 +422,16 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] EnginePlayback* playbackFor(bool remote) const;
     // Makes `playback` the one the transport follows, stopping the other if it
     // was playing: one engine plays at a time.
-    void followPlayback(EnginePlayback* playback);
+    // `stop_other`: the engine followed until now is stopped -- as when this
+    // window starts playing elsewhere. Not when another client did it: then
+    // the window only looks where the music started.
+    void followPlayback(EnginePlayback* playback, bool stop_other = true);
+    // Another client -- a script, the phone, a picker -- started the engine
+    // this window does not follow: the window follows the music there.
+    void followIfStartedElsewhere(EnginePlayback* playback);
+    // What each engine was last seen doing, so a start is told from a state
+    // the window already knew of.
+    void rememberEngineState(EnginePlayback* playback);
     // Builds the remote connection, its library panel and its default tab.
     void connectRemoteEngine();
     [[nodiscard]] ListTab* remoteQueueTab();
@@ -585,6 +594,13 @@ class BenchMainWindow final : public QMainWindow {
     std::unique_ptr<CatalogueSource> remote_catalogue_source_;
     EnginePlayback* local_playback_{nullptr};
     EnginePlayback* remote_playback_{nullptr};
+    struct SeenEngine {
+        QString status;
+        QString entry;
+        std::uint64_t queue_revision{0};
+    };
+    SeenEngine local_seen_;
+    SeenEngine remote_seen_;
     // The engine the transport follows: the one the playing tab belongs to.
     // One engine plays at a time, so this is also the one that may.
     EnginePlayback* transport_{nullptr};

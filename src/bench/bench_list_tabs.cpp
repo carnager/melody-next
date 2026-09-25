@@ -78,6 +78,7 @@ void BenchMainWindow::initializePersistence() {
     local_playback_ = new EnginePlayback(*catalogue_source_, this);
     transport_ = local_playback_;
     connect(local_playback_, &EnginePlayback::changed, this, [this] {
+        followIfStartedElsewhere(local_playback_);
         if (transport_ == local_playback_) {
             refreshTransport();
         }
@@ -97,6 +98,8 @@ void BenchMainWindow::initializePersistence() {
     });
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
+        // What it is doing now is not news; a start after this is.
+        rememberEngineState(local_playback_);
         if (transport_ != local_playback_) {
             return;
         }

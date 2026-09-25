@@ -231,6 +231,26 @@ second_pid=""
 cli outputs | grep -q "^\*" || fail "outputs marks the one in use"
 cli stop | grep -q "^stopped:" || fail "stop stops"
 
+# Only the fields asked for, and the key; every track without words.
+cli --fields title --json tracks | python3 -c '
+import json, sys
+tracks = json.load(sys.stdin)
+assert len(tracks) == 3, len(tracks)
+assert all(set(track) == {"key", "title"} for track in tracks), tracks[0]' \
+    || fail "--fields lists only those, with the key, and tracks lists every track"
+# --keys: lines as a picker shows them, each ending in a tab and its key.
+cli --keys tracks | python3 -c '
+import sys
+lines = sys.stdin.read().splitlines()
+assert len(lines) == 3, lines
+assert all(line.count("\t") == 1 and line.split("\t")[1] for line in lines), lines' \
+    || fail "--keys ends every line in a tab and its key"
+track_key="$(cli --fields title --json tracks gamma | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["key"])')"
+before="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
+cli add track --key "${track_key}" 2>/dev/null > /dev/null || fail "add track --key adds it"
+after="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["queue_size"])')"
+[ "${after}" = "$((before + 1))" ] || fail "the keyed track is appended (${before} -> ${after})"
+
 # One album exactly, by the key albums gives it -- as a picker does.
 key="$(cli --json albums | python3 -c '
 import json, sys

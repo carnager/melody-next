@@ -253,7 +253,11 @@ core::Result<void> Client::write_line(const std::string& line) {
 
 void Client::read_loop() {
     std::string pending;
-    std::array<char, 4096> buffer{};
+    // Where the search for the end of the line got to: an answer can be
+    // megabytes, and searching it from its start again with every read made
+    // reading it quadratic.
+    std::size_t searched = 0;
+    std::array<char, 65536> buffer{};
     while (open_.load()) {
         const auto received = ::recv(descriptor_, buffer.data(), buffer.size(), 0);
         if (received < 0) {
@@ -269,8 +273,9 @@ void Client::read_loop() {
 
         std::size_t start = 0;
         while (true) {
-            const auto newline = pending.find('\n', start);
+            const auto newline = pending.find('\n', std::max(start, searched));
             if (newline == std::string::npos) {
+                searched = pending.size();
                 break;
             }
             auto line = pending.substr(start, newline - start);
@@ -288,10 +293,11 @@ void Client::read_loop() {
                 // connection and lose everything else on it.
                 continue;
             }
-            if (const auto* response = std::get_if<Response>(&*parsed)) {
+            if (auto* response = std::get_if<Response>(&*parsed)) {
                 const std::lock_guard guard{mutex_};
                 if (const auto found = pending_.find(response->id); found != pending_.end()) {
-                    found->second->response = *response;
+                    // Moved, not copied: it can be a whole library.
+                    found->second->response = std::move(*response);
                     arrived_.notify_all();
                 }
                 // A response to an id nobody is waiting for is dropped: the
@@ -339,6 +345,7 @@ void Client::read_loop() {
             }
         }
         pending.erase(0, start);
+        searched = searched > start ? searched - start : 0;
     }
     // Still open means nobody here closed it: the other side went away.
     const bool dropped = open_.exchange(false) && !closed_.load();
@@ -394,7 +401,7 @@ core::Result<Json> Client::call(const std::string& method, const Json& params,
                         .message = failure_.empty() ? "the connection was lost" : failure_,
                         .context = {{.key = "method", .value = method}}});
     }
-    const auto& response = *slot->response;
+    auto& response = *slot->response;
     if (response.error) {
         // The wire code is mapped back by name; an unknown one lands on
         // invariant rather than failing, so a newer engine reporting
@@ -408,7 +415,7 @@ core::Result<Json> Client::call(const std::string& method, const Json& params,
         }
         return std::unexpected(std::move(error));
     }
-    return response.result.value_or(Json{});
+    return response.result ? std::move(*response.result) : Json{};
 }
 
 core::Result<Json> Client::run_job(const std::string& job, const Json& params,

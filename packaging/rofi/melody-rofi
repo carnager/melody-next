@@ -1,27 +1,39 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Pick an album in rofi, then put it in Up Next, add it to the list that
-# plays, or replace that list with it and play.
+# Pick an album -- or a track -- in rofi, then put it in Up Next, add it to
+# the list that plays, or replace that list with it and play.
 #
-#   melody-rofi                    # the engine melody-cli finds by itself
-#   melody-rofi --engine gemenon   # any melody-cli options go to melody-cli
+#   melody-rofi                          # albums, from the engine melody-cli finds
+#   melody-rofi tracks                   # tracks
+#   melody-rofi tracks --engine gemenon  # any melody-cli options go to melody-cli
 #
-# Needs melody-cli, rofi and jq.
+# Needs melody-cli and rofi.
 
 set -euo pipefail
+
+kind=album
+case "${1:-}" in
+    albums) shift ;;
+    tracks) kind=track; shift ;;
+esac
 
 cli() { melody-cli "$@"; }
 say() { notify-send -a Melody "$1" "${2:-}" 2>/dev/null || printf '%s\n' "$1 ${2:-}" >&2; }
 
-# "Artist — Album (Year)", then a tab and the album's key: rofi shows the
+# A line to show, then a tab and the key -- melody-cli --keys writes them
+# so, asking the engine for no more than the lines need. rofi shows the
 # first column and hands back the whole line.
-albums="$(cli "$@" --json albums | jq -r '.[] |
-    "\(.artist) — \(.album // .label)\(if (.date // "") != "" then " (\(.date[0:4]))" else "" end)\t\(.key)"')" ||
-    { say "Melody" "Could not list the albums"; exit 1; }
+if [ "${kind}" = album ]; then
+    lines="$(cli "$@" --keys albums)" || { say "Melody" "Could not list the albums"; exit 1; }
+    prompt=Album
+else
+    lines="$(cli "$@" --keys tracks)" || { say "Melody" "Could not list the tracks"; exit 1; }
+    prompt=Track
+fi
 
-chosen="$(printf '%s\n' "${albums}" |
-    rofi -dmenu -i -p Album -display-columns 1 -display-column-separator $'\t')" || exit 0
+chosen="$(printf '%s\n' "${lines}" |
+    rofi -dmenu -i -p "${prompt}" -display-columns 1 -display-column-separator $'\t')" || exit 0
 name="${chosen%%$'\t'*}"
 key="${chosen##*$'\t'}"
 [ -n "${key}" ] || exit 0
@@ -30,9 +42,9 @@ action="$(printf '%s\n' 'Up Next' 'Add to the list' 'Replace and play' |
     rofi -dmenu -i -p "${name}")" || exit 0
 
 case "${action}" in
-    'Up Next') words=(queue album --key "${key}") ;;
-    'Add to the list') words=(add album --key "${key}") ;;
-    'Replace and play') words=(play album --key "${key}") ;;
+    'Up Next') words=(queue "${kind}" --key "${key}") ;;
+    'Add to the list') words=(add "${kind}" --key "${key}") ;;
+    'Replace and play') words=(play "${kind}" --key "${key}") ;;
     *) exit 0 ;;
 esac
 

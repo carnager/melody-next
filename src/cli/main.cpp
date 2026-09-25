@@ -16,6 +16,7 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -35,11 +36,17 @@ struct Options final {
     std::string password;
     std::string engine;
     bool json{false};
+    // --fields: what albums and tracks list, besides the key; empty, all.
+    std::vector<std::string> fields;
+    // --keys: each listed line ends in a tab and its key, for a picker to
+    // hand back to add/play/next/queue --key.
+    bool keys{false};
     std::vector<std::string> words;
 };
 
 void usage(std::ostream& out) {
     out << "usage: melody-cli [--server HOST:PORT] [--password PASS] [--engine NAME] [--json]\n"
+           "                  [--fields artist,album,title,date] [--keys]\n"
            "                  COMMAND [ARGUMENTS]\n"
            "\n"
            "  status                      what plays, where and how far in\n"
@@ -53,11 +60,11 @@ void usage(std::ostream& out) {
            "  queue album|track WORDS...  add it to Up Next, last\n"
            "      Every word must appear in its artist, title, album or year:\n"
            "      melody-cli play album doors 1967\n"
-           "      Or name one album exactly by the key albums --json gives it:\n"
+           "      Or name one exactly by the key albums or tracks --json gives it:\n"
            "      melody-cli add album --key KEY\n"
            "\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
-           "  tracks WORDS...             list tracks\n"
+           "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
            "  outputs                     the speakers this engine can play on\n"
            "  output NAME                 play on those instead\n"
@@ -225,21 +232,35 @@ void usage(std::ostream& out) {
 // The library's albums or tracks for these words -- every one, page by
 // page -- or, with none and newest set, the most recently added.
 [[nodiscard]] std::vector<Json> find(Client& client, const bool albums, const std::string& words,
-                                     const std::size_t limit, const bool newest = false) {
+                                     const std::size_t limit, const bool newest = false,
+                                     const std::vector<std::string>& fields = {}) {
     std::vector<Json> found;
-    constexpr std::size_t page_size = 10'000;
+    // The engine's own cap: every page re-sorts the whole library, so one
+    // page is the fastest way to list all of it.
+    constexpr std::size_t page_size = 100'000;
     for (std::size_t offset = 0;;) {
         const auto wanted = limit == 0U ? page_size : std::min(page_size, limit - found.size());
         Json params{{"kind", albums ? 1 : 2}, {"text", words}, {"offset", offset}, {"limit", wanted}};
         if (newest) {
             params["newest_first"] = true;
         }
-        const auto page = call(client, "catalogue.query", params);
-        auto entries = page.value("entries", std::vector<Json>{});
-        offset += entries.size();
-        found.insert(found.end(), std::make_move_iterator(entries.begin()),
-                     std::make_move_iterator(entries.end()));
-        if (!page.value("more", false) || entries.empty() ||
+        // Only these, besides the key -- a picker's whole library is then a
+        // fraction of the size. An engine that predates fields sends all.
+        if (!fields.empty()) {
+            params["fields"] = fields;
+        }
+        auto page = call(client, "catalogue.query", params);
+        // Moved out, not copied: the whole library can be one page.
+        std::size_t taken = 0;
+        if (const auto entries = page.find("entries");
+            entries != page.end() && entries->is_array()) {
+            taken = entries->size();
+            for (auto& entry : *entries) {
+                found.push_back(std::move(entry));
+            }
+        }
+        offset += taken;
+        if (!page.value("more", false) || taken == 0U ||
             (limit != 0U && found.size() >= limit)) {
             return found;
         }
@@ -293,6 +314,18 @@ void usage(std::ostream& out) {
     }
     if (words.empty()) {
         fail("which " + kind + "? Give words from its artist, title, album or year");
+    }
+    // One track by its key -- its path -- as a picker showed it.
+    if (!album && words.starts_with("--key ")) {
+        const auto key = words.substr(6);
+        auto tracks = call(client, "catalogue.query",
+                           Json{{"kind", 2}, {"text", ""}, {"path", key}, {"limit", 1}})
+                          .value("entries", std::vector<Json>{});
+        if (tracks.empty()) {
+            fail("no track has the key " + key);
+        }
+        chosen = describe_found(tracks.front(), false);
+        return queue_entries(tracks);
     }
     // One album by its key: exactly the one a picker showed, not the first
     // that the words happen to find.
@@ -790,23 +823,38 @@ int run(const Options& options) {
     } else if (command == "albums" || command == "tracks" || command == "latest") {
         const bool albums = command != "tracks";
         const auto text = command == "latest" ? std::string{} : joined(words, 1);
-        if (command == "tracks" && text.empty()) {
-            fail("tracks wants words to find them by");
-        }
         // Everything that matches; only latest is a count.
         std::size_t limit = 0;
         if (command == "latest") {
             limit = words.size() > 1U ? static_cast<std::size_t>(std::max(1, std::atoi(words[1].c_str())))
                                       : 20U;
         }
-        const auto found = find(*client, albums, text, limit, command == "latest");
-        if (options.json) {
-            std::cout << Json(found).dump() << "\n";
-        } else {
-            for (const auto& entry : found) {
-                std::cout << describe_found(entry, albums) << "\n";
-            }
+        // Lines are only ever artist, name, album and year: only those are
+        // asked for, which for a whole library is most of the time saved.
+        auto fields = options.fields;
+        if (!options.json && fields.empty()) {
+            fields = {"artist", "album", "title", "label", "date"};
         }
+        const auto found = find(*client, albums, text, limit, command == "latest", fields);
+        if (options.json) {
+            const auto count = found.size();
+            Json listed = Json::array();
+            for (auto& entry : found) {
+                listed.push_back(std::move(entry));
+            }
+            std::cout << listed.dump() << "\n";
+            return count == 0U ? EXIT_FAILURE : EXIT_SUCCESS;
+        }
+        std::string lines;
+        for (const auto& entry : found) {
+            lines += describe_found(entry, albums);
+            if (options.keys) {
+                lines += '\t';
+                lines += text_of(entry, "key");
+            }
+            lines += '\n';
+        }
+        std::cout << lines;
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
     } else if (command == "outputs") {
         const auto outputs = call(*client, "outputs.list").value("outputs", std::vector<Json>{});
@@ -988,6 +1036,15 @@ int main(int argc, char** argv) {
             options.engine = value();
         } else if (argument == "--json") {
             options.json = true;
+        } else if (argument == "--keys") {
+            options.keys = true;
+        } else if (argument == "--fields") {
+            std::stringstream list{value()};
+            for (std::string field; std::getline(list, field, ',');) {
+                if (!field.empty()) {
+                    options.fields.push_back(field);
+                }
+            }
         } else if (argument == "--help" || argument == "-h") {
             usage(std::cout);
             return EXIT_SUCCESS;

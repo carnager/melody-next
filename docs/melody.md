@@ -93,9 +93,10 @@ melody-cli watch --all                # the same, for whichever engine plays
 
 There's a bar widget for DankMaterialShell built on these in
 [`packaging/dms/melody`](../packaging/dms/melody/), and
-[`packaging/rofi/melody-rofi`](../packaging/rofi/melody-rofi) picks an album in
-rofi and puts it in Up Next, adds it to the list that plays, or replaces that
-list and plays it (`melody-rofi --engine gemenon` for a particular engine).
+[`packaging/rofi/melody-rofi`](../packaging/rofi/melody-rofi) picks an album (or,
+with `melody-rofi tracks`, a track) in rofi and puts it in Up Next, adds it to
+the list that plays, or replaces that list and plays it (`melody-rofi tracks
+--engine gemenon` for a particular engine).
 
 ## When something doesn't work
 

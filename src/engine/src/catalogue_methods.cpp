@@ -137,25 +137,55 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return request;
     };
 
-    const auto render_page = [](const persistence::LibraryPage& page) {
+    // A page, with every field -- or, when the query names some, those and
+    // the key: a picker listing the whole library wants four of sixteen,
+    // and the rest is most of what is built, written and sent.
+    const auto render_page = [](const persistence::LibraryPage& page, const Json& params) {
+        std::vector<std::string> wanted;
+        if (const auto fields = params.find("fields");
+            fields != params.end() && fields->is_array()) {
+            for (const auto& field : *fields) {
+                if (field.is_string()) {
+                    wanted.push_back(field.get<std::string>());
+                }
+            }
+        }
+        const auto chosen = [&wanted](const std::string_view name) {
+            return wanted.empty() || name == "key" || std::ranges::contains(wanted, name);
+        };
         auto entries = Json::array();
         for (const auto& entry : page.entries) {
             Json rendered = Json::object();
-            rendered["kind"] = static_cast<int>(entry.kind);
-            rendered["key"] = protocol::encode_raw_path(entry.key);
-            rendered["label"] = protocol::displayable_text(entry.label);
-            rendered["artist"] = protocol::displayable_text(entry.artist);
-            rendered["album"] = protocol::displayable_text(entry.album);
-            rendered["tracks"] = entry.tracks;
-            rendered["available"] = entry.available;
-            rendered["track_number"] = entry.track_number;
-            rendered["albums"] = entry.albums;
-            rendered["rating_hash"] = entry.rating_hash;
-            rendered["rating"] = entry.rating;
-            rendered["date"] = protocol::displayable_text(entry.date);
-            rendered["title"] = protocol::displayable_text(entry.title);
-            rendered["added"] = entry.added;
-            rendered["duration_ms"] = entry.duration_ms;
+            const auto put = [&rendered, &chosen](const char* name, auto&& value) {
+                if (chosen(name)) {
+                    rendered[name] = std::forward<decltype(value)>(value);
+                }
+            };
+            put("kind", static_cast<int>(entry.kind));
+            put("key", protocol::encode_raw_path(entry.key));
+            if (chosen("label")) {
+                put("label", protocol::displayable_text(entry.label));
+            }
+            if (chosen("artist")) {
+                put("artist", protocol::displayable_text(entry.artist));
+            }
+            if (chosen("album")) {
+                put("album", protocol::displayable_text(entry.album));
+            }
+            put("tracks", entry.tracks);
+            put("available", entry.available);
+            put("track_number", entry.track_number);
+            put("albums", entry.albums);
+            put("rating_hash", entry.rating_hash);
+            put("rating", entry.rating);
+            if (chosen("date")) {
+                put("date", protocol::displayable_text(entry.date));
+            }
+            if (chosen("title")) {
+                put("title", protocol::displayable_text(entry.title));
+            }
+            put("added", entry.added);
+            put("duration_ms", entry.duration_ms);
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};
@@ -171,7 +201,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                       if (!page) {
                           return std::unexpected(std::move(page.error()));
                       }
-                      return render_page(*page);
+                      return render_page(*page, params);
                   });
 
     dispatcher.on("catalogue.paths",
@@ -204,7 +234,7 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             if (!page) {
                 return std::unexpected(std::move(page.error()));
             }
-            return render_page(*page);
+            return render_page(*page, params);
         });
 
     dispatcher.on("catalogue.filter_paths", [&catalogue](const Json& params) -> core::Result<Json> {

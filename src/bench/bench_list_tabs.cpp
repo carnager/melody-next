@@ -664,6 +664,33 @@ std::vector<std::pair<QString, QString>> BenchMainWindow::listTargets(const bool
     return targets;
 }
 
+void BenchMainWindow::keepTabGroupsTogether() {
+    if (regrouping_tabs_) {
+        return;
+    }
+    regrouping_tabs_ = true;
+    // A tab dragged into the other engine's group goes back to the edge of
+    // its own, the order within each group as it was left.
+    for (int index = tabs_->count() - 1; index >= 0; --index) {
+        if (tabs_->widget(index)->property("bench-remote-list").toBool()) {
+            continue;
+        }
+        int first_remote = -1;
+        for (int other = 0; other < index; ++other) {
+            if (tabs_->widget(other)->property("bench-remote-list").toBool()) {
+                first_remote = other;
+                break;
+            }
+        }
+        if (first_remote >= 0) {
+            tabs_->tabBar()->moveTab(index, first_remote);
+            ++index;
+        }
+    }
+    regrouping_tabs_ = false;
+    tabs_->tabBar()->update();
+}
+
 void BenchMainWindow::showOpenListDialog() {
     if (auto* existing = findChild<QDialog*>(QStringLiteral("bench-open-list"))) {
         existing->raise();
@@ -1020,7 +1047,17 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         return true;
     });
 
-    const auto index = tabs_->addTab(view, displayText(document.name));
+    // ADR-0233: in its engine's group -- this computer's before the remote's.
+    int insert_at = tabs_->count();
+    if (!document.remote) {
+        for (int other = 0; other < tabs_->count(); ++other) {
+            if (tabs_->widget(other)->property("bench-remote-list").toBool()) {
+                insert_at = other;
+                break;
+            }
+        }
+    }
+    const auto index = tabs_->insertTab(insert_at, view, displayText(document.name));
     if (document.remote) {
         // ADR-0227: which engine a tab plays on is visible, not remembered.
         tabs_->setTabIcon(index, QIcon::fromTheme(QStringLiteral("network-server")));

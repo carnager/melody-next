@@ -252,6 +252,7 @@ class BenchMainWindowTest final : public QObject {
     void aListFromElsewhereOpensAsATab();
     void aMoveIsFollowedInListsNotOpenHere();
     void libraryAndFoldersAddToAChosenList();
+    void tabsAreGroupedByEngine();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1964,6 +1965,53 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     QTRY_COMPARE(current->model->rowCount(), before + 1);
     QCOMPARE(current->model->rows().back().raw_path,
              QFile::encodeName(music + QStringLiteral("/album/one.wav")).toStdString());
+}
+
+// ADR-0233: this computer's lists first, then the remote engine's under its
+// name -- kept that way whatever order tabs are opened or dragged in.
+void BenchMainWindowTest::tabsAreGroupedByEngine() {
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    auto* remote_tab = window.remoteQueueTab();
+    QVERIFY(remote_tab != nullptr);
+    auto* local_tab = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Added later",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        false);
+    auto* bar = static_cast<PlaybackTabBar*>(window.tabs_->tabBar());
+    const auto remote_at = [&] { return window.tabs_->indexOf(remote_tab->view); };
+    const auto local_at = [&] { return window.tabs_->indexOf(local_tab->view); };
+    QVERIFY2(local_at() < remote_at(), "a local list opens before the remote's group");
+    QCOMPARE(bar->groupOf(remote_at()), window.remote_catalogue_source_->name());
+    QVERIFY(bar->groupOf(local_at()).isEmpty());
+    // The divider and name stand before the remote group, and only there.
+    QVERIFY(bar->groupLead(remote_at()) > 0);
+    QCOMPARE(bar->groupLead(local_at()), 0);
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(bar->grab().save(directory + QStringLiteral("/tabs-grouped-by-engine.png")));
+    }
+    for (int index = 0; index < window.tabs_->count(); ++index) {
+        if (index != remote_at()) {
+            QCOMPARE(bar->groupLead(index), 0);
+        }
+    }
+    // Dragged into the other group: back in its own.
+    bar->moveTab(remote_at(), 0);
+    QVERIFY2(local_at() < remote_at(), "the groups stay together");
+    for (int index = 0; index < remote_at(); ++index) {
+        QVERIFY(!window.tabs_->widget(index)->property("bench-remote-list").toBool());
+    }
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

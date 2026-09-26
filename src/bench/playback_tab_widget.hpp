@@ -10,6 +10,8 @@
 #include <QTabBar>
 #include <QTabWidget>
 
+#include <functional>
+
 namespace trackknife::bench {
 
 inline QIcon playbackSpeakerIcon(const QPalette& palette) {
@@ -45,7 +47,36 @@ class PlaybackTabBar final : public QTabBar {
   public:
     using QTabBar::QTabBar;
 
+    // ADR-0233: tabs grouped by the engine their lists are on. Each tab's
+    // group, by name; where it changes from the tab before, a divider and the
+    // group's name stand at the start of the new group. The first group is
+    // this computer's, and goes unnamed.
+    void setGroupOf(std::function<QString(int)> group_of) {
+        group_of_ = std::move(group_of);
+        updateGeometry();
+        update();
+    }
+    [[nodiscard]] QString groupOf(int index) const {
+        return group_of_ && index >= 0 && index < count() ? group_of_(index) : QString{};
+    }
+    // The room before a tab that starts a group: the divider and the name.
+    [[nodiscard]] int groupLead(int index) const {
+        if (!group_of_ || index <= 0 || index >= count()) {
+            return 0;
+        }
+        const auto group = groupOf(index);
+        if (group == groupOf(index - 1)) {
+            return 0;
+        }
+        return groupFontMetrics().horizontalAdvance(group) + 22;
+    }
+
   protected:
+    [[nodiscard]] QSize tabSizeHint(int index) const override {
+        auto size = QTabBar::tabSizeHint(index);
+        size.rwidth() += groupLead(index);
+        return size;
+    }
     void paintEvent(QPaintEvent*) override {
         QStylePainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing);
@@ -53,6 +84,21 @@ class PlaybackTabBar final : public QTabBar {
         const auto draw = [this, &painter, hovered](int index) {
             QStyleOptionTab option;
             initStyleOption(&option, index);
+            if (const auto lead = groupLead(index); lead > 0) {
+                // The divider, and the name of the engine these tabs are on.
+                const auto area = option.rect;
+                painter.save();
+                painter.setPen(QPen(palette().color(QPalette::Mid), 1));
+                painter.drawLine(QPointF(area.left() + 4.5, area.top() + 7),
+                                 QPointF(area.left() + 4.5, area.bottom() - 5));
+                painter.setFont(groupFont());
+                painter.setPen(palette().color(QPalette::PlaceholderText));
+                painter.drawText(QRect(area.left() + 12, area.top() + 3, lead - 14, area.height() - 3),
+                                 Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+                                 groupOf(index));
+                painter.restore();
+                option.rect.setLeft(option.rect.left() + lead);
+            }
             const bool current = index == currentIndex();
             const auto tab = option.rect.adjusted(1, 3, -1, 0);
             if (current || index == hovered) {
@@ -120,6 +166,17 @@ class PlaybackTabBar final : public QTabBar {
         QTabBar::mouseMoveEvent(event);
         update();
     }
+
+  private:
+    [[nodiscard]] QFont groupFont() const {
+        auto small = font();
+        small.setPointSizeF(small.pointSizeF() * 0.85);
+        small.setBold(true);
+        return small;
+    }
+    [[nodiscard]] QFontMetrics groupFontMetrics() const { return QFontMetrics{groupFont()}; }
+
+    std::function<QString(int)> group_of_;
 };
 
 class PlaybackTabWidget final : public QTabWidget {

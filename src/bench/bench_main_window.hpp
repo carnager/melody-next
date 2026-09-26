@@ -191,6 +191,9 @@ class BenchMainWindow final : public QMainWindow {
     void settleListConflict(const QString& id);
     // The lists of every engine this window reaches, to open one as a tab.
     void showOpenListDialog();
+    // ADR-0233: this computer's tabs before the remote engine's, always.
+    void keepTabGroupsTogether();
+    bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
     [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(bool remote) const;
     void openEngineList(bool remote, const QString& id);

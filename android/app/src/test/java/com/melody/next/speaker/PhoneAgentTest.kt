@@ -48,6 +48,8 @@ private class StandIn : Audition {
         .put("state", state)
         .put("format", JSONObject().put("sample_rate", 1000).put("channels", 2))
         .put("position_sample", position)
+    override fun leave(): Place? = null.also { stop() }
+    override fun takeUp(place: Place, play: Boolean) { asked += "take_up ${place.source.getString("url")}"; state = if (play) 4 else 5 }
 }
 
 /** The engine's end of an agent connection: it takes the registration, then asks. */

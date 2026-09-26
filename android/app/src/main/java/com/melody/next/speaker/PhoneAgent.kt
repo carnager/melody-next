@@ -44,8 +44,7 @@ class PhoneAgent(
      * True while the connection is being made again after it dropped with
      * music playing here: the engine resumes on this phone once it is back,
      * and until then the app must stay in front, or the system cuts it off
-     * the network and it never is back. Shared, so a new agent writes the
-     * same flag the playback notification reads.
+     * the network and it never is back.
      */
     val reconnecting: MutableStateFlow<Boolean> = MutableStateFlow(false),
     private val giveUpMs: Long = 10 * 60_000,

@@ -581,8 +581,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
                        "computer's: its library gets a tab and its tracks play there. The first "
                        "listed is the one this computer's speakers are offered to. Unencrypted: "
-                       "for a home network or WireGuard. Engines added or removed apply after "
-                       "restarting Trackknife."),
+                       "for a home network or WireGuard."),
         remote);
     engine_note->setWordWrap(true);
     engine_note->setForegroundRole(QPalette::PlaceholderText);

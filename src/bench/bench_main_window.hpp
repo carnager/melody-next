@@ -507,6 +507,13 @@ class BenchMainWindow final : public QMainWindow {
     // one an older release's remote lists belong to.
     void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
     void adoptEngineIdentity(EngineLink& engine);
+    // Settings changed: engines listed and not connected are connected,
+    // those connected and no longer listed -- or now at another address or
+    // with another password -- are let go, and connected again if listed.
+    void syncRemoteEngines();
+    // Lets go of an engine elsewhere: its connection, library panel and tab.
+    // Its lists stay, as those of an engine that is not reached.
+    void disconnectEngine(const EngineKey& key);
     [[nodiscard]] ListTab* remoteQueueTab();
     // An engine's own tab: its first, or one made for it, named after it.
     [[nodiscard]] ListTab* engineTab(EngineLink& engine);

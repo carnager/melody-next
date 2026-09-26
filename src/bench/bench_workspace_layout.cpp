@@ -1133,6 +1133,8 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
         }
     });
     connect(dialog, &QDialog::accepted, this, [this] {
+        // ADR-0234: engines added, removed or pointed elsewhere, at once.
+        syncRemoteEngines();
         applyLocalLibraryVisibility();
         applyListsDisplay();
     });

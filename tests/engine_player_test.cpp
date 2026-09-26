@@ -269,12 +269,30 @@ void changes_are_pushed_without_asking(engine::Player& player) {
     // unchanged. An earlier scenario may have left a track draining, and its
     // transition to stopped is a real change the watcher is right to report --
     // so settle first rather than assert into a moving state.
+    // Stopped is not settled: an earlier scenario's consume records the entry
+    // it dropped just after the player says it stopped -- a real change, and
+    // under load it landed in the quiet window below. So wait until the whole
+    // state, bar the position, holds still for a while.
     static_cast<void>(player.stop());
-    const auto settled = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-    while (player.state().status != "stopped" && std::chrono::steady_clock::now() < settled) {
+    const auto still = [&player] {
+        auto state = engine::to_json(player.state());
+        state.erase("position_ms");
+        return state;
+    };
+    const auto settled = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    auto last = still();
+    auto unchanged_since = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() < settled &&
+           std::chrono::steady_clock::now() - unchanged_since < std::chrono::milliseconds{300}) {
         std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        if (auto now = still(); now != last) {
+            last = std::move(now);
+            unchanged_since = std::chrono::steady_clock::now();
+        }
     }
     require(player.state().status == "stopped", "the player must settle before it is watched");
+    require(std::chrono::steady_clock::now() - unchanged_since >= std::chrono::milliseconds{300},
+            "and hold still");
 
     std::mutex mutex;
     std::vector<protocol::Event> seen;
@@ -316,6 +334,11 @@ void changes_are_pushed_without_asking(engine::Player& player) {
     std::this_thread::sleep_for(std::chrono::milliseconds{120});
     {
         const std::lock_guard guard{mutex};
+        if (!seen.empty()) {
+            // What changed, so a failure says whether it was chatter or a
+            // real change the test did not expect.
+            std::cerr << "emitted: " << seen.front().data.dump() << '\n';
+        }
         require(seen.empty(), "an unchanged player is quiet rather than chattering");
     }
 

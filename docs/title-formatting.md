@@ -118,7 +118,14 @@ compilation fails closed.
 
 ## Metadata and context fields
 
-Field names are normalized with ASCII case folding for lookup. Values retain
+Field names are normalized with ASCII case folding for lookup. Hosts backed
+by the library index -- Trackknife's library views and queries, and the
+engine's `playback.format` and `catalogue.find` -- go further: they look a
+field up by its canonical name, which also ignores spaces, underscores and
+hyphens, so `%replaygain_track_gain%` and `%Replay-Gain-Track-Gain%` name one
+field there. Files keep their tags' native spellings; only that lookup folds
+them, and two tags whose names differ only so read as one field with both
+values, in order. Values retain
 their original UTF-8 bytes; there is no implicit Unicode normalization.
 
 The context must distinguish:
@@ -136,7 +143,7 @@ tags:
 | --- | --- |
 | Track/list | `list_index`, `list_total`, `selected` |
 | Queue | `queue_position`, `queue_total`, `queue_origin` |
-| Now playing | `playback_time`, `playback_remaining`, `playback_state` |
+| Now playing | `playback_time`, `playback_remaining`, `playback_state`; with the engine's library row also `length`, `path`, `rating` (1-10) |
 | Conversion | `conversion_index`, `source_filename`, `source_extension` |
 | Metadata transformation | none; fields are the current working document after earlier actions |
 

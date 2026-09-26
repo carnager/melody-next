@@ -113,6 +113,22 @@ engine '{"id":9,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.fi
 
 # The library, by words and by what is newest.
 cli tracks alpha | grep -q "alpha" || fail "a track is found by its title"
+
+# A query, formatted by the engine with the library's whole row.
+[ "$(cli find alpha --format '%title%|$info(samplerate)|$info(bitspersample)')" = "alpha|44100|16" ] \
+    || fail "find formats what a query finds, technicals included"
+[ "$(cli find alpha --format '$info(Sample-Rate)/$info(bits_per_sample)')" = "44100/16" ] \
+    || fail "the engine looks names up folded: case, spaces, underscores, hyphens"
+[ "$(cli find 'ALL SORT DESCENDING BY %title%' --format '%title%' | tr '\n' ' ')" = "gamma beta alpha " ] \
+    || fail "find keeps the query's order"
+cli find --keys alpha | grep -qP "^.+\t[A-Za-z0-9+/=]+$" || fail "find --keys gives each line its key"
+if cli find 'title IS' 2>"${work}/query.txt"; then
+    fail "a query that does not parse is refused"
+fi
+[ -s "${work}/query.txt" ] || fail "and says why"
+if cli find nothing-like-this > /dev/null 2>&1; then
+    fail "find with nothing found fails, as tracks does"
+fi
 [ "$(cli latest 5 | wc -l)" -ge 1 ] || fail "the newest albums are listed"
 cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) == 2' \
     || fail "--json answers in JSON, every album"
@@ -126,6 +142,8 @@ cli current | grep -q "alpha" || fail "current names the playing track"
 cli current --format '%playback_state%|%title%|$if(%rating%,rated,unrated)|%length%' \
     | grep -qE "^playing\|[^|]*alpha[^|]*\|unrated\|0:[0-9]{2}$" \
     || fail "current formats the track and where playback is, in tkfmt-1"
+[ "$(cli current --format '$info(samplerate)/$info(bitspersample)/$info(channels)')" = "44100/16/2" ] \
+    || fail "current has the library's technicals, through \$info"
 [ "$(cli --format '$upper(x)\(%playback_state%\)' current)" = "X(playing)" ] \
     || fail "--format comes before the command too, with escaped parentheses"
 if cli current --format '$nosuch(%title%)' 2>"${work}/format.txt"; then

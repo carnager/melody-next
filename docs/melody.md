@@ -118,6 +118,7 @@ the network (`--engine NAME` if there are several).
 melody-cli status
 melody-cli current                    # "Artist - Title", or nothing when stopped
 melody-cli current --format '%artist% — %title% \(%playback_time%/%length%\)'
+melody-cli find 'genre IS jazz SORT BY %date%' --format '%date% %artist% - %title%'
 melody-cli play album doors 1967      # every word must match
 melody-cli next track riders storm    # plays after the current track
 melody-cli lists                      # the engine's lists, saved and working
@@ -129,10 +130,18 @@ melody-cli --json watch               # a line each time something changes
 melody-cli watch --all                # the same, for whichever engine plays
 ```
 
-`current --format` takes a [tkfmt-1](title-formatting.md) expression, the
-language Trackknife formats with: `%artist%`, `%title%`, `%album%`, `%date%`,
-`%tracknumber%`, `%rating%` (1-10, half stars, as the engine keeps it; absent when unrated), `%length%`, `%path%`, and
-`%playback_state%`, `%playback_time%`, `%playback_remaining%`. There are no
+`current` and `find` print tracks as the engine formats them, with a
+[tkfmt-1](title-formatting.md) expression given by `--format` -- the language
+Trackknife formats with. The engine has each track's whole library row, so
+every tag is a field (`%replaygain_track_gain%`, `%genre%`, `%composer%`, ...),
+the technicals come through `$info(codec)`, `$info(samplerate)`,
+`$info(bitspersample)`, `$info(channels)`, and `%path%`, `%length%` and
+`%rating%` (1-10, half stars; absent when unrated) are there too. `current`
+adds `%playback_state%`, `%playback_time%` and `%playback_remaining%`.
+`find` takes a [Trackknife query](query-language.md) -- plain words, or
+`artist IS "Alice in Chains" SORT BY $num(%tracknumber%,2)` -- and prints a
+line for each track, in the query's order; `--keys` adds a tab and each
+track's key for `add --key`. There are no
 optional `[...]` sections; `$if(%date%, \(%date%\))` does that, and a literal
 `(`, `)`, `,`, `$` or `%` is escaped with a backslash. Stars:
 

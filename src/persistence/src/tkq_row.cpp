@@ -81,7 +81,10 @@ class RowFactsContext final : public titleformat::EvaluationContext {
         const auto canonical = metadata::canonicalize_field_name(name);
         const auto found = row_.fields.find(canonical);
         if (found == row_.fields.end()) {
-            return std::nullopt;
+            // The display fallbacks above, which are what %title% and the
+            // rest read through: the evaluator asks here, not resolveField.
+            auto shown = resolveField(name);
+            return shown ? std::optional{MetadataValues{std::move(*shown)}} : std::nullopt;
         }
         MetadataValues values;
         values.reserve(found->second.size());
@@ -407,6 +410,54 @@ core::Result<std::string> tkq_sort_key(const query::CompiledTkq& compiled, const
         return std::unexpected(std::move(value.error()));
     }
     return lower(value->text);
+}
+
+namespace {
+
+// A row with the caller's own fields in front of its tags.
+class HostedRowContext final : public titleformat::EvaluationContext {
+  public:
+    HostedRowContext(const TkqRowFacts& row, const titleformat::FormatContextKind kind,
+                     const std::map<std::string, std::string>& host)
+        : row_(row, kind), host_(host) {}
+    titleformat::FormatContextKind kind() const noexcept override { return row_.kind(); }
+    std::optional<std::string> resolveField(std::string_view name) const override {
+        if (const auto found = host_.find(metadata::canonicalize_field_name(name));
+            found != host_.end()) {
+            return found->second.empty() ? std::nullopt : std::optional{found->second};
+        }
+        return row_.resolveField(name);
+    }
+    std::optional<MetadataValues> resolveMetadata(std::string_view name) const override {
+        if (const auto found = host_.find(metadata::canonicalize_field_name(name));
+            found != host_.end()) {
+            return found->second.empty() ? std::nullopt
+                                         : std::optional{MetadataValues{found->second}};
+        }
+        return row_.resolveMetadata(name);
+    }
+    std::optional<std::string> resolveTechnicalInfo(std::string_view name) const override {
+        return row_.resolveTechnicalInfo(name);
+    }
+
+  private:
+    RowFactsContext row_;
+    const std::map<std::string, std::string>& host_;
+};
+
+} // namespace
+
+core::Result<std::string> tkq_format(const titleformat::Program& program, const TkqRowFacts& facts,
+                                     const std::map<std::string, std::string>& host,
+                                     const core::CancellationToken& cancellation) {
+    const HostedRowContext context{facts, program.context(), host};
+    titleformat::EvaluationOptions options;
+    options.cancellation = cancellation;
+    auto value = titleformat::evaluate(program, context, std::move(options));
+    if (!value) {
+        return std::unexpected(std::move(value.error()));
+    }
+    return std::move(value->text);
 }
 
 } // namespace trackknife::persistence

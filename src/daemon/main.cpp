@@ -15,6 +15,7 @@
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
+#include "trackknife/engine/now_playing_methods.hpp"
 #include "trackknife/engine/playback_store.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
@@ -360,6 +361,7 @@ int main(int argc, char** argv) {
         player = trackknife::engine::Player::create_without_audio();
     }
     trackknife::engine::register_playback_methods(dispatcher, *player);
+    trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its
     // id, the one it is announced with, so a client that reaches it both
     // here and over the network knows it is one engine.

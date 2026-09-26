@@ -7,8 +7,6 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/protocol/client.hpp"
-#include "trackknife/titleformat/compiler.hpp"
-#include "trackknife/titleformat/evaluator.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -45,7 +43,7 @@ struct Options final {
     // --keys: each listed line ends in a tab and its key, for a picker to
     // hand back to add/play/next/queue --key.
     bool keys{false};
-    // --format: how `current` prints the playing track, in tkfmt-1.
+    // --format: how `current` and `find` print a track, in tkfmt-1.
     std::string format{"$if(%artist%,%artist% - )%title%"};
     std::vector<std::string> words;
 };
@@ -60,11 +58,13 @@ void usage(std::ostream& out) {
            "                              nothing plays. EXPR is tkfmt-1, as in\n"
            "                              Trackknife (default \"$if(%artist%,%artist% - "
            ")%title%\"):\n"
-           "                              %artist% %title% %album% %date% %tracknumber%\n"
-           "                              %rating% (1-10) %length% %path% %playback_state%\n"
-           "                              %playback_time% %playback_remaining%; a field\n"
-           "                              not known is empty. Literal ( ) , $ % are\n"
-           "                              escaped with a backslash.\n"
+           "                              every tag as %name% (%replaygain_track_gain%...),\n"
+           "                              $info(samplerate) $info(bitspersample)\n"
+           "                              $info(codec) $info(channels), %rating% (1-10)\n"
+           "                              %length% %path% %playback_state% %playback_time%\n"
+           "                              %playback_remaining%; a field not known is\n"
+           "                              empty. Literal ( ) , $ % are escaped with a\n"
+           "                              backslash.\n"
            "  play | pause | toggle | stop | next | prev\n"
            "  seek [+|-]SECONDS           to a place, or forward and back\n"
            "  volume [[+|-]PERCENT]       say or set how loud\n"
@@ -87,6 +87,12 @@ void usage(std::ostream& out) {
            "  lists                       the engine's lists, saved and working\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
+           "  find QUERY [--format EXPR]  tracks a query finds, one line each, formatted\n"
+           "                              by the engine from its whole library row, with\n"
+           "                              the fields current has, bar playback_*.\n"
+           "                              QUERY is a Trackknife query:\n"
+           "                              melody-cli find 'genre IS jazz SORT BY %date%' \\\n"
+           "                                --format '%date% %artist% - %title%'\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
            "  revision                    changes when the library does, for caches\n"
            "  outputs                     the speakers this engine can play on\n"
@@ -233,8 +239,9 @@ look_around(const std::string& wanted = {}) {
     return text;
 }
 
-// An encoded path (base64 of its bytes), as the bytes it names.
-[[nodiscard]] std::string decoded_path(const std::string& encoded) {
+// The file name in an encoded path (base64 of its bytes), for a track the
+// library does not know.
+[[nodiscard]] std::string decoded_name(const std::string& encoded) {
     static constexpr std::string_view alphabet{
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"};
     std::string raw;
@@ -252,12 +259,7 @@ look_around(const std::string& wanted = {}) {
             raw.push_back(static_cast<char>((buffer >> static_cast<unsigned>(bits)) & 0xFFU));
         }
     }
-    return raw;
-}
-
-// The file name in an encoded path, for a track the library does not know.
-[[nodiscard]] std::string decoded_name(const std::string& encoded) {
-    return std::filesystem::path{decoded_path(encoded)}.filename().string();
+    return std::filesystem::path{raw}.filename().string();
 }
 
 // The library's albums or tracks for these words -- every one, page by
@@ -472,11 +474,6 @@ look_around(const std::string& wanted = {}) {
     if (text_of(track, "title").empty()) {
         track["title"] = decoded_name(path);
     }
-    if (!known.empty()) {
-        if (const auto number = known.front().value("track_number", 0); number > 0) {
-            track["track_number"] = number;
-        }
-    }
     // Only a track in the library has a rating to show or set.
     if (!known.empty() && !text_of(known.front(), "rating_hash").empty()) {
         track["rating_hash"] = text_of(known.front(), "rating_hash");
@@ -497,54 +494,6 @@ look_around(const std::string& wanted = {}) {
     }
     return text;
 }
-
-// What `current` formats: the playing track's tags, and where playback is
-// (docs/title-formatting.md, "Now playing"). An empty value is an absent
-// one, so $if and $if2 fall back over it.
-class NowPlaying final : public trackknife::titleformat::EvaluationContext {
-  public:
-    NowPlaying(const Json& state, const Json& track) {
-        for (const auto* key : {"artist", "title", "album", "date"}) {
-            fields_[key] = text_of(track, key);
-        }
-        if (const auto number = track.value("track_number", 0); number > 0) {
-            fields_["tracknumber"] = std::to_string(number);
-        }
-        // As the engine keeps it: 1-10, half stars. Unrated is no rating,
-        // not a rating of nought.
-        if (const auto rating = track.value("rating", 0); rating > 0) {
-            fields_["rating"] = std::to_string(rating);
-        }
-        fields_["path"] = decoded_path(text_of(track, "path"));
-        const auto position = state.value("position_ms", std::int64_t{0});
-        const auto duration = state.value("duration_ms", std::int64_t{-1});
-        fields_["playback_state"] = state.value("status", std::string{"stopped"});
-        fields_["playback_time"] = clock(position);
-        if (duration >= 0) {
-            fields_["length"] = clock(duration);
-            fields_["playback_remaining"] = clock(std::max<std::int64_t>(0, duration - position));
-        }
-    }
-
-    [[nodiscard]] trackknife::titleformat::FormatContextKind kind() const noexcept override {
-        return trackknife::titleformat::FormatContextKind::now_playing;
-    }
-    [[nodiscard]] std::optional<std::string>
-    resolveField(const std::string_view name) const override {
-        std::string folded{name};
-        std::ranges::transform(folded, folded.begin(), [](const unsigned char c) {
-            return static_cast<char>(std::tolower(c));
-        });
-        const auto found = fields_.find(folded);
-        if (found == fields_.end() || found->second.empty()) {
-            return std::nullopt;
-        }
-        return found->second;
-    }
-
-  private:
-    std::map<std::string, std::string> fields_;
-};
 
 void print_state(const Json& state, Client& client) {
     const auto status = state.value("status", std::string{"stopped"});
@@ -865,29 +814,15 @@ int run(const Options& options) {
         if (words.size() > 1U) {
             fail("current takes no words; its format is given with --format");
         }
-        auto compiled = trackknife::titleformat::compile(
-            options.format, {.context = trackknife::titleformat::FormatContextKind::now_playing,
-                             .dialect = {},
-                             .parse_options = {}});
-        if (!compiled.isValid()) {
-            const auto message = !compiled.parse_diagnostics.empty()
-                                     ? compiled.parse_diagnostics.front().message
-                                     : compiled.diagnostics.front().message;
-            fail("--format: " + message);
-        }
-        const auto current = state();
-        const auto track = now_playing(*client, current);
+        // The engine formats it: it has the library's whole row for the
+        // track -- every tag, ReplayGain, the technicals -- where this has a
+        // summary.
+        const auto answer = call(*client, "playback.format", Json{{"format", options.format}});
         // Nothing playing is nothing to print, as mpc does: a status bar
         // shows an empty line, a script tests for it.
-        if (track.is_null()) {
-            return EXIT_SUCCESS;
+        if (const auto text = answer.find("text"); text != answer.end() && text->is_string()) {
+            std::cout << text->get<std::string>() << "\n";
         }
-        const auto line =
-            trackknife::titleformat::evaluate(*compiled.program, NowPlaying{current, track});
-        if (!line) {
-            fail("--format: " + line.error().message);
-        }
-        std::cout << line->text << "\n";
     } else if ((command == "play" || command == "next") && words.size() == 1U) {
         // Plain play resumes; plain next skips.
         const auto current = state();
@@ -1066,6 +1001,30 @@ int run(const Options& options) {
         }
         std::cout << lines;
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+    } else if (command == "find") {
+        if (words.size() < 2U) {
+            fail("find wants a query: melody-cli find 'artist HAS doors'");
+        }
+        // The engine runs the query and formats each track with its whole
+        // library row; this prints what it says.
+        const auto answer = call(*client, "catalogue.find",
+                                 Json{{"query", joined(words, 1)}, {"format", options.format}});
+        const auto tracks = answer.value("tracks", std::vector<Json>{});
+        if (options.json) {
+            std::cout << Json(tracks).dump() << "\n";
+            return tracks.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+        }
+        std::string lines;
+        for (const auto& track : tracks) {
+            lines += text_of(track, "text");
+            if (options.keys) {
+                lines += '\t';
+                lines += text_of(track, "key");
+            }
+            lines += '\n';
+        }
+        std::cout << lines;
+        return tracks.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
     } else if (command == "revision") {
         // The library's revision: a picker keeps its list while it stays
         // the same. An engine too old to say fails, and it lists afresh.
@@ -1238,9 +1197,14 @@ int main(int argc, char** argv) {
             }
             return argv[++index];
         };
-        // Anywhere on the line: `current --format ...` reads naturally.
+        // Anywhere on the line: `find QUERY --format ... --keys` reads
+        // naturally.
         if (argument == "--format") {
             options.format = value();
+        } else if (argument == "--json") {
+            options.json = true;
+        } else if (argument == "--keys") {
+            options.keys = true;
         } else if (!options.words.empty()) {
             options.words.emplace_back(argument);
         } else if (argument == "--server") {
@@ -1250,10 +1214,6 @@ int main(int argc, char** argv) {
             options.password = value();
         } else if (argument == "--engine") {
             options.engine = value();
-        } else if (argument == "--json") {
-            options.json = true;
-        } else if (argument == "--keys") {
-            options.keys = true;
         } else if (argument == "--fields") {
             std::stringstream list{value()};
             for (std::string field; std::getline(list, field, ',');) {

@@ -6,6 +6,7 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/query/tkq.hpp"
+#include "trackknife/titleformat/compiler.hpp"
 
 #include <array>
 #include <cstdint>
@@ -78,5 +79,14 @@ struct TkqRowTechnicals {
 [[nodiscard]] core::Result<std::string>
 tkq_sort_key(const query::CompiledTkq& compiled, const TkqRowFacts& facts,
              const core::CancellationToken& cancellation = {});
+
+// Formats one row with a compiled tkfmt-1 program: its tags as fields, its
+// technicals through $info. `host` holds the fields the caller owns -- now
+// playing's playback_time, say -- keyed by canonical name; they win over a
+// same-named tag.
+[[nodiscard]] core::Result<std::string>
+tkq_format(const titleformat::Program& program, const TkqRowFacts& facts,
+           const std::map<std::string, std::string>& host = {},
+           const core::CancellationToken& cancellation = {});
 
 } // namespace trackknife::persistence

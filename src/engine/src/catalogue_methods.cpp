@@ -3,6 +3,8 @@
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/cover_fitting.hpp"
 
+#include "track_format.hpp"
+
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
 
@@ -41,7 +43,7 @@ using protocol::Json;
 } // namespace
 
 void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
-                                 EventSink events) {
+                                EventSink events) {
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {
         auto roots = catalogue.roots();
         if (!roots) {
@@ -256,6 +258,61 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{{"paths", encoded_paths(*paths)}};
     });
 
+    // A query, answered as lines: each track it finds, formatted by the
+    // engine with the library's whole row -- every tag, and the technicals
+    // through $info -- in the query's order.
+    //
+    //   catalogue.find {query, format, limit?} -> {"tracks": [{key, text}]}
+    dispatcher.on("catalogue.find", [&catalogue](const Json& params) -> core::Result<Json> {
+        auto source = required_string(params, "query");
+        if (!source) {
+            return std::unexpected(std::move(source.error()));
+        }
+        auto format = required_string(params, "format");
+        if (!format) {
+            return std::unexpected(std::move(format.error()));
+        }
+        std::size_t limit = 0;
+        if (const auto found = params.find("limit"); found != params.end()) {
+            if (!found->is_number_unsigned()) {
+                return std::unexpected(bad_params("limit must be a positive number", "limit"));
+            }
+            limit = found->get<std::size_t>();
+        }
+        auto program = compile_client_format(std::move(*format),
+                                             titleformat::FormatContextKind::track_display);
+        if (!program) {
+            return std::unexpected(std::move(program.error()));
+        }
+        auto compiled = query::compile_tkq(*source);
+        if (!compiled) {
+            return std::unexpected(std::move(compiled.error()));
+        }
+        auto paths = catalogue.filter_paths(*compiled);
+        if (!paths) {
+            return std::unexpected(std::move(paths.error()));
+        }
+        if (limit > 0U && paths->size() > limit) {
+            paths->resize(limit);
+        }
+        auto snapshots = catalogue.cached_tracks(*paths);
+        if (!snapshots) {
+            return std::unexpected(std::move(snapshots.error()));
+        }
+        auto tracks = Json::array();
+        for (auto& snapshot : *snapshots) {
+            name_by_file(snapshot.facts, snapshot.raw_path);
+            auto text = persistence::tkq_format(*program, snapshot.facts,
+                                                track_fields(snapshot.facts, snapshot.raw_path));
+            if (!text) {
+                return std::unexpected(std::move(text.error()));
+            }
+            tracks.push_back(Json{{"key", protocol::encode_raw_path(snapshot.raw_path)},
+                                  {"text", protocol::displayable_text(*text)}});
+        }
+        return Json{{"tracks", std::move(tracks)}};
+    });
+
     // Cached facts for a set of paths, in the order asked. This is what a
     // search result needs to render: without it a remote library returns
     // paths and no metadata, which looks like a broken library rather than a
@@ -349,34 +406,37 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{{"ratings", *ratings}};
     });
 
-    dispatcher.on("catalogue.set_rating", [&catalogue, events = std::move(events)](
-                                              const Json& params) -> core::Result<Json> {
-        auto hash = required_string(params, "hash");
-        if (!hash) {
-            return std::unexpected(std::move(hash.error()));
-        }
-        const auto album = params.value("album", false);
-        // Not is_number_unsigned(): a JSON 7 arrives as a signed integer
-        // unless the sender went out of its way, and requiring unsignedness
-        // would reject every ordinary client for no benefit. The range check
-        // is what actually matters.
-        const auto rating = params.find("rating");
-        if (rating == params.end() || !rating->is_number_integer() ||
-            rating->get<std::int64_t>() < 0) {
-            return std::unexpected(bad_params("rating must be a non-negative integer", "rating"));
-        }
-        const auto value = static_cast<unsigned>(rating->get<std::int64_t>());
-        auto stored = catalogue.set_rating(*hash, album, value);
-        if (!stored) {
-            return std::unexpected(std::move(stored.error()));
-        }
-        if (events) {
-            events(protocol::Event{.name = "catalogue.rating_changed",
-                                   .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
-        }
-        // A void operation still answers, so the caller learns it completed.
-        return Json{};
-    });
+    dispatcher.on(
+        "catalogue.set_rating",
+        [&catalogue, events = std::move(events)](const Json& params) -> core::Result<Json> {
+            auto hash = required_string(params, "hash");
+            if (!hash) {
+                return std::unexpected(std::move(hash.error()));
+            }
+            const auto album = params.value("album", false);
+            // Not is_number_unsigned(): a JSON 7 arrives as a signed integer
+            // unless the sender went out of its way, and requiring unsignedness
+            // would reject every ordinary client for no benefit. The range check
+            // is what actually matters.
+            const auto rating = params.find("rating");
+            if (rating == params.end() || !rating->is_number_integer() ||
+                rating->get<std::int64_t>() < 0) {
+                return std::unexpected(
+                    bad_params("rating must be a non-negative integer", "rating"));
+            }
+            const auto value = static_cast<unsigned>(rating->get<std::int64_t>());
+            auto stored = catalogue.set_rating(*hash, album, value);
+            if (!stored) {
+                return std::unexpected(std::move(stored.error()));
+            }
+            if (events) {
+                events(protocol::Event{
+                    .name = "catalogue.rating_changed",
+                    .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
+            }
+            // A void operation still answers, so the caller learns it completed.
+            return Json{};
+        });
 
     // Play counts and timestamps. Only the fields the lookup keys on cross the
     // wire -- path, revision, decoder selection, span and the album hash --
@@ -458,8 +518,9 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         std::vector<std::string> raw_paths;
         raw_paths.reserve(paths->size());
         for (const auto& encoded : *paths) {
-            auto decoded = encoded.is_string() ? protocol::decode_raw_path(encoded.get<std::string>())
-                                               : core::Result<std::string>{};
+            auto decoded = encoded.is_string()
+                               ? protocol::decode_raw_path(encoded.get<std::string>())
+                               : core::Result<std::string>{};
             if (!encoded.is_string() || !decoded) {
                 return std::unexpected(bad_params("a path is not an encoded path", "paths"));
             }
@@ -486,7 +547,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             return std::unexpected(bad_params("path is not an encoded path", "path"));
         }
         std::string after;
-        if (const auto cursor = params.find("after"); cursor != params.end() && cursor->is_string()) {
+        if (const auto cursor = params.find("after");
+            cursor != params.end() && cursor->is_string()) {
             auto decoded = protocol::decode_raw_path(cursor->get<std::string>());
             if (!decoded) {
                 return std::unexpected(bad_params("after is not an encoded path", "after"));
@@ -555,11 +617,10 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             *image = std::move(*fitted);
         }
         Json answer = Json::object();
-        answer["image"] =
-            image->empty()
-                ? Json(nullptr)
-                : Json(protocol::encode_raw_path(std::string_view{
-                      reinterpret_cast<const char*>(image->data()), image->size()}));
+        answer["image"] = image->empty()
+                              ? Json(nullptr)
+                              : Json(protocol::encode_raw_path(std::string_view{
+                                    reinterpret_cast<const char*>(image->data()), image->size()}));
         return answer;
     });
 

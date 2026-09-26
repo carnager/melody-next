@@ -124,7 +124,7 @@ void BenchMainWindow::buildWorkspace() {
     folders_layout->setContentsMargins(0, 0, 0, 0);
     folders_layout->setSpacing(0);
     auto* heading_row = new QHBoxLayout;
-    heading_row->setContentsMargins(6, 6, 6, 2);
+    heading_row->setContentsMargins(6, 4, 6, 0);
     heading_row->setSpacing(2);
     // One-click source switching (ADR-0130): a flat tab bar per authority
     // replaces the dropdown and static heading.
@@ -133,31 +133,21 @@ void BenchMainWindow::buildWorkspace() {
         auto* bar = new QTabBar(folders_panel_);
         bar->setObjectName(object_name);
         bar->setAccessibleName(accessible_name);
-        bar->setExpanding(true);
+        bar->setExpanding(false);
         bar->setDrawBase(false);
         bar->setDocumentMode(true);
-        // A segmented control: one pill holding the sources, the chosen one
-        // filled -- choosing between views, not holding documents.
-        const auto ground = palette().color(QPalette::Window);
-        const auto ink = palette().color(QPalette::Text);
-        const auto shade = [&](const int amount) {
-            const auto mix = [amount](const int a, const int b) {
-                return (a * (100 - amount) + b * amount) / 100;
-            };
-            return QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
-                                   mix(ground.blue(), ink.blue()))
-                .name();
-        };
-        bar->setAttribute(Qt::WA_StyledBackground);
+        // As the track tabs: plain text, the chosen one filled with the
+        // ground of what it shows below, a hovered one faintly.
+        auto hover = palette().color(QPalette::Base);
+        hover.setAlpha(110);
         bar->setStyleSheet(
             QStringLiteral(
-                "QTabBar { background: %1; border-radius: 5px; }"
-                "QTabBar::tab { background: transparent; border: none; margin: 2px;"
-                " padding: 3px 12px; border-radius: 4px; color: palette(placeholder-text); }"
-                "QTabBar::tab:hover { color: palette(text); }"
-                "QTabBar::tab:selected { background: palette(highlight);"
-                " color: palette(highlighted-text); }")
-                .arg(shade(6)));
+                "QTabBar::tab { background: transparent; border: none; margin: 3px 1px 0 1px;"
+                " padding: 5px 12px; border-top-left-radius: 5px; border-top-right-radius: 5px;"
+                " color: palette(placeholder-text); }"
+                "QTabBar::tab:hover { background: %1; }"
+                "QTabBar::tab:selected { background: palette(base); color: palette(text); }")
+                .arg(hover.name(QColor::HexArgb)));
         return bar;
     };
     local_source_tabs_ = make_source_tabs(QStringLiteral("bench-local-source-tabs"),

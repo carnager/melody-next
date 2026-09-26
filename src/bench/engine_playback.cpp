@@ -231,16 +231,19 @@ void EnginePlayback::retire() {
 
 bool EnginePlayback::active() const { return client_ != nullptr && client_->connected(); }
 
-std::vector<LocalTrackRow> EnginePlayback::queueEntries() const {
-    if (!client_) {
-        return {};
-    }
-    auto answer = client_->call("playback.queue");
-    if (!answer || !answer->contains("entries")) {
+void EnginePlayback::queueEntries(QueueAnswer answer) {
+    request(QStringLiteral("playback.queue"), protocol::Json::object(),
+            [answer = std::move(answer)](const core::Result<protocol::Json>& result) {
+                answer(result ? queueRows(*result) : std::vector<LocalTrackRow>{});
+            });
+}
+
+std::vector<LocalTrackRow> EnginePlayback::queueRows(const protocol::Json& answer) {
+    if (!answer.contains("entries")) {
         return {};
     }
     std::vector<LocalTrackRow> rows;
-    for (const auto& item : answer->at("entries")) {
+    for (const auto& item : answer.at("entries")) {
         auto decoded = protocol::decode_raw_path(item.value("path", std::string{}));
         if (!decoded) {
             continue;

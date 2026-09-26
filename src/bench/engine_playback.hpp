@@ -53,8 +53,10 @@ class EnginePlayback final : public QObject {
 
     // The engine's queue, asked for rather than remembered. Used when a window
     // attaches to an engine that is already playing: the queue is the engine's
-    // and this client has never seen it.
-    [[nodiscard]] std::vector<LocalTrackRow> queueEntries() const;
+    // and this client has never seen it. Answered on this object's thread,
+    // in order with the commands; empty when there is no answer.
+    using QueueAnswer = std::function<void(std::vector<LocalTrackRow>)>;
+    void queueEntries(QueueAnswer answer);
 
     // What the engine last told us. Cached so painting transport does not
     // make a blocking call on the UI thread, and refreshed by events.
@@ -206,6 +208,8 @@ class EnginePlayback final : public QObject {
     void listChanged(const QString& id, quint64 revision, bool deleted);
 
   private:
+    // `playback.queue`'s answer as rows.
+    [[nodiscard]] static std::vector<LocalTrackRow> queueRows(const protocol::Json& answer);
     // Connects if one is configured. Answers whether a connection now exists.
     // Blocks: for a unix socket, which answers or refuses at once.
     bool open();

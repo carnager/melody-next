@@ -54,7 +54,9 @@ Each stage leaves the application working and is committed on its own.
 3. Lists persist their engine's id; migration as above. Done (schema 47).
 4. Several remotes: Settings, sidebar, grouping. Done; see below.
 5. The last synchronous call on the UI thread (`queueEntries()`, review item
-   B2) goes with the old remote plumbing.
+   B2) goes with the old remote plumbing. Done: the engine's queue is asked
+   for and taken when it comes, and only the latest ask's answer, for the
+   engine still playing, is used.
 
 ## Several remotes, as built (stage 4)
 

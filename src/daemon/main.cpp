@@ -390,13 +390,6 @@ int main(int argc, char** argv) {
         trackknife::engine::EventSink sink;
     };
     const auto relay = std::make_shared<EventRelay>();
-    trackknife::engine::register_catalogue_methods(
-        dispatcher, catalogue, [relay](const trackknife::protocol::Event& event) {
-            const std::scoped_lock held{relay->lock};
-            if (relay->sink) {
-                relay->sink(event);
-            }
-        });
 
     // A machine with no audio device still plays: through output agents
     // (ADR-0228). Its player keeps the queue and plays nothing until one is
@@ -409,6 +402,18 @@ int main(int argc, char** argv) {
                   << "); playing through output agents only\n";
         player = trackknife::engine::Player::create_without_audio();
     }
+    // A cover is given for what this engine may stream -- what it holds to
+    // play -- as well as for its library: a list of files it does not index
+    // shows its covers too, as does an engine with no library at all.
+    trackknife::engine::register_catalogue_methods(
+        dispatcher, catalogue,
+        [relay](const trackknife::protocol::Event& event) {
+            const std::scoped_lock held{relay->lock};
+            if (relay->sink) {
+                relay->sink(event);
+            }
+        },
+        [&player](const std::string& raw_path) { return player->holds(raw_path); });
     trackknife::engine::register_playback_methods(dispatcher, *player);
     trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its

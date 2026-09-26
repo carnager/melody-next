@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/catalogue_methods.hpp"
 #include "trackknife/engine/cover_fitting.hpp"
+#include "trackknife/formats/artwork.hpp"
 
 #include "track_format.hpp"
 
@@ -43,7 +44,7 @@ using protocol::Json;
 } // namespace
 
 void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
-                                EventSink events) {
+                                EventSink events, HeldPath holds) {
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {
         auto roots = catalogue.roots();
         if (!roots) {
@@ -571,7 +572,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
 
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
-    dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {
+    dispatcher.on("catalogue.artwork", [&catalogue, holds = std::move(holds)](
+                                           const Json& params) -> core::Result<Json> {
         // By a track, or by an album: a grid of albums knows their keys, not
         // their files, and asking for a file first would double the trips.
         std::string raw_path;
@@ -602,7 +604,10 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             raw_path = std::move(*decoded);
         }
-        auto image = catalogue.artwork(raw_path);
+        // Held to play: streamed to an agent whether indexed or not, so its
+        // cover is no secret either.
+        auto image = holds && holds(raw_path) ? formats::load_track_artwork(raw_path)
+                                               : catalogue.artwork(raw_path);
         if (!image) {
             return std::unexpected(std::move(image.error()));
         }

@@ -30,6 +30,7 @@
 #include <QWidgetAction>
 #include <QMenuBar>
 #include <QPushButton>
+#include <QSet>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -941,13 +942,13 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     });
     local_replaygain_button_ = new QToolButton(statusBar());
     local_replaygain_button_->setObjectName(QStringLiteral("bench-local-replaygain"));
-    local_replaygain_button_->setAccessibleName(QStringLiteral("Local ReplayGain mode"));
+    local_replaygain_button_->setAccessibleName(QStringLiteral("ReplayGain mode"));
     local_replaygain_button_->setIcon(QIcon::fromTheme(
         QStringLiteral("view-media-equalizer"), style()->standardIcon(QStyle::SP_MediaVolume)));
     local_replaygain_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     local_replaygain_button_->setAutoRaise(true);
     local_replaygain_button_->setPopupMode(QToolButton::InstantPopup);
-    auto* menu = new QMenu(QStringLiteral("Local ReplayGain"), local_replaygain_button_);
+    auto* menu = new QMenu(QStringLiteral("ReplayGain"), local_replaygain_button_);
     menu->setObjectName(QStringLiteral("bench-local-replaygain-menu"));
     local_replaygain_group_ = new QActionGroup(menu);
     local_replaygain_group_->setExclusive(true);
@@ -1132,7 +1133,7 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
     }
     local_replaygain_button_->setToolTip(
         QStringLiteral(
-            "Local ReplayGain: %1\nAutomatic: track gain with Random, album gain otherwise.\nUses "
+            "ReplayGain: %1\nAutomatic: track gain with Random, album gain otherwise.\nUses "
             "embedded gain with peak-based clipping prevention when a matching peak is "
             "present.\nChanges apply as buffered audio drains; missing gain plays unchanged.")
             .arg(local_replaygain_button_->text().section(QStringLiteral(": "), 1)));
@@ -1478,9 +1479,22 @@ void BenchMainWindow::buildShortcuts() {
                 enqueueUpNext(view, prepend);
         });
     }
+    auto* focus_search = new QAction(tr("Search the library"), this);
+    bind(focus_search, QStringLiteral("action-focus-library-search"), QStringLiteral("Ctrl+L"));
+    connect(focus_search, &QAction::triggered, this, &BenchMainWindow::focusLibrarySearch);
+
+    // Every action with a key by default, and every workspace command
+    // whether it has one or not: Convert, ReplayGain and the rest can be
+    // given one too.
+    QSet<QAction*> commands;
+    for (const auto* id : workspace_command_ids) {
+        if (auto* action = findChild<QAction*>(QString::fromLatin1(id))) {
+            commands.insert(action);
+        }
+    }
     for (auto* action : findChildren<QAction*>()) {
         if (!action->objectName().startsWith(QStringLiteral("action-")) ||
-            action->shortcut().isEmpty())
+            (action->shortcut().isEmpty() && !commands.contains(action)))
             continue;
         action->setProperty("shortcut-default",
                             action->shortcut().toString(QKeySequence::PortableText));
@@ -1610,12 +1624,14 @@ void BenchMainWindow::refreshEngineTransport() {
         // Asked to play and could not: said where the track would be, or
         // the engine reads as idle and the ask as lost.
         now_playing_->setText(tr("Could not play"));
+        setWindowTitle(QStringLiteral("Trackknife"));
         now_playing_context_->setText(state.error);
         refreshHeaderCover({});
         now_playing_->setToolTip(state.error);
         now_playing_context_->setToolTip(state.error);
     } else if (stopped || state.path.isEmpty()) {
         now_playing_->setText(QStringLiteral("Nothing playing"));
+        setWindowTitle(QStringLiteral("Trackknife"));
         now_playing_context_->clear();
         refreshHeaderCover({});
         now_playing_->setToolTip({});
@@ -1654,6 +1670,10 @@ void BenchMainWindow::refreshEngineTransport() {
             context = tr("Paused · %1 is playing on these speakers").arg(taker);
         }
         now_playing_->setText(label);
+        // In the title too, which is what a taskbar or window switcher shows.
+        const auto artist = row != nullptr ? QString::fromStdString(row->artist) : QString{};
+        setWindowTitle((artist.isEmpty() ? label : artist + QStringLiteral(" – ") + label) +
+                       QStringLiteral(" — Trackknife"));
         now_playing_context_->setText(context);
         refreshHeaderCover(state.entry);
         now_playing_->setToolTip(state.path);
@@ -1770,6 +1790,7 @@ void BenchMainWindow::refreshTransport() {
     device_button_->setEnabled(false);
     device_button_->setToolTip(QStringLiteral("No engine is connected"));
     now_playing_->setText(QStringLiteral("No engine"));
+    setWindowTitle(QStringLiteral("Trackknife"));
     now_playing_context_->clear();
     setProperty("trackknife-engine-playback", QStringLiteral("unavailable"));
     publishMprisState();

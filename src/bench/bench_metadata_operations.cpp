@@ -1126,7 +1126,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                     persistence::ListDocument{
                         .id = core::StableId::random(),
                         .kind = persistence::ListKind::scratch,
-                        .name = "Scratch",
+                        .name = untitled_list_name,
                         .pinned = false,
                         .dirty = false,
                         .items = {},

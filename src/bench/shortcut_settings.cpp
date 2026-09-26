@@ -54,10 +54,6 @@ bool ShortcutSettings::apply() {
     };
     for (qsizetype i = 0; i < bindings_.size(); ++i) {
         const auto key = bindings_[i].edit->keySequence();
-        if (overlaps(key, QKeySequence(QStringLiteral("Ctrl+L")))) {
-            error_->setText(tr("Ctrl+L is reserved for library search."));
-            return false;
-        }
         for (qsizetype j = 0; j < i; ++j) {
             if (overlaps(key, bindings_[j].edit->keySequence())) {
                 error_->setText(tr("Conflicting shortcuts: %1 and %2")

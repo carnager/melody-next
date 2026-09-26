@@ -237,6 +237,9 @@ class BenchMainWindow final : public QMainWindow {
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
     void showCommandPalette();
+    // Ctrl+L: the search field of the library showing -- or, from Folders,
+    // of the library the source switch would open.
+    void focusLibrarySearch();
     // Ctrl+Shift+A / Ctrl+Shift+T: find an album or a track by words and
     // add, replace or queue it.
     void openQuickPick(QuickPickKind kind);

@@ -25,6 +25,14 @@
 #include <utility>
 
 namespace trackknife::bench {
+namespace {
+
+// "1 track", "2 tracks".
+[[nodiscard]] QString tracks(const long long count) {
+    return count == 1 ? QStringLiteral("1 track") : QStringLiteral("%1 tracks").arg(count);
+}
+
+} // namespace
 
 ReplayGainDialog::ReplayGainDialog(const std::size_t item_count,
                                    MetadataPropertiesSourceReader source_reader,
@@ -122,8 +130,8 @@ ReplayGainDialog::ReplayGainDialog(const std::size_t item_count,
     layout->addWidget(storage);
 
     status_ =
-        new QLabel(QStringLiteral("%1 tracks selected. Scan writes tags when measurement finishes.")
-                       .arg(item_count_),
+        new QLabel(QStringLiteral("%1 selected. Scan writes tags when measurement finishes.")
+                       .arg(tracks(static_cast<long long>(item_count_))),
                    this);
     status_->setObjectName(QStringLiteral("bench-replaygain-dialog-status"));
     status_->setWordWrap(true);
@@ -322,13 +330,13 @@ void ReplayGainDialog::startCapture() {
             (void)key;
             if (capture->groups.size() >= 200)
                 break;
-            capture->groups << QStringLiteral("%1 · %2 tracks").arg(group.first).arg(group.second);
+            capture->groups << QStringLiteral("%1 · %2").arg(group.first, tracks(group.second));
         }
         if (groups.size() > 200)
             capture->groups << QStringLiteral("… %1 more album groups").arg(groups.size() - 200);
         if (track_only)
-            capture->groups << QStringLiteral("%1 tracks without album grouping — track gain only")
-                                   .arg(track_only);
+            capture->groups << QStringLiteral("%1 without album grouping — track gain only")
+                                   .arg(tracks(static_cast<long long>(track_only)));
         return capture;
     }));
 }
@@ -357,9 +365,9 @@ void ReplayGainDialog::finishCapture() {
         setRunning(false);
         status_->setText(cancellation_.is_cancellation_requested()
                              ? QStringLiteral("Stopped. No tags written.")
-                             : QStringLiteral("%1 tracks ready. Scan and write tags to measure "
+                             : QStringLiteral("%1 ready. Scan and write tags to measure "
                                               "loudness and save the results.")
-                                   .arg(item_count_));
+                                   .arg(tracks(static_cast<long long>(item_count_))));
         return;
     }
     progress_->setRange(0, static_cast<int>(item_count_));

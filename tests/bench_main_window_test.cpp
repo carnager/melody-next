@@ -244,6 +244,7 @@ class BenchMainWindowTest final : public QObject {
     void localListeningColumnsLoadRefreshAndRespectAuthority();
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
+    void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1415,6 +1416,40 @@ void BenchMainWindowTest::shortcutSettingsValidateSaveAndCancel() {
         QCOMPARE(reopened.findChild<QAction*>(QStringLiteral("action-jump-to-playing"))->shortcut(),
                  QKeySequence(QStringLiteral("Ctrl+Alt+J")));
     }
+    QSettings{}.remove(QStringLiteral("shortcuts"));
+}
+
+// Ctrl+L was documented, and refused to anything else as "reserved for
+// library search", but nothing was bound to it. And only actions with a key
+// by default could be given one: Convert, ReplayGain and the rest could not.
+void BenchMainWindowTest::everyCommandTakesAKeyAndCtrlLSearchesTheLibrary() {
+    QSettings{}.remove(QStringLiteral("shortcuts"));
+    BenchMainWindow window;
+    window.show();
+    QVERIFY(QTest::qWaitForWindowActive(&window));
+    QTRY_VERIFY(window.lists_restored_);
+
+    // From Folders, which has no search, to the library's.
+    window.local_source_tabs_->setCurrentIndex(0);
+    auto* search = window.findChild<QAction*>(QStringLiteral("action-focus-library-search"));
+    QVERIFY(search != nullptr);
+    QCOMPARE(search->shortcut(), QKeySequence(QStringLiteral("Ctrl+L")));
+    search->trigger();
+    QTRY_VERIFY(QApplication::focusWidget() != nullptr);
+    QCOMPARE(QApplication::focusWidget()->objectName(), QStringLiteral("local-library-search"));
+    QVERIFY(window.local_source_tabs_->currentIndex() != 0);
+
+    auto* convert = window.findChild<QAction*>(QStringLiteral("action-convert-files"));
+    QVERIFY(convert != nullptr && convert->shortcut().isEmpty());
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::shortcuts);
+    auto* edit =
+        dialog->findChild<QKeySequenceEdit*>(QStringLiteral("shortcut-action-convert-files"));
+    QVERIFY(edit != nullptr);
+    edit->setKeySequence(QKeySequence(QStringLiteral("Ctrl+Alt+C")));
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QCOMPARE(convert->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+C")));
     QSettings{}.remove(QStringLiteral("shortcuts"));
 }
 
@@ -5764,7 +5799,13 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     window.remote_playback_->next();
     QTRY_VERIFY(window.playback_.requests.pending().empty());
     QTRY_COMPARE(window.now_playing_->text(), QString::fromStdString(asked_title));
+    // The title bar -- what a taskbar shows -- names it too, and lets go of
+    // it when nothing plays.
+    QVERIFY2(window.windowTitle().contains(QString::fromStdString(asked_title)) &&
+                 window.windowTitle().endsWith(QStringLiteral("Trackknife")),
+             qPrintable(window.windowTitle()));
     window.remote_playback_->stop();
+    QTRY_COMPARE(window.windowTitle(), QStringLiteral("Trackknife"));
 }
 
 void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
@@ -10546,7 +10587,7 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
         QVERIFY(copied != nullptr);
         QCOMPARE(copied->model()->rowCount(), 1);
         const auto copied_index = tabs->indexOf(copied);
-        QCOMPARE(tabs->tabText(copied_index), QStringLiteral("Local Queue copy *"));
+        QCOMPARE(tabs->tabText(copied_index), QStringLiteral("Untitled copy *"));
         QVERIFY(tabs->tabBar()->tabButton(copied_index, QTabBar::RightSide)->isVisible());
 
         QTimer::singleShot(0, [] {
@@ -10589,7 +10630,7 @@ void BenchMainWindowTest::persistsPinnedDuplicatedAndDirtyTabs() {
     QVERIFY(tabs != nullptr);
     QTRY_COMPARE(tabs->count(), 1);
     const auto local_index = tabs->currentIndex();
-    QCOMPARE(tabs->tabText(local_index), QStringLiteral("Local Queue *"));
+    QCOMPARE(tabs->tabText(local_index), QStringLiteral("Untitled *"));
     QVERIFY(tabs->tabToolTip(local_index).contains(QStringLiteral("pinned")));
     QVERIFY(tabs->tabToolTip(local_index).contains(QStringLiteral("modified")));
     QVERIFY(!tabs->tabBar()->tabButton(local_index, QTabBar::RightSide)->isVisible());

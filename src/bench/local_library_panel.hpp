@@ -58,6 +58,8 @@ class LocalLibraryPanel final : public QWidget {
     }
     // Reload committed index records; filesystem scans require the Refresh button.
     void refreshLibrary();
+    // Puts the cursor in the search field, its text selected to type over.
+    void focusSearch();
     void stop();
     void resolveEntries(std::vector<persistence::LibraryEntry> entries,
                         std::function<void(std::vector<std::string>)> completion);

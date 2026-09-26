@@ -503,6 +503,11 @@ void LocalLibraryPanel::refreshSourceLabel() {
                                        "library action."));
 }
 
+void LocalLibraryPanel::focusSearch() {
+    search_->setFocus(Qt::ShortcutFocusReason);
+    search_->selectAll();
+}
+
 LocalLibraryPanel::~LocalLibraryPanel() { stop(); }
 
 void LocalLibraryPanel::stop() {

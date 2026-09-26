@@ -70,7 +70,8 @@ The initial workspace is intentionally conventional:
   Both searches accept any nonempty query with a 200 ms debounce, and clearing
   the field restores browsing. MPD continuation appears as a Show more… tree row.
   Clicking elsewhere leaves results visible. Switching authority preserves each
-  library's query. `Ctrl+L` focuses the active authority's library search.
+  library's query. `Ctrl+L` focuses the search of the library showing, or,
+  from Folders, of the library the source switch opens to.
 - ADR-0125 adds a hidden-by-default native **Find in current list** toolbar for
   local lists and the MPD queue. `Ctrl+F` opens it; Next/Previous,
   Enter/Shift+Enter, and F3/Shift+F3
@@ -583,10 +584,12 @@ Neither navigation action changes playback or the sticky Active marker.
 
 ## Keyboard shortcuts
 
-Settings → Shortcuts lists editable application bindings. Save applies and
-persists them; Cancel leaves current bindings alone. Restore defaults edits the
-form until Save. Empty bindings disable a shortcut. Duplicate and chord-prefix
-conflicts are rejected, including the reserved Ctrl+L library-search shortcut.
+Settings → Shortcuts lists every action with a default key, and every command
+the command palette offers, with or without one, so Convert, ReplayGain and
+the rest can be given a key. Save applies and persists them; Cancel leaves
+current bindings alone. Restore defaults edits the form until Save. Empty
+bindings disable a shortcut. Duplicate and chord-prefix conflicts are
+rejected; `Ctrl+L` is an ordinary binding like the others.
 These are application shortcuts, not desktop-wide hotkeys.
 
 | Action | Default |

@@ -274,7 +274,7 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
             persistence::ListDocument{
                 .id = core::StableId::random(),
                 .kind = persistence::ListKind::scratch,
-                .name = "Local Queue",
+                .name = untitled_list_name,
                 .pinned = false,
                 .dirty = false,
                 .items = {},
@@ -1178,6 +1178,23 @@ void BenchMainWindow::selectPreferredSource() {
     local_source_tabs_->setCurrentIndex(target);
 }
 
+void BenchMainWindow::focusLibrarySearch() {
+    if (source_stack_ == nullptr || local_source_tabs_ == nullptr) {
+        return;
+    }
+    if (qobject_cast<LocalLibraryPanel*>(source_stack_->currentWidget()) == nullptr) {
+        // On Folders, which has no search: the library it would switch to.
+        const auto folders = local_source_tabs_->currentIndex();
+        selectPreferredSource();
+        if (local_source_tabs_->currentIndex() == folders && local_source_tabs_->count() > 1) {
+            local_source_tabs_->setCurrentIndex(1);
+        }
+    }
+    if (auto* panel = qobject_cast<LocalLibraryPanel*>(source_stack_->currentWidget())) {
+        panel->focusSearch();
+    }
+}
+
 void BenchMainWindow::quitAndStopEngine() {
     // Closing the window leaves the music playing; quitting stops it. After
     // the close, so a close that was cancelled leaves it running.
@@ -1436,7 +1453,7 @@ void BenchMainWindow::closeTabAt(const int index) {
             persistence::ListDocument{
                 .id = core::StableId::random(),
                 .kind = persistence::ListKind::scratch,
-                .name = "Local Queue",
+                .name = untitled_list_name,
                 .pinned = false,
                 .dirty = false,
                 .items = {},

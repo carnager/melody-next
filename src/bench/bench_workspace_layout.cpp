@@ -294,12 +294,16 @@ void BenchMainWindow::buildWorkspace() {
     auto* add_root = file_menu->addAction(QStringLiteral("Bookmark folder…"));
     connect(add_root, &QAction::triggered, this, &BenchMainWindow::addFolderRoot);
     file_menu->addSeparator();
-    file_menu->addSeparator();
-    auto* quit = file_menu->addAction(QStringLiteral("Quit"));
+    // The two ways out, side by side and named for what they do to the
+    // music: only a tooltip told them apart, and menus do not show those.
+    auto* close_window = file_menu->addAction(QStringLiteral("Close window"));
+    close_window->setObjectName(QStringLiteral("action-close-window"));
+    close_window->setStatusTip(QStringLiteral("The music keeps playing"));
+    connect(close_window, &QAction::triggered, this, &QWidget::close);
+    auto* quit = file_menu->addAction(QStringLiteral("Quit and stop playback"));
     quit->setObjectName(QStringLiteral("action-quit"));
     quit->setShortcut(QKeySequence::Quit);
-    quit->setToolTip(QStringLiteral("Close Trackknife and stop this computer's engine; closing "
-                                    "the window leaves the music playing"));
+    quit->setStatusTip(QStringLiteral("Close Trackknife and stop this computer's engine"));
     connect(quit, &QAction::triggered, this, &BenchMainWindow::quitAndStopEngine);
 
     auto* edit_menu = menuBar()->addMenu(QStringLiteral("&Edit"));
@@ -1068,24 +1072,7 @@ void trackknife::bench::BenchMainWindow::showCommandPalette() {
         }
     }
     QList<QAction*> commands;
-    // Deliberate task inventory. Device names, rating values, column names and
-    // transient context-menu choices are parameters, not standalone commands.
-    for (const auto* id : {"action-open-files",       "action-open-folder",
-                           "action-new-list",         "action-import-m3u8",
-                           "action-export-m3u8",      "action-dynamic-playlists",
-                           "action-settings",         "action-search-dialog",
-                           "action-quick-album",      "action-quick-track",
-                           "action-find-in-list",     "action-jump-to-playing",
-                           "action-follow-playback",  "action-show-up-next",
-                           "action-play-pause",       "action-stop",
-                           "action-next-track",       "action-previous-track",
-                           "action-save-list",        "action-rename-tab",
-                           "action-duplicate-tab",    "action-close-tab",
-                           "action-track-properties", "action-replaygain-dialog",
-                           "action-convert-files",    "action-reverse-list",
-                           "action-shuffle-albums",   "action-local-album-random",
-                           "action-deduplicate-list", "action-backup-workspace",
-                           "action-restore-workspace"}) {
+    for (const auto* id : workspace_command_ids) {
         if (auto* action = findChild<QAction*>(QString::fromLatin1(id)))
             commands.append(action);
     }

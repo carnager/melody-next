@@ -866,7 +866,7 @@ void BenchMainWindow::openLocalPaths(std::vector<std::string> raw_paths) {
                   ? local->get()
                   : addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                          .kind = persistence::ListKind::scratch,
-                                                         .name = "Local Queue",
+                                                         .name = untitled_list_name,
                                                          .pinned = false,
                                                          .dirty = false,
                                                          .items = {},

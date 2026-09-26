@@ -35,6 +35,28 @@ struct TrackColumnSpec {
     int minimum_width;
 };
 
+// What a new list is called until someone names it -- the one a window opens
+// with, or starts again with after its last tab closes. Not "Local Queue":
+// the queue is Up Next, and "local" was the MPD era's word for this computer.
+inline constexpr auto untitled_list_name = "Untitled";
+
+// The workspace's standalone commands: what the command palette offers, and
+// what the shortcut editor lets a key be given to whether or not it has one
+// by default. Device names, rating values, column names and transient
+// context-menu choices are parameters, not commands.
+inline constexpr std::array workspace_command_ids{
+    "action-open-files",        "action-open-folder",       "action-new-list",
+    "action-import-m3u8",       "action-export-m3u8",       "action-dynamic-playlists",
+    "action-settings",          "action-search-dialog",     "action-focus-library-search",
+    "action-quick-album",       "action-quick-track",       "action-find-in-list",
+    "action-jump-to-playing",   "action-follow-playback",   "action-show-up-next",
+    "action-play-pause",        "action-stop",              "action-next-track",
+    "action-previous-track",    "action-save-list",         "action-rename-tab",
+    "action-duplicate-tab",     "action-close-tab",         "action-track-properties",
+    "action-replaygain-dialog", "action-convert-files",     "action-reverse-list",
+    "action-shuffle-albums",    "action-local-album-random", "action-deduplicate-list",
+    "action-backup-workspace",  "action-restore-workspace"};
+
 inline constexpr std::array<TrackColumnSpec, local_column_count> track_column_specs{{
     {local_artwork_column, "artwork", "Artwork", 110, 72},
     {local_artist_column, "artist", "Artist", 150, 72},

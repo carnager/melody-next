@@ -118,6 +118,8 @@ the network (`--engine NAME` if there are several).
 melody-cli status
 melody-cli play album doors 1967      # every word must match
 melody-cli next track riders storm    # plays after the current track
+melody-cli lists                      # the engine's lists, saved and working
+melody-cli play list road trip        # one of them, by name or its words
 melody-cli output "Pixel 10 Pro"
 melody-cli rate 4                     # stars for what plays, 0-5
 melody-cli love                       # on Last.fm, with the engine's account

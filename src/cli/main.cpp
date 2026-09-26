@@ -9,6 +9,7 @@
 #include "trackknife/protocol/client.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -66,6 +67,10 @@ void usage(std::ostream& out) {
            "      artist), random tracks [COUNT] (default 25):\n"
            "      melody-cli play random tracks 50\n"
            "\n"
+           "  play list NAME...           play one of the engine's lists: by its name,\n"
+           "                              or every word found in one name\n"
+           "\n"
+           "  lists                       the engine's lists, saved and working\n"
            "  albums [WORDS...]           list albums: every one, or those the words find\n"
            "  tracks [WORDS...]           list tracks: every one, or those the words find\n"
            "  latest [COUNT]              the albums added most recently (default 20)\n"
@@ -838,6 +843,64 @@ int run(const Options& options) {
             percent += state().value("volume_percent", 0);
         }
         show(call(*client, "playback.set_volume", Json{{"percent", std::clamp(percent, 0, 100)}}));
+    } else if (command == "play" && words.size() >= 3U && words[1] == "list") {
+        // ADR-0233: the engine's list, played there as the queue.
+        const auto wanted = joined(words, 2);
+        const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
+        const auto lower = [](std::string text) {
+            std::ranges::transform(text, text.begin(), [](const unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return text;
+        };
+        std::vector<Json> matches;
+        for (const auto& list : lists) {
+            if (lower(text_of(list, "name")) == lower(wanted)) {
+                matches = {list};
+                break;
+            }
+            bool every = true;
+            for (std::size_t index = 2; index < words.size() && every; ++index) {
+                every = lower(text_of(list, "name")).find(lower(words[index])) != std::string::npos;
+            }
+            if (every) {
+                matches.push_back(list);
+            }
+        }
+        if (matches.empty()) {
+            fail("no list is called " + wanted);
+        }
+        if (matches.size() > 1U) {
+            std::string names;
+            for (const auto& list : matches) {
+                names += "\n  " + text_of(list, "name");
+            }
+            fail("more than one list matches " + wanted + ":" + names);
+        }
+        static_cast<void>(call(*client, "list.play", Json{{"id", text_of(matches.front(), "id")}}));
+        show(started(call(*client, "playback.state")));
+        if (!options.json) {
+            std::cerr << "melody-cli: " << text_of(matches.front(), "name") << "\n";
+        }
+    } else if (command == "lists") {
+        const auto lists = call(*client, "list.all").value("lists", std::vector<Json>{});
+        if (options.json) {
+            std::cout << Json(lists).dump() << "\n";
+            return lists.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
+        }
+        std::string lines;
+        for (const auto& list : lists) {
+            lines += text_of(list, "name");
+            lines += " (" + std::to_string(list.value("tracks", 0)) + " tracks";
+            lines += text_of(list, "kind") == "working" ? ", working)" : ")";
+            if (options.keys) {
+                lines += '\t';
+                lines += text_of(list, "id");
+            }
+            lines += '\n';
+        }
+        std::cout << lines;
+        return lists.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
     } else if ((command == "play" || command == "add" || command == "next" ||
                 command == "queue") &&
                words.size() >= 2U) {

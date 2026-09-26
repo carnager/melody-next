@@ -318,6 +318,28 @@ if cli play random tracks 0 2>/dev/null; then
 fi
 cli stop > /dev/null
 
+# ADR-0233: the engine's lists, listed and played by name.
+first="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' "${work}/music/first/alpha.wav")"
+second="$(python3 -c 'import base64,sys; print(base64.b64encode(sys.argv[1].encode()).decode())' "${work}/music/second/gamma.wav")"
+engine "{\"id\":20,\"method\":\"list.save\",\"params\":{\"name\":\"Road trip\",\"kind\":\"saved\",\"items\":[{\"path\":\"${second}\"},{\"path\":\"${first}\"}]}}" > /dev/null
+engine "{\"id\":21,\"method\":\"list.save\",\"params\":{\"name\":\"Road work\",\"items\":[{\"path\":\"${first}\"}]}}" > /dev/null
+cli lists > "${work}/lists.txt" || fail "lists lists"
+grep -q "^Road trip (2 tracks)$" "${work}/lists.txt" || fail "a saved list, by name and size"
+grep -q "^Road work (1 tracks, working)$" "${work}/lists.txt" || fail "a working list says so"
+cli --keys lists | grep -qP "^Road trip \(2 tracks\)\t[0-9a-f-]{36}$" || fail "--keys gives each its id"
+cli play list trip 2>/dev/null | grep -q "^playing:" || fail "play list plays one by a word of its name"
+cli --json status | python3 -c '
+import json, sys
+assert json.load(sys.stdin)["queue_size"] == 2' || fail "the whole list is the queue"
+if cli play list road 2>"${work}/ambiguous.txt"; then
+    fail "a word two lists share is refused"
+fi
+grep -q "more than one list matches" "${work}/ambiguous.txt" || fail "and says which"
+if cli play list nothing-like-this 2>/dev/null; then
+    fail "a list that is not there fails"
+fi
+cli stop > /dev/null
+
 # Wrong words say so, and fail.
 if cli play album nothing-like-this 2>"${work}/none.txt"; then
     fail "an album that is not there fails"

@@ -14,7 +14,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -61,6 +65,8 @@ class OfflineStore(
     private val _albums = MutableStateFlow<List<OfflineAlbum>>(emptyList())
     private val _progress = MutableStateFlow<Map<String, Progress>>(emptyMap())
     private val waiting = ArrayDeque<String>()
+    /** Tracks of an album fetched at once. */
+    private val parallelFetches = 4
     private var worker: Job? = null
 
     val albums: StateFlow<List<OfflineAlbum>> = _albums
@@ -82,7 +88,7 @@ class OfflineStore(
     fun fileFor(path: String): File? =
         _albums.value.firstNotNullOfOrNull { album -> album.tracks.firstOrNull { it.entry.key == path }?.file?.takeIf(File::isFile) }
 
-    /** Keeps an album: its tracks as the library lists them, then fetched one by one. */
+    /** Keeps an album: its tracks as the library lists them, then fetched a few at a time. */
     fun download(engine: String, album: LibraryEntry) {
         scope.launch(Dispatchers.IO) {
             try {
@@ -126,35 +132,48 @@ class OfflineStore(
             val album = album(key) ?: continue
             val want = wanted()
             if (want.wifiOnly) want.metered.first { !it }
-            var done = album.tracks.count { it.file.isFile }
-            _progress.value = _progress.value + (key to Progress(done, album.tracks.size))
-            for (track in album.tracks) {
-                if (track.file.isFile) continue
-                var tries = 0
-                while (true) {
-                    try {
-                        fetch(track, album.bitrateKbps)
-                        break
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (failure: Throwable) {
-                        // Not connected yet, a moment's outage: again, a
-                        // little later each time.
-                        if (album(key) == null) return
-                        if (++tries >= 5) {
-                            problems.value = "${album.album}: ${failure.message}"
-                            delay(60_000)
-                            tries = 0
-                        } else {
-                            delay(2_000L * tries)
+            _progress.value = _progress.value + (key to Progress(album.tracks.count { it.file.isFile }, album.tracks.size))
+            // Several at once: the engine converts each whole before its
+            // first byte, so one at a time leaves it and the network idle
+            // in turn.
+            val slots = Semaphore(parallelFetches)
+            coroutineScope {
+                for (track in album.tracks) {
+                    if (track.file.isFile) continue
+                    launch {
+                        slots.withPermit {
+                            if (album(key) != null && keep(key, album, track)) {
+                                _progress.update { it + (key to Progress(album.tracks.count { t -> t.file.isFile }, album.tracks.size)) }
+                            }
                         }
                     }
                 }
-                if (album(key) == null) break
-                done++
-                _progress.value = _progress.value + (key to Progress(done, album.tracks.size))
             }
             _progress.value = _progress.value - key
+        }
+    }
+
+    /** Fetches one track, trying again while the album is still wanted. */
+    private suspend fun keep(key: String, album: OfflineAlbum, track: OfflineTrack): Boolean {
+        var tries = 0
+        while (true) {
+            try {
+                fetch(track, album.bitrateKbps)
+                return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                // Not connected yet, a moment's outage: again, a little later
+                // each time.
+                if (album(key) == null) return false
+                if (++tries >= 5) {
+                    problems.value = "${album.album.album}: ${failure.message}"
+                    delay(60_000)
+                    tries = 0
+                } else {
+                    delay(2_000L * tries)
+                }
+            }
         }
     }
 

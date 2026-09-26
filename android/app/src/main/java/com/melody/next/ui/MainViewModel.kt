@@ -17,6 +17,7 @@ import com.melody.next.engine.toQueueEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -32,7 +33,8 @@ sealed interface LibraryLevel {
     data object Offline : LibraryLevel
     /** ADR-0233: the engine's lists, and one of them. */
     data object Lists : LibraryLevel
-    data class ListPage(val list: EngineList) : LibraryLevel
+    /** `engine`: one of the other engines' (ADR-0234); null, the main one's. */
+    data class ListPage(val list: EngineList, val engine: com.melody.next.engine.Endpoint? = null) : LibraryLevel
     data class OfflineAlbum(val key: String) : LibraryLevel
 }
 
@@ -63,6 +65,26 @@ class MainViewModel : ViewModel() {
     private var loadingJob: Job? = null
     var lists by mutableStateOf<List<EngineList>>(emptyList())
         private set
+
+    /** ADR-0234: one engine's lists, under its name. `engine` null: the main one. */
+    data class ListGroup(
+        val name: String,
+        val engine: com.melody.next.engine.Endpoint?,
+        val lists: List<EngineList>,
+        val problem: String = "",
+    )
+
+    /** Every engine's lists: the main one's first, then the others'. */
+    var listGroups by mutableStateOf<List<ListGroup>>(emptyList())
+        private set
+
+    /** The connection a list's engine is reached by: the main one's, or another's. */
+    fun clientFor(engine: com.melody.next.engine.Endpoint?): com.melody.next.engine.EngineClient? =
+        if (engine == null) client
+        else app.otherClients.value.getOrNull(app.settings.otherEngines.indexOf(engine))
+
+    private fun nameOf(connection: com.melody.next.engine.EngineClient, fallback: String): String =
+        (connection.connection.value as? ConnectionState.Connected)?.name ?: fallback
     var listEntries by mutableStateOf<List<ListEntry>>(emptyList())
         private set
 
@@ -103,10 +125,22 @@ class MainViewModel : ViewModel() {
         // A list changed anywhere -- a window saved it, another phone -- shows
         // as it is now, if it is what is open.
         viewModelScope.launch {
-            client.listsChanged.collect { id ->
-                val shown = level
-                if (shown == LibraryLevel.Lists || (shown is LibraryLevel.ListPage && shown.list.id == id)) {
-                    reload()
+            client.listsChanged.collect { id -> listChanged(id) }
+        }
+        // The other engines' too, whichever are connected now -- and the list
+        // of them shown again as each is reached, or the set of them changes.
+        viewModelScope.launch {
+            app.otherClients.collectLatest { others ->
+                if (level == LibraryLevel.Lists) reload()
+                kotlinx.coroutines.coroutineScope {
+                    others.forEach { other ->
+                        launch { other.listsChanged.collect { id -> listChanged(id) } }
+                        launch {
+                            other.connection.collect { state ->
+                                if (state is ConnectionState.Connected && level == LibraryLevel.Lists) reload()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -160,6 +194,13 @@ class MainViewModel : ViewModel() {
 
     fun showLatest(latest: Boolean) = showTop(if (latest) LibraryLevel.Latest else LibraryLevel.Artists)
 
+    private fun listChanged(id: String) {
+        val shown = level
+        if (shown == LibraryLevel.Lists || (shown is LibraryLevel.ListPage && shown.list.id == id)) {
+            reload()
+        }
+    }
+
     fun reload() {
         loadingJob?.cancel()
         val shown = level
@@ -168,8 +209,23 @@ class MainViewModel : ViewModel() {
             libraryError = ""
             try {
                 when (shown) {
-                    LibraryLevel.Lists -> lists = client.lists()
-                    is LibraryLevel.ListPage -> listEntries = client.listEntries(shown.list.id)
+                    LibraryLevel.Lists -> {
+                        lists = client.lists()
+                        val groups = mutableListOf(ListGroup(nameOf(client, "This engine"), null, lists))
+                        app.settings.otherEngines.forEachIndexed { index, endpoint ->
+                            val other = app.otherClients.value.getOrNull(index) ?: return@forEachIndexed
+                            groups += try {
+                                ListGroup(nameOf(other, endpoint.host), endpoint, other.lists())
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (failure: Throwable) {
+                                ListGroup(nameOf(other, endpoint.host), endpoint, emptyList(), failure.message ?: "not reached")
+                            }
+                        }
+                        listGroups = groups
+                    }
+                    is LibraryLevel.ListPage -> listEntries =
+                        clientFor(shown.engine)?.listEntries(shown.list.id) ?: emptyList()
                     else -> Unit
                 }
                 entries = when (shown) {

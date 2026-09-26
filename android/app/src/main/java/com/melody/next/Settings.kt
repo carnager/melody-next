@@ -27,6 +27,30 @@ class Settings(context: Context) {
             }.apply()
         }
 
+    /**
+     * ADR-0234: engines besides the one this phone plays through, whose lists
+     * it shows too -- a desktop's open tabs beside the NAS's lists.
+     */
+    var otherEngines by mutableStateOf(readOtherEngines())
+        private set
+
+    fun updateOtherEngines(engines: List<Endpoint>) {
+        otherEngines = engines.distinctBy { it.host to it.port }
+        val stored = org.json.JSONArray()
+        otherEngines.forEach {
+            stored.put(org.json.JSONObject().put("host", it.host).put("port", it.port).put("password", it.password))
+        }
+        preferences.edit().putString("other_engines", stored.toString()).apply()
+    }
+
+    private fun readOtherEngines(): List<Endpoint> = runCatching {
+        val stored = org.json.JSONArray(preferences.getString("other_engines", "[]") ?: "[]")
+        (0 until stored.length()).map { index ->
+            val engine = stored.getJSONObject(index)
+            Endpoint(engine.getString("host"), engine.optInt("port", Endpoint.DEFAULT_PORT), engine.optString("password"))
+        }
+    }.getOrDefault(emptyList())
+
     /** Whether this phone offers itself to the engine as somewhere to play. */
     var speaker by mutableStateOf(preferences.getBoolean("speaker", true))
         private set

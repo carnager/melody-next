@@ -29,6 +29,15 @@ class MelodyApp : Application() {
     lateinit var audition: PhoneAudition
         private set
     private var agent: PhoneAgent? = null
+    /** ADR-0234: a connection to each engine whose lists are shown besides the main one's. */
+    val otherClients = kotlinx.coroutines.flow.MutableStateFlow<List<EngineClient>>(emptyList())
+
+    /** The other engines follow the settings: connected, or let go. */
+    fun updateOtherEngines() {
+        otherClients.value.forEach { it.disconnect() }
+        otherClients.value = settings.otherEngines.map { endpoint -> EngineClient(scope).also { it.connect(endpoint) } }
+    }
+
     /** This phone's speaker lost the engine mid-track and is getting it back. */
     val speakerReconnecting = kotlinx.coroutines.flow.MutableStateFlow(false)
     lateinit var network: com.melody.next.speaker.Network
@@ -66,10 +75,14 @@ class MelodyApp : Application() {
                 .collect { bitrate -> agent?.bitrateKbps = bitrate }
         }
         settings.endpoint?.let(::useEngine)
+        updateOtherEngines()
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) = client.reconnectNow()
+            override fun onStart(owner: LifecycleOwner) {
+                client.reconnectNow()
+                otherClients.value.forEach { it.reconnectNow() }
+            }
         })
     }
 

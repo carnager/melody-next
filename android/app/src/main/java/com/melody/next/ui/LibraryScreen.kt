@@ -69,7 +69,7 @@ fun LibraryScreen(vm: MainViewModel) {
                 level is LibraryLevel.OfflineAlbum -> OfflineAlbumPage(vm, level.key)
                 vm.libraryError.isNotEmpty() -> Unreachable(vm, vm.libraryError)
                 level == LibraryLevel.Lists -> ListsPage(vm)
-                level is LibraryLevel.ListPage -> ListPage(vm, level.list)
+                level is LibraryLevel.ListPage -> ListPage(vm, level.list, level.engine)
                 vm.loading && vm.entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(strokeWidth = 2.dp)
                 }
@@ -387,28 +387,50 @@ fun Modifier.combinedClickableCompat(onClick: () -> Unit, onLongClick: (() -> Un
 @Composable
 private fun ListsPage(vm: MainViewModel) {
     val tones = LocalTones.current
-    if (vm.loading && vm.lists.isEmpty()) {
+    val groups = vm.listGroups
+    if (vm.loading && groups.all { it.lists.isEmpty() }) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(strokeWidth = 2.dp) }
         return
     }
-    if (vm.lists.isEmpty()) {
+    if (groups.all { it.lists.isEmpty() && it.problem.isEmpty() }) {
         Centered("No lists yet. Lists saved in Trackknife show here.")
         return
     }
+    // ADR-0234: each engine's lists under its name, the main one's first;
+    // named only when there is more than one.
+    val named = groups.size > 1
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
-        itemsIndexed(vm.lists, key = { _, list -> list.id }) { _, list ->
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { vm.open(LibraryLevel.ListPage(list)) }
-                    .padding(vertical = 10.dp),
-            ) {
-                Text(list.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOfNotNull("${list.tracks} tracks", if (list.saved) null else "working").joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = tones.muted,
-                )
+        groups.forEach { group ->
+            if (named) {
+                item(key = "engine:${group.engine ?: "main"}") {
+                    Text(
+                        group.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                    )
+                }
+            }
+            if (group.lists.isEmpty()) {
+                item(key = "none:${group.engine ?: "main"}") {
+                    Text(
+                        if (group.problem.isEmpty()) "No lists" else "Not reached: ${group.problem}",
+                        style = MaterialTheme.typography.bodySmall, color = tones.muted, modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                }
+            }
+            itemsIndexed(group.lists, key = { _, list -> "${group.engine ?: "main"}:${list.id}" }) { _, list ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.open(LibraryLevel.ListPage(list, group.engine)) }
+                        .padding(vertical = 10.dp),
+                ) {
+                    Text(list.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull("${list.tracks} tracks", if (list.saved) null else "working").joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tones.muted,
+                    )
+                }
             }
         }
     }
@@ -416,8 +438,11 @@ private fun ListsPage(vm: MainViewModel) {
 
 /** One of the engine's lists: played whole, or from a track. */
 @Composable
-private fun ListPage(vm: MainViewModel, list: EngineList) {
-    val state by vm.client.state.collectAsState()
+private fun ListPage(vm: MainViewModel, list: EngineList, engine: com.melody.next.engine.Endpoint?) {
+    // Played by the engine it is on: another engine's list plays there.
+    val owner = vm.clientFor(engine) ?: vm.client
+    // What plays there, for the row it is.
+    val state by owner.state.collectAsState()
     val tones = LocalTones.current
     val entries = vm.listEntries
     val total = entries.sumOf { it.durationMs.coerceAtLeast(0) }
@@ -437,7 +462,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList) {
                 )
                 Row(Modifier.padding(top = 14.dp, bottom = 10.dp)) {
                     Button(
-                        onClick = { vm.client.playList(list.id) },
+                        onClick = { owner.playList(list.id) },
                         enabled = entries.isNotEmpty(),
                         contentPadding = PaddingValues(start = 16.dp, end = 22.dp),
                     ) {
@@ -456,7 +481,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList) {
                 durationMs = entry.durationMs,
                 playing = entry.path == state.path,
                 moving = state.playing,
-                onClick = { vm.client.playList(list.id, entry.entry) },
+                onClick = { owner.playList(list.id, entry.entry) },
                 onLongClick = null,
             )
         }

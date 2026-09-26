@@ -70,6 +70,34 @@ void request_stop(int) { stop_requested.store(true); }
     return std::filesystem::current_path();
 }
 
+// ADR-0234: who this engine is, across restarts -- minted once and kept in
+// its state directory, beside the library and lists it identifies. An id
+// that cannot be kept still names the engine for this run, and says so.
+[[nodiscard]] std::string stable_engine_id(const std::filesystem::path& state_directory) {
+    const auto path = state_directory / "engine-id";
+    if (std::ifstream in{path}; in) {
+        std::string text;
+        std::getline(in, text);
+        if (auto kept = trackknife::core::StableId::parse(text); kept) {
+            return kept->to_string();
+        }
+    }
+    auto minted = trackknife::core::StableId::random().to_string();
+    const auto partial = state_directory / "engine-id.partial";
+    std::error_code error;
+    if (std::ofstream out{partial, std::ios::trunc}; out && (out << minted << '\n') && out.flush()) {
+        out.close();
+        std::filesystem::rename(partial, path, error);
+    } else {
+        error = std::make_error_code(std::errc::io_error);
+    }
+    if (error) {
+        std::cerr << "melodyd: could not keep this engine's id in " << path.string()
+                  << "; clients will see a new engine next time\n";
+    }
+    return minted;
+}
+
 // One database: catalogue, ratings, history, lists and the operation journals
 // share a schema and a file. The name is the one Trackknife gave it.
 constexpr std::string_view database_filename{"lists.sqlite"};
@@ -364,8 +392,9 @@ int main(int argc, char** argv) {
     trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its
     // id, the one it is announced with, so a client that reaches it both
-    // here and over the network knows it is one engine.
-    const auto engine_id = trackknife::core::StableId::random().to_string();
+    // here and over the network knows it is one engine, and one that stores
+    // the id finds it again after a restart (ADR-0234).
+    const auto engine_id = stable_engine_id(state_directory);
     dispatcher.on("engine.info", [&engine_name, engine_id](const trackknife::protocol::Json&)
                                      -> trackknife::core::Result<trackknife::protocol::Json> {
         return trackknife::protocol::Json{

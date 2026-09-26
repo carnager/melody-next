@@ -257,6 +257,7 @@ class BenchMainWindowTest final : public QObject {
     void tabsAreGroupedByEngine();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
+    void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -2140,6 +2141,57 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
     window.persistNow(false);
     QTRY_VERIFY(!listed(id));
     QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    (*engine)->close();
+}
+
+// Deleted by another client while this window was writing it: the delete
+// was taken for this window's own write and ignored, the tab stayed, and its
+// next write made the list again -- on the phone, a list that would not go.
+void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto listed = [&engine](const std::string& id) {
+        auto all = (*engine)->call("list.all");
+        return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
+                                          [&id](const protocol::Json& list) {
+                                              return list.value("id", std::string{}) == id;
+                                          });
+    };
+    auto* scratch = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Scratch",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto id = scratch->document.id.to_string();
+    LocalTrackRow row;
+    row.raw_path = "/music/one.flac";
+    scratch->model->appendRows({row});
+    window.persistNow(false);
+    QTRY_VERIFY(listed(id));
+    QTRY_VERIFY(!window.list_sync_->busy());
+
+    // Changed here and being written; deleted there, and told so before the
+    // write has answered.
+    row.raw_path = "/music/two.flac";
+    scratch->model->appendRows({row});
+    window.persistNow(false);
+    QVERIFY(window.list_sync_->busy());
+    QVERIFY((*engine)->call("list.delete", protocol::Json{{"id", id}}).has_value());
+    window.list_sync_->listChanged(window.local_playback_, QString::fromStdString(id), 0, true);
+
+    QTRY_VERIFY(window.tabForDocument(QString::fromStdString(id)) == nullptr);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    window.persistNow(false);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(!listed(id));
     (*engine)->close();
 }
 

@@ -399,14 +399,21 @@ void EngineListSync::listChanged(const EnginePlayback* engine, const QString& id
         return;
     }
     auto& known = found->second;
-    // This window's own write: its answer brings the revision.
-    if (known.in_flight) {
-        return;
-    }
+    // Deleted elsewhere: that stands, even over a write of this window's on
+    // its way -- which, landing after the delete, would make the list again.
+    // So it is deleted again, after that write on the same connection.
     if (deleted) {
+        const bool writing = known.in_flight;
         waiting_.erase(found->first);
         known_.erase(found);
+        if (writing) {
+            remove(id.toStdString(), remote);
+        }
         emit removedElsewhere(id);
+        return;
+    }
+    // This window's own write: its answer brings the revision.
+    if (known.in_flight) {
         return;
     }
     if (known.revision && revision <= *known.revision) {

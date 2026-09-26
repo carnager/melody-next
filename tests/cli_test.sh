@@ -120,7 +120,18 @@ cli --json albums | python3 -c 'import json,sys; assert len(json.load(sys.stdin)
 # Quiet first, then play a track: the queue is replaced and it plays.
 cli volume 0 > /dev/null
 [ "$(cli volume)" = "0" ] || fail "the volume is set and read back"
+[ -z "$(cli current)" ] || fail "current prints nothing while nothing plays"
 cli play track alpha 2>/dev/null | grep -q "^playing: .*alpha" || fail "play track plays it"
+cli current | grep -q "alpha" || fail "current names the playing track"
+cli current --format '%playback_state%|%title%|$if(%rating%,rated,unrated)|%length%' \
+    | grep -qE "^playing\|[^|]*alpha[^|]*\|unrated\|0:[0-9]{2}$" \
+    || fail "current formats the track and where playback is, in tkfmt-1"
+[ "$(cli --format '$upper(x)\(%playback_state%\)' current)" = "X(playing)" ] \
+    || fail "--format comes before the command too, with escaped parentheses"
+if cli current --format '$nosuch(%title%)' 2>"${work}/format.txt"; then
+    fail "a format that does not compile is refused"
+fi
+grep -q "unknown format function" "${work}/format.txt" || fail "and says why"
 cli status | grep -q "queue 1" || fail "status shows the queue it replaced"
 cli status | grep -q " / ?" && fail "the library's duration travels with what is queued"
 

@@ -116,6 +116,8 @@ the network (`--engine NAME` if there are several).
 
 ```sh
 melody-cli status
+melody-cli current                    # "Artist - Title", or nothing when stopped
+melody-cli current --format '%artist% — %title% \(%playback_time%/%length%\)'
 melody-cli play album doors 1967      # every word must match
 melody-cli next track riders storm    # plays after the current track
 melody-cli lists                      # the engine's lists, saved and working
@@ -126,6 +128,13 @@ melody-cli love                       # on Last.fm, with the engine's account
 melody-cli --json watch               # a line each time something changes
 melody-cli watch --all                # the same, for whichever engine plays
 ```
+
+`current --format` takes a [tkfmt-1](title-formatting.md) expression, the
+language Trackknife formats with: `%artist%`, `%title%`, `%album%`, `%date%`,
+`%tracknumber%`, `%rating%` (absent when unrated), `%length%`, `%path%`, and
+`%playback_state%`, `%playback_time%`, `%playback_remaining%`. There are no
+optional `[...]` sections; `$if(%date%, \(%date%\))` does that, and a literal
+`(`, `)`, `,`, `$` or `%` is escaped with a backslash.
 
 There's a bar widget for DankMaterialShell built on these in
 [`packaging/dms/melody`](../packaging/dms/melody/), and

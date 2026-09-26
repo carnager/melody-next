@@ -7,6 +7,8 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/protocol/client.hpp"
+#include "trackknife/titleformat/compiler.hpp"
+#include "trackknife/titleformat/evaluator.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -15,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -42,15 +45,26 @@ struct Options final {
     // --keys: each listed line ends in a tab and its key, for a picker to
     // hand back to add/play/next/queue --key.
     bool keys{false};
+    // --format: how `current` prints the playing track, in tkfmt-1.
+    std::string format{"$if(%artist%,%artist% - )%title%"};
     std::vector<std::string> words;
 };
 
 void usage(std::ostream& out) {
     out << "usage: melody-cli [--server HOST:PORT] [--password PASS] [--engine NAME] [--json]\n"
-           "                  [--fields artist,album,title,date] [--keys]\n"
+           "                  [--fields artist,album,title,date] [--keys] [--format EXPR]\n"
            "                  COMMAND [ARGUMENTS]\n"
            "\n"
            "  status                      what plays, where and how far in\n"
+           "  current [--format EXPR]     the playing track on one line; nothing when\n"
+           "                              nothing plays. EXPR is tkfmt-1, as in\n"
+           "                              Trackknife (default \"$if(%artist%,%artist% - "
+           ")%title%\"):\n"
+           "                              %artist% %title% %album% %date% %tracknumber%\n"
+           "                              %rating% %length% %path% %playback_state%\n"
+           "                              %playback_time% %playback_remaining%; a field\n"
+           "                              not known is empty. Literal ( ) , $ % are\n"
+           "                              escaped with a backslash.\n"
            "  play | pause | toggle | stop | next | prev\n"
            "  seek [+|-]SECONDS           to a place, or forward and back\n"
            "  volume [[+|-]PERCENT]       say or set how loud\n"
@@ -109,7 +123,8 @@ void usage(std::ostream& out) {
 }
 
 [[nodiscard]] std::filesystem::path local_socket() {
-    if (const char* runtime = std::getenv("XDG_RUNTIME_DIR"); runtime != nullptr && *runtime != '\0') {
+    if (const char* runtime = std::getenv("XDG_RUNTIME_DIR");
+        runtime != nullptr && *runtime != '\0') {
         return std::filesystem::path{runtime} / "melodyd.sock";
     }
     return std::filesystem::temp_directory_path() / "melodyd.sock";
@@ -118,14 +133,16 @@ void usage(std::ostream& out) {
 // The engines on the network. Their answers come within a second, so that
 // long is waited for -- unless one is wanted by name, which ends the wait
 // as soon as it has answered.
-[[nodiscard]] std::vector<trackknife::discovery::Found> look_around(const std::string& wanted = {}) {
+[[nodiscard]] std::vector<trackknife::discovery::Found>
+look_around(const std::string& wanted = {}) {
     auto browser = trackknife::discovery::Browser::start();
     if (!browser) {
         return {};
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds{1'200};
     while (std::chrono::steady_clock::now() < deadline) {
-        if (!wanted.empty() && std::ranges::any_of((*browser)->found(), [&wanted](const auto& engine) {
+        if (!wanted.empty() &&
+            std::ranges::any_of((*browser)->found(), [&wanted](const auto& engine) {
                 return engine.instance == wanted;
             })) {
             break;
@@ -158,9 +175,8 @@ void usage(std::ostream& out) {
     }
     auto found = look_around(options.engine);
     if (!options.engine.empty()) {
-        std::erase_if(found, [&options](const auto& engine) {
-            return engine.instance != options.engine;
-        });
+        std::erase_if(found,
+                      [&options](const auto& engine) { return engine.instance != options.engine; });
     }
     if (found.empty()) {
         fail(options.engine.empty() ? "no engine here or on the network; name one with --server"
@@ -179,7 +195,8 @@ void usage(std::ostream& out) {
                          .token = options.password});
 }
 
-[[nodiscard]] Json call(Client& client, const std::string& method, const Json& params = Json::object()) {
+[[nodiscard]] Json call(Client& client, const std::string& method,
+                        const Json& params = Json::object()) {
     auto answer = client.call(method, params);
     if (!answer) {
         fail(method + ": " + answer.error().message);
@@ -196,7 +213,8 @@ void usage(std::ostream& out) {
     char text[32];
     if (hours > 0) {
         std::snprintf(text, sizeof(text), "%lld:%02lld:%02lld", static_cast<long long>(hours),
-                      static_cast<long long>(seconds / 60 % 60), static_cast<long long>(seconds % 60));
+                      static_cast<long long>(seconds / 60 % 60),
+                      static_cast<long long>(seconds % 60));
     } else {
         std::snprintf(text, sizeof(text), "%lld:%02lld", static_cast<long long>(seconds / 60),
                       static_cast<long long>(seconds % 60));
@@ -215,9 +233,8 @@ void usage(std::ostream& out) {
     return text;
 }
 
-// The file name in an encoded path (base64 of its bytes), for a track the
-// library does not know.
-[[nodiscard]] std::string decoded_name(const std::string& encoded) {
+// An encoded path (base64 of its bytes), as the bytes it names.
+[[nodiscard]] std::string decoded_path(const std::string& encoded) {
     static constexpr std::string_view alphabet{
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"};
     std::string raw;
@@ -235,7 +252,12 @@ void usage(std::ostream& out) {
             raw.push_back(static_cast<char>((buffer >> static_cast<unsigned>(bits)) & 0xFFU));
         }
     }
-    return std::filesystem::path{raw}.filename().string();
+    return raw;
+}
+
+// The file name in an encoded path, for a track the library does not know.
+[[nodiscard]] std::string decoded_name(const std::string& encoded) {
+    return std::filesystem::path{decoded_path(encoded)}.filename().string();
 }
 
 // The library's albums or tracks for these words -- every one, page by
@@ -249,7 +271,8 @@ void usage(std::ostream& out) {
     constexpr std::size_t page_size = 100'000;
     for (std::size_t offset = 0;;) {
         const auto wanted = limit == 0U ? page_size : std::min(page_size, limit - found.size());
-        Json params{{"kind", albums ? 1 : 2}, {"text", words}, {"offset", offset}, {"limit", wanted}};
+        Json params{
+            {"kind", albums ? 1 : 2}, {"text", words}, {"offset", offset}, {"limit", wanted}};
         if (newest) {
             params["newest_first"] = true;
         }
@@ -269,8 +292,7 @@ void usage(std::ostream& out) {
             }
         }
         offset += taken;
-        if (!page.value("more", false) || taken == 0U ||
-            (limit != 0U && found.size() >= limit)) {
+        if (!page.value("more", false) || taken == 0U || (limit != 0U && found.size() >= limit)) {
             return found;
         }
     }
@@ -278,8 +300,7 @@ void usage(std::ostream& out) {
 
 [[nodiscard]] std::string describe_found(const Json& entry, const bool album) {
     const auto artist = text_of(entry, "artist");
-    const auto name = album ? text_of(entry, "album")
-                            : first_text(entry, "title", "label");
+    const auto name = album ? text_of(entry, "album") : first_text(entry, "title", "label");
     const auto date = text_of(entry, "date");
     std::string text = artist + " — " + name;
     if (!album && !text_of(entry, "album").empty()) {
@@ -296,15 +317,13 @@ void usage(std::ostream& out) {
 [[nodiscard]] std::vector<Json> queue_entries(const std::vector<Json>& tracks) {
     std::vector<Json> entries;
     for (const auto& track : tracks) {
-        entries.push_back(Json{
-            {"entry", trackknife::core::StableId::random().to_string()},
-            {"path", text_of(track, "key")},
-            {"title", first_text(track, "title", "label")},
-            {"group",
-             Json{{"album_artist", text_of(track, "artist")},
-                  {"artist", text_of(track, "artist")},
-                  {"album", text_of(track, "album")},
-                  {"date", text_of(track, "date")}}}});
+        entries.push_back(Json{{"entry", trackknife::core::StableId::random().to_string()},
+                               {"path", text_of(track, "key")},
+                               {"title", first_text(track, "title", "label")},
+                               {"group", Json{{"album_artist", text_of(track, "artist")},
+                                              {"artist", text_of(track, "artist")},
+                                              {"album", text_of(track, "album")},
+                                              {"date", text_of(track, "date")}}}});
         // Known to the library, so the engine can show how long it is.
         if (const auto duration = track.value("duration_ms", std::int64_t{-1}); duration >= 0) {
             entries.back()["duration_ms"] = duration;
@@ -336,8 +355,8 @@ void usage(std::ostream& out) {
             if (artists.empty()) {
                 fail("the library has no albums");
             }
-            const auto albums =
-                random(Json{{"kind", 1}, {"artist", text_of(artists.front(), "key")}, {"limit", 1}});
+            const auto albums = random(
+                Json{{"kind", 1}, {"artist", text_of(artists.front(), "key")}, {"limit", 1}});
             if (albums.empty()) {
                 fail("no album of " + text_of(artists.front(), "label") + " was found");
             }
@@ -387,12 +406,9 @@ void usage(std::ostream& out) {
     // that the words happen to find.
     if (album && words.starts_with("--key ")) {
         const auto key = words.substr(6);
-        const auto page = call(client, "catalogue.query",
-                               Json{{"kind", 2},
-                                    {"text", ""},
-                                    {"album_key", key},
-                                    {"offset", 0},
-                                    {"limit", 5'000}});
+        const auto page = call(
+            client, "catalogue.query",
+            Json{{"kind", 2}, {"text", ""}, {"album_key", key}, {"offset", 0}, {"limit", 5'000}});
         auto tracks = page.value("entries", std::vector<Json>{});
         if (tracks.empty()) {
             fail("no album has the key " + key);
@@ -419,7 +435,6 @@ void usage(std::ostream& out) {
     }
     return queue_entries(tracks);
 }
-
 
 // What plays, as a script wants it: its tags from the engine's library,
 // which read them from the file -- the queue entry says only what the
@@ -457,6 +472,11 @@ void usage(std::ostream& out) {
     if (text_of(track, "title").empty()) {
         track["title"] = decoded_name(path);
     }
+    if (!known.empty()) {
+        if (const auto number = known.front().value("track_number", 0); number > 0) {
+            track["track_number"] = number;
+        }
+    }
     // Only a track in the library has a rating to show or set.
     if (!known.empty() && !text_of(known.front(), "rating_hash").empty()) {
         track["rating_hash"] = text_of(known.front(), "rating_hash");
@@ -478,6 +498,53 @@ void usage(std::ostream& out) {
     return text;
 }
 
+// What `current` formats: the playing track's tags, and where playback is
+// (docs/title-formatting.md, "Now playing"). An empty value is an absent
+// one, so $if and $if2 fall back over it.
+class NowPlaying final : public trackknife::titleformat::EvaluationContext {
+  public:
+    NowPlaying(const Json& state, const Json& track) {
+        for (const auto* key : {"artist", "title", "album", "date"}) {
+            fields_[key] = text_of(track, key);
+        }
+        if (const auto number = track.value("track_number", 0); number > 0) {
+            fields_["tracknumber"] = std::to_string(number);
+        }
+        // Unrated is no rating, not a rating of nought.
+        if (const auto rating = track.value("rating", 0); rating > 0) {
+            fields_["rating"] = std::to_string(rating);
+        }
+        fields_["path"] = decoded_path(text_of(track, "path"));
+        const auto position = state.value("position_ms", std::int64_t{0});
+        const auto duration = state.value("duration_ms", std::int64_t{-1});
+        fields_["playback_state"] = state.value("status", std::string{"stopped"});
+        fields_["playback_time"] = clock(position);
+        if (duration >= 0) {
+            fields_["length"] = clock(duration);
+            fields_["playback_remaining"] = clock(std::max<std::int64_t>(0, duration - position));
+        }
+    }
+
+    [[nodiscard]] trackknife::titleformat::FormatContextKind kind() const noexcept override {
+        return trackknife::titleformat::FormatContextKind::now_playing;
+    }
+    [[nodiscard]] std::optional<std::string>
+    resolveField(const std::string_view name) const override {
+        std::string folded{name};
+        std::ranges::transform(folded, folded.begin(), [](const unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        const auto found = fields_.find(folded);
+        if (found == fields_.end() || found->second.empty()) {
+            return std::nullopt;
+        }
+        return found->second;
+    }
+
+  private:
+    std::map<std::string, std::string> fields_;
+};
+
 void print_state(const Json& state, Client& client) {
     const auto status = state.value("status", std::string{"stopped"});
     const auto track = now_playing(client, state);
@@ -485,8 +552,8 @@ void print_state(const Json& state, Client& client) {
     std::cout << status << ": " << what << "\n";
     std::cout << clock(state.value("position_ms", std::int64_t{0})) << " / "
               << clock(state.value("duration_ms", std::int64_t{-1})) << " · volume "
-              << state.value("volume_percent", 0) << "% · queue "
-              << state.value("queue_size", 0) << " · up next " << state.value("requests", 0);
+              << state.value("volume_percent", 0) << "% · queue " << state.value("queue_size", 0)
+              << " · up next " << state.value("requests", 0);
     const auto outputs = call(client, "outputs.list").value("outputs", std::vector<Json>{});
     for (const auto& output : outputs) {
         if (output.value("selected", false)) {
@@ -540,8 +607,7 @@ int watch_all(const Options& options) {
                             const std::string& announced_id) {
         {
             const std::scoped_lock held{lock};
-            if (!announced_id.empty() &&
-                std::ranges::any_of(engines, [&](const auto& known) {
+            if (!announced_id.empty() && std::ranges::any_of(engines, [&](const auto& known) {
                     return known->id == announced_id && !known->gone;
                 })) {
                 return;
@@ -590,9 +656,9 @@ int watch_all(const Options& options) {
         if (std::ranges::any_of(engines, [&](const auto& known) {
                 // By id where both say one; an engine too old to say is
                 // known by its name.
-                return !known->gone && (!engine->id.empty() && !known->id.empty()
-                                            ? known->id == engine->id
-                                            : known->name == engine->name);
+                return !known->gone &&
+                       (!engine->id.empty() && !known->id.empty() ? known->id == engine->id
+                                                                  : known->name == engine->name);
             })) {
             engine->client->close();
             return;
@@ -626,12 +692,11 @@ int watch_all(const Options& options) {
                    {});
         }
     }
-    auto browser = options.servers.empty()
-                       ? trackknife::discovery::Browser::start()
-                       : std::unexpected(trackknife::core::Error{
-                             .code = trackknife::core::ErrorCode::unsupported,
-                             .message = "engines named",
-                             .context = {}});
+    auto browser = options.servers.empty() ? trackknife::discovery::Browser::start()
+                                           : std::unexpected(trackknife::core::Error{
+                                                 .code = trackknife::core::ErrorCode::unsupported,
+                                                 .message = "engines named",
+                                                 .context = {}});
     const auto look = [&] {
         if (!options.servers.empty()) {
             named();
@@ -665,14 +730,16 @@ int watch_all(const Options& options) {
         {
             std::unique_lock held{lock};
             woken.wait_until(held, next_look, [&] {
-                return std::ranges::any_of(engines,
-                                           [](const auto& engine) { return engine->fresh || engine->gone; });
+                return std::ranges::any_of(
+                    engines, [](const auto& engine) { return engine->fresh || engine->gone; });
             });
             std::erase_if(engines, [](const auto& engine) { return engine->gone; });
             // Playing beats paused beats stopped; then the latest.
             const auto rank = [](const Watched& engine) {
                 const auto status = text_of(engine.state, "status");
-                return std::tuple{status == "playing" ? 2 : !text_of(engine.state, "entry").empty() ? 1 : 0,
+                return std::tuple{status == "playing"                       ? 2
+                                  : !text_of(engine.state, "entry").empty() ? 1
+                                                                            : 0,
                                   status == "playing" ? engine.started : engine.changed};
             };
             for (const auto& engine : engines) {
@@ -721,20 +788,19 @@ int run(const Options& options) {
         if (options.json) {
             auto listed = Json::array();
             for (const auto& engine : found) {
-                listed.push_back(Json{{"name", engine.instance},
-                                      {"address", engine.address},
-                                      {"port", engine.port},
-                                      {"password", engine.txt.contains("auth") &&
-                                                       engine.txt.at("auth") == "1"}});
+                listed.push_back(Json{
+                    {"name", engine.instance},
+                    {"address", engine.address},
+                    {"port", engine.port},
+                    {"password", engine.txt.contains("auth") && engine.txt.at("auth") == "1"}});
             }
             std::cout << listed.dump() << "\n";
             return EXIT_SUCCESS;
         }
         for (const auto& engine : found) {
             std::cout << engine.instance << "\t" << engine.address << ":" << engine.port
-                      << (engine.txt.contains("auth") && engine.txt.at("auth") == "1"
-                              ? "\tpassword"
-                              : "")
+                      << (engine.txt.contains("auth") && engine.txt.at("auth") == "1" ? "\tpassword"
+                                                                                      : "")
                       << "\n";
         }
         return found.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
@@ -782,7 +848,7 @@ int run(const Options& options) {
     };
     // A skip is done when another entry plays, whatever the status was.
     const auto moved_on = [&client, &failed, &playing_or_fail](Json answer,
-                                                                 const std::string& before) {
+                                                               const std::string& before) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
         while ((text_of(answer, "entry") == before || text_of(answer, "status") != "playing") &&
                !failed(answer) && std::chrono::steady_clock::now() < deadline) {
@@ -794,6 +860,33 @@ int run(const Options& options) {
 
     if (command == "status") {
         show(state());
+    } else if (command == "current") {
+        if (words.size() > 1U) {
+            fail("current takes no words; its format is given with --format");
+        }
+        auto compiled = trackknife::titleformat::compile(
+            options.format, {.context = trackknife::titleformat::FormatContextKind::now_playing,
+                             .dialect = {},
+                             .parse_options = {}});
+        if (!compiled.isValid()) {
+            const auto message = !compiled.parse_diagnostics.empty()
+                                     ? compiled.parse_diagnostics.front().message
+                                     : compiled.diagnostics.front().message;
+            fail("--format: " + message);
+        }
+        const auto current = state();
+        const auto track = now_playing(*client, current);
+        // Nothing playing is nothing to print, as mpc does: a status bar
+        // shows an empty line, a script tests for it.
+        if (track.is_null()) {
+            return EXIT_SUCCESS;
+        }
+        const auto line =
+            trackknife::titleformat::evaluate(*compiled.program, NowPlaying{current, track});
+        if (!line) {
+            fail("--format: " + line.error().message);
+        }
+        std::cout << line->text << "\n";
     } else if ((command == "play" || command == "next") && words.size() == 1U) {
         // Plain play resumes; plain next skips.
         const auto current = state();
@@ -801,11 +894,11 @@ int run(const Options& options) {
             show(moved_on(call(*client, "playback.next"), text_of(current, "entry")));
         } else if (text_of(current, "status") == "paused") {
             show(started(call(*client, "playback.resume")));
-        } else if (text_of(current, "status") == "stopped" &&
-                   current.value("queue_size", 0) > 0) {
-            const auto queue = call(*client, "playback.queue").value("entries", std::vector<Json>{});
-            show(started(call(*client, "playback.play",
-                              Json{{"entry", text_of(queue.front(), "entry")}})));
+        } else if (text_of(current, "status") == "stopped" && current.value("queue_size", 0) > 0) {
+            const auto queue =
+                call(*client, "playback.queue").value("entries", std::vector<Json>{});
+            show(started(
+                call(*client, "playback.play", Json{{"entry", text_of(queue.front(), "entry")}})));
         } else {
             show(current);
         }
@@ -830,7 +923,8 @@ int run(const Options& options) {
         if (amount.front() == '+' || amount.front() == '-') {
             target = state().value("position_ms", std::int64_t{0}) + target;
         }
-        show(call(*client, "playback.seek", Json{{"position_ms", std::max<std::int64_t>(0, target)}}));
+        show(call(*client, "playback.seek",
+                  Json{{"position_ms", std::max<std::int64_t>(0, target)}}));
     } else if (command == "volume") {
         if (words.size() == 1U) {
             const auto current = state();
@@ -901,8 +995,7 @@ int run(const Options& options) {
         }
         std::cout << lines;
         return lists.empty() ? EXIT_FAILURE : EXIT_SUCCESS;
-    } else if ((command == "play" || command == "add" || command == "next" ||
-                command == "queue") &&
+    } else if ((command == "play" || command == "add" || command == "next" || command == "queue") &&
                words.size() >= 2U) {
         std::string chosen;
         auto entries = entries_for(*client, words[1], joined(words, 2), chosen);
@@ -922,7 +1015,8 @@ int run(const Options& options) {
         } else {
             // Up Next: handed to the engine to hold, then asked for in order.
             static_cast<void>(call(*client, "playback.enqueue", Json{{"entries", entries}}));
-            auto requests = call(*client, "playback.requests").value("entries", std::vector<Json>{});
+            auto requests =
+                call(*client, "playback.requests").value("entries", std::vector<Json>{});
             std::vector<Json> asked;
             for (const auto& entry : entries) {
                 asked.push_back(text_of(entry, "entry"));
@@ -940,8 +1034,9 @@ int run(const Options& options) {
         // Everything that matches; only latest is a count.
         std::size_t limit = 0;
         if (command == "latest") {
-            limit = words.size() > 1U ? static_cast<std::size_t>(std::max(1, std::atoi(words[1].c_str())))
-                                      : 20U;
+            limit = words.size() > 1U
+                        ? static_cast<std::size_t>(std::max(1, std::atoi(words[1].c_str())))
+                        : 20U;
         }
         // Lines are only ever artist, name, album and year: only those are
         // asked for, which for a whole library is most of the time saved.
@@ -981,8 +1076,7 @@ int run(const Options& options) {
             return EXIT_SUCCESS;
         }
         for (const auto& output : outputs) {
-            std::cout << (output.value("selected", false) ? "* " : "  ")
-                      << text_of(output, "name")
+            std::cout << (output.value("selected", false) ? "* " : "  ") << text_of(output, "name")
                       << (output.value("online", true) ? "" : " (offline)") << "\n";
         }
     } else if (command == "output") {
@@ -992,8 +1086,7 @@ int run(const Options& options) {
         }
         const auto outputs = call(*client, "outputs.list").value("outputs", std::vector<Json>{});
         const auto found = std::ranges::find_if(outputs, [&name](const Json& output) {
-            return text_of(output, "name") == name ||
-                   text_of(output, "id") == name;
+            return text_of(output, "name") == name || text_of(output, "id") == name;
         });
         if (found == outputs.end()) {
             fail("no output called \"" + name + "\"; see melody-cli outputs");
@@ -1095,8 +1188,9 @@ int run(const Options& options) {
             fail("rate wants stars from 0 to 5");
         }
         const auto stars = given.front() - '0';
-        static_cast<void>(call(*client, "catalogue.set_rating",
-                               Json{{"hash", text_of(track, "rating_hash")}, {"rating", stars * 2}}));
+        static_cast<void>(
+            call(*client, "catalogue.set_rating",
+                 Json{{"hash", text_of(track, "rating_hash")}, {"rating", stars * 2}}));
         if (!options.json) {
             std::cout << "rated " << stars << (stars == 1 ? " star: " : " stars: ")
                       << describe_track(track) << "\n";
@@ -1143,7 +1237,10 @@ int main(int argc, char** argv) {
             }
             return argv[++index];
         };
-        if (!options.words.empty()) {
+        // Anywhere on the line: `current --format ...` reads naturally.
+        if (argument == "--format") {
+            options.format = value();
+        } else if (!options.words.empty()) {
             options.words.emplace_back(argument);
         } else if (argument == "--server") {
             options.server = value();

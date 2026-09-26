@@ -5630,4 +5630,77 @@ core::Result<bool> ListRepository::delete_engine_list(const core::StableId& id,
     });
 }
 
+core::Result<std::vector<EngineListSummary>>
+ListRepository::relocate_engine_list_paths(
+    const std::vector<std::pair<std::string, std::string>>& moves, const std::int64_t now_ms) {
+    if (moves.size() > maximum_source_relocations) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::limit_exceeded,
+                                           .message = "Too many moves at once",
+                                           .context = {}});
+    }
+    auto* database = implementation_->database;
+    return in_transaction(database, [&]() -> core::Result<std::vector<EngineListSummary>> {
+        auto touched = prepare(database, "SELECT DISTINCT list_id FROM engine_list_items "
+                                         "WHERE raw_path=?1");
+        auto update = prepare(database, "UPDATE engine_list_items SET raw_path=?2 "
+                                        "WHERE raw_path=?1");
+        if (!touched || !update) {
+            return std::unexpected(database_error(database, "Could not relocate list entries"));
+        }
+        std::unordered_set<std::string> changed;
+        for (const auto& [from, to] : moves) {
+            if (from.empty() || to.empty() || from == to) {
+                continue;
+            }
+            if (!bind_blob(touched->get(), 1, from)) {
+                return std::unexpected(database_error(database, "Could not relocate list entries"));
+            }
+            int step = SQLITE_ROW;
+            while ((step = sqlite3_step(touched->get())) == SQLITE_ROW) {
+                changed.insert(column_text(touched->get(), 0));
+            }
+            sqlite3_reset(touched->get());
+            sqlite3_clear_bindings(touched->get());
+            if (step != SQLITE_DONE) {
+                return std::unexpected(database_error(database, "Could not relocate list entries"));
+            }
+            if (!bind_blob(update->get(), 1, from) || !bind_blob(update->get(), 2, to)) {
+                return std::unexpected(database_error(database, "Could not relocate list entries"));
+            }
+            if (auto done = step_done(database, update->get(), "Could not relocate list entries");
+                !done) {
+                return std::unexpected(std::move(done.error()));
+            }
+        }
+        std::vector<EngineListSummary> summaries;
+        auto bump = prepare(database, "UPDATE engine_lists SET revision=revision+1, "
+                                      "modified_ms=?2 WHERE id=?1");
+        if (!bump) {
+            return std::unexpected(database_error(database, "Could not relocate list entries"));
+        }
+        for (const auto& id : changed) {
+            if (!bind_text(bump->get(), 1, id) ||
+                sqlite3_bind_int64(bump->get(), 2, now_ms) != SQLITE_OK) {
+                return std::unexpected(database_error(database, "Could not relocate list entries"));
+            }
+            if (auto done = step_done(database, bump->get(), "Could not relocate list entries");
+                !done) {
+                return std::unexpected(std::move(done.error()));
+            }
+            auto parsed = core::StableId::parse(id);
+            if (!parsed) {
+                continue;
+            }
+            auto summary = select_engine_list_summaries(database, *parsed);
+            if (!summary) {
+                return std::unexpected(std::move(summary.error()));
+            }
+            for (auto& one : *summary) {
+                summaries.push_back(std::move(one));
+            }
+        }
+        return summaries;
+    });
+}
+
 } // namespace trackknife::persistence

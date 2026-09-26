@@ -367,6 +367,12 @@ class ListRepository final {
     // False when there was no such list.
     [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
                                                      std::optional<std::uint64_t> expected_revision);
+    // ADR-0233: files moved or renamed. Every entry of every list naming a
+    // `from` names its `to` instead, in one transaction; each list changed
+    // gets a new revision, and is returned.
+    [[nodiscard]] core::Result<std::vector<EngineListSummary>>
+    relocate_engine_list_paths(const std::vector<std::pair<std::string, std::string>>& moves,
+                               std::int64_t now_ms);
 
   private:
     struct Impl;

@@ -118,10 +118,12 @@ void BenchMainWindow::initializePersistence() {
             [this](const QString& id, const quint64 revision, const bool deleted) {
                 list_sync_->listChanged(local_playback_, id, revision, deleted);
             });
+    loadPendingRelocations();
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
         // A new engine, or this one restarted: compared again, and given its
-        // lists.
+        // lists -- and any moves it missed.
         list_sync_->reconnected(local_playback_);
+        flushEngineRelocations();
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
         rememberEngineState(local_playback_);
@@ -313,8 +315,10 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
         openLocalPaths(std::move(pending));
     }
     // ADR-0233: once saved, the restored lists are on their engines too --
-    // which, the first time, is moving them there.
+    // which, the first time, is moving them there. And moves an engine missed
+    // while this window was closed are handed to it.
     schedulePersist();
+    flushEngineRelocations();
 }
 
 void BenchMainWindow::schedulePersist() {

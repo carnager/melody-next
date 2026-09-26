@@ -324,6 +324,35 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         return Json{{"deleted", *deleted}};
     });
 
+    // Files moved or renamed -- by Trackknife, which does the file work --
+    // followed in every list here: {"moves": [{"from", "to"}]}, encoded paths.
+    dispatcher.on("list.relocate", [&workspace, changed](const Json& params) -> core::Result<Json> {
+        const auto moves = params.find("moves");
+        if (moves == params.end() || !moves->is_array()) {
+            return std::unexpected(bad_params("moves must be a list", "moves"));
+        }
+        std::vector<std::pair<std::string, std::string>> decoded;
+        decoded.reserve(moves->size());
+        for (const auto& move : *moves) {
+            auto from = protocol::decode_raw_path(move.value("from", std::string{}));
+            auto to = protocol::decode_raw_path(move.value("to", std::string{}));
+            if (!from || !to) {
+                return std::unexpected(bad_params("each move needs encoded from and to", "moves"));
+            }
+            decoded.emplace_back(std::move(*from), std::move(*to));
+        }
+        auto relocated = workspace.relocate_engine_list_paths(decoded, now_ms());
+        if (!relocated) {
+            return std::unexpected(std::move(relocated.error()));
+        }
+        auto ids = Json::array();
+        for (const auto& summary : *relocated) {
+            changed(&summary, summary.id);
+            ids.push_back(summary.id.to_string());
+        }
+        return Json{{"changed", std::move(ids)}};
+    });
+
     // For the phone and the CLI, which hold no list of their own: the list
     // becomes the queue and plays, from its first entry or the one named.
     dispatcher.on("list.play", [&workspace, &player](const Json& params) -> core::Result<Json> {

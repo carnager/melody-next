@@ -202,6 +202,13 @@ core::Result<bool> Workspace::delete_engine_list(const core::StableId& id,
     return repository_.delete_engine_list(id, expected_revision);
 }
 
+core::Result<std::vector<persistence::EngineListSummary>>
+Workspace::relocate_engine_list_paths(const std::vector<std::pair<std::string, std::string>>& moves,
+                                      const std::int64_t now_ms) {
+    const std::lock_guard guard{*mutex_};
+    return repository_.relocate_engine_list_paths(moves, now_ms);
+}
+
 core::Result<std::vector<persistence::SavedSearch>> Workspace::load_saved_searches() const {
     const std::lock_guard guard{*mutex_};
     return repository_.load_saved_searches();

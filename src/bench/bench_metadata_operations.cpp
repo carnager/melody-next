@@ -333,6 +333,130 @@ void BenchMainWindow::followRemoteRetag(const operations::MetadataCommitResult& 
     queueRemoteRefresh(known->second);
 }
 
+namespace {
+
+constexpr auto pending_relocations_key = "lists/pending-relocations";
+
+} // namespace
+
+void BenchMainWindow::queueEngineRelocation(const std::string& from, const std::string& to) {
+    if (from.empty() || to.empty() || from == to) {
+        return;
+    }
+    pending_relocations_.push_back(PendingRelocation{.from = from, .to = to});
+    storePendingRelocations();
+    flushEngineRelocations();
+}
+
+void BenchMainWindow::storePendingRelocations() const {
+    auto pending = protocol::Json::array();
+    for (const auto& move : pending_relocations_) {
+        pending.push_back(protocol::Json{{"from", protocol::encode_raw_path(move.from)},
+                                         {"to", protocol::encode_raw_path(move.to)},
+                                         {"local", move.local_done},
+                                         {"remote", move.remote_done}});
+    }
+    QSettings settings;
+    if (pending_relocations_.empty()) {
+        settings.remove(QLatin1String(pending_relocations_key));
+    } else {
+        settings.setValue(QLatin1String(pending_relocations_key),
+                          QString::fromStdString(pending.dump()));
+    }
+}
+
+void BenchMainWindow::loadPendingRelocations() {
+    const auto stored =
+        QSettings{}.value(QLatin1String(pending_relocations_key)).toString().toStdString();
+    const auto parsed = protocol::Json::parse(stored, nullptr, false);
+    if (!parsed.is_array()) {
+        return;
+    }
+    for (const auto& move : parsed) {
+        auto from = protocol::decode_raw_path(move.value("from", std::string{}));
+        auto to = protocol::decode_raw_path(move.value("to", std::string{}));
+        if (from && to) {
+            pending_relocations_.push_back(PendingRelocation{.from = std::move(*from),
+                                                             .to = std::move(*to),
+                                                             .local_done = move.value("local", false),
+                                                             .remote_done = move.value("remote", false)});
+        }
+    }
+}
+
+void BenchMainWindow::flushEngineRelocations() {
+    // What the remote engine calls a path here: through the mount, or the
+    // same when the music is at the same place on both. A file outside the
+    // mount is not the remote's, and there is nothing to tell it.
+    const auto mount = RemoteMount::configured();
+    const auto remote_path = [&mount](const std::string& path) -> std::optional<std::string> {
+        if (mount.local_folder.empty()) {
+            return path;
+        }
+        if (!path_within(path, mount.local_folder)) {
+            return std::nullopt;
+        }
+        return mount.remote_folder + path.substr(mount.local_folder.size());
+    };
+    const bool has_remote =
+        remote_catalogue_source_ != nullptr && remote_catalogue_source_->configured();
+    for (auto& move : pending_relocations_) {
+        if (!has_remote || (!remote_path(move.from) && !remote_path(move.to))) {
+            move.remote_done = true;
+        }
+    }
+    const auto send = [this](EnginePlayback* engine, const bool remote, auto path_for) {
+        auto& relocating = remote ? remote_relocating_ : local_relocating_;
+        if (engine == nullptr || !engine->active() || relocating) {
+            return;
+        }
+        auto moves = protocol::Json::array();
+        std::vector<std::pair<std::string, std::string>> sent;
+        for (const auto& move : pending_relocations_) {
+            if (remote ? move.remote_done : move.local_done) {
+                continue;
+            }
+            const auto from = path_for(move.from);
+            const auto to = path_for(move.to);
+            if (!from || !to) {
+                continue;
+            }
+            moves.push_back(protocol::Json{{"from", protocol::encode_raw_path(*from)},
+                                           {"to", protocol::encode_raw_path(*to)}});
+            sent.emplace_back(move.from, move.to);
+        }
+        if (sent.empty()) {
+            return;
+        }
+        relocating = true;
+        engine->request(
+            QStringLiteral("list.relocate"), protocol::Json{{"moves", std::move(moves)}},
+            [this, remote, sent](const core::Result<protocol::Json>& answer) {
+                (remote ? remote_relocating_ : local_relocating_) = false;
+                // An engine that predates lists has nothing to follow: done.
+                if (!answer && answer.error().code != core::ErrorCode::unsupported) {
+                    return;
+                }
+                for (auto& move : pending_relocations_) {
+                    if (std::ranges::find(sent, std::pair{move.from, move.to}) != sent.end()) {
+                        (remote ? move.remote_done : move.local_done) = true;
+                    }
+                }
+                std::erase_if(pending_relocations_, [](const PendingRelocation& move) {
+                    return move.local_done && move.remote_done;
+                });
+                storePendingRelocations();
+                flushEngineRelocations();
+            });
+    };
+    std::erase_if(pending_relocations_, [](const PendingRelocation& move) {
+        return move.local_done && move.remote_done;
+    });
+    storePendingRelocations();
+    send(local_playback_, false, [](const std::string& path) { return std::optional{path}; });
+    send(remote_playback_, true, remote_path);
+}
+
 void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitResult& result) {
     const auto known = remote_file_work_.find(result.source_raw_path);
     if (known == remote_file_work_.end()) {
@@ -1264,6 +1388,7 @@ void BenchMainWindow::applyCommittedLoudnessSidecar(
 
 void BenchMainWindow::applyCommittedRelocation(
     const operations::FilePublicationCommitResult& result) {
+    queueEngineRelocation(result.source_raw_path, result.target_raw_path);
     followRemoteMove(result);
     if (local_library_ != nullptr) {
         local_library_->refreshLibrary();

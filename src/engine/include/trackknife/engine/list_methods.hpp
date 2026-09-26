@@ -17,7 +17,8 @@ class Workspace;
 //   list.save {id?, name, kind?, items, revision?} -> summary
 //   list.rename {id, name, revision?}          -> summary
 //   list.delete {id, revision?}                -> {"deleted": bool}
-//   list.play {id, entry?}                     -> the playback state
+//   list.play {id, entry?}                     -> {"playing": entry}
+//   list.relocate {moves: [{from, to}]}        -> {"changed": [id]}
 //   event list.changed {id, revision?, deleted}
 //
 // A summary is {id, name, kind: "working"|"saved", revision, tracks,

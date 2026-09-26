@@ -298,6 +298,20 @@ class BenchMainWindow final : public QMainWindow {
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
     void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
     void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
+    // ADR-0233: a file moved here is followed in the engines' lists too --
+    // those this window has open and those it has not. Kept in Settings until
+    // each engine has taken it, so one that is away catches up when it is
+    // back.
+    struct PendingRelocation {
+        std::string from;
+        std::string to;
+        bool local_done{false};
+        bool remote_done{false};
+    };
+    void queueEngineRelocation(const std::string& from, const std::string& to);
+    void flushEngineRelocations();
+    void storePendingRelocations() const;
+    void loadPendingRelocations();
     void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
                                            const metadata::MetadataDocument& document);
     void removeSelectedRows();
@@ -607,6 +621,9 @@ class BenchMainWindow final : public QMainWindow {
     EnginePlayback* remote_playback_{nullptr};
     // ADR-0233: this window's lists, on the engines that own their files.
     EngineListSync* list_sync_{nullptr};
+    std::vector<PendingRelocation> pending_relocations_;
+    bool local_relocating_{false};
+    bool remote_relocating_{false};
     struct SeenEngine {
         QString status;
         QString entry;

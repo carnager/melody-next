@@ -58,8 +58,10 @@ void BenchMainWindow::connectRemoteEngine() {
                 [this](const QString& id, const quint64 revision, const bool deleted) {
                     list_sync_->listChanged(remote_playback_, id, revision, deleted);
                 });
-        connect(remote_playback_, &EnginePlayback::connected, this,
-                [this] { list_sync_->reconnected(remote_playback_); });
+        connect(remote_playback_, &EnginePlayback::connected, this, [this] {
+            list_sync_->reconnected(remote_playback_);
+            flushEngineRelocations();
+        });
     }
     connect(remote_playback_, &EnginePlayback::changed, this, [this] {
         followIfStartedElsewhere(remote_playback_);

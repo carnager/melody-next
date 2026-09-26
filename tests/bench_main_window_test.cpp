@@ -250,6 +250,7 @@ class BenchMainWindowTest final : public QObject {
     void anotherClientsListChangesReachTheWindow();
     void aListChangedWhileClosedIsTakenUpOnOpening();
     void aListFromElsewhereOpensAsATab();
+    void aMoveIsFollowedInListsNotOpenHere();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1825,6 +1826,65 @@ void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
     QTest::qWait(300);
     QTRY_VERIFY(!window.list_sync_->busy());
     QCOMPARE((*other)->call("list.get", protocol::Json{{"id", id}})->value("revision", 0), 1);
+    (*other)->close();
+}
+
+// ADR-0233: a file moved from this window is followed in every list of its
+// engine -- one open in no window included -- and an engine that is away at
+// the time is told when it is back.
+void BenchMainWindowTest::aMoveIsFollowedInListsNotOpenHere() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    const auto connect_other = [this] {
+        return protocol::Client::connect(protocol::Endpoint{
+            .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    };
+    auto other = connect_other();
+    QVERIFY(other.has_value());
+    auto made = (*other)->call(
+        "list.save", protocol::Json{{"name", "Not open here"},
+                                    {"kind", "saved"},
+                                    {"items", listItems({"/music/moving/a.flac",
+                                                         "/music/moving/b.flac"})}});
+    QVERIFY(made.has_value());
+    const auto id = made->value("id", std::string{});
+    const auto paths = [&other, &id] {
+        std::vector<std::string> found;
+        auto got = (*other)->call("list.get", protocol::Json{{"id", id}});
+        for (const auto& item : got ? got->value("items", protocol::Json::array())
+                                    : protocol::Json::array()) {
+            found.push_back(*protocol::decode_raw_path(item.value("path", std::string{})));
+        }
+        return found;
+    };
+    const auto moved = [](const std::string& from, const std::string& to) {
+        operations::FilePublicationCommitResult result;
+        result.journal_id = core::StableId::random();
+        result.source_raw_path = from;
+        result.target_raw_path = to;
+        return result;
+    };
+
+    window.applyCommittedRelocation(moved("/music/moving/a.flac", "/music/moved/a.flac"));
+    QTRY_COMPARE(paths(),
+                 (std::vector<std::string>{"/music/moved/a.flac", "/music/moving/b.flac"}));
+    QTRY_VERIFY(!QSettings{}.contains(QStringLiteral("lists/pending-relocations")));
+
+    // Away during the move: kept, and handed over when it is back.
+    (*other)->close();
+    engine_.stop();
+    QTRY_VERIFY(!window.local_playback_->active());
+    window.applyCommittedRelocation(moved("/music/moving/b.flac", "/music/moved/b.flac"));
+    QVERIFY(QSettings{}.contains(QStringLiteral("lists/pending-relocations")));
+    QVERIFY2(engine_.start(), engine_.log().constData());
+    QTRY_VERIFY_WITH_TIMEOUT(window.local_playback_->active(), 10'000);
+    other = connect_other();
+    QVERIFY(other.has_value());
+    QTRY_COMPARE_WITH_TIMEOUT(
+        paths(), (std::vector<std::string>{"/music/moved/a.flac", "/music/moved/b.flac"}), 10'000);
+    QTRY_VERIFY(!QSettings{}.contains(QStringLiteral("lists/pending-relocations")));
     (*other)->close();
 }
 

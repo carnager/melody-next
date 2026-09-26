@@ -151,6 +151,33 @@ check(a.call("list.delete", {"id": list_id})["result"]["deleted"] is False,
       "deleting it again is no error")
 check(a.call("list.save", {"name": "", "items": []})["error"]["code"] == "invalid_argument",
       "a list needs a name")
+
+# Files moved: every list naming them follows, in one go, and says so.
+one = a.call("list.save", {"name": "One", "kind": "saved",
+                           "items": [{"path": encode(f"{work}/one.wav")},
+                                     {"path": encode(f"{work}/two.wav")}]})["result"]
+other = a.call("list.save", {"name": "Other", "kind": "saved",
+                             "items": [{"path": encode(f"{work}/one.wav")}]})["result"]
+untouched = a.call("list.save", {"name": "Untouched", "kind": "saved",
+                                 "items": [{"path": encode(f"{work}/two.wav")}]})["result"]
+moved = a.call("list.relocate", {"moves": [{"from": encode(f"{work}/one.wav"),
+                                            "to": encode(f"{work}/moved/one.wav")}]})["result"]
+check(sorted(moved["changed"]) == sorted([one["id"], other["id"]]),
+      "the lists naming the file are the ones changed")
+paths = [base64.b64decode(i["path"]).decode()
+         for i in a.call("list.get", {"id": one["id"]})["result"]["items"]]
+check(paths == [f"{work}/moved/one.wav", f"{work}/two.wav"], "the entry names the new path, in place")
+check(a.call("list.get", {"id": other["id"]})["result"]["revision"] == other["revision"] + 1,
+      "each list changed gets a new revision")
+check(a.call("list.get", {"id": untouched["id"]})["result"]["revision"] == untouched["revision"],
+      "a list without the file is left alone")
+heard = set()
+for _ in range(10):
+    event = b.wait_event("list.changed", 1)
+    if event is None:
+        break
+    heard.add(event["data"]["id"])
+check({one["id"], other["id"]} <= heard, "and other clients hear of both")
 PY
 
 echo "engine lists: ok"

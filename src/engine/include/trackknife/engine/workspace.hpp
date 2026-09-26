@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace trackknife::engine {
@@ -108,6 +109,9 @@ class Workspace final {
                     std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
     [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
                                                      std::optional<std::uint64_t> expected_revision);
+    [[nodiscard]] core::Result<std::vector<persistence::EngineListSummary>>
+    relocate_engine_list_paths(const std::vector<std::pair<std::string, std::string>>& moves,
+                               std::int64_t now_ms);
 
     [[nodiscard]] core::Result<std::vector<persistence::SavedSearch>> load_saved_searches() const;
     [[nodiscard]] core::Result<void> save_search(const persistence::SavedSearch& search);

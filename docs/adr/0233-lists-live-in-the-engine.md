@@ -71,6 +71,7 @@ all reach it from their own threads.
 | `list.rename {id, name, revision?}` | |
 | `list.delete {id, revision?}` | says whether there was one to delete |
 | `list.play {id, entry?}` | the list becomes the queue and plays, with the same entry identities -- for the phone and the CLI |
+| `list.relocate {moves: [{from, to}]}` | files moved or renamed, followed in every list; says which lists changed |
 | event `list.changed {id, revision?, deleted}` | to every client |
 
 **Trackknife.** A tab is a view of an engine's list: it records which engine
@@ -83,12 +84,16 @@ it opens and plays with its engine away; writing waits, and says so, until the
 engine is back.
 
 **Following file moves.** Trackknife's rename/move keeps its journal
-(ADR-0044 family). After the files move and the local transaction commits,
-it asks each affected engine to relocate: `list.relocate {moves: [{from,
-to}]}`, applied by the engine in one transaction across its lists. The
-move's journal entry stays open until every engine has confirmed; an engine
-that is away is asked again when it returns, from the journal. One logical
-transaction, carried by the journal rather than by one database.
+(ADR-0044 family), and the local list update stays in the same transaction
+as before. Once a move has committed, Trackknife tells the engines:
+`list.relocate {moves: [{from, to}]}`, which each applies in one transaction
+across its lists, raising the revision of every list it changed. This
+computer's engine gets the paths as they are here; the remote one gets them
+through the remote mount, and a file outside the mount is not its to follow.
+Each move is kept in Settings until every engine has taken it, so one that
+is away is told when it is back -- and the move itself is not reported as
+failed for an engine being off. One logical transaction, carried by that
+queue rather than by one database.
 
 **Migration.** On first connecting to an engine that answers `list.all`,
 Trackknife hands it the lists that belong to it, keeping their document ids
@@ -129,9 +134,8 @@ ADR-0230 without changing who owns what.
   open them; closing one's tab deletes it for both.
 - A second writer for lists appears -- the engine -- but on tables no one else
   writes.
-- Moves span processes and need the journal to finish them; a relocation can
-  be pending while an engine is away, and a list on that engine names the old
-  paths until it returns.
+- Moves span processes; a relocation can be pending while an engine is away,
+  and a list on that engine names the old paths until it returns.
 
 ## Verification
 

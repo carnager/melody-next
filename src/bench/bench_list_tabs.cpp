@@ -172,7 +172,13 @@ void BenchMainWindow::initializePersistence() {
         reattachToEngine();
         // ADR-0227: the remote engine too, after the lists for the same
         // reason -- its tab may already be among them.
-        connectRemoteEngine();
+        {
+            bool first = true;
+            for (const auto& setting : loadRemoteEngines()) {
+                connectRemoteEngine(setting, first);
+                first = false;
+            }
+        }
         applyLocalLibraryVisibility();
         if (error.isEmpty()) {
             localEngine().library =
@@ -1210,8 +1216,8 @@ void BenchMainWindow::openSearchDialog() {
                         return EngineKey::of(tab->document) == engine;
                     });
                     destination = first != list_tabs_.end() ? first->get()
-                                  : remoteEngine() != nullptr && engine == remoteEngine()->key
-                                      ? remoteQueueTab()
+                                  : link(engine) != nullptr && !engine.isLocal()
+                                      ? engineTab(*link(engine))
                                       : nullptr;
                 }
                 int insertion = -1;
@@ -1568,9 +1574,9 @@ void BenchMainWindow::quitAndStopEngine() {
     // Nothing may start it again. The event loop runs on after this until
     // the process ends, and an engine connection's reconnect timer revives
     // an engine that stopped: it did, and quitting left it running.
-    for (auto* playback : {localPlayback(), remotePlayback()}) {
-        if (playback != nullptr) {
-            playback->retire();
+    for (const auto& engine : engines_) {
+        if (engine->playback != nullptr) {
+            engine->playback->retire();
         }
     }
     if (localCatalogue()) {
@@ -1582,14 +1588,23 @@ void BenchMainWindow::quitAndStopEngine() {
     QCoreApplication::quit();
 }
 
-std::vector<std::string> BenchMainWindow::remoteRoots() const {
-    // Asked now, not remembered: a folder added to the remote's library since
-    // it was last asked is part of it.
+RemoteMount BenchMainWindow::mountOf(const EngineLink& engine) const {
+    for (const auto& setting : loadRemoteEngines()) {
+        if (setting.address == engine.setting.address) {
+            return setting.mount();
+        }
+    }
+    return engine.setting.mount();
+}
+
+std::vector<std::string> BenchMainWindow::rootsOf(const EngineLink& engine) const {
+    // Asked now, not remembered: a folder added to its library since it was
+    // last asked is part of it.
     std::vector<std::string> roots;
-    if (!remoteCatalogue()) {
+    if (engine.catalogue == nullptr) {
         return roots;
     }
-    if (auto known = remoteCatalogue()->open()->roots()) {
+    if (auto known = engine.catalogue->open()->roots()) {
         for (auto& root : *known) {
             roots.push_back(std::move(root.raw_path));
         }
@@ -1607,12 +1622,21 @@ std::optional<std::string> BenchMainWindow::crossEnginePath(const std::string& p
     if (from == to) {
         return path;
     }
-    const auto mount = RemoteMount::configured();
-    std::optional<std::string> here = from.isLocal() ? std::optional{path} : mount.to_local(path);
+    // Each engine elsewhere reaches this computer through its own mount.
+    std::optional<std::string> here;
+    if (from.isLocal()) {
+        here = path;
+    } else if (const auto* source = link(from); source != nullptr) {
+        here = mountOf(*source).to_local(path);
+    }
     if (!here || to.isLocal()) {
         return here;
     }
-    return mount.to_remote(*here, remoteRoots());
+    const auto* target = link(to);
+    if (target == nullptr) {
+        return std::nullopt;
+    }
+    return mountOf(*target).to_remote(*here, rootsOf(*target));
 }
 
 std::vector<std::string> BenchMainWindow::crossEnginePaths(std::vector<std::string> paths,

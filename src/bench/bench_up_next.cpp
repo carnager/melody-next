@@ -304,10 +304,10 @@ void BenchMainWindow::refreshUpNext() {
                                              playback_.requests.active()->source.title);
         // Up Next belongs to the engine that is playing (ADR-0227), so it is
         // named by it -- "Local" was the MPD era's word for this computer.
-        const auto engine =
-            transport_ != nullptr && transport_ == remotePlayback() && remoteCatalogue()
-                ? remoteCatalogue()->name()
-                : QStringLiteral("This computer");
+        const auto* playing_engine = linkOf(transport_);
+        const auto engine = playing_engine == nullptr || playing_engine->key.isLocal()
+                                ? QStringLiteral("This computer")
+                                : engineName(playing_engine->key);
         up_next_status_->setText(QStringLiteral("%1 · %2 waiting")
                                      .arg(engine)
                                      .arg(playback_.requests.pending().size()));

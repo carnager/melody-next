@@ -44,6 +44,7 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
         return engines;
     }
     const auto count = settings.beginReadArray(QLatin1String(array_key));
+    engines.reserve(static_cast<std::size_t>(count));
     for (int index = 0; index < count; ++index) {
         settings.setArrayIndex(index);
         RemoteEngineSetting engine{
@@ -57,6 +58,29 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
         }
     }
     settings.endArray();
+    // The old keys name the first engine, and what writes them -- a release
+    // before this one, the Settings page before it lists engines -- is the
+    // newer word on it. The same address keeps its id; another may be
+    // another engine, and its id is learned anew.
+    const auto address = text(settings, SettingsDialog::library_engine_socket_key);
+    if (!address.isEmpty()) {
+        RemoteEngineSetting first{
+            .address = address,
+            .password = text(settings, SettingsDialog::library_engine_token_key),
+            .music_folder = text(settings, SettingsDialog::library_remote_folder_key),
+            .reachable_at = text(settings, SettingsDialog::library_remote_mount_key),
+            .id = {}};
+        if (engines.empty()) {
+            engines.push_back(first);
+        } else if (engines.front().address == address) {
+            first.id = engines.front().id;
+            engines.front() = first;
+        } else {
+            engines.front() = first;
+        }
+    } else if (!engines.empty()) {
+        engines.erase(engines.begin());
+    }
     return engines;
 }
 

@@ -275,7 +275,10 @@ void BenchMainWindow::showConvertDialog() {
 
 std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (engineOfView(view).isLocal() || model == nullptr || view->selectionModel() == nullptr) {
+    const auto engine = engineOfView(view);
+    const auto* engine_link = link(engine);
+    if (engine.isLocal() || engine_link == nullptr || model == nullptr ||
+        view->selectionModel() == nullptr) {
         return std::nullopt;
     }
     // ADR-0227: the tools read and write files here, so a remote tab's are
@@ -283,7 +286,7 @@ std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QT
     // all, rather than whatever is at the remote's paths on this machine.
     auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
-    const auto mount = RemoteMount::configured();
+    const auto mount = mountOf(*engine_link);
     std::vector<LocalTrackRow> rows;
     std::size_t unreachable = 0U;
     for (const auto& index : selected) {
@@ -302,14 +305,14 @@ std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QT
         // What was known of it came from the remote; this computer reads it
         // afresh before writing.
         local.source_revision.reset();
-        remote_file_work_[local.raw_path] = remote_path;
+        remote_file_work_[local.raw_path] = RemoteFile{.engine = engine, .path = remote_path};
         rows.push_back(std::move(local));
     }
     if (unreachable > 0U) {
         statusBar()->showMessage(
             QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
-                           "out. Where the remote's music is mounted here is set in Settings → "
-                           "Engine.")
+                           "out. Where that engine's music is reachable here is set in Settings "
+                           "→ Engine.")
                 .arg(unreachable)
                 .arg(selected.size()),
             10'000);
@@ -325,12 +328,12 @@ void BenchMainWindow::followRemoteRetag(const operations::MetadataCommitResult& 
     // The remote tabs' rows take the new tags by the remote's name for the
     // file: where the mount differs, the local commit did not reach them.
     for (auto& tab : list_tabs_) {
-        if (!EngineKey::of(tab->document).isLocal()) {
-            static_cast<void>(tab->model->applyCommittedMetadata(known->second, result.document,
-                                                                 result.published_revision));
+        if (EngineKey::of(tab->document) == known->second.engine) {
+            static_cast<void>(tab->model->applyCommittedMetadata(
+                known->second.path, result.document, result.published_revision));
         }
     }
-    queueRemoteRefresh(known->second);
+    queueRemoteRefresh(known->second.engine, known->second.path);
 }
 
 namespace {
@@ -343,7 +346,7 @@ void BenchMainWindow::queueEngineRelocation(const std::string& from, const std::
     if (from.empty() || to.empty() || from == to) {
         return;
     }
-    pending_relocations_.push_back(PendingRelocation{.from = from, .to = to});
+    pending_relocations_.push_back(PendingRelocation{.from = from, .to = to, .done = {}});
     storePendingRelocations();
     flushEngineRelocations();
 }
@@ -353,8 +356,13 @@ void BenchMainWindow::storePendingRelocations() const {
     for (const auto& move : pending_relocations_) {
         pending.push_back(protocol::Json{{"from", protocol::encode_raw_path(move.from)},
                                          {"to", protocol::encode_raw_path(move.to)},
-                                         {"local", move.local_done},
-                                         {"remote", move.remote_done}});
+                                         {"done", [&move] {
+                                              auto done = protocol::Json::array();
+                                              for (const auto& engine : move.done) {
+                                                  done.push_back(engine.toStdString());
+                                              }
+                                              return done;
+                                          }()}});
     }
     QSettings settings;
     if (pending_relocations_.empty()) {
@@ -376,48 +384,71 @@ void BenchMainWindow::loadPendingRelocations() {
         auto from = protocol::decode_raw_path(move.value("from", std::string{}));
         auto to = protocol::decode_raw_path(move.value("to", std::string{}));
         if (from && to) {
-            pending_relocations_.push_back(PendingRelocation{.from = std::move(*from),
-                                                             .to = std::move(*to),
-                                                             .local_done = move.value("local", false),
-                                                             .remote_done = move.value("remote", false)});
+            PendingRelocation pending{.from = std::move(*from), .to = std::move(*to), .done = {}};
+            for (const auto& engine : move.value("done", protocol::Json::array())) {
+                if (engine.is_string()) {
+                    pending.done.insert(QString::fromStdString(engine.get<std::string>()));
+                }
+            }
+            // An older release said only whether this computer's and the
+            // remote had it.
+            if (move.value("local", false)) {
+                pending.done.insert(EngineKey::local().text());
+            }
+            if (move.value("remote", false)) {
+                pending.done.insert(QStringLiteral("*"));
+            }
+            pending_relocations_.push_back(std::move(pending));
         }
     }
 }
 
 void BenchMainWindow::flushEngineRelocations() {
-    // What the remote engine calls a path here: through the mount, or the
-    // same when the music is at the same place on both. A file outside the
-    // mount is not the remote's, and there is nothing to tell it.
-    const auto mount = RemoteMount::configured();
-    const auto remote_path = [&mount](const std::string& path) -> std::optional<std::string> {
-        if (mount.local_folder.empty()) {
-            return path;
-        }
-        if (!path_within(path, mount.local_folder)) {
-            return std::nullopt;
-        }
-        return mount.remote_folder + path.substr(mount.local_folder.size());
+    // What an engine calls a path here: this computer's the same; another's
+    // through its mount, or the same when its music is at the same place
+    // here. A file outside its mount is not its, and there is nothing to
+    // tell it.
+    const auto path_for = [this](const EngineLink& engine) {
+        return [mount = mountOf(engine), local = engine.key.isLocal()](
+                   const std::string& path) -> std::optional<std::string> {
+            if (local || mount.local_folder.empty()) {
+                return path;
+            }
+            if (!path_within(path, mount.local_folder)) {
+                return std::nullopt;
+            }
+            return mount.remote_folder + path.substr(mount.local_folder.size());
+        };
     };
-    const bool has_remote = remoteCatalogue() != nullptr && remoteCatalogue()->configured();
     for (auto& move : pending_relocations_) {
-        if (!has_remote || (!remote_path(move.from) && !remote_path(move.to))) {
-            move.remote_done = true;
+        for (const auto& engine : engines_) {
+            const auto mapped = path_for(*engine);
+            if (!engine->key.isLocal() && !mapped(move.from) && !mapped(move.to)) {
+                move.done.insert(engine->key.text());
+            }
         }
     }
-    const auto send = [this](EnginePlayback* engine, const bool remote, auto path_for) {
-        auto* engine_link = linkOf(engine);
-        if (engine == nullptr || engine_link == nullptr || !engine->active() ||
-            engine_link->relocating) {
-            return;
+    // Done once every engine this window reaches has it.
+    const auto finished = [this](const PendingRelocation& move) {
+        return std::ranges::all_of(
+            engines_, [&move](const auto& engine) { return move.doneFor(engine->key); });
+    };
+    std::erase_if(pending_relocations_, finished);
+    storePendingRelocations();
+    for (const auto& engine : engines_) {
+        auto* playback = engine->playback;
+        if (playback == nullptr || !playback->active() || engine->relocating) {
+            continue;
         }
+        const auto mapped = path_for(*engine);
         auto moves = protocol::Json::array();
         std::vector<std::pair<std::string, std::string>> sent;
         for (const auto& move : pending_relocations_) {
-            if (remote ? move.remote_done : move.local_done) {
+            if (move.doneFor(engine->key)) {
                 continue;
             }
-            const auto from = path_for(move.from);
-            const auto to = path_for(move.to);
+            const auto from = mapped(move.from);
+            const auto to = mapped(move.to);
             if (!from || !to) {
                 continue;
             }
@@ -426,13 +457,12 @@ void BenchMainWindow::flushEngineRelocations() {
             sent.emplace_back(move.from, move.to);
         }
         if (sent.empty()) {
-            return;
+            continue;
         }
-        engine_link->relocating = true;
-        engine->request(
+        engine->relocating = true;
+        playback->request(
             QStringLiteral("list.relocate"), protocol::Json{{"moves", std::move(moves)}},
-            [this, key = engine_link->key, remote,
-             sent](const core::Result<protocol::Json>& answer) {
+            [this, key = engine->key, sent, finished](const core::Result<protocol::Json>& answer) {
                 if (auto* relocated = link(key); relocated != nullptr) {
                     relocated->relocating = false;
                 }
@@ -442,22 +472,14 @@ void BenchMainWindow::flushEngineRelocations() {
                 }
                 for (auto& move : pending_relocations_) {
                     if (std::ranges::find(sent, std::pair{move.from, move.to}) != sent.end()) {
-                        (remote ? move.remote_done : move.local_done) = true;
+                        move.done.insert(key.text());
                     }
                 }
-                std::erase_if(pending_relocations_, [](const PendingRelocation& move) {
-                    return move.local_done && move.remote_done;
-                });
+                std::erase_if(pending_relocations_, finished);
                 storePendingRelocations();
                 flushEngineRelocations();
             });
-    };
-    std::erase_if(pending_relocations_, [](const PendingRelocation& move) {
-        return move.local_done && move.remote_done;
-    });
-    storePendingRelocations();
-    send(localPlayback(), false, [](const std::string& path) { return std::optional{path}; });
-    send(remotePlayback(), true, remote_path);
+    }
 }
 
 void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitResult& result) {
@@ -465,30 +487,34 @@ void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitRe
     if (known == remote_file_work_.end()) {
         return;
     }
-    const auto remote_source = known->second;
+    const auto remote = known->second;
     remote_file_work_.erase(known);
-    // Where the remote sees the new place. Outside its library it has lost
+    const auto* engine = link(remote.engine);
+    if (engine == nullptr) {
+        return;
+    }
+    // Where that engine sees the new place. Outside its library it has lost
     // the file, which re-reading the old path records.
-    const auto remote_target =
-        RemoteMount::configured().to_remote(result.target_raw_path, remoteRoots());
+    const auto remote_target = mountOf(*engine).to_remote(result.target_raw_path, rootsOf(*engine));
     if (remote_target) {
-        remote_file_work_[result.target_raw_path] = *remote_target;
+        remote_file_work_[result.target_raw_path] =
+            RemoteFile{.engine = remote.engine, .path = *remote_target};
         for (auto& tab : list_tabs_) {
-            if (!EngineKey::of(tab->document).isLocal()) {
+            if (EngineKey::of(tab->document) == remote.engine) {
                 static_cast<void>(tab->model->applyCommittedRelocation(
-                    remote_source, *remote_target, result.source_revision,
-                    result.target_revision));
+                    remote.path, *remote_target, result.source_revision, result.target_revision));
             }
         }
-        queueRemoteRefresh(*remote_target);
+        queueRemoteRefresh(remote.engine, *remote_target);
     }
-    queueRemoteRefresh(remote_source);
+    queueRemoteRefresh(remote.engine, remote.path);
 }
 
-void BenchMainWindow::queueRemoteRefresh(std::string remote_path) {
-    pending_remote_refresh_.push_back(std::move(remote_path));
+void BenchMainWindow::queueRemoteRefresh(const EngineKey& engine, std::string remote_path) {
+    pending_remote_refresh_[engine].push_back(std::move(remote_path));
     if (remote_refresh_timer_ == nullptr) {
-        // One request for a whole apply, however many files it wrote.
+        // One request per engine for a whole apply, however many files it
+        // wrote.
         remote_refresh_timer_ = new QTimer(this);
         remote_refresh_timer_->setSingleShot(true);
         remote_refresh_timer_->setInterval(300);
@@ -498,35 +524,37 @@ void BenchMainWindow::queueRemoteRefresh(std::string remote_path) {
 }
 
 void BenchMainWindow::sendRemoteRefresh() {
-    if (!remoteCatalogue() || pending_remote_refresh_.empty()) {
-        return;
-    }
-    auto paths = std::exchange(pending_remote_refresh_, {});
-    std::shared_ptr<engine::Catalogue> catalogue{remoteCatalogue()->openDeferred()};
-    auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
-        watcher->deleteLater();
-        if (!watcher->result()) {
-            statusBar()->showMessage(QStringLiteral("%1 has not re-read the changed files: %2")
-                                         .arg(remoteCatalogue()
-                                                  ? remoteCatalogue()->name()
-                                                  : QStringLiteral("The remote engine"),
-                                              displayText(watcher->result().error().message)),
-                                     8'000);
-            return;
+    auto pending = std::exchange(pending_remote_refresh_, {});
+    for (auto& [key, paths] : pending) {
+        const auto* engine = link(key);
+        if (engine == nullptr || engine->catalogue == nullptr || paths.empty()) {
+            continue;
         }
-        // Its index has the new tags and paths: what shows them catches up.
-        if (remoteLibrary() != nullptr) {
-            remoteLibrary()->refreshLibrary();
-        }
-        for (auto& tab : list_tabs_) {
-            if (!EngineKey::of(tab->document).isLocal()) {
-                enqueueUnprobedRows(*tab);
+        std::shared_ptr<engine::Catalogue> catalogue{engine->catalogue->openDeferred()};
+        auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, key] {
+            watcher->deleteLater();
+            const auto* refreshed = link(key);
+            if (!watcher->result()) {
+                statusBar()->showMessage(
+                    QStringLiteral("%1 has not re-read the changed files: %2")
+                        .arg(engineName(key), displayText(watcher->result().error().message)),
+                    8'000);
+                return;
             }
-        }
-    });
-    watcher->setFuture(QtConcurrent::run(
-        [catalogue, paths = std::move(paths)] { return catalogue->refresh(paths); }));
+            // Its index has the new tags and paths: what shows them catches up.
+            if (refreshed != nullptr && refreshed->library != nullptr) {
+                refreshed->library->refreshLibrary();
+            }
+            for (auto& tab : list_tabs_) {
+                if (EngineKey::of(tab->document) == key) {
+                    enqueueUnprobedRows(*tab);
+                }
+            }
+        });
+        watcher->setFuture(QtConcurrent::run(
+            [catalogue, paths = std::move(paths)] { return catalogue->refresh(paths); }));
+    }
 }
 
 void BenchMainWindow::showConvertForView(QTableView* view) {

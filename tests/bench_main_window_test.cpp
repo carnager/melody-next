@@ -258,6 +258,7 @@ class BenchMainWindowTest final : public QObject {
     void tabsAreGroupedByEngine();
     void theRemotesListsTakeItsIdOnceItSaysIt();
     void remoteEnginesStartFromTheOneRemoteOfBefore();
+    void twoEnginesElsewhereSideBySide();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2373,6 +2374,73 @@ void BenchMainWindowTest::remoteEnginesStartFromTheOneRemoteOfBefore() {
                 .toString()
                 .isEmpty());
     QSettings{}.remove(QStringLiteral("engines"));
+}
+
+// ADR-0234: two engines elsewhere at once -- a desktop's library and a
+// NAS's -- each by its own id, with its own library tab and its own lists,
+// grouped after this computer's in the order Settings have them.
+void BenchMainWindowTest::twoEnginesElsewhereSideBySide() {
+    QTemporaryDir first_state;
+    QTemporaryDir second_state;
+    QVERIFY(first_state.isValid() && second_state.isValid());
+    testing::TestEngine first;
+    testing::TestEngine second;
+    QVERIFY2(first.start(first_state.path().toStdString(), true), first.log().constData());
+    QVERIFY2(second.start(second_state.path().toStdString(), true), second.log().constData());
+    const auto id_of = [](const QTemporaryDir& state) {
+        QFile file{state.path() + QStringLiteral("/engine-id")};
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed()
+                                              : QString{};
+    };
+    const auto first_id = id_of(first_state);
+    const auto second_id = id_of(second_state);
+    QVERIFY(!first_id.isEmpty() && !second_id.isEmpty() && first_id != second_id);
+    saveRemoteEngines({{.address = first.socket(),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}},
+                       {.address = second.socket(),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}}});
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QCOMPARE(window.engines_.size(), std::size_t{3});
+    QTRY_VERIFY(window.engines_[1]->playback->active() && window.engines_[2]->playback->active());
+    QTRY_COMPARE(window.engines_[1]->key.text(), first_id);
+    QTRY_COMPARE(window.engines_[2]->key.text(), second_id);
+    // Each remembered, by its address.
+    const auto kept = loadRemoteEngines();
+    QCOMPARE(kept.size(), std::size_t{2});
+    QCOMPARE(kept[0].id, first_id);
+    QCOMPARE(kept[1].id, second_id);
+
+    // A library tab each, found by the engine's key.
+    QStringList keys;
+    for (int index = 0; index < window.local_source_tabs_->count(); ++index) {
+        keys << window.local_source_tabs_->tabData(index).toString();
+    }
+    QVERIFY2(keys.contains(first_id) && keys.contains(second_id), qPrintable(keys.join(u',')));
+    QVERIFY(window.engines_[1]->library != window.engines_[2]->library);
+    QCOMPARE(window.engines_[2]->library->engine().text(), second_id);
+
+    // Each its own tab, of its own engine, after this computer's.
+    auto* first_tab = window.engineTab(*window.engines_[1]);
+    auto* second_tab = window.engineTab(*window.engines_[2]);
+    QVERIFY(first_tab != nullptr && second_tab != nullptr && first_tab != second_tab);
+    QCOMPARE(QString::fromStdString(first_tab->document.engine), first_id);
+    QCOMPARE(QString::fromStdString(second_tab->document.engine), second_id);
+    const auto at = [&window](const BenchMainWindow::ListTab* tab) {
+        return window.tabs_->indexOf(tab->view);
+    };
+    QVERIFY(at(window.list_tabs_.front().get()) < at(first_tab));
+    QVERIFY(at(first_tab) < at(second_tab));
+    QCOMPARE(window.playbackOf(EngineKey::of(second_tab->document)), window.engines_[2]->playback);
+    saveRemoteEngines({});
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

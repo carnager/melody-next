@@ -62,6 +62,13 @@ class TestEngine final {
                     QLatin1String(remote ? SettingsDialog::library_engine_socket_key
                                          : SettingsDialog::library_local_engine_socket_key),
                     socket_);
+                if (remote) {
+                    // ADR-0234: this engine is the one remote, as an older
+                    // release would have it -- the list is made from it anew,
+                    // and it has not said who it is yet.
+                    QSettings{}.remove(QStringLiteral("engines"));
+                    QSettings{}.remove(QLatin1String(SettingsDialog::library_engine_id_key));
+                }
                 return true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds{20});

@@ -11,6 +11,7 @@
 #include "bench/local_playback_service.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_identify_dialog.hpp"
+#include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 #include "trackknife/audio/playback_anchors.hpp"
 #include "trackknife/audio/playback_modes.hpp"
@@ -41,10 +42,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <tuple>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 class QActionGroup;
@@ -121,6 +123,8 @@ class PlaylistTransferBar;
 
 class BenchMainWindow final : public QMainWindow {
     Q_OBJECT
+    // ADR-0234: one engine this window reaches (defined further down).
+    struct EngineLink;
 
   public:
     explicit BenchMainWindow(QWidget* parent = nullptr);
@@ -339,8 +343,12 @@ class BenchMainWindow final : public QMainWindow {
     struct PendingRelocation {
         std::string from;
         std::string to;
-        bool local_done{false};
-        bool remote_done{false};
+        // The engines told, by key; "*" is every engine elsewhere -- what an
+        // older release's "the remote has it" means now.
+        std::set<QString> done;
+        [[nodiscard]] bool doneFor(const EngineKey& engine) const {
+            return done.contains(engine.text()) || (!engine.isLocal() && done.contains("*"));
+        }
     };
     void queueEngineRelocation(const std::string& from, const std::string& to);
     void flushEngineRelocations();
@@ -424,9 +432,12 @@ class BenchMainWindow final : public QMainWindow {
     crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to);
     [[nodiscard]] std::vector<LocalTrackRow>
     crossEngineRows(std::vector<LocalTrackRow> rows, const EngineKey& from, const EngineKey& to);
-    // The remote engine's library folders, asked of it; empty when it is
-    // not reachable, and then nothing is known to cross to it.
-    [[nodiscard]] std::vector<std::string> remoteRoots() const;
+    // An engine's library folders, asked of it; empty when it is not
+    // reachable, and then nothing is known to cross to it.
+    [[nodiscard]] std::vector<std::string> rootsOf(const EngineLink& engine) const;
+    // Where an engine's music is reachable here, as Settings say now: a change
+    // there applies at once, as the one remote's always did.
+    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const;
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
     void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);
@@ -492,9 +503,13 @@ class BenchMainWindow final : public QMainWindow {
     // the window already knew of.
     void rememberEngineState(EnginePlayback* playback);
     // Builds the remote connection, its library panel and its default tab.
-    void connectRemoteEngine();
-    void adoptRemoteIdentity();
+    // ADR-0234: one engine elsewhere, as Settings name it; the first is the
+    // one an older release's remote lists belong to.
+    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
+    void adoptEngineIdentity(EngineLink& engine);
     [[nodiscard]] ListTab* remoteQueueTab();
+    // An engine's own tab: its first, or one made for it, named after it.
+    [[nodiscard]] ListTab* engineTab(EngineLink& engine);
     // True, having said why, when `view` lists the remote engine's files:
     // work that reads or writes files cannot run here on those (ADR-0227).
     // ADR-0227: the selected rows of a remote tab as this computer sees their
@@ -507,10 +522,16 @@ class BenchMainWindow final : public QMainWindow {
     // remote engine is asked to re-read it (batched).
     void followRemoteRetag(const operations::MetadataCommitResult& result);
     void followRemoteMove(const operations::FilePublicationCommitResult& result);
-    void queueRemoteRefresh(std::string remote_path);
+    void queueRemoteRefresh(const EngineKey& engine, std::string remote_path);
     void sendRemoteRefresh();
-    std::unordered_map<std::string, std::string> remote_file_work_;
-    std::vector<std::string> pending_remote_refresh_;
+    // A file of another engine that the tools work on here: whose, and by
+    // what path that engine knows it.
+    struct RemoteFile {
+        EngineKey engine;
+        std::string path;
+    };
+    std::unordered_map<std::string, RemoteFile> remote_file_work_;
+    std::map<EngineKey, std::vector<std::string>> pending_remote_refresh_;
     QTimer* remote_refresh_timer_{nullptr};
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
@@ -654,6 +675,8 @@ class BenchMainWindow final : public QMainWindow {
     // window keeps for it. Code that needs an engine asks for its link.
     struct EngineLink {
         EngineKey key;
+        // How Settings name it; empty for this computer's.
+        RemoteEngineSetting setting;
         std::unique_ptr<CatalogueSource> catalogue;
         EnginePlayback* playback{nullptr};
         LocalLibraryPanel* library{nullptr};

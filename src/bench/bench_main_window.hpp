@@ -485,6 +485,8 @@ class BenchMainWindow final : public QMainWindow {
     // this window did not cause is read back.
     void syncEngineQueue();
     void adoptEngineQueue();
+    void adoptEngineQueue(std::vector<LocalTrackRow> held);
+    void reattachToQueue(std::vector<LocalTrackRow> rows);
     // Credits listening to Last.fm from the engine's state rather than from a
     // local player that is not running.
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
@@ -751,6 +753,10 @@ class BenchMainWindow final : public QMainWindow {
     // holds, and if not, who changed it".
     QString engine_queue_;
     quint64 engine_queue_revision_{0};
+    // The last ask for the engine's queue, per purpose: only its answer is
+    // taken, an earlier one being out of date by the time it comes.
+    quint64 engine_queue_asked_{0};
+    quint64 engine_reattach_asked_{0};
     MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};

@@ -1194,12 +1194,24 @@ void BenchMainWindow::syncEngineQueue() {
 }
 
 void BenchMainWindow::adoptEngineQueue() {
-    auto* tab = tabForDocument(playback_.anchors.document);
-    if (tab == nullptr) {
+    if (transport_ == nullptr) {
         return;
     }
-    const auto held = transport_->queueEntries();
-    if (held.empty()) {
+    // Asked, not waited for: the UI thread never blocks on the engine.
+    const auto asked = ++engine_queue_asked_;
+    const QPointer window{this};
+    auto* playback = transport_;
+    playback->queueEntries([window, asked, playback](std::vector<LocalTrackRow> held) {
+        // A later ask, or another engine playing since: out of date.
+        if (window && asked == window->engine_queue_asked_ && playback == window->transport_) {
+            window->adoptEngineQueue(std::move(held));
+        }
+    });
+}
+
+void BenchMainWindow::adoptEngineQueue(std::vector<LocalTrackRow> held) {
+    auto* tab = tabForDocument(playback_.anchors.document);
+    if (tab == nullptr || held.empty()) {
         return;
     }
     // Merged rather than replaced: the engine's entries are paths and tags it
@@ -1275,9 +1287,28 @@ void BenchMainWindow::reattachToEngine() {
     // Otherwise the queue is the only record of what is playing, so it becomes
     // a list. The rows carry the engine's identities rather than fresh ones,
     // or the anchor below would name an entry this list does not contain.
-    auto rows = transport_->queueEntries();
-    if (rows.empty()) {
+    const auto asked = ++engine_reattach_asked_;
+    const QPointer window{this};
+    auto* playback = transport_;
+    playback->queueEntries([window, asked, playback](std::vector<LocalTrackRow> rows) {
+        if (window && asked == window->engine_reattach_asked_ && playback == window->transport_) {
+            window->reattachToQueue(std::move(rows));
+        }
+    });
+}
+
+void BenchMainWindow::reattachToQueue(std::vector<LocalTrackRow> rows) {
+    const auto playing = core::StableId::parse(transport_->state().entry.toStdString());
+    if (!playing || rows.empty()) {
         return;
+    }
+    // While the queue was on its way, what plays may have come to rest in a
+    // list after all.
+    for (const auto& tab : list_tabs_) {
+        if (const auto row = tab->model->rowOfEntry(*playing, -1); row >= 0) {
+            adoptEngineRow(*tab, row, *playing);
+            return;
+        }
     }
     for (auto& row : rows) {
         row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));

@@ -20,8 +20,9 @@ services:
     user: "1000:1000"
     environment:
       # --name: what Trackknife and the agents call it.
-      # --password-file /state/password: when one is wanted (default: open).
-      MELODYD_OPTIONS: "--name gemenon"
+      # --password-file: every client and agent gives it; without one the
+      # engine stays off the network. /state/password holds one line.
+      MELODYD_OPTIONS: "--name gemenon --password-file /state/password"
     volumes:
       # The library, database and saved queue: keep this.
       - ./state:/state

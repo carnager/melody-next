@@ -82,7 +82,7 @@ void usage(std::ostream& out) {
            "\n"
            "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
            "one found on the network -- by name with --engine when there are several.\n"
-           "--password (or $MELODY_PASSWORD) for an engine that wants one. --json prints\n"
+           "--password (or $MELODY_PASSWORD) for an engine on the network. --json prints\n"
            "the engine's own answers, for scripts.\n";
 }
 

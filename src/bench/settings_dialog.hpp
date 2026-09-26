@@ -76,7 +76,7 @@ class SettingsDialog final : public QDialog {
     // than the one the workspace starts. Not shown in Settings: it is for
     // tests and for developing the engine, which run their own.
     static constexpr auto library_local_engine_socket_key = "library/local-engine-socket";
-    // ADR-0223: the password a TCP engine asks for, if it has one. The key
+    // ADR-0223: the password every TCP engine asks for. The key
     // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
     // ADR-0227: where this computer sees the remote engine's music. Both

@@ -12,11 +12,15 @@ it's where you left it.
 ## Music on a server
 
 On the server, install `melodyd` ([Installation](install.md)) and give it a
-name in `~/.config/melody/melodyd.conf`:
+name and a password in `~/.config/melody/melodyd.conf`:
 
 ```sh
-MELODYD_OPTIONS=--name myserver
+MELODYD_OPTIONS=--name myserver --password-file /home/you/.config/melody/password
 ```
+
+The password file holds one line; make it readable only by you
+(`chmod 600`). Without a password the engine doesn't listen on the network
+at all. Use the same password on every engine and agent you run.
 
 ```sh
 systemctl --user enable --now melodyd
@@ -28,7 +32,7 @@ Or use the Docker image instead.
 On your desktop, in Trackknife:
 
 1. **Settings → Engine → Remote engine**: pick the server under
-   **On the network**.
+   **On the network** and enter its password.
 2. The server's library shows up as its own tab in the library panel. Click
    **Folders…** there and add the music folder as the *server* sees it, then
    **Refresh**.
@@ -49,8 +53,9 @@ Now the tag editor, ReplayGain and Convert work on server tracks.
 
 - **A computer running Trackknife**: tick **Settings → Engine → Let other
   engines play on this computer's speakers**.
-- **A headless machine** (a Pi by the stereo): run `melody-agent`, or
-  `melodyd --agent` if it should have its own library too.
+- **A headless machine** (a Pi by the stereo): run
+  `melody-agent --password-file FILE`, or `melodyd --agent` with the same
+  password if it should have its own library too.
 - **Your phone**: the app offers the phone as a speaker by default.
 
 Pick where it plays from the output menu in Trackknife's header.
@@ -68,6 +73,8 @@ Wi-Fi only, unless you change that), for when there's no engine in reach.
 ## Away from home
 
 Use a VPN (WireGuard, Tailscale, …) and connect to the engine's VPN address.
-Don't forward its ports to the internet: it has no encryption.
+Don't forward its ports to the internet: the password travels unencrypted.
+If you want TLS anyway, put a proxy in front of it (see
+[melody.md](melody.md#headless-melodyd)).
 
 How all of this fits together: [Engines, agents and the phone](melody.md).

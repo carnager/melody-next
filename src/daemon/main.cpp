@@ -117,16 +117,17 @@ void usage() {
               << "  --name NAME    what clients call this engine (default: the host name)\n"
               << "  --listen HOST:PORT\n"
               << "                 where to accept TCP connections, from clients and output\n"
-              << "                 agents (default 0.0.0.0:6603, streams on 0.0.0.0:6604);\n"
-              << "                 the engine is announced there to be found by name. Open to\n"
-              << "                 the network unless a password is set.\n"
+              << "                 agents (default 0.0.0.0:6603, streams on 0.0.0.0:6604, when\n"
+              << "                 a password is set); the engine is announced there to be\n"
+              << "                 found by name. Needs a password.\n"
               << "  --local-only   no TCP and no streams by default: this machine's socket\n"
-              << "                 only, unless --listen or --http names them\n"
+              << "                 only, unless --listen or --http names them. The default\n"
+              << "                 without a password.\n"
               << "  --password PASS, --password-file FILE\n"
-              << "                 require this password of every TCP connection. Without\n"
-              << "                 one, anyone who can reach the port can control the engine\n"
-              << "                 and, with --http, fetch any file it can read by queueing\n"
-              << "                 it. There is no TLS either way (ADR-0223).\n"              << "  --http HOST:PORT\n"
+              << "                 the password every TCP connection must give, the same on\n"
+              << "                 every agent and client. There is no TLS: on an untrusted\n"
+              << "                 network use WireGuard, or put a TLS proxy in front of a\n"
+              << "                 loopback --listen (ADR-0223).\n"              << "  --http HOST:PORT\n"
               << "                 serve the music being played to output agents that have\n"
               << "                 no copy of their own (melody-agent --stream). Only what\n"
               << "                 the queue holds is served -- converted to Opus for an agent\n"
@@ -142,14 +143,14 @@ void usage() {
               << "                 what to call that engine when it takes them (default: its\n"
               << "                 address)\n"
               << "  --play-for-password PASS, --play-for-password-file FILE\n"
-              << "                 its password, if it has one\n"
+              << "                 its password (default: this engine's own)\n"
               << "  --play-for-music-root DIR\n"
               << "                 where its music is mounted here; without one it streams\n"
               << "  --agent        play for every other engine found on the network, on this\n"
               << "                 machine's speakers: no melody-agent needed. Engines listening\n"
               << "                 on the network (--listen) announce themselves to be found.\n"
               << "  --agent-password PASS, --agent-password-file FILE\n"
-              << "                 for engines that want one (default: --play-for's, else\n"
+              << "                 for the engines it plays for (default: --play-for's, else\n"
               << "                 this engine's own)\n"
               << "  --agent-music-root DIR\n"
               << "                 where their music is mounted here; without one it streams\n"
@@ -271,12 +272,29 @@ int main(int argc, char** argv) {
             play_for_password.pop_back();
         }
     }
+    // ADR-0223: every TCP connection gives a password, so a listener asked
+    // for without one is refused before anything is opened.
+    if (!listen_address.empty() && password.empty()) {
+        std::cerr << "melodyd: --listen needs --password or --password-file: every TCP "
+                     "connection must give it (ADR-0223)\n";
+        return EXIT_FAILURE;
+    }
+    // One password set everywhere is the usual case, as for --agent-password.
+    if (play_for_password.empty()) {
+        play_for_password = password;
+    }
     std::optional<trackknife::protocol::Endpoint> guest_endpoint;
     if (!play_for.empty()) {
         guest_endpoint = trackknife::protocol::Endpoint::parse(play_for, play_for_password);
         if (!guest_endpoint) {
             std::cerr << "melodyd: --play-for wants HOST:PORT or a socket path\n";
             return EXIT_FAILURE;
+        }
+        if (guest_endpoint->tcp() && play_for_password.empty()) {
+            // Not fatal: the engine is still this machine's player. But the
+            // other one will refuse it, and that should be said here.
+            std::cerr << "melodyd: --play-for " << play_for
+                      << " has no password; that engine will refuse this one\n";
         }
     }
 
@@ -358,11 +376,18 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    // ADR-0223: TCP only when asked for; a password only when one is set.
+    // ADR-0223: TCP always wants a password.
     std::unique_ptr<trackknife::engine::Server> tcp_server;
-    // On the network unless told otherwise: an engine is there to be played
-    // from and on, and found by name. The ports asked for must be had; the
-    // default ones are given up quietly for local-only when taken.
+    // On the network unless told otherwise, when it has a password: an engine
+    // is there to be played from and on, and found by name. Without one it
+    // stays on this machine rather than refusing to start, and says why; a
+    // --listen asked for without one is refused below. The ports asked for
+    // must be had; the default ones are given up quietly for local-only when
+    // taken.
+    if (!local_only && listen_address.empty() && password.empty()) {
+        std::cerr << "melodyd: no --password, so not on the network; this machine only\n";
+        local_only = true;
+    }
     const bool listen_by_default = !local_only && listen_address.empty();
     if (listen_by_default) {
         listen_address = default_listen;
@@ -388,8 +413,7 @@ int main(int argc, char** argv) {
             return EXIT_FAILURE;
         } else {
             tcp_server = std::move(*listening);
-            std::cerr << "melodyd: listening on " << endpoint->describe()
-                      << (password.empty() ? " (no password)" : " (with a password)") << "\n";
+            std::cerr << "melodyd: listening on " << endpoint->describe() << " (with a password)\n";
         }
     }
 
@@ -564,7 +588,8 @@ int main(int argc, char** argv) {
             .port = tcp_server->port(),
             .txt = {{"id", engine_id},
                     {"proto", "1"},
-                    {"auth", password.empty() ? "0" : "1"},
+                    // Always wanted now; kept for clients that read it.
+                    {"auth", "1"},
                     {"http", streams ? std::to_string(streams->port()) : std::string{}}}});
         if (announced) {
             announcer = std::move(*announced);

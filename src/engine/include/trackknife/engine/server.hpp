@@ -37,10 +37,10 @@ class Server final {
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen(std::filesystem::path socket_path, protocol::Dispatcher& dispatcher);
 
-    // ADR-0223: a TCP listener. With a password, a connection must give it
-    // through session.authenticate before anything else; without one the
-    // listener is open, for a home network that wants none. Port 0 asks for
-    // an ephemeral port, which `port()` then reports.
+    // ADR-0223: a TCP listener. A connection must give the password through
+    // session.authenticate before anything else. An empty password is
+    // refused: there is no open TCP listener. Port 0 asks for an ephemeral
+    // port, which `port()` then reports.
     [[nodiscard]] static core::Result<std::unique_ptr<Server>>
     listen_tcp(const std::string& host, std::uint16_t port, protocol::Dispatcher& dispatcher,
                std::string password);
@@ -105,7 +105,7 @@ class Server final {
     std::filesystem::path path_;
     std::uint16_t port_{0};
     // Empty for a unix socket, whose connections are trusted from their first
-    // line. Set for TCP, whose connections are not.
+    // line. Always set for TCP, whose connections are not.
     std::string token_;
     protocol::Dispatcher* dispatcher_{nullptr};
     AgentHandler agent_handler_;

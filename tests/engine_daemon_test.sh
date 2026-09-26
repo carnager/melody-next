@@ -85,14 +85,14 @@ stop_ms=$(( ($(date +%s%N) - stop_started) / 1000000 ))
 daemon_pid=""
 [ -S "${socket}" ] && fail "the socket must be removed on shutdown"
 
-# ADR-0223: TCP -- on by default, --local-only turning it off -- with a
-# password when one is set. Also typed by hand: the handshake is one more
+# ADR-0223: TCP -- on by default when there is a password, --local-only
+# turning it off -- always with a password. Also typed by hand: the handshake is one more
 # line in nc, not a binary preamble. (The default ports are not bound here:
 # a test must not take the ones a real engine on this machine uses.)
 port=$(( 20000 + RANDOM % 20000 ))
 printf 'correct horse\n' > "${work}/password"
 "${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
-    --password-file "${work}/password" 2>"${work}/tcp-log.txt" &
+    --password-file "${work}/password" --name "living room" 2>"${work}/tcp-log.txt" &
 daemon_pid=$!
 for _ in $(seq 1 100); do
     grep -q "with a password" "${work}/tcp-log.txt" 2>/dev/null && break
@@ -109,6 +109,10 @@ admitted="$(printf '{"id":1,"method":"session.authenticate","params":{"password"
 echo "${admitted}" | grep -q '"authenticated":true' || fail "the right password must be accepted"
 echo "${admitted}" | grep -q '"roots":\[\]' || fail "and the engine must then answer over TCP"
 
+named="$(printf '{"id":1,"method":"session.authenticate","params":{"password":"correct horse"}}\n{"id":2,"method":"engine.info"}\n' \
+    | timeout 5 nc 127.0.0.1 "${port}" || true)"
+echo "${named}" | grep -q '"name":"living room"' || fail "the engine must say the name it was given"
+
 # The unix socket is unchanged: no handshake.
 plain="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc -U "${socket}" || true)"
 echo "${plain}" | grep -q '"roots":\[\]' || fail "the unix socket must need no token"
@@ -117,19 +121,22 @@ kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
 daemon_pid=""
 
-# And without one, open: nothing to type, as with MPD. Named, so a client
-# shows the name rather than the address.
-"${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
-    --name "living room" 2>"${work}/open-log.txt" &
+# ADR-0223, second amendment: no open TCP. Asked to listen without a
+# password, the engine refuses to start; not asked, it stays on this machine
+# and says why.
+if "${binary}" --socket "${socket}" --state "${state}" --listen "127.0.0.1:${port}" \
+    > "${work}/open-log.txt" 2>&1; then
+    fail "--listen without a password must be refused"
+fi
+grep -q -- "--listen needs --password" "${work}/open-log.txt" || fail "and say what is missing"
+"${binary}" --socket "${socket}" --state "${state}" 2>"${work}/unshared-log.txt" &
 daemon_pid=$!
 for _ in $(seq 1 100); do
-    grep -q "no password" "${work}/open-log.txt" 2>/dev/null && break
+    grep -q "this machine only" "${work}/unshared-log.txt" 2>/dev/null && break
     sleep 0.05
 done
-open="$(printf '{"id":1,"method":"catalogue.roots"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${open}" | grep -q '"roots":\[\]' || fail "TCP without a password set must be open"
-named="$(printf '{"id":1,"method":"engine.info"}\n' | timeout 5 nc 127.0.0.1 "${port}" || true)"
-echo "${named}" | grep -q '"name":"living room"' || fail "the engine must say the name it was given"
+grep -q "no --password, so not on the network" "${work}/unshared-log.txt" ||
+    fail "without a password the engine must stay on this machine, and say so"
 kill "${daemon_pid}"
 wait "${daemon_pid}" 2>/dev/null || true
 daemon_pid=""

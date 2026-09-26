@@ -22,6 +22,10 @@ Engines announce themselves on the local network by name (multicast DNS), so
 clients and agents find them without addresses. Where that doesn't reach,
 over a VPN say, give the address instead: `HOST:6603`.
 
+Every connection over the network gives the engine's password. Use one
+password for all your engines and agents: an engine playing for another, or
+lending its speakers with `--agent`, uses its own unless told otherwise.
+
 ## Headless melodyd
 
 On a desktop, Trackknife starts its engine for you. On a server or a Pi, run
@@ -29,7 +33,12 @@ it yourself, as a user service:
 
 ```sh
 # ~/.config/melody/melodyd.conf
-MELODYD_OPTIONS=--name myserver
+MELODYD_OPTIONS=--name myserver --password-file /home/you/.config/melody/password
+```
+
+```sh
+printf '%s\n' 'your password' > ~/.config/melody/password
+chmod 600 ~/.config/melody/password
 ```
 
 ```sh
@@ -42,16 +51,18 @@ or with Docker ([Installation](install.md#docker)). Useful options:
 | Option | What it does |
 | --- | --- |
 | `--name NAME` | What clients see it as. Default: the host name. |
-| `--password-file FILE` | Every connection must give this password. Without one, anyone on your network can control it. |
-| `--local-only` | No network at all, just the local socket. |
+| `--password-file FILE` | The password every network connection must give. Without one the engine stays on this machine. |
+| `--local-only` | No network at all, just the local socket. The default without a password. |
 | `--music-root DIR` | Where its music is, so agents with their own copy can open the files directly (see below). |
 | `--agent` | Also lend this machine's speakers to other engines on the network. |
 | `--agent-music-root DIR` | Where those engines' music is mounted here. |
 | `--transcode-cache MB` | Space for converted tracks. Default 2048. |
 
-It listens on port 6603 for clients and agents, 6604 for streams, and
-5353/udp for multicast DNS. There's no encryption, so keep these ports off
-the internet and use a VPN from outside. `melodyd --help` lists everything.
+With a password it listens on port 6603 for clients and agents, 6604 for
+streams, and 5353/udp for multicast DNS. There's no encryption, so keep these
+ports off the internet and use a VPN from outside -- or, if you want TLS, put
+a proxy (stunnel, an nginx or Caddy stream proxy) in front of an engine
+listening on `127.0.0.1`. `melodyd --help` lists everything.
 
 ## Agents
 

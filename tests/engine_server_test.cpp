@@ -377,32 +377,21 @@ void an_endpoint_is_read_from_settings() {
             "describing an endpoint never includes its token");
 }
 
-// ADR-0223: without a password a TCP listener is open, like MPD's -- and a
-// client that was given a password anyway is let in rather than refused.
-void tcp_without_a_password_is_open() {
+// ADR-0223, second amendment: there is no open TCP listener. Open, anyone
+// who could reach the port controlled the engine and could fetch any file it
+// can read -- and 0.0.0.0 was the default.
+void tcp_needs_a_password() {
     protocol::Dispatcher dispatcher;
-    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
-        return protocol::Json{{"state", "playing"}};
-    });
-    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "");
-    require(server.has_value(), "a TCP listener needs no password");
-    (*server)->start();
-    const auto port = (*server)->port();
+    auto refused = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "");
+    require(!refused && refused.error().code == core::ErrorCode::invalid_argument,
+            "a TCP listener without a password is refused");
 
-    auto open = protocol::Client::connect(
-        protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = {}});
-    require(open.has_value(), "a client without a password connects");
-    const auto state = (*open)->call("playback.state");
-    require(state && state->value("state", std::string{}) == "playing",
-            "and is answered straight away");
-
-    auto configured = protocol::Client::connect(
-        protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = "spare"});
-    require(configured.has_value() && (*configured)->call("playback.state").has_value(),
-            "one that brings a password to an open engine is let in too");
-    (*open)->close();
-    (*configured)->close();
-    (*server)->stop();
+    // Nor does a client try one without: it is told what is missing rather
+    // than getting unauthorized from whatever it asks first.
+    auto unasked = protocol::Client::connect(
+        protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = 1, .token = {}});
+    require(!unasked && unasked.error().code == core::ErrorCode::unauthorized,
+            "a client without a password for a TCP engine is refused before connecting");
 }
 
 // ADR-0228: an agent serves the engine it connected to. When that engine
@@ -555,7 +544,7 @@ int main() {
     a_second_engine_refuses_an_occupied_socket(directory / "c.sock");
     tcp_admits_only_the_token_holder();
     an_endpoint_is_read_from_settings();
-    tcp_without_a_password_is_open();
+    tcp_needs_a_password();
     an_attached_connection_ends_with_its_engine();
     attaching_to_a_stopping_server_does_not_end_the_process();
     a_slow_request_does_not_hold_a_cancel(directory / "d.sock");

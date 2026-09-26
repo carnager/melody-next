@@ -1,6 +1,7 @@
 # ADR-0223: TCP transport and authentication
 
-Status: Accepted; amended 2026-09-23 (the password is optional -- see the end)
+Status: Accepted; amended 2026-09-23 (the password is optional), and again
+2026-09-26 (the password is required again, without the token file) -- see the end
 
 ## Context
 
@@ -117,3 +118,43 @@ port controls playback and, with `--http` (ADR-0228), can fetch any file the
 engine's user can read by queueing it. Whether that matters is the owner's
 call. It is not tied to anything else: the engine streams the same with or
 without a password.
+
+## Second amendment (2026-09-26): the password is required
+
+The first amendment made `melodyd` open to every network it was on by
+default: `--listen` defaulted to `0.0.0.0:6603`, and with no password anyone
+who could reach the port controlled playback and, through the stream port,
+could fetch any file the engine's user can read. That was a default, not a
+choice anybody made, and it was the first finding of a code review.
+
+What the first amendment removed stays removed: there is no generated token
+and no `engine.token`. The owner still picks the password and sets the same
+one everywhere. What changes is that there is no longer an open listener.
+
+- `Server::listen_tcp` refuses an empty password. Every TCP connection
+  authenticates, loopback included, as the original decision said.
+- `melodyd` without a password stays on this machine -- the unix socket
+  only, as `--local-only` -- and says so on stderr, rather than refusing to
+  start: an engine that was playing before an upgrade keeps playing.
+  `--listen` given explicitly without a password is refused at startup.
+- `--play-for-password` defaults to the engine's own password, like
+  `--agent-password` already did, so one `--password-file` is enough on an
+  engine that both shares and plays for another.
+- The protocol client refuses a TCP endpoint with no password before
+  connecting, with `unauthorized` and a message saying so.
+- Trackknife treats "share on the network" without a password as not shared,
+  and Settings will not save that combination.
+- The mDNS TXT record still carries `auth`, always `1`, for clients that
+  read it.
+
+**Still no built-in TLS**, for the reasons in the decision above: the
+deployments are a home network and a WireGuard tunnel, and a reverse proxy
+(stunnel, an nginx or Caddy stream proxy) in front of a loopback listener
+does the job where encryption is wanted, without the engine managing
+certificates. The documentation says so where it tells people not to forward
+the ports.
+
+Deployments that ran open must add a password to every engine, agent and
+client. An engine left without one still plays locally; the others are
+refused by it and say why.
+

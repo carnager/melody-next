@@ -37,7 +37,8 @@ The desktop app isn't in the release yet; build it from source.
 For a server there's an image with the engine:
 `ghcr.io/carnager/melodyd:latest`. The compose file in
 [`packaging/docker/`](../packaging/docker/docker-compose.yml) shows how to
-run it. Change the music path and the name, then:
+run it. Change the music path and the name, put a password in
+`state/password`, then:
 
 ```sh
 docker compose -f packaging/docker/docker-compose.yml up -d

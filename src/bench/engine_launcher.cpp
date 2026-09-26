@@ -171,8 +171,10 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
             }
         }
     }
-    if (!sharing.share || sharing.listen.isEmpty()) {
-        // Not shared: this computer only, not melodyd's default network ports.
+    // Not shared: this computer only, not melodyd's default network ports.
+    // Shared without a password is not shared either: every TCP connection
+    // must give one (ADR-0223), and Settings will not save sharing without.
+    if (!sharing.share || sharing.listen.isEmpty() || sharing.password.isEmpty()) {
         arguments << QStringLiteral("--local-only");
         std::filesystem::remove(password_file, ignored);
         return arguments;
@@ -183,10 +185,6 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     if (colon > 0 && sharing.stream_port > 0) {
         arguments << QStringLiteral("--http")
                   << QStringLiteral("%1:%2").arg(sharing.listen.left(colon)).arg(sharing.stream_port);
-    }
-    if (sharing.password.isEmpty()) {
-        std::filesystem::remove(password_file, ignored);
-        return arguments;
     }
     QFile file{path_text(password_file)};
     // Owner-only from the moment it exists, not after.

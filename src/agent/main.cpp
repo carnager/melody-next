@@ -34,7 +34,7 @@ void usage() {
         << "  --server        the engine: HOST:PORT (melodyd --listen), or a unix socket path.\n"
         << "                  Without one, every engine on the network that announces itself\n"
         << "                  is played for, the newest to start playing having the speakers\n"
-        << "  --password      the engine's password, if it has one\n"
+        << "  --password      the engine's password\n"
         << "  --password-file read the password from FILE instead\n"
         << "  --name          what the engine calls this output (default: the host name)\n"
         << "  --music-root    where the engine's music is on this machine: files it names\n"

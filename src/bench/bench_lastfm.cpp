@@ -350,7 +350,7 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         }
         const auto password =
             QInputDialog::getText(engines, QStringLiteral("Another engine"),
-                                  QStringLiteral("Its password, if it has one:"),
+                                  QStringLiteral("Its password:"),
                                   QLineEdit::Password, {}, &accepted);
         if (!accepted) {
             return;

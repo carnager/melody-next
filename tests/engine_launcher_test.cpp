@@ -208,27 +208,31 @@ void EngineLauncherTest::sharingSettingsReachTheEngine() {
     QVERIFY(std::filesystem::exists(password_file));
     QCOMPARE(std::filesystem::status(password_file).permissions() & std::filesystem::perms::all,
              std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
-    QVERIFY(!tcp({}).has_value() || !(*tcp({}))->call("catalogue.roots").has_value());
+    QVERIFY(!tcp({}).has_value());
+    QVERIFY(!tcp("wrong").has_value());
     auto admitted = tcp("correct horse");
     QVERIFY(admitted.has_value() && (*admitted)->call("catalogue.roots").has_value());
     (*admitted)->close();
     const auto first = enginePid(scratch.engine);
 
-    // No password: open, and the file is gone.
-    settings.remove(QLatin1String(SettingsDialog::engine_password_key));
-    settings.sync();
-    QVERIFY(restartLocalEngine(scratch.engine).has_value());
-    QVERIFY(enginePid(scratch.engine) != first);
-    QVERIFY(!std::filesystem::exists(password_file));
-    auto open = tcp({});
-    QVERIFY(open.has_value() && (*open)->call("catalogue.roots").has_value());
-    (*open)->close();
-
     // Not shared: nothing listens on the network.
     settings.setValue(QLatin1String(SettingsDialog::engine_share_key), false);
     settings.sync();
     QVERIFY(restartLocalEngine(scratch.engine).has_value());
-    QVERIFY(!tcp({}).has_value());
+    QVERIFY(enginePid(scratch.engine) != first);
+    QVERIFY(!tcp("correct horse").has_value());
+    QVERIFY(!std::filesystem::exists(password_file));
+
+    // ADR-0223: shared without a password is not shared at all -- there is
+    // no open TCP engine -- rather than an engine that will not start.
+    settings.setValue(QLatin1String(SettingsDialog::engine_share_key), true);
+    settings.remove(QLatin1String(SettingsDialog::engine_password_key));
+    settings.sync();
+    QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
+                .contains(QStringLiteral("--local-only")));
+    QVERIFY(restartLocalEngine(scratch.engine).has_value());
+    QVERIFY(!tcp("correct horse").has_value());
+    QVERIFY(!std::filesystem::exists(password_file));
     settings.clear();
 }
 
@@ -248,17 +252,20 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     remote.setArguments({QStringLiteral("--socket"), remote_state.filePath(QStringLiteral("r.sock")),
                          QStringLiteral("--state"), remote_state.path(), QStringLiteral("--name"),
                          QStringLiteral("remote"), QStringLiteral("--listen"),
-                         QStringLiteral("127.0.0.1:%1").arg(port)});
+                         QStringLiteral("127.0.0.1:%1").arg(port), QStringLiteral("--password"),
+                         QStringLiteral("correct horse")});
     remote.setProcessChannelMode(QProcess::MergedChannels);
     remote.start();
     QVERIFY(remote.waitForStarted());
     const protocol::Endpoint remote_endpoint{
-        .socket = {}, .host = "127.0.0.1", .port = port, .token = {}};
+        .socket = {}, .host = "127.0.0.1", .port = port, .token = "correct horse"};
     QTRY_VERIFY_WITH_TIMEOUT(protocol::Client::connect(remote_endpoint).has_value(), 10'000);
 
     QSettings settings;
     settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                       QStringLiteral("127.0.0.1:%1").arg(port));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                      QStringLiteral("correct horse"));
     settings.sync();
     QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
                 .contains(QStringLiteral("--play-for")));

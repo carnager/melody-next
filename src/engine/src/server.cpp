@@ -174,6 +174,15 @@ core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host
                                                          const std::uint16_t port,
                                                          protocol::Dispatcher& dispatcher,
                                                          std::string password) {
+    // ADR-0223, second amendment: a TCP listener always has a password. Open,
+    // anyone who could reach the port controlled the engine and could fetch
+    // any file it can read.
+    if (password.empty()) {
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "a TCP listener needs a password",
+                        .context = {{.key = "host", .value = host}}});
+    }
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -346,8 +355,8 @@ void Server::accept_loop() {
         auto connection = std::make_shared<Connection>();
         connection->descriptor = accepted;
         // A unix peer got here through the filesystem's permissions. A TCP
-        // peer must give the password when there is one; without one the
-        // listener is open, as MPD's is (ADR-0223).
+        // peer must give the password, which a TCP listener always has
+        // (ADR-0223).
         connection->authenticated.store(token_.empty());
         {
             const std::lock_guard guard{mutex_};
@@ -464,8 +473,9 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                 }
                 if (request->method == "session.authenticate") {
                     // Already admitted -- by the socket's permissions, or an
-                    // open listener -- so a client configured with a password
-                    // is told it is in, not that the method is unknown.
+                    // earlier handshake -- so a client configured with a
+                    // password is told it is in, not that the method is
+                    // unknown.
                     protocol::Response admitted{.id = request->id,
                                                 .result = protocol::Json{{"authenticated", true}},
                                                 .error = std::nullopt};

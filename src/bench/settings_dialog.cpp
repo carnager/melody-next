@@ -347,7 +347,10 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_password_ = new QLineEdit(sharing);
     engine_password_->setObjectName(QStringLiteral("bench-settings-engine-password"));
     engine_password_->setEchoMode(QLineEdit::Password);
-    engine_password_->setPlaceholderText(QStringLiteral("none: open, like MPD"));
+    engine_password_->setPlaceholderText(QStringLiteral("required to share"));
+    engine_password_->setToolTip(QStringLiteral(
+        "Every agent and client on the network gives this. It travels unencrypted: across an "
+        "untrusted network, use WireGuard or a TLS proxy."));
     engine_password_->setText(
         settings.value(QLatin1String(engine_password_key), QString{}).toString());
     sharing_form->addRow(QStringLiteral("Password:"), engine_password_);
@@ -396,11 +399,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             host = QSysInfo::machineHostName();
         }
         const auto port = colon > 0 ? listen.mid(colon + 1) : QString{};
-        auto command =
-            QStringLiteral("melody-agent --server %1:%2").arg(host, port);
-        if (!engine_password_->text().isEmpty()) {
-            command += QStringLiteral(" --password …");
+        if (engine_password_->text().isEmpty()) {
+            engine_agent_command_->setText(
+                QStringLiteral("Set a password to share: every connection from the network "
+                               "must give it."));
+            return;
         }
+        const auto command =
+            QStringLiteral("melody-agent --server %1:%2 --password …").arg(host, port);
         engine_agent_command_->setText(
             QStringLiteral("On a machine with speakers, run:\n%1\nAdd --music-root DIR where "
                            "it has the music itself; without it, it streams. Changing these "
@@ -720,6 +726,12 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     connect(buttons, &QDialogButtonBox::accepted, this, [this] {
         if (shortcuts_ && !shortcuts_->apply()) {
             showPage(Page::shortcuts);
+            return;
+        }
+        // ADR-0223: sharing without a password is not a thing to save.
+        if (engine_share_->isChecked() && engine_password_->text().isEmpty()) {
+            showPage(Page::engine);
+            engine_password_->setFocus();
             return;
         }
         save();

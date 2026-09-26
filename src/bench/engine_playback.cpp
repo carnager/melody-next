@@ -178,6 +178,16 @@ void EnginePlayback::maintain() {
     emit changed();
 }
 
+void EnginePlayback::retire() {
+    revive_ = nullptr;
+    if (reconnect_timer_ != nullptr) {
+        reconnect_timer_->stop();
+    }
+    if (position_timer_ != nullptr) {
+        position_timer_->stop();
+    }
+}
+
 bool EnginePlayback::active() const { return client_ != nullptr && client_->connected(); }
 
 std::vector<LocalTrackRow> EnginePlayback::queueEntries() const {

@@ -245,6 +245,7 @@ class BenchMainWindowTest final : public QObject {
     void localListeningCacheIsBoundedAndRejectsStaleResults();
     void shortcutSettingsValidateSaveAndCancel();
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
+    void quittingStopsTheEngineForGood();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1451,6 +1452,48 @@ void BenchMainWindowTest::everyCommandTakesAKeyAndCtrlLSearchesTheLibrary() {
         ->click();
     QCOMPARE(convert->shortcut(), QKeySequence(QStringLiteral("Ctrl+Alt+C")));
     QSettings{}.remove(QStringLiteral("shortcuts"));
+}
+
+// Quit stops this computer's engine -- and it stays stopped. The window's
+// engine connection starts its engine again when it goes away, every few
+// seconds, and the event loop ran on for a moment after Quit: the engine
+// came back, and the music with it.
+void BenchMainWindowTest::quittingStopsTheEngineForGood() {
+    // The window's own engine, as the application starts it, in place of
+    // the one every other case runs against: same data directory, a socket
+    // of its own. cleanup() clears the settings again.
+    engine_.stop();
+    QSettings settings;
+    settings.remove(QLatin1String(SettingsDialog::library_local_engine_socket_key));
+    settings.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
+    settings.sync();
+    const auto program = qgetenv("TRACKKNIFE_ENGINE");
+    qputenv("TRACKKNIFE_ENGINE", TRACKKNIFE_ENGINE_BINARY);
+    allowLocalEngine(true);
+    const auto engine = localEngine();
+    QVERIFY(engine.has_value());
+    const auto restore = qScopeGuard([&] {
+        static_cast<void>(stopLocalEngine(*engine));
+        allowLocalEngine(false);
+        qputenv("TRACKKNIFE_ENGINE", program);
+    });
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY2_WITH_TIMEOUT(window.local_playback_ != nullptr && window.local_playback_->active(),
+                              qPrintable(window.catalogue_source_ ? window.catalogue_source_->describe()
+                                                                  : QStringLiteral("no source")),
+                              15'000);
+    QVERIFY(!lockHolders(engine->state / "engine.lock").empty());
+
+    window.quitAndStopEngine();
+    QVERIFY(lockHolders(engine->state / "engine.lock").empty());
+    // The loop turns on past the reconnect timer's next tick, as it does
+    // while the process ends.
+    QTest::qWait(5'000);
+    QVERIFY2(lockHolders(engine->state / "engine.lock").empty(),
+             "quitting must not leave anything that starts the engine again");
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

@@ -175,6 +175,11 @@ class EnginePlayback final : public QObject {
     // ADR-0228: plays on another of the engine's outputs, taking the music
     // there where it is.
     void selectOutput(const std::string& id);
+    // For quitting: stops reconnecting, and never starts the engine again.
+    // Its reconnect timer otherwise revives an engine that stopped -- the
+    // very one quitting has just stopped, in the moment before the process
+    // ends.
+    void retire();
     void setBuffer(qint64 capacity_ms, qint64 start_threshold_ms);
 
   signals:

@@ -1201,9 +1201,21 @@ void BenchMainWindow::quitAndStopEngine() {
     if (!close()) {
         return;
     }
+    // Nothing may start it again. The event loop runs on after this until
+    // the process ends, and an engine connection's reconnect timer revives
+    // an engine that stopped: it did, and quitting left it running.
+    for (auto* playback : {local_playback_, remote_playback_}) {
+        if (playback != nullptr) {
+            playback->retire();
+        }
+    }
     if (catalogue_source_) {
         static_cast<void>(catalogue_source_->stopLocalEngine());
     }
+    // Rather than waiting for the last window to be seen closing: a window
+    // still open elsewhere -- a tag editor, say -- kept the process, and
+    // with it anything that might start an engine.
+    QCoreApplication::quit();
 }
 
 std::vector<std::string> BenchMainWindow::remoteRoots() const {

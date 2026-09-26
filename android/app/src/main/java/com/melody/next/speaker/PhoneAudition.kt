@@ -37,6 +37,81 @@ interface Audition {
     /** Anything loaded, playing or paused. */
     val loaded: Boolean
     fun snapshot(): JSONObject
+    /**
+     * What plays, kept to be taken up again, and the player emptied for
+     * another engine: null when nothing is loaded.
+     */
+    fun leave(): Place?
+    /** A place left before, taken up again where it was. */
+    fun takeUp(place: Place, play: Boolean)
+}
+
+/**
+ * One engine's track on the player, kept while another engine plays on it:
+ * enough to take it up again as the same playback, at the same place, with
+ * what was armed to follow it.
+ */
+data class Place(
+    val source: JSONObject,
+    val next: JSONObject? = null,
+    val nextToken: Long = 0,
+    val positionMs: Long = 0,
+    val durationMs: Long? = null,
+    val playbackInstance: Long = 0,
+    val occurrenceToken: Long = 0,
+    val chainTransitions: Long = 0,
+)
+
+/** What an audition reports, as the engine's audition would render it (`audition_wire`). */
+data class Report(
+    val state: PhoneAudition.State,
+    val rate: Int = 1000,
+    val channels: Int = 2,
+    val positionMs: Long = 0,
+    val durationMs: Long? = null,
+    val nextArmed: Boolean = false,
+    val chainTransitions: Long = 0,
+    val playbackInstance: Long = 0,
+    val occurrenceToken: Long = 0,
+    val nextToken: Long = 0,
+    val volumePercent: Int = 100,
+    val gainMode: Int = 0,
+    val preampWithGain: Double = 0.0,
+    val preampWithoutGain: Double = 0.0,
+    val bufferCapacityMs: Long = 750,
+    val bufferStartMs: Long = 100,
+    val underruns: Long = 0,
+    val error: String? = null,
+) {
+    fun json(): JSONObject {
+        // Positions travel in samples: at the stream's rate when it is known,
+        // else in milliseconds as samples at 1 kHz, which the engine reads the same.
+        val json = JSONObject()
+            .put("state", state.ordinal)
+            .put("position_sample", positionMs * rate / 1000)
+            .put("end_sample", durationMs?.let { it * rate / 1000 } ?: JSONObject.NULL)
+            .put("next_armed", nextArmed)
+            .put("chain_transitions", chainTransitions)
+            .put("playback_instance", playbackInstance)
+            .put("occurrence_token", occurrenceToken)
+            .put("next_occurrence_token", nextToken)
+            .put("volume_percent", volumePercent)
+            .put("replay_gain_mode", gainMode)
+            .put("preamp_with_gain_db", preampWithGain)
+            .put("preamp_without_gain_db", preampWithoutGain)
+            .put("configured_buffer", JSONObject().put("capacity_ms", bufferCapacityMs).put("start_threshold_ms", bufferStartMs))
+            .put("underruns", underruns)
+            .put("output_target", JSONObject.NULL)
+            .put("default_output", JSONObject.NULL)
+            .put("output_available", true)
+            .put("output_suspended", false)
+            .put("devices", JSONArray())
+        if (state != PhoneAudition.State.Empty) {
+            json.put("format", JSONObject().put("sample_rate", rate).put("channels", channels).put("layout", if (channels == 1) "mono" else "stereo"))
+        }
+        error?.let { json.put("error", it) }
+        return json
+    }
 }
 
 /**
@@ -79,6 +154,10 @@ class PhoneAudition(
     private var playbackInstance = 0L
     private var occurrenceToken = 0L
     private var nextToken = 0L
+    // What plays and what is armed after it, as the engine sent them: kept
+    // so a place can be left and taken up again.
+    private var currentSource: JSONObject? = null
+    private var nextSource: JSONObject? = null
     private var volumePercent = 100
     private var gainMode = Gain.Off
     private var preampWithGain = 0.0
@@ -98,6 +177,8 @@ class PhoneAudition(
                     playbackInstance++
                     occurrenceToken = nextToken
                     nextToken = 0
+                    currentSource = nextSource
+                    nextSource = null
                     // What finished is gone; only what plays, and what may
                     // be armed after it, stay.
                     while (player.currentMediaItemIndex > 0) player.removeMediaItem(0)
@@ -131,6 +212,8 @@ class PhoneAudition(
         playbackInstance++
         occurrenceToken = 0
         nextToken = 0
+        currentSource = source
+        nextSource = null
         player.setMediaItem(item, positionMs.coerceAtLeast(0))
         player.playWhenReady = play
         player.prepare()
@@ -144,6 +227,7 @@ class PhoneAudition(
         if (player.mediaItemCount == 0) throw AgentError("unsupported", "nothing plays to continue from")
         player.addMediaItem(item)
         nextToken = token
+        nextSource = source
     }
 
     @MainThread
@@ -152,6 +236,7 @@ class PhoneAudition(
             player.removeMediaItem(player.mediaItemCount - 1)
         }
         nextToken = 0
+        nextSource = null
     }
 
     @MainThread
@@ -170,6 +255,36 @@ class PhoneAudition(
         failure = null
         occurrenceToken = 0
         nextToken = 0
+        currentSource = null
+        nextSource = null
+    }
+
+    @MainThread
+    override fun leave(): Place? {
+        val source = currentSource
+        val place = if (source == null || !loaded) null else Place(
+            source = source,
+            next = nextSource,
+            nextToken = nextToken,
+            positionMs = player.currentPosition.coerceAtLeast(0),
+            durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 },
+            playbackInstance = playbackInstance,
+            occurrenceToken = occurrenceToken,
+            chainTransitions = chainTransitions,
+        )
+        stop()
+        return place
+    }
+
+    @MainThread
+    override fun takeUp(place: Place, play: Boolean) {
+        load(place.source, play, place.positionMs)
+        // The same playback as before, not a new one: the engine that left
+        // it counts on its numbers.
+        playbackInstance = place.playbackInstance
+        occurrenceToken = place.occurrenceToken
+        chainTransitions = place.chainTransitions
+        place.next?.let { queueNext(it, place.nextToken) }
     }
 
     @MainThread
@@ -220,40 +335,26 @@ class PhoneAudition(
 
     /** The snapshot, as the engine's audition would render it (`audition_wire`). */
     @MainThread
-    override fun snapshot(): JSONObject {
-        val state = state()
-        // Positions travel in samples: at the stream's rate when it is known,
-        // else in milliseconds as samples at 1 kHz, which the engine reads the same.
-        val rate = player.audioFormat?.sampleRate?.takeIf { it > 0 } ?: 1000
-        val channels = player.audioFormat?.channelCount?.takeIf { it > 0 } ?: 2
-        val positionMs = player.currentPosition.coerceAtLeast(0)
-        val durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
-        val json = JSONObject()
-            .put("state", state.ordinal)
-            .put("position_sample", positionMs * rate / 1000)
-            .put("end_sample", durationMs?.let { it * rate / 1000 } ?: JSONObject.NULL)
-            .put("next_armed", player.mediaItemCount > player.currentMediaItemIndex + 1)
-            .put("chain_transitions", chainTransitions)
-            .put("playback_instance", playbackInstance)
-            .put("occurrence_token", occurrenceToken)
-            .put("next_occurrence_token", nextToken)
-            .put("volume_percent", volumePercent)
-            .put("replay_gain_mode", gainMode.ordinal)
-            .put("preamp_with_gain_db", preampWithGain)
-            .put("preamp_without_gain_db", preampWithoutGain)
-            .put("configured_buffer", JSONObject().put("capacity_ms", bufferCapacityMs).put("start_threshold_ms", bufferStartMs))
-            .put("underruns", underruns)
-            .put("output_target", JSONObject.NULL)
-            .put("default_output", JSONObject.NULL)
-            .put("output_available", true)
-            .put("output_suspended", false)
-            .put("devices", JSONArray())
-        if (state != State.Empty) {
-            json.put("format", JSONObject().put("sample_rate", rate).put("channels", channels).put("layout", if (channels == 1) "mono" else "stereo"))
-        }
-        failure?.let { json.put("error", it) }
-        return json
-    }
+    override fun snapshot(): JSONObject = Report(
+        state = state(),
+        rate = player.audioFormat?.sampleRate?.takeIf { it > 0 } ?: 1000,
+        channels = player.audioFormat?.channelCount?.takeIf { it > 0 } ?: 2,
+        positionMs = player.currentPosition.coerceAtLeast(0),
+        durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 },
+        nextArmed = player.mediaItemCount > player.currentMediaItemIndex + 1,
+        chainTransitions = chainTransitions,
+        playbackInstance = playbackInstance,
+        occurrenceToken = occurrenceToken,
+        nextToken = nextToken,
+        volumePercent = volumePercent,
+        gainMode = gainMode.ordinal,
+        preampWithGain = preampWithGain,
+        preampWithoutGain = preampWithoutGain,
+        bufferCapacityMs = bufferCapacityMs,
+        bufferStartMs = bufferStartMs,
+        underruns = underruns,
+        error = failure,
+    ).json()
 
     // --- Inside -----------------------------------------------------------------
 

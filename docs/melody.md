@@ -97,7 +97,8 @@ There are three kinds:
 - **`melody-agent`** on a machine that only plays: a Pi next to the stereo.
   Without `--server` it plays for every engine it finds; with
   `--server HOST:6603` only for that one.
-- **The phone**, which offers itself unless you turn it off in the app.
+- **The phone**, which offers itself unless you turn it off in the app: to
+  its engine and to every engine under **Other engines** in its settings.
 
 When two engines want the same speakers, the one that started playing last
 gets them and the other pauses.

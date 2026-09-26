@@ -10,7 +10,9 @@ import com.melody.next.engine.Endpoint
 import com.melody.next.engine.EngineClient
 import com.melody.next.speaker.PhoneAgent
 import com.melody.next.speaker.PhoneAudition
+import com.melody.next.speaker.SharedSpeaker
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -28,7 +30,12 @@ class MelodyApp : Application() {
     /** This phone as an output: its player, and its link to the engine. */
     lateinit var audition: PhoneAudition
         private set
-    private var agent: PhoneAgent? = null
+    /** The one player, a seat on it for each engine the phone plays for. */
+    private lateinit var speaker: SharedSpeaker
+    private class Speaking(val agent: PhoneAgent, val seat: com.melody.next.speaker.Audition, val name: String)
+    /** ADR-0234: this phone's speaker, offered to every engine listed, by its endpoint. */
+    private var agents: Map<Endpoint, Speaking> = emptyMap()
+    private var watchingAgents: Job? = null
     /** ADR-0234: a connection to each engine whose lists are shown besides the main one's. */
     val otherClients = kotlinx.coroutines.flow.MutableStateFlow<List<EngineClient>>(emptyList())
 
@@ -36,6 +43,7 @@ class MelodyApp : Application() {
     fun updateOtherEngines() {
         otherClients.value.forEach { it.disconnect() }
         otherClients.value = settings.otherEngines.map { endpoint -> EngineClient(scope).also { it.connect(endpoint) } }
+        updateSpeaker()
     }
 
     /** This phone's speaker lost the engine mid-track and is getting it back. */
@@ -64,7 +72,8 @@ class MelodyApp : Application() {
             com.melody.next.offline.OfflineStore.Wanted(settings.downloadBitrate, settings.downloadOnWifiOnly, network.metered)
         }
         offlinePlayer = com.melody.next.offline.OfflinePlayer(this)
-        audition = PhoneAudition(this, localCopy = { path -> offline.fileFor(path) }) { agent?.noteChange() }
+        audition = PhoneAudition(this, localCopy = { path -> offline.fileFor(path) }) { speaker.changed() }
+        speaker = SharedSpeaker(audition)
         // Off Wi-Fi, Opus; on it, what Settings say. The engine hears the
         // change in the next report and sends the next track that way.
         scope.launch {
@@ -72,7 +81,7 @@ class MelodyApp : Application() {
                 network.metered,
                 androidx.compose.runtime.snapshotFlow { settings.mobileBitrate to settings.wifiBitrate },
             ) { metered, (mobile, wifi) -> if (metered) mobile else wifi }
-                .collect { bitrate -> agent?.bitrateKbps = bitrate }
+                .collect { bitrate -> agents.values.forEach { it.agent.bitrateKbps = bitrate } }
         }
         settings.endpoint?.let(::useEngine)
         updateOtherEngines()
@@ -95,19 +104,43 @@ class MelodyApp : Application() {
 
     /** Paused by hand while the speaker waited: no longer worth staying in front for. */
     fun stopWaitingForSpeaker() {
+        agents.values.forEach { it.agent.reconnecting.value = false }
         speakerReconnecting.value = false
     }
 
-    /** The speaker follows the settings: on or off, under its name, for the engine chosen. */
+    /**
+     * The speaker follows the settings: on or off, under its name, for the
+     * engine chosen and every other engine listed. An engine still listed
+     * keeps its connection, and what plays on it goes on playing.
+     */
     fun updateSpeaker() {
-        agent?.stop()
-        agent = null
-        val endpoint = settings.endpoint ?: return
-        if (!settings.speaker) return
-        agent = PhoneAgent(scope, audition, settings.speakerName, reconnecting = speakerReconnecting).also {
+        val wanted = if (!settings.speaker) emptyList()
+        else (listOfNotNull(settings.endpoint) + settings.otherEngines).distinctBy { it.host to it.port }
+        val kept = agents.filter { (endpoint, speaking) -> endpoint in wanted && speaking.name == settings.speakerName }
+        (agents - kept.keys).values.forEach { speaking ->
+            speaking.agent.stop()
+            speaker.close(speaking.seat)
+        }
+        agents = wanted.associateWith { endpoint -> kept[endpoint] ?: startAgent(endpoint) }
+        // Waiting for any engine that went away mid-track keeps the app in front.
+        watchingAgents?.cancel()
+        speakerReconnecting.value = agents.values.any { it.agent.reconnecting.value }
+        if (agents.isNotEmpty()) {
+            watchingAgents = scope.launch {
+                kotlinx.coroutines.flow.combine(agents.values.map { it.agent.reconnecting }) { flags -> flags.any { it } }
+                    .collect { speakerReconnecting.value = it }
+            }
+        }
+    }
+
+    private fun startAgent(endpoint: Endpoint): Speaking {
+        lateinit var agent: PhoneAgent
+        val seat = speaker.seat { agent.noteChange() }
+        agent = PhoneAgent(scope, seat, settings.speakerName).also {
             it.bitrateKbps = if (network.metered.value) settings.mobileBitrate else settings.wifiBitrate
             it.start(endpoint)
         }
+        return Speaking(agent, seat, settings.speakerName)
     }
 
     companion object {

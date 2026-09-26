@@ -50,11 +50,16 @@ struct LocalEngineSharing final {
     int stream_port{0}; // the stream port for agents without the files
     QString password;   // empty: open
     QString music_root; // empty: none
-    // The remote engine this one plays for on this computer's speakers
-    // (ADR-0228): its address, password, and where its music is mounted here.
-    QString play_for;          // empty: none
-    QString play_for_password; // empty: open
-    QString play_for_music_root;
+    // The engines elsewhere this one plays for on this computer's speakers
+    // (ADR-0228, ADR-0234): each by address, with its password and where its
+    // music is reachable here.
+    struct PlayFor final {
+        QString address;
+        QString password; // empty: open
+        QString music_root;
+        friend bool operator==(const PlayFor&, const PlayFor&) = default;
+    };
+    std::vector<PlayFor> play_for;
     // Plays for every engine found on the network, too.
     bool play_for_found{false};
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;

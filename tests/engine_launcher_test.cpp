@@ -6,6 +6,7 @@
 // forgot would leave one running.
 
 #include "bench/engine_launcher.hpp"
+#include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 
 #include <QSettings>
@@ -313,6 +314,31 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
         QSKIP("no audio output here for the built-in agent");
     }
     QTRY_VERIFY_WITH_TIMEOUT(listed(), 10'000);
+
+    // ADR-0234: every engine elsewhere, each with its own --play-for and what
+    // follows it -- its own password where it differs.
+    {
+        auto engines = loadRemoteEngines();
+        QCOMPARE(engines.size(), std::size_t{1});
+        engines.push_back({.address = QStringLiteral("127.0.0.1:1"),
+                           .password = QStringLiteral("another"),
+                           .music_folder = {},
+                           .reachable_at = QStringLiteral("/media/other"),
+                           .id = {}});
+        saveRemoteEngines(engines);
+        const auto arguments = localEngineArguments(scratch.engine, localEngineSharing());
+        QCOMPARE(arguments.count(QStringLiteral("--play-for")), 2);
+        const auto second = arguments.lastIndexOf(QStringLiteral("--play-for"));
+        QCOMPARE(arguments.at(second + 1), QStringLiteral("127.0.0.1:1"));
+        QCOMPARE(arguments.at(second + 2), QStringLiteral("--play-for-music-root"));
+        QCOMPARE(arguments.at(second + 3), QStringLiteral("/media/other"));
+        QCOMPARE(arguments.at(second + 4), QStringLiteral("--play-for-password-file"));
+        QFile password{arguments.at(second + 5)};
+        QVERIFY(password.open(QIODevice::ReadOnly));
+        QCOMPARE(password.readAll().trimmed(), QByteArrayLiteral("another"));
+        engines.pop_back();
+        saveRemoteEngines(engines);
+    }
 
     // Turned off: the engine starts without it.
     settings.setValue(QLatin1String(SettingsDialog::engine_play_for_remote_key), false);

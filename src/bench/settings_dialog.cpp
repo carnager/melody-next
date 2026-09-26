@@ -579,9 +579,9 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
-                       "computer's: its library gets a tab and its tracks play there. The first "
-                       "listed is the one this computer's speakers are offered to. Unencrypted: "
-                       "for a home network or WireGuard."),
+                       "computer's: its library gets a tab and its tracks play there, and this "
+                       "computer's speakers are offered to each. Unencrypted: for a home network "
+                       "or WireGuard."),
         remote);
     engine_note->setWordWrap(true);
     engine_note->setForegroundRole(QPalette::PlaceholderText);

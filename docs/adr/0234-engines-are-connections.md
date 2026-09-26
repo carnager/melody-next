@@ -79,10 +79,18 @@ Each stage leaves the application working and is committed on its own.
 - **Per engine:** the mount and library folders used to move tracks
   between engines and for file work, the index asked to re-read changed
   files, and whether a file move has been told to it.
-- **Speakers.** This computer's engine offers its speakers ("play for") to
-  the first engine listed only: melodyd takes one `--play-for`. Offering
-  them to several needs the engine to hold several agent connections, and
-  is left for then.
+- **Speakers.** This computer's engine offers its speakers to every engine
+  listed: melodyd takes `--play-for` again for each, with the options after
+  one its own (a password, where its music is reachable here), and one
+  agent connection each, sharing the speakers through its arbiter as the
+  engines it finds on the network (`--agent`) do.
+- **The phone's speaker** registers with its engine and every other engine
+  listed in its settings, one agent connection each. It has one player, so
+  each connection gets a seat on it: the newest to start playing takes it,
+  the engine it was taken from is left paused where it was -- same playback,
+  same place, what was armed to follow -- and playing there again takes it
+  back. A connection taking up a paused track does not take the player from
+  music playing on it.
 
 ## Consequences
 

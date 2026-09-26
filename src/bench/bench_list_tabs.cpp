@@ -1696,10 +1696,14 @@ std::vector<LocalTrackRow> BenchMainWindow::crossEngineRows(std::vector<LocalTra
     return moved;
 }
 
-void BenchMainWindow::markTabDirty(ListTab& tab) {
+void BenchMainWindow::takeEngineChange(ListTab& tab) {
     tab.document.dirty = true;
     refreshTabChrome(tab);
     schedulePersist();
+}
+
+void BenchMainWindow::markTabDirty(ListTab& tab) {
+    takeEngineChange(tab);
     // An edit to the list that is playing is an edit to the engine's queue.
     // Without this the engine keeps playing the list as it was when play was
     // pressed, and a track removed here still plays.

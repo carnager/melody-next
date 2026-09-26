@@ -95,6 +95,14 @@ void startSoakLog(QObject* parent) {
 int main(int argc, char** argv) {
     QApplication application(argc, argv);
     default_message_handler = qInstallMessageHandler(filtered_message_handler);
+    // QA hook: --screenshot renders against test data only. Decided before
+    // anything reads settings or the workspace: Qt fixes where settings live
+    // the first time they are read, and the real ones name the remote engine
+    // and its password -- a screenshot run once wrote its test lists there.
+    const bool screenshot_run = QApplication::arguments().contains(QStringLiteral("--screenshot"));
+    if (screenshot_run) {
+        QStandardPaths::setTestModeEnabled(true);
+    }
     QApplication::setOrganizationName(QStringLiteral("trackknife"));
     QApplication::setApplicationName(QStringLiteral("trackknife"));
     QApplication::setApplicationDisplayName(QStringLiteral("Trackknife"));
@@ -167,8 +175,8 @@ int main(int argc, char** argv) {
     }
 
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
-    // background probing has had a moment, and exits. It switches to the
-    // test-mode settings location so real user state stays untouched.
+    // background probing has had a moment, and exits -- in test mode, set
+    // above.
     QString screenshot_path;
     std::vector<std::string> raw_paths;
     const auto arguments = QApplication::arguments();
@@ -188,10 +196,6 @@ int main(int argc, char** argv) {
         const auto encoded = QFile::encodeName(arguments.at(index));
         raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
     }
-    if (!screenshot_path.isEmpty()) {
-        QStandardPaths::setTestModeEnabled(true);
-    }
-
     // ADR-0226: only the application starts an engine, and not when it is
     // taking screenshots against test data.
     trackknife::bench::allowLocalEngine(screenshot_path.isEmpty());

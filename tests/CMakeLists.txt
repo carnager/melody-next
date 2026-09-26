@@ -752,12 +752,15 @@ if(TRACKKNIFE_BUILD_UI)
         NAME ui-smoke
         COMMAND trackknife --screenshot "${CMAKE_CURRENT_BINARY_DIR}/ui_smoke_screenshot.png"
     )
+    # A home of its own: the application run whole must never find the
+    # user's settings -- which name a remote engine and its password.
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home")
     set_tests_properties(
         ui-smoke
         PROPERTIES
             TIMEOUT 30
             ENVIRONMENT
-                "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
+                "QT_QPA_PLATFORM=offscreen;HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home;XDG_CONFIG_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home/.config;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/ui-smoke-home/.local/share;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
     )
 endif()
 

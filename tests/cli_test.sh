@@ -162,6 +162,7 @@ position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys
 # Stars for what plays: stored as the engine counts, 0-10.
 cli rate 5 | grep -q "^rated 5 stars: .*gamma" || fail "rate rates what plays"
 [ "$(cli rate)" = "5" ] || fail "rate reads the stars back"
+[ "$(cli current --format '%rating%')" = "5" ] || fail "current's rating is in stars, as rate's"
 cli --json rate | python3 -c 'import json,sys; assert json.load(sys.stdin)["rating"] == 10' \
     || fail "five stars are a 10 to the engine"
 if cli rate 7 2>/dev/null; then

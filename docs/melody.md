@@ -131,10 +131,15 @@ melody-cli watch --all                # the same, for whichever engine plays
 
 `current --format` takes a [tkfmt-1](title-formatting.md) expression, the
 language Trackknife formats with: `%artist%`, `%title%`, `%album%`, `%date%`,
-`%tracknumber%`, `%rating%` (absent when unrated), `%length%`, `%path%`, and
+`%tracknumber%`, `%rating%` (stars, 0-5, as `rate` sets them; absent when unrated), `%length%`, `%path%`, and
 `%playback_state%`, `%playback_time%`, `%playback_remaining%`. There are no
 optional `[...]` sections; `$if(%date%, \(%date%\))` does that, and a literal
-`(`, `)`, `,`, `$` or `%` is escaped with a backslash.
+`(`, `)`, `,`, `$` or `%` is escaped with a backslash. Stars:
+
+```sh
+melody-cli current --format '%artist% - %title%$if(%rating%, $repeat(★,%rating%)$repeat(☆,$sub(5,%rating%)))'
+# Songs: Ohia - Farewell Transmission ★★★★☆
+```
 
 There's a bar widget for DankMaterialShell built on these in
 [`packaging/dms/melody`](../packaging/dms/melody/), and

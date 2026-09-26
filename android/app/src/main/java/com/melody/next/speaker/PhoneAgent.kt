@@ -40,6 +40,15 @@ class PhoneAgent(
     // Where the player lives: ExoPlayer wants the thread it was made on.
     private val playerThread: CoroutineDispatcher = Dispatchers.Main,
     private val retryMs: Long = 2_000,
+    /**
+     * True while the connection is being made again after it dropped with
+     * music playing here: the engine resumes on this phone once it is back,
+     * and until then the app must stay in front, or the system cuts it off
+     * the network and it never is back. Shared, so a new agent writes the
+     * same flag the playback notification reads.
+     */
+    val reconnecting: MutableStateFlow<Boolean> = MutableStateFlow(false),
+    private val giveUpMs: Long = 10 * 60_000,
 ) {
     /**
      * What this phone wants streamed: the original, or Opus at a bit rate
@@ -79,6 +88,7 @@ class PhoneAgent(
     fun stop() {
         session?.cancel()
         session = null
+        stopWaiting()
         _status.value = Status.Off
         scope.launch(playerThread) { audition.stop() }
     }
@@ -88,9 +98,28 @@ class PhoneAgent(
         changed = true
     }
 
+    private var giveUp: Job? = null
+
+    private fun stopWaiting() {
+        giveUp?.cancel()
+        giveUp = null
+        reconnecting.value = false
+    }
+
+    /** Waits for the engine to come back -- for a while, not for ever. */
+    private fun waitForReturn() {
+        reconnecting.value = true
+        giveUp?.cancel()
+        giveUp = scope.launch {
+            delay(giveUpMs)
+            reconnecting.value = false
+        }
+    }
+
     private suspend fun run(endpoint: Endpoint) {
         var problem = ""
         while (scope.isActive) {
+            var registered = false
             _status.value = Status.Connecting(endpoint, problem)
             val socket = Socket()
             try {
@@ -109,6 +138,9 @@ class PhoneAgent(
                         .put("decodes", JSONArray(DECODES)).put("stream", wish()),
                 )
                 _status.value = Status.Registered(endpoint)
+                registered = true
+                // Back: the engine takes up what played, where it was.
+                stopWaiting()
                 problem = ""
                 changed = true
                 val reporting = scope.launch(playerThread) { report() }
@@ -118,8 +150,6 @@ class PhoneAgent(
                     reporting.cancel()
                 }
                 problem = "the engine went away"
-                // What played belonged to that connection.
-                withContext(playerThread) { if (audition.loaded) audition.pause() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Throwable) {
@@ -127,6 +157,15 @@ class PhoneAgent(
             } finally {
                 writer = null
                 runCatching { socket.close() }
+            }
+            // Gone, cleanly or not -- a network switch usually breaks the
+            // connection rather than closing it. What played belonged to it;
+            // if something was, the engine is waited for.
+            if (registered) {
+                val wasPlaying = withContext(playerThread) {
+                    audition.playing.also { if (audition.loaded) audition.pause() }
+                }
+                if (wasPlaying) waitForReturn()
             }
             delay(retryMs)
         }

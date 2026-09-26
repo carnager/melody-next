@@ -30,8 +30,13 @@ import kotlinx.coroutines.launch
  * it is asked, it asks the engine.
  */
 @UnstableApi
-private class EnginePlayer(private val client: EngineClient, private val covers: Covers) :
-    SimpleBasePlayer(Looper.getMainLooper()) {
+private class EnginePlayer(
+    private val client: EngineClient,
+    private val covers: Covers,
+    // This phone's speaker lost the engine mid-track and is getting it back.
+    private val speakerReconnecting: kotlinx.coroutines.flow.StateFlow<Boolean>,
+    private val stopWaiting: () -> Unit,
+) : SimpleBasePlayer(Looper.getMainLooper()) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var state = PlaybackState()
     private var current: QueueEntry? = null
@@ -42,7 +47,9 @@ private class EnginePlayer(private val client: EngineClient, private val covers:
 
     init {
         scope.launch {
-            combine(client.state, client.queue, client.upNext) { state, queue, upNext -> Triple(state, queue, upNext) }
+            combine(client.state, client.queue, client.upNext, speakerReconnecting) { state, queue, upNext, _ ->
+                Triple(state, queue, upNext)
+            }
                 .collect { (next, queue, upNext) ->
                     state = next
                     current = queue.firstOrNull { it.entry == next.entry } ?: upNext.firstOrNull { it.entry == next.entry }
@@ -78,9 +85,14 @@ private class EnginePlayer(private val client: EngineClient, private val covers:
         )
         if (hasAfter) commands.addAll(COMMAND_SEEK_TO_NEXT, COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
         if (entry != null) commands.addAll(COMMAND_SEEK_TO_PREVIOUS, COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+        // The engine paused because this phone's speaker dropped away; it
+        // resumes once the speaker is back. Shown as buffering, wanting to
+        // play -- which keeps this service in front, and with it the network
+        // the speaker needs to get back at all.
+        val waiting = speakerReconnecting.value
         val builder = State.Builder()
             .setAvailableCommands(commands.build())
-            .setPlayWhenReady(state.playing, PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
+            .setPlayWhenReady(state.playing || waiting, PLAY_WHEN_READY_CHANGE_REASON_REMOTE)
         if (entry == null) {
             return builder.setPlaybackState(STATE_IDLE).setPlaylist(emptyList()).build()
         }
@@ -107,7 +119,7 @@ private class EnginePlayer(private val client: EngineClient, private val covers:
         }
         val shown = state
         return builder
-            .setPlaybackState(STATE_READY)
+            .setPlaybackState(if (waiting && !state.playing) STATE_BUFFERING else STATE_READY)
             .setPlaylist(playlist)
             .setCurrentMediaItemIndex(if (hasBefore) 1 else 0)
             .setContentPositionMs { shown.positionAt(SystemClock.elapsedRealtime()) }
@@ -115,6 +127,12 @@ private class EnginePlayer(private val client: EngineClient, private val covers:
     }
 
     override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+        // Paused by hand while waiting for the speaker: stop waiting; the
+        // engine is paused already.
+        if (!playWhenReady && speakerReconnecting.value && !state.playing) {
+            stopWaiting()
+            return Futures.immediateVoidFuture()
+        }
         if (playWhenReady != state.playing) client.togglePlay()
         return Futures.immediateVoidFuture()
     }
@@ -151,7 +169,9 @@ class PlaybackService : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, EnginePlayer(app.client, app.covers))
+        session = MediaSession.Builder(
+            this, EnginePlayer(app.client, app.covers, app.speakerReconnecting, app::stopWaitingForSpeaker),
+        )
             .setSessionActivity(open)
             .build()
             // Nothing binds to this service -- no controller asks for the

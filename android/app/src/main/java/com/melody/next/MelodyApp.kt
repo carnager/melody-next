@@ -29,6 +29,8 @@ class MelodyApp : Application() {
     lateinit var audition: PhoneAudition
         private set
     private var agent: PhoneAgent? = null
+    /** This phone's speaker lost the engine mid-track and is getting it back. */
+    val speakerReconnecting = kotlinx.coroutines.flow.MutableStateFlow(false)
     lateinit var network: com.melody.next.speaker.Network
         private set
     /** Albums kept on the phone, and the player for them when no engine is in reach. */
@@ -78,13 +80,18 @@ class MelodyApp : Application() {
         updateSpeaker()
     }
 
+    /** Paused by hand while the speaker waited: no longer worth staying in front for. */
+    fun stopWaitingForSpeaker() {
+        speakerReconnecting.value = false
+    }
+
     /** The speaker follows the settings: on or off, under its name, for the engine chosen. */
     fun updateSpeaker() {
         agent?.stop()
         agent = null
         val endpoint = settings.endpoint ?: return
         if (!settings.speaker) return
-        agent = PhoneAgent(scope, audition, settings.speakerName).also {
+        agent = PhoneAgent(scope, audition, settings.speakerName, reconnecting = speakerReconnecting).also {
             it.bitrateKbps = if (network.metered.value) settings.mobileBitrate else settings.wifiBitrate
             it.start(endpoint)
         }

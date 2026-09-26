@@ -178,4 +178,47 @@ class PhoneAgentTest {
             agent.stop()
         }
     }
+
+    // Gemenon paused when the phone dropped away on a network switch, and
+    // the app, no longer playing, was cut off the network in the background
+    // and never came back. While it gets the engine back, it says so -- the
+    // notification stays in front on it -- and stops saying so once back.
+    @Test
+    fun droppedWhilePlayingItWaitsForTheEngineAndSaysSo() = runBlocking {
+        FakeEngine().use { engine ->
+            val player = StandIn()
+            val reconnecting = kotlinx.coroutines.flow.MutableStateFlow(false)
+            val agent = PhoneAgent(scope, player, "Pixel", playerThread, retryMs = 100, reconnecting = reconnecting)
+            agent.start(engine.endpoint)
+            engine.accept()
+            eventually("registered") { agent.status.value is PhoneAgent.Status.Registered }
+            val source = JSONObject().put("url", "http://engine:6604/stream?path=x&token=t")
+            engine.ask(10, "audition.load", JSONObject().put("source", source).put("play", true))
+            assertTrue(player.playing)
+
+            engine.drop()
+            eventually("waiting for the engine") { reconnecting.value }
+            assertTrue("what played belonged to that connection", player.asked.contains("pause"))
+
+            engine.accept()
+            eventually("back") { agent.status.value is PhoneAgent.Status.Registered }
+            eventually("no longer waiting") { !reconnecting.value }
+        }
+    }
+
+    // Dropped with nothing playing: nothing to stay in front for.
+    @Test
+    fun droppedWhileIdleItDoesNotWait() = runBlocking {
+        FakeEngine().use { engine ->
+            val reconnecting = kotlinx.coroutines.flow.MutableStateFlow(false)
+            val agent = PhoneAgent(scope, StandIn(), "Pixel", playerThread, retryMs = 100, reconnecting = reconnecting)
+            agent.start(engine.endpoint)
+            engine.accept()
+            eventually("registered") { agent.status.value is PhoneAgent.Status.Registered }
+            engine.drop()
+            eventually("reconnecting") { agent.status.value is PhoneAgent.Status.Connecting }
+            delay(300)
+            assertTrue(!reconnecting.value)
+        }
+    }
 }

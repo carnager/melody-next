@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/engine_key.hpp"
+
 #include "bench/catalogue_source.hpp"
 
 #include "bench/local_library_panel.hpp"
@@ -47,27 +49,33 @@ class SearchDialog final : public QDialog {
     using TabAccess = std::function<std::optional<TabSnapshot>()>;
     using TechnicalsSink = std::function<void(std::string, LocalTrackTechnicals)>;
 
-    // `remote`: the remote engine's library, offered as a scope of its own
-    // (ADR-0227) under `remote_label`. Null when none is configured.
+    // Another engine's library, offered as a scope of its own (ADR-0227,
+    // ADR-0234) under its name.
+    struct OtherLibrary {
+        EngineKey engine;
+        const CatalogueSource* catalogues{nullptr};
+        QString name;
+    };
     SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                  TechnicalsSink technicals_sink, QWidget* parent = nullptr,
-                 const CatalogueSource* remote = nullptr, QString remote_label = {});
+                 std::vector<OtherLibrary> others = {});
     ~SearchDialog() override;
 
     void watchCurrentModel(QAbstractItemModel* model);
     void focusInput();
-    // The library of the tab it was opened from: the remote's for a remote
-    // tab, this computer's for a local one. "Current tab" is kept.
-    void followLibrary(bool remote);
+    // The library of the tab it was opened from: its engine's. "Current tab"
+    // is kept.
+    void followLibrary(const EngineKey& engine);
 
   protected:
     void showEvent(QShowEvent* event) override;
 
   signals:
     // Every scope carries cached rows directly; opening never starts file
-    // discovery. `remote`: the rows are the remote library's, for a remote tab.
+    // discovery. `engine`: whose library the rows are, for a tab of that
+    // engine.
     void rowsRequested(QString name, std::vector<LocalTrackRow> rows, LocalLibraryAction action,
-                       bool remote);
+                       const trackknife::ui::EngineKey& engine);
 
   private:
     void populatePresets(QMenu* menu);
@@ -101,11 +109,13 @@ class SearchDialog final : public QDialog {
     void openResults(LocalLibraryAction action, bool selection_only);
     [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
     [[nodiscard]] bool databaseScope() const;
-    [[nodiscard]] bool remoteScope() const;
+    // The engine whose library the scope searches; this computer's for the
+    // current tab.
+    [[nodiscard]] EngineKey scopeEngine() const;
     [[nodiscard]] const CatalogueSource* scopeCatalogues() const;
 
     const CatalogueSource* catalogues_{nullptr};
-    const CatalogueSource* remote_{nullptr};
+    std::vector<OtherLibrary> others_;
     TabAccess tab_access_;
     TechnicalsSink technicals_sink_;
     std::vector<QMetaObject::Connection> current_model_connections_;
@@ -137,7 +147,7 @@ class SearchDialog final : public QDialog {
     std::vector<LocalTrackRow> result_rows_;
     std::vector<persistence::LibraryEntry> result_artists_;
     std::vector<persistence::LibraryEntry> result_albums_;
-    bool result_remote_{false};
+    EngineKey result_engine_{EngineKey::local()};
     QString result_query_;
 };
 

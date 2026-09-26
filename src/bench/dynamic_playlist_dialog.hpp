@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+
+#include "bench/engine_key.hpp"
+
 #include "bench/dynamic_playlist_service.hpp"
 #include <QDialog>
+#include <vector>
 
 class QComboBox;
 class QLineEdit;
@@ -18,18 +22,24 @@ namespace trackknife::bench {
 class DynamicPlaylistDialog final : public QDialog {
     Q_OBJECT
   public:
-    // Which library a refresh searches: this computer's, or the remote's.
-    using LibrarySearch = std::function<void(bool remote, query::CompiledTkq,
-                                             core::CancellationToken,
-                                             DynamicPlaylistService::Completion)>;
-    // `remote_label` names the remote's library; empty when there is none.
-    DynamicPlaylistDialog(QString profile, QString remote_label, LibrarySearch search,
+    // Which library a refresh searches: that of the engine chosen.
+    using LibrarySearch =
+        std::function<void(const EngineKey& engine, query::CompiledTkq, core::CancellationToken,
+                           DynamicPlaylistService::Completion)>;
+    // A library to choose, by its engine and the name it is shown by.
+    struct Library {
+        EngineKey engine;
+        QString name;
+    };
+    // `libraries`: the engines to search, this computer's first; none, only
+    // this computer's.
+    DynamicPlaylistDialog(QString profile, std::vector<Library> libraries, LibrarySearch search,
                           QWidget* parent = nullptr);
     ~DynamicPlaylistDialog() override;
     ui::QueueTableView* view() const { return view_; }
     // The library the results come from, and so the engine they play on.
-    bool remote() const;
-    void followLibrary(bool remote);
+    EngineKey engine() const;
+    void followLibrary(const EngineKey& engine);
     void libraryChanged();
     void invalidateAuthority();
     bool authorityValid() const { return authority_valid_; }
@@ -40,7 +50,7 @@ class DynamicPlaylistDialog final : public QDialog {
     void playRequested(int row);
     void resultsChanged();
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
-    void libraryChosen(bool remote);
+    void libraryChosen(const trackknife::ui::EngineKey& engine);
 
   private:
     DynamicPlaylistDefinition definition() const;

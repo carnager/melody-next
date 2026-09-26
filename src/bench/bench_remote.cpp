@@ -103,7 +103,7 @@ void BenchMainWindow::connectRemoteEngine() {
     });
     connect(remotePlayback(), &EnginePlayback::ratingChanged, this,
             [this](const QString& hash, const unsigned rating) {
-                adoptEngineRating(true, hash, rating);
+                adoptEngineRating(EngineKey::remote(), hash, rating);
             });
     connect(remotePlayback(), &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
@@ -125,8 +125,9 @@ void BenchMainWindow::connectRemoteEngine() {
         for (auto& tab : list_tabs_) {
             if (tab->document.remote) {
                 // Named now that the remote has said its name.
-                static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(emptyListTitle(true),
-                                                                             emptyListHint(true));
+                static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(
+                    emptyListTitle(EngineKey::of(tab->document)),
+                    emptyListHint(EngineKey::of(tab->document)));
                 enqueueUnprobedRows(*tab);
                 syncArtwork(*tab);
             }
@@ -170,7 +171,8 @@ void BenchMainWindow::connectRemoteEngine() {
         static_cast<void>(remoteQueueTab());
     }
 
-    remoteEngine()->library = new LocalLibraryPanel(*remoteCatalogue(), source_stack_);
+    remoteEngine()->library =
+        new LocalLibraryPanel(*remoteCatalogue(), remoteEngine()->key, source_stack_);
     remoteLibrary()->setObjectName(QStringLiteral("bench-remote-library"));
     source_stack_->addWidget(remoteLibrary());
     // Ratings set in remote tabs are stored on the remote, and read from it.
@@ -196,7 +198,7 @@ void BenchMainWindow::connectRemoteEngine() {
                     std::move(entries), [this, action](std::vector<LocalTrackRow> rows) {
                         enqueueLocalRequests(std::move(rows),
                                              action == LocalLibraryAction::request_next ? 0 : -1,
-                                             true);
+                                             remoteEngine()->key);
                     });
                 return;
             }
@@ -252,7 +254,7 @@ void BenchMainWindow::connectRemoteEngine() {
                     }
                 });
         });
-    remoteLibrary()->setListTargets([this] { return listTargets(true); });
+    remoteLibrary()->setListTargets([this] { return listTargets(EngineKey::remote()); });
     connect(remoteLibrary(), &LocalLibraryPanel::addToListRequested, this,
             [this](std::vector<persistence::LibraryEntry> entries, const QString& id) {
                 if (tabForDocument(id) == nullptr || entries.empty()) {

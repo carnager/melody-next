@@ -1067,10 +1067,12 @@ void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind)
     // The library of the tab in front: a remote tab's albums come from its
     // engine and go where that tab's would.
     const auto* current = currentListTab();
-    const bool remote = current != nullptr && current->document.remote &&
-                        remoteCatalogue() != nullptr && remoteLibrary() != nullptr;
-    auto* library = remote ? remoteLibrary() : localLibrary();
-    const auto* source = remote ? remoteCatalogue() : localCatalogue();
+    auto engine = current != nullptr ? EngineKey::of(current->document) : EngineKey::local();
+    if (catalogueOf(engine) == nullptr || libraryOf(engine) == nullptr) {
+        engine = EngineKey::local();
+    }
+    auto* library = libraryOf(engine);
+    const auto* source = catalogueOf(engine);
     if (library == nullptr || source == nullptr) {
         return;
     }

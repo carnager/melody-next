@@ -12,7 +12,7 @@ namespace trackknife::bench {
 namespace {
 
 constexpr int id_role = Qt::UserRole;
-constexpr int remote_role = Qt::UserRole + 1;
+constexpr int engine_role = Qt::UserRole + 1;
 constexpr int other_role = Qt::UserRole + 2;
 
 } // namespace
@@ -48,7 +48,7 @@ ListsPanel::ListsPanel(QWidget* parent) : QTreeWidget(parent) {
                     return;
                 }
                 if (!idOf(item).isEmpty()) {
-                    emit listChosen(remoteOf(item), idOf(item));
+                    emit listChosen(engineOf(item), idOf(item));
                 }
             });
 }
@@ -77,7 +77,7 @@ void ListsPanel::present(const std::vector<Group>& groups, const std::vector<Oth
                 parent, {list.name + (list.dirty ? QStringLiteral(" *") : QString{}),
                          list.tracks >= 0 ? QString::number(list.tracks) : QString{}});
             item->setData(0, id_role, list.id);
-            item->setData(0, remote_role, group.remote);
+            item->setData(0, engine_role, group.engine.text());
             item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled);
             item->setForeground(1, quiet);
             item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
@@ -131,8 +131,9 @@ QString ListsPanel::idOf(const QTreeWidgetItem* item) {
     return item == nullptr ? QString{} : item->data(0, id_role).toString();
 }
 
-bool ListsPanel::remoteOf(const QTreeWidgetItem* item) {
-    return item != nullptr && item->data(0, remote_role).toBool();
+EngineKey ListsPanel::engineOf(const QTreeWidgetItem* item) {
+    return item != nullptr ? EngineKey::fromText(item->data(0, engine_role).toString())
+                           : EngineKey{};
 }
 
 QTreeWidgetItem* ListsPanel::itemFor(const QString& id) const {
@@ -150,7 +151,7 @@ QTreeWidgetItem* ListsPanel::itemFor(const QString& id) const {
 bool ListsPanel::offer(QDropEvent* event) {
     auto* item = itemAt(event->position().toPoint());
     if (item == nullptr || idOf(item).isEmpty() || !drop_handler_ ||
-        !drop_handler_(event, remoteOf(item), idOf(item))) {
+        !drop_handler_(event, engineOf(item), idOf(item))) {
         event->ignore();
         return false;
     }

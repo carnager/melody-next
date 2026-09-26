@@ -678,7 +678,7 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     pumpArtworkQueue();
 }
 
-QImage BenchMainWindow::coverFor(const LocalTrackRow& track, const bool remote) {
+QImage BenchMainWindow::coverFor(const LocalTrackRow& track, const EngineKey& engine_key) {
     if (track.album.empty() && track.artist.empty() && track.album_artist.empty()) {
         return {};
     }
@@ -692,13 +692,14 @@ QImage BenchMainWindow::coverFor(const LocalTrackRow& track, const bool remote) 
         return *cached;
     }
     // Not in any list: fetched as a tab's would be, from the engine that has
-    // the file when it is the remote's.
+    // the file when it is another's.
     std::shared_ptr<engine::Catalogue> engine;
-    if (remote) {
-        if (!remoteCatalogue()) {
+    if (!engine_key.isLocal()) {
+        auto* catalogue = catalogueOf(engine_key);
+        if (catalogue == nullptr) {
             return {};
         }
-        engine = remoteCatalogue()->openDeferred();
+        engine = catalogue->openDeferred();
     }
     if (!artwork_pending_.contains(key)) {
         artwork_pending_.insert(key);

@@ -712,10 +712,9 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
     using Service = DynamicPlaylistService;
     std::vector<Service::Completion> pending;
     DynamicPlaylistDialog dialog(
-        QStringLiteral("local"), QString{},
-        [&](bool, query::CompiledTkq, core::CancellationToken, Service::Completion done) {
-            pending.push_back(std::move(done));
-        });
+        QStringLiteral("local"), {},
+        [&](const EngineKey&, query::CompiledTkq, core::CancellationToken,
+            Service::Completion done) { pending.push_back(std::move(done)); });
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
     auto* stop = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-stop"));
@@ -746,8 +745,9 @@ void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
     using Service = DynamicPlaylistService;
     {
         Service::Completion pending;
-        DynamicPlaylistDialog dialog(QStringLiteral("local"), QString{},
-                                     [&](bool, query::CompiledTkq, core::CancellationToken,
+        DynamicPlaylistDialog dialog(QStringLiteral("local"), {},
+                                     [&](const EngineKey&, query::CompiledTkq,
+                                         core::CancellationToken,
                                          Service::Completion done) { pending = std::move(done); });
         dialog.setAttribute(Qt::WA_DeleteOnClose, false);
         dialog.show();
@@ -1934,11 +1934,11 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     auto* current = window.currentListTab();
     QVERIFY(current != nullptr && current != chosen);
     const auto chosen_id = QString::fromStdString(chosen->document.id.to_string());
-    const auto targets = window.listTargets(false);
+    const auto targets = window.listTargets(EngineKey::local());
     QVERIFY(std::ranges::any_of(targets, [&](const auto& target) {
         return target.first == chosen_id && target.second == QStringLiteral("Chosen");
     }));
-    QVERIFY(window.listTargets(true).empty());
+    QVERIFY(window.listTargets(EngineKey::remote()).empty());
 
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
@@ -2015,7 +2015,7 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     bar->moveTab(remote_at(), 0);
     QVERIFY2(local_at() < remote_at(), "the groups stay together");
     for (int index = 0; index < remote_at(); ++index) {
-        QVERIFY(!window.tabs_->widget(index)->property("bench-remote-list").toBool());
+        QVERIFY(engineOfView(window.tabs_->widget(index)).isLocal());
     }
 }
 
@@ -6124,9 +6124,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                  qPrintable(status->text()));
     }
     // Up Next holds one engine's asks.
-    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, true);
+    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, EngineKey::remote());
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
-    window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, false);
+    window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, EngineKey::local());
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
     window.playback_.requests.clear();
 
@@ -6477,7 +6477,7 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     auto* library = dialog->findChild<QComboBox*>(QStringLiteral("dynamic-library"));
     QVERIFY(library != nullptr);
     QCOMPARE(library->count(), 2);
-    QVERIFY(dialog->remote());
+    QVERIFY(!dialog->engine().isLocal());
     dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-query"))->setText(QStringLiteral("ALL"));
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     const auto remote_path = QFile::encodeName(music + QStringLiteral("/art.flac")).toStdString();
@@ -6493,7 +6493,7 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
 
     // This computer's library, which has no such track.
     library->setCurrentIndex(library->findData(false));
-    QVERIFY(!dialog->remote());
+    QVERIFY(dialog->engine().isLocal());
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     QTRY_VERIFY(dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->isEnabled());
     QVERIFY(std::ranges::none_of(dialog->tracks(), [&remote_path](const auto& row) {
@@ -6557,7 +6557,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
             [&asked](std::vector<LocalTrackRow> rows) { asked = std::move(rows); });
         QTRY_COMPARE(asked.size(), std::size_t{1});
         asked_title = asked.front().title;
-        window.enqueueLocalRequests(asked, -1, true);
+        window.enqueueLocalRequests(asked, -1, EngineKey::remote());
         // An ask is an occurrence of its own, with an identity of its own.
         QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
         asked_id = window.playback_.requests.pending().front().source.entry_id.to_string();
@@ -6575,7 +6575,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
     QCOMPARE(window.playback_.requests.pending().front().source.entry_id.to_string(), asked_id);
-    QVERIFY(window.up_next_remote_);
+    QVERIFY(window.up_next_engine_ == EngineKey::remote());
     QVERIFY(engine_requests() == std::vector<std::string>{asked_id});
     // Played, it is named in the header by its title, and leaves the waiting list.
     QTRY_VERIFY(window.transport_ == window.remotePlayback());

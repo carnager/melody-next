@@ -164,10 +164,10 @@ class BenchMainWindow final : public QMainWindow {
     // Queues what was dragged out of a library, with its tags.
     bool enqueueLibraryDrop(const ui::LocalFilesMimeData& files, int position);
     void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
-    // `remote`: whose files these are (ADR-0227). Up Next holds one engine's
+    // `engine`: whose files these are (ADR-0227). Up Next holds one engine's
     // asks at a time.
     void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1,
-                              bool remote = false);
+                              const EngineKey& engine = EngineKey::local());
     void addUpNextActions(QMenu* menu, QTableView* source);
     void editUpNext(int operation, int row = -1, int destination = -1);
     void editUpNextSelection(int operation, int destination = -1);
@@ -197,11 +197,14 @@ class BenchMainWindow final : public QMainWindow {
     void showOpenListDialog();
     // ADR-0233: this computer's tabs before the remote engine's, always.
     void keepTabGroupsTogether();
+    // Where a view's engine stands among this window's: 0 for this computer.
+    [[nodiscard]] int engineRank(const QWidget* view) const;
     bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
-    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(bool remote) const;
+    [[nodiscard]] std::vector<std::pair<QString, QString>>
+    listTargets(const EngineKey& engine) const;
     // Then, whatever is to be done with it once it is open.
-    void openEngineList(bool remote, const QString& id, std::function<void()> then = {});
+    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {});
     // ADR-0233: the lists as a pane beside the tracks instead of as a tab
     // bar, by the setting below.
     static constexpr auto lists_display_key = "appearance/lists-display";
@@ -214,8 +217,9 @@ class BenchMainWindow final : public QMainWindow {
     void refreshListsPanel();
     void presentListsPanel();
     void showListsPanelMenu(const QPoint& position);
-    bool dropOnPanelList(QDropEvent* drop, bool remote, const QString& id);
-    void addDroppedPaths(const QString& id, bool remote_files, std::vector<std::string> paths);
+    bool dropOnPanelList(QDropEvent* drop, const EngineKey& engine, const QString& id);
+    void addDroppedPaths(const QString& id, const EngineKey& files_engine,
+                         std::vector<std::string> paths);
     QSplitter* track_area_{nullptr};
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
@@ -232,7 +236,7 @@ class BenchMainWindow final : public QMainWindow {
     void refreshLocalRatings();
     // A rating an engine says was set -- here, on the phone, from a script:
     // shown in the tabs whose tracks are that engine's.
-    void adoptEngineRating(bool remote, const QString& hash, unsigned rating);
+    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
 
     void showDynamicPlaylists();
 
@@ -399,9 +403,10 @@ class BenchMainWindow final : public QMainWindow {
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
     // What an empty list tab says, and how to fill it.
-    [[nodiscard]] QString emptyListTitle(bool remote) const;
-    [[nodiscard]] QString emptyListHint(bool remote) const;
-    [[nodiscard]] QString remoteName() const;
+    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const;
+    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const;
+    // How an engine is named to the user: "this computer", or its name.
+    [[nodiscard]] QString engineName(const EngineKey& engine) const;
     // Shows the source the user last chose, or a library by default.
     void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;
@@ -409,14 +414,16 @@ class BenchMainWindow final : public QMainWindow {
     // Quit, as opposed to closing the window: this computer's engine stops
     // too, instead of playing on.
     void quitAndStopEngine();
-    // ADR-0227: paths moving from one engine's tab to the other's, as the
-    // other engine sees them (RemoteMount). What cannot be -- not reachable
-    // here, or not in the remote's library -- is left out, and the status
-    // bar says how much and why.
-    [[nodiscard]] std::vector<std::string> crossEnginePaths(std::vector<std::string> paths,
-                                                            bool to_remote);
-    [[nodiscard]] std::vector<LocalTrackRow> crossEngineRows(std::vector<LocalTrackRow> rows,
-                                                             bool to_remote);
+    // ADR-0227, ADR-0234: paths moving from one engine's list to another's,
+    // as the other engine sees them (RemoteMount). What cannot be -- not
+    // reachable here, or not in the remote's library -- is left out, and the
+    // status bar says how much and why.
+    [[nodiscard]] std::optional<std::string>
+    crossEnginePath(const std::string& path, const EngineKey& from, const EngineKey& to) const;
+    [[nodiscard]] std::vector<std::string>
+    crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to);
+    [[nodiscard]] std::vector<LocalTrackRow>
+    crossEngineRows(std::vector<LocalTrackRow> rows, const EngineKey& from, const EngineKey& to);
     // The remote engine's library folders, asked of it; empty when it is
     // not reachable, and then nothing is known to cross to it.
     [[nodiscard]] std::vector<std::string> remoteRoots() const;
@@ -472,9 +479,6 @@ class BenchMainWindow final : public QMainWindow {
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
     // Points the workspace at an entry the engine is playing.
     void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
-    // ADR-0227: the playback link for a connection, null when that one has
-    // none (no remote configured).
-    [[nodiscard]] EnginePlayback* playbackFor(bool remote) const;
     // Makes `playback` the one the transport follows, stopping the other if it
     // was playing: one engine plays at a time.
     // `stop_other`: the engine followed until now is stopped -- as when this
@@ -521,7 +525,7 @@ class BenchMainWindow final : public QMainWindow {
     void refreshHeaderCover(const QString& entry);
     // An album's cover from the lists or the cache; fetched when neither has
     // it, arriving later through the same path as a tab's.
-    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, bool remote);
+    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine);
     void setUpNextCount(int count);
     void playRow(ListTab& tab, int row);
     void refreshTransport();
@@ -689,7 +693,7 @@ class BenchMainWindow final : public QMainWindow {
     EnginePlayback* transport_{nullptr};
     // The connection Up Next was filled from, while it holds anything: its
     // asks are files on that engine's machine.
-    bool up_next_remote_{false};
+    EngineKey up_next_engine_{EngineKey::local()};
     // The entry the engine last reported. The engine advances its own queue,
     // so without following it the highlighted row would stay on whatever was
     // double-clicked while something else played.
@@ -799,7 +803,7 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<EnginePlayback::State::Output> output_choices_;
     // Whether the menu's outputs are the remote engine's, which names its
     // own audio differently.
-    bool output_choices_remote_{false};
+    EngineKey output_choices_engine_{EngineKey::local()};
     [[nodiscard]] QString outputLabel(const EnginePlayback::State::Output& output) const;
     // Whether an engine state has been seen, so the first one does not read
     // as the output changing.

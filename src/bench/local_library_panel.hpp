@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/engine_key.hpp"
+
 #include "bench/catalogue_source.hpp"
 #include "bench/local_list_model.hpp"
 #include "trackknife/engine/catalogue.hpp"
@@ -48,14 +50,13 @@ enum class LocalLibraryAction { append, next, replace, new_list, request_next, r
 class LocalLibraryPanel final : public QWidget {
     Q_OBJECT
   public:
-    explicit LocalLibraryPanel(const CatalogueSource& catalogues, QWidget* parent = nullptr);
+    // `engine`: whose library this is (ADR-0234).
+    explicit LocalLibraryPanel(const CatalogueSource& catalogues,
+                               EngineKey engine = EngineKey::local(), QWidget* parent = nullptr);
     ~LocalLibraryPanel() override;
     void addRoot(std::string raw_path);
     QWidget* createFoldersWidget(QWidget* parent);
-    // Whether this is a remote engine's library (ADR-0227).
-    [[nodiscard]] bool remote() const noexcept {
-        return catalogues_->role() == CatalogueSource::Role::remote;
-    }
+    [[nodiscard]] const EngineKey& engine() const noexcept { return engine_; }
     // Reload committed index records; filesystem scans require the Refresh button.
     void refreshLibrary();
     // Puts the cursor in the search field, its text selected to type over.
@@ -143,6 +144,7 @@ class LocalLibraryPanel final : public QWidget {
     // cannot accidentally open the wrong thing -- which is how its scan and
     // its artwork loader each stayed local after the query pool was routed.
     const CatalogueSource* catalogues_{nullptr};
+    EngineKey engine_;
     // Always present and never overwritten by transient status, so "which
     // library am I looking at" is answerable by looking rather than by
     // asking. A silent fallback to the local database is otherwise

@@ -275,7 +275,7 @@ void BenchMainWindow::showConvertDialog() {
 
 std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!isRemoteView(view) || model == nullptr || view->selectionModel() == nullptr) {
+    if (engineOfView(view).isLocal() || model == nullptr || view->selectionModel() == nullptr) {
         return std::nullopt;
     }
     // ADR-0227: the tools read and write files here, so a remote tab's are

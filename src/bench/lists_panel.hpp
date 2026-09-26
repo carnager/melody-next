@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/engine_key.hpp"
+
 #include <QPointer>
 #include <QTreeWidget>
 
@@ -32,7 +34,7 @@ class ListsPanel final : public QTreeWidget {
     };
     struct Group {
         QString name;
-        bool remote{false};
+        EngineKey engine;
         std::vector<List> lists;
         // Said in place of lists when there are none: an engine away, say.
         QString note;
@@ -51,16 +53,17 @@ class ListsPanel final : public QTreeWidget {
                  const QString& current_id, const QWidget* current_other);
 
     // Whether a drop on a list is taken, and on Drop, taking it.
-    using DropHandler = std::function<bool(QDropEvent*, bool remote, const QString& id)>;
+    using DropHandler =
+        std::function<bool(QDropEvent*, const EngineKey& engine, const QString& id)>;
     void setDropHandler(DropHandler handler) { drop_handler_ = std::move(handler); }
 
     // For the window and tests: the list under a row.
     [[nodiscard]] static QString idOf(const QTreeWidgetItem* item);
-    [[nodiscard]] static bool remoteOf(const QTreeWidgetItem* item);
+    [[nodiscard]] static EngineKey engineOf(const QTreeWidgetItem* item);
     [[nodiscard]] QTreeWidgetItem* itemFor(const QString& id) const;
 
   signals:
-    void listChosen(bool remote, const QString& id);
+    void listChosen(const trackknife::ui::EngineKey& engine, const QString& id);
     void otherChosen(QWidget* widget);
 
   protected:

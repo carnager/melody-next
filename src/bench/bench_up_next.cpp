@@ -242,7 +242,7 @@ void BenchMainWindow::buildUpNext() {
 
 bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, const int position) {
     const auto carried = files.property(library_entries_property).toList();
-    auto* library = files.remote() ? remoteLibrary() : localLibrary();
+    auto* library = libraryOf(files.engine());
     if (carried.isEmpty() || library == nullptr) {
         return false;
     }
@@ -250,11 +250,10 @@ bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, co
     for (const auto& entry : carried) {
         entries.push_back(entry.value<persistence::LibraryEntry>());
     }
-    const bool remote = files.remote();
-    library->resolveEntryRows(std::move(entries),
-                              [this, position, remote](std::vector<LocalTrackRow> rows) {
-                                  enqueueLocalRequests(std::move(rows), position, remote);
-                              });
+    library->resolveEntryRows(std::move(entries), [this, position, engine = files.engine()](
+                                                      std::vector<LocalTrackRow> rows) {
+        enqueueLocalRequests(std::move(rows), position, engine);
+    });
     return true;
 }
 
@@ -290,7 +289,7 @@ void BenchMainWindow::refreshUpNext() {
                 continue;
             }
             if (const auto cover = coverFor(
-                    up_next_local_model_->rows()[static_cast<std::size_t>(row)], up_next_remote_);
+                    up_next_local_model_->rows()[static_cast<std::size_t>(row)], up_next_engine_);
                 !cover.isNull()) {
                 up_next_local_model_->setArtwork(key, cover);
             }
@@ -387,29 +386,27 @@ void BenchMainWindow::enqueueUpNext(QTableView* source, bool prepend, int positi
         for (const auto& index : indices)
             rows.push_back(local->rows().at(static_cast<std::size_t>(index.row())));
         enqueueLocalRequests(std::move(rows), position >= 0 ? position : (prepend ? 0 : -1),
-                             isRemoteView(source));
+                             engineOfView(source));
     }
     refreshUpNext();
 }
 
 void BenchMainWindow::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position,
-                                           const bool remote) {
+                                           const EngineKey& engine) {
     const auto count = rows.size();
     // ADR-0227: an ask is a file on one engine's machine, and a queue cannot
     // play files from two. Up Next is one engine's until it is empty again.
     const bool holding =
         !playback_.requests.pending().empty() || playback_.requests.active().has_value();
-    if (holding && remote != up_next_remote_) {
-        statusBar()->showMessage(
-            remote ? QStringLiteral("Up Next holds this computer's tracks; finish or clear it "
-                                    "before adding the remote engine's")
-                   : QStringLiteral("Up Next holds the remote engine's tracks; finish or clear "
-                                    "it before adding this computer's"),
-            6000);
+    if (holding && engine != up_next_engine_) {
+        statusBar()->showMessage(QStringLiteral("Up Next holds tracks from %1; finish or clear it "
+                                                "before adding tracks from %2")
+                                     .arg(engineName(up_next_engine_), engineName(engine)),
+                                 6000);
         return;
     }
     if (!holding) {
-        up_next_remote_ = remote;
+        up_next_engine_ = engine;
         engine_requests_.clear();
     }
     // Each ask is an occurrence of its own (ADR-0221): the same track asked
@@ -559,7 +556,7 @@ void BenchMainWindow::persistUpNext() {
         {QStringLiteral("version"), 1},
         {QStringLiteral("rows"), rows},
         // Whose files these are: Up Next holds one engine's asks.
-        {QStringLiteral("remote"), up_next_remote_},
+        {QStringLiteral("engine"), up_next_engine_.text()},
         {QStringLiteral("document"), document_text(playback_.anchors.document)},
         {QStringLiteral("row"), resolvePlaybackRow(tabForDocument(playback_.anchors.document))}};
     state[QStringLiteral("anchor")] = QString::fromLatin1(
@@ -676,11 +673,17 @@ void BenchMainWindow::restoreUpNext() {
                                    !playback_.requests.active();
             if (untouched) {
                 // Saved before the engine was: whose the tab it returns to is.
-                if (state.contains(QStringLiteral("remote"))) {
-                    up_next_remote_ = state.value(QStringLiteral("remote")).toBool();
+                // An older release said only whether it was the remote's.
+                if (state.contains(QStringLiteral("engine"))) {
+                    up_next_engine_ =
+                        EngineKey::fromText(state.value(QStringLiteral("engine")).toString());
+                } else if (state.contains(QStringLiteral("remote"))) {
+                    up_next_engine_ = state.value(QStringLiteral("remote")).toBool()
+                                          ? EngineKey::remote()
+                                          : EngineKey::local();
                 } else if (const auto* returns_to =
                                tabForDocument(state.value(QStringLiteral("document")).toString())) {
-                    up_next_remote_ = returns_to->document.remote;
+                    up_next_engine_ = EngineKey::of(returns_to->document);
                 }
                 if (!playback_.requests.insert(std::move(rows), 0)) {
                     statusBar()->showMessage(

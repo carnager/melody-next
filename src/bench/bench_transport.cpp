@@ -236,7 +236,8 @@ void BenchMainWindow::refreshHeaderCover(const QString& entry) {
     QString key;
     if (const auto* row = entry.isEmpty() ? nullptr : playingRow(entry)) {
         key = LocalListModel::groupKeyOf(*row);
-        cover = coverFor(*row, transport_ != nullptr && transport_ == remotePlayback());
+        const auto* playing = linkOf(transport_);
+        cover = coverFor(*row, playing != nullptr ? playing->key : EngineKey::local());
     }
     header_cover_wanted_ = key;
     if (cover.isNull()) {
@@ -725,8 +726,8 @@ QString BenchMainWindow::outputLabel(const EnginePlayback::State::Output& output
     // "caprica" in its own engine's speakers as in the server's, where it
     // plays as an agent. Only an engine that gives no name is described.
     if (output.local && (output.name.empty() || output.name == "this machine")) {
-        return output_choices_remote_ ? QStringLiteral("The server")
-                                      : QStringLiteral("This computer");
+        return output_choices_engine_.isLocal() ? QStringLiteral("This computer")
+                                                : QStringLiteral("The server");
     }
     return displayText(output.name);
 }
@@ -1146,7 +1147,8 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
 void BenchMainWindow::syncEngineRequests() {
     // Asks go to the engine whose files they are, and only while it is the
     // one playing: the other would be asked for paths it does not have.
-    if (!playingOnEngine() || (transport_ == remotePlayback()) != up_next_remote_) {
+    const auto* playing = linkOf(transport_);
+    if (!playingOnEngine() || playing == nullptr || playing->key != up_next_engine_) {
         return;
     }
     std::vector<LocalTrackRow> rows;
@@ -1280,9 +1282,9 @@ void BenchMainWindow::reattachToEngine() {
     for (auto& row : rows) {
         row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
     }
-    const bool remote = transport_ != nullptr && transport_ == remotePlayback();
+    const auto* playing_engine = linkOf(transport_);
     // A remote engine's queue goes into its tab, which it always has.
-    auto* tab = remote
+    auto* tab = playing_engine != nullptr && !playing_engine->key.isLocal()
                     ? remoteQueueTab()
                     : addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                            .kind = persistence::ListKind::scratch,
@@ -1315,10 +1317,6 @@ void BenchMainWindow::adoptEngineRow(ListTab& tab, const int row, const core::St
     setActiveLocalList(QString::fromStdString(tab.document.id.to_string()));
     refreshTransport();
     refreshPlaybackCursor(true);
-}
-
-EnginePlayback* BenchMainWindow::playbackFor(const bool remote) const {
-    return remote ? remotePlayback() : localPlayback();
 }
 
 void BenchMainWindow::followPlayback(EnginePlayback* playback, const bool stop_other) {
@@ -1410,7 +1408,7 @@ int BenchMainWindow::resolvePlaybackRow(const ListTab* tab) const {
 
 void BenchMainWindow::playRow(ListTab& tab, const int row) {
     // ADR-0227: a tab plays on the engine whose files it lists.
-    auto* target = playbackFor(tab.document.remote);
+    auto* target = playbackOf(EngineKey::of(tab.document));
     if (target == nullptr || !target->active()) {
         statusBar()->showMessage(tab.document.remote
                                      ? QStringLiteral("Nothing can play: the remote engine is "
@@ -1673,7 +1671,8 @@ void BenchMainWindow::refreshEngineTransport() {
         // Paused because another engine is playing on these speakers: said
         // where the album would be, so the silence has a reason.
         if (!state.speakers_taken_by.isEmpty() && state.status != QStringLiteral("playing")) {
-            const auto taker = remoteCatalogue() ? remoteName() : state.speakers_taken_by;
+            const auto taker =
+                remoteCatalogue() ? engineName(EngineKey::remote()) : state.speakers_taken_by;
             context = tr("Paused · %1 is playing on these speakers").arg(taker);
         }
         now_playing_->setText(label);
@@ -1841,11 +1840,12 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
                                            .arg(outputLabel(*now)),
                                  5'000);
     }
-    const bool remote = transport_ != nullptr && transport_ == remotePlayback();
+    const auto* playing = linkOf(transport_);
+    const auto engine = playing != nullptr ? playing->key : EngineKey::local();
     const bool outputs_changed =
-        state.outputs != output_choices_ || remote != output_choices_remote_;
+        state.outputs != output_choices_ || engine != output_choices_engine_;
     output_choices_ = state.outputs;
-    output_choices_remote_ = remote;
+    output_choices_engine_ = engine;
     engine_output_seen_ = true;
     const bool menu_changed = outputs_changed || choices != device_choices_ ||
                               state.output_target != selected_device_ ||
@@ -1910,10 +1910,10 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
     // Nothing chosen yet: the engine's own speakers, by the same name.
     const auto own = std::ranges::find_if(output_choices_,
                                           [](const auto& output) { return output.local; });
-    const auto engine_name = own != output_choices_.end()
-                                 ? outputLabel(*own)
-                                 : (remote && remoteCatalogue() ? remoteCatalogue()->name()
-                                                                : QStringLiteral("This computer"));
+    const auto engine_name =
+        own != output_choices_.end()
+            ? outputLabel(*own)
+            : (engine.isLocal() ? QStringLiteral("This computer") : engineName(engine));
     const auto speaker = now ? outputLabel(*now) : engine_name;
     const auto device = selected_device_ ? label_of(*selected_device_) : QString{};
     QString shown;

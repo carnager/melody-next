@@ -1325,13 +1325,15 @@ void LocalLibraryTest::dynamicRulesFollowIndexedTagsAndKeepRawPaths() {
     QVERIFY(library && library->add_root(root.native()));
     persistence::LibraryScanProgress progress;
     QVERIFY(library->scan({}, progress));
-    DynamicPlaylistDialog dialog{
-        QStringLiteral("local"), QString{},
-        [database](bool, query::CompiledTkq compiled, core::CancellationToken cancellation,
-                   DynamicPlaylistService::Completion completion) {
-            const engine::LocalCatalogue catalogue{database};
-            completion(queryDynamicLibrary(catalogue, compiled, cancellation));
-        }};
+    DynamicPlaylistDialog dialog{QStringLiteral("local"),
+                                 {},
+                                 [database](const EngineKey&, query::CompiledTkq compiled,
+                                            core::CancellationToken cancellation,
+                                            DynamicPlaylistService::Completion completion) {
+                                     const engine::LocalCatalogue catalogue{database};
+                                     completion(
+                                         queryDynamicLibrary(catalogue, compiled, cancellation));
+                                 }};
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     // ADR-0226: the catalogue is an engine's, here one on this database.
     testing::TestEngine catalogues_engine;

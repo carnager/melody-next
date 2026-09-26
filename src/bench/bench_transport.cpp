@@ -1228,8 +1228,10 @@ void BenchMainWindow::adoptEngineQueue(std::vector<LocalTrackRow> held) {
             continue;
         }
         auto fresh = entry;
-        fresh.title =
-            core::display_raw_path(fresh.raw_path.substr(fresh.raw_path.find_last_of('/') + 1));
+        if (fresh.title.empty()) {
+            fresh.title =
+                core::display_raw_path(fresh.raw_path.substr(fresh.raw_path.find_last_of('/') + 1));
+        }
         merged.push_back(std::move(fresh));
     }
     QString stated;
@@ -1310,8 +1312,14 @@ void BenchMainWindow::reattachToQueue(std::vector<LocalTrackRow> rows) {
             return;
         }
     }
+    // Untitled: the filename, until the file is read.
+    QString stated;
     for (auto& row : rows) {
-        row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+        if (row.title.empty()) {
+            row.title =
+                core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
+        }
+        stated += QString::fromStdString(row.entry_id.to_string());
     }
     auto* playing_engine = linkOf(transport_);
     // An engine elsewhere's queue goes into its tab, which it always has.
@@ -1328,6 +1336,10 @@ void BenchMainWindow::reattachToQueue(std::vector<LocalTrackRow> rows) {
         return;
     }
     tab->model->replaceRows(std::move(rows), true);
+    // These rows are the engine's queue: not a change to hand back to it.
+    // Sent back, a list of whoever had not read the files -- this window,
+    // before its probes -- replaced the tags the engine was given.
+    engine_queue_ = stated;
     // Titles are filenames until the files have been read; the ordinary probe
     // queue fills them in rather than a second path for this case.
     enqueueUnprobedRows(*tab);

@@ -6190,7 +6190,11 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
             ids.push_back(core::StableId::random().to_string());
             entries.push_back(protocol::Json{{"entry", ids.back()},
                                              {"path", protocol::encode_raw_path(paths[index])},
-                                             {"title", "Track " + std::to_string(index)}});
+                                             {"title", "Track " + std::to_string(index)},
+                                             {"group", protocol::Json{{"album_artist", "Band"},
+                                                                      {"artist", "Band"},
+                                                                      {"album", "Record"},
+                                                                      {"date", "1992"}}}});
         }
         static_cast<void>((*other)->call("playback.replace_queue",
                                          protocol::Json{{"entries", std::move(entries)}}));
@@ -6223,6 +6227,19 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QVERIFY(!marked(album[0]) && !marked(album[2]));
     QTest::qWait(1'500);
     QVERIFY2(marked(album[1]), "the playing row lost its mark");
+    // The tags the other client gave are the engine's still: the window,
+    // following, neither showed filenames nor sent its rows back in their
+    // place -- which left a phone showing no tags for what it had queued.
+    const auto held = (*other)->call("playback.queue");
+    QVERIFY(held.has_value());
+    QCOMPARE(held->at("entries").size(), std::size_t{3});
+    for (const auto& entry : held->at("entries")) {
+        QVERIFY2(entry.value("title", std::string{}).starts_with("Track "),
+                 entry.dump().c_str());
+        QCOMPARE(entry.at("group").value("album", std::string{}), std::string{"Record"});
+    }
+    const auto row = tab->model->rowOfEntry(id(album[0]), -1);
+    QCOMPARE(tab->model->rows()[static_cast<std::size_t>(row)].album, std::string{"Record"});
     static_cast<void>((*other)->call("playback.stop"));
     (*other)->close();
 }

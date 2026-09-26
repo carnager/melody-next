@@ -220,6 +220,31 @@ void BenchMainWindow::connectRemoteEngine() {
                     }
                 });
         });
+    remote_library_->setListTargets([this] { return listTargets(true); });
+    connect(remote_library_, &LocalLibraryPanel::addToListRequested, this,
+            [this](std::vector<persistence::LibraryEntry> entries, const QString& id) {
+                if (tabForDocument(id) == nullptr || entries.empty()) {
+                    return;
+                }
+                remote_library_->resolveEntryRows(
+                    std::move(entries), [this, id](std::vector<LocalTrackRow> rows) {
+                        auto* destination = tabForDocument(id);
+                        if (destination == nullptr || rows.empty()) {
+                            return;
+                        }
+                        const auto count = rows.size();
+                        destination->model->appendRows(std::move(rows));
+                        markTabDirty(*destination);
+                        syncArtwork(*destination);
+                        schedulePersist();
+                        statusBar()->showMessage(
+                            QStringLiteral("Added %1 to “%2”")
+                                .arg(count == 1U ? QStringLiteral("1 track")
+                                                 : QStringLiteral("%1 tracks").arg(count),
+                                     displayText(destination->document.name)),
+                            4'000);
+                    });
+            });
     connect(remote_library_, &LocalLibraryPanel::searchCommitted, this,
             [this](const QString& query, std::vector<LocalTrackRow> rows) {
                 auto* destination = addListTab(

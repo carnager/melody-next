@@ -255,6 +255,26 @@ void BenchMainWindow::initializePersistence() {
                 });
             connect(local_library_, &LocalLibraryPanel::ratingsChanged, this,
                     &BenchMainWindow::refreshLocalRatings);
+            // "Add to list": this computer's lists, in tab order.
+            local_library_->setListTargets([this] { return listTargets(false); });
+            connect(local_library_, &LocalLibraryPanel::addToListRequested, this,
+                    [this](std::vector<persistence::LibraryEntry> entries, const QString& id) {
+                        if (tabForDocument(id) == nullptr || entries.empty()) {
+                            return;
+                        }
+                        local_library_->resolveEntries(
+                            std::move(entries), [this, id](std::vector<std::string> paths) {
+                                if (tabForDocument(id) == nullptr) {
+                                    return;
+                                }
+                                if (discovery_running_) {
+                                    statusBar()->showMessage(
+                                        QStringLiteral("A file intake is already running"), 3'000);
+                                    return;
+                                }
+                                startDiscovery(std::move(paths), id, -1, false);
+                            });
+                    });
             // Restored rows carry their identity hashes; load stored values
             // once the rating store is reachable.
             refreshLocalRatings();
@@ -625,6 +645,23 @@ void BenchMainWindow::adoptEngineList(const persistence::ListDocument& document)
     enqueueUnprobedRows(*tab);
     syncArtwork(*tab);
     schedulePersist();
+}
+
+std::vector<std::pair<QString, QString>> BenchMainWindow::listTargets(const bool remote) const {
+    std::vector<std::pair<QString, QString>> targets;
+    for (int index = 0; index < tabs_->count(); ++index) {
+        auto* view = qobject_cast<QTableView*>(tabs_->widget(index));
+        if (view == nullptr) {
+            continue;
+        }
+        const auto id = view->property("bench-document-id").toString();
+        for (const auto& tab : list_tabs_) {
+            if (tab->view == view && tab->document.remote == remote) {
+                targets.emplace_back(id, displayText(tab->document.name));
+            }
+        }
+    }
+    return targets;
 }
 
 void BenchMainWindow::showOpenListDialog() {

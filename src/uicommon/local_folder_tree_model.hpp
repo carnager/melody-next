@@ -28,6 +28,11 @@ class LocalFolderTreeModel final : public QAbstractItemModel {
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
+    // Dragged into a list: the folders and files chosen, their paths given
+    // after the drop, where the list's own intake walks the folders.
+    [[nodiscard]] QStringList mimeTypes() const override;
+    [[nodiscard]] Qt::DropActions supportedDragActions() const override;
+    [[nodiscard]] QMimeData* mimeData(const QModelIndexList& indexes) const override;
     [[nodiscard]] bool hasChildren(const QModelIndex& parent = {}) const override;
     [[nodiscard]] bool canFetchMore(const QModelIndex& parent) const override;
     // Whether a directory's children are all present. Distinct from

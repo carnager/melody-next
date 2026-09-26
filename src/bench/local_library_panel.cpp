@@ -954,6 +954,22 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
         connect(command, &QAction::triggered, this, [this, entries, action] {
             emit actionRequested(entries, static_cast<LocalLibraryAction>(action));
         });
+        // Beside "Append to current list": to any list of this engine's.
+        if (action == 0) {
+            auto* lists = menu->addMenu(QIcon::fromTheme(QStringLiteral("view-media-playlist")),
+                                        tr("Add to list"));
+            lists->setObjectName(QStringLiteral("local-library-add-to-list"));
+            const auto targets = list_targets_ ? list_targets_()
+                                               : std::vector<std::pair<QString, QString>>{};
+            for (std::size_t target = 0; target < targets.size(); ++target) {
+                const auto& [id, name] = targets[target];
+                auto* choice = lists->addAction(name);
+                choice->setObjectName(QStringLiteral("action-local-library-add-to-%1").arg(target));
+                connect(choice, &QAction::triggered, this,
+                        [this, entries, id] { emit addToListRequested(entries, id); });
+            }
+            lists->setEnabled(available && !targets.empty());
+        }
     }
     // ADR-0179: rate the targeted track or album entry by content identity.
     const auto target_entry = index.data(entry_role).value<persistence::LibraryEntry>();

@@ -211,6 +211,10 @@ void BenchMainWindow::buildWorkspace() {
     folder_view_->setModel(folder_model_);
     folder_view_->setHeaderHidden(true);
     folder_view_->setUniformRowHeights(true);
+    // Folders and files dragged into a list, as from the library.
+    folder_view_->setDragEnabled(true);
+    folder_view_->setDragDropMode(QAbstractItemView::DragOnly);
+    folder_view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     folder_view_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(folder_view_, &QWidget::customContextMenuRequested, this,
             &BenchMainWindow::showFolderContextMenu);

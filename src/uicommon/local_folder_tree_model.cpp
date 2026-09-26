@@ -2,6 +2,8 @@
 
 #include "uicommon/local_folder_tree_model.hpp"
 
+#include "uicommon/local_files_mime_data.hpp"
+
 #include "trackknife/core/local_sources.hpp"
 
 #include <QByteArray>
@@ -185,7 +187,33 @@ QVariant LocalFolderTreeModel::data(const QModelIndex& index, const int role) co
 }
 
 Qt::ItemFlags LocalFolderTreeModel::flags(const QModelIndex& index) const {
-    return index.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable : Qt::NoItemFlags;
+    return index.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled
+                           : Qt::NoItemFlags;
+}
+
+QStringList LocalFolderTreeModel::mimeTypes() const { return {LocalFilesMimeData::mimeType()}; }
+
+Qt::DropActions LocalFolderTreeModel::supportedDragActions() const { return Qt::CopyAction; }
+
+QMimeData* LocalFolderTreeModel::mimeData(const QModelIndexList& indexes) const {
+    std::vector<std::string> paths;
+    for (const auto& index : indexes) {
+        if (index.column() != 0) {
+            continue;
+        }
+        auto path = rawPath(index);
+        if (!path.empty() && std::ranges::find(paths, path) == paths.end()) {
+            paths.push_back(std::move(path));
+        }
+    }
+    if (paths.empty()) {
+        return nullptr;
+    }
+    // Nothing is walked while dragging: the paths are handed over as they
+    // are, folders included, when the drop asks.
+    return new LocalFilesMimeData{[paths = std::move(paths)](LocalFilesMimeData::Completion done) {
+        done(paths);
+    }};
 }
 
 bool LocalFolderTreeModel::hasChildren(const QModelIndex& parent_index) const {

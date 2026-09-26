@@ -251,6 +251,7 @@ class BenchMainWindowTest final : public QObject {
     void aListChangedWhileClosedIsTakenUpOnOpening();
     void aListFromElsewhereOpensAsATab();
     void aMoveIsFollowedInListsNotOpenHere();
+    void libraryAndFoldersAddToAChosenList();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1886,6 +1887,83 @@ void BenchMainWindowTest::aMoveIsFollowedInListsNotOpenHere() {
         paths(), (std::vector<std::string>{"/music/moved/a.flac", "/music/moved/b.flac"}), 10'000);
     QTRY_VERIFY(!QSettings{}.contains(QStringLiteral("lists/pending-relocations")));
     (*other)->close();
+}
+
+// The library's "Add to list" puts a selection into a list of the user's
+// choosing, not only the one on screen; and a folder dragged from the folder
+// browser onto a list is read into it, as from a file manager.
+void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
+    QTemporaryDir music_dir;
+    QVERIFY(music_dir.isValid());
+    const auto music = music_dir.path();
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/album")));
+    write_wave(music + QStringLiteral("/album/one.wav"), wave_sample_rate);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_library_ != nullptr);
+    auto catalogue = window.catalogue_source_->open();
+    QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
+    persistence::LibraryScanProgress progress;
+    QVERIFY(catalogue->scan({}, progress).has_value());
+
+    auto* chosen = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::saved,
+                                  .name = "Chosen",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        false);
+    auto* current = window.currentListTab();
+    QVERIFY(current != nullptr && current != chosen);
+    const auto chosen_id = QString::fromStdString(chosen->document.id.to_string());
+    const auto targets = window.listTargets(false);
+    QVERIFY(std::ranges::any_of(targets, [&](const auto& target) {
+        return target.first == chosen_id && target.second == QStringLiteral("Chosen");
+    }));
+    QVERIFY(window.listTargets(true).empty());
+
+    persistence::LibraryQuery albums;
+    albums.kind = persistence::LibraryEntryKind::album;
+    const auto page = catalogue->query(albums);
+    QVERIFY(page && !page->entries.empty());
+    const auto before = current->model->rowCount();
+    emit window.local_library_->addToListRequested(page->entries, chosen_id);
+    QTRY_COMPARE(chosen->model->rowCount(), 1);
+    QCOMPARE(current->model->rowCount(), before);
+    QTRY_VERIFY(!window.discovery_running_);
+
+    // The folder, dragged from the folder browser onto the list on screen.
+    auto* folder_model = window.findChild<ui::LocalFolderTreeModel*>();
+    QVERIFY(folder_model != nullptr);
+    folder_model->addRoot(QFile::encodeName(music + QStringLiteral("/album")).toStdString());
+    QModelIndex album;
+    QTRY_VERIFY([&] {
+        for (int row = 0; row < folder_model->rowCount(); ++row) {
+            const auto index = folder_model->index(row, 0);
+            if (folder_model->rawPath(index) ==
+                QFile::encodeName(music + QStringLiteral("/album")).toStdString()) {
+                album = index;
+                return true;
+            }
+        }
+        return false;
+    }());
+    QVERIFY(folder_model->flags(album).testFlag(Qt::ItemIsDragEnabled));
+    std::unique_ptr<QMimeData> mime{folder_model->mimeData({album})};
+    QVERIFY(mime != nullptr);
+    auto* viewport = current->view->viewport();
+    QDragEnterEvent enter{QPoint{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton,
+                          Qt::NoModifier};
+    QApplication::sendEvent(viewport, &enter);
+    QVERIFY(enter.isAccepted());
+    QDropEvent drop{QPointF{10, 10}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &drop);
+    QVERIFY(drop.isAccepted());
+    QTRY_COMPARE(current->model->rowCount(), before + 1);
+    QCOMPARE(current->model->rows().back().raw_path,
+             QFile::encodeName(music + QStringLiteral("/album/one.wav")).toStdString());
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

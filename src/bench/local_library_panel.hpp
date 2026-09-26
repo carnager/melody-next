@@ -79,8 +79,15 @@ class LocalLibraryPanel final : public QWidget {
                         std::function<void(std::vector<unsigned>)> ready);
     void storeRating(std::string hash, bool album, unsigned rating);
 
+    // The lists the context menu offers to add to, by id and name, asked for
+    // each time it opens: this library's engine's lists open in the window.
+    using ListTargets = std::function<std::vector<std::pair<QString, QString>>()>;
+    void setListTargets(ListTargets targets) { list_targets_ = std::move(targets); }
+
   signals:
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
+    // "Add to list": the entries, appended to the list with this id.
+    void addToListRequested(std::vector<persistence::LibraryEntry> entries, const QString& id);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
     void ratingsChanged();
     void libraryContentChanged();
@@ -90,6 +97,7 @@ class LocalLibraryPanel final : public QWidget {
     bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
+    ListTargets list_targets_;
     struct Outcome {
         persistence::LibraryPage page;
         std::vector<persistence::LibraryRoot> roots;

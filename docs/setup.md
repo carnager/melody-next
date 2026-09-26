@@ -32,14 +32,16 @@ Or use the Docker image instead.
 On your desktop, in Trackknife:
 
 1. **Settings → Engine**: enter the password at the top -- the same one the
-   server has -- and under **Remote engine** pick the server from
-   **On the network**. The remote password field is only for a server whose
-   password differs from yours.
-2. The server's library shows up as its own tab in the library panel. Click
+   server has -- and under **Engines elsewhere** pick the server from
+   **On the network** (or **Add** it by address). Its password field is only
+   for a server whose password differs from yours. Several can be listed --
+   a NAS and another desktop, say -- and are all connected at once; engines
+   added or removed apply after restarting Trackknife.
+2. Each server's library shows up as its own tab in the library panel. Click
    **Folders…** there and add the music folder as the *server* sees it, then
    **Refresh**.
 
-Tabs you fill from the server's library play on the server.
+Tabs you fill from a server's library play on that server.
 
 If the music is on a NAS and the engine runs elsewhere, run `melody-watch` on
 the NAS so the engine hears about changes instead of scanning over the network
@@ -48,10 +50,13 @@ the NAS so the engine hears about changes instead of scanning over the network
 ## Editing tags on server files
 
 The engine never writes to your files; Trackknife does. Mount the server's
-music on your desktop (NFS, sshfs, …), then under **Settings → Engine** set:
+music on your desktop yourself (NFS, sshfs, …) -- Trackknife mounts
+nothing -- then under **Settings → Engine**, with that server chosen in
+**Engines elsewhere**, set:
 
-- **Remote music folder**: the path on the server, e.g. `/music`
-- **Mounted here at**: where it is on your desktop, e.g. `/mnt/nas/music`
+- **Its music folder**: the path on the server, e.g. `/music`
+- **Also reachable here at**: where it is on your desktop, e.g.
+  `/mnt/nas/music`; empty when it is at the same path on both
 
 Now the tag editor, ReplayGain and Convert work on server tracks.
 

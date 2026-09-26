@@ -259,6 +259,7 @@ class BenchMainWindowTest final : public QObject {
     void theRemotesListsTakeItsIdOnceItSaysIt();
     void remoteEnginesStartFromTheOneRemoteOfBefore();
     void twoEnginesElsewhereSideBySide();
+    void settingsListTheEnginesElsewhere();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2440,6 +2441,69 @@ void BenchMainWindowTest::twoEnginesElsewhereSideBySide() {
     QVERIFY(at(window.list_tabs_.front().get()) < at(first_tab));
     QVERIFY(at(first_tab) < at(second_tab));
     QCOMPARE(window.playbackOf(EngineKey::of(second_tab->document)), window.engines_[2]->playback);
+    saveRemoteEngines({});
+}
+
+// ADR-0234: Settings list the engines elsewhere; the form below edits the
+// one chosen, Add and Remove change the list, and what is saved is those
+// with an address, in order.
+void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = {},
+                        .music_folder = QStringLiteral("/mnt/nas/Music"),
+                        .reachable_at = {},
+                        .id = QStringLiteral("nas-id")}});
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    QVERIFY(dialog != nullptr);
+    auto* list = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-engines"));
+    auto* address = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
+    auto* folder = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-remote-folder"));
+    auto* reachable = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-remote-mount"));
+    auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-add"));
+    auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-remove"));
+    QVERIFY(list && address && folder && reachable && add && remove);
+    QCOMPARE(list->count(), 1);
+    QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
+    QCOMPARE(folder->text(), QStringLiteral("/mnt/nas/Music"));
+
+    // One more, filled in.
+    add->click();
+    QCOMPARE(list->count(), 2);
+    QVERIFY(address->text().isEmpty());
+    address->setText(QStringLiteral("192.0.2.20:6603"));
+    folder->setText(QStringLiteral("/srv/music"));
+    reachable->setText(QStringLiteral("/media/desktop"));
+    QCOMPARE(list->item(1)->text(), QStringLiteral("192.0.2.20:6603"));
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-engines.png")));
+    }
+    // Back to the first: its fields, untouched.
+    list->setCurrentRow(0);
+    QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
+    QVERIFY(reachable->text().isEmpty());
+    // A third, left empty, and removed again.
+    add->click();
+    QCOMPARE(list->count(), 3);
+    remove->click();
+    QCOMPARE(list->count(), 2);
+
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    const auto saved = loadRemoteEngines();
+    QCOMPARE(saved.size(), std::size_t{2});
+    QCOMPARE(saved[0].address, QStringLiteral("192.0.2.10:6603"));
+    QCOMPARE(saved[0].id, QStringLiteral("nas-id"));
+    QCOMPARE(saved[1].address, QStringLiteral("192.0.2.20:6603"));
+    QCOMPARE(saved[1].music_folder, QStringLiteral("/srv/music"));
+    QCOMPARE(saved[1].reachable_at, QStringLiteral("/media/desktop"));
+    QVERIFY(saved[1].id.isEmpty());
     saveRemoteEngines({});
 }
 

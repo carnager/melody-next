@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/remote_engines.hpp"
+
 #include "bench/output_profiles_widget.hpp"
 #include "trackknife/metadata/artwork_write_plan.hpp"
 
@@ -136,6 +138,15 @@ class SettingsDialog final : public QDialog {
     QLineEdit* engine_token_{nullptr};
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
+    // ADR-0234: the engines elsewhere, as edited; the form shows one.
+    std::vector<RemoteEngineSetting> engines_list_;
+    int engine_current_{-1};
+    bool loading_engine_{false};
+    QListWidget* engines_view_{nullptr};
+    [[nodiscard]] static QString engineLabel(const RemoteEngineSetting& engine);
+    void refreshEngines(int current);
+    void showEngine(int row);
+    void chooseFoundEngine(const QString& address);
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
     // Looks for engines while the dialog is open.

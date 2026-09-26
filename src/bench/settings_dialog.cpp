@@ -27,6 +27,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
@@ -433,19 +434,31 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     refresh_sharing();
     engine_layout->addWidget(sharing);
 
-    auto* remote = new QGroupBox(QStringLiteral("Remote engine"), engine);
+    auto* remote = new QGroupBox(QStringLiteral("Engines elsewhere"), engine);
     auto* remote_layout = new QVBoxLayout(remote);
-    // ADR-0220: which engine serves the catalogue and owns playback. Empty
-    // means this computer's own, started when needed (ADR-0226) -- stated
-    // here rather than left as a hand-edited setting, because "which engine
-    // is in use" is otherwise unanswerable from the UI.
+    // ADR-0234: engines on other machines, each connected at once beside
+    // this computer's, their libraries in tabs of their own. The list; below
+    // it, the one chosen.
+    engines_list_ = loadRemoteEngines();
+    if (engines_list_.empty()) {
+        engines_list_.push_back({});
+    }
+    engines_view_ = new QListWidget(remote);
+    engines_view_->setObjectName(QStringLiteral("bench-settings-engines"));
+    engines_view_->setAccessibleName(QStringLiteral("Engines elsewhere"));
+    engines_view_->setMaximumHeight(110);
+    remote_layout->addWidget(engines_view_);
+    auto* engine_buttons = new QHBoxLayout;
+    auto* add_engine = new QPushButton(QStringLiteral("Add"), remote);
+    add_engine->setObjectName(QStringLiteral("bench-settings-engine-add"));
+    auto* remove_engine = new QPushButton(QStringLiteral("Remove"), remote);
+    remove_engine->setObjectName(QStringLiteral("bench-settings-engine-remove"));
+    engine_buttons->addWidget(add_engine);
+    engine_buttons->addWidget(remove_engine);
     auto* engine_form = new QFormLayout;
     engine_socket_ = new QLineEdit(remote);
     engine_socket_->setObjectName(QStringLiteral("bench-settings-engine-socket"));
-    engine_socket_->setPlaceholderText(
-        QStringLiteral("host:port or socket path; empty: no remote engine"));
-    engine_socket_->setText(
-        settings.value(QLatin1String(library_engine_socket_key), QString{}).toString());
+    engine_socket_->setPlaceholderText(QStringLiteral("host:port or socket path"));
     // Engines that announce themselves on the network, by name: chosen
     // rather than typed. The list fills as they answer.
     auto* found_engines = new QToolButton(remote);
@@ -471,8 +484,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                 found_menu->addAction(QStringLiteral("%1 — %2%3")
                                           .arg(QString::fromStdString(announced.instance), where,
                                                locked ? QStringLiteral(" · password") : QString{}));
-            connect(choice, &QAction::triggered, this,
-                    [this, where] { engine_socket_->setText(where); });
+            connect(choice, &QAction::triggered, this, [this, where] { chooseFoundEngine(where); });
         }
     };
     fill_found({});
@@ -486,34 +498,74 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         found_engines->setEnabled(false);
         found_engines->setToolTip(QString::fromStdString(browser.error().message));
     }
-    auto* engine_row = new QHBoxLayout;
-    engine_row->addWidget(engine_socket_, 1);
-    engine_row->addWidget(found_engines);
-    engine_form->addRow(QStringLiteral("Remote engine:"), engine_row);
+    engine_buttons->addStretch(1);
+    engine_buttons->addWidget(found_engines);
+    remote_layout->addLayout(engine_buttons);
+    engine_form->addRow(QStringLiteral("Address:"), engine_socket_);
     engine_token_ = new QLineEdit(remote);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
     engine_token_->setPlaceholderText(QStringLiteral("the password above"));
     engine_token_->setToolTip(
-        QStringLiteral("Only when the remote engine's password differs from yours"));
-    engine_token_->setText(
-        settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Remote password:"), engine_token_);
-    // Where the remote's music is on this computer, for moving its tracks
-    // into local lists (and back): played here, and tagged here.
+        QStringLiteral("Only when that engine's password differs from yours"));
+    engine_form->addRow(QStringLiteral("Password:"), engine_token_);
+    // Where its music is, and where the same folder is reachable from this
+    // computer -- if it is, by a mount made outside Trackknife. Only moving
+    // its tracks to this computer's lists and the tag and file tools need it.
     remote_folder_ = new QLineEdit(remote);
     remote_folder_->setObjectName(QStringLiteral("bench-settings-remote-folder"));
     remote_folder_->setPlaceholderText(
-        QStringLiteral("e.g. /mnt/nas/Music, as the remote sees it"));
-    remote_folder_->setText(
-        settings.value(QLatin1String(library_remote_folder_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Remote music folder:"), remote_folder_);
+        QStringLiteral("e.g. /mnt/nas/Music, as that engine sees it"));
+    engine_form->addRow(QStringLiteral("Its music folder:"), remote_folder_);
     remote_mount_ = new QLineEdit(remote);
     remote_mount_->setObjectName(QStringLiteral("bench-settings-remote-mount"));
-    remote_mount_->setPlaceholderText(QStringLiteral("the same folder here; empty: same path"));
-    remote_mount_->setText(
-        settings.value(QLatin1String(library_remote_mount_key), QString{}).toString());
-    engine_form->addRow(QStringLiteral("Mounted here at:"), remote_mount_);
+    remote_mount_->setPlaceholderText(
+        QStringLiteral("optional; empty: the same path, or not reachable here"));
+    remote_mount_->setToolTip(QStringLiteral(
+        "Where that folder is on this computer, if you have mounted it (NFS, SMB, …). "
+        "Trackknife mounts nothing itself."));
+    engine_form->addRow(QStringLiteral("Also reachable here at:"), remote_mount_);
+    // The form edits the engine chosen in the list.
+    const auto edited = [this] {
+        if (loading_engine_ || engine_current_ < 0 ||
+            engine_current_ >= static_cast<int>(engines_list_.size())) {
+            return;
+        }
+        auto& chosen = engines_list_[static_cast<std::size_t>(engine_current_)];
+        const auto address = engine_socket_->text().trimmed();
+        // Another address may be another engine: its id is learned anew.
+        if (address != chosen.address) {
+            chosen.id.clear();
+        }
+        chosen.address = address;
+        chosen.password = engine_token_->text().trimmed();
+        chosen.music_folder = remote_folder_->text().trimmed();
+        chosen.reachable_at = remote_mount_->text().trimmed();
+        if (auto* item = engines_view_->item(engine_current_)) {
+            item->setText(engineLabel(chosen));
+        }
+    };
+    for (auto* field : {engine_socket_, engine_token_, remote_folder_, remote_mount_}) {
+        connect(field, &QLineEdit::textChanged, this, edited);
+    }
+    connect(engines_view_, &QListWidget::currentRowChanged, this,
+            [this](const int row) { showEngine(row); });
+    connect(add_engine, &QPushButton::clicked, this, [this] {
+        engines_list_.push_back({});
+        refreshEngines(static_cast<int>(engines_list_.size()) - 1);
+        engine_socket_->setFocus();
+    });
+    connect(remove_engine, &QPushButton::clicked, this, [this] {
+        if (engine_current_ < 0 || engine_current_ >= static_cast<int>(engines_list_.size())) {
+            return;
+        }
+        engines_list_.erase(engines_list_.begin() + engine_current_);
+        if (engines_list_.empty()) {
+            engines_list_.push_back({});
+        }
+        refreshEngines(std::min(engine_current_, static_cast<int>(engines_list_.size()) - 1));
+    });
+    refreshEngines(0);
     play_for_remote_ =
         new QCheckBox(QStringLiteral("Let other engines play on this computer's speakers"), remote);
     play_for_remote_->setObjectName(QStringLiteral("bench-settings-play-for-remote"));
@@ -527,8 +579,10 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
-                       "computer's: its library gets a tab and its tracks play there. Unencrypted: "
-                       "for a home network or WireGuard. Applies after restarting Trackknife."),
+                       "computer's: its library gets a tab and its tracks play there. The first "
+                       "listed is the one this computer's speakers are offered to. Unencrypted: "
+                       "for a home network or WireGuard. Engines added or removed apply after "
+                       "restarting Trackknife."),
         remote);
     engine_note->setWordWrap(true);
     engine_note->setForegroundRole(QPalette::PlaceholderText);
@@ -802,6 +856,53 @@ QString SettingsDialog::remoteEnginePassword() {
                          : own;
 }
 
+QString SettingsDialog::engineLabel(const RemoteEngineSetting& engine) {
+    return engine.address.isEmpty() ? QStringLiteral("New engine") : engine.address;
+}
+
+void SettingsDialog::refreshEngines(const int current) {
+    const QSignalBlocker blocker{engines_view_};
+    engines_view_->clear();
+    for (const auto& engine : engines_list_) {
+        engines_view_->addItem(engineLabel(engine));
+    }
+    engines_view_->setCurrentRow(current);
+    showEngine(current);
+}
+
+void SettingsDialog::showEngine(const int row) {
+    engine_current_ = row;
+    if (row < 0 || row >= static_cast<int>(engines_list_.size())) {
+        return;
+    }
+    const auto& engine = engines_list_[static_cast<std::size_t>(row)];
+    loading_engine_ = true;
+    engine_socket_->setText(engine.address);
+    engine_token_->setText(engine.password);
+    remote_folder_->setText(engine.music_folder);
+    remote_mount_->setText(engine.reachable_at);
+    loading_engine_ = false;
+}
+
+void SettingsDialog::chooseFoundEngine(const QString& address) {
+    // Known already: chosen. Otherwise into the one being filled in, if it
+    // is still empty, or as one more.
+    for (int row = 0; row < static_cast<int>(engines_list_.size()); ++row) {
+        if (engines_list_[static_cast<std::size_t>(row)].address == address) {
+            refreshEngines(row);
+            return;
+        }
+    }
+    const bool blank = engine_current_ >= 0 &&
+                       engine_current_ < static_cast<int>(engines_list_.size()) &&
+                       engines_list_[static_cast<std::size_t>(engine_current_)].address.isEmpty();
+    if (!blank) {
+        engines_list_.push_back({});
+        refreshEngines(static_cast<int>(engines_list_.size()) - 1);
+    }
+    engine_socket_->setText(address);
+}
+
 void SettingsDialog::save() {
     QSettings settings;
     settings.setValue(QLatin1String(acoustid_client_key), acoustid_key_->text().trimmed());
@@ -818,15 +919,16 @@ void SettingsDialog::save() {
                       buffer_threshold_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), preamp_with_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
-    // Another address may be another engine: its id is learned anew.
-    if (settings.value(QLatin1String(library_engine_socket_key)).toString() !=
-        engine_socket_->text().trimmed()) {
-        settings.remove(QLatin1String(library_engine_id_key));
+    // ADR-0234: the engines elsewhere, those with an address.
+    {
+        std::vector<RemoteEngineSetting> kept;
+        for (const auto& entry : engines_list_) {
+            if (!entry.address.isEmpty()) {
+                kept.push_back(entry);
+            }
+        }
+        saveRemoteEngines(kept);
     }
-    settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
-    settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
-    settings.setValue(QLatin1String(library_remote_folder_key), remote_folder_->text().trimmed());
-    settings.setValue(QLatin1String(library_remote_mount_key), remote_mount_->text().trimmed());
     settings.setValue(QLatin1String(library_show_local_key), show_local_library_->isChecked());
     settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
     settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());

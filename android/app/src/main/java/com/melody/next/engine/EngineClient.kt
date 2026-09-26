@@ -43,6 +43,7 @@ class EngineClient(
     private val _outputs = MutableStateFlow<List<Output>>(emptyList())
     private val _problems = MutableSharedFlow<String>(extraBufferCapacity = 8)
     private val _ratings = MutableSharedFlow<RatingChange>(extraBufferCapacity = 16)
+    private val _listsChanged = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
     val connection: StateFlow<ConnectionState> = _connection
     val state: StateFlow<PlaybackState> = _state
@@ -53,6 +54,8 @@ class EngineClient(
     val problems: SharedFlow<String> = _problems
     /** A rating set on the engine, by any client: this one, Trackknife, a script. */
     val ratings: SharedFlow<RatingChange> = _ratings
+    /** ADR-0233: a list on the engine was written or deleted, by anyone: its id. */
+    val listsChanged: SharedFlow<String> = _listsChanged
 
     @Volatile private var control: EngineConnection? = null
     @Volatile private var covers: EngineConnection? = null
@@ -143,6 +146,7 @@ class EngineClient(
             "catalogue.rating_changed" -> event.data.optString("hash").takeIf { it.isNotEmpty() }?.let { hash ->
                 _ratings.tryEmit(RatingChange(hash, event.data.optInt("rating")))
             }
+            "list.changed" -> _listsChanged.tryEmit(event.data.optString("id"))
         }
     }
 
@@ -171,6 +175,21 @@ class EngineClient(
         runCatching {
             _outputs.value = connection.call("outputs.list").optJSONArray("outputs").objects().map(Output::from)
         }
+    }
+
+    /** ADR-0233: the engine's lists, saved ones first, each by name. */
+    suspend fun lists(): List<EngineList> =
+        call("list.all").optJSONArray("lists").objects().map(EngineList::from)
+            .sortedWith(compareBy({ !it.saved }, { it.name.lowercase() }))
+
+    suspend fun listEntries(id: String): List<ListEntry> =
+        call("list.get", JSONObject().put("id", id)).optJSONArray("items").objects().map(ListEntry::from)
+
+    /** The list becomes the queue and plays -- from the entry named, or its first. */
+    fun playList(id: String, entry: String? = null) {
+        val params = JSONObject().put("id", id)
+        if (entry != null) params.put("entry", entry)
+        command("list.play", params)
     }
 
     /** The engine's address as this phone reaches it: where its stream port is too. */

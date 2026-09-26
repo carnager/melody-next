@@ -2,6 +2,7 @@ package com.melody.next.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,9 +49,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.melody.next.CoverKey
 import com.melody.next.engine.ConnectionState
+import com.melody.next.engine.EngineList
 import com.melody.next.engine.LibraryEntry
 
-private val topLevels = listOf(LibraryLevel.Artists, LibraryLevel.Latest, LibraryLevel.Offline)
+private val topLevels = listOf(LibraryLevel.Artists, LibraryLevel.Latest, LibraryLevel.Lists, LibraryLevel.Offline)
 
 @Composable
 fun LibraryScreen(vm: MainViewModel) {
@@ -58,13 +60,15 @@ fun LibraryScreen(vm: MainViewModel) {
         val level = vm.level
         val top = topLevels.indexOf(level)
         if (top >= 0) {
-            TextTabs(listOf("Artists", "Newest", "On this phone"), top) { vm.showTop(topLevels[it]) }
+            TextTabs(listOf("Artists", "Newest", "Lists", "On this phone"), top) { vm.showTop(topLevels[it]) }
         }
         Box(Modifier.fillMaxSize()) {
             when {
                 level == LibraryLevel.Offline -> OfflineAlbums(vm)
                 level is LibraryLevel.OfflineAlbum -> OfflineAlbumPage(vm, level.key)
                 vm.libraryError.isNotEmpty() -> Unreachable(vm, vm.libraryError)
+                level == LibraryLevel.Lists -> ListsPage(vm)
+                level is LibraryLevel.ListPage -> ListPage(vm, level.list)
                 vm.loading && vm.entries.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(strokeWidth = 2.dp)
                 }
@@ -369,3 +373,79 @@ fun formatMinutes(ms: Long): String {
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.combinedClickableCompat(onClick: () -> Unit, onLongClick: (() -> Unit)? = null): Modifier =
     combinedClickable(onClick = onClick, onLongClick = onLongClick)
+
+
+/** ADR-0233: the engine's lists -- saved ones first, working ones said to be. */
+@Composable
+private fun ListsPage(vm: MainViewModel) {
+    val tones = LocalTones.current
+    if (vm.loading && vm.lists.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(strokeWidth = 2.dp) }
+        return
+    }
+    if (vm.lists.isEmpty()) {
+        Centered("No lists yet. Lists saved in Trackknife show here.")
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 12.dp)) {
+        itemsIndexed(vm.lists, key = { _, list -> list.id }) { _, list ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { vm.open(LibraryLevel.ListPage(list)) }
+                    .padding(vertical = 10.dp),
+            ) {
+                Text(list.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull("${list.tracks} tracks", if (list.saved) null else "working").joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tones.muted,
+                )
+            }
+        }
+    }
+}
+
+/** One of the engine's lists: played whole, or from a track. */
+@Composable
+private fun ListPage(vm: MainViewModel, list: EngineList) {
+    val state by vm.client.state.collectAsState()
+    val tones = LocalTones.current
+    val entries = vm.listEntries
+    val total = entries.sumOf { it.durationMs.coerceAtLeast(0) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
+        item(key = "head") {
+            Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(list.name, style = MaterialTheme.typography.headlineSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOfNotNull("${entries.size} tracks", total.takeIf { it > 0 }?.let(::formatMinutes), if (list.saved) null else "working")
+                        .joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = tones.muted,
+                )
+                Row(Modifier.padding(top = 14.dp, bottom = 10.dp)) {
+                    Button(
+                        onClick = { vm.client.playList(list.id) },
+                        enabled = entries.isNotEmpty(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 22.dp),
+                    ) {
+                        Icon(Icons.Default.PlayArrow, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Play", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        }
+        itemsIndexed(entries, key = { _, entry -> entry.entry }) { index, entry ->
+            TrackRow(
+                number = index + 1,
+                title = entry.title,
+                subtitle = listOf(entry.artist, entry.album).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null },
+                durationMs = entry.durationMs,
+                playing = entry.path == state.path,
+                moving = state.playing,
+                onClick = { vm.client.playList(list.id, entry.entry) },
+                onLongClick = {},
+            )
+        }
+    }
+}

@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.melody.next.MelodyApp
 import com.melody.next.engine.ConnectionState
+import com.melody.next.engine.EngineList
+import com.melody.next.engine.ListEntry
 import com.melody.next.engine.EntryKind
 import com.melody.next.engine.LibraryEntry
 import com.melody.next.engine.QueueEntry
@@ -28,6 +30,9 @@ sealed interface LibraryLevel {
     data class Tracks(val album: LibraryEntry) : LibraryLevel
     /** Albums kept on the phone: there with no engine in reach. */
     data object Offline : LibraryLevel
+    /** ADR-0233: the engine's lists, and one of them. */
+    data object Lists : LibraryLevel
+    data class ListPage(val list: EngineList) : LibraryLevel
     data class OfflineAlbum(val key: String) : LibraryLevel
 }
 
@@ -56,6 +61,10 @@ class MainViewModel : ViewModel() {
     var libraryError by mutableStateOf("")
         private set
     private var loadingJob: Job? = null
+    var lists by mutableStateOf<List<EngineList>>(emptyList())
+        private set
+    var listEntries by mutableStateOf<List<ListEntry>>(emptyList())
+        private set
 
     // --- Search ---
     var searchText by mutableStateOf("")
@@ -91,6 +100,16 @@ class MainViewModel : ViewModel() {
                 }
         }
         viewModelScope.launch { client.problems.collect { message = it } }
+        // A list changed anywhere -- a window saved it, another phone -- shows
+        // as it is now, if it is what is open.
+        viewModelScope.launch {
+            client.listsChanged.collect { id ->
+                val shown = level
+                if (shown == LibraryLevel.Lists || (shown is LibraryLevel.ListPage && shown.list.id == id)) {
+                    reload()
+                }
+            }
+        }
         // A rating set anywhere shows on what is open.
         viewModelScope.launch {
             client.ratings.collect { change ->
@@ -146,6 +165,11 @@ class MainViewModel : ViewModel() {
             loading = true
             libraryError = ""
             try {
+                when (shown) {
+                    LibraryLevel.Lists -> lists = client.lists()
+                    is LibraryLevel.ListPage -> listEntries = client.listEntries(shown.list.id)
+                    else -> Unit
+                }
                 entries = when (shown) {
                     LibraryLevel.Artists -> client.query(EntryKind.Artist, limit = 20_000).entries
                     LibraryLevel.Latest -> client.query(EntryKind.Album, newestFirst = true, limit = 200).entries
@@ -153,6 +177,7 @@ class MainViewModel : ViewModel() {
                     is LibraryLevel.Tracks -> client.tracksOf(shown.album)
                     // Kept on the phone: read from there, not asked for.
                     LibraryLevel.Offline, is LibraryLevel.OfflineAlbum -> emptyList()
+                    LibraryLevel.Lists, is LibraryLevel.ListPage -> emptyList()
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

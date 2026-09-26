@@ -206,3 +206,54 @@ data class Output(
 
 /** A track's or an album's rating, 0-10, by the key the library rates it under. */
 data class RatingChange(val hash: String, val rating: Int)
+
+/** ADR-0233: one of the engine's lists -- saved, or a working one a window has open. */
+data class EngineList(
+    val id: String,
+    val name: String,
+    val saved: Boolean,
+    val tracks: Int,
+    val revision: Long,
+) {
+    companion object {
+        fun from(json: JSONObject) = EngineList(
+            id = json.optString("id"),
+            name = json.optString("name"),
+            saved = json.optString("kind") == "saved",
+            tracks = json.optInt("tracks"),
+            revision = json.optLong("revision"),
+        )
+    }
+}
+
+/** An entry of a list: its identity in the list, and what the list says it is. */
+data class ListEntry(
+    val entry: String,
+    /** The track's path, encoded as the engine sends it. */
+    val path: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+) {
+    companion object {
+        fun from(json: JSONObject): ListEntry {
+            val path = json.optString("path")
+            // A file the library does not describe is named by its file name.
+            val named = json.optString("title").ifEmpty {
+                runCatching {
+                    String(android.util.Base64.decode(path, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                        .substringAfterLast('/')
+                }.getOrDefault("")
+            }
+            return ListEntry(
+                entry = json.optString("entry"),
+                path = path,
+                title = named,
+                artist = json.optString("artist"),
+                album = json.optString("album"),
+                durationMs = if (json.isNull("duration_ms")) -1 else json.optLong("duration_ms", -1),
+            )
+        }
+    }
+}

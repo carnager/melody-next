@@ -2,6 +2,7 @@
 
 #include "bench/engine_launcher.hpp"
 
+#include "bench/remote_engines.hpp"
 #include "bench/settings_dialog.hpp"
 
 #include <QCoreApplication>
@@ -114,24 +115,26 @@ LocalEngineSharing localEngineSharing() {
                            .value(QLatin1String(SettingsDialog::engine_stream_port_key),
                                   SettingsDialog::engine_stream_port_default)
                            .toInt(),
-        .password =
-            settings.value(QLatin1String(SettingsDialog::engine_password_key), QString{})
-                .toString(),
+        .password = settings.value(QLatin1String(SettingsDialog::engine_password_key), QString{})
+                        .toString(),
         .music_root =
             settings.value(QLatin1String(SettingsDialog::engine_music_root_key), QString{})
                 .toString()
                 .trimmed(),
-        .play_for = settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
-                            .toBool()
-                        ? settings.value(QLatin1String(SettingsDialog::library_engine_socket_key))
-                              .toString()
-                              .trimmed()
-                        : QString{},
-        .play_for_password = SettingsDialog::remoteEnginePassword(),
-        .play_for_music_root =
-            settings.value(QLatin1String(SettingsDialog::library_remote_mount_key))
-                .toString()
-                .trimmed(),
+        .play_for =
+            [&settings] {
+                std::vector<LocalEngineSharing::PlayFor> targets;
+                if (!settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
+                         .toBool()) {
+                    return targets;
+                }
+                for (const auto& engine : loadRemoteEngines()) {
+                    targets.push_back({.address = engine.address,
+                                       .password = engine.effectivePassword(),
+                                       .music_root = engine.reachable_at});
+                }
+                return targets;
+            }(),
         .play_for_found =
             settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
                 .toBool(),
@@ -150,25 +153,35 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     if (sharing.play_for_found) {
         arguments << QStringLiteral("--agent");
     }
-    // Only a remote on the network: one on this computer's own socket plays
-    // here already.
-    const auto guest_password = engine.state / "play-for.password";
-    std::filesystem::remove(guest_password, ignored);
-    if (sharing.play_for.contains(QLatin1Char(':'))) {
-        arguments << QStringLiteral("--play-for") << sharing.play_for;
-        if (!sharing.play_for_music_root.isEmpty()) {
-            arguments << QStringLiteral("--play-for-music-root") << sharing.play_for_music_root;
+    // Each engine elsewhere on the network, by name -- for one multicast does
+    // not reach (WireGuard). One on this computer's own socket plays here
+    // already. Its options follow its --play-for, which makes them its own.
+    for (const auto& stale : std::filesystem::directory_iterator{engine.state, ignored}) {
+        if (stale.path().filename().string().starts_with("play-for")) {
+            std::filesystem::remove(stale.path(), ignored);
         }
-        if (!sharing.play_for_password.isEmpty()) {
+    }
+    for (std::size_t index = 0; const auto& target : sharing.play_for) {
+        if (!target.address.contains(QLatin1Char(':'))) {
+            continue;
+        }
+        arguments << QStringLiteral("--play-for") << target.address;
+        if (!target.music_root.isEmpty()) {
+            arguments << QStringLiteral("--play-for-music-root") << target.music_root;
+        }
+        if (!target.password.isEmpty()) {
+            const auto guest_password =
+                engine.state / ("play-for-" + std::to_string(index) + ".password");
             QFile file{path_text(guest_password)};
             if (file.open(QIODevice::WriteOnly | QIODevice::Truncate,
                           QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
                 file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-                file.write(sharing.play_for_password.toUtf8() + '\n');
+                file.write(target.password.toUtf8() + '\n');
                 file.close();
                 arguments << QStringLiteral("--play-for-password-file") << path_text(guest_password);
             }
         }
+        ++index;
     }
     // Not shared: this computer only, not melodyd's default network ports.
     // Shared without a password is not shared either: every TCP connection

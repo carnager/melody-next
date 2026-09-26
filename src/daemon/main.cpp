@@ -130,70 +130,74 @@ constexpr const char* default_listen = "0.0.0.0:6603";
 constexpr const char* default_http = "0.0.0.0:6604";
 
 void usage() {
-    std::cerr << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT | --local-only]\n"
-              << "               [--name NAME] [--password PASS | --password-file FILE]\n"
-              << "               [--http HOST:PORT] [--music-root DIR]\n"
-              << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
-              << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
-              << "                [--play-for-music-root DIR]]\n"
-              << "               [--agent [--agent-password PASS] [--agent-music-root DIR]]\n"
-              << "\n"
-              << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
-              << "  --state DIR    where the database lives (default\n"
-              << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
-              << "  --music-root DIR\n"
-              << "                 where the music is: output agents with their own copy are\n"
-              << "                 sent paths relative to it (ADR-0228)\n"
-              << "  --name NAME    what clients call this engine (default: the host name)\n"
-              << "  --listen HOST:PORT\n"
-              << "                 where to accept TCP connections, from clients and output\n"
-              << "                 agents (default 0.0.0.0:6603, streams on 0.0.0.0:6604, when\n"
-              << "                 a password is set); the engine is announced there to be\n"
-              << "                 found by name. Needs a password.\n"
-              << "  --local-only   no TCP and no streams by default: this machine's socket\n"
-              << "                 only, unless --listen or --http names them. The default\n"
-              << "                 without a password.\n"
-              << "  --password PASS, --password-file FILE\n"
-              << "                 the password every TCP connection must give, the same on\n"
-              << "                 every agent and client. There is no TLS: on an untrusted\n"
-              << "                 network use WireGuard, or put a TLS proxy in front of a\n"
-              << "                 loopback --listen (ADR-0223).\n"              << "  --http HOST:PORT\n"
-              << "                 serve the music being played to output agents that have\n"
-              << "                 no copy of their own (melody-agent --stream). Only what\n"
-              << "                 the queue holds is served -- converted to Opus for an agent\n"
-              << "                 that asks, and to clients with a ticket (offline copies).\n"
-              << "  --transcode-cache MB\n"
-              << "                 how much converted music to keep for streams and\n"
-              << "                 downloads (default 2048)\n"
-              << "  --play-for HOST:PORT\n"
-              << "                 let another engine play on this machine's speakers, as an\n"
-              << "                 output agent built in -- no melody-agent needed here. The\n"
-              << "                 newest to start playing gets the speakers; the other pauses.\n"
-              << "  --play-for-name NAME\n"
-              << "                 what to call that engine when it takes them (default: its\n"
-              << "                 address)\n"
-              << "  --play-for-password PASS, --play-for-password-file FILE\n"
-              << "                 its password (default: this engine's own)\n"
-              << "  --play-for-music-root DIR\n"
-              << "                 where its music is mounted here; without one it streams\n"
-              << "  --agent        play for every other engine found on the network, on this\n"
-              << "                 machine's speakers: no melody-agent needed. Engines listening\n"
-              << "                 on the network (--listen) announce themselves to be found.\n"
-              << "  --agent-password PASS, --agent-password-file FILE\n"
-              << "                 for the engines it plays for (default: --play-for's, else\n"
-              << "                 this engine's own)\n"
-              << "  --agent-music-root DIR\n"
-              << "                 where their music is mounted here; without one it streams\n"
-              << "\n"
-              << "Speaks protocol v1: one JSON object per line. Try:\n"
-              << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
-              << default_socket_path().string() << "\n"
-              << "\n"
-              << "A half-closed connection stays open, because a client that has\n"
-              << "finished sending is usually still listening -- that is how job\n"
-              << "events reach the client that submitted the job. So give nc a read\n"
-              << "timeout (-w) or it will wait for an engine that has nothing more\n"
-              << "to say.\n";
+    std::cerr
+        << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT | --local-only]\n"
+        << "               [--name NAME] [--password PASS | --password-file FILE]\n"
+        << "               [--http HOST:PORT] [--music-root DIR]\n"
+        << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
+        << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
+        << "                [--play-for-music-root DIR]]\n"
+        << "               [--agent [--agent-password PASS] [--agent-music-root DIR]]\n"
+        << "\n"
+        << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
+        << "  --state DIR    where the database lives (default\n"
+        << "                 $XDG_DATA_HOME/trackknife/trackknife, Trackknife's own)\n"
+        << "  --music-root DIR\n"
+        << "                 where the music is: output agents with their own copy are\n"
+        << "                 sent paths relative to it (ADR-0228)\n"
+        << "  --name NAME    what clients call this engine (default: the host name)\n"
+        << "  --listen HOST:PORT\n"
+        << "                 where to accept TCP connections, from clients and output\n"
+        << "                 agents (default 0.0.0.0:6603, streams on 0.0.0.0:6604, when\n"
+        << "                 a password is set); the engine is announced there to be\n"
+        << "                 found by name. Needs a password.\n"
+        << "  --local-only   no TCP and no streams by default: this machine's socket\n"
+        << "                 only, unless --listen or --http names them. The default\n"
+        << "                 without a password.\n"
+        << "  --password PASS, --password-file FILE\n"
+        << "                 the password every TCP connection must give, the same on\n"
+        << "                 every agent and client. There is no TLS: on an untrusted\n"
+        << "                 network use WireGuard, or put a TLS proxy in front of a\n"
+        << "                 loopback --listen (ADR-0223).\n"
+        << "  --http HOST:PORT\n"
+        << "                 serve the music being played to output agents that have\n"
+        << "                 no copy of their own (melody-agent --stream). Only what\n"
+        << "                 the queue holds is served -- converted to Opus for an agent\n"
+        << "                 that asks, and to clients with a ticket (offline copies).\n"
+        << "  --transcode-cache MB\n"
+        << "                 how much converted music to keep for streams and\n"
+        << "                 downloads (default 2048)\n"
+        << "  --play-for HOST:PORT\n"
+        << "                 let another engine play on this machine's speakers, as an\n"
+        << "                 output agent built in -- no melody-agent needed here. The\n"
+        << "                 newest to start playing gets the speakers; the other pauses.\n"
+        << "                 Given again, for each engine; the --play-for-* options after\n"
+        << "                 one are its, those before any are every one's.\n"
+        << "  --play-for-name NAME\n"
+        << "                 what to call that engine when it takes them (default: its\n"
+        << "                 address)\n"
+        << "  --play-for-password PASS, --play-for-password-file FILE\n"
+        << "                 its password (default: this engine's own)\n"
+        << "  --play-for-music-root DIR\n"
+        << "                 where its music is mounted here; without one it streams\n"
+        << "  --agent        play for every other engine found on the network, on this\n"
+        << "                 machine's speakers: no melody-agent needed. Engines listening\n"
+        << "                 on the network (--listen) announce themselves to be found.\n"
+        << "  --agent-password PASS, --agent-password-file FILE\n"
+        << "                 for the engines it plays for (default: --play-for's, else\n"
+        << "                 this engine's own)\n"
+        << "  --agent-music-root DIR\n"
+        << "                 where their music is mounted here; without one it streams\n"
+        << "\n"
+        << "Speaks protocol v1: one JSON object per line. Try:\n"
+        << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
+        << default_socket_path().string() << "\n"
+        << "\n"
+        << "A half-closed connection stays open, because a client that has\n"
+        << "finished sending is usually still listening -- that is how job\n"
+        << "events reach the client that submitted the job. So give nc a read\n"
+        << "timeout (-w) or it will wait for an engine that has nothing more\n"
+        << "to say.\n";
 }
 
 } // namespace
@@ -209,11 +213,20 @@ int main(int argc, char** argv) {
     std::string password_file;
     std::string engine_name;
     std::optional<std::filesystem::path> music_root;
-    std::string play_for;
-    std::string play_for_name;
-    std::string play_for_password;
-    std::string play_for_password_file;
-    std::optional<std::filesystem::path> play_for_music_root;
+    // ADR-0234: engines this one plays for by address, each on these
+    // speakers; `--play-for-*` after one applies to it, before any to all.
+    struct PlayFor {
+        std::string address;
+        std::string name;
+        std::string password;
+        std::string password_file;
+        std::optional<std::filesystem::path> music_root;
+    };
+    std::vector<PlayFor> play_fors;
+    PlayFor play_for_defaults;
+    const auto play_for_option = [&play_fors, &play_for_defaults]() -> PlayFor& {
+        return play_fors.empty() ? play_for_defaults : play_fors.back();
+    };
     bool agent_for_all = false;
     std::string agent_password;
     std::string agent_password_file;
@@ -251,13 +264,17 @@ int main(int argc, char** argv) {
         } else if (argument == "--music-root") {
             music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for") {
-            play_for = value();
+            play_fors.push_back(PlayFor{.address = value(),
+                                        .name = {},
+                                        .password = {},
+                                        .password_file = {},
+                                        .music_root = {}});
         } else if (argument == "--play-for-name") {
-            play_for_name = value();
+            play_for_option().name = value();
         } else if (argument == "--play-for-password") {
-            play_for_password = value();
+            play_for_option().password = value();
         } else if (argument == "--play-for-password-file") {
-            play_for_password_file = value();
+            play_for_option().password_file = value();
         } else if (argument == "--agent") {
             agent_for_all = true;
         } else if (argument == "--agent-password") {
@@ -267,7 +284,7 @@ int main(int argc, char** argv) {
         } else if (argument == "--agent-music-root") {
             agent_music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for-music-root") {
-            play_for_music_root = std::filesystem::path{value()};
+            play_for_option().music_root = std::filesystem::path{value()};
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -278,10 +295,14 @@ int main(int argc, char** argv) {
         }
     }
 
-    for (const auto& [file, password_read] :
-         {std::pair{&password_file, &password},
-          std::pair{&play_for_password_file, &play_for_password},
-          std::pair{&agent_password_file, &agent_password}}) {
+    std::vector<std::pair<std::string*, std::string*>> password_files{
+        {&password_file, &password},
+        {&play_for_defaults.password_file, &play_for_defaults.password},
+        {&agent_password_file, &agent_password}};
+    for (auto& target : play_fors) {
+        password_files.emplace_back(&target.password_file, &target.password);
+    }
+    for (const auto& [file, password_read] : password_files) {
         if (file->empty()) {
             continue;
         }
@@ -300,22 +321,32 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     // One password set everywhere is the usual case, as for --agent-password.
-    if (play_for_password.empty()) {
-        play_for_password = password;
+    if (play_for_defaults.password.empty()) {
+        play_for_defaults.password = password;
     }
-    std::optional<trackknife::protocol::Endpoint> guest_endpoint;
-    if (!play_for.empty()) {
-        guest_endpoint = trackknife::protocol::Endpoint::parse(play_for, play_for_password);
-        if (!guest_endpoint) {
+    std::vector<std::pair<PlayFor, trackknife::protocol::Endpoint>> guest_endpoints;
+    for (auto target : play_fors) {
+        if (target.name.empty()) {
+            target.name = play_for_defaults.name;
+        }
+        if (target.password.empty()) {
+            target.password = play_for_defaults.password;
+        }
+        if (!target.music_root) {
+            target.music_root = play_for_defaults.music_root;
+        }
+        auto endpoint = trackknife::protocol::Endpoint::parse(target.address, target.password);
+        if (!endpoint) {
             std::cerr << "melodyd: --play-for wants HOST:PORT or a socket path\n";
             return EXIT_FAILURE;
         }
-        if (guest_endpoint->tcp() && play_for_password.empty()) {
+        if (endpoint->tcp() && target.password.empty()) {
             // Not fatal: the engine is still this machine's player. But the
             // other one will refuse it, and that should be said here.
-            std::cerr << "melodyd: --play-for " << play_for
+            std::cerr << "melodyd: --play-for " << target.address
                       << " has no password; that engine will refuse this one\n";
         }
+        guest_endpoints.emplace_back(std::move(target), std::move(*endpoint));
     }
 
     if (engine_name.empty()) {
@@ -555,31 +586,34 @@ int main(int argc, char** argv) {
 
     // Another engine on these speakers, through an agent built in: newest
     // wins them (ADR-0228).
-    std::unique_ptr<trackknife::agent::Agent> guest;
+    // One agent each, with audio of its own; they share the speakers
+    // through the arbiter as agents found on the network do.
+    std::vector<std::pair<std::string, std::unique_ptr<trackknife::agent::Agent>>> guest_agents;
     std::unique_ptr<trackknife::agent::SpeakerArbiter> arbiter;
-    if (guest_endpoint) {
+    for (const auto& [target, endpoint] : guest_endpoints) {
         auto audition = trackknife::audio::LocalAuditionService::create();
         if (!audition) {
-            std::cerr << "melodyd: no audio here to play " << play_for << " on: "
-                      << audition.error().message << "\n";
-        } else {
-            static_cast<void>((*audition)->refresh_output_devices());
-            auto made = trackknife::agent::Agent::create(
-                trackknife::agent::AgentConfig{.server = *guest_endpoint,
-                                               .name = engine_name,
-                                               .music_root = play_for_music_root,
-                                               .stream_only = !play_for_music_root.has_value()},
-                std::move(*audition));
-            if (!made) {
-                std::cerr << "melodyd: cannot play for " << play_for << ": "
-                          << made.error().message << "\n";
-            } else {
-                guest = std::move(*made);
-                arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(&*player);
-                arbiter->add_guest(
-                    play_for_name.empty() ? guest_endpoint->describe() : play_for_name, *guest);
-            }
+            std::cerr << "melodyd: no audio here to play " << target.address
+                      << " on: " << audition.error().message << "\n";
+            continue;
         }
+        static_cast<void>((*audition)->refresh_output_devices());
+        auto made = trackknife::agent::Agent::create(
+            trackknife::agent::AgentConfig{.server = endpoint,
+                                           .name = engine_name,
+                                           .music_root = target.music_root,
+                                           .stream_only = !target.music_root.has_value()},
+            std::move(*audition));
+        if (!made) {
+            std::cerr << "melodyd: cannot play for " << target.address << ": "
+                      << made.error().message << "\n";
+            continue;
+        }
+        if (!arbiter) {
+            arbiter = std::make_unique<trackknife::agent::SpeakerArbiter>(&*player);
+        }
+        arbiter->add_guest(target.name.empty() ? endpoint.describe() : target.name, **made);
+        guest_agents.emplace_back(endpoint.describe(), std::move(*made));
     }
 
     // This run's identity among engines on the network: what an engine that
@@ -594,13 +628,19 @@ int main(int argc, char** argv) {
                 .name = engine_name,
                 // Asked for, else the one given for --play-for, else this
                 // engine's own: one password set everywhere is the usual case.
-                .password = !agent_password.empty()      ? agent_password
-                            : !play_for_password.empty() ? play_for_password
-                                                         : password,
+                .password = !agent_password.empty()               ? agent_password
+                            : !play_for_defaults.password.empty() ? play_for_defaults.password
+                                                                  : password,
                 .music_root = agent_music_root,
                 .own_id = engine_id,
-                .already = play_for.empty() ? std::vector<std::string>{}
-                                            : std::vector<std::string>{play_for}},
+                .already =
+                    [&play_fors] {
+                        std::vector<std::string> addresses;
+                        for (const auto& target : play_fors) {
+                            addresses.push_back(target.address);
+                        }
+                        return addresses;
+                    }()},
             *arbiter);
     }
     // Listening on the network, it says so there: agents and clients find it
@@ -642,10 +682,9 @@ int main(int argc, char** argv) {
     if (arbiter) {
         arbiter->start();
     }
-    if (guest) {
-        guest->start();
-        std::cerr << "melodyd: playing for " << guest_endpoint->describe() << " as \""
-                  << engine_name << "\"\n";
+    for (const auto& [described, agent] : guest_agents) {
+        agent->start();
+        std::cerr << "melodyd: playing for " << described << " as \"" << engine_name << "\"\n";
     }
     std::cerr << "melodyd: listening on " << socket_path.string() << "\n"
               << "melodyd: database " << database.string() << "\n";
@@ -662,8 +701,9 @@ int main(int argc, char** argv) {
     if (guests) {
         guests->stop();
     }
-    if (guest) {
-        guest->stop();
+    for (const auto& [described, agent] : guest_agents) {
+        static_cast<void>(described);
+        agent->stop();
     }
     // Both sample the player, so they stop before it and before the server
     // the watcher writes to.

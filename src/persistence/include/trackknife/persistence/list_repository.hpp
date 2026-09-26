@@ -106,6 +106,47 @@ struct ListDocument {
     friend bool operator==(const ListDocument&, const ListDocument&) = default;
 };
 
+// ADR-0233: one entry of a list, as its engine stores it. The track
+// is named by its path on the engine's machine; the entry keeps its identity
+// (ADR-0221). Title, artist and album are what the client that saved it
+// showed, for a file the library does not index.
+struct EngineListItem {
+    core::StableId entry_id{core::StableId::random()};
+    std::string raw_path;
+    std::optional<std::string> logical_reference;
+    std::optional<ListItemSegment> segment;
+    std::optional<ListItemSourceSelection> source_selection;
+    std::optional<std::int64_t> duration_ms;
+    std::string title;
+    std::string artist;
+    std::string album;
+
+    friend bool operator==(const EngineListItem&, const EngineListItem&) = default;
+};
+
+// A working list goes with the tab it was open in; a saved one stays until
+// it is deleted. "Save" turns the one into the other.
+enum class EngineListKind : std::uint8_t { working, saved };
+
+struct EngineListSummary {
+    core::StableId id;
+    std::string name;
+    EngineListKind kind{EngineListKind::working};
+    // Goes up with every write: a client saves against the revision it read.
+    std::uint64_t revision{0};
+    std::size_t tracks{0};
+    std::int64_t modified_ms{0};
+
+    friend bool operator==(const EngineListSummary&, const EngineListSummary&) = default;
+};
+
+struct EngineList {
+    EngineListSummary summary;
+    std::vector<EngineListItem> items;
+
+    friend bool operator==(const EngineList&, const EngineList&) = default;
+};
+
 struct ConnectionProfile {
     core::StableId id;
     std::string name;
@@ -306,6 +347,26 @@ class ListRepository final {
     // has nothing to restore, and that is ordinary.
     [[nodiscard]] core::Result<std::optional<std::string>>
     load_engine_state(std::string_view key) const;
+
+    // ADR-0233: lists, the engine's own -- working and saved -- not list_documents,
+    // which is Trackknife's workspace and rewritten whole by it.
+    [[nodiscard]] core::Result<std::vector<EngineListSummary>> load_engine_lists() const;
+    // Empty when there is no such list.
+    [[nodiscard]] core::Result<std::optional<EngineList>> load_engine_list(const core::StableId& id) const;
+    // Creates it, or replaces its name and items. With `expected_revision`
+    // the write is refused as a conflict unless the list is still at
+    // that revision -- or, for 0, does not exist yet; without, it is written
+    // whatever changed meanwhile.
+    [[nodiscard]] core::Result<EngineListSummary>
+    save_engine_list(const core::StableId& id, std::string_view name, EngineListKind kind,
+                  const std::vector<EngineListItem>& items,
+                  std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    [[nodiscard]] core::Result<EngineListSummary>
+    rename_engine_list(const core::StableId& id, std::string_view name,
+                    std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    // False when there was no such list.
+    [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
+                                                     std::optional<std::uint64_t> expected_revision);
 
   private:
     struct Impl;

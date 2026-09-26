@@ -23,6 +23,7 @@
 #include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/token.hpp"
+#include "trackknife/engine/list_methods.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/client.hpp"
 
@@ -439,6 +440,8 @@ int main(int argc, char** argv) {
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
+    // ADR-0233: the engine's lists, working and saved, for every client.
+    trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);
 
     // Pushed state, so a client learns a track changed without asking.
     std::optional<trackknife::engine::PlaybackWatcher> watcher;

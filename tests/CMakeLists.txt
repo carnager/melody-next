@@ -385,6 +385,13 @@ add_test(
 set_tests_properties(engine-daemon PROPERTIES TIMEOUT 60)
 
 add_test(
+    NAME engine-lists
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_lists_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>"
+)
+set_tests_properties(engine-lists PROPERTIES TIMEOUT 60)
+
+add_test(
     NAME engine-discovery
     COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/engine_discovery_test.sh"
             "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_agent>"

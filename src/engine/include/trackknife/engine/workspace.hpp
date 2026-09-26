@@ -8,6 +8,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -92,6 +94,21 @@ class Workspace final {
     [[nodiscard]] core::Result<std::optional<std::string>>
     load_engine_state(std::string_view key) const;
 
+    // ADR-0233: lists, the engine's own -- working and saved.
+    [[nodiscard]] core::Result<std::vector<persistence::EngineListSummary>> load_engine_lists() const;
+    [[nodiscard]] core::Result<std::optional<persistence::EngineList>>
+    load_engine_list(const core::StableId& id) const;
+    [[nodiscard]] core::Result<persistence::EngineListSummary>
+    save_engine_list(const core::StableId& id, std::string_view name,
+                  persistence::EngineListKind kind,
+                  const std::vector<persistence::EngineListItem>& items,
+                  std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    [[nodiscard]] core::Result<persistence::EngineListSummary>
+    rename_engine_list(const core::StableId& id, std::string_view name,
+                    std::optional<std::uint64_t> expected_revision, std::int64_t now_ms);
+    [[nodiscard]] core::Result<bool> delete_engine_list(const core::StableId& id,
+                                                     std::optional<std::uint64_t> expected_revision);
+
     [[nodiscard]] core::Result<std::vector<persistence::SavedSearch>> load_saved_searches() const;
     [[nodiscard]] core::Result<void> save_search(const persistence::SavedSearch& search);
     [[nodiscard]] core::Result<void> remove_search(const persistence::SavedSearch& expected);
@@ -101,6 +118,12 @@ class Workspace final {
         : repository_(std::move(repository)) {}
 
     persistence::ListRepository repository_;
+    // One call at a time. The engine calls in from its recorder, its
+    // playback store and every client's connection (ADR-0233), and the
+    // repository's writes are transactions on one SQLite connection: two
+    // threads' BEGINs on it would nest, and one would fail or take the
+    // other's statements in. Behind a pointer so the workspace still moves.
+    std::unique_ptr<std::mutex> mutex_{std::make_unique<std::mutex>()};
 };
 
 } // namespace trackknife::engine

@@ -656,7 +656,7 @@ void LocalLibraryTest::denseMetadataDoesNotProduceFalseMissingMatches() {
     // Migrations unwind strictly in reverse order down to the truncation-era
     // schema before the app re-migrates forward.
     for (const auto* name :
-         {"0045_library_revision.down", "0044_library_added.down", "0043_remote_list_documents.down", "0042_engine_state.down",
+         {"0046_engine_lists.down", "0045_library_revision.down", "0044_library_added.down", "0043_remote_list_documents.down", "0042_engine_state.down",
           "0041_list_entry_identity.down",
           "0040_local_listening_occurrences.down", "0039_local_listening_history.down",
           "0038_folder_image_journal.down", "0037_mpd_list_documents.down",
@@ -915,13 +915,13 @@ void LocalLibraryTest::migrationRoundTrip() {
     {
         auto repository = persistence::ListRepository::open(database);
         QVERIFY(repository);
-        QCOMPARE(*repository->schema_version(), 45U);
+        QCOMPARE(*repository->schema_version(), 46U);
     }
     sqlite3* db = nullptr;
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     // Down in reverse order, up in forward order: the ADR-0150 field table
     // references the track table, so 0030 must unwind before 0028.
-    for (const auto* name : {"0045_library_revision.down", "0044_library_added.down", "0043_remote_list_documents.down",
+    for (const auto* name : {"0046_engine_lists.down", "0045_library_revision.down", "0044_library_added.down", "0043_remote_list_documents.down",
                              "0042_engine_state.down",
                              "0041_list_entry_identity.down",
                              "0040_local_listening_occurrences.down",
@@ -946,7 +946,7 @@ void LocalLibraryTest::migrationRoundTrip() {
                              "0040_local_listening_occurrences.up",
                              "0041_list_entry_identity.up",
                              "0042_engine_state.up", "0043_remote_list_documents.up",
-                             "0044_library_added.up", "0045_library_revision.up"}) {
+                             "0044_library_added.up", "0045_library_revision.up", "0046_engine_lists.up"}) {
         QFile migration{
             QStringLiteral(TRACKKNIFE_MIGRATION_DIR "/%1.sql").arg(QString::fromLatin1(name))};
         QVERIFY(migration.open(QIODevice::ReadOnly));
@@ -976,7 +976,7 @@ void LocalLibraryTest::migrationRoundTrip() {
     QCOMPARE(sqlite3_exec(db, "ROLLBACK", nullptr, nullptr, nullptr), SQLITE_OK);
     sqlite3_close(db);
     QCOMPARE(repository->load_saved_searches()->size(), 1U);
-    QCOMPARE(*repository->schema_version(), 45U);
+    QCOMPARE(*repository->schema_version(), 46U);
     QVERIFY(repository->save_local_resume(std::string(64U, 'a'), 500, 1'000));
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     QFile history_downgrade{
@@ -1048,7 +1048,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
                   "completed_at_unix_seconds, updated_at_unix_seconds) VALUES('j1', 0, 1, 1);"),
              SQLITE_OK);
     for (const auto* name :
-         {"0045_library_revision", "0044_library_added", "0043_remote_list_documents",
+         {"0046_engine_lists", "0045_library_revision", "0044_library_added", "0043_remote_list_documents",
           "0042_engine_state", "0041_list_entry_identity", "0040_local_listening_occurrences",
           "0039_local_listening_history", "0038_folder_image_journal"}) {
         QFile downgrade{
@@ -1063,7 +1063,7 @@ void LocalLibraryTest::journalRebuildsKeepTheirEvidence() {
     // Schema 38 runs again: the rebuild that emptied the child tables.
     auto repository = persistence::ListRepository::open(database);
     QVERIFY(repository.has_value());
-    QCOMPARE(*repository->schema_version(), 45U);
+    QCOMPARE(*repository->schema_version(), 46U);
     QCOMPARE(sqlite3_open(database.c_str(), &db), SQLITE_OK);
     const auto count = [&db](const char* table) {
         sqlite3_stmt* statement = nullptr;

@@ -21,7 +21,7 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-09-26, through ADR-0233 and database schema 45.
+Updated on 2026-09-26, through ADR-0233 and database schema 46.
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
@@ -31,7 +31,7 @@ two-authority model in older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
-- [ADR-0233: Saved playlists live in the engine](adr/0233-saved-playlists-in-the-engine.md).
+- [ADR-0233: Lists live in the engine](adr/0233-lists-live-in-the-engine.md).
 - [ADR-0232: melody-watch, telling the engine what changed on a NAS](adr/0232-melody-watch.md).
 - [ADR-0231: The Android client](adr/0231-android-client.md).
 - [ADR-0230: Opus streams and download tickets](adr/0230-opus-streams-and-download-tickets.md).

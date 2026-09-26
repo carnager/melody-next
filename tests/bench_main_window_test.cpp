@@ -384,6 +384,11 @@ class BenchMainWindowTest final : public QObject {
     void localTrackRatingsPersistByContentIdentity();
 
   private:
+    // A home of this process's own: test-mode data lives under ~/.qttest,
+    // which every run shares otherwise -- and each run's first act is to
+    // clear it, so two runs at once (two checkouts, two sessions) broke each
+    // other's engines.
+    QTemporaryDir home_directory_;
     QTemporaryDir settings_directory_;
     testing::TestEngine engine_;
 };
@@ -426,6 +431,8 @@ namespace {
 } // namespace
 
 void BenchMainWindowTest::initTestCase() {
+    QVERIFY(home_directory_.isValid());
+    qputenv("HOME", QFile::encodeName(home_directory_.path()));
     QVERIFY(settings_directory_.isValid());
     QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeTests"));
     QCoreApplication::setApplicationName(QStringLiteral("trackknife-tests"));

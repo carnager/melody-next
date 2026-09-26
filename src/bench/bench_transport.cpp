@@ -1258,7 +1258,7 @@ void BenchMainWindow::adoptEngineQueue(std::vector<LocalTrackRow> held) {
     if (playback_.row >= 0) {
         tab->model->setCurrentSource(tab->model->source(playback_.row), playback_.row);
     }
-    markTabDirty(*tab);
+    takeEngineChange(*tab);
 }
 
 void BenchMainWindow::reattachToEngine() {
@@ -1336,9 +1336,7 @@ void BenchMainWindow::reattachToQueue(std::vector<LocalTrackRow> rows) {
         return;
     }
     tab->model->replaceRows(std::move(rows), true);
-    // These rows are the engine's queue: not a change to hand back to it.
-    // Sent back, a list of whoever had not read the files -- this window,
-    // before its probes -- replaced the tags the engine was given.
+    // What the engine holds, as this window knows it: these rows.
     engine_queue_ = stated;
     // Titles are filenames until the files have been read; the ordinary probe
     // queue fills them in rather than a second path for this case.
@@ -1347,7 +1345,7 @@ void BenchMainWindow::reattachToQueue(std::vector<LocalTrackRow> rows) {
     if (row >= 0) {
         adoptEngineRow(*tab, row, *playing);
     }
-    markTabDirty(*tab);
+    takeEngineChange(*tab);
     schedulePersist();
 }
 
@@ -1773,7 +1771,10 @@ void BenchMainWindow::refreshEngineTransport() {
                 consuming_row_ = true;
                 tab->model->removeRowIndexes({row}, false);
                 consuming_row_ = false;
-                markTabDirty(*tab);
+                takeEngineChange(*tab);
+                // Nor is it in the engine's queue any more, as this window
+                // knows it.
+                engine_queue_.remove(state.consumed);
                 schedulePersist();
                 break;
             }

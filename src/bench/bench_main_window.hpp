@@ -296,7 +296,14 @@ class BenchMainWindow final : public QMainWindow {
     void refreshTabActions();
     void refreshListHistoryActions();
     void replayListEdit(bool undo);
+    // An edit made here: saved, and -- to the list playing -- told to its
+    // engine, whose queue it is.
     void markTabDirty(ListTab& tab);
+    // A change the engine made -- its queue adopted, a consumed row dropped:
+    // saved, never sent back. Sent back, it is this window's copy of the
+    // engine's queue replacing the queue itself, tags another client gave it
+    // and all.
+    void takeEngineChange(ListTab& tab);
     void closeTabAt(int index);
     // Most-recently-visited tabs, newest first, so closing one returns to
     // where you came from rather than to its neighbour.

@@ -176,6 +176,95 @@ void a_registry_cancels_and_joins_what_it_owns() {
     require(observed_cancellation.load(), "destroying the registry cancels what it owns");
 }
 
+// A job that finished before submit() had listed it retired first, found
+// nothing, and was then listed -- as running, for good, cancellable forever.
+void a_finished_job_is_not_listed() {
+    RecordedEvents events;
+    engine::JobRegistry registry{events.sink()};
+    std::vector<core::StableId> submitted;
+    for (int index = 0; index < 200; ++index) {
+        submitted.push_back(registry.submit(
+            "instant", [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
+                return protocol::Json{};
+            }));
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (events.count("job.finished") < submitted.size() &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    require(events.count("job.finished") == submitted.size(), "every job finishes");
+    for (const auto& job_id : submitted) {
+        require(!registry.cancel(job_id), "and a finished job is not still listed as running");
+    }
+}
+
+// A sink is usually a socket. One that is slow must not hold up job.cancel,
+// which the engine answers ahead of everything else precisely so that it is
+// never kept waiting.
+void a_slow_sink_does_not_hold_cancel() {
+    std::atomic_bool stalling{false};
+    std::atomic_bool release{false};
+    engine::JobRegistry registry{[&](const protocol::Event& event) {
+        if (event.name == "job.progress") {
+            stalling.store(true);
+            while (!release.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
+        }
+    }};
+    const auto waiting = registry.submit(
+        "waiting", [](const core::CancellationToken& token, const engine::JobRegistry::Reporter&) {
+            while (!token.is_cancellation_requested()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
+            return protocol::Json{};
+        });
+    (void)registry.submit("reporting",
+                          [](const core::CancellationToken&,
+                             const engine::JobRegistry::Reporter& report) {
+                              report(protocol::Json{{"done", 1}});
+                              return protocol::Json{};
+                          });
+    while (!stalling.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    const auto started = std::chrono::steady_clock::now();
+    require(registry.cancel(waiting), "a running job can be cancelled");
+    require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{500},
+            "while the sink is stuck on another job's event");
+    release.store(true);
+}
+
+// The last thing a job does is publish job.finished. A job whose thread was
+// detached could do that after the registry -- and its sink -- had gone.
+void a_job_finishes_before_its_registry_goes() {
+    std::atomic<int> finished{0};
+    for (int round = 0; round < 10; ++round) {
+        std::atomic_bool retired{false};
+        {
+            // A sink that takes a moment, as a socket may: the job has
+            // already left the running list when it gets here.
+            engine::JobRegistry registry{[&](const protocol::Event& event) {
+                if (event.name == "job.finished") {
+                    retired.store(true);
+                    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+                    finished.fetch_add(1);
+                }
+            }};
+            (void)registry.submit(
+                "instant", [](const core::CancellationToken&, const engine::JobRegistry::Reporter&) {
+                    return protocol::Json{};
+                });
+            while (!retired.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+            }
+        }
+        require(finished.load() == round + 1,
+                "a job's last event is published before its registry is destroyed");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -183,6 +272,9 @@ int main() {
     cancelling_is_a_request_not_a_guarantee();
     a_long_job_does_not_starve_the_control_path();
     a_registry_cancels_and_joins_what_it_owns();
-    std::cout << "job registry: 4 scenarios\n";
+    a_finished_job_is_not_listed();
+    a_slow_sink_does_not_hold_cancel();
+    a_job_finishes_before_its_registry_goes();
+    std::cout << "job registry: 7 scenarios\n";
     return EXIT_SUCCESS;
 }

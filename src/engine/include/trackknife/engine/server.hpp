@@ -25,10 +25,11 @@ namespace trackknife::engine {
 // listener requires every connection to authenticate first (ADR-0223),
 // loopback included, because any local user can reach 127.0.0.1.
 //
-// One thread per connection. A client is a person's music player, not a web
-// crawler, so the count is small and a thread apiece is simpler to reason
-// about than a reactor -- and it keeps a slow client from delaying anyone
-// else's line.
+// Two threads per connection, a reader and a writer. A client is a person's
+// music player, not a web crawler, so the count is small (and capped) and a
+// thread apiece is simpler to reason about than a reactor. Everything sent to
+// a client is queued for its writer, so a slow client delays no one else's
+// line; one that stops reading its events altogether is let go.
 class Server final {
   public:
     // Binds and listens. Refuses rather than clobbering if the path exists and
@@ -79,6 +80,9 @@ class Server final {
     [[nodiscard]] std::uint16_t port() const noexcept { return port_; }
     // For tests: how many clients are connected right now.
     [[nodiscard]] std::size_t connections();
+    // For tests: how many threads serve connections, after joining those
+    // that have finished.
+    [[nodiscard]] std::size_t threads();
 
   private:
     struct Connection;
@@ -93,9 +97,16 @@ class Server final {
     bool admit(Connection& connection, const protocol::Request& request);
 
     void accept_loop();
-    void serve(std::shared_ptr<Connection> connection);
+    // Starts a connection's threads and lists it. Called with mutex_ held.
+    void spawn(std::shared_ptr<Connection> connection);
+    void serve(Connection& connection);
+    // Takes a connection out of the broadcast set.
+    void forget(const Connection& connection);
     void broadcast(const std::string& line);
+    // Drops closed connections from the broadcast set and joins the threads
+    // of those that have finished.
     void reap();
+    static void join(Connection& connection);
 
     int listener_{-1};
     // A self-pipe, so a blocking accept can be woken for shutdown without
@@ -113,8 +124,12 @@ class Server final {
     std::atomic_bool running_{false};
     std::thread acceptor_;
     std::mutex mutex_;
+    // Who hears events.
     std::vector<std::shared_ptr<Connection>> connections_;
-    std::vector<std::thread> workers_;
+    // Every connection whose threads have not been joined yet -- including
+    // one that has left the broadcast set and is still sending its last
+    // answer.
+    std::vector<std::shared_ptr<Connection>> all_;
 };
 
 } // namespace trackknife::engine

@@ -20,6 +20,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +29,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -128,9 +130,12 @@ class Client final {
         return std::nullopt;
     }
 
+    // Says it will send no more, and keeps reading: the `nc` idiom.
+    void half_close() { ::shutdown(descriptor_, SHUT_WR); }
+
     // Whether the engine has hung up.
-    [[nodiscard]] bool closed_by_peer() {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    [[nodiscard]] bool closed_by_peer(const std::chrono::seconds patience = std::chrono::seconds{5}) {
+        const auto deadline = std::chrono::steady_clock::now() + patience;
         while (std::chrono::steady_clock::now() < deadline) {
             std::array<char, 1024> buffer{};
             const auto received = ::recv(descriptor_, buffer.data(), buffer.size(), MSG_DONTWAIT);
@@ -535,6 +540,141 @@ void an_unencodable_answer_does_not_end_the_engine(const std::filesystem::path& 
     (*server)->stop();
 }
 
+
+// Every connection had a thread of its own that was only joined when the
+// engine stopped, so each client that came and went -- melody-cli from a key
+// binding, a reconnecting agent -- left one behind for good.
+void closed_clients_give_back_their_threads(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "playing"}};
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the server listens");
+    (*server)->start();
+    for (int round = 0; round < 100; ++round) {
+        Client client{path};
+        client.send("{\"id\":1,\"method\":\"playback.state\"}\n");
+        require(client.line().find("playing") != std::string::npos, "each client is answered");
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (((*server)->threads() > 0U || (*server)->connections() > 0U) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    require((*server)->connections() == 0U, "a client that closed is let go");
+    require((*server)->threads() == 0U, "and its threads are joined, not kept until shutdown");
+    (*server)->stop();
+}
+
+// Events were written to each client in turn, on the thread that raised them,
+// so one client that stopped reading held up every other client's events --
+// and, through the job registry, job.cancel.
+void a_client_that_does_not_read_is_let_go(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the server listens");
+    (*server)->start();
+
+    Client stuck{path};
+    Client reading{path};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while ((*server)->connections() < 2U && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    std::atomic_bool heard_last{false};
+    std::thread listener{[&] {
+        while (!heard_last.load()) {
+            const auto line = reading.maybe_line(std::chrono::seconds{10});
+            require(line.has_value(), "a client that reads keeps hearing events");
+            heard_last.store(line->find("\"last\"") != std::string::npos);
+        }
+    }};
+
+    const std::string filler(64U * 1024U, 'x');
+    const auto sink = (*server)->sink();
+    for (int index = 0; index < 160; ++index) {
+        const auto started = std::chrono::steady_clock::now();
+        sink(protocol::Event{.name = "test.filler", .data = protocol::Json{{"filler", filler}}});
+        require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{250},
+                "raising an event never waits for a client");
+        // At a pace a reading client keeps up with; the stuck one falls
+        // further behind every time.
+        if (index % 8 == 7) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        }
+    }
+    sink(protocol::Event{.name = "test.last", .data = protocol::Json{{"last", true}}});
+    listener.join();
+    require(heard_last.load(), "the reading client heard everything");
+    const auto let_go = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while ((*server)->connections() > 1U && std::chrono::steady_clock::now() < let_go) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+    require((*server)->connections() == 1U, "and the one that never read was let go");
+    require(stuck.closed_by_peer(), "hung up on, not left waiting");
+    (*server)->stop();
+}
+
+// Connections are bounded. One more is told why it is refused -- unless a
+// half-closed connection can make room, which over TCP may well be a client
+// that closed long ago.
+void connections_are_bounded(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "playing"}};
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the server listens");
+    (*server)->start();
+    std::vector<std::unique_ptr<Client>> clients;
+    for (int index = 0; index < 64; ++index) {
+        clients.push_back(std::make_unique<Client>(path));
+        clients.back()->send("{\"id\":1,\"method\":\"playback.state\"}\n");
+        require(clients.back()->line().find("playing") != std::string::npos,
+                "every client up to the bound is served");
+    }
+    Client refused{path};
+    const auto why = refused.line();
+    require(why.find("too many connections") != std::string::npos,
+            "one more is told why it is refused");
+    require(refused.closed_by_peer(), "and hung up on");
+
+    clients.front()->half_close();
+    // A unix peer that half-closed is still listening, so it is kept -- until
+    // room is wanted.
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+    Client admitted{path};
+    admitted.send("{\"id\":1,\"method\":\"playback.state\"}\n");
+    require(admitted.line().find("playing") != std::string::npos,
+            "a half-closed connection makes room for a new one");
+    require(clients.front()->closed_by_peer(), "and is the one let go");
+    (*server)->stop();
+}
+
+// ADR-0223: a TCP peer holds a connection from the moment it connects, so it
+// has a few seconds to authenticate. Once in, an idle client is a normal one.
+void a_stranger_has_seconds_to_authenticate() {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("playback.state", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"state", "playing"}};
+    });
+    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "the-password");
+    require(server.has_value(), "the engine binds a TCP port");
+    (*server)->start();
+    Client stranger{(*server)->port()};
+    Client owner{(*server)->port()};
+    owner.send("{\"id\":1,\"method\":\"session.authenticate\",\"params\":{\"password\":"
+               "\"the-password\"}}\n");
+    require(owner.line().find("\"authenticated\":true") != std::string::npos, "the owner is in");
+    require(stranger.closed_by_peer(std::chrono::seconds{15}),
+            "a peer that never authenticates is hung up on");
+    owner.send("{\"id\":2,\"method\":\"playback.state\"}\n");
+    require(owner.line().find("playing") != std::string::npos,
+            "while an authenticated client that sat idle as long is still served");
+    (*server)->stop();
+}
+
 int main() {
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-server-" + core::StableId::random().to_string());
@@ -549,8 +689,12 @@ int main() {
     attaching_to_a_stopping_server_does_not_end_the_process();
     a_slow_request_does_not_hold_a_cancel(directory / "d.sock");
     an_unencodable_answer_does_not_end_the_engine(directory / "e.sock");
+    closed_clients_give_back_their_threads(directory / "f.sock");
+    a_client_that_does_not_read_is_let_go(directory / "g.sock");
+    connections_are_bounded(directory / "h.sock");
+    a_stranger_has_seconds_to_authenticate();
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 10 scenarios\n";
+    std::cout << "engine server: 14 scenarios\n";
     return EXIT_SUCCESS;
 }

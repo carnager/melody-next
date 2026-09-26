@@ -6,6 +6,7 @@
 #include "trackknife/protocol/message.hpp"
 
 #include <arpa/inet.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -13,6 +14,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <condition_variable>
@@ -36,6 +38,25 @@ namespace {
 // hostile sender, not a large request.
 constexpr std::size_t maximum_line_bytes = 1U << 20U;
 
+// How many clients may be connected at once. A person's players, agents and
+// scripts are a handful; this is a bound, not a budget.
+constexpr std::size_t maximum_connections = 64U;
+
+// Events waiting for a client that does not read them. Past this the client
+// is let go: holding its events without bound would grow the engine, and
+// waiting for it would hold up everyone else. Answers to its own requests do
+// not count -- it asked for those.
+constexpr std::size_t maximum_unread_event_bytes = 4U << 20U;
+
+// How long a TCP peer may take to authenticate. Until it has, it holds one of
+// the connections above and can do nothing with it.
+constexpr time_t authentication_seconds = 10;
+
+void receive_timeout(const int descriptor, const time_t seconds) {
+    const timeval timeout{.tv_sec = seconds, .tv_usec = 0};
+    ::setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+}
+
 // A response as a line. JSON strings must be UTF-8, and an answer carrying
 // bytes that are not -- a file name, a tag -- cannot be encoded. That once
 // threw out of the engine and ended it; now the caller is told instead, and
@@ -56,11 +77,14 @@ constexpr std::size_t maximum_line_bytes = 1U << 20U;
 
 } // namespace
 
-// Owns one client socket. Writes are serialised because a response from this
-// connection's own thread and an event from a job thread can race.
+// Owns one client socket, and the two threads that serve it: a reader, which
+// is serve(), and a writer, which drains the outbox. Everything written to the
+// client goes through the outbox, so no one -- a job reporting progress, the
+// player announcing a track -- ever waits on this client's socket.
 struct Server::Connection final {
     int descriptor{-1};
-    std::mutex write_mutex;
+    // False once the connection is closing: nothing more is queued, and the
+    // writer sends what is already queued and stops.
     std::atomic_bool open{true};
     // ADR-0223: whether this peer may do anything, including hear events.
     // True from the start on a unix socket, earned on TCP.
@@ -69,21 +93,136 @@ struct Server::Connection final {
     // the engine that drives it. Its peer closing is that engine gone, not a
     // client that has finished asking and still listens.
     bool ends_at_eof{false};
+    // Given to an agent handler, which owns the socket now: closing this
+    // side's descriptor is fine, shutting the socket down is not.
+    std::atomic_bool handed_off{false};
+    // The peer said it will send no more, and may or may not still read.
+    std::atomic_bool half_closed{false};
 
+    std::thread reader;
+    std::thread writer;
+    std::atomic_bool reader_done{false};
+    std::atomic_bool writer_done{false};
+
+    std::mutex outbox_mutex;
+    std::condition_variable outbox_changed;
+    // Each line with whether it is an event.
+    std::deque<std::pair<std::string, bool>> outbox;
+    std::size_t event_bytes{0};
+    bool writing{false};
+
+    Connection() = default;
+    Connection(const Connection&) = delete;
+    Connection(Connection&&) = delete;
+    Connection& operator=(const Connection&) = delete;
+    Connection& operator=(Connection&&) = delete;
+    // The threads are joined by the server before the last reference goes.
     ~Connection() {
         if (descriptor >= 0) {
             ::close(descriptor);
         }
     }
 
-    // Returns false once the peer has gone, so the caller can retire it.
-    bool write_line(const std::string& line) {
-        const std::lock_guard guard{write_mutex};
-        if (!open.load()) {
-            return false;
+    // Queues a line. Returns false once the connection is closing, so the
+    // caller can retire it. Never blocks on the socket.
+    bool write_line(std::string line, const bool event = false) {
+        {
+            const std::lock_guard guard{outbox_mutex};
+            if (!open.load()) {
+                return false;
+            }
+            line.push_back('\n');
+            if (event) {
+                event_bytes += line.size();
+                if (event_bytes > maximum_unread_event_bytes) {
+                    // Not reading. Shut down rather than drained: what is
+                    // queued would never be read either.
+                    open.store(false);
+                    outbox.clear();
+                    event_bytes = 0;
+                    ::shutdown(descriptor, SHUT_RDWR);
+                    outbox_changed.notify_all();
+                    return false;
+                }
+            }
+            outbox.emplace_back(std::move(line), event);
         }
-        auto payload = line;
-        payload.push_back('\n');
+        outbox_changed.notify_all();
+        return true;
+    }
+
+    // Stops queueing; the writer sends what is queued, then ends the
+    // connection so the peer sees it closed.
+    void close() {
+        {
+            const std::lock_guard guard{outbox_mutex};
+            open.store(false);
+        }
+        outbox_changed.notify_all();
+    }
+
+    // For shutdown: closes at once, unblocking both threads.
+    void abort() {
+        close();
+        if (!handed_off.load()) {
+            ::shutdown(descriptor, SHUT_RDWR);
+        }
+    }
+
+    // ADR-0228: once everything queued has been sent, stops writing so the
+    // socket can be handed to an agent handler without an event landing on
+    // it behind that handler's back.
+    void hand_off() {
+        std::unique_lock lock{outbox_mutex};
+        outbox_changed.wait(lock, [this] { return (outbox.empty() && !writing) || !open.load(); });
+        handed_off.store(true);
+        open.store(false);
+        lock.unlock();
+        outbox_changed.notify_all();
+    }
+
+    void write_loop() {
+        while (true) {
+            std::string line;
+            bool event = false;
+            {
+                std::unique_lock lock{outbox_mutex};
+                outbox_changed.wait(lock, [this] { return !outbox.empty() || !open.load(); });
+                if (outbox.empty()) {
+                    break;
+                }
+                line = std::move(outbox.front().first);
+                event = outbox.front().second;
+                outbox.pop_front();
+                writing = true;
+            }
+            const bool sent = send_all(line);
+            {
+                const std::lock_guard guard{outbox_mutex};
+                writing = false;
+                if (event) {
+                    event_bytes -= std::min(event_bytes, line.size());
+                }
+                if (!sent) {
+                    open.store(false);
+                    outbox.clear();
+                    event_bytes = 0;
+                }
+            }
+            outbox_changed.notify_all();
+            if (!sent) {
+                break;
+            }
+        }
+        // Closed, and everything queued sent: the peer sees the end -- a
+        // refused password, say, is answered and then hung up on.
+        if (!handed_off.load()) {
+            ::shutdown(descriptor, SHUT_RDWR);
+        }
+    }
+
+  private:
+    [[nodiscard]] bool send_all(const std::string& payload) const {
         std::size_t written = 0;
         while (written < payload.size()) {
             // MSG_NOSIGNAL: a client that hangs up must not kill the engine
@@ -94,7 +233,6 @@ struct Server::Connection final {
                 if (errno == EINTR) {
                     continue;
                 }
-                open.store(false);
                 return false;
             }
             written += static_cast<std::size_t>(sent);
@@ -280,16 +418,31 @@ void Server::attach(const int descriptor) {
     connection->descriptor = descriptor;
     connection->authenticated.store(true);
     connection->ends_at_eof = true;
+    reap();
     const std::lock_guard guard{mutex_};
     // Stopped already: an agent that finished registering just as it was
-    // told to stop. Its worker would never be joined, and a thread that is
+    // told to stop. Its threads would never be joined, and a thread that is
     // not joined ends the whole process when it is destroyed.
     if (!running_.load()) {
-        ::close(descriptor);
         return;
     }
+    spawn(std::move(connection));
+}
+
+void Server::spawn(std::shared_ptr<Connection> connection) {
+    // The server's lists hold the connection until both threads are joined
+    // (reap, stop), so the last reference never goes on one of its own
+    // threads, where destroying a joinable thread would end the process.
+    connection->writer = std::thread{[raw = connection.get()] {
+        raw->write_loop();
+        raw->writer_done.store(true);
+    }};
+    connection->reader = std::thread{[this, raw = connection.get()] {
+        serve(*raw);
+        raw->reader_done.store(true);
+    }};
     connections_.push_back(connection);
-    workers_.emplace_back([this, connection] { serve(connection); });
+    all_.push_back(std::move(connection));
 }
 
 void Server::on_agent(AgentHandler handler) { agent_handler_ = std::move(handler); }
@@ -305,25 +458,31 @@ void Server::stop() {
     if (acceptor_.joinable()) {
         acceptor_.join();
     }
-    // Taken under the lock that attach() holds, so a worker added while
+    // Taken under the lock that attach() holds, so a connection added while
     // this ran is among them rather than added behind it.
-    std::vector<std::thread> workers;
+    std::vector<std::shared_ptr<Connection>> all;
     {
         const std::lock_guard guard{mutex_};
-        for (const auto& connection : connections_) {
-            connection->open.store(false);
-            // Half-closing unblocks a worker parked in recv.
-            ::shutdown(connection->descriptor, SHUT_RDWR);
+        for (const auto& connection : all_) {
+            // Shutting the socket down unblocks a reader parked in recv and a
+            // writer parked in send.
+            connection->abort();
         }
-        workers.swap(workers_);
+        all.swap(all_);
+        connections_.clear();
     }
-    for (auto& worker : workers) {
-        if (worker.joinable()) {
-            worker.join();
-        }
+    for (const auto& connection : all) {
+        join(*connection);
     }
-    const std::lock_guard guard{mutex_};
-    connections_.clear();
+}
+
+void Server::join(Connection& connection) {
+    if (connection.reader.joinable()) {
+        connection.reader.join();
+    }
+    if (connection.writer.joinable()) {
+        connection.writer.join();
+    }
 }
 
 void Server::accept_loop() {
@@ -345,28 +504,50 @@ void Server::accept_loop() {
         if ((watched[0].revents & POLLIN) == 0) {
             continue;
         }
-        const auto accepted = ::accept(listener_, nullptr, nullptr);
+        const auto accepted = ::accept4(listener_, nullptr, nullptr, SOCK_CLOEXEC);
         if (accepted < 0) {
             if (errno == EINTR || errno == ECONNABORTED) {
                 continue;
             }
             return;
         }
+        reap();
         auto connection = std::make_shared<Connection>();
         connection->descriptor = accepted;
         // A unix peer got here through the filesystem's permissions. A TCP
         // peer must give the password, which a TCP listener always has
-        // (ADR-0223).
+        // (ADR-0223), and soon.
         connection->authenticated.store(token_.empty());
-        {
-            const std::lock_guard guard{mutex_};
-            connections_.push_back(connection);
-            workers_.emplace_back([this, connection] { serve(connection); });
+        if (!token_.empty()) {
+            receive_timeout(accepted, authentication_seconds);
         }
+        const std::lock_guard guard{mutex_};
+        if (connections_.size() >= maximum_connections) {
+            // Room is made first by letting go the longest half-closed
+            // connection: most are clients that closed long ago, which TCP
+            // cannot tell apart from one still listening without writing.
+            const auto oldest = std::ranges::find_if(
+                connections_, [](const auto& held) { return held->half_closed.load(); });
+            if (oldest != connections_.end()) {
+                (*oldest)->abort();
+                connections_.erase(oldest);
+            }
+        }
+        if (connections_.size() >= maximum_connections) {
+            // Told why rather than just hung up on. The socket is new and
+            // empty, so this one line does not block.
+            protocol::Event full{.name = "protocol.rejected", .data = protocol::Json::object()};
+            full.data["reason"] = "the engine has too many connections";
+            const auto line = protocol::encode_message(full) + "\n";
+            (void)::send(accepted, line.data(), line.size(), MSG_NOSIGNAL | MSG_DONTWAIT);
+            continue;
+        }
+        spawn(std::move(connection));
     }
 }
 
-void Server::serve(std::shared_ptr<Connection> connection) {
+void Server::serve(Connection& connection_ref) {
+    Connection* const connection = &connection_ref;
     // Requests are answered in order, on a worker of this connection's own,
     // so reading carries on while one is being handled. Read and handled on
     // one thread, a request that waited -- on the database, say -- stopped the
@@ -412,6 +593,8 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             if (errno == EINTR) {
                 continue;
             }
+            // EAGAIN is the authentication deadline running out; anything
+            // else is the connection gone.
             break;
         }
         if (received == 0 && connection->ends_at_eof) {
@@ -427,12 +610,24 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             // request in, stdin reaches EOF, and the answer plus any job
             // events are still wanted. Stop reading, keep writing.
             //
-            // The connection stays in the broadcast set and is reaped when a
-            // write finally fails, or at shutdown. A client that half-closes
-            // and never closes therefore holds one entry until the engine
-            // stops, which is acceptable for a local socket whose peers are
-            // the user's own programs.
+            // The connection stays in the broadcast set until the peer is
+            // gone entirely. A unix peer closing is seen at once, as a
+            // hangup; a TCP one only when a write to it fails -- or when its
+            // place is wanted for a new connection (accept_loop).
+            connection->half_closed.store(true);
             finish_reading();
+            pollfd watched{.fd = connection->descriptor, .events = 0, .revents = 0};
+            while (connection->open.load()) {
+                const auto ready = ::poll(&watched, 1, -1);
+                if (ready < 0 && errno == EINTR) {
+                    continue;
+                }
+                if (ready < 0 || (watched.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+                    break;
+                }
+            }
+            connection->close();
+            forget(*connection);
             return;
         }
         pending.append(buffer.data(), static_cast<std::size_t>(received));
@@ -466,7 +661,6 @@ void Server::serve(std::shared_ptr<Connection> connection) {
             if (const auto* request = std::get_if<protocol::Request>(&*parsed)) {
                 if (!connection->authenticated.load()) {
                     if (!admit(*connection, *request)) {
-                        connection->open.store(false);
                         break;
                     }
                     continue;
@@ -494,12 +688,9 @@ void Server::serve(std::shared_ptr<Connection> connection) {
                                                 .error = std::nullopt};
                     accepted.result->emplace("accepted", true);
                     connection->write_line(encode_answer(accepted));
+                    connection->hand_off();
                     const auto handed = ::dup(connection->descriptor);
-                    connection->open.store(false);
-                    {
-                        const std::lock_guard guard{mutex_};
-                        std::erase(connections_, connection);
-                    }
+                    forget(*connection);
                     if (handed >= 0) {
                         agent_handler_(request->params, handed);
                     }
@@ -530,9 +721,15 @@ void Server::serve(std::shared_ptr<Connection> connection) {
         }
     }
     finish_reading();
-    connection->open.store(false);
+    connection->close();
+    forget(*connection);
+}
+
+void Server::forget(const Connection& connection) {
     const std::lock_guard guard{mutex_};
-    std::erase(connections_, connection);
+    std::erase_if(connections_, [&connection](const std::shared_ptr<Connection>& held) {
+        return held.get() == &connection;
+    });
 }
 
 bool Server::admit(Connection& connection, const protocol::Request& request) {
@@ -552,6 +749,8 @@ bool Server::admit(Connection& connection, const protocol::Request& request) {
     if (offered != request.params.end() && offered->is_string() &&
         same_token(offered->get<std::string>(), token_)) {
         connection.authenticated.store(true);
+        // In, so no longer on the clock: an idle client is a normal one.
+        receive_timeout(connection.descriptor, 0);
         response.result = protocol::Json{{"authenticated", true}};
         connection.write_line(protocol::encode_message(response));
         return true;
@@ -561,14 +760,29 @@ bool Server::admit(Connection& connection, const protocol::Request& request) {
     response.error = protocol::to_protocol_error(core::Error{
         .code = core::ErrorCode::unauthorized, .message = "wrong password", .context = {}});
     connection.write_line(protocol::encode_message(response));
-    ::shutdown(connection.descriptor, SHUT_RDWR);
+    // Closed once that answer is sent.
+    connection.close();
     return false;
 }
 
 void Server::reap() {
-    const std::lock_guard guard{mutex_};
-    std::erase_if(connections_,
-                  [](const std::shared_ptr<Connection>& held) { return !held->open.load(); });
+    std::vector<std::shared_ptr<Connection>> finished;
+    {
+        const std::lock_guard guard{mutex_};
+        std::erase_if(connections_,
+                      [](const std::shared_ptr<Connection>& held) { return !held->open.load(); });
+        std::erase_if(all_, [&finished](std::shared_ptr<Connection>& held) {
+            if (!held->reader_done.load() || !held->writer_done.load()) {
+                return false;
+            }
+            finished.push_back(std::move(held));
+            return true;
+        });
+    }
+    // Both threads have said they are done, so these joins do not wait.
+    for (const auto& connection : finished) {
+        join(*connection);
+    }
 }
 
 void Server::broadcast(const std::string& line) {
@@ -583,7 +797,7 @@ void Server::broadcast(const std::string& line) {
         if (!connection->authenticated.load()) {
             continue;
         }
-        lost = !connection->write_line(line) || lost;
+        lost = !connection->write_line(line, true) || lost;
     }
     if (lost) {
         // A half-closed peer is only discovered by writing to it, so this is
@@ -606,6 +820,12 @@ EventSink Server::sink() {
 std::size_t Server::connections() {
     const std::lock_guard guard{mutex_};
     return connections_.size();
+}
+
+std::size_t Server::threads() {
+    reap();
+    const std::lock_guard guard{mutex_};
+    return 2U * all_.size();
 }
 
 } // namespace trackknife::engine

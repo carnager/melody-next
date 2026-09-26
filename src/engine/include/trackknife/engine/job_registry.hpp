@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace trackknife::engine {
 
@@ -69,10 +70,18 @@ class JobRegistry final {
     // stay includable from Qt code even though they use none of it.
     void publish(const protocol::Event& event);
     void retire(const core::StableId& job_id);
+    // Joins the threads of jobs that have retired. Their threads are kept,
+    // not detached: a detached one still publishing job.finished could
+    // outlive the registry.
+    void reap();
 
     EventSink sink_;
+    // Serialises the sink on its own, so a slow sink never holds up submit
+    // or cancel -- those take mutex_ only.
+    std::mutex sink_mutex_;
     std::mutex mutex_;
     std::map<core::StableId, Running> running_;
+    std::vector<std::thread> retired_;
 };
 
 } // namespace trackknife::engine

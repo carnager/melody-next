@@ -40,7 +40,7 @@ import com.melody.next.MelodyApp
  * dense screen gets a sharp one and a list row gets no more than it needs.
  */
 @Composable
-fun Cover(key: CoverKey?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 8.dp) {
+fun Cover(key: CoverKey?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 8.dp, covers: com.melody.next.Covers = MelodyApp.instance.covers) {
     val pixels = with(LocalDensity.current) { size.roundToPx() }
     // A few sizes rather than every size: each is fetched and kept apart.
     val asked = when {
@@ -49,12 +49,11 @@ fun Cover(key: CoverKey?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 
         pixels <= 512 -> 512
         else -> 1024
     }
-    val covers = MelodyApp.instance.covers
-    var image by remember(key, asked) { mutableStateOf(key?.let { covers.cached(it, asked) }) }
+    var image by remember(key, asked, covers) { mutableStateOf(key?.let { covers.cached(it, asked) }) }
     // Asked again once connected: a cover asked for while the app was
     // still connecting -- the mini player's, at start -- found no engine.
-    val connected = MelodyApp.instance.client.connection.collectAsState().value is com.melody.next.engine.ConnectionState.Connected
-    LaunchedEffect(key, asked, connected) {
+    val connected = covers.client.connection.collectAsState().value is com.melody.next.engine.ConnectionState.Connected
+    LaunchedEffect(key, asked, connected, covers) {
         if (key != null && image == null) image = covers.load(key, asked)
     }
     Box(

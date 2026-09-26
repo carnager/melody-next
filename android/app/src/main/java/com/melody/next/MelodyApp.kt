@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** The one engine client, the settings and the covers, for the whole app. */
@@ -42,8 +43,52 @@ class MelodyApp : Application() {
     /** The other engines follow the settings: connected, or let go. */
     fun updateOtherEngines() {
         otherClients.value.forEach { it.disconnect() }
+        otherCovers.clear()
         otherClients.value = settings.otherEngines.map { endpoint -> EngineClient(scope).also { it.connect(endpoint) } }
+        if (followed.value !== client && followed.value !in otherClients.value) following.gone(followed.value, client)
         updateSpeaker()
+    }
+
+    /** ADR-0234: the engine whose playback the phone shows and controls. */
+    private lateinit var following: Following<EngineClient>
+    val followed: kotlinx.coroutines.flow.StateFlow<EngineClient> get() = following.followed
+
+    /** About to play on `target`: followed from now on, and the one before stops. */
+    fun playOn(target: EngineClient) = following.playOn(target)
+
+    private val otherCovers = HashMap<EngineClient, Covers>()
+
+    /** Covers as an engine has them: the same key on another is another album. */
+    fun coversOf(engine: EngineClient): Covers =
+        if (engine === client) covers
+        else otherCovers.getOrPut(engine) {
+            Covers(this, engine).also { kept ->
+                scope.launch {
+                    engine.connection.collect { state ->
+                        if (state is ConnectionState.Connected) kept.engine = state.name
+                    }
+                }
+            }
+        }
+
+    /** Another engine started -- by a window, another phone -- while the followed one is idle: followed. */
+    private fun followStartsElsewhere() {
+        scope.launch {
+            otherClients.collectLatest { others ->
+                kotlinx.coroutines.coroutineScope {
+                    (listOf(client) + others).forEach { engine ->
+                        launch {
+                            var was = engine.state.value.playing
+                            engine.state.collect { state ->
+                                val started = state.playing && !was
+                                was = state.playing
+                                if (started) following.started(engine)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** This phone's speaker lost the engine mid-track and is getting it back. */
@@ -61,6 +106,7 @@ class MelodyApp : Application() {
         instance = this
         settings = Settings(this)
         client = EngineClient(scope)
+        following = Following(client, { it.state.value.playing }, { it.stop() })
         covers = Covers(this, client)
         scope.launch {
             client.connection.collect { state ->
@@ -85,6 +131,7 @@ class MelodyApp : Application() {
         }
         settings.endpoint?.let(::useEngine)
         updateOtherEngines()
+        followStartsElsewhere()
         // Back in front: a connection the system dropped in the background
         // is made again now rather than on the next retry.
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

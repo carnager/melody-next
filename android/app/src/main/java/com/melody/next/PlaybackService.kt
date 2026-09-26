@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -30,9 +31,11 @@ import kotlinx.coroutines.launch
  * it is asked, it asks the engine.
  */
 @UnstableApi
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 private class EnginePlayer(
-    private val client: EngineClient,
-    private val covers: Covers,
+    // ADR-0234: the engine the phone follows, whichever that is now.
+    private val followed: kotlinx.coroutines.flow.StateFlow<EngineClient>,
+    private val coversOf: (EngineClient) -> Covers,
     // This phone's speaker lost the engine mid-track and is getting it back.
     private val speakerReconnecting: kotlinx.coroutines.flow.StateFlow<Boolean>,
     private val stopWaiting: () -> Unit,
@@ -45,10 +48,14 @@ private class EnginePlayer(
     private var artwork: Pair<String, ByteArray>? = null
     private var fetching: Job? = null
 
+    private val client get() = followed.value
+
     init {
         scope.launch {
-            combine(client.state, client.queue, client.upNext, speakerReconnecting) { state, queue, upNext, _ ->
-                Triple(state, queue, upNext)
+            followed.flatMapLatest { engine ->
+                combine(engine.state, engine.queue, engine.upNext, speakerReconnecting) { state, queue, upNext, _ ->
+                    Triple(state, queue, upNext)
+                }
             }
                 .collect { (next, queue, upNext) ->
                     state = next
@@ -71,7 +78,7 @@ private class EnginePlayer(
         if (artwork?.first == entry.albumGroup) return
         fetching?.cancel()
         fetching = scope.launch {
-            val bytes = covers.bytes(CoverKey(path = entry.path, group = entry.albumGroup), 512) ?: return@launch
+            val bytes = coversOf(client).bytes(CoverKey(path = entry.path, group = entry.albumGroup), 512) ?: return@launch
             artwork = entry.albumGroup to bytes
             invalidateState()
         }
@@ -170,7 +177,7 @@ class PlaybackService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         session = MediaSession.Builder(
-            this, EnginePlayer(app.client, app.covers, app.speakerReconnecting, app::stopWaitingForSpeaker),
+            this, EnginePlayer(app.followed, app::coversOf, app.speakerReconnecting, app::stopWaitingForSpeaker),
         )
             .setSessionActivity(open)
             .build()

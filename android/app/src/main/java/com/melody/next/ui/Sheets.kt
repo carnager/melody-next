@@ -59,10 +59,13 @@ private fun SheetAction(icon: ImageVector, title: String, detail: String, onClic
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OutputsSheet(vm: MainViewModel, onDismiss: () -> Unit) {
-    val outputs by vm.client.outputs.collectAsState()
+    // The followed engine's outputs: the one whose music this is.
+    val engine by vm.app.followed.collectAsState()
+    val outputs by engine.outputs.collectAsState()
+    val name = (engine.connection.collectAsState().value as? com.melody.next.engine.ConnectionState.Connected)?.name
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.navigationBarsPadding()) {
-            Text("Play on", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            Text(name?.let { "Play $it on" } ?: "Play on", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
             if (outputs.isEmpty()) {
                 Text("No outputs", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
@@ -85,7 +88,7 @@ fun OutputsSheet(vm: MainViewModel, onDismiss: () -> Unit) {
                         if (output.selected) Icon(Icons.Default.CheckCircle, "Playing here", tint = MaterialTheme.colorScheme.primary)
                     },
                     modifier = Modifier.clickable(enabled = output.online && !output.selected) {
-                        vm.client.selectOutput(output.id)
+                        engine.selectOutput(output.id)
                         onDismiss()
                     },
                 )

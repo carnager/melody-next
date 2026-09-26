@@ -31,7 +31,7 @@ private val cache = HashMap<String, CoverColours>()
  * accent. Until they are known, and for an album with no cover, the theme's.
  */
 @Composable
-fun coverColours(key: CoverKey?): CoverColours {
+fun coverColours(key: CoverKey?, covers: com.melody.next.Covers = MelodyApp.instance.covers): CoverColours {
     val fallback = CoverColours(
         ground = MaterialTheme.colorScheme.background,
         text = MaterialTheme.colorScheme.onBackground,
@@ -42,7 +42,7 @@ fun coverColours(key: CoverKey?): CoverColours {
     val colours by produceState(key?.identity?.let { synchronized(cache) { cache[it] } } ?: fallback, key?.identity) {
         val identity = key?.identity ?: return@produceState
         synchronized(cache) { cache[identity] }?.let { value = it; return@produceState }
-        val bitmap = MelodyApp.instance.covers.load(key, 128) ?: return@produceState
+        val bitmap = covers.load(key, 128) ?: return@produceState
         val made = withContext(Dispatchers.Default) { fromPalette(Palette.from(bitmap.asAndroidBitmap()).generate()) } ?: return@produceState
         synchronized(cache) { cache[identity] = made }
         value = made

@@ -63,7 +63,9 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
     var outputs by remember { mutableStateOf(false) }
     var clearing by remember { mutableStateOf(false) }
     val connection by vm.client.connection.collectAsState()
-    val queue by vm.client.queue.collectAsState()
+    // The queue is the followed engine's: where the music is.
+    val followed by vm.app.followed.collectAsState()
+    val queue by followed.queue.collectAsState()
     val snackbar = remember { SnackbarHostState() }
 
     // Back leaves a drill-down first, then goes home to the library.
@@ -78,7 +80,7 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
     }
 
     val engineName = (connection as? ConnectionState.Connected)?.name
-    val upNext by vm.client.upNext.collectAsState()
+    val upNext by followed.upNext.collectAsState()
     val tones = LocalTones.current
     val drilling = tab == 0 && vm.levels.size > 1
 
@@ -172,7 +174,7 @@ fun MainScreen(vm: MainViewModel, onChangeEngine: () -> Unit) {
                 title = { Text("Clear the queue?") },
                 text = { Text("All ${queue.size} tracks are taken out and playback stops.") },
                 confirmButton = {
-                    TextButton(onClick = { clearing = false; vm.client.clearQueue() }) {
+                    TextButton(onClick = { clearing = false; followed.clearQueue() }) {
                         Text("Clear", color = MaterialTheme.colorScheme.error)
                     }
                 },

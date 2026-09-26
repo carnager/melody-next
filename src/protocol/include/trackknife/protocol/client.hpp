@@ -45,6 +45,12 @@ struct Endpoint final {
     friend bool operator==(const Endpoint&, const Endpoint&) = default;
 };
 
+// ADR-0223: a password kept in a file, for every --password-file. The first
+// line, without trailing spaces or a carriage return. A file that can't be
+// read, or has nothing on that line, is an error: the caller asked for a
+// password and would otherwise go on without one.
+[[nodiscard]] core::Result<std::string> read_password_file(const std::filesystem::path& path);
+
 // Opens a connection to an endpoint, a unix socket or TCP, and nothing more:
 // no handshake. For callers that speak the protocol themselves first, as an
 // output agent registering does.

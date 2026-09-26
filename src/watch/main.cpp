@@ -14,7 +14,6 @@
 
 #include <csignal>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <set>
@@ -102,16 +101,12 @@ struct Options final {
             if (!given) {
                 return std::nullopt;
             }
-            std::ifstream file{*given};
-            std::getline(file, options.password);
-            while (!options.password.empty() &&
-                   (options.password.back() == '\r' || options.password.back() == ' ')) {
-                options.password.pop_back();
-            }
-            if (options.password.empty()) {
-                say("no password in " + *given);
+            auto read = trackknife::protocol::read_password_file(*given);
+            if (!read) {
+                say(read.error().message);
                 return std::nullopt;
             }
+            options.password = std::move(*read);
         } else if (argument == "--settle") {
             auto given = value();
             if (!given) {

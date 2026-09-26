@@ -216,6 +216,7 @@ int main(int argc, char** argv) {
     std::optional<std::filesystem::path> play_for_music_root;
     bool agent_for_all = false;
     std::string agent_password;
+    std::string agent_password_file;
     std::optional<std::filesystem::path> agent_music_root;
 
     for (int index = 1; index < argc; ++index) {
@@ -262,12 +263,7 @@ int main(int argc, char** argv) {
         } else if (argument == "--agent-password") {
             agent_password = value();
         } else if (argument == "--agent-password-file") {
-            std::ifstream file{value()};
-            std::getline(file, agent_password);
-            while (!agent_password.empty() &&
-                   (agent_password.back() == '\r' || agent_password.back() == ' ')) {
-                agent_password.pop_back();
-            }
+            agent_password_file = value();
         } else if (argument == "--agent-music-root") {
             agent_music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for-music-root") {
@@ -282,25 +278,19 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!password_file.empty()) {
-        std::ifstream file{password_file};
-        std::getline(file, password);
-        while (!password.empty() && (password.back() == '\r' || password.back() == ' ')) {
-            password.pop_back();
+    for (const auto& [file, password_read] :
+         {std::pair{&password_file, &password},
+          std::pair{&play_for_password_file, &play_for_password},
+          std::pair{&agent_password_file, &agent_password}}) {
+        if (file->empty()) {
+            continue;
         }
-        if (password.empty()) {
-            std::cerr << "melodyd: no password in " << password_file << "\n";
+        auto read = trackknife::protocol::read_password_file(*file);
+        if (!read) {
+            std::cerr << "melodyd: " << read.error().message << "\n";
             return EXIT_FAILURE;
         }
-    }
-
-    if (!play_for_password_file.empty()) {
-        std::ifstream file{play_for_password_file};
-        std::getline(file, play_for_password);
-        while (!play_for_password.empty() &&
-               (play_for_password.back() == '\r' || play_for_password.back() == ' ')) {
-            play_for_password.pop_back();
-        }
+        *password_read = std::move(*read);
     }
     // ADR-0223: every TCP connection gives a password, so a listener asked
     // for without one is refused before anything is opened.

@@ -112,7 +112,9 @@ gets Opus instead of the original files.
 
 For scripts, key bindings and status bars. It finds the engine like the
 others do: `--server`, `$MELODY_SERVER`, the one on this machine, or one on
-the network (`--engine NAME` if there are several).
+the network (`--engine NAME` if there are several). An engine on the network
+wants its password: `--password`, `$MELODY_PASSWORD`, or kept in a file with
+`--password-file FILE` or `$MELODY_PASSWORD_FILE`, as melodyd reads its own.
 
 ```sh
 melody-cli status

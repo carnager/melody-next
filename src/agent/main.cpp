@@ -7,6 +7,7 @@
 #include "agent/agent.hpp"
 #include "agent/guests.hpp"
 #include "agent/speaker_arbiter.hpp"
+#include "trackknife/protocol/client.hpp"
 
 #include <unistd.h>
 
@@ -14,7 +15,6 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -88,15 +88,12 @@ int main(int argc, char** argv) {
         }
     }
     if (!token_file.empty()) {
-        std::ifstream file{token_file};
-        std::getline(file, token);
-        while (!token.empty() && (token.back() == '\r' || token.back() == ' ')) {
-            token.pop_back();
-        }
-        if (token.empty()) {
-            std::cerr << "melody-agent: no password in " << token_file << "\n";
+        auto read = trackknife::protocol::read_password_file(token_file);
+        if (!read) {
+            std::cerr << "melody-agent: " << read.error().message << "\n";
             return EXIT_FAILURE;
         }
+        token = std::move(*read);
     }
     std::signal(SIGINT, request_stop);
     std::signal(SIGTERM, request_stop);

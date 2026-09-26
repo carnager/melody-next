@@ -36,6 +36,9 @@ struct Options final {
     // Every --server given, for watch --all: those engines and no others.
     std::vector<std::string> servers;
     std::string password;
+    // --password-file or $MELODY_PASSWORD_FILE: read once the line is
+    // parsed, and only if no --password came after it.
+    std::string password_file;
     std::string engine;
     bool json{false};
     // --fields: what albums and tracks list, besides the key; empty, all.
@@ -49,7 +52,8 @@ struct Options final {
 };
 
 void usage(std::ostream& out) {
-    out << "usage: melody-cli [--server HOST:PORT] [--password PASS] [--engine NAME] [--json]\n"
+    out << "usage: melody-cli [--server HOST:PORT] [--password PASS | --password-file FILE]\n"
+           "                  [--engine NAME] [--json]\n"
            "                  [--fields artist,album,title,date] [--keys] [--format EXPR]\n"
            "                  COMMAND [ARGUMENTS]\n"
            "\n"
@@ -107,8 +111,9 @@ void usage(std::ostream& out) {
            "\n"
            "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
            "one found on the network -- by name with --engine when there are several.\n"
-           "--password (or $MELODY_PASSWORD) for an engine on the network. --json prints\n"
-           "the engine's own answers, for scripts.\n";
+           "--password (or $MELODY_PASSWORD) for an engine on the network, or\n"
+           "--password-file (or $MELODY_PASSWORD_FILE) to read it from the first line\n"
+           "of a file. --json prints the engine's own answers, for scripts.\n";
 }
 
 // A string field of an answer: empty when absent, null or not a string, so
@@ -1188,6 +1193,8 @@ int main(int argc, char** argv) {
     }
     if (const char* password = std::getenv("MELODY_PASSWORD"); password != nullptr) {
         options.password = password;
+    } else if (const char* file = std::getenv("MELODY_PASSWORD_FILE"); file != nullptr) {
+        options.password_file = file;
     }
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -1212,6 +1219,9 @@ int main(int argc, char** argv) {
             options.servers.push_back(options.server);
         } else if (argument == "--password") {
             options.password = value();
+            options.password_file.clear();
+        } else if (argument == "--password-file") {
+            options.password_file = value();
         } else if (argument == "--engine") {
             options.engine = value();
         } else if (argument == "--fields") {
@@ -1233,6 +1243,13 @@ int main(int argc, char** argv) {
     if (options.words.empty()) {
         usage(std::cerr);
         return EXIT_FAILURE;
+    }
+    if (!options.password_file.empty()) {
+        auto read = trackknife::protocol::read_password_file(options.password_file);
+        if (!read) {
+            fail(read.error().message);
+        }
+        options.password = std::move(*read);
     }
     return run(options);
 }

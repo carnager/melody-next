@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <fstream>
 #include <utility>
 
 namespace trackknife::protocol {
@@ -91,6 +92,24 @@ constexpr std::chrono::milliseconds connect_timeout{5'000};
 }
 
 } // namespace
+
+core::Result<std::string> read_password_file(const std::filesystem::path& path) {
+    std::ifstream file{path};
+    if (!file) {
+        return std::unexpected(transport_error("cannot read " + path.string()));
+    }
+    std::string password;
+    std::getline(file, password);
+    while (!password.empty() && (password.back() == '\r' || password.back() == ' ')) {
+        password.pop_back();
+    }
+    if (password.empty()) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "no password in " + path.string(),
+                                           .context = {}});
+    }
+    return password;
+}
 
 core::Result<int> open_connection(const Endpoint& endpoint) {
     if (!endpoint.tcp()) {

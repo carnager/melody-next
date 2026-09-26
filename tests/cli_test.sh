@@ -8,6 +8,8 @@ set -euo pipefail
 melodyd="$1"
 cli="$2"
 work="$(mktemp -d)"
+# The engines here are named on each line, not by whoever runs the test.
+unset MELODY_SERVER MELODY_PASSWORD MELODY_PASSWORD_FILE
 daemon_pid=""
 second_pid=""
 
@@ -375,5 +377,40 @@ if cli play album nothing-like-this 2>"${work}/none.txt"; then
     fail "an album that is not there fails"
 fi
 grep -q "no album matches" "${work}/none.txt" || fail "and says why"
+
+# ADR-0223: an engine on the network wants its password, which may be kept
+# in a file, as melodyd's own can.
+port=$(( 20000 + RANDOM % 20000 ))
+printf 'correct horse \r\nsecond line\n' > "${work}/password"
+"${melodyd}" --socket "${work}/tcp.sock" --state "${work}/tcp-state" \
+    --listen "127.0.0.1:${port}" --password "correct horse" 2>"${work}/tcp.log" &
+second_pid=$!
+for _ in $(seq 1 100); do
+    grep -q "with a password" "${work}/tcp.log" 2>/dev/null && break
+    sleep 0.05
+done
+grep -q "with a password" "${work}/tcp.log" || fail "an engine with a password starts"
+tcp="127.0.0.1:${port}"
+"${cli}" --server "${tcp}" --password-file "${work}/password" status > /dev/null ||
+    fail "--password-file gives the file's first line, trimmed"
+MELODY_PASSWORD_FILE="${work}/password" "${cli}" --server "${tcp}" status > /dev/null ||
+    fail "and so does \$MELODY_PASSWORD_FILE"
+MELODY_PASSWORD_FILE="${work}/nowhere" "${cli}" --server "${tcp}" --password "correct horse" \
+    status > /dev/null || fail "--password on the line comes before the file in the environment"
+if "${cli}" --server "${tcp}" --password wrong status > /dev/null 2>&1; then
+    fail "a wrong password is refused"
+fi
+: > "${work}/empty"
+if "${cli}" --server "${tcp}" --password-file "${work}/empty" status 2>"${work}/empty.txt"; then
+    fail "a file without a password fails"
+fi
+grep -q "no password in" "${work}/empty.txt" || fail "and says why"
+if "${cli}" --server "${tcp}" --password-file "${work}/nowhere" status 2>"${work}/nowhere.txt"; then
+    fail "a file that is not there fails"
+fi
+grep -q "cannot read" "${work}/nowhere.txt" || fail "and says why"
+kill "${second_pid}" 2>/dev/null || true
+wait "${second_pid}" 2>/dev/null || true
+second_pid=""
 
 echo "melody-cli: ok"

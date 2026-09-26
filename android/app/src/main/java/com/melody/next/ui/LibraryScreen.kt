@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -222,7 +223,7 @@ private fun AlbumTile(vm: MainViewModel, album: LibraryEntry, newest: Boolean) {
     }
 }
 
-/** One album as a row: what search lists. */
+/** One album as a row: what search lists. Its options are one tap away, not a long press. */
 @Composable
 fun AlbumRow(vm: MainViewModel, album: LibraryEntry, showArtist: Boolean, showAdded: Boolean) {
     val tones = LocalTones.current
@@ -233,7 +234,7 @@ fun AlbumRow(vm: MainViewModel, album: LibraryEntry, showArtist: Boolean, showAd
                 onClick = { vm.open(LibraryLevel.Tracks(album)) },
                 onLongClick = { vm.act(Target.Album(album)) },
             )
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+            .padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -248,6 +249,7 @@ fun AlbumRow(vm: MainViewModel, album: LibraryEntry, showArtist: Boolean, showAd
             }
             Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = tones.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        IconButton(onClick = { vm.act(Target.Album(album)) }) { Icon(Icons.Default.MoreVert, "More", tint = tones.secondary) }
     }
 }
 
@@ -361,6 +363,12 @@ fun TrackRow(
             if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = tones.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(formatTime(durationMs), style = MaterialTheme.typography.bodySmall, color = tones.muted)
+        // What a long press offers, in sight.
+        if (onLongClick != null) {
+            IconButton(onClick = onLongClick, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.MoreVert, "More", tint = tones.muted, modifier = Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -449,7 +457,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList) {
                 playing = entry.path == state.path,
                 moving = state.playing,
                 onClick = { vm.client.playList(list.id, entry.entry) },
-                onLongClick = {},
+                onLongClick = null,
             )
         }
     }

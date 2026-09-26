@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "bench/remote_mount.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playback_tab_widget.hpp"
+#include "bench/remote_mount.hpp"
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
@@ -25,7 +25,10 @@
 
 #include <QAbstractItemView>
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -38,15 +41,10 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
-#include <QDialog>
-#include <QVBoxLayout>
-#include <QDialogButtonBox>
-#include <QTreeWidget>
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStandardPaths>
-#include <QApplication>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -54,6 +52,8 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
+#include <QTreeWidget>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cstddef>
@@ -117,6 +117,7 @@ void BenchMainWindow::initializePersistence() {
     connect(local_playback_, &EnginePlayback::listChanged, this,
             [this](const QString& id, const quint64 revision, const bool deleted) {
                 list_sync_->listChanged(local_playback_, id, revision, deleted);
+                fetchEngineLists();
             });
     loadPendingRelocations();
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
@@ -124,6 +125,7 @@ void BenchMainWindow::initializePersistence() {
         // lists -- and any moves it missed.
         list_sync_->reconnected(local_playback_);
         flushEngineRelocations();
+        fetchEngineLists();
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
         rememberEngineState(local_playback_);
@@ -768,9 +770,10 @@ void BenchMainWindow::showOpenListDialog() {
                 }
                 if (lists.empty()) {
                     auto* none = new QTreeWidgetItem(
-                        parent, {answer ? QStringLiteral("No lists")
-                                        : QStringLiteral("Cannot say: %1")
-                                              .arg(QString::fromStdString(answer.error().message))});
+                        parent,
+                        {answer ? QStringLiteral("No lists")
+                                : QStringLiteral("Cannot say: %1")
+                                      .arg(QString::fromStdString(answer.error().message))});
                     none->setFlags(Qt::NoItemFlags);
                 }
             });
@@ -782,40 +785,46 @@ void BenchMainWindow::showOpenListDialog() {
     dialog->open();
 }
 
-void BenchMainWindow::openEngineList(const bool remote, const QString& id) {
+void BenchMainWindow::openEngineList(const bool remote, const QString& id,
+                                     std::function<void()> then) {
     // Already open here: shown, not opened twice.
     if (auto* tab = tabForDocument(id); tab != nullptr) {
         tabs_->setCurrentWidget(tab->view);
+        if (then) {
+            then();
+        }
         return;
     }
     auto* engine = remote ? remote_playback_ : local_playback_;
     if (engine == nullptr) {
         return;
     }
-    engine->request(QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}},
-                    [this, remote](const core::Result<protocol::Json>& answer) {
-                        if (!answer) {
-                            statusBar()->showMessage(
-                                QStringLiteral("Could not open the list: %1")
-                                    .arg(QString::fromStdString(answer.error().message)),
-                                5'000);
-                            return;
-                        }
-                        auto document = EngineListSync::documentFromAnswer(*answer, remote);
-                        if (!document) {
-                            return;
-                        }
-                        if (auto* open = tabForDocument(document->id); open != nullptr) {
-                            tabs_->setCurrentWidget(open->view);
-                            return;
-                        }
-                        list_sync_->opened(*document,
-                                           answer->value("revision", std::uint64_t{0}));
-                        auto* tab = addListTab(std::move(*document), true);
-                        enqueueUnprobedRows(*tab);
-                        syncArtwork(*tab);
-                        schedulePersist();
-                    });
+    engine->request(
+        QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}},
+        [this, remote, then = std::move(then)](const core::Result<protocol::Json>& answer) {
+            if (!answer) {
+                statusBar()->showMessage(QStringLiteral("Could not open the list: %1")
+                                             .arg(QString::fromStdString(answer.error().message)),
+                                         5'000);
+                return;
+            }
+            auto document = EngineListSync::documentFromAnswer(*answer, remote);
+            if (!document) {
+                return;
+            }
+            if (auto* open = tabForDocument(document->id); open != nullptr) {
+                tabs_->setCurrentWidget(open->view);
+            } else {
+                list_sync_->opened(*document, answer->value("revision", std::uint64_t{0}));
+                auto* tab = addListTab(std::move(*document), true);
+                enqueueUnprobedRows(*tab);
+                syncArtwork(*tab);
+                schedulePersist();
+            }
+            if (then) {
+                then();
+            }
+        });
 }
 
 void BenchMainWindow::settleListConflict(const QString& id) {
@@ -835,7 +844,8 @@ void BenchMainWindow::settleListConflict(const QString& id) {
     theirs->setObjectName(QStringLiteral("bench-list-conflict-theirs"));
     auto* mine = question->addButton(QStringLiteral("Keep mine"), QMessageBox::AcceptRole);
     mine->setObjectName(QStringLiteral("bench-list-conflict-mine"));
-    auto* copy = question->addButton(QStringLiteral("Save mine as a copy"), QMessageBox::ActionRole);
+    auto* copy =
+        question->addButton(QStringLiteral("Save mine as a copy"), QMessageBox::ActionRole);
     copy->setObjectName(QStringLiteral("bench-list-conflict-copy"));
     question->setDefaultButton(copy);
     connect(question, &QMessageBox::buttonClicked, this,
@@ -1180,9 +1190,8 @@ void BenchMainWindow::openSearchDialog() {
                     if (remote) {
                         destination = remoteQueueTab();
                     } else {
-                        const auto local = std::ranges::find_if(list_tabs_, [](const auto& tab) {
-                            return !tab->document.remote;
-                        });
+                        const auto local = std::ranges::find_if(
+                            list_tabs_, [](const auto& tab) { return !tab->document.remote; });
                         destination = local != list_tabs_.end() ? local->get() : nullptr;
                     }
                 }
@@ -1405,15 +1414,14 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
         return false;
     }
     // The new tab is the same engine's as the rows (ADR-0227).
-    auto* destination =
-        addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                             .kind = persistence::ListKind::scratch,
-                                             .name = utf8Bytes(name),
-                                             .pinned = false,
-                                             .dirty = false,
-                                             .items = {},
-                                             .remote = isRemoteView(source)},
-                   false);
+    auto* destination = addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                             .kind = persistence::ListKind::scratch,
+                                                             .name = utf8Bytes(name),
+                                                             .pinned = false,
+                                                             .dirty = false,
+                                                             .items = {},
+                                                             .remote = isRemoteView(source)},
+                                   false);
     const auto transferred = transferRows(
         source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
     if (transferred)
@@ -1648,6 +1656,7 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     if (index < 0) {
         return;
     }
+    refreshListsPanel();
     const auto name = displayText(tab.document.name);
     const auto active =
         QString::fromStdString(tab.document.id.to_string()) == active_local_list_id_;
@@ -1656,9 +1665,8 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabData(index, active);
     tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}));
     // The playing dot is the tab bar's own; the icon says where it plays.
-    tabs_->setTabIcon(index, tab.document.remote
-                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
-                                 : QIcon{});
+    tabs_->setTabIcon(
+        index, tab.document.remote ? QIcon::fromTheme(QStringLiteral("network-server")) : QIcon{});
     const auto kind = tab.document.kind == persistence::ListKind::scratch
                           ? QStringLiteral("Persistent scratch list")
                           : QStringLiteral("Named Trackknife working list");
@@ -2100,21 +2108,22 @@ void BenchMainWindow::refreshLocalRatings() {
         for (const auto& hash : hashes) {
             keys.push_back(hash.toStdString());
         }
-        library->requestRatings(std::move(keys), [this, hashes, remote](std::vector<unsigned> values) {
-            if (values.size() != static_cast<std::size_t>(hashes.size())) {
-                return;
-            }
-            QHash<QString, unsigned> ratings;
-            ratings.reserve(hashes.size());
-            for (qsizetype index = 0; index < hashes.size(); ++index) {
-                ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
-            }
-            for (const auto& tab : list_tabs_) {
-                if (tab->document.remote == remote) {
-                    tab->model->applyRatings(ratings);
+        library->requestRatings(
+            std::move(keys), [this, hashes, remote](std::vector<unsigned> values) {
+                if (values.size() != static_cast<std::size_t>(hashes.size())) {
+                    return;
                 }
-            }
-        });
+                QHash<QString, unsigned> ratings;
+                ratings.reserve(hashes.size());
+                for (qsizetype index = 0; index < hashes.size(); ++index) {
+                    ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
+                }
+                for (const auto& tab : list_tabs_) {
+                    if (tab->document.remote == remote) {
+                        tab->model->applyRatings(ratings);
+                    }
+                }
+            });
     }
 }
 
@@ -2214,14 +2223,15 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
         auto* album_rate = make_rating_action(album_rate_menu, rating);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
         album_rate->setChecked(album_ratings_match && common_album_rating == rating);
-        connect(album_rate, &QAction::triggered, this, [library = QPointer{library}, album_hashes, rating] {
-            if (library == nullptr) {
-                return;
-            }
-            for (const auto& hash : album_hashes) {
-                library->storeRating(hash.toStdString(), true, rating);
-            }
-        });
+        connect(album_rate, &QAction::triggered, this,
+                [library = QPointer{library}, album_hashes, rating] {
+                    if (library == nullptr) {
+                        return;
+                    }
+                    for (const auto& hash : album_hashes) {
+                        library->storeRating(hash.toStdString(), true, rating);
+                    }
+                });
     }
 }
 

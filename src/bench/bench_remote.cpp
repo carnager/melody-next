@@ -6,12 +6,12 @@
 // from the engine that has them.
 
 #include "bench/bench_main_window.hpp"
-#include "uicommon/queue_table_view.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
 #include "bench/local_library_panel.hpp"
+#include "uicommon/queue_table_view.hpp"
 
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -57,10 +57,12 @@ void BenchMainWindow::connectRemoteEngine() {
         connect(remote_playback_, &EnginePlayback::listChanged, this,
                 [this](const QString& id, const quint64 revision, const bool deleted) {
                     list_sync_->listChanged(remote_playback_, id, revision, deleted);
+                    fetchEngineLists();
                 });
         connect(remote_playback_, &EnginePlayback::connected, this, [this] {
             list_sync_->reconnected(remote_playback_);
             flushEngineRelocations();
+            fetchEngineLists();
         });
     }
     connect(remote_playback_, &EnginePlayback::changed, this, [this] {
@@ -93,8 +95,8 @@ void BenchMainWindow::connectRemoteEngine() {
         for (auto& tab : list_tabs_) {
             if (tab->document.remote) {
                 // Named now that the remote has said its name.
-                static_cast<ui::QueueTableView*>(tab->view)
-                    ->setEmptyMessage(emptyListTitle(true), emptyListHint(true));
+                static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(emptyListTitle(true),
+                                                                             emptyListHint(true));
                 enqueueUnprobedRows(*tab);
                 syncArtwork(*tab);
             }

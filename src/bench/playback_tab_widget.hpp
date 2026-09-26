@@ -93,9 +93,9 @@ class PlaybackTabBar final : public QTabBar {
                                  QPointF(area.left() + 4.5, area.bottom() - 5));
                 painter.setFont(groupFont());
                 painter.setPen(palette().color(QPalette::PlaceholderText));
-                painter.drawText(QRect(area.left() + 12, area.top() + 3, lead - 14, area.height() - 3),
-                                 Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
-                                 groupOf(index));
+                painter.drawText(
+                    QRect(area.left() + 12, area.top() + 3, lead - 14, area.height() - 3),
+                    Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, groupOf(index));
                 painter.restore();
                 option.rect.setLeft(option.rect.left() + lead);
             }
@@ -183,6 +183,22 @@ class PlaybackTabWidget final : public QTabWidget {
   public:
     explicit PlaybackTabWidget(QWidget* parent = nullptr) : QTabWidget(parent) {
         setTabBar(new PlaybackTabBar(this));
+    }
+    // Told of every tab added or removed.
+    std::function<void()> tabs_changed;
+
+  protected:
+    void tabInserted(int index) override {
+        QTabWidget::tabInserted(index);
+        if (tabs_changed) {
+            tabs_changed();
+        }
+    }
+    void tabRemoved(int index) override {
+        QTabWidget::tabRemoved(index);
+        if (tabs_changed) {
+            tabs_changed();
+        }
     }
 };
 } // namespace trackknife::bench

@@ -40,6 +40,8 @@ qt_add_library(
     convert_dialog.hpp
     engine_playback.cpp
     engine_list_sync.cpp
+    lists_panel.cpp
+    bench_lists_panel.cpp
     engine_playback.hpp
     catalogue_source.cpp
     catalogue_source.hpp

@@ -49,6 +49,7 @@
 class QActionGroup;
 class QDialog;
 class QDockWidget;
+class QDropEvent;
 class QLabel;
 class QPushButton;
 class QStyledItemDelegate;
@@ -88,6 +89,7 @@ class LocalFilesMimeData;
 
 namespace trackknife::bench {
 enum class QuickPickKind;
+class ListsPanel;
 struct ConvertDialogItem;
 
 struct MetadataOperationJobOutcome;
@@ -141,6 +143,7 @@ class BenchMainWindow final : public QMainWindow {
     // one when dropped on empty space.
     bool handleTabFileDrop(QDropEvent* drop, int tab_index);
     bool handleTabTrackDrop(QAbstractItemView* source, QDropEvent* event, const QPoint& position);
+    bool handleTrackDropOnTab(QAbstractItemView* source, QDropEvent* drop, int tab_index);
     struct ListTab {
         persistence::ListDocument document;
         LocalListModel* model{nullptr};
@@ -196,7 +199,31 @@ class BenchMainWindow final : public QMainWindow {
     bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
     [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(bool remote) const;
-    void openEngineList(bool remote, const QString& id);
+    // Then, whatever is to be done with it once it is open.
+    void openEngineList(bool remote, const QString& id, std::function<void()> then = {});
+    // ADR-0233: the lists as a pane beside the tracks instead of as a tab
+    // bar, by the setting below.
+    static constexpr auto lists_display_key = "appearance/lists-display";
+    void buildListsPanel();
+    void applyListsDisplay();
+    [[nodiscard]] bool listsInPanel() const;
+    // Asks the engines for their lists again, a moment later.
+    void fetchEngineLists();
+    // Shows the window's tabs and the engines' lists in the pane, soon.
+    void refreshListsPanel();
+    void presentListsPanel();
+    void showListsPanelMenu(const QPoint& position);
+    bool dropOnPanelList(QDropEvent* drop, bool remote, const QString& id);
+    void addDroppedPaths(const QString& id, bool remote_files, std::vector<std::string> paths);
+    QSplitter* track_area_{nullptr};
+    QWidget* lists_pane_{nullptr};
+    ListsPanel* lists_panel_{nullptr};
+    QAction* lists_panel_action_{nullptr};
+    QTimer* lists_fetch_timer_{nullptr};
+    QTimer* lists_present_timer_{nullptr};
+    // The last list.all of each engine: this computer's, the remote's.
+    std::optional<std::vector<protocol::Json>> engine_lists_[2];
+    QString engine_lists_error_[2];
     void backupWorkspace();
     void scheduleWorkspaceRestore();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();

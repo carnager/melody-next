@@ -104,6 +104,14 @@ The initial workspace is intentionally conventional:
   and server-round-trip edits with `stored_playlist`
   idle refresh; multi-row reorder and restoring open playlist tabs across
   restart remain follow-ups.
+- **Trackknife decision** (ADR-0233): lists show as a tab bar grouped by
+  engine (default), or -- Settings → General → *Show lists as*, or Workspace →
+  *Lists in a side panel* -- as a Lists pane beside the tracks. The pane hides
+  the tab bar and lists every engine's lists under its name, saved ones first
+  and working ones in italics, whether open in this window or not; choosing
+  one shows it, dropping library rows, folders or tracks on one adds them
+  (opening it first if needed), and its menu opens, closes, saves, renames and
+  deletes. Tabs that are not lists (tag editors) appear under *Other tabs*.
 - The default track presentation is grouped albums with cover art and readable
   track rows.
 - A plain, information-dense columns preset is one action away.

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "bench/quick_pick_popup.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/metadata_artwork_section.hpp"
 #include "bench/playback_tab_widget.hpp"
+#include "bench/quick_pick_popup.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "trackknife/audio/local_audition.hpp"
@@ -102,19 +102,26 @@ void BenchMainWindow::buildWorkspace() {
     connect(tabs_, &QTabWidget::tabCloseRequested, this, &BenchMainWindow::closeTabAt);
     connect(tabs_, &QTabWidget::currentChanged, this, [this](const int) {
         rememberTabVisit(tabs_->currentWidget());
+        refreshListsPanel();
         refreshTabActions();
         refreshTrackViewActions();
         refreshSelectionStatus();
         refreshActiveContext();
     });
-    connect(tabs_->tabBar(), &QTabBar::tabMoved, this,
-            [this](const int, const int) {
-                keepTabGroupsTogether();
-                schedulePersist();
-            });
-    tabs_->setProperty(layout_panel_id_property, QString::fromLatin1(track_lists_panel_id));
-    tabs_->setProperty(layout_panel_title_property, QStringLiteral("Track Lists"));
-    tabs_->setProperty("trackknifeLayoutPanel", true);
+    connect(tabs_->tabBar(), &QTabBar::tabMoved, this, [this](const int, const int) {
+        keepTabGroupsTogether();
+        schedulePersist();
+    });
+    static_cast<PlaybackTabWidget*>(tabs_)->tabs_changed = [this] { refreshListsPanel(); };
+    // The tracks, and beside them the lists when they are shown as a pane.
+    track_area_ = new QSplitter(Qt::Horizontal, this);
+    track_area_->setObjectName(QStringLiteral("bench-track-area"));
+    track_area_->setChildrenCollapsible(false);
+    track_area_->setProperty(layout_panel_id_property, QString::fromLatin1(track_lists_panel_id));
+    track_area_->setProperty(layout_panel_title_property, QStringLiteral("Track Lists"));
+    track_area_->setProperty("trackknifeLayoutPanel", true);
+    track_area_->addWidget(tabs_);
+    buildListsPanel();
 
     folder_model_ = new ui::LocalFolderTreeModel(this);
     folders_panel_ = new QWidget(this);
@@ -153,12 +160,13 @@ void BenchMainWindow::buildWorkspace() {
         };
         bar->setAttribute(Qt::WA_StyledBackground);
         bar->setStyleSheet(
-            QStringLiteral("QTabBar { background: %1; border-radius: 5px; }"
-                           "QTabBar::tab { background: transparent; border: none; margin: 2px;"
-                           " padding: 3px 12px; border-radius: 4px; color: palette(placeholder-text); }"
-                           "QTabBar::tab:hover { color: palette(text); }"
-                           "QTabBar::tab:selected { background: palette(highlight);"
-                           " color: palette(highlighted-text); }")
+            QStringLiteral(
+                "QTabBar { background: %1; border-radius: 5px; }"
+                "QTabBar::tab { background: transparent; border: none; margin: 2px;"
+                " padding: 3px 12px; border-radius: 4px; color: palette(placeholder-text); }"
+                "QTabBar::tab:hover { color: palette(text); }"
+                "QTabBar::tab:selected { background: palette(highlight);"
+                " color: palette(highlighted-text); }")
                 .arg(shade(6)));
         return bar;
     };
@@ -173,9 +181,9 @@ void BenchMainWindow::buildWorkspace() {
         const auto kind = local_source_tabs_->tabData(index).toString();
         // The temporary Files page (ADR-0183 addendum) is session-only.
         const auto choice = kind == QStringLiteral("remote") ? QStringLiteral("remote")
-                            : index == 0                    ? QStringLiteral("folders")
-                            : index == 1                    ? QStringLiteral("library")
-                                                            : QString{};
+                            : index == 0                     ? QStringLiteral("folders")
+                            : index == 1                     ? QStringLiteral("library")
+                                                             : QString{};
         if (!choice.isEmpty()) {
             QSettings{}.setValue(QStringLiteral("local-library/view"), choice);
         }
@@ -241,7 +249,7 @@ void BenchMainWindow::buildWorkspace() {
     folders_layout->addWidget(source_stack_, 1);
 
     panel_widgets_.insert(QString::fromLatin1(folders_panel_id), folders_panel_);
-    panel_widgets_.insert(QString::fromLatin1(track_lists_panel_id), tabs_);
+    panel_widgets_.insert(QString::fromLatin1(track_lists_panel_id), track_area_);
     layout_host_ = new QWidget(this);
     layout_host_->setObjectName(QStringLiteral("bench-panel-layout-host"));
     layout_host_layout_ = new QVBoxLayout(layout_host_);
@@ -501,6 +509,17 @@ void BenchMainWindow::buildWorkspace() {
     quick_track->setShortcutContext(Qt::WindowShortcut);
     connect(quick_track, &QAction::triggered, this,
             [this] { openQuickPick(QuickPickKind::track); });
+    // ADR-0233: a tab bar, or a pane that keeps every list in sight.
+    lists_panel_action_ = workspace_menu->addAction(tr("Lists in a side panel"));
+    lists_panel_action_->setObjectName(QStringLiteral("action-lists-panel"));
+    lists_panel_action_->setCheckable(true);
+    lists_panel_action_->setChecked(listsInPanel());
+    connect(lists_panel_action_, &QAction::toggled, this, [this](const bool panel) {
+        QSettings{}.setValue(QLatin1String(lists_display_key),
+                             panel ? QStringLiteral("panel") : QStringLiteral("tabs"));
+        applyListsDisplay();
+    });
+    workspace_menu->addSeparator();
     duplicate_tab_action_ = workspace_menu->addAction(QStringLiteral("Duplicate tab"));
     duplicate_tab_action_->setObjectName(QStringLiteral("action-duplicate-tab"));
     duplicate_tab_action_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+D")));
@@ -937,8 +956,8 @@ void BenchMainWindow::loadFolderBookmarks() {
         const std::string raw_path{bytes.constData(), static_cast<std::size_t>(bytes.size())};
         const auto display = QString::fromUtf8(
             core::display_raw_path(std::filesystem::path{raw_path}.filename().native().empty()
-                                      ? raw_path
-                                      : std::filesystem::path{raw_path}.filename().native()));
+                                       ? raw_path
+                                       : std::filesystem::path{raw_path}.filename().native()));
         auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")), display,
                                          folder_bookmarks_);
         item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
@@ -1131,7 +1150,10 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             }
         }
     });
-    connect(dialog, &QDialog::accepted, this, [this] { applyLocalLibraryVisibility(); });
+    connect(dialog, &QDialog::accepted, this, [this] {
+        applyLocalLibraryVisibility();
+        applyListsDisplay();
+    });
     connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
         // ADR-0226: this computer's engine runs apart from the window, so a
         // change to how it is shared means starting it again.

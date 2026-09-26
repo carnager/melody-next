@@ -2,6 +2,7 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/lists_panel.hpp"
 #include "bench/up_next_delegate.hpp"
 #include "bench/quick_pick_popup.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -106,6 +107,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSettings>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QSlider>
 #include <QSpinBox>
@@ -253,6 +255,7 @@ class BenchMainWindowTest final : public QObject {
     void aMoveIsFollowedInListsNotOpenHere();
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
+    void theListsPanelShowsEveryListAndTakesDrops();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -2012,6 +2015,101 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     for (int index = 0; index < remote_at(); ++index) {
         QVERIFY(!window.tabs_->widget(index)->property("bench-remote-list").toBool());
     }
+}
+
+// ADR-0233: the lists as a pane instead of a tab bar -- the engine's too,
+// open here or not -- and a drop on one it has not opened yet adds to it.
+void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
+    QTemporaryDir music_dir;
+    QVERIFY(music_dir.isValid());
+    const auto music = music_dir.path();
+    QVERIFY(QDir{}.mkpath(music + QStringLiteral("/album")));
+    write_wave(music + QStringLiteral("/album/one.wav"), wave_sample_rate);
+    QSettings{}.setValue(QLatin1String(BenchMainWindow::lists_display_key), QStringLiteral("panel"));
+    const auto restore = qScopeGuard(
+        [] { QSettings{}.remove(QLatin1String(BenchMainWindow::lists_display_key)); });
+    BenchMainWindow window;
+    window.resize(1200, 700);
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QVERIFY(window.tabs_->tabBar()->isHidden());
+    QVERIFY(window.lists_pane_->isVisible());
+
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto make = [&engine](const std::string& name) {
+        const auto made = (*engine)->call(
+            "list.save", protocol::Json{{"name", name}, {"kind", "saved"},
+                                        {"items", protocol::Json::array()}});
+        return made ? QString::fromStdString(made->value("id", std::string{})) : QString{};
+    };
+    const auto elsewhere = make("Elsewhere");
+    const auto target = make("Target");
+    QVERIFY(!elsewhere.isEmpty() && !target.isEmpty());
+
+    // Lists no tab holds are there, under this computer, and so is the
+    // window's own.
+    auto* panel = window.lists_panel_;
+    QTRY_VERIFY(panel->itemFor(elsewhere) != nullptr && panel->itemFor(target) != nullptr);
+    QCOMPARE(panel->itemFor(elsewhere)->parent()->text(0), QStringLiteral("This computer"));
+    auto* own = window.currentListTab();
+    QVERIFY(own != nullptr);
+    const auto own_id = QString::fromStdString(own->document.id.to_string());
+    QTRY_VERIFY(panel->itemFor(own_id) != nullptr);
+    QVERIFY(panel->itemFor(own_id)->isSelected());
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(window.grab().save(directory + QStringLiteral("/lists-panel.png")));
+    }
+
+    // Chosen: opened, and its tracks are what is shown.
+    panel->setCurrentItem(panel->itemFor(elsewhere));
+    QTRY_VERIFY(window.tabForDocument(elsewhere) != nullptr);
+    QCOMPARE(window.currentListTab(), window.tabForDocument(elsewhere));
+    panel->setCurrentItem(panel->itemFor(own_id));
+    QTRY_COMPARE(window.currentListTab(), own);
+
+    // A folder dropped on a list not open here: opened, and added to.
+    QVERIFY(window.tabForDocument(target) == nullptr);
+    auto* folder_model = window.findChild<ui::LocalFolderTreeModel*>();
+    QVERIFY(folder_model != nullptr);
+    folder_model->addRoot(QFile::encodeName(music + QStringLiteral("/album")).toStdString());
+    QModelIndex album;
+    QTRY_VERIFY([&] {
+        for (int row = 0; row < folder_model->rowCount(); ++row) {
+            const auto index = folder_model->index(row, 0);
+            if (folder_model->rawPath(index) ==
+                QFile::encodeName(music + QStringLiteral("/album")).toStdString()) {
+                album = index;
+                return true;
+            }
+        }
+        return false;
+    }());
+    std::unique_ptr<QMimeData> mime{folder_model->mimeData({album})};
+    QVERIFY(mime != nullptr);
+    QTRY_VERIFY(panel->itemFor(target) != nullptr);
+    const auto at = panel->visualItemRect(panel->itemFor(target)).center();
+    auto* viewport = panel->viewport();
+    QDragEnterEvent enter{at, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &enter);
+    QVERIFY(enter.isAccepted());
+    QDragMoveEvent move{at, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &move);
+    QVERIFY(move.isAccepted());
+    QDropEvent drop{QPointF{at}, Qt::CopyAction, mime.get(), Qt::LeftButton, Qt::NoModifier};
+    QApplication::sendEvent(viewport, &drop);
+    QVERIFY(drop.isAccepted());
+    QTRY_VERIFY(window.tabForDocument(target) != nullptr);
+    QTRY_COMPARE(window.tabForDocument(target)->model->rowCount(), 1);
+    QTRY_VERIFY(!window.discovery_running_);
+
+    // Back to a tab bar: the pane goes, the tabs return.
+    window.lists_panel_action_->setChecked(false);
+    QVERIFY(!window.tabs_->tabBar()->isHidden());
+    QVERIFY(window.lists_pane_->isHidden());
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
@@ -10288,7 +10386,7 @@ void BenchMainWindowTest::panelLayoutPersistsAndPreservesFutureState() {
         QVERIFY(initial_split != nullptr);
         QCOMPARE(initial_split->orientation(), Qt::Horizontal);
         QCOMPARE(initial_split->widget(0)->objectName(), QStringLiteral("bench-panel-folders"));
-        QCOMPARE(initial_split->widget(1)->objectName(), QStringLiteral("bench-tabs"));
+        QCOMPARE(initial_split->widget(1)->objectName(), QStringLiteral("bench-track-area"));
         QTRY_VERIFY(initial_split->sizes().at(0) < initial_split->sizes().at(1));
         QVERIFY(!vertical->isEnabled());
 

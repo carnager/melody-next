@@ -7,24 +7,22 @@
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/discovery/mdns.hpp"
 
+#include <QAbstractSpinBox>
 #include <QApplication>
 #include <QCheckBox>
-#include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
-#include <QHBoxLayout>
-#include <QSysInfo>
 #include <QGroupBox>
-#include <QLabel>
+#include <QHBoxLayout>
 #include <QKeySequenceEdit>
+#include <QLabel>
 #include <QLineEdit>
-#include <QToolButton>
-#include <QMenu>
 #include <QListWidget>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
@@ -32,6 +30,8 @@
 #include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
+#include <QSysInfo>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -186,6 +186,15 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     panel_animations_->setChecked(
         settings.value(QStringLiteral("appearance/panel-animations"), true).toBool());
     general_form->addRow(QStringLiteral("Appearance:"), panel_animations_);
+    // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
+    lists_display_ = new QComboBox(general);
+    lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));
+    lists_display_->addItem(QStringLiteral("Tab bar"), QStringLiteral("tabs"));
+    lists_display_->addItem(QStringLiteral("Side panel"), QStringLiteral("panel"));
+    lists_display_->setCurrentIndex(
+        std::max(0, lists_display_->findData(settings.value(
+                        QStringLiteral("appearance/lists-display"), QStringLiteral("tabs")))));
+    general_form->addRow(QStringLiteral("Show lists as:"), lists_display_);
     add_page(QStringLiteral("General"), general);
 
     auto* playback = new QWidget(this);
@@ -341,15 +350,13 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_share_->setObjectName(QStringLiteral("bench-settings-engine-share"));
     engine_share_->setToolTip(QStringLiteral(
         "Lets output agents play this computer's music, and other Trackknife windows control it"));
-    engine_share_->setChecked(
-        settings.value(QLatin1String(engine_share_key), false).toBool());
+    engine_share_->setChecked(settings.value(QLatin1String(engine_share_key), false).toBool());
     sharing_form->addRow(engine_share_);
     engine_listen_ = new QLineEdit(sharing);
     engine_listen_->setObjectName(QStringLiteral("bench-settings-engine-listen"));
-    engine_listen_->setText(settings
-                                .value(QLatin1String(engine_listen_key),
-                                       QString::fromLatin1(engine_listen_default))
-                                .toString());
+    engine_listen_->setText(
+        settings.value(QLatin1String(engine_listen_key), QString::fromLatin1(engine_listen_default))
+            .toString());
     engine_listen_->setToolTip(
         QStringLiteral("host:port; 0.0.0.0 listens on every network this computer is on"));
     sharing_form->addRow(QStringLiteral("Address:"), engine_listen_);
@@ -358,8 +365,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_stream_port_->setRange(1, 65535);
     engine_stream_port_->setValue(
         settings.value(QLatin1String(engine_stream_port_key), engine_stream_port_default).toInt());
-    engine_stream_port_->setToolTip(QStringLiteral(
-        "Where agents without a copy of the music fetch it, on the same address"));
+    engine_stream_port_->setToolTip(
+        QStringLiteral("Where agents without a copy of the music fetch it, on the same address"));
     sharing_form->addRow(QStringLiteral("Stream port:"), engine_stream_port_);
     engine_music_root_ = new QLineEdit(sharing);
     engine_music_root_->setObjectName(QStringLiteral("bench-settings-engine-music-root"));
@@ -373,8 +380,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     music_root_row->addWidget(engine_music_root_, 1);
     auto* music_root_browse = new QPushButton(QStringLiteral("Browse…"), sharing);
     connect(music_root_browse, &QPushButton::clicked, this, [this] {
-        const auto chosen = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Music root"), engine_music_root_->text());
+        const auto chosen = QFileDialog::getExistingDirectory(this, QStringLiteral("Music root"),
+                                                              engine_music_root_->text());
         if (!chosen.isEmpty()) {
             engine_music_root_->setText(chosen);
         }
@@ -460,19 +467,20 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                                    .arg(QString::fromStdString(announced.address))
                                    .arg(announced.port);
             const bool locked = announced.txt.contains("auth") && announced.txt.at("auth") == "1";
-            auto* choice = found_menu->addAction(
-                QStringLiteral("%1 — %2%3")
-                    .arg(QString::fromStdString(announced.instance), where,
-                         locked ? QStringLiteral(" · password") : QString{}));
-            connect(choice, &QAction::triggered, this, [this, where] { engine_socket_->setText(where); });
+            auto* choice =
+                found_menu->addAction(QStringLiteral("%1 — %2%3")
+                                          .arg(QString::fromStdString(announced.instance), where,
+                                               locked ? QStringLiteral(" · password") : QString{}));
+            connect(choice, &QAction::triggered, this,
+                    [this, where] { engine_socket_->setText(where); });
         }
     };
     fill_found({});
-    if (auto browser = discovery::Browser::start([this, fill_found](
-                                                     const std::vector<discovery::Found>& engines) {
-            QMetaObject::invokeMethod(this, [fill_found, engines] { fill_found(engines); },
-                                      Qt::QueuedConnection);
-        })) {
+    if (auto browser = discovery::Browser::start(
+            [this, fill_found](const std::vector<discovery::Found>& engines) {
+                QMetaObject::invokeMethod(
+                    this, [fill_found, engines] { fill_found(engines); }, Qt::QueuedConnection);
+            })) {
         engine_browser_ = std::move(*browser);
     } else {
         found_engines->setEnabled(false);
@@ -495,7 +503,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     // into local lists (and back): played here, and tagged here.
     remote_folder_ = new QLineEdit(remote);
     remote_folder_->setObjectName(QStringLiteral("bench-settings-remote-folder"));
-    remote_folder_->setPlaceholderText(QStringLiteral("e.g. /mnt/nas/Music, as the remote sees it"));
+    remote_folder_->setPlaceholderText(
+        QStringLiteral("e.g. /mnt/nas/Music, as the remote sees it"));
     remote_folder_->setText(
         settings.value(QLatin1String(library_remote_folder_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Remote music folder:"), remote_folder_);
@@ -799,6 +808,7 @@ void SettingsDialog::save() {
     settings.setValue(QStringLiteral("lastfm/api-key"), lastfm_key_->text().trimmed());
     settings.setValue(QStringLiteral("appearance/panel-animations"),
                       panel_animations_->isChecked());
+    settings.setValue(QStringLiteral("appearance/lists-display"), lists_display_->currentData());
     settings.setValue(QStringLiteral("desktop/notifications"), notifications_->isChecked());
     settings.setValue(QStringLiteral("desktop/notifications-background-only"),
                       notifications_background_->isChecked());

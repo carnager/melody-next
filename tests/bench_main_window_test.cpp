@@ -247,6 +247,8 @@ class BenchMainWindowTest final : public QObject {
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void quittingStopsTheEngineForGood();
     void theWindowsListsAreOnItsEngine();
+    void anotherClientsListChangesReachTheWindow();
+    void aListChangedWhileClosedIsTakenUpOnOpening();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1598,6 +1600,183 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     QTRY_VERIFY(!window.list_sync_->busy());
     QVERIFY(listed(id).has_value());
     (*engine)->close();
+}
+
+namespace {
+
+// A list the way another client -- the phone, a second window -- writes it.
+protocol::Json listItems(const std::vector<std::string>& paths) {
+    auto items = protocol::Json::array();
+    for (const auto& path : paths) {
+        items.push_back(protocol::Json{{"path", protocol::encode_raw_path(path)},
+                                       {"title", path.substr(path.rfind('/') + 1)}});
+    }
+    return items;
+}
+
+std::vector<std::string> rowPaths(const LocalListModel& model) {
+    std::vector<std::string> paths;
+    for (const auto& row : model.rows()) {
+        paths.push_back(row.raw_path);
+    }
+    return paths;
+}
+
+} // namespace
+
+// ADR-0233: what another client does to a list open here reaches the tab: a
+// change is shown, a deletion closes it. A saved list someone else saved
+// since this window read it is not overwritten on Save: the choice is asked.
+void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    const auto revision = [&other](const std::string& id) {
+        auto got = (*other)->call("list.get", protocol::Json{{"id", id}});
+        return got ? got->value("revision", std::uint64_t{0}) : std::uint64_t{0};
+    };
+
+    auto* tab = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Shared",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto id = tab->document.id.to_string();
+    const auto qid = QString::fromStdString(id);
+    LocalTrackRow row;
+    row.raw_path = "/music/shared/a.flac";
+    row.title = "a";
+    tab->model->appendRows({row});
+    window.persistNow(false);
+    QTRY_VERIFY(revision(id) >= 1U);
+    QTRY_VERIFY(!window.list_sync_->busy());
+
+    // Changed elsewhere: the tab shows it.
+    QVERIFY((*other)->call("list.save",
+                           protocol::Json{{"id", id},
+                                          {"name", "Shared, renamed"},
+                                          {"items", listItems({"/music/shared/a.flac",
+                                                               "/music/shared/b.flac"})}}));
+    QTRY_COMPARE(rowPaths(*tab->model),
+                 (std::vector<std::string>{"/music/shared/a.flac", "/music/shared/b.flac"}));
+    QCOMPARE(displayText(tab->document.name), QStringLiteral("Shared, renamed"));
+    QVERIFY(!tab->document.dirty);
+
+    // Saved here, then saved elsewhere, then edited here and saved: asked.
+    tab->document.kind = persistence::ListKind::saved;
+    window.persistNow(false);
+    QTRY_COMPARE((*other)->call("list.get", protocol::Json{{"id", id}})->value("kind", std::string{}),
+                 std::string{"saved"});
+    QTRY_VERIFY(!window.list_sync_->busy());
+    const auto theirs = revision(id);
+    QVERIFY((*other)->call("list.save",
+                           protocol::Json{{"id", id},
+                                          {"name", "Shared, renamed"},
+                                          {"kind", "saved"},
+                                          {"revision", theirs},
+                                          {"items", listItems({"/music/shared/theirs.flac"})}}));
+    // Their change reached this window, which had no edits of its own, so it
+    // shows theirs; now edited here, unsaved.
+    QTRY_COMPARE(rowPaths(*tab->model), std::vector<std::string>{"/music/shared/theirs.flac"});
+    QTRY_VERIFY(!window.list_sync_->busy());
+    LocalTrackRow mine;
+    mine.raw_path = "/music/shared/mine.flac";
+    tab->model->appendRows({mine});
+    tab->document.dirty = true;
+    window.persistNow(false);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    // Theirs again, meanwhile.
+    QVERIFY((*other)->call("list.save",
+                           protocol::Json{{"id", id},
+                                          {"name", "Shared, renamed"},
+                                          {"kind", "saved"},
+                                          {"items", listItems({"/music/shared/again.flac"})}}));
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QCOMPARE(rowPaths(*tab->model),
+             (std::vector<std::string>{"/music/shared/theirs.flac", "/music/shared/mine.flac"}));
+    // Saved here: the choice.
+    tab->document.dirty = false;
+    window.persistNow(false);
+    QTRY_VERIFY(window.findChild<QMessageBox*>(QStringLiteral("bench-list-conflict")) != nullptr);
+    auto* question = window.findChild<QMessageBox*>(QStringLiteral("bench-list-conflict"));
+    question->findChild<QAbstractButton*>(QStringLiteral("bench-list-conflict-copy"))->click();
+    // Mine is a list of its own; the tab shows theirs.
+    QTRY_COMPARE(rowPaths(*tab->model), std::vector<std::string>{"/music/shared/again.flac"});
+    const auto copy = std::ranges::find_if(window.list_tabs_, [](const auto& candidate) {
+        return displayText(candidate->document.name) == QStringLiteral("Shared, renamed (mine)");
+    });
+    QVERIFY(copy != window.list_tabs_.end());
+    QCOMPARE(rowPaths(*(*copy)->model),
+             (std::vector<std::string>{"/music/shared/theirs.flac", "/music/shared/mine.flac"}));
+    const auto copy_id = (*copy)->document.id.to_string();
+    window.persistNow(false);
+    QTRY_VERIFY((*other)->call("list.get", protocol::Json{{"id", copy_id}}).has_value());
+
+    // Deleted elsewhere: the tab closes, with nothing asked.
+    QVERIFY((*other)->call("list.delete", protocol::Json{{"id", id}}));
+    QTRY_VERIFY(window.tabForDocument(qid) == nullptr);
+    (*other)->close();
+}
+
+// A list changed on its engine while this window was closed: the engine's
+// version is what the tab shows when the window opens again, rather than the
+// window's old copy being written back over it.
+void BenchMainWindowTest::aListChangedWhileClosedIsTakenUpOnOpening() {
+    std::string id;
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+        auto* tab = window.addListTab(
+            persistence::ListDocument{.id = core::StableId::random(),
+                                      .kind = persistence::ListKind::saved,
+                                      .name = "Kept",
+                                      .pinned = false,
+                                      .dirty = false,
+                                      .items = {}},
+            true);
+        id = tab->document.id.to_string();
+        LocalTrackRow row;
+        row.raw_path = "/music/kept/old.flac";
+        tab->model->appendRows({row});
+        window.persistNow(true);
+        auto engine = protocol::Client::connect(protocol::Endpoint{
+            .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+        QVERIFY(engine.has_value());
+        QTRY_VERIFY((*engine)->call("list.get", protocol::Json{{"id", id}}).has_value());
+        QTRY_VERIFY(!window.list_sync_->busy());
+        (*engine)->close();
+    }
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    QVERIFY((*other)->call("list.save",
+                           protocol::Json{{"id", id},
+                                          {"name", "Kept"},
+                                          {"kind", "saved"},
+                                          {"items", listItems({"/music/kept/new.flac"})}}));
+
+    BenchMainWindow reopened;
+    reopened.show();
+    QTRY_VERIFY(reopened.lists_restored_);
+    auto* tab = reopened.tabForDocument(QString::fromStdString(id));
+    QVERIFY(tab != nullptr);
+    QTRY_COMPARE(rowPaths(*tab->model), std::vector<std::string>{"/music/kept/new.flac"});
+    QTest::qWait(300);
+    QTRY_VERIFY(!reopened.list_sync_->busy());
+    auto stored = (*other)->call("list.get", protocol::Json{{"id", id}});
+    QVERIFY(stored.has_value());
+    QCOMPARE(stored->at("items").size(), std::size_t{1});
+    (*other)->close();
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

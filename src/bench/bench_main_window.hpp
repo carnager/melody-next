@@ -185,6 +185,10 @@ class BenchMainWindow final : public QMainWindow {
     void restoreLists(std::vector<persistence::ListDocument> documents);
     void schedulePersist();
     void persistNow(bool wait);
+    // ADR-0233: another client's version of a list open here, and a save of
+    // one that someone else saved first.
+    void adoptEngineList(const persistence::ListDocument& document);
+    void settleListConflict(const QString& id);
     void backupWorkspace();
     void scheduleWorkspaceRestore();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();

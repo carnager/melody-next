@@ -38,6 +38,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStandardPaths>
@@ -98,10 +99,25 @@ void BenchMainWindow::initializePersistence() {
     });
     list_sync_ = new EngineListSync(this);
     list_sync_->setEngines(local_playback_, nullptr);
+    connect(list_sync_, &EngineListSync::adopted, this, &BenchMainWindow::adoptEngineList);
+    connect(list_sync_, &EngineListSync::wantsSave, this, &BenchMainWindow::schedulePersist);
+    connect(list_sync_, &EngineListSync::conflicted, this, &BenchMainWindow::settleListConflict);
+    connect(list_sync_, &EngineListSync::removedElsewhere, this, [this](const QString& id) {
+        // Deleted by another client: closed here too, with nothing to ask.
+        if (auto* tab = tabForDocument(id); tab != nullptr) {
+            tab->document.dirty = false;
+            tab->document.pinned = false;
+            closeTabAt(tabs_->indexOf(tab->view));
+        }
+    });
+    connect(local_playback_, &EnginePlayback::listChanged, this,
+            [this](const QString& id, const quint64 revision, const bool deleted) {
+                list_sync_->listChanged(local_playback_, id, revision, deleted);
+            });
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
-        // A new engine, or this one restarted: its lists go to it again.
-        list_sync_->forget(local_playback_);
-        schedulePersist();
+        // A new engine, or this one restarted: compared again, and given its
+        // lists.
+        list_sync_->reconnected(local_playback_);
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
         rememberEngineState(local_playback_);
@@ -515,12 +531,13 @@ void BenchMainWindow::scheduleWorkspaceRestore() {
     close();
 }
 
-BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument document,
-                                                      const bool select) {
-    const auto id = QString::fromStdString(document.id.to_string());
-    auto* model = new LocalListModel(tabs_);
-    std::vector<LocalTrackRow> restored_rows;
-    restored_rows.reserve(document.items.size());
+namespace {
+
+// A stored list's rows, as a tab shows them: what was cached with each is
+// taken for what the file says until it is read again.
+std::vector<LocalTrackRow> rowsOfDocument(const persistence::ListDocument& document) {
+    std::vector<LocalTrackRow> rows;
+    rows.reserve(document.items.size());
     for (const auto& item : document.items) {
         if (item.source != persistence::ListSource::local) {
             continue;
@@ -565,9 +582,102 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         row.probed = row.selection.stream_index.has_value() ||
                      row.selection.subsong_index.has_value() || row.segment.has_value() ||
                      row.duration_ms.has_value() || !item.fields.empty();
-        restored_rows.push_back(std::move(row));
+        rows.push_back(std::move(row));
     }
-    model->replaceRows(std::move(restored_rows));
+    return rows;
+}
+
+} // namespace
+
+// ADR-0233: another client's version of a list open here. A row that is the
+// same entry of the same file keeps what this window already knows of it --
+// tags read, cover found -- and only what is new is read again.
+void BenchMainWindow::adoptEngineList(const persistence::ListDocument& document) {
+    auto* tab = tabForDocument(document.id);
+    if (tab == nullptr) {
+        return;
+    }
+    std::unordered_map<std::string, const LocalTrackRow*> current;
+    for (const auto& row : tab->model->rows()) {
+        current.emplace(row.entry_id.to_string(), &row);
+    }
+    auto rows = rowsOfDocument(document);
+    for (auto& row : rows) {
+        const auto known = current.find(row.entry_id.to_string());
+        if (known != current.end() && known->second->raw_path == row.raw_path &&
+            known->second->segment == row.segment && known->second->selection == row.selection) {
+            row = *known->second;
+        }
+    }
+    tab->model->replaceRows(std::move(rows));
+    tab->document.name = document.name;
+    tab->document.kind = document.kind;
+    tab->document.dirty = false;
+    refreshTabChrome(*tab);
+    enqueueUnprobedRows(*tab);
+    syncArtwork(*tab);
+    schedulePersist();
+}
+
+void BenchMainWindow::settleListConflict(const QString& id) {
+    auto* tab = tabForDocument(id);
+    if (tab == nullptr || list_sync_ == nullptr) {
+        return;
+    }
+    auto* question = new QMessageBox(
+        QMessageBox::Question, QStringLiteral("List changed elsewhere"),
+        QStringLiteral("“%1” was saved from somewhere else since you opened it. Keep which?")
+            .arg(displayText(tab->document.name)),
+        QMessageBox::NoButton, this);
+    question->setObjectName(QStringLiteral("bench-list-conflict"));
+    question->setAttribute(Qt::WA_DeleteOnClose);
+    question->setOption(QMessageBox::Option::DontUseNativeDialog);
+    auto* theirs = question->addButton(QStringLiteral("Reload theirs"), QMessageBox::RejectRole);
+    theirs->setObjectName(QStringLiteral("bench-list-conflict-theirs"));
+    auto* mine = question->addButton(QStringLiteral("Keep mine"), QMessageBox::AcceptRole);
+    mine->setObjectName(QStringLiteral("bench-list-conflict-mine"));
+    auto* copy = question->addButton(QStringLiteral("Save mine as a copy"), QMessageBox::ActionRole);
+    copy->setObjectName(QStringLiteral("bench-list-conflict-copy"));
+    question->setDefaultButton(copy);
+    connect(question, &QMessageBox::buttonClicked, this,
+            [this, id, theirs, mine](QAbstractButton* clicked) {
+                auto* conflicting = tabForDocument(id);
+                if (conflicting == nullptr || list_sync_ == nullptr) {
+                    return;
+                }
+                if (clicked == mine) {
+                    list_sync_->keepMine(id);
+                    return;
+                }
+                if (clicked != theirs) {
+                    // Mine as a list of its own, beside theirs.
+                    auto copied = conflicting->document;
+                    copied.id = core::StableId::random();
+                    copied.name = utf8Bytes(
+                        QStringLiteral("%1 (mine)").arg(displayText(conflicting->document.name)));
+                    copied.kind = persistence::ListKind::saved;
+                    copied.dirty = false;
+                    copied.pinned = false;
+                    copied.items.clear();
+                    auto* mine_tab = addListTab(std::move(copied), false);
+                    auto rows = conflicting->model->rows();
+                    for (auto& row : rows) {
+                        row.entry_id = core::StableId::random();
+                    }
+                    mine_tab->model->replaceRows(std::move(rows));
+                    syncArtwork(*mine_tab);
+                    schedulePersist();
+                }
+                list_sync_->takeTheirs(id);
+            });
+    question->open();
+}
+
+BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument document,
+                                                      const bool select) {
+    const auto id = QString::fromStdString(document.id.to_string());
+    auto* model = new LocalListModel(tabs_);
+    model->replaceRows(rowsOfDocument(document));
     model->setListeningHistoryService(persistence_);
 
     auto* view = new ui::QueueTableView(tabs_);

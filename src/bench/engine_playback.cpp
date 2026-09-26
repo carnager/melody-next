@@ -83,6 +83,22 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
             }
             return;
         }
+        if (event.name == "list.changed") {
+            const auto id = QString::fromStdString(event.data.value("id", std::string{}));
+            const auto revision = static_cast<quint64>(event.data.value("revision", std::uint64_t{0}));
+            const bool deleted = event.data.value("deleted", false);
+            if (self && !id.isEmpty()) {
+                QMetaObject::invokeMethod(
+                    self,
+                    [self, id, revision, deleted] {
+                        if (self) {
+                            emit self->listChanged(id, revision, deleted);
+                        }
+                    },
+                    Qt::QueuedConnection);
+            }
+            return;
+        }
         if (event.name == "playback.changed") {
             adopt(event.data);
         } else if (event.name == "outputs.changed") {

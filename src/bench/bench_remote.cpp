@@ -54,6 +54,12 @@ void BenchMainWindow::connectRemoteEngine() {
     remote_playback_ = new EnginePlayback(*remote_catalogue_source_, this);
     if (list_sync_ != nullptr) {
         list_sync_->setEngines(local_playback_, remote_playback_);
+        connect(remote_playback_, &EnginePlayback::listChanged, this,
+                [this](const QString& id, const quint64 revision, const bool deleted) {
+                    list_sync_->listChanged(remote_playback_, id, revision, deleted);
+                });
+        connect(remote_playback_, &EnginePlayback::connected, this,
+                [this] { list_sync_->reconnected(remote_playback_); });
     }
     connect(remote_playback_, &EnginePlayback::changed, this, [this] {
         followIfStartedElsewhere(remote_playback_);

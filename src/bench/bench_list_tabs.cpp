@@ -204,9 +204,10 @@ void BenchMainWindow::initializePersistence() {
                     auto* target = currentListTab();
                     // This computer's library goes into a local tab: the one
                     // on screen, or else the first there is (ADR-0227).
-                    if (target != nullptr && target->document.remote) {
-                        const auto local = std::ranges::find_if(
-                            list_tabs_, [](const auto& tab) { return !tab->document.remote; });
+                    if (target != nullptr && !EngineKey::of(target->document).isLocal()) {
+                        const auto local = std::ranges::find_if(list_tabs_, [](const auto& tab) {
+                            return EngineKey::of(tab->document).isLocal();
+                        });
                         target = local != list_tabs_.end() ? local->get() : nullptr;
                     }
                     if (!target || entries.empty()) {
@@ -1076,7 +1077,7 @@ BenchMainWindow::ListTab* BenchMainWindow::addListTab(persistence::ListDocument 
         }
     }
     const auto index = tabs_->insertTab(insert_at, view, displayText(document.name));
-    if (document.remote) {
+    if (!EngineKey::of(document).isLocal()) {
         // ADR-0227: which engine a tab plays on is visible, not remembered.
         tabs_->setTabIcon(index, QIcon::fromTheme(QStringLiteral("network-server")));
         tabs_->setTabToolTip(index, tr("Plays on the remote engine"));
@@ -1208,9 +1209,10 @@ void BenchMainWindow::openSearchDialog() {
                     const auto first = std::ranges::find_if(list_tabs_, [&engine](const auto& tab) {
                         return EngineKey::of(tab->document) == engine;
                     });
-                    destination = first != list_tabs_.end()       ? first->get()
-                                  : engine == EngineKey::remote() ? remoteQueueTab()
-                                                                  : nullptr;
+                    destination = first != list_tabs_.end() ? first->get()
+                                  : remoteEngine() != nullptr && engine == remoteEngine()->key
+                                      ? remoteQueueTab()
+                                      : nullptr;
                 }
                 int insertion = -1;
                 if (action == LocalLibraryAction::new_list) {
@@ -1221,7 +1223,7 @@ void BenchMainWindow::openSearchDialog() {
                                                              .pinned = false,
                                                              .dirty = false,
                                                              .items = {},
-                                                             .remote = !engine.isLocal()},
+                                                             .engine = engine.stored()},
                                    true);
                     schedulePersist();
                 } else if (destination != nullptr && action == LocalLibraryAction::next) {
@@ -1437,7 +1439,7 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
                                              .pinned = false,
                                              .dirty = false,
                                              .items = {},
-                                             .remote = !engineOfView(source).isLocal()},
+                                             .engine = engineOfView(source).stored()},
                    false);
     const auto transferred = transferRows(
         source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
@@ -1521,9 +1523,10 @@ void BenchMainWindow::selectPreferredSource() {
     } else if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote")) {
         wanted = QStringLiteral("library");
     }
+    // A library tab of another engine carries that engine's key.
     int remote = -1;
     for (int index = 0; index < local_source_tabs_->count(); ++index) {
-        if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+        if (!local_source_tabs_->tabData(index).toString().isEmpty()) {
             remote = index;
         }
     }
@@ -1703,8 +1706,9 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
     tabs_->tabBar()->setTabData(index, active);
     tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}));
     // The playing dot is the tab bar's own; the icon says where it plays.
-    tabs_->setTabIcon(
-        index, tab.document.remote ? QIcon::fromTheme(QStringLiteral("network-server")) : QIcon{});
+    tabs_->setTabIcon(index, !EngineKey::of(tab.document).isLocal()
+                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                 : QIcon{});
     const auto kind = tab.document.kind == persistence::ListKind::scratch
                           ? QStringLiteral("Persistent scratch list")
                           : QStringLiteral("Named Trackknife working list");

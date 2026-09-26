@@ -46,6 +46,9 @@ class EngineListSync final : public QObject {
     // ADR-0234: the connection an engine's lists go to; null, it has none
     // (no longer, or not yet).
     void setEngine(const EngineKey& key, EnginePlayback* playback);
+    // An engine known by one key is known by another from now: the remote
+    // once it has said who it is. Its lists and pending removals go along.
+    void rekey(const EngineKey& from, const EngineKey& to);
     // After every save of the workspace.
     void update(const std::vector<persistence::ListDocument>& documents);
     // An engine connected, or connected again: compared anew before anything

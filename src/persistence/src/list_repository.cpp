@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 46U;
+constexpr unsigned current_schema_version = 47U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1420,6 +1420,22 @@ UPDATE schema_version SET version = 46;
             return result;
         }
     }
+    if (version <= 46) {
+        // ADR-0234: a list names its engine -- by the id the engine keeps --
+        // rather than only whether it is the remote's. Empty is this
+        // computer's; the remote's lists say "remote" until that engine has
+        // been reached and has said who it is. `remote` stays, and is kept
+        // true for any engine's list, for a release that reads only it.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE list_documents ADD COLUMN engine TEXT NOT NULL DEFAULT '';
+UPDATE list_documents SET engine = 'remote' WHERE remote != 0;
+UPDATE schema_version SET version = 47;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
     // Foreign keys are off while the schema changes (see open()); a rebuild
     // that left a reference dangling is refused here rather than committed.
     auto dangling = prepare(database, "PRAGMA foreign_key_check");
@@ -1980,7 +1996,7 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
     }
     auto documents_query = prepare(
         implementation_->database,
-        "SELECT id, kind, name, pinned, dirty, remote FROM list_documents ORDER BY position");
+        "SELECT id, kind, name, pinned, dirty, engine FROM list_documents ORDER BY position");
     if (!documents_query) {
         return std::unexpected(std::move(documents_query.error()));
     }
@@ -2005,7 +2021,7 @@ core::Result<std::vector<ListDocument>> ListRepository::load_all() const {
             .pinned = sqlite3_column_int(documents_query->get(), 3) != 0,
             .dirty = sqlite3_column_int(documents_query->get(), 4) != 0,
             .items = {},
-            .remote = sqlite3_column_int(documents_query->get(), 5) != 0,
+            .engine = column_text(documents_query->get(), 5),
         });
     }
     if (sqlite3_errcode(implementation_->database) != SQLITE_OK &&
@@ -2314,8 +2330,9 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
         return result;
     }
     auto insert_document = prepare(
-        database, "INSERT INTO list_documents(id, kind, name, pinned, dirty, position, remote) "
-                  "VALUES(?,?,?,?,?,?,?)");
+        database,
+        "INSERT INTO list_documents(id, kind, name, pinned, dirty, position, remote, engine) "
+        "VALUES(?,?,?,?,?,?,?,?)");
     auto insert_item = prepare(
         database,
         "INSERT INTO list_items(document_id, position, source, profile_id, source_reference, "
@@ -2346,7 +2363,8 @@ core::Result<void> ListRepository::replace_all(const std::span<const ListDocumen
             sqlite3_bind_int(document_statement, 5, document.dirty ? 1 : 0) != SQLITE_OK ||
             sqlite3_bind_int64(document_statement, 6,
                                static_cast<sqlite3_int64>(document_position)) != SQLITE_OK ||
-            sqlite3_bind_int(document_statement, 7, document.remote ? 1 : 0) != SQLITE_OK) {
+            sqlite3_bind_int(document_statement, 7, document.engine.empty() ? 0 : 1) != SQLITE_OK ||
+            !bind_text(document_statement, 8, document.engine)) {
             auto error = database_error(database, "Could not bind list document");
             rollback();
             return std::unexpected(std::move(error));

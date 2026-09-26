@@ -13,19 +13,23 @@
 
 namespace trackknife::ui {
 
-// ADR-0234: which engine something belongs to, within this window. Until
-// lists record their engine's id (stage 3) there are two: this computer's
-// and the remote configured in Settings; code that needs an engine is
-// handed its key rather than a flag, so more can follow without it
-// changing.
+// ADR-0234: which engine something belongs to, within this window: this
+// computer's ("local"), or another by the id it keeps -- or "remote", the
+// configured remote before it has been reached and said who it is. Code that
+// needs an engine is handed its key rather than a flag.
 class EngineKey final {
   public:
     EngineKey() = default;
     [[nodiscard]] static EngineKey local() { return EngineKey{QStringLiteral("local")}; }
     [[nodiscard]] static EngineKey remote() { return EngineKey{QStringLiteral("remote")}; }
-    // The engine a list belongs to, as the list records it today.
+    // The engine a list belongs to, as the list records it.
     [[nodiscard]] static EngineKey of(const persistence::ListDocument& document) {
-        return document.remote ? remote() : local();
+        return document.engine.empty() ? local()
+                                       : EngineKey{QString::fromStdString(document.engine)};
+    }
+    // As a list records it: empty for this computer's.
+    [[nodiscard]] std::string stored() const {
+        return isLocal() ? std::string{} : value_.toStdString();
     }
     // Read back from text written by text().
     [[nodiscard]] static EngineKey fromText(const QString& text) { return EngineKey{text}; }

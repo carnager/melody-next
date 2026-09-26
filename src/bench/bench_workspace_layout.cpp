@@ -160,10 +160,10 @@ void BenchMainWindow::buildWorkspace() {
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
         const auto kind = local_source_tabs_->tabData(index).toString();
         // The temporary Files page (ADR-0183 addendum) is session-only.
-        const auto choice = kind == QStringLiteral("remote") ? QStringLiteral("remote")
-                            : index == 0                     ? QStringLiteral("folders")
-                            : index == 1                     ? QStringLiteral("library")
-                                                             : QString{};
+        const auto choice = !kind.isEmpty() ? QStringLiteral("remote")
+                            : index == 0    ? QStringLiteral("folders")
+                            : index == 1    ? QStringLiteral("library")
+                                            : QString{};
         if (!choice.isEmpty()) {
             QSettings{}.setValue(QStringLiteral("local-library/view"), choice);
         }

@@ -325,7 +325,7 @@ void BenchMainWindow::followRemoteRetag(const operations::MetadataCommitResult& 
     // The remote tabs' rows take the new tags by the remote's name for the
     // file: where the mount differs, the local commit did not reach them.
     for (auto& tab : list_tabs_) {
-        if (tab->document.remote) {
+        if (!EngineKey::of(tab->document).isLocal()) {
             static_cast<void>(tab->model->applyCommittedMetadata(known->second, result.document,
                                                                  result.published_revision));
         }
@@ -474,7 +474,7 @@ void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitRe
     if (remote_target) {
         remote_file_work_[result.target_raw_path] = *remote_target;
         for (auto& tab : list_tabs_) {
-            if (tab->document.remote) {
+            if (!EngineKey::of(tab->document).isLocal()) {
                 static_cast<void>(tab->model->applyCommittedRelocation(
                     remote_source, *remote_target, result.source_revision,
                     result.target_revision));
@@ -520,7 +520,7 @@ void BenchMainWindow::sendRemoteRefresh() {
             remoteLibrary()->refreshLibrary();
         }
         for (auto& tab : list_tabs_) {
-            if (tab->document.remote) {
+            if (!EngineKey::of(tab->document).isLocal()) {
                 enqueueUnprobedRows(*tab);
             }
         }

@@ -107,7 +107,7 @@ using protocol::Json;
                                        .pinned = false,
                                        .dirty = false,
                                        .items = {},
-                                       .remote = !engine.isLocal()};
+                                       .engine = engine.stored()};
     for (const auto& value : answer.value("items", Json::array())) {
         auto path = protocol::decode_raw_path(value.value("path", std::string{}));
         auto entry = core::StableId::parse(value.value("entry", std::string{}));
@@ -212,6 +212,32 @@ void EngineListSync::setEngine(const EngineKey& key, EnginePlayback* playback) {
     // Already connected, it will not say so again: what was left pending
     // last time goes now, not at some later reconnect.
     flushRemovals(key);
+}
+
+void EngineListSync::rekey(const EngineKey& from, const EngineKey& to) {
+    if (from == to) {
+        return;
+    }
+    if (auto moved = engines_.extract(from); !moved.empty()) {
+        moved.key() = to;
+        engines_.insert(std::move(moved));
+    }
+    for (auto& [id, known] : known_) {
+        static_cast<void>(id);
+        if (known.engine == from) {
+            known.engine = to;
+        }
+    }
+    const auto move_all = [&from, &to](std::set<std::pair<EngineKey, std::string>>& entries) {
+        std::set<std::pair<EngineKey, std::string>> kept;
+        for (const auto& [key, id] : entries) {
+            kept.emplace(key == from ? to : key, id);
+        }
+        entries = std::move(kept);
+    };
+    move_all(removals_);
+    move_all(removing_);
+    storeRemovals();
 }
 
 EnginePlayback* EngineListSync::engineFor(const EngineKey& key) const {

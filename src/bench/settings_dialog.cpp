@@ -818,6 +818,11 @@ void SettingsDialog::save() {
                       buffer_threshold_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-with"), preamp_with_->value());
     settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
+    // Another address may be another engine: its id is learned anew.
+    if (settings.value(QLatin1String(library_engine_socket_key)).toString() !=
+        engine_socket_->text().trimmed()) {
+        settings.remove(QLatin1String(library_engine_id_key));
+    }
     settings.setValue(QLatin1String(library_engine_socket_key), engine_socket_->text().trimmed());
     settings.setValue(QLatin1String(library_engine_token_key), engine_token_->text().trimmed());
     settings.setValue(QLatin1String(library_remote_folder_key), remote_folder_->text().trimmed());

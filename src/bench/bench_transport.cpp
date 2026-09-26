@@ -1410,7 +1410,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
     // ADR-0227: a tab plays on the engine whose files it lists.
     auto* target = playbackOf(EngineKey::of(tab.document));
     if (target == nullptr || !target->active()) {
-        statusBar()->showMessage(tab.document.remote
+        statusBar()->showMessage(!EngineKey::of(tab.document).isLocal()
                                      ? QStringLiteral("Nothing can play: the remote engine is "
                                                       "not connected")
                                      : QStringLiteral("Nothing can play: this computer's engine "
@@ -1671,8 +1671,8 @@ void BenchMainWindow::refreshEngineTransport() {
         // Paused because another engine is playing on these speakers: said
         // where the album would be, so the silence has a reason.
         if (!state.speakers_taken_by.isEmpty() && state.status != QStringLiteral("playing")) {
-            const auto taker =
-                remoteCatalogue() ? engineName(EngineKey::remote()) : state.speakers_taken_by;
+            const auto taker = remoteEngine() != nullptr ? engineName(remoteEngine()->key)
+                                                         : state.speakers_taken_by;
             context = tr("Paused · %1 is playing on these speakers").arg(taker);
         }
         now_playing_->setText(label);

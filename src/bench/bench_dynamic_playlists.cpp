@@ -109,7 +109,7 @@ void BenchMainWindow::showDynamicPlaylists() {
                                                  .pinned = false,
                                                  .dirty = false,
                                                  .items = {},
-                                                 .remote = !dialog->engine().isLocal()},
+                                                 .engine = dialog->engine().stored()},
                        false);
         destination->model->replaceRows(rows);
         dialog->setProperty("playback-context",
@@ -236,7 +236,7 @@ void BenchMainWindow::showDynamicPlaylists() {
                                                          .pinned = false,
                                                          .dirty = false,
                                                          .items = {},
-                                                         .remote = !dialog->engine().isLocal()},
+                                                         .engine = dialog->engine().stored()},
                                true);
                 applyTrackViewLayout(*destination, layout);
                 destination->model->replaceRows(tracks);

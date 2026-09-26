@@ -99,9 +99,11 @@ struct ListDocument {
     bool pinned{false};
     bool dirty{false};
     std::vector<ListItem> items;
-    // ADR-0227: a list of the remote engine's files rather than this
-    // computer's. It plays there, and its paths name files on that machine.
-    bool remote{false};
+    // ADR-0227, ADR-0234: the engine whose files these are, by the id it
+    // keeps; empty for this computer's. Its paths name files on that
+    // engine's machine, and it plays there. "remote" is the remote of an
+    // older release's lists, until that engine has said who it is.
+    std::string engine{};
 
     friend bool operator==(const ListDocument&, const ListDocument&) = default;
 };

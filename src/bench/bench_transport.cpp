@@ -1350,15 +1350,22 @@ void BenchMainWindow::adoptEngineRow(ListTab& tab, const int row, const core::St
     refreshPlaybackCursor(true);
 }
 
+namespace {
+// Not an engine's status: the one this window told to stop, until it has.
+const QString stopping_status = QStringLiteral("stopping (asked)");
+} // namespace
+
 void BenchMainWindow::followPlayback(EnginePlayback* playback, const bool stop_other) {
     if (playback == nullptr || playback == transport_) {
         return;
     }
     // ADR-0227: one engine plays at a time. Starting on one stops the other,
     // in that order, so an output agent the two share is released first.
+    bool stopping = false;
     if (stop_other && transport_ != nullptr && transport_->active() &&
         transport_->state().status != QStringLiteral("stopped")) {
         transport_->stop();
+        stopping = true;
     }
     if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
         tab->model->setCurrentSource({}, -1);
@@ -1368,7 +1375,7 @@ void BenchMainWindow::followPlayback(EnginePlayback* playback, const bool stop_o
     if (transport_ != nullptr) {
         rememberEngineState(transport_);
         if (auto* left = linkOf(transport_); left != nullptr) {
-            left->seen.status = QStringLiteral("playing");
+            left->seen.status = stopping ? stopping_status : QStringLiteral("playing");
         }
     }
     transport_ = playback;
@@ -1406,9 +1413,19 @@ void BenchMainWindow::followIfStartedElsewhere(EnginePlayback* playback) {
     // track of the same queue is not, or two engines playing at once would
     // take the window back and forth with every track.
     const bool playing = state.status == QStringLiteral("playing");
+    // Told to stop by this window, it is not started elsewhere until it has
+    // stopped: its reports on the way -- still playing, its queue already
+    // emptied -- are the stop, not a start.
+    if (seen.status == stopping_status && state.status != QStringLiteral("stopped")) {
+        seen.entry = state.entry;
+        seen.queue_revision = state.queue_revision;
+        return;
+    }
+    // And playing nothing it can name is nothing to follow.
     const bool started =
-        playing && (seen.status != QStringLiteral("playing") ||
-                    (seen.entry != state.entry && seen.queue_revision != state.queue_revision));
+        playing && !state.entry.isEmpty() &&
+        (seen.status != QStringLiteral("playing") ||
+         (seen.entry != state.entry && seen.queue_revision != state.queue_revision));
     seen = SeenEngine{
         .status = state.status, .entry = state.entry, .queue_revision = state.queue_revision};
     if (!started || playback == transport_) {

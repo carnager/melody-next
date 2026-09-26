@@ -100,6 +100,7 @@ class EngineClient(
                 try {
                     val name = opened.call("engine.info").optString("name").ifEmpty { to.host }
                     queueRevision = -1
+                    sequence = 0
                     adoptState(opened.call("playback.state"))
                     refreshOutputs()
                     _connection.value = ConnectionState.Connected(to, name)
@@ -150,8 +151,21 @@ class EngineClient(
         }
     }
 
+    /**
+     * The engine's number of the state adopted last. States come as events,
+     * as answers and as polls, so one made earlier can arrive later; it is
+     * dropped rather than put back over a newer one. Per connection: an
+     * engine started again counts from one. An engine without numbers: all taken.
+     */
+    private var sequence = 0L
+
     private suspend fun adoptState(json: JSONObject) {
         if (!json.has("status")) return
+        if (json.has("sequence")) {
+            val made = json.optLong("sequence")
+            if (made <= sequence) return
+            sequence = made
+        }
         val next = PlaybackState.from(json, clock())
         _state.value = next
         // The queue is fetched when it changed, anyone's change: the

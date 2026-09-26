@@ -43,6 +43,9 @@ from ordering** except within a single `id`. Events in particular are not
 ordered against responses: a `playback.changed` may arrive before the response
 to the request that caused it. Clients reconcile on state, not sequence.
 
+(ADR-0236: playback states now carry an engine-made `sequence`, so a client
+holding two keeps the later.)
+
 **What the protocol permits and what the first server does differ, and the
 difference is deliberate.** The envelope allows an engine to answer a cheap
 request while an expensive one is still running. The server here does not: it

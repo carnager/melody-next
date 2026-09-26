@@ -100,12 +100,20 @@ class RecordingEngine final {
                     failure.message = response.error->message;
                     return core::Result<protocol::Json>{std::unexpected(std::move(failure))};
                 }
-                return core::Result<protocol::Json>{*response.result};
+                auto answer = *response.result;
+                // An answer made before a state the client already has, as
+                // one carried on another thread can be.
+                if (stale_answers_.load() && answer.is_object() && answer.contains("sequence")) {
+                    answer["sequence"] = 1;
+                    answer["volume_percent"] = 99;
+                }
+                return core::Result<protocol::Json>{std::move(answer)};
             });
         }
     }
 
     [[nodiscard]] protocol::Dispatcher& dispatcher() noexcept { return outer_; }
+    void answerStale(const bool stale) { stale_answers_.store(stale); }
 
     // Commands as the engine saw them, in arrival order. State queries are
     // excluded: the client polls those, and they would bury the sequence.
@@ -127,6 +135,7 @@ class RecordingEngine final {
     protocol::Dispatcher outer_;
     mutable std::mutex mutex_;
     std::vector<std::string> commands_;
+    std::atomic_bool stale_answers_{false};
 };
 
 } // namespace
@@ -152,6 +161,7 @@ class EnginePlaybackTest final : public QObject {
     void aNewWindowAttachesToWhatTheEngineIsPlaying();
     void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
+    void anOlderStateIsNotTakenOverANewerOne();
 
   private:
     QTemporaryDir settings_directory_;
@@ -1107,7 +1117,43 @@ void EnginePlaybackTest::withoutAnEngineNothingChanges() {
     QVERIFY(!window.findChild<QAction*>(QStringLiteral("action-play-pause"))->isEnabled());
 }
 
+// States reach the window on two threads -- the engine's events, and the
+// answers to its commands -- so one made earlier can arrive later. Numbered
+// by the engine, the older is dropped: a volume just set never goes back.
+void EnginePlaybackTest::anOlderStateIsNotTakenOverANewerOne() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create_without_audio();
+    RecordingEngine recorder{*player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    EnginePlayback* playback = nullptr;
+    QTRY_VERIFY((playback = window.findChild<EnginePlayback*>()) != nullptr && playback->active());
+    QTRY_VERIFY(playback->state().volume_percent == 100);
+    recorder.answerStale(true);
+    playback->setVolume(40);
+    QTRY_COMPARE(player->state().volume_percent, 40);
+    // The forged answer says 99 with a number below any state already taken.
+    for (int looked = 0; looked < 50; ++looked) {
+        QVERIFY2(playback->state().volume_percent != 99,
+                 "an older state was taken over a newer one");
+        QTest::qWait(10);
+    }
+    QVERIFY(playback->state().volume_percent != 99);
+    (*server)->stop();
+}
+
+
 } // namespace trackknife::bench
 
 QTEST_MAIN(trackknife::bench::EnginePlaybackTest)
 #include "engine_playback_test.moc"
+

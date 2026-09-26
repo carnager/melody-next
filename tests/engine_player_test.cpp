@@ -277,6 +277,7 @@ void changes_are_pushed_without_asking(engine::Player& player) {
     const auto still = [&player] {
         auto state = engine::to_json(player.state());
         state.erase("position_ms");
+        state.erase("sequence");
         return state;
     };
     const auto settled = std::chrono::steady_clock::now() + std::chrono::seconds{5};
@@ -1096,6 +1097,42 @@ void an_agents_sink_is_not_kept_as_this_machines(const std::filesystem::path& di
     std::filesystem::remove(database, ignored);
 }
 
+// An output takes a volume or a seek on its own thread -- an agent over the
+// network -- so the state answering the command still showed the old one,
+// and a client put its slider back: a mute undone for a moment. The player
+// says what it told the output until the output shows it, and every state
+// is numbered, so a client holding two keeps the later.
+void what_the_output_was_told_shows_until_it_catches_up() {
+    auto player = engine::Player::create_without_audio();
+    const std::vector<engine::QueueEntry> entries{entry("/music/one.flac")};
+    player->replace_queue(entries);
+    RecordingAudition output;
+    require(player->set_output(&output).has_value(), "an output is chosen");
+    require(player->play_entry(entries[0].entry_id).has_value(), "and plays");
+    output.advance_to(50'000);
+
+    const auto before = player->state().sequence;
+    require(player->set_volume_percent(30).has_value(), "a volume is set");
+    const auto told = player->state();
+    require(told.sequence > before, "every state is numbered, later ones higher");
+    require(output.snapshot().volume_percent == 100, "the output has not taken it yet");
+    require(told.volume_percent == 30, "but the state says what it was told");
+    output.catch_up();
+    require(player->state().volume_percent == 30, "and then what the output has");
+
+    require(player->seek_ms(10'000).has_value(), "a seek back");
+    require(player->state().position_ms == 10'000, "shows the place asked for at once");
+    output.catch_up();
+    output.advance_to(10'300);
+    require(player->state().position_ms == 10'300, "and the output's own once it is there");
+
+    // An output that never shows it is believed after a while.
+    require(player->set_volume_percent(40).has_value(), "another volume");
+    require(player->state().volume_percent == 40, "shown at once");
+    std::this_thread::sleep_for(std::chrono::milliseconds{2'100});
+    require(player->state().volume_percent == 30, "and given up on, the output's again");
+}
+
 void the_player_plays_on_the_output_it_is_given() {
     auto player = engine::Player::create_without_audio();
     require(player->local_output() == nullptr, "a headless player has no audio of its own");
@@ -1220,6 +1257,7 @@ int main(int argc, char** argv) {
 
     // Needs no audio device, so it runs before the check for one.
     the_player_plays_on_the_output_it_is_given();
+    what_the_output_was_told_shows_until_it_catches_up();
     a_failure_to_play_says_why();
     clearing_the_queue_ends_what_plays();
 

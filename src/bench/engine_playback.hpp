@@ -251,6 +251,11 @@ class EnginePlayback final : public QObject {
     QTimer* position_timer_{nullptr};
     mutable std::mutex mutex_;
     State state_;
+    // The engine's sequence of the state adopted last. States come on two
+    // threads -- events, and the answers to commands -- so one made earlier
+    // can arrive later; it is dropped rather than put back over a newer one.
+    // Counted per connection: an engine started again counts from one.
+    std::uint64_t sequence_{0};
     std::atomic<int> in_flight_{0};
     std::atomic_bool engine_scrobbles_{false};
 };

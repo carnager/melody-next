@@ -36,6 +36,7 @@ class RecordingAudition final : public audio::Audition {
         current.output_target = target_;
         current.playback_instance = instance_;
         current.error = error_;
+        current.volume_percent = volume_;
         return current;
     }
     [[nodiscard]] core::Result<void>
@@ -94,8 +95,27 @@ class RecordingAudition final : public audio::Audition {
         loaded_.clear();
         return {};
     }
-    [[nodiscard]] core::Result<void> seek_to_seconds(double) override { return {}; }
-    [[nodiscard]] core::Result<void> set_volume_percent(int) override { return {}; }
+    // Held, as a real output's thread holds them for a moment, until
+    // catch_up().
+    [[nodiscard]] core::Result<void> seek_to_seconds(const double seconds) override {
+        const std::lock_guard guard{mutex_};
+        pending_seek_ms_ = static_cast<std::int64_t>(seconds * 1000.0);
+        return {};
+    }
+    [[nodiscard]] core::Result<void> set_volume_percent(const int percent) override {
+        const std::lock_guard guard{mutex_};
+        pending_volume_ = percent;
+        return {};
+    }
+    void catch_up() {
+        const std::lock_guard guard{mutex_};
+        if (pending_volume_) {
+            volume_ = *std::exchange(pending_volume_, std::nullopt);
+        }
+        if (pending_seek_ms_) {
+            position_ms_ = *std::exchange(pending_seek_ms_, std::nullopt);
+        }
+    }
     [[nodiscard]] core::Result<void>
     set_replay_gain_mode(const audio::ReplayGainMode mode) override {
         const std::lock_guard guard{mutex_};
@@ -140,6 +160,9 @@ class RecordingAudition final : public audio::Audition {
     }
 
   private:
+    int volume_{100};
+    std::optional<int> pending_volume_;
+    std::optional<std::int64_t> pending_seek_ms_;
     void load_locked(std::string raw_path) {
         ++instance_;
         position_ms_ = 0;

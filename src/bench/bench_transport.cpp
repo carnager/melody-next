@@ -1665,9 +1665,11 @@ void BenchMainWindow::refreshEngineTransport() {
     duration_->setText(formatTime(duration_ms));
 
     // The engine owns the output, so the slider shows what the engine has --
-    // including a change another client made.
+    // including a change another client made. Not while this window's own
+    // commands are on their way: a report from before them would put back
+    // the volume just changed -- a mute undone for a moment.
     volume_->setEnabled(true);
-    if (!changing_volume_) {
+    if (!changing_volume_ && !transport_->settling()) {
         const QSignalBlocker blocker{volume_};
         volume_->setValue(state.volume_percent);
     }

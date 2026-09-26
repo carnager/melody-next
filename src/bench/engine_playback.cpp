@@ -178,6 +178,31 @@ void EnginePlayback::maintain() {
     emit changed();
 }
 
+void EnginePlayback::request(const QString& method, protocol::Json params, Answer answer) {
+    if (!client_) {
+        answer(std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                           .message = "no engine is connected",
+                                           .context = {}}));
+        return;
+    }
+    const QPointer self{this};
+    static_cast<void>(QtConcurrent::run(
+        &pool_, [self, this, method, params = std::move(params), answer = std::move(answer)] {
+            if (!self || client_ == nullptr) {
+                return;
+            }
+            auto result = client_->call(method.toStdString(), params);
+            QMetaObject::invokeMethod(
+                self,
+                [self, answer, result = std::move(result)] {
+                    if (self) {
+                        answer(result);
+                    }
+                },
+                Qt::QueuedConnection);
+        }));
+}
+
 void EnginePlayback::retire() {
     revive_ = nullptr;
     if (reconnect_timer_ != nullptr) {

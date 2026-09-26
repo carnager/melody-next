@@ -96,7 +96,12 @@ void BenchMainWindow::initializePersistence() {
     connect(local_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
+    list_sync_ = new EngineListSync(this);
+    list_sync_->setEngines(local_playback_, nullptr);
     connect(local_playback_, &EnginePlayback::connected, this, [this] {
+        // A new engine, or this one restarted: its lists go to it again.
+        list_sync_->forget(local_playback_);
+        schedulePersist();
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
         rememberEngineState(local_playback_);
@@ -287,6 +292,9 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
         auto pending = std::exchange(pending_open_paths_, std::vector<std::string>{});
         openLocalPaths(std::move(pending));
     }
+    // ADR-0233: once saved, the restored lists are on their engines too --
+    // which, the first time, is moving them there.
+    schedulePersist();
 }
 
 void BenchMainWindow::schedulePersist() {
@@ -402,6 +410,9 @@ void BenchMainWindow::persistNow(const bool wait) {
         return;
     }
     auto documents = collectDocuments();
+    if (list_sync_ != nullptr) {
+        list_sync_->update(documents);
+    }
     auto view_layouts = collectTrackViewLayouts();
     if (wait) {
         const auto error =

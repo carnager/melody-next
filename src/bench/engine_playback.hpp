@@ -175,6 +175,12 @@ class EnginePlayback final : public QObject {
     // ADR-0228: plays on another of the engine's outputs, taking the music
     // there where it is.
     void selectOutput(const std::string& id);
+    // Any other request -- one whose answer is not a state document: sent in
+    // order with the commands, and answered on this object's thread. With no
+    // connection it is answered at once, with the error.
+    using Answer = std::function<void(core::Result<protocol::Json>)>;
+    void request(const QString& method, protocol::Json params, Answer answer);
+
     // For quitting: stops reconnecting, and never starts the engine again.
     // Its reconnect timer otherwise revives an engine that stopped -- the
     // very one quitting has just stopped, in the moment before the process

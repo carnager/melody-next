@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/local_list_model.hpp"
@@ -597,6 +598,8 @@ class BenchMainWindow final : public QMainWindow {
     std::unique_ptr<CatalogueSource> remote_catalogue_source_;
     EnginePlayback* local_playback_{nullptr};
     EnginePlayback* remote_playback_{nullptr};
+    // ADR-0233: this window's lists, on the engines that own their files.
+    EngineListSync* list_sync_{nullptr};
     struct SeenEngine {
         QString status;
         QString entry;

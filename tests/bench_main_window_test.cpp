@@ -246,6 +246,7 @@ class BenchMainWindowTest final : public QObject {
     void shortcutSettingsValidateSaveAndCancel();
     void everyCommandTakesAKeyAndCtrlLSearchesTheLibrary();
     void quittingStopsTheEngineForGood();
+    void theWindowsListsAreOnItsEngine();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1494,6 +1495,109 @@ void BenchMainWindowTest::quittingStopsTheEngineForGood() {
     QTest::qWait(5'000);
     QVERIFY2(lockHolders(engine->state / "engine.lock").empty(),
              "quitting must not leave anything that starts the engine again");
+}
+
+// ADR-0233: the window's lists are on the engine that owns their files, so
+// the phone and the CLI see them. A working list follows its tab -- changed as
+// it changes, gone when it closes; a saved one is written when saved, not
+// while it has unsaved edits.
+void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto listed = [&engine](const std::string& id) -> std::optional<protocol::Json> {
+        auto all = (*engine)->call("list.all");
+        if (!all) {
+            return std::nullopt;
+        }
+        for (const auto& list : all->value("lists", protocol::Json::array())) {
+            if (list.value("id", std::string{}) == id) {
+                return list;
+            }
+        }
+        return std::nullopt;
+    };
+    const auto rows = [](const int count) {
+        std::vector<LocalTrackRow> made;
+        for (int index = 0; index < count; ++index) {
+            LocalTrackRow row;
+            row.raw_path = "/music/list/" + std::to_string(index) + ".flac";
+            row.title = "Track " + std::to_string(index);
+            made.push_back(std::move(row));
+        }
+        return made;
+    };
+
+    // The window's own first list, restored and then saved, is there.
+    QVERIFY(!window.list_tabs_.empty());
+    const auto first = window.list_tabs_.front()->document.id.to_string();
+    QTRY_VERIFY(listed(first).has_value());
+    QCOMPARE(listed(first)->value("kind", std::string{}), std::string{"working"});
+
+    auto* tab = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Party",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto id = tab->document.id.to_string();
+    tab->model->appendRows(rows(3));
+    window.markTabDirty(*tab);
+    window.persistNow(false);
+    QTRY_VERIFY(listed(id).has_value() && listed(id)->value("tracks", 0) == 3);
+    QCOMPARE(listed(id)->value("name", std::string{}), std::string{"Party"});
+    auto items = (*engine)->call("list.get", protocol::Json{{"id", id}});
+    QVERIFY(items.has_value());
+    QCOMPARE(items->at("items").at(1).value("title", std::string{}), std::string{"Track 1"});
+    QCOMPARE(items->at("items").at(0).value("entry", std::string{}),
+             tab->model->rows().front().entry_id.to_string());
+
+    // Saved: written as saved. Then edited, unsaved: not written.
+    tab->document.kind = persistence::ListKind::saved;
+    tab->document.dirty = false;
+    window.persistNow(false);
+    QTRY_COMPARE(listed(id)->value("kind", std::string{}), std::string{"saved"});
+    tab->model->appendRows(rows(1));
+    tab->document.dirty = true;
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QCOMPARE(listed(id)->value("tracks", 0), 3);
+
+    // A working list's tab closed: gone from the engine. A saved one stays.
+    auto* scratch = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Scratch",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto scratch_id = scratch->document.id.to_string();
+    scratch->model->appendRows(rows(1));
+    window.persistNow(false);
+    QTRY_VERIFY(listed(scratch_id).has_value());
+    window.closeTabAt(window.tabs_->indexOf(scratch->view));
+    window.persistNow(false);
+    QTRY_VERIFY(!listed(scratch_id).has_value());
+    // Saved again -- the edits go too -- and then closed, with nothing to ask
+    // about: the list stays on the engine.
+    tab->document.dirty = false;
+    window.persistNow(false);
+    QTRY_COMPARE(listed(id)->value("tracks", 0), 4);
+    window.closeTabAt(window.tabs_->indexOf(tab->view));
+    QVERIFY(window.tabForDocument(QString::fromStdString(id)) == nullptr);
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QVERIFY(listed(id).has_value());
+    (*engine)->close();
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

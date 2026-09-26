@@ -39,6 +39,7 @@ qt_add_library(
     convert_dialog.cpp
     convert_dialog.hpp
     engine_playback.cpp
+    engine_list_sync.cpp
     engine_playback.hpp
     catalogue_source.cpp
     catalogue_source.hpp

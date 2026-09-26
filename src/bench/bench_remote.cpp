@@ -9,6 +9,7 @@
 #include "uicommon/queue_table_view.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
+#include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
 #include "bench/local_library_panel.hpp"
 
@@ -51,6 +52,9 @@ void BenchMainWindow::connectRemoteEngine() {
         return;
     }
     remote_playback_ = new EnginePlayback(*remote_catalogue_source_, this);
+    if (list_sync_ != nullptr) {
+        list_sync_->setEngines(local_playback_, remote_playback_);
+    }
     connect(remote_playback_, &EnginePlayback::changed, this, [this] {
         followIfStartedElsewhere(remote_playback_);
         if (transport_ == remote_playback_) {

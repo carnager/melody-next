@@ -254,6 +254,42 @@ void covers_come_by_album_and_by_size(const std::filesystem::path& directory,
             "an album that is not there has no cover, which is not an error");
 }
 
+// An engine with no library -- or a list of files it does not index --
+// still shows the covers of what it holds to play: it streams those files
+// to agents, so their covers are no secret. Anything else it does not give.
+void covers_of_held_files_need_no_library(const std::filesystem::path& directory,
+                                          const std::filesystem::path& fixtures) {
+    const auto music = directory / "held";
+    std::filesystem::create_directories(music);
+    {
+        std::ifstream input{fixtures / "art-tone-flac.b64"};
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
+        std::erase(base64, '\n');
+        const auto decoded = protocol::decode_raw_path(base64);
+        require(decoded.has_value(), "the fixture decodes");
+        std::ofstream output{music / "art.flac", std::ios::binary};
+        output.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
+    }
+    const auto held = (music / "art.flac").string();
+    const auto other = (music / "other.flac").string();
+    std::filesystem::copy_file(held, other);
+    // Prepared, never given a folder: no library.
+    engine::LocalCatalogue catalogue{directory / "empty.sqlite3"};
+    require(catalogue.prepare().has_value(), "the catalogue opens");
+    protocol::Dispatcher dispatcher;
+    engine::register_catalogue_methods(dispatcher, catalogue, {},
+                                       [&held](const std::string& path) { return path == held; });
+
+    const auto cover = call(dispatcher, 1, "catalogue.artwork",
+                            protocol::Json{{"path", protocol::encode_raw_path(held)}, {"size", 16}});
+    require(cover.result && cover.result->at("image").is_string(),
+            "a held file's cover is given with no library");
+    const auto refused = call(dispatcher, 2, "catalogue.artwork",
+                              protocol::Json{{"path", protocol::encode_raw_path(other)}});
+    require(!refused.result.has_value(), "a file neither held nor indexed is not read");
+}
+
 int main(int argc, char** argv) {
     require(argc == 2, "usage: engine_methods_test <fixture-dir>");
     const auto directory = std::filesystem::temp_directory_path() /
@@ -263,6 +299,7 @@ int main(int argc, char** argv) {
     catalogue_methods_answer_over_the_wire(database);
     jobs_submit_and_cancel_over_the_wire(database);
     covers_come_by_album_and_by_size(directory, argv[1]);
+    covers_of_held_files_need_no_library(directory, argv[1]);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
     return EXIT_SUCCESS;

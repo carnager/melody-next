@@ -79,9 +79,10 @@ import kotlinx.coroutines.launch
 /** The entry playing, found in the queue or Up Next -- it can be in either. */
 @Composable
 fun currentEntry(vm: MainViewModel): QueueEntry? {
-    val state by vm.client.state.collectAsState()
-    val queue by vm.client.queue.collectAsState()
-    val upNext by vm.client.upNext.collectAsState()
+    val engine by vm.app.followed.collectAsState()
+    val state by engine.state.collectAsState()
+    val queue by engine.queue.collectAsState()
+    val upNext by engine.upNext.collectAsState()
     return remember(state.entry, queue, upNext) {
         queue.firstOrNull { it.entry == state.entry } ?: upNext.firstOrNull { it.entry == state.entry }
     }
@@ -125,7 +126,8 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
         OfflineMiniPlayer(vm, onOpen)
         return
     }
-    val state by vm.client.state.collectAsState()
+    val engine by vm.app.followed.collectAsState()
+    val state by engine.state.collectAsState()
     val entry = currentEntry(vm)
     if (state.entry.isEmpty() && state.error.isEmpty()) return
     val position = livePosition(state)
@@ -143,7 +145,7 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Cover(entry?.let { CoverKey(path = it.path, group = it.albumGroup) }, 40.dp)
+                Cover(entry?.let { CoverKey(path = it.path, group = it.albumGroup) }, 40.dp, covers = vm.app.coversOf(engine))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     if (state.error.isNotEmpty() && !state.playing) {
@@ -162,10 +164,10 @@ fun MiniPlayer(vm: MainViewModel, onOpen: () -> Unit) {
                         )
                     }
                 }
-                IconButton(onClick = vm.client::togglePlay) {
+                IconButton(onClick = engine::togglePlay) {
                     Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", Modifier.size(28.dp))
                 }
-                IconButton(onClick = vm.client::next) { Icon(Icons.Default.SkipNext, "Next") }
+                IconButton(onClick = engine::next) { Icon(Icons.Default.SkipNext, "Next") }
             }
             MiniProgress(if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f)
         }
@@ -180,20 +182,22 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
         OfflineNowPlaying(vm, onClose)
         return
     }
-    val state by vm.client.state.collectAsState()
-    val outputs by vm.client.outputs.collectAsState()
+    val engine by vm.app.followed.collectAsState()
+    val covers = vm.app.coversOf(engine)
+    val state by engine.state.collectAsState()
+    val outputs by engine.outputs.collectAsState()
     val entry = currentEntry(vm)
     val scope = rememberCoroutineScope()
     val cover = entry?.let { CoverKey(path = it.path, group = it.albumGroup) }
-    val colours = coverColours(cover)
+    val colours = coverColours(cover, covers)
     // The library's view of this file: its rating and the key to set one.
     var facts by remember { mutableStateOf<LibraryEntry?>(null) }
-    LaunchedEffect(entry?.path) {
-        facts = entry?.path?.let { vm.client.track(it) }
+    LaunchedEffect(entry?.path, engine) {
+        facts = entry?.path?.let { engine.track(it) }
     }
     // Rated elsewhere -- in Trackknife, from a script -- while it plays.
-    LaunchedEffect(Unit) {
-        vm.client.ratings.collect { change ->
+    LaunchedEffect(engine) {
+        engine.ratings.collect { change ->
             facts?.let { if (it.ratingHash == change.hash) facts = it.copy(rating = change.rating) }
         }
     }
@@ -227,7 +231,7 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
             BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 val side = maxWidth
                 Box(Modifier.shadow(28.dp, RoundedCornerShape(16.dp))) {
-                    Cover(cover, side, corner = 16.dp)
+                    Cover(cover, side, corner = 16.dp, covers = covers)
                 }
             }
             Spacer(Modifier.weight(0.3f))
@@ -248,7 +252,7 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
                         ) {
                             RatingBar(track.rating, onRate = { rating ->
                                 scope.launch {
-                                    runCatching { vm.client.setRating(track.ratingHash, false, rating) }
+                                    runCatching { engine.setRating(track.ratingHash, false, rating) }
                                         .onSuccess { facts = track.copy(rating = rating) }
                                 }
                             }, starSize = 15.dp, tint = colours.accent, idle = colours.muted)
@@ -265,34 +269,34 @@ fun NowPlayingScreen(vm: MainViewModel, onOutputs: () -> Unit, onClose: () -> Un
             SeekBar(vm, state, entry, colours)
             Spacer(Modifier.height(10.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = vm.client::previous, modifier = Modifier.size(60.dp)) {
+                IconButton(onClick = engine::previous, modifier = Modifier.size(60.dp)) {
                     Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(34.dp))
                 }
                 Spacer(Modifier.width(24.dp))
                 Box(
-                    Modifier.size(76.dp).clip(CircleShape).background(colours.text).clickable(onClick = vm.client::togglePlay),
+                    Modifier.size(76.dp).clip(CircleShape).background(colours.text).clickable(onClick = engine::togglePlay),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause",
                         Modifier.size(36.dp), tint = colours.ground)
                 }
                 Spacer(Modifier.width(24.dp))
-                IconButton(onClick = vm.client::next, modifier = Modifier.size(60.dp)) {
+                IconButton(onClick = engine::next, modifier = Modifier.size(60.dp)) {
                     Icon(Icons.Default.SkipNext, "Next", Modifier.size(34.dp))
                 }
             }
             Spacer(Modifier.height(14.dp))
             val modes = state.modes
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                ModeToggle(Icons.Default.Repeat, "Repeat", modes.repeat, false, colours, vm.client::toggleRepeat)
-                ModeToggle(Icons.Default.Shuffle, "Random", modes.random, false, colours, vm.client::toggleRandom)
-                ModeToggle(Icons.Default.LooksOne, "Single", modes.single != 0, modes.single == 2, colours, vm.client::cycleSingle)
-                IconButton(onClick = vm.client::cycleConsume) {
+                ModeToggle(Icons.Default.Repeat, "Repeat", modes.repeat, false, colours, engine::toggleRepeat)
+                ModeToggle(Icons.Default.Shuffle, "Random", modes.random, false, colours, engine::toggleRandom)
+                ModeToggle(Icons.Default.LooksOne, "Single", modes.single != 0, modes.single == 2, colours, engine::cycleSingle)
+                IconButton(onClick = engine::cycleConsume) {
                     ConsumeMark(modes.consume != 0, modes.consume == 2, if (modes.consume != 0) colours.accent else colours.muted)
                 }
             }
             Spacer(Modifier.height(8.dp))
-            VolumeBar(state.volume, colours, vm.client::setVolume)
+            VolumeBar(state.volume, colours, engine::setVolume)
             Spacer(Modifier.weight(0.35f))
         }
     }
@@ -312,6 +316,7 @@ private fun ModeToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, la
 
 @Composable
 private fun SeekBar(vm: MainViewModel, state: PlaybackState, entry: QueueEntry?, colours: CoverColours) {
+    val engine by vm.app.followed.collectAsState()
     val duration = state.durationMs.takeIf { it > 0 } ?: entry?.durationMs ?: -1
     val position = livePosition(state)
     var dragging by remember { mutableStateOf<Float?>(null) }
@@ -335,7 +340,7 @@ private fun SeekBar(vm: MainViewModel, state: PlaybackState, entry: QueueEntry?,
         onDone = {
             dragging?.let { chosen ->
                 sought = (chosen * duration).toLong()
-                vm.client.seek(sought)
+                engine.seek(sought)
             }
             dragging = null
         },

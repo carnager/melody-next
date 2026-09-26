@@ -298,7 +298,10 @@ class MainViewModel : ViewModel() {
                 return@launch
             }
             when (action) {
-                Action.Play -> client.play(entries)
+                Action.Play -> {
+                    app.playOn(client)
+                    client.play(entries)
+                }
                 Action.PlayNext -> client.request(entries, first = true)
                 Action.UpNext -> client.request(entries, first = false)
                 Action.Append -> client.append(entries)
@@ -315,6 +318,7 @@ class MainViewModel : ViewModel() {
 
     /** A tapped track plays in its album, from where it is. */
     fun playFrom(tracks: List<LibraryEntry>, index: Int, albumArtist: String) {
+        app.playOn(client)
         client.play(tracks.map { it.toQueueEntry(albumArtist) }, startAt = index)
     }
 

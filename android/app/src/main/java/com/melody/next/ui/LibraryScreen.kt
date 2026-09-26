@@ -462,7 +462,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList, engine: com.melody.nex
                 )
                 Row(Modifier.padding(top = 14.dp, bottom = 10.dp)) {
                     Button(
-                        onClick = { owner.playList(list.id) },
+                        onClick = { vm.app.playOn(owner); owner.playList(list.id) },
                         enabled = entries.isNotEmpty(),
                         contentPadding = PaddingValues(start = 16.dp, end = 22.dp),
                     ) {
@@ -481,7 +481,7 @@ private fun ListPage(vm: MainViewModel, list: EngineList, engine: com.melody.nex
                 durationMs = entry.durationMs,
                 playing = entry.path == state.path,
                 moving = state.playing,
-                onClick = { owner.playList(list.id, entry.entry) },
+                onClick = { vm.app.playOn(owner); owner.playList(list.id, entry.entry) },
                 onLongClick = null,
             )
         }

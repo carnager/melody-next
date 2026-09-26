@@ -25,7 +25,7 @@ data class CoverKey(val albumKey: String? = null, val path: String? = null, val 
  * tomorrow -- costs nothing on the network. Kept per engine, since the same
  * key on another engine is another album.
  */
-class Covers(context: Context, private val client: EngineClient) {
+class Covers(context: Context, val client: EngineClient) {
     private val memory = object : LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }

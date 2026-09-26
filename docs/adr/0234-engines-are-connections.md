@@ -93,6 +93,10 @@ Each stage leaves the application working and is committed on its own.
   same place, what was armed to follow -- and playing there again takes it
   back. A connection taking up a paused track does not take the player from
   music playing on it.
+- **The phone follows one engine** for its player, queue, output choice
+  and notification: the main one, until something is played on another --
+  which stops the one followed before -- or another starts playing while
+  the followed one is idle. The library and search stay the main engine's.
 
 ## Consequences
 

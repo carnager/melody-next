@@ -48,9 +48,11 @@ import com.melody.next.engine.QueueEntry
  */
 @Composable
 fun QueueScreen(vm: MainViewModel, onBrowse: () -> Unit) {
-    val queue by vm.client.queue.collectAsState()
-    val upNext by vm.client.upNext.collectAsState()
-    val state by vm.client.state.collectAsState()
+    val engine by vm.app.followed.collectAsState()
+    val covers = vm.app.coversOf(engine)
+    val queue by engine.queue.collectAsState()
+    val upNext by engine.upNext.collectAsState()
+    val state by engine.state.collectAsState()
     val tones = LocalTones.current
     if (queue.isEmpty() && upNext.isEmpty()) {
         Column(
@@ -86,11 +88,11 @@ fun QueueScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                     Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("UP NEXT", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                        TextButton(onClick = vm.client::clearRequests) { Text("Clear", color = tones.secondary) }
+                        TextButton(onClick = engine::clearRequests) { Text("Clear", color = tones.secondary) }
                     }
                     upNext.forEach { entry ->
-                        Swipeable(onRemove = { vm.client.removeRequest(entry.entry) }, background = MaterialTheme.colorScheme.surfaceContainer) {
-                            AskRow(entry, playing = entry.entry == state.entry, moving = state.playing) { vm.client.playEntry(entry.entry) }
+                        Swipeable(onRemove = { engine.removeRequest(entry.entry) }, background = MaterialTheme.colorScheme.surfaceContainer) {
+                            AskRow(entry, covers, playing = entry.entry == state.entry, moving = state.playing) { engine.playEntry(entry.entry) }
                         }
                     }
                 }
@@ -98,8 +100,8 @@ fun QueueScreen(vm: MainViewModel, onBrowse: () -> Unit) {
         }
         itemsIndexed(queue, key = { _, entry -> entry.entry }) { index, entry ->
             Column {
-                if (index == 0 || queue[index - 1].albumGroup != entry.albumGroup) AlbumHeader(entry)
-                Swipeable(onRemove = { vm.client.removeFromQueue(entry.entry) }) {
+                if (index == 0 || queue[index - 1].albumGroup != entry.albumGroup) AlbumHeader(entry, covers)
+                Swipeable(onRemove = { engine.removeFromQueue(entry.entry) }) {
                     Box(Modifier.padding(horizontal = 20.dp)) {
                         TrackRow(
                             number = numberInAlbum(queue, index),
@@ -109,7 +111,7 @@ fun QueueScreen(vm: MainViewModel, onBrowse: () -> Unit) {
                             playing = entry.entry == state.entry,
                             moving = state.playing,
                             dimmed = playingRow >= 0 && index < playingRow,
-                            onClick = { vm.client.playEntry(entry.entry) },
+                            onClick = { engine.playEntry(entry.entry) },
                         )
                     }
                 }
@@ -129,13 +131,13 @@ private fun albumsBefore(queue: List<QueueEntry>, row: Int): Int =
     (1..row).count { queue[it - 1].albumGroup != queue[it].albumGroup } + 1
 
 @Composable
-private fun AlbumHeader(entry: QueueEntry) {
+private fun AlbumHeader(entry: QueueEntry, covers: com.melody.next.Covers) {
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Cover(CoverKey(path = entry.path, group = entry.albumGroup), 44.dp)
+        Cover(CoverKey(path = entry.path, group = entry.albumGroup), 44.dp, covers = covers)
         Column {
             Text(entry.album.ifEmpty { "—" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -146,7 +148,7 @@ private fun AlbumHeader(entry: QueueEntry) {
 }
 
 @Composable
-private fun AskRow(entry: QueueEntry, playing: Boolean, moving: Boolean, onPlay: () -> Unit) {
+private fun AskRow(entry: QueueEntry, covers: com.melody.next.Covers, playing: Boolean, moving: Boolean, onPlay: () -> Unit) {
     val tones = LocalTones.current
     Row(
         Modifier
@@ -158,7 +160,7 @@ private fun AskRow(entry: QueueEntry, playing: Boolean, moving: Boolean, onPlay:
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Cover(CoverKey(path = entry.path, group = entry.albumGroup), 36.dp, corner = 6.dp)
+            Cover(CoverKey(path = entry.path, group = entry.albumGroup), 36.dp, corner = 6.dp, covers = covers)
             if (playing) Box(Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
                 PlayingBars(moving)
             }

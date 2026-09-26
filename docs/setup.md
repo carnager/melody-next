@@ -35,8 +35,8 @@ On your desktop, in Trackknife:
    server has -- and under **Engines elsewhere** pick the server from
    **On the network** (or **Add** it by address). Its password field is only
    for a server whose password differs from yours. Several can be listed --
-   a NAS and another desktop, say -- and are all connected at once; engines
-   added or removed apply after restarting Trackknife.
+   a NAS and another desktop, say -- and are all connected at once, as soon
+   as Settings are saved.
 2. Each server's library shows up as its own tab in the library panel. Click
    **Folders…** there and add the music folder as the *server* sees it, then
    **Refresh**.

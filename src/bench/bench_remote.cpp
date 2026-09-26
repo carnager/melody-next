@@ -149,6 +149,99 @@ BenchMainWindow::ListTab* BenchMainWindow::engineTab(EngineLink& engine) {
     return tab;
 }
 
+void BenchMainWindow::syncRemoteEngines() {
+    const auto wanted = loadRemoteEngines();
+    const auto listed = [&wanted](const EngineLink& engine) {
+        return std::ranges::any_of(wanted, [&engine](const RemoteEngineSetting& setting) {
+            return setting.address == engine.setting.address &&
+                   setting.effectivePassword() == engine.setting.effectivePassword();
+        });
+    };
+    std::vector<EngineKey> gone;
+    for (const auto& engine : engines_) {
+        if (!engine->key.isLocal() && !listed(*engine)) {
+            gone.push_back(engine->key);
+        }
+    }
+    for (const auto& key : gone) {
+        disconnectEngine(key);
+    }
+    for (const auto& setting : wanted) {
+        const bool connected = std::ranges::any_of(engines_, [&setting](const auto& engine) {
+            return !engine->key.isLocal() && engine->setting.address == setting.address;
+        });
+        if (!connected) {
+            // An engine added now is new to this window: it has no lists of
+            // an older release to be the owner of.
+            connectRemoteEngine(setting, false);
+        }
+    }
+    // What mounts and names say now.
+    for (auto& engine : engines_) {
+        for (const auto& setting : wanted) {
+            if (!engine->key.isLocal() && setting.address == engine->setting.address) {
+                engine->setting.music_folder = setting.music_folder;
+                engine->setting.reachable_at = setting.reachable_at;
+            }
+        }
+    }
+    keepTabGroupsTogether();
+    fetchEngineLists();
+    refreshListsPanel();
+}
+
+void BenchMainWindow::disconnectEngine(const EngineKey& key) {
+    const auto found =
+        std::ranges::find(engines_, key, [](const auto& engine) { return engine->key; });
+    if (found == engines_.end() || key.isLocal()) {
+        return;
+    }
+    auto& engine = **found;
+    // Nothing is to follow or play it any more.
+    if (transport_ == engine.playback) {
+        transport_ = localPlayback();
+        playback_.anchors = {};
+        playback_.row = -1;
+        refreshTransport();
+    }
+    if (list_sync_ != nullptr) {
+        list_sync_->setEngine(key, nullptr);
+    }
+    // Dialogs that offer the libraries by engine are made again when next
+    // opened.
+    if (auto* dialog = findChild<DynamicPlaylistDialog*>()) {
+        dialog->close();
+    }
+    if (search_dialog_ != nullptr) {
+        search_dialog_->close();
+    }
+    for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
+         ++index) {
+        if (local_source_tabs_->tabData(index).toString() == key.text()) {
+            local_source_tabs_->removeTab(index);
+            break;
+        }
+    }
+    // The connection first -- it waits for what it has in hand -- then the
+    // panel, then the catalogue both of them read through.
+    if (engine.playback != nullptr) {
+        engine.playback->retire();
+        disconnect(engine.playback, nullptr, this, nullptr);
+        delete engine.playback;
+        engine.playback = nullptr;
+    }
+    if (engine.library != nullptr) {
+        disconnect(engine.library, nullptr, this, nullptr);
+        source_stack_->removeWidget(engine.library);
+        delete engine.library;
+        engine.library = nullptr;
+    }
+    engines_.erase(found);
+    selectPreferredSource();
+    refreshActiveContext();
+    refreshTransport();
+}
+
 void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, const bool first) {
     auto added = std::make_unique<EngineLink>();
     // ADR-0234: by the id it gave when last reached. Until it has been, a

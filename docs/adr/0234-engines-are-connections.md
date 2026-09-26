@@ -64,8 +64,10 @@ Each stage leaves the application working and is committed on its own.
   mounted it; Trackknife mounts nothing. "On the network" adds a found
   engine, or chooses it when listed. The one remote of an older release
   becomes the first entry, and the old single-remote keys keep naming the
-  first. Engines added or removed apply after restarting Trackknife; a
-  changed mount applies at once.
+  first. Saved, it applies at once: an engine added is connected, one
+  removed -- or given another address or password -- is let go (and
+  connected again if still listed); its lists stay, as those of an engine
+  not reached.
 - **Keys before an id.** An engine not yet reached is known by a
   placeholder: `remote` for the first (the key an older release's remote
   lists carry), `address:<address>` for any other. When it says its id, what

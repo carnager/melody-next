@@ -260,6 +260,7 @@ class BenchMainWindowTest final : public QObject {
     void remoteEnginesStartFromTheOneRemoteOfBefore();
     void twoEnginesElsewhereSideBySide();
     void settingsListTheEnginesElsewhere();
+    void enginesAddedOrRemovedApplyAtOnce();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2504,6 +2505,66 @@ void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
     QCOMPARE(saved[1].music_folder, QStringLiteral("/srv/music"));
     QCOMPARE(saved[1].reachable_at, QStringLiteral("/media/desktop"));
     QVERIFY(saved[1].id.isEmpty());
+    saveRemoteEngines({});
+}
+
+// Engines added in Settings are connected, and those removed let go, at
+// once -- no restart. A removed engine's lists stay, as an engine's that is
+// not reached.
+void BenchMainWindowTest::enginesAddedOrRemovedApplyAtOnce() {
+    QTemporaryDir first_state;
+    QTemporaryDir second_state;
+    QVERIFY(first_state.isValid() && second_state.isValid());
+    testing::TestEngine first;
+    testing::TestEngine second;
+    QVERIFY2(first.start(first_state.path().toStdString(), true), first.log().constData());
+    QVERIFY2(second.start(second_state.path().toStdString(), true), second.log().constData());
+    const RemoteEngineSetting first_setting{.address = first.socket(),
+                                            .password = {},
+                                            .music_folder = {},
+                                            .reachable_at = {},
+                                            .id = {}};
+    const RemoteEngineSetting second_setting{.address = second.socket(),
+                                             .password = {},
+                                             .music_folder = {},
+                                             .reachable_at = {},
+                                             .id = {}};
+    saveRemoteEngines({first_setting});
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QCOMPARE(window.engines_.size(), std::size_t{2});
+    QTRY_VERIFY(window.engines_[1]->playback->active());
+    const auto sidebar_keys = [&window] {
+        QStringList keys;
+        for (int index = 0; index < window.local_source_tabs_->count(); ++index) {
+            keys << window.local_source_tabs_->tabData(index).toString();
+        }
+        return keys;
+    };
+
+    // Added: connected, with its library tab.
+    saveRemoteEngines({first_setting, second_setting});
+    window.syncRemoteEngines();
+    QCOMPARE(window.engines_.size(), std::size_t{3});
+    QTRY_VERIFY(window.engines_[2]->playback->active());
+    QTRY_VERIFY(sidebar_keys().contains(window.engines_[2]->key.text()));
+    const auto first_key = window.engines_[1]->key;
+    auto* first_tab = window.engineTab(*window.engines_[1]);
+    QVERIFY(first_tab != nullptr);
+    const auto first_list = QString::fromStdString(first_tab->document.id.to_string());
+
+    // Removed: let go -- its tab in the sidebar too -- its list kept.
+    saveRemoteEngines({second_setting});
+    window.syncRemoteEngines();
+    QCOMPARE(window.engines_.size(), std::size_t{2});
+    QVERIFY(window.link(first_key) == nullptr);
+    QVERIFY(!sidebar_keys().contains(first_key.text()));
+    QVERIFY(window.tabForDocument(first_list) != nullptr);
+    QVERIFY(window.playbackOf(first_key) == nullptr);
+    // The one left still works.
+    QVERIFY(window.engines_[1]->playback->active());
+    QCOMPARE(window.engines_[1]->setting.address, second.socket());
     saveRemoteEngines({});
 }
 

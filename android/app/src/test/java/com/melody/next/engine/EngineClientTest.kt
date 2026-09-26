@@ -203,6 +203,27 @@ class EngineClientTest {
     }
 
     @Test
+    fun anOlderStateIsNotTakenOverANewerOne() = runBlocking {
+        FakeEngine().use { engine ->
+            engine.state = JSONObject().put("status", "paused").put("queue_revision", 1).put("sequence", 5)
+            val client = EngineClient(scope, clock = { 0L })
+            client.connect(engine.endpoint)
+            eventually("connected", { client.connection.value }) { it is ConnectionState.Connected }
+            engine.push("playback.changed", JSONObject().put("status", "playing").put("queue_revision", 1).put("sequence", 7))
+            eventually("the newer state", { client.state.value.playing }) { it }
+            val heard = scope.async { client.ratings.first() }
+            delay(100)
+            // Made before the one just taken, arriving after it -- and then
+            // something else, handled after it, to know it has been.
+            engine.push("playback.changed", JSONObject().put("status", "stopped").put("queue_revision", 1).put("sequence", 6))
+            engine.push("catalogue.rating_changed", JSONObject().put("hash", "abc").put("album", false).put("rating", 8))
+            withTimeout(5_000) { heard.await() }
+            assertTrue("the older state was dropped", client.state.value.playing)
+            client.disconnect()
+        }
+    }
+
+    @Test
     fun aRatingSetElsewhereIsPassedOn() = runBlocking {
         FakeEngine().use { engine ->
             val client = EngineClient(scope, clock = { 0L })

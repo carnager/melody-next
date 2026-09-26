@@ -63,6 +63,10 @@ std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
         return nullptr;
     }
     auto client = std::move(*connected);
+    {
+        const std::lock_guard guard{mutex_};
+        sequence_ = 0;
+    }
 
     const QPointer self{this};
     client->on_event([self, this](const protocol::Event& event) {
@@ -302,6 +306,15 @@ EnginePlayback::~EnginePlayback() {
 
 void EnginePlayback::adopt(const protocol::Json& payload) {
     const std::lock_guard guard{mutex_};
+    // An engine from before sequences has none, and every state is taken.
+    if (const auto sequence = payload.find("sequence");
+        sequence != payload.end() && sequence->is_number_integer()) {
+        const auto made = sequence->get<std::uint64_t>();
+        if (made <= sequence_) {
+            return;
+        }
+        sequence_ = made;
+    }
     state_.status = QString::fromStdString(payload.value("status", std::string{"stopped"}));
     state_.entry = payload.contains("entry") && payload.at("entry").is_string()
                        ? QString::fromStdString(payload.at("entry").get<std::string>())

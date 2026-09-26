@@ -14,6 +14,7 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/core/stable_id.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -230,6 +231,10 @@ class Player final {
         // showing is out of date -- including when another client is what
         // changed it.
         std::uint64_t queue_revision{0};
+        // Which state this is, counting every one this engine has made: a
+        // client given two -- an event and a command's answer, carried on
+        // different threads -- keeps the later, not whichever came last.
+        std::uint64_t sequence{0};
         // Which playback this is, not which track: replaying the same file is
         // a new instance. A client that credits listening needs to tell those
         // apart, and a path cannot.
@@ -356,6 +361,25 @@ class Player final {
     void follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot);
 
     mutable std::mutex mutex_;
+    mutable std::uint64_t state_sequence_{0};
+    // What this engine told its output and the output has not yet shown:
+    // an output applies a command on its own thread -- an agent, over the
+    // network -- so the state answering the command would still carry the
+    // old volume or place, and a client would put its slider back. Reported
+    // instead until the output catches up, or for a while if it never does.
+    struct AskedVolume final {
+        const audio::Audition* output;
+        int percent;
+        std::chrono::steady_clock::time_point at;
+    };
+    struct AskedPlace final {
+        const audio::Audition* output;
+        std::uint64_t instance;
+        std::int64_t position_ms;
+        std::chrono::steady_clock::time_point at;
+    };
+    mutable std::optional<AskedVolume> asked_volume_;
+    mutable std::optional<AskedPlace> asked_place_;
     // This machine's audio, if it has any; an output that refuses to play,
     // for when nothing is chosen; and whichever one is playing, which is
     // never null.

@@ -274,6 +274,7 @@ Json to_json(const Player::State& state) {
     rendered["volume_percent"] = state.volume_percent;
     rendered["instance"] = state.instance;
     rendered["queue_revision"] = state.queue_revision;
+    rendered["sequence"] = state.sequence;
     rendered["consumed"] =
         state.consumed.is_nil() ? Json(nullptr) : Json(state.consumed.to_string());
     rendered["gapless_entry"] =
@@ -643,8 +644,10 @@ void PlaybackWatcher::start() {
             // Position is dropped before comparing: it moves continuously and
             // emitting on it would be a broadcast storm carrying nothing a
             // client could not work out for itself.
+            // So is the sequence, which every state has anew.
             auto comparable = current;
             comparable.erase("position_ms");
+            comparable.erase("sequence");
             if (first || comparable != previous) {
                 first = false;
                 previous = std::move(comparable);

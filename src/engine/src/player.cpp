@@ -568,7 +568,12 @@ core::Result<void> Player::play_entry(const core::StableId& entry_id) {
 
 core::Result<void> Player::set_volume_percent(const int percent) {
     const std::lock_guard guard{mutex_};
-    return audition_->set_volume_percent(percent);
+    auto set = audition_->set_volume_percent(percent);
+    if (set) {
+        asked_volume_ = AskedVolume{
+            .output = audition_, .percent = percent, .at = std::chrono::steady_clock::now()};
+    }
+    return set;
 }
 
 void Player::set_speakers_taken_by(std::string engine) {
@@ -662,7 +667,14 @@ core::Result<void> Player::seek_ms(const std::int64_t position_ms) {
                                            .message = "a position cannot be negative",
                                            .context = {}});
     }
-    return audition_->seek_to_seconds(static_cast<double>(position_ms) / 1000.0);
+    auto sought = audition_->seek_to_seconds(static_cast<double>(position_ms) / 1000.0);
+    if (sought) {
+        asked_place_ = AskedPlace{.output = audition_,
+                                  .instance = audition_->snapshot().playback_instance,
+                                  .position_ms = position_ms,
+                                  .at = std::chrono::steady_clock::now()};
+    }
+    return sought;
 }
 
 core::Result<void> Player::step(const int direction) {
@@ -867,6 +879,7 @@ Player::State Player::state() const {
     const std::lock_guard guard{mutex_};
     const auto snapshot = audition_->snapshot();
     State current;
+    current.sequence = ++state_sequence_;
     switch (snapshot.state) {
     case audio::LocalAuditionState::playing:
     case audio::LocalAuditionState::draining:
@@ -897,6 +910,32 @@ Player::State Player::state() const {
     current.requests = requests_.size();
     current.modes = modes_;
     current.volume_percent = snapshot.volume_percent;
+    // Told but not yet shown by the output: what it was told.
+    constexpr auto patience = std::chrono::seconds{2};
+    const auto now = std::chrono::steady_clock::now();
+    if (asked_volume_) {
+        if (asked_volume_->output != audition_ || now - asked_volume_->at > patience ||
+            snapshot.volume_percent == asked_volume_->percent) {
+            asked_volume_.reset();
+        } else {
+            current.volume_percent = asked_volume_->percent;
+        }
+    }
+    if (asked_place_) {
+        // Arrived: at the place, or played on from it since -- never more
+        // than the time gone by, and a little for the output's own clock.
+        const auto since =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - asked_place_->at).count();
+        const bool arrived = current.position_ms >= asked_place_->position_ms - 250 &&
+                             current.position_ms <= asked_place_->position_ms + since + 500;
+        if (asked_place_->output != audition_ ||
+            asked_place_->instance != snapshot.playback_instance || now - asked_place_->at > patience ||
+            arrived) {
+            asked_place_.reset();
+        } else {
+            current.position_ms = asked_place_->position_ms;
+        }
+    }
     current.gapless_entry = gapless_entry_.value_or(core::StableId{});
     current.instance = snapshot.playback_instance;
     current.consumed = consumed_;

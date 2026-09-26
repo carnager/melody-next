@@ -256,6 +256,7 @@ class BenchMainWindowTest final : public QObject {
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
     void theListsPanelShowsEveryListAndTakesDrops();
+    void aWorkingListClosedAfterAReconnectLeavesItsEngine();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1970,8 +1971,8 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
              QFile::encodeName(music + QStringLiteral("/album/one.wav")).toStdString());
 }
 
-// ADR-0233: this computer's lists first, then the remote engine's under its
-// name -- kept that way whatever order tabs are opened or dragged in.
+// ADR-0233: this computer's lists first, then the remote engine's -- kept
+// that way whatever order tabs are opened or dragged in.
 void BenchMainWindowTest::tabsAreGroupedByEngine() {
     QTemporaryDir remote_state;
     QVERIFY(remote_state.isValid());
@@ -1991,23 +1992,13 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
                                   .dirty = false,
                                   .items = {}},
         false);
-    auto* bar = static_cast<PlaybackTabBar*>(window.tabs_->tabBar());
+    auto* bar = window.tabs_->tabBar();
     const auto remote_at = [&] { return window.tabs_->indexOf(remote_tab->view); };
     const auto local_at = [&] { return window.tabs_->indexOf(local_tab->view); };
     QVERIFY2(local_at() < remote_at(), "a local list opens before the remote's group");
-    QCOMPARE(bar->groupOf(remote_at()), window.remote_catalogue_source_->name());
-    QVERIFY(bar->groupOf(local_at()).isEmpty());
-    // The gap and name stand before the remote group, and only there.
-    QVERIFY(bar->groupLead(remote_at()) > 0);
-    QCOMPARE(bar->groupLead(local_at()), 0);
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
         !directory.isEmpty()) {
         QVERIFY(bar->grab().save(directory + QStringLiteral("/tabs-grouped-by-engine.png")));
-    }
-    for (int index = 0; index < window.tabs_->count(); ++index) {
-        if (index != remote_at()) {
-            QCOMPARE(bar->groupLead(index), 0);
-        }
     }
     // Dragged into the other group: back in its own.
     bar->moveTab(remote_at(), 0);
@@ -2110,6 +2101,46 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     window.lists_panel_action_->setChecked(false);
     QVERIFY(!window.tabs_->tabBar()->isHidden());
     QVERIFY(window.lists_pane_->isHidden());
+}
+
+// A working list closed here leaves its engine, whether or not this window
+// can still tell it was sent -- after a reconnect it cannot.
+void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto listed = [&engine](const std::string& id) {
+        auto all = (*engine)->call("list.all");
+        return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
+                                          [&id](const protocol::Json& list) {
+                                              return list.value("id", std::string{}) == id;
+                                          });
+    };
+    auto* scratch = window.addListTab(
+        persistence::ListDocument{.id = core::StableId::random(),
+                                  .kind = persistence::ListKind::scratch,
+                                  .name = "Scratch",
+                                  .pinned = false,
+                                  .dirty = false,
+                                  .items = {}},
+        true);
+    const auto id = scratch->document.id.to_string();
+    LocalTrackRow row;
+    row.raw_path = "/music/scratch.flac";
+    scratch->model->appendRows({row});
+    window.persistNow(false);
+    QTRY_VERIFY(listed(id));
+    QTRY_VERIFY(!window.list_sync_->busy());
+    window.list_sync_->reconnected(window.local_playback_);
+    window.closeTabAt(window.tabs_->indexOf(scratch->view));
+    window.persistNow(false);
+    QTRY_VERIFY(!listed(id));
+    QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
+    (*engine)->close();
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

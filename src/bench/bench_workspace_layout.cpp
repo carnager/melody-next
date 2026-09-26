@@ -81,16 +81,6 @@ void BenchMainWindow::buildWorkspace() {
     tabs_->setObjectName(QStringLiteral("bench-tabs"));
     tabs_->setDocumentMode(true);
     tabs_->setMovable(true);
-    // ADR-0233: this computer's lists first, then each remote engine's,
-    // under its name.
-    static_cast<PlaybackTabBar*>(tabs_->tabBar())->setGroupOf([this](const int index) {
-        auto* view = tabs_->widget(index);
-        if (view == nullptr || !view->property("bench-remote-list").toBool()) {
-            return QString{};
-        }
-        return remote_catalogue_source_ != nullptr ? remote_catalogue_source_->name()
-                                                   : QStringLiteral("Remote");
-    });
     tabs_->setTabsClosable(true);
     tabs_->setAcceptDrops(true);
     tabs_->installEventFilter(this);

@@ -138,6 +138,8 @@ class MainViewModel : ViewModel() {
     }
 
     fun open(next: LibraryLevel) {
+        // Another list's tracks are never shown under this one's name.
+        if (next is LibraryLevel.ListPage) listEntries = emptyList()
         levels.add(next)
         reload()
     }

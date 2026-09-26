@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -110,6 +111,8 @@ class EngineListSync final : public QObject {
     void fetch(const std::string& id, bool remote, bool comparing);
     void send(const persistence::ListDocument& document, std::size_t fingerprint);
     void remove(const std::string& id, bool remote);
+    void flushRemovals(bool remote);
+    void storeRemovals() const;
 
     QPointer<EnginePlayback> local_;
     QPointer<EnginePlayback> remote_;
@@ -119,6 +122,11 @@ class EngineListSync final : public QObject {
     // The newest of each document asked to be sent while one was in flight.
     std::unordered_map<std::string, persistence::ListDocument> waiting_;
     int in_flight_{0};
+    // Working lists closed here, by engine (remote or not) and id, until
+    // their engine has deleted them; kept in Settings under this key.
+    static constexpr auto removals_key = "lists/pending-removals";
+    std::set<std::pair<bool, std::string>> removals_;
+    std::set<std::pair<bool, std::string>> removing_;
 };
 
 } // namespace trackknife::bench

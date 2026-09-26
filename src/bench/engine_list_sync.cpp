@@ -5,6 +5,8 @@
 #include "bench/engine_playback.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <QSettings>
+
 #include <functional>
 #include <unordered_set>
 #include <utility>
@@ -97,15 +99,15 @@ using protocol::Json;
     if (!id) {
         return std::nullopt;
     }
-    persistence::ListDocument document{
-        .id = *id,
-        .kind = answer.value("kind", std::string{}) == "saved" ? persistence::ListKind::saved
-                                                               : persistence::ListKind::scratch,
-        .name = answer.value("name", std::string{}),
-        .pinned = false,
-        .dirty = false,
-        .items = {},
-        .remote = remote};
+    persistence::ListDocument document{.id = *id,
+                                       .kind = answer.value("kind", std::string{}) == "saved"
+                                                   ? persistence::ListKind::saved
+                                                   : persistence::ListKind::scratch,
+                                       .name = answer.value("name", std::string{}),
+                                       .pinned = false,
+                                       .dirty = false,
+                                       .items = {},
+                                       .remote = remote};
     for (const auto& value : answer.value("items", Json::array())) {
         auto path = protocol::decode_raw_path(value.value("path", std::string{}));
         auto entry = core::StableId::parse(value.value("entry", std::string{}));
@@ -163,14 +165,21 @@ using protocol::Json;
 
 } // namespace
 
-EngineListSync::EngineListSync(QObject* parent) : QObject(parent) {}
+EngineListSync::EngineListSync(QObject* parent) : QObject(parent) {
+    for (const auto& pending : QSettings{}.value(QLatin1String(removals_key)).toStringList()) {
+        if (pending.size() > 2 && pending.at(1) == QLatin1Char(':')) {
+            removals_.emplace(pending.front() == QLatin1Char('r'), pending.mid(2).toStdString());
+        }
+    }
+}
 
 std::optional<persistence::ListDocument>
 EngineListSync::documentFromAnswer(const protocol::Json& answer, const bool remote) {
     return document_from(answer, remote);
 }
 
-void EngineListSync::opened(const persistence::ListDocument& document, const std::uint64_t revision) {
+void EngineListSync::opened(const persistence::ListDocument& document,
+                            const std::uint64_t revision) {
     auto& known = known_[document.id.to_string()];
     known.working = document.kind != persistence::ListKind::saved;
     known.remote = document.remote;
@@ -178,6 +187,10 @@ void EngineListSync::opened(const persistence::ListDocument& document, const std
     known.fingerprint = fingerprint(document);
     known.local = known.fingerprint;
     known.revision = revision;
+    // Open again: not to be deleted after all.
+    if (removals_.erase({document.remote, document.id.to_string()}) > 0) {
+        storeRemovals();
+    }
 }
 
 void EngineListSync::setEngines(EnginePlayback* local, EnginePlayback* remote) {
@@ -254,7 +267,9 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
             ++entry;
             continue;
         }
-        if (entry->second.working && entry->second.fingerprint) {
+        // Whether or not this window knows it was sent: after a reconnect or
+        // a failed write it cannot tell, and the engine says if it had none.
+        if (entry->second.working) {
             remove(entry->first, entry->second.remote);
         }
         waiting_.erase(entry->first);
@@ -265,6 +280,7 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
 void EngineListSync::reconnected(const EnginePlayback* engine) {
     const bool remote = engine != nullptr && engine == remote_.data();
     stateFor(remote) = Engine{};
+    flushRemovals(remote);
     for (auto& [id, known] : known_) {
         static_cast<void>(id);
         if (known.remote == remote) {
@@ -331,49 +347,48 @@ void EngineListSync::fetch(const std::string& id, const bool remote, const bool 
         ++stateFor(remote).outstanding;
     }
     const QPointer self{this};
-    engine->request(
-        QStringLiteral("list.get"), Json{{"id", id}},
-        [self, id, remote, comparing](core::Result<Json> answer) {
-            if (!self) {
-                return;
-            }
-            --self->in_flight_;
-            const auto settle = [&self, remote, comparing] {
-                if (comparing) {
-                    --self->stateFor(remote).outstanding;
-                    self->compared(remote);
-                }
-            };
-            const auto found = self->known_.find(id);
-            if (found == self->known_.end() || !answer) {
-                settle();
-                return;
-            }
-            auto document = document_from(*answer, remote);
-            if (!document) {
-                settle();
-                return;
-            }
-            auto& known = found->second;
-            const auto print = fingerprint(*document);
-            const auto revision = answer->value("revision", std::uint64_t{0});
-            if (known.local == print) {
-                // Already what this window shows.
-                known.fingerprint = print;
-                known.revision = revision;
-            } else if (!known.working && known.dirty) {
-                // Changed there while edited here: settled when saved.
-                known.conflict = true;
-            } else {
-                known.fingerprint = print;
-                known.local = print;
-                known.revision = revision;
-                known.conflict = false;
-                known.asked = false;
-                emit self->adopted(*document);
-            }
-            settle();
-        });
+    engine->request(QStringLiteral("list.get"), Json{{"id", id}},
+                    [self, id, remote, comparing](core::Result<Json> answer) {
+                        if (!self) {
+                            return;
+                        }
+                        --self->in_flight_;
+                        const auto settle = [&self, remote, comparing] {
+                            if (comparing) {
+                                --self->stateFor(remote).outstanding;
+                                self->compared(remote);
+                            }
+                        };
+                        const auto found = self->known_.find(id);
+                        if (found == self->known_.end() || !answer) {
+                            settle();
+                            return;
+                        }
+                        auto document = document_from(*answer, remote);
+                        if (!document) {
+                            settle();
+                            return;
+                        }
+                        auto& known = found->second;
+                        const auto print = fingerprint(*document);
+                        const auto revision = answer->value("revision", std::uint64_t{0});
+                        if (known.local == print) {
+                            // Already what this window shows.
+                            known.fingerprint = print;
+                            known.revision = revision;
+                        } else if (!known.working && known.dirty) {
+                            // Changed there while edited here: settled when saved.
+                            known.conflict = true;
+                        } else {
+                            known.fingerprint = print;
+                            known.local = print;
+                            known.revision = revision;
+                            known.conflict = false;
+                            known.asked = false;
+                            emit self->adopted(*document);
+                        }
+                        settle();
+                    });
 }
 
 void EngineListSync::listChanged(const EnginePlayback* engine, const QString& id,
@@ -450,61 +465,98 @@ void EngineListSync::send(const persistence::ListDocument& document, const std::
         params["revision"] = *known.revision;
     }
     const QPointer self{this};
-    engine->request(
-        QStringLiteral("list.save"), std::move(params), [self, id](core::Result<Json> answer) {
-            if (!self) {
-                return;
-            }
-            --self->in_flight_;
-            const auto found = self->known_.find(id);
-            if (found == self->known_.end()) {
-                return;
-            }
-            auto& entry = found->second;
-            entry.in_flight = false;
-            if (!answer) {
-                if (answer.error().code == core::ErrorCode::conflict) {
-                    entry.conflict = true;
-                    entry.asked = true;
-                    emit self->conflicted(QString::fromStdString(id));
-                    return;
-                }
-                // Tried again at the next save -- unless the engine predates
-                // lists and would only refuse again.
-                if (answer.error().code != core::ErrorCode::unsupported) {
-                    entry.fingerprint.reset();
-                }
-            } else {
-                entry.revision = answer->value("revision", std::uint64_t{0});
-            }
-            if (!entry.again) {
-                return;
-            }
-            entry.again = false;
-            auto newer = self->waiting_.extract(id);
-            if (!newer.empty()) {
-                const auto& latest = newer.mapped();
-                const auto again = fingerprint(latest);
-                if (entry.fingerprint != again) {
-                    self->send(latest, again);
-                }
-            }
-        });
+    engine->request(QStringLiteral("list.save"), std::move(params),
+                    [self, id](core::Result<Json> answer) {
+                        if (!self) {
+                            return;
+                        }
+                        --self->in_flight_;
+                        const auto found = self->known_.find(id);
+                        if (found == self->known_.end()) {
+                            return;
+                        }
+                        auto& entry = found->second;
+                        entry.in_flight = false;
+                        if (!answer) {
+                            if (answer.error().code == core::ErrorCode::conflict) {
+                                entry.conflict = true;
+                                entry.asked = true;
+                                emit self->conflicted(QString::fromStdString(id));
+                                return;
+                            }
+                            // Tried again at the next save -- unless the engine predates
+                            // lists and would only refuse again.
+                            if (answer.error().code != core::ErrorCode::unsupported) {
+                                entry.fingerprint.reset();
+                            }
+                        } else {
+                            entry.revision = answer->value("revision", std::uint64_t{0});
+                        }
+                        if (!entry.again) {
+                            return;
+                        }
+                        entry.again = false;
+                        auto newer = self->waiting_.extract(id);
+                        if (!newer.empty()) {
+                            const auto& latest = newer.mapped();
+                            const auto again = fingerprint(latest);
+                            if (entry.fingerprint != again) {
+                                self->send(latest, again);
+                            }
+                        }
+                    });
 }
 
 void EngineListSync::remove(const std::string& id, const bool remote) {
+    // Kept until the engine has answered, across restarts: one that is away
+    // is told when it is back, or the list stays on it for good.
+    removals_.emplace(remote, id);
+    storeRemovals();
+    flushRemovals(remote);
+}
+
+void EngineListSync::flushRemovals(const bool remote) {
     auto* engine = engineFor(remote);
-    if (engine == nullptr) {
+    if (engine == nullptr || !engine->active()) {
         return;
     }
-    ++in_flight_;
-    const QPointer self{this};
-    engine->request(QStringLiteral("list.delete"), Json{{"id", id}},
-                    [self](const core::Result<Json>&) {
-                        if (self) {
+    for (const auto& pending : removals_) {
+        if (pending.first != remote || removing_.contains(pending)) {
+            continue;
+        }
+        removing_.insert(pending);
+        ++in_flight_;
+        const QPointer self{this};
+        engine->request(QStringLiteral("list.delete"), Json{{"id", pending.second}},
+                        [self, pending](const core::Result<Json>& answer) {
+                            if (!self) {
+                                return;
+                            }
                             --self->in_flight_;
-                        }
-                    });
+                            self->removing_.erase(pending);
+                            // Gone, or an engine too old to have lists: done.
+                            // Anything else is tried again on reconnecting.
+                            if (answer || answer.error().code == core::ErrorCode::not_found ||
+                                answer.error().code == core::ErrorCode::unsupported) {
+                                self->removals_.erase(pending);
+                                self->storeRemovals();
+                            }
+                        });
+    }
+}
+
+void EngineListSync::storeRemovals() const {
+    QStringList stored;
+    for (const auto& [remote, id] : removals_) {
+        stored.push_back((remote ? QStringLiteral("r:") : QStringLiteral("l:")) +
+                         QString::fromStdString(id));
+    }
+    QSettings settings;
+    if (stored.isEmpty()) {
+        settings.remove(QLatin1String(removals_key));
+    } else {
+        settings.setValue(QLatin1String(removals_key), stored);
+    }
 }
 
 } // namespace trackknife::bench

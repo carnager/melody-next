@@ -413,6 +413,11 @@ private fun ListPage(vm: MainViewModel, list: EngineList) {
     val tones = LocalTones.current
     val entries = vm.listEntries
     val total = entries.sumOf { it.durationMs.coerceAtLeast(0) }
+    // Still on its way: not an empty list.
+    if (vm.loading && entries.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(strokeWidth = 2.dp) }
+        return
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

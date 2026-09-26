@@ -258,6 +258,7 @@ class BenchMainWindowTest final : public QObject {
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
+    void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -383,6 +384,11 @@ class BenchMainWindowTest final : public QObject {
     void localTrackRatingsPersistByContentIdentity();
 
   private:
+    // A home of this process's own: test-mode data lives under ~/.qttest,
+    // which every run shares otherwise -- and each run's first act is to
+    // clear it, so two runs at once (two checkouts, two sessions) broke each
+    // other's engines.
+    QTemporaryDir home_directory_;
     QTemporaryDir settings_directory_;
     testing::TestEngine engine_;
 };
@@ -425,6 +431,8 @@ namespace {
 } // namespace
 
 void BenchMainWindowTest::initTestCase() {
+    QVERIFY(home_directory_.isValid());
+    qputenv("HOME", QFile::encodeName(home_directory_.path()));
     QVERIFY(settings_directory_.isValid());
     QCoreApplication::setOrganizationName(QStringLiteral("TrackknifeTests"));
     QCoreApplication::setApplicationName(QStringLiteral("trackknife-tests"));
@@ -704,10 +712,9 @@ void BenchMainWindowTest::dynamicPlaylistRetainsChangesDuringRefresh() {
     using Service = DynamicPlaylistService;
     std::vector<Service::Completion> pending;
     DynamicPlaylistDialog dialog(
-        QStringLiteral("local"), QString{},
-        [&](bool, query::CompiledTkq, core::CancellationToken, Service::Completion done) {
-            pending.push_back(std::move(done));
-        });
+        QStringLiteral("local"), {},
+        [&](const EngineKey&, query::CompiledTkq, core::CancellationToken,
+            Service::Completion done) { pending.push_back(std::move(done)); });
     dialog.setAttribute(Qt::WA_DeleteOnClose, false);
     auto* refresh = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-refresh"));
     auto* stop = dialog.findChild<QPushButton*>(QStringLiteral("dynamic-stop"));
@@ -738,8 +745,9 @@ void BenchMainWindowTest::dynamicResultSelectionSurvivesRefresh() {
     using Service = DynamicPlaylistService;
     {
         Service::Completion pending;
-        DynamicPlaylistDialog dialog(QStringLiteral("local"), QString{},
-                                     [&](bool, query::CompiledTkq, core::CancellationToken,
+        DynamicPlaylistDialog dialog(QStringLiteral("local"), {},
+                                     [&](const EngineKey&, query::CompiledTkq,
+                                         core::CancellationToken,
                                          Service::Completion done) { pending = std::move(done); });
         dialog.setAttribute(Qt::WA_DeleteOnClose, false);
         dialog.show();
@@ -997,7 +1005,7 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    auto catalogue = window.catalogue_source_->open();
+    auto catalogue = window.localCatalogue()->open();
     QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
     persistence::LibraryScanProgress progress;
     QVERIFY(catalogue->scan({}, progress).has_value());
@@ -1025,11 +1033,12 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     QTest::keyClick(popup->input(), Qt::Key_Escape);
 
     // The library panel's Recently added: albums, the new one first.
-    window.local_library_->refreshLibrary();
-    auto* newest = window.local_library_->findChild<QToolButton*>(QStringLiteral("local-library-newest"));
+    window.localLibrary()->refreshLibrary();
+    auto* newest =
+        window.localLibrary()->findChild<QToolButton*>(QStringLiteral("local-library-newest"));
     QVERIFY(newest != nullptr && newest->isCheckable());
     newest->setChecked(true);
-    auto* tree = window.local_library_->findChild<QTreeView*>();
+    auto* tree = window.localLibrary()->findChild<QTreeView*>();
     QTRY_COMPARE(tree->model()->rowCount(), 2);
     const auto first = tree->model()->index(0, 0).data(library_entry_role);
     QVERIFY(first.isValid());
@@ -1085,7 +1094,7 @@ void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
     window.show();
     QTRY_VERIFY(window.lists_restored_);
     {
-        auto catalogue = window.catalogue_source_->open();
+        auto catalogue = window.localCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -1123,7 +1132,7 @@ void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
     window.show();
     QTRY_VERIFY(window.lists_restored_ && window.playingOnEngine());
     {
-        auto catalogue = window.catalogue_source_->open();
+        auto catalogue = window.localCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -1142,9 +1151,9 @@ void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
     QTRY_COMPARE(popup->results()->count(), 1);
     QTest::keyClick(popup->input(), Qt::Key_Return, Qt::ShiftModifier);
     QTRY_COMPARE(tab->model->rowCount(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(window.local_playback_->state().status, QStringLiteral("playing"),
+    QTRY_COMPARE_WITH_TIMEOUT(window.localPlayback()->state().status, QStringLiteral("playing"),
                               10'000);
-    window.local_playback_->stop();
+    window.localPlayback()->stop();
 }
 
 void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
@@ -1159,7 +1168,7 @@ void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
     QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
     persistence::LibraryEntry album;
     {
-        auto catalogue = window.catalogue_source_->open();
+        auto catalogue = window.localCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -1233,13 +1242,13 @@ void BenchMainWindowTest::libraryDragsIntoUpNextWithCovers() {
     window.show();
     QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
     {
-        auto catalogue = window.catalogue_source_->open();
+        auto catalogue = window.localCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
     }
-    window.local_library_->refreshLibrary();
-    auto* tree = window.local_library_->findChild<QTreeView*>();
+    window.localLibrary()->refreshLibrary();
+    auto* tree = window.localLibrary()->findChild<QTreeView*>();
     QVERIFY(tree != nullptr);
     QTRY_VERIFY(tree->model()->rowCount() > 0 &&
                 tree->model()->index(0, 0).data(Qt::DisplayRole).toString().contains(
@@ -1493,9 +1502,10 @@ void BenchMainWindowTest::quittingStopsTheEngineForGood() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY2_WITH_TIMEOUT(window.local_playback_ != nullptr && window.local_playback_->active(),
-                              qPrintable(window.catalogue_source_ ? window.catalogue_source_->describe()
-                                                                  : QStringLiteral("no source")),
+    QTRY_VERIFY2_WITH_TIMEOUT(window.localPlayback() != nullptr && window.localPlayback()->active(),
+                              qPrintable(window.localCatalogue()
+                                             ? window.localCatalogue()->describe()
+                                             : QStringLiteral("no source")),
                               15'000);
     QVERIFY(!lockHolders(engine->state / "engine.lock").empty());
 
@@ -1516,7 +1526,7 @@ void BenchMainWindowTest::theWindowsListsAreOnItsEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
@@ -1640,7 +1650,7 @@ void BenchMainWindowTest::anotherClientsListChangesReachTheWindow() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
@@ -1744,7 +1754,7 @@ void BenchMainWindowTest::aListChangedWhileClosedIsTakenUpOnOpening() {
         BenchMainWindow window;
         window.show();
         QTRY_VERIFY(window.lists_restored_);
-        QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+        QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
         auto* tab = window.addListTab(
             persistence::ListDocument{.id = core::StableId::random(),
                                       .kind = persistence::ListKind::saved,
@@ -1795,7 +1805,7 @@ void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(other.has_value());
@@ -1843,7 +1853,7 @@ void BenchMainWindowTest::aMoveIsFollowedInListsNotOpenHere() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     const auto connect_other = [this] {
         return protocol::Client::connect(protocol::Endpoint{
             .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
@@ -1882,11 +1892,11 @@ void BenchMainWindowTest::aMoveIsFollowedInListsNotOpenHere() {
     // Away during the move: kept, and handed over when it is back.
     (*other)->close();
     engine_.stop();
-    QTRY_VERIFY(!window.local_playback_->active());
+    QTRY_VERIFY(!window.localPlayback()->active());
     window.applyCommittedRelocation(moved("/music/moving/b.flac", "/music/moved/b.flac"));
     QVERIFY(QSettings{}.contains(QStringLiteral("lists/pending-relocations")));
     QVERIFY2(engine_.start(), engine_.log().constData());
-    QTRY_VERIFY_WITH_TIMEOUT(window.local_playback_->active(), 10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localPlayback()->active(), 10'000);
     other = connect_other();
     QVERIFY(other.has_value());
     QTRY_COMPARE_WITH_TIMEOUT(
@@ -1907,8 +1917,8 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_library_ != nullptr);
-    auto catalogue = window.catalogue_source_->open();
+    QTRY_VERIFY(window.localLibrary() != nullptr);
+    auto catalogue = window.localCatalogue()->open();
     QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
     persistence::LibraryScanProgress progress;
     QVERIFY(catalogue->scan({}, progress).has_value());
@@ -1924,18 +1934,18 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     auto* current = window.currentListTab();
     QVERIFY(current != nullptr && current != chosen);
     const auto chosen_id = QString::fromStdString(chosen->document.id.to_string());
-    const auto targets = window.listTargets(false);
+    const auto targets = window.listTargets(EngineKey::local());
     QVERIFY(std::ranges::any_of(targets, [&](const auto& target) {
         return target.first == chosen_id && target.second == QStringLiteral("Chosen");
     }));
-    QVERIFY(window.listTargets(true).empty());
+    QVERIFY(window.listTargets(EngineKey::remote()).empty());
 
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = catalogue->query(albums);
     QVERIFY(page && !page->entries.empty());
     const auto before = current->model->rowCount();
-    emit window.local_library_->addToListRequested(page->entries, chosen_id);
+    emit window.localLibrary()->addToListRequested(page->entries, chosen_id);
     QTRY_COMPARE(chosen->model->rowCount(), 1);
     QCOMPARE(current->model->rowCount(), before);
     QTRY_VERIFY(!window.discovery_running_);
@@ -1982,7 +1992,7 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     auto* remote_tab = window.remoteQueueTab();
     QVERIFY(remote_tab != nullptr);
     auto* local_tab = window.addListTab(
@@ -2005,7 +2015,7 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     bar->moveTab(remote_at(), 0);
     QVERIFY2(local_at() < remote_at(), "the groups stay together");
     for (int index = 0; index < remote_at(); ++index) {
-        QVERIFY(!window.tabs_->widget(index)->property("bench-remote-list").toBool());
+        QVERIFY(engineOfView(window.tabs_->widget(index)).isLocal());
     }
 }
 
@@ -2024,7 +2034,7 @@ void BenchMainWindowTest::theListsPanelShowsEveryListAndTakesDrops() {
     window.resize(1200, 700);
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     QVERIFY(window.tabs_->tabBar()->isHidden());
     QVERIFY(window.lists_pane_->isVisible());
 
@@ -2110,7 +2120,7 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
@@ -2136,7 +2146,7 @@ void BenchMainWindowTest::aWorkingListClosedAfterAReconnectLeavesItsEngine() {
     window.persistNow(false);
     QTRY_VERIFY(listed(id));
     QTRY_VERIFY(!window.list_sync_->busy());
-    window.list_sync_->reconnected(window.local_playback_);
+    window.list_sync_->reconnected(window.localPlayback());
     window.closeTabAt(window.tabs_->indexOf(scratch->view));
     window.persistNow(false);
     QTRY_VERIFY(!listed(id));
@@ -2151,7 +2161,7 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto engine = protocol::Client::connect(protocol::Endpoint{
         .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
     QVERIFY(engine.has_value());
@@ -2185,13 +2195,42 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
     window.persistNow(false);
     QVERIFY(window.list_sync_->busy());
     QVERIFY((*engine)->call("list.delete", protocol::Json{{"id", id}}).has_value());
-    window.list_sync_->listChanged(window.local_playback_, QString::fromStdString(id), 0, true);
+    window.list_sync_->listChanged(window.localPlayback(), QString::fromStdString(id), 0, true);
 
     QTRY_VERIFY(window.tabForDocument(QString::fromStdString(id)) == nullptr);
     QTRY_VERIFY(!window.list_sync_->busy());
     window.persistNow(false);
     QTRY_VERIFY(!window.list_sync_->busy());
     QVERIFY(!listed(id));
+    (*engine)->close();
+}
+
+// ADR-0234: pending removals are kept by engine key now; one an older release
+// left as "l:<id>" is still carried out on connecting.
+void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto made = (*engine)->call(
+        "list.save", protocol::Json{{"name", "Closed long ago"}, {"kind", "working"},
+                                    {"items", protocol::Json::array()}});
+    QVERIFY(made.has_value());
+    const auto id = made->value("id", std::string{});
+    QSettings{}.setValue(QStringLiteral("lists/pending-removals"),
+                         QStringList{QStringLiteral("l:") + QString::fromStdString(id)});
+    const auto listed = [&engine, &id] {
+        auto all = (*engine)->call("list.all");
+        return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
+                                          [&id](const protocol::Json& list) {
+                                              return list.value("id", std::string{}) == id;
+                                          });
+    };
+    QVERIFY(listed());
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(!listed());
+    QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
 
@@ -5541,7 +5580,7 @@ void BenchMainWindowTest::muteRestoresLocalVolumeAcrossBrowsing() {
     auto* local = window.list_tabs_.front()->view;
     window.tabs_->setCurrentWidget(local);
     // The engine's volume: what the slider shows is what the engine reports.
-    const auto engine_volume = [&window] { return window.local_playback_->state().volume_percent; };
+    const auto engine_volume = [&window] { return window.localPlayback()->state().volume_percent; };
     window.volume_->setValue(37);
     QTRY_COMPARE(engine_volume(), 37);
     QTest::mouseClick(window.mute_button_, Qt::LeftButton);
@@ -5737,16 +5776,16 @@ void BenchMainWindowTest::theRemoteTabTakesTheNameItsEngineAnnounces() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QVERIFY(window.remote_catalogue_source_ != nullptr);
+    QVERIFY(window.remoteCatalogue() != nullptr);
     auto* tab = window.remoteQueueTab();
     QVERIFY(tab != nullptr);
-    const auto address = window.remote_catalogue_source_->addressName();
+    const auto address = window.remoteCatalogue()->addressName();
     QCOMPARE(displayText(tab->document.name), address);
 
     QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
-    QTRY_VERIFY_WITH_TIMEOUT(window.remote_playback_->active(), 10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.remotePlayback()->active(), 10'000);
     QTRY_VERIFY(displayText(tab->document.name) != address);
-    QCOMPARE(displayText(tab->document.name), window.remote_catalogue_source_->name());
+    QCOMPARE(displayText(tab->document.name), window.remoteCatalogue()->name());
 }
 
 // A remote engine over TCP whose host is off -- the NAS -- held a connect for
@@ -5768,8 +5807,8 @@ void BenchMainWindowTest::anUnreachableRemoteDoesNotHoldTheWindow() {
     window.show();
     QTRY_VERIFY(window.lists_restored_);
     QVERIFY2(opening.elapsed() < 2'000, QByteArray::number(opening.elapsed()).constData());
-    QVERIFY(window.remote_playback_ != nullptr);
-    QVERIFY(!window.remote_playback_->active());
+    QVERIFY(window.remotePlayback() != nullptr);
+    QVERIFY(!window.remotePlayback()->active());
 
     // And across the reconnect timer's next attempt, the event loop keeps
     // turning.
@@ -5804,8 +5843,8 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
-    QVERIFY(window.transport_ == window.local_playback_);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QVERIFY(window.transport_ == window.localPlayback());
 
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
@@ -5834,7 +5873,7 @@ void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", album[1]}}).has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds{600});
 
-    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remotePlayback(), 10'000);
     const auto id = [](const std::string& text) { return *core::StableId::parse(text); };
     QTRY_VERIFY(tab->model->rowOfEntry(id(album[0]), -1) >= 0 &&
                 tab->model->rowOfEntry(id(album[2]), -1) >= 0);
@@ -5874,7 +5913,7 @@ void BenchMainWindowTest::aListReplacedOnTheFollowedEngineMarksWhatPlays() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
 
     auto other = protocol::Client::connect(protocol::Endpoint{
         .socket = remote.socket().toStdString(), .host = {}, .port = 0, .token = {}});
@@ -5903,7 +5942,7 @@ void BenchMainWindowTest::aListReplacedOnTheFollowedEngineMarksWhatPlays() {
     // The server plays the old list's second track; the window follows it.
     const auto old_list = queue({0, 1, 2});
     QVERIFY((*other)->call("playback.play", protocol::Json{{"entry", old_list[1]}}).has_value());
-    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remote_playback_, 10'000);
+    QTRY_VERIFY_WITH_TIMEOUT(window.transport_ == window.remotePlayback(), 10'000);
     QTRY_VERIFY(marked(old_list[1]));
 
     // Replaced, and its first track played -- in one report.
@@ -5939,7 +5978,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     auto* remote_tab = window.remoteQueueTab();
     QVERIFY(remote_tab != nullptr && remote_tab->document.remote);
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
@@ -5963,14 +6002,14 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // it was started without one -- rather than by its socket or address.
     QTRY_COMPARE(sources->tabText(sources->count() - 1), QSysInfo::machineHostName());
     // And the library says so too, not the address.
-    QTRY_COMPARE(window.remote_catalogue_source_->describe(),
+    QTRY_COMPARE(window.remoteCatalogue()->describe(),
                  QStringLiteral("Library: %1").arg(QSysInfo::machineHostName()));
 
     // A folder is added to the remote's library by its path there: this
     // computer's file dialog would offer this computer's folders.
     {
         QWidget host;
-        auto* folders = window.remote_library_->createFoldersWidget(&host);
+        auto* folders = window.remoteLibrary()->createFoldersWidget(&host);
         auto* add = folders->findChild<QPushButton*>(QStringLiteral("local-library-folder-add"));
         QVERIFY(add != nullptr);
         QTimer::singleShot(0, [music] {
@@ -5982,7 +6021,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         });
         add->click();
         QTRY_VERIFY([&] {
-            const auto roots = window.remote_catalogue_source_->open()->roots();
+            const auto roots = window.remoteCatalogue()->open()->roots();
             return roots && roots->size() == 1U &&
                    roots->front().raw_path == QFile::encodeName(music).toStdString();
         }());
@@ -5990,26 +6029,26 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // The remote library fills the remote tab, from the remote's index.
     {
         persistence::LibraryScanProgress progress;
-        QVERIFY(window.remote_catalogue_source_->open()->scan({}, progress).has_value());
+        QVERIFY(window.remoteCatalogue()->open()->scan({}, progress).has_value());
     }
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && !page->entries.empty());
     window.openLocalPaths({QFile::encodeName(here).toStdString()});
     QTRY_VERIFY(window.currentListTab() != nullptr && !window.currentListTab()->document.remote &&
                 window.currentListTab()->model->rowCount() == 1);
     auto* local_tab = window.currentListTab();
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(remote_tab->model->rowCount(), 1);
     QCOMPARE(local_tab->model->rowCount(), 1);
     QVERIFY(!remote_tab->model->rows().front().title.empty());
 
     // Local plays here; the remote tab plays there and stops this one.
     window.playRow(*local_tab, 0);
-    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
+    QTRY_COMPARE(window.localPlayback()->state().status, QStringLiteral("playing"));
     window.playRow(*remote_tab, 0);
-    QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
+    QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
     window.refreshUpNext();
     QVERIFY2(window.up_next_status_->text().startsWith(QSysInfo::machineHostName() +
                                                         QStringLiteral(" · ")),
@@ -6018,7 +6057,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // added -- tagged, with their own identities -- rather than being traded
     // for the engine's bare paths.
     {
-        emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_COMPARE(remote_tab->model->rowCount(), 2);
         const auto added = remote_tab->model->rows();
         for (int wait = 0; wait < 40; ++wait) {
@@ -6033,8 +6072,8 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         }
         remote_tab->model->removeRowIndexes({1});
         window.markTabDirty(*remote_tab);
-        QTRY_VERIFY(!window.remote_playback_->settling());
-        QTRY_COMPARE(window.remote_playback_->state().queue_size, std::size_t{1});
+        QTRY_VERIFY(!window.remotePlayback()->settling());
+        QTRY_COMPARE(window.remotePlayback()->state().queue_size, std::size_t{1});
     }
     // And while the engine is slow to answer -- a remote busy scanning, as
     // gemenon was. An edit is on its way when an older state arrives, one
@@ -6051,17 +6090,17 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         const auto resume = qScopeGuard([pid] { ::kill(pid, SIGCONT); });
         remote_tab->model->appendRows({extra});
         window.markTabDirty(*remote_tab);
-        QVERIFY(window.remote_playback_->settling());
+        QVERIFY(window.remotePlayback()->settling());
         // A state from before the edit, as far as the window can tell.
         window.engine_queue_revision_ = 0;
         QElapsedTimer waited;
         waited.start();
-        emit window.remote_playback_->changed();
+        emit window.remotePlayback()->changed();
         QVERIFY2(waited.elapsed() < 1'000, "the window does not wait on a busy engine");
         QCOMPARE(remote_tab->model->rowCount(), 2);
         QCOMPARE(remote_tab->model->rows().back().entry_id, extra.entry_id);
         ::kill(pid, SIGCONT);
-        QTRY_VERIFY(!window.remote_playback_->settling());
+        QTRY_VERIFY(!window.remotePlayback()->settling());
         QTest::qWait(300);
         QCOMPARE(remote_tab->model->rowCount(), 2);
         QCOMPARE(remote_tab->model->rows().back().entry_id, extra.entry_id);
@@ -6069,12 +6108,12 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         remote_tab->model->removeRowIndexes({1});
         window.markTabDirty(*remote_tab);
     }
-    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("stopped"));
-    QVERIFY(window.transport_ == window.remote_playback_);
+    QTRY_COMPARE(window.localPlayback()->state().status, QStringLiteral("stopped"));
+    QVERIFY(window.transport_ == window.remotePlayback());
     // And back.
     window.playRow(*local_tab, 0);
-    QTRY_COMPARE(window.local_playback_->state().status, QStringLiteral("playing"));
-    QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("stopped"));
+    QTRY_COMPARE(window.localPlayback()->state().status, QStringLiteral("playing"));
+    QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("stopped"));
 
     // Up Next is named by the engine it belongs to.
     {
@@ -6085,9 +6124,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                  qPrintable(status->text()));
     }
     // Up Next holds one engine's asks.
-    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, true);
+    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, EngineKey::remote());
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
-    window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, false);
+    window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, EngineKey::local());
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
     window.playback_.requests.clear();
 
@@ -6108,7 +6147,7 @@ void BenchMainWindowTest::theDeviceMenuChoosesAnOutputAgent() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
     auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-device-menu"));
     QVERIFY(menu != nullptr);
     const auto output_action = [menu](const QString& id) {
@@ -6315,9 +6354,9 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6326,9 +6365,9 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     QVERIFY(tab != nullptr);
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().album_rating_hash.empty());
     const auto track_hash = tab->model->rows().front().rating_hash;
@@ -6349,14 +6388,14 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
 
     // Stored where the track lives, so the remote's own queries see it...
     const auto remote_ratings = [&window, &track_hash, &album_hash] {
-        auto found = window.remote_catalogue_source_->open()->ratings({track_hash, album_hash});
+        auto found = window.remoteCatalogue()->open()->ratings({track_hash, album_hash});
         return found ? *found : std::vector<unsigned>{};
     };
     QTRY_COMPARE(remote_ratings(), (std::vector<unsigned>{6U, 8U}));
     // ...and read back from there onto the tab's cover.
     QTRY_COMPARE(tab->model->rows().front().album_rating, 8U);
     // Not on this computer's engine, which does not have the track.
-    const auto here = window.catalogue_source_->open()->ratings({track_hash, album_hash});
+    const auto here = window.localCatalogue()->open()->ratings({track_hash, album_hash});
     QVERIFY(here.has_value());
     QCOMPARE(*here, (std::vector<unsigned>{0U, 0U}));
 }
@@ -6375,9 +6414,9 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6386,9 +6425,9 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     QVERIFY(tab != nullptr);
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().rating_hash.empty());
     const auto hash = tab->model->rows().front().rating_hash;
@@ -6420,9 +6459,9 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6438,7 +6477,7 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     auto* library = dialog->findChild<QComboBox*>(QStringLiteral("dynamic-library"));
     QVERIFY(library != nullptr);
     QCOMPARE(library->count(), 2);
-    QVERIFY(dialog->remote());
+    QVERIFY(!dialog->engine().isLocal());
     dialog->findChild<QLineEdit*>(QStringLiteral("dynamic-query"))->setText(QStringLiteral("ALL"));
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     const auto remote_path = QFile::encodeName(music + QStringLiteral("/art.flac")).toStdString();
@@ -6454,7 +6493,7 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
 
     // This computer's library, which has no such track.
     library->setCurrentIndex(library->findData(false));
-    QVERIFY(!dialog->remote());
+    QVERIFY(dialog->engine().isLocal());
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->click();
     QTRY_VERIFY(dialog->findChild<QPushButton*>(QStringLiteral("dynamic-refresh"))->isEnabled());
     QVERIFY(std::ranges::none_of(dialog->tracks(), [&remote_path](const auto& row) {
@@ -6495,9 +6534,9 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
         BenchMainWindow window;
         window.show();
         QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
-        QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+        QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
         {
-            auto catalogue = window.remote_catalogue_source_->open();
+            auto catalogue = window.remoteCatalogue()->open();
             QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
             persistence::LibraryScanProgress progress;
             QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6506,17 +6545,19 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
         QVERIFY(tab != nullptr);
         persistence::LibraryQuery tracks;
         tracks.kind = persistence::LibraryEntryKind::track;
-        const auto page = window.remote_catalogue_source_->open()->query(tracks);
+        const auto page = window.remoteCatalogue()->open()->query(tracks);
         QVERIFY(page && page->entries.size() == 2U);
-        emit window.remote_library_->actionRequested({page->entries[0]}, LocalLibraryAction::replace);
-        QTRY_COMPARE(window.remote_playback_->state().status, QStringLiteral("playing"));
-        window.remote_playback_->setVolume(0);
+        emit window.remoteLibrary()->actionRequested({page->entries[0]},
+                                                     LocalLibraryAction::replace);
+        QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
+        window.remotePlayback()->setVolume(0);
         std::vector<LocalTrackRow> asked;
-        window.remote_library_->resolveEntryRows(
-            {page->entries[1]}, [&asked](std::vector<LocalTrackRow> rows) { asked = std::move(rows); });
+        window.remoteLibrary()->resolveEntryRows(
+            {page->entries[1]},
+            [&asked](std::vector<LocalTrackRow> rows) { asked = std::move(rows); });
         QTRY_COMPARE(asked.size(), std::size_t{1});
         asked_title = asked.front().title;
-        window.enqueueLocalRequests(asked, -1, true);
+        window.enqueueLocalRequests(asked, -1, EngineKey::remote());
         // An ask is an occurrence of its own, with an identity of its own.
         QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
         asked_id = window.playback_.requests.pending().front().source.entry_id.to_string();
@@ -6531,14 +6572,14 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_ && window.up_next_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
     QCOMPARE(window.playback_.requests.pending().front().source.entry_id.to_string(), asked_id);
-    QVERIFY(window.up_next_remote_);
+    QVERIFY(window.up_next_engine_ == EngineKey::remote());
     QVERIFY(engine_requests() == std::vector<std::string>{asked_id});
     // Played, it is named in the header by its title, and leaves the waiting list.
-    QTRY_VERIFY(window.transport_ == window.remote_playback_);
-    window.remote_playback_->next();
+    QTRY_VERIFY(window.transport_ == window.remotePlayback());
+    window.remotePlayback()->next();
     QTRY_VERIFY(window.playback_.requests.pending().empty());
     QTRY_COMPARE(window.now_playing_->text(), QString::fromStdString(asked_title));
     // The title bar -- what a taskbar shows -- names it too, and lets go of
@@ -6546,7 +6587,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     QVERIFY2(window.windowTitle().contains(QString::fromStdString(asked_title)) &&
                  window.windowTitle().endsWith(QStringLiteral("Trackknife")),
              qPrintable(window.windowTitle()));
-    window.remote_playback_->stop();
+    window.remotePlayback()->stop();
     QTRY_COMPARE(window.windowTitle(), QStringLiteral("Trackknife"));
 }
 
@@ -6566,9 +6607,9 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6578,15 +6619,15 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
     window.tabs_->setCurrentWidget(tab->view);
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
     const auto album_name = QString::fromStdString(page->entries.front().album);
     const auto artist_name = QString::fromStdString(page->entries.front().artist);
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
-    window.remote_library_->refreshLibrary();
+    window.remoteLibrary()->refreshLibrary();
 
-    auto* tree = window.remote_library_->findChild<QTreeView*>();
+    auto* tree = window.remoteLibrary()->findChild<QTreeView*>();
     for (const bool album : {true, false}) {
         const auto position = tab->view->visualRect(tab->model->index(0, local_title_column)).center();
         QVERIFY(QMetaObject::invokeMethod(tab->view, "customContextMenuRequested",
@@ -6606,7 +6647,7 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
         QTRY_VERIFY(tree->currentIndex().data().toString().contains(album ? album_name
                                                                           : artist_name));
     }
-    window.remote_playback_->stop();
+    window.remotePlayback()->stop();
     QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
@@ -6623,9 +6664,9 @@ void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6635,15 +6676,15 @@ void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
     window.tabs_->setCurrentWidget(tab->view);
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
     // "Replace list and play" -- from the menu, or Shift+Enter in the quick
     // album popup -- plays, on the remote as it does here.
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
-    QTRY_COMPARE_WITH_TIMEOUT(window.remote_playback_->state().status, QStringLiteral("playing"),
+    QTRY_COMPARE_WITH_TIMEOUT(window.remotePlayback()->state().status, QStringLiteral("playing"),
                               10'000);
-    window.remote_playback_->stop();
+    window.remotePlayback()->stop();
 }
 
 void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
@@ -6660,9 +6701,9 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     {
-        auto catalogue = window.remote_catalogue_source_->open();
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6676,9 +6717,9 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     // With the buttons: tagged from the start, and a cover from the engine.
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
-    const auto page = window.remote_catalogue_source_->open()->query(albums);
+    const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
     QTRY_VERIFY(covered(0));
@@ -6838,7 +6879,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     window.applyCommittedMetadata(committed);
     const auto remote_art = QFile::encodeName(art).toStdString();
     QTRY_VERIFY([&] {
-        const auto indexed = window.remote_catalogue_source_->open()->cached_tracks({remote_art});
+        const auto indexed = window.remoteCatalogue()->open()->cached_tracks({remote_art});
         return indexed && indexed->front().facts.title == "Metadata Fixture";
     }());
     QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
@@ -6874,8 +6915,8 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
         BenchMainWindow window;
         window.show();
         QTRY_VERIFY(window.lists_restored_);
-        QTRY_VERIFY(window.remote_playback_ != nullptr && window.remote_playback_->active());
-        auto catalogue = window.remote_catalogue_source_->open();
+        QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+        auto catalogue = window.remoteCatalogue()->open();
         QVERIFY(catalogue->add_root(QFile::encodeName(music).toStdString()).has_value());
         persistence::LibraryScanProgress progress;
         QVERIFY(catalogue->scan({}, progress).has_value());
@@ -6883,7 +6924,7 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
         albums.kind = persistence::LibraryEntryKind::album;
         const auto page = catalogue->query(albums);
         QVERIFY(page && page->entries.size() == 1U);
-        emit window.remote_library_->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_VERIFY(covered(remote_tab(window)));
         window.persistNow(false);
         QVERIFY(window.close());
@@ -6916,8 +6957,8 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     BenchMainWindow window;
     window.show();
     QTRY_VERIFY(window.lists_restored_);
-    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
-    QVERIFY(!window.local_playback_->scrobblesItself());
+    QTRY_VERIFY(window.localPlayback() != nullptr && window.localPlayback()->active());
+    QVERIFY(!window.localPlayback()->scrobblesItself());
 
     QWidget host;
     auto* page = window.buildLastFmSettings(&host);
@@ -6927,7 +6968,7 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     QTRY_COMPARE(state->text(), QStringLiteral("Not scrobbling"));
     use->click();
     QTRY_COMPARE(state->text(), QStringLiteral("Scrobbling as listener"));
-    QTRY_VERIFY(window.local_playback_->scrobblesItself());
+    QTRY_VERIFY(window.localPlayback()->scrobblesItself());
     // The engine has this account now: handing it over again would do nothing.
     QTRY_COMPARE(use->text(), QStringLiteral("In use"));
     QVERIFY(!use->isEnabled());

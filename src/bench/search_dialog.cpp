@@ -84,8 +84,8 @@ constexpr int result_index_role = Qt::UserRole + 1;
 
 SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                            TechnicalsSink technicals_sink, QWidget* parent,
-                           const CatalogueSource* remote, QString remote_label)
-    : QDialog(parent), catalogues_(&catalogues), remote_(remote),
+                           std::vector<OtherLibrary> others)
+    : QDialog(parent), catalogues_(&catalogues), others_(std::move(others)),
       tab_access_(std::move(tab_access)), technicals_sink_(std::move(technicals_sink)) {
     setWindowTitle(QStringLiteral("Search"));
     setObjectName(QStringLiteral("bench-search-dialog"));
@@ -98,11 +98,11 @@ SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_acce
     scope_->setObjectName(QStringLiteral("bench-search-scope"));
     scope_->addItem(QStringLiteral("This computer"), QStringLiteral("local"));
     scope_->addItem(QStringLiteral("Current tab"), QStringLiteral("tab"));
-    if (remote_ != nullptr) {
-        // ADR-0227: the remote's library is searched there, and what is found
-        // opens in a remote tab.
-        scope_->addItem(remote_label.isEmpty() ? QStringLiteral("Remote library") : remote_label,
-                        QStringLiteral("remote"));
+    // ADR-0227: another engine's library is searched there, and what is
+    // found opens in a tab of that engine.
+    for (const auto& other : others_) {
+        scope_->addItem(other.name.isEmpty() ? QStringLiteral("Remote library") : other.name,
+                        other.engine.text());
     }
     top->addWidget(scope_);
     input_ = new QLineEdit(this);
@@ -240,11 +240,11 @@ SearchDialog::SearchDialog(const CatalogueSource& catalogues, TabAccess tab_acce
 
 void SearchDialog::focusInput() { input_->setFocus(Qt::ShortcutFocusReason); }
 
-void SearchDialog::followLibrary(const bool remote) {
+void SearchDialog::followLibrary(const EngineKey& engine) {
     if (!databaseScope()) {
         return;
     }
-    const auto wanted = scope_->findData(remote ? QStringLiteral("remote") : QStringLiteral("local"));
+    const auto wanted = scope_->findData(engine.text());
     if (wanted >= 0 && wanted != scope_->currentIndex()) {
         scope_->setCurrentIndex(wanted);
     }
@@ -538,12 +538,15 @@ bool SearchDialog::databaseScope() const {
     return scope_->currentData().toString() != QStringLiteral("tab");
 }
 
-bool SearchDialog::remoteScope() const {
-    return scope_->currentData().toString() == QStringLiteral("remote");
+EngineKey SearchDialog::scopeEngine() const {
+    const auto scope = scope_->currentData().toString();
+    return scope == QStringLiteral("tab") ? EngineKey::local() : EngineKey::fromText(scope);
 }
 
 const CatalogueSource* SearchDialog::scopeCatalogues() const {
-    return remoteScope() ? remote_ : catalogues_;
+    const auto engine = scopeEngine();
+    const auto other = std::ranges::find(others_, engine, &OtherLibrary::engine);
+    return other != others_.end() ? other->catalogues : catalogues_;
 }
 
 void SearchDialog::scheduleSearch() {
@@ -591,7 +594,7 @@ void SearchDialog::startSearch() {
         return;
     }
     result_query_ = input_->text().trimmed();
-    result_remote_ = remoteScope();
+    result_engine_ = scopeEngine();
     if (databaseScope() && !query_mode_->isChecked()) {
         // Words in a library: what the library panel's filter finds, by kind
         // -- artists, albums, tracks -- each a short indexed query, so the
@@ -929,7 +932,7 @@ void SearchDialog::openResults(const LocalLibraryAction action, const bool selec
     const auto name = QStringLiteral("Search: %1").arg(result_query_);
     if (!selection_only) {
         if (!result_rows_.empty()) {
-            emit rowsRequested(name, result_rows_, action, result_remote_);
+            emit rowsRequested(name, result_rows_, action, result_engine_);
         }
         return;
     }
@@ -971,13 +974,13 @@ void SearchDialog::openResults(const LocalLibraryAction action, const bool selec
         auto* watcher = new QFutureWatcher<std::vector<LocalTrackRow>>(this);
         connect(watcher, &QFutureWatcherBase::finished, this,
                 [this, watcher, name, action, picked = std::move(rows),
-                 remote = result_remote_]() mutable {
+                 engine = result_engine_]() mutable {
                     watcher->deleteLater();
                     auto resolved = watcher->result();
                     resolved.insert(resolved.end(), std::make_move_iterator(picked.begin()),
                                     std::make_move_iterator(picked.end()));
                     if (!resolved.empty()) {
-                        emit rowsRequested(name, std::move(resolved), action, remote);
+                        emit rowsRequested(name, std::move(resolved), action, engine);
                     }
                 });
         watcher->setFuture(QtConcurrent::run([catalogues = scopeCatalogues(),
@@ -1009,7 +1012,7 @@ void SearchDialog::openResults(const LocalLibraryAction action, const bool selec
         return;
     }
     if (!rows.empty()) {
-        emit rowsRequested(name, std::move(rows), action, result_remote_);
+        emit rowsRequested(name, std::move(rows), action, result_engine_);
     }
 }
 

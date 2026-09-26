@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/engine_key.hpp"
+
 #include "bench/local_list_model.hpp"
 #include "trackknife/persistence/local_library.hpp"
 
@@ -21,10 +23,14 @@ namespace trackknife::bench {
 
 [[nodiscard]] QIcon albumShuffleIcon(const QPalette& palette);
 
-// Whether a track view's rows are files on the remote engine's machine
-// (ADR-0227): a remote tab's, or dynamic results drawn from its library.
-[[nodiscard]] inline bool isRemoteView(const QObject* view) {
-    return view != nullptr && view->property("bench-remote-list").toBool();
+// ADR-0227, ADR-0234: the engine whose files a track view lists, as its maker marked
+// it; a view nobody marked lists this computer's.
+[[nodiscard]] inline EngineKey engineOfView(const QObject* view) {
+    const auto text = view != nullptr ? view->property("bench-engine").toString() : QString{};
+    return text.isEmpty() ? EngineKey::local() : EngineKey::fromText(text);
+}
+inline void markViewEngine(QObject* view, const EngineKey& engine) {
+    view->setProperty("bench-engine", engine.text());
 }
 
 struct TrackColumnSpec {

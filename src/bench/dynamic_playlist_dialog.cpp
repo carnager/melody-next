@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/dynamic_playlist_dialog.hpp"
+
+#include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/queue_table_view.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -40,15 +42,14 @@ QList<QByteArray> resultKeys(QAbstractItemModel* model) {
     return keys;
 }
 } // namespace
-DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString remote_label,
+DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Library> libraries,
                                              LibrarySearch search, QWidget* parent)
     : QDialog(parent), profile_(std::move(profile)),
       service_(new DynamicPlaylistService(
           [this, search = std::move(search)](query::CompiledTkq compiled,
                                              core::CancellationToken cancellation,
                                              DynamicPlaylistService::Completion completion) {
-              search(remote(), std::move(compiled), std::move(cancellation),
-                     std::move(completion));
+              search(engine(), std::move(compiled), std::move(cancellation), std::move(completion));
           },
           this)) {
     setObjectName(QStringLiteral("bench-dynamic-playlists"));
@@ -69,9 +70,11 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString remote_lab
     library_ = new QComboBox(this);
     library_->setObjectName(QStringLiteral("dynamic-library"));
     library_->setAccessibleName(QStringLiteral("Library"));
-    library_->addItem(QStringLiteral("This computer"), false);
-    if (!remote_label.isEmpty()) {
-        library_->addItem(remote_label, true);
+    if (libraries.empty()) {
+        libraries.push_back({EngineKey::local(), QStringLiteral("This computer")});
+    }
+    for (const auto& library : libraries) {
+        library_->addItem(library.name, library.engine.text());
     }
     auto* catalog_row = new QHBoxLayout;
     catalog_ = new QComboBox(this);
@@ -258,8 +261,8 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString remote_lab
             [this] { emit snapshotRequested(name_->text().trimmed(), tracks_); });
     connect(catalog_, &QComboBox::activated, this, [this](int) { loadSelection(); });
     connect(library_, &QComboBox::currentIndexChanged, this, [this](int) {
-        view_->setProperty("bench-remote-list", remote());
-        emit libraryChosen(remote());
+        markViewEngine(view_, engine());
+        emit libraryChosen(engine());
         // The same definition, run against the other library.
         const bool saved_rules = !catalog_->currentData().toString().isEmpty() &&
                                  source_->currentData() == QStringLiteral("rules");
@@ -334,9 +337,12 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, QString remote_lab
         status_->setText(QString::fromStdString(loaded.error().message));
 }
 DynamicPlaylistDialog::~DynamicPlaylistDialog() { service_->cancel(); }
-bool DynamicPlaylistDialog::remote() const { return library_->currentData().toBool(); }
-void DynamicPlaylistDialog::followLibrary(const bool remote) {
-    const auto wanted = library_->findData(remote);
+EngineKey DynamicPlaylistDialog::engine() const {
+    const auto text = library_->currentData().toString();
+    return text.isEmpty() ? EngineKey::local() : EngineKey::fromText(text);
+}
+void DynamicPlaylistDialog::followLibrary(const EngineKey& engine) {
+    const auto wanted = library_->findData(engine.text());
     if (wanted >= 0)
         library_->setCurrentIndex(wanted);
 }

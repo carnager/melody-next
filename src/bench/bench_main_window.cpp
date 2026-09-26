@@ -47,8 +47,8 @@ void BenchMainWindow::stopBackgroundWork() {
     if (list_edit_bar_ != nullptr) {
         list_edit_bar_->cancel();
     }
-    if (local_library_ != nullptr) {
-        local_library_->stop();
+    if (localLibrary() != nullptr) {
+        localLibrary()->stop();
     }
     probe_cancellation_.request_cancellation();
     metadata_operation_cancellation_.request_cancellation();
@@ -238,7 +238,7 @@ bool BenchMainWindow::handleTabFileDrop(QDropEvent* drop, const int tab_index) {
     }
     // Whose files they are: a library says; a file manager's are this
     // computer's.
-    const bool remote_files = library != nullptr && library->remote();
+    const auto files_engine = library != nullptr ? library->engine() : EngineKey::local();
     auto* view = tab_index < 0 ? nullptr : qobject_cast<QTableView*>(tabs_->widget(tab_index));
     auto* target =
         view == nullptr ? nullptr : tabForDocument(view->property("bench-document-id").toString());
@@ -257,16 +257,16 @@ bool BenchMainWindow::handleTabFileDrop(QDropEvent* drop, const int tab_index) {
                                                       .pinned = false,
                                                       .dirty = false,
                                                       .items = {},
-                                                      .remote = remote_files},
+                                                      .remote = !files_engine.isLocal()},
                             true);
         schedulePersist();
     }
     tabs_->setCurrentWidget(target->view);
     const auto id = QString::fromStdString(target->document.id.to_string());
     const QPointer<BenchMainWindow> window{this};
-    const auto place = [window, id, remote_files](std::vector<std::string> paths) {
+    const auto place = [window, id, files_engine](std::vector<std::string> paths) {
         if (window) {
-            window->addDroppedPaths(id, remote_files, std::move(paths));
+            window->addDroppedPaths(id, files_engine, std::move(paths));
         }
     };
     if (library != nullptr) {
@@ -279,20 +279,20 @@ bool BenchMainWindow::handleTabFileDrop(QDropEvent* drop, const int tab_index) {
     return true;
 }
 
-void BenchMainWindow::addDroppedPaths(const QString& id, const bool remote_files,
+void BenchMainWindow::addDroppedPaths(const QString& id, const EngineKey& files_engine,
                                       std::vector<std::string> paths) {
     auto* destination = tabForDocument(id);
     if (destination == nullptr) {
         return;
     }
-    const bool into_remote = destination->document.remote;
-    if (remote_files != into_remote) {
-        paths = crossEnginePaths(std::move(paths), into_remote);
+    const auto into = EngineKey::of(destination->document);
+    if (files_engine != into) {
+        paths = crossEnginePaths(std::move(paths), files_engine, into);
     }
     if (paths.empty()) {
         return;
     }
-    if (into_remote) {
+    if (!into.isLocal()) {
         insertRemotePaths(*destination, std::move(paths), -1);
     } else {
         startDiscovery(std::move(paths), id, -1);
@@ -301,7 +301,8 @@ void BenchMainWindow::addDroppedPaths(const QString& id, const bool remote_files
 
 // ADR-0233: a drop on a list in the lists pane. One open here takes it as
 // its tab would; one that is not is opened first, and then given it.
-bool BenchMainWindow::dropOnPanelList(QDropEvent* drop, const bool remote, const QString& id) {
+bool BenchMainWindow::dropOnPanelList(QDropEvent* drop, const EngineKey& engine,
+                                      const QString& id) {
     auto* source = qobject_cast<QAbstractItemView*>(drop->source());
     if (auto* tab = tabForDocument(id); tab != nullptr) {
         return handleTrackDropOnTab(source, drop, tabs_->indexOf(tab->view));
@@ -343,21 +344,21 @@ bool BenchMainWindow::dropOnPanelList(QDropEvent* drop, const bool remote, const
             indices.push_back(index.row());
         }
         const QPointer<QTableView> guarded{source_table};
-        openEngineList(remote, id, [window, guarded, indices, id] {
+        openEngineList(engine, id, [window, guarded, indices, id] {
             if (window && guarded) {
                 static_cast<void>(window->transferRows(guarded, indices, id, false, -1));
             }
         });
         return true;
     }
-    const bool remote_files = library != nullptr && library->remote();
-    const auto place = [window, remote, id, remote_files](std::vector<std::string> paths) {
+    const auto files_engine = library != nullptr ? library->engine() : EngineKey::local();
+    const auto place = [window, engine, id, files_engine](std::vector<std::string> paths) {
         if (!window) {
             return;
         }
-        window->openEngineList(remote, id, [window, id, remote_files, paths = std::move(paths)] {
+        window->openEngineList(engine, id, [window, id, files_engine, paths = std::move(paths)] {
             if (window) {
-                window->addDroppedPaths(id, remote_files, paths);
+                window->addDroppedPaths(id, files_engine, paths);
             }
         });
     };

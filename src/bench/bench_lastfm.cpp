@@ -141,7 +141,7 @@ void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel*
                 }
                 // The engines this window plays on may scrobble now: it
                 // stops crediting them itself.
-                for (auto* playback : {local_playback_, remote_playback_}) {
+                for (auto* playback : {localPlayback(), remotePlayback()}) {
                     if (playback != nullptr) {
                         playback->refreshScrobbling();
                     }
@@ -328,12 +328,12 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         connect(use, &QPushButton::clicked, this,
                 [this, endpoint, state, use] { handOverLastFm(endpoint, state, use); });
     };
-    if (catalogue_source_ && catalogue_source_->endpoint()) {
-        add_engine(QStringLiteral("This computer"), *catalogue_source_->endpoint(),
+    if (localCatalogue() && localCatalogue()->endpoint()) {
+        add_engine(QStringLiteral("This computer"), *localCatalogue()->endpoint(),
                    QStringLiteral("lastfm-engine-local"));
     }
-    if (remote_catalogue_source_ && remote_catalogue_source_->endpoint()) {
-        add_engine(remote_catalogue_source_->name(), *remote_catalogue_source_->endpoint(),
+    if (remoteCatalogue() && remoteCatalogue()->endpoint()) {
+        add_engine(remoteCatalogue()->name(), *remoteCatalogue()->endpoint(),
                    QStringLiteral("lastfm-engine-remote"));
     }
     auto* another = new QPushButton(QStringLiteral("Another engine…"), engines);

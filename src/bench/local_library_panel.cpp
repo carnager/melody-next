@@ -157,20 +157,21 @@ class LibraryModel final : public QStandardItemModel {
             std::ranges::none_of(entries, [](const auto& entry) { return entry.available > 0U; })) {
             return nullptr;
         }
-        const bool remote = panel_ && panel_->remote();
+        const auto engine = panel_ ? panel_->engine() : EngineKey::local();
         // The entries themselves too, for a place that wants tagged rows
         // rather than paths: Up Next.
         QVariantList carried;
         for (const auto& entry : entries) {
             carried.push_back(QVariant::fromValue(entry));
         }
-        auto* mime = new ui::LocalFilesMimeData{[panel = panel_, entries = std::move(entries)](
-                                              ui::LocalFilesMimeData::Completion done) {
-                                              if (panel) {
-                                                  panel->resolveEntries(entries, std::move(done));
-                                              }
-                                          },
-                                          remote};
+        auto* mime =
+            new ui::LocalFilesMimeData{[panel = panel_, entries = std::move(entries)](
+                                           ui::LocalFilesMimeData::Completion done) {
+                                           if (panel) {
+                                               panel->resolveEntries(entries, std::move(done));
+                                           }
+                                       },
+                                       engine};
         mime->setProperty(library_entries_property, carried);
         return mime;
     }
@@ -183,8 +184,9 @@ class LibraryModel final : public QStandardItemModel {
 
 } // namespace
 
-LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, QWidget* parent)
-    : QWidget(parent), catalogues_(&catalogues) {
+LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKey engine,
+                                     QWidget* parent)
+    : QWidget(parent), catalogues_(&catalogues), engine_(std::move(engine)) {
     setObjectName(QStringLiteral("bench-local-library"));
     pool_.setMaxThreadCount(2);
     artwork_pool_.setMaxThreadCount(1);
@@ -588,7 +590,7 @@ void LocalLibraryPanel::locatePath(std::string raw_path, bool album) {
                  return;
              }
              if (outcome.page.entries.empty()) {
-                 status_->setText(remote()
+                 status_->setText(!engine_.isLocal()
                                       ? tr("This file is not in this library yet; it is found "
                                            "after the engine's next scan.")
                                       : tr("This file is not in the local library. Add its folder "
@@ -1302,16 +1304,15 @@ QWidget* LocalLibraryPanel::createFoldersWidget(QWidget* parent) {
     widget->setObjectName(QStringLiteral("local-library-folders-settings"));
     folders_widget_ = widget;
     auto* layout = new QVBoxLayout(widget);
-    const bool remote =
-        catalogues_ != nullptr && catalogues_->role() == CatalogueSource::Role::remote;
     auto* explanation = new QLabel(
-        remote ? tr("Folders on %1 for its engine to index. Give each path as that machine "
-                    "sees it. Folder changes are saved immediately. Removing a folder leaves its "
-                    "files untouched.")
-                     .arg(catalogues_->name())
-               : tr("Choose the folders to browse and search as your local music library. "
-                    "Folder changes are saved immediately. Removing a folder leaves its files "
-                    "untouched. "),
+        !engine_.isLocal() && catalogues_ != nullptr
+            ? tr("Folders on %1 for its engine to index. Give each path as that machine "
+                 "sees it. Folder changes are saved immediately. Removing a folder leaves its "
+                 "files untouched.")
+                  .arg(catalogues_->name())
+            : tr("Choose the folders to browse and search as your local music library. "
+                 "Folder changes are saved immediately. Removing a folder leaves its files "
+                 "untouched. "),
         widget);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);

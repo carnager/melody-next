@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "uicommon/engine_key.hpp"
+
 #include <QMimeData>
 
 #include <functional>
@@ -19,18 +21,18 @@ class LocalFilesMimeData final : public QMimeData {
     using Resolver = std::function<void(Completion)>;
     static QString mimeType() { return QStringLiteral("application/x-trackknife-local-files"); }
 
-    // `remote`: the paths are a remote engine's (ADR-0227), which only a
-    // tab of that engine can take.
-    explicit LocalFilesMimeData(Resolver resolver, const bool remote = false)
-        : resolver_(std::move(resolver)), remote_(remote) {
+    // `engine`: whose paths these are (ADR-0227, ADR-0234) -- a list of that
+    // engine takes them as they are; another has them mapped, or cannot.
+    explicit LocalFilesMimeData(Resolver resolver, EngineKey engine = EngineKey::local())
+        : resolver_(std::move(resolver)), engine_(std::move(engine)) {
         setData(mimeType(), QByteArrayLiteral("1"));
     }
     void resolve(Completion completion) const { resolver_(std::move(completion)); }
-    [[nodiscard]] bool remote() const noexcept { return remote_; }
+    [[nodiscard]] const EngineKey& engine() const noexcept { return engine_; }
 
   private:
     Resolver resolver_;
-    bool remote_{false};
+    EngineKey engine_;
 };
 
 } // namespace trackknife::ui

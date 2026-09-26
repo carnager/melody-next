@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/engine_key.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -9,6 +10,7 @@
 #include <QPointer>
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -41,9 +43,9 @@ class EngineListSync final : public QObject {
   public:
     explicit EngineListSync(QObject* parent = nullptr);
 
-    // The connections lists go to. Either may be null: no remote engine, or
-    // none yet.
-    void setEngines(EnginePlayback* local, EnginePlayback* remote);
+    // ADR-0234: the connection an engine's lists go to; null, it has none
+    // (no longer, or not yet).
+    void setEngine(const EngineKey& key, EnginePlayback* playback);
     // After every save of the workspace.
     void update(const std::vector<persistence::ListDocument>& documents);
     // An engine connected, or connected again: compared anew before anything
@@ -61,7 +63,7 @@ class EngineListSync final : public QObject {
     // A list as list.get answers it, in the window's terms; empty for an
     // answer that is not one.
     [[nodiscard]] static std::optional<persistence::ListDocument>
-    documentFromAnswer(const protocol::Json& answer, bool remote);
+    documentFromAnswer(const protocol::Json& answer, const EngineKey& engine);
     // A list the window has just opened from its engine, as it is there: not
     // sent back, since that is what it already is.
     void opened(const persistence::ListDocument& document, std::uint64_t revision);
@@ -87,7 +89,7 @@ class EngineListSync final : public QObject {
         // The window's version at its last save.
         std::optional<std::size_t> local;
         bool working{true};
-        bool remote{false};
+        EngineKey engine;
         bool dirty{false};
         bool in_flight{false};
         // Changed again while being sent: sent again when the answer comes.
@@ -99,34 +101,33 @@ class EngineListSync final : public QObject {
         std::optional<std::uint64_t> revision;
     };
     struct Engine {
+        QPointer<EnginePlayback> playback;
         bool compared{false};
         bool comparing{false};
         int outstanding{0};
     };
 
-    [[nodiscard]] EnginePlayback* engineFor(bool remote) const;
-    [[nodiscard]] Engine& stateFor(bool remote) { return remote ? remote_state_ : local_state_; }
-    void compare(bool remote);
-    void compared(bool remote);
-    void fetch(const std::string& id, bool remote, bool comparing);
+    [[nodiscard]] EnginePlayback* engineFor(const EngineKey& key) const;
+    [[nodiscard]] Engine& stateFor(const EngineKey& key);
+    [[nodiscard]] EngineKey keyOf(const EnginePlayback* playback) const;
+    void compare(const EngineKey& key);
+    void compared(const EngineKey& key);
+    void fetch(const std::string& id, const EngineKey& key, bool comparing);
     void send(const persistence::ListDocument& document, std::size_t fingerprint);
-    void remove(const std::string& id, bool remote);
-    void flushRemovals(bool remote);
+    void remove(const std::string& id, const EngineKey& key);
+    void flushRemovals(const EngineKey& key);
     void storeRemovals() const;
 
-    QPointer<EnginePlayback> local_;
-    QPointer<EnginePlayback> remote_;
-    Engine local_state_;
-    Engine remote_state_;
+    std::map<EngineKey, Engine> engines_;
     std::unordered_map<std::string, Known> known_;
     // The newest of each document asked to be sent while one was in flight.
     std::unordered_map<std::string, persistence::ListDocument> waiting_;
     int in_flight_{0};
-    // Working lists closed here, by engine (remote or not) and id, until
+    // Working lists closed here, by engine and id, until
     // their engine has deleted them; kept in Settings under this key.
     static constexpr auto removals_key = "lists/pending-removals";
-    std::set<std::pair<bool, std::string>> removals_;
-    std::set<std::pair<bool, std::string>> removing_;
+    std::set<std::pair<EngineKey, std::string>> removals_;
+    std::set<std::pair<EngineKey, std::string>> removing_;
 };
 
 } // namespace trackknife::bench

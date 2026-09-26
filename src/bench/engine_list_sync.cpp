@@ -94,7 +94,7 @@ using protocol::Json;
 // saved itself for the same rows. An entry the engine could not describe is
 // left out.
 [[nodiscard]] std::optional<persistence::ListDocument> document_from(const Json& answer,
-                                                                     const bool remote) {
+                                                                     const EngineKey& engine) {
     auto id = core::StableId::parse(answer.value("id", std::string{}));
     if (!id) {
         return std::nullopt;
@@ -107,7 +107,7 @@ using protocol::Json;
                                        .pinned = false,
                                        .dirty = false,
                                        .items = {},
-                                       .remote = remote};
+                                       .remote = !engine.isLocal()};
     for (const auto& value : answer.value("items", Json::array())) {
         auto path = protocol::decode_raw_path(value.value("path", std::string{}));
         auto entry = core::StableId::parse(value.value("entry", std::string{}));
@@ -167,46 +167,71 @@ using protocol::Json;
 
 EngineListSync::EngineListSync(QObject* parent) : QObject(parent) {
     for (const auto& pending : QSettings{}.value(QLatin1String(removals_key)).toStringList()) {
-        if (pending.size() > 2 && pending.at(1) == QLatin1Char(':')) {
-            removals_.emplace(pending.front() == QLatin1Char('r'), pending.mid(2).toStdString());
+        // "engine<TAB>id"; before engines had keys, "r:id" or "l:id".
+        if (const auto tab = pending.indexOf(QLatin1Char('\t')); tab > 0) {
+            removals_.emplace(EngineKey::fromText(pending.left(tab)),
+                              pending.mid(tab + 1).toStdString());
+        } else if (pending.size() > 2 && pending.at(1) == QLatin1Char(':')) {
+            removals_.emplace(pending.front() == QLatin1Char('r') ? EngineKey::remote()
+                                                                  : EngineKey::local(),
+                              pending.mid(2).toStdString());
         }
     }
 }
 
 std::optional<persistence::ListDocument>
-EngineListSync::documentFromAnswer(const protocol::Json& answer, const bool remote) {
-    return document_from(answer, remote);
+EngineListSync::documentFromAnswer(const protocol::Json& answer, const EngineKey& engine) {
+    return document_from(answer, engine);
 }
 
 void EngineListSync::opened(const persistence::ListDocument& document,
                             const std::uint64_t revision) {
     auto& known = known_[document.id.to_string()];
     known.working = document.kind != persistence::ListKind::saved;
-    known.remote = document.remote;
+    known.engine = EngineKey::of(document);
     known.dirty = false;
     known.fingerprint = fingerprint(document);
     known.local = known.fingerprint;
     known.revision = revision;
     // Open again: not to be deleted after all.
-    if (removals_.erase({document.remote, document.id.to_string()}) > 0) {
+    if (removals_.erase({EngineKey::of(document), document.id.to_string()}) > 0) {
         storeRemovals();
     }
 }
 
-void EngineListSync::setEngines(EnginePlayback* local, EnginePlayback* remote) {
-    if (remote_.data() != remote) {
-        remote_state_ = Engine{};
+void EngineListSync::setEngine(const EngineKey& key, EnginePlayback* playback) {
+    if (playback == nullptr) {
+        engines_.erase(key);
+        return;
     }
-    if (local_.data() != local) {
-        local_state_ = Engine{};
+    auto& engine = engines_[key];
+    if (engine.playback.data() != playback) {
+        engine = Engine{};
+        engine.playback = playback;
     }
-    local_ = local;
-    remote_ = remote;
+    // Already connected, it will not say so again: what was left pending
+    // last time goes now, not at some later reconnect.
+    flushRemovals(key);
 }
 
-EnginePlayback* EngineListSync::engineFor(const bool remote) const {
-    EnginePlayback* engine = remote ? remote_.data() : local_.data();
+EnginePlayback* EngineListSync::engineFor(const EngineKey& key) const {
+    const auto found = engines_.find(key);
+    if (found == engines_.end()) {
+        return nullptr;
+    }
+    EnginePlayback* engine = found->second.playback.data();
     return engine != nullptr && engine->active() ? engine : nullptr;
+}
+
+EngineListSync::Engine& EngineListSync::stateFor(const EngineKey& key) { return engines_[key]; }
+
+EngineKey EngineListSync::keyOf(const EnginePlayback* playback) const {
+    for (const auto& [key, engine] : engines_) {
+        if (playback != nullptr && engine.playback.data() == playback) {
+            return key;
+        }
+    }
+    return {};
 }
 
 void EngineListSync::update(const std::vector<persistence::ListDocument>& documents) {
@@ -220,16 +245,17 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
         present.insert(id);
         auto& known = known_[id];
         known.working = document.kind != persistence::ListKind::saved;
-        known.remote = document.remote;
+        const auto engine = EngineKey::of(document);
+        known.engine = engine;
         known.dirty = document.dirty;
         const auto print = fingerprint(document);
         known.local = print;
-        if (engineFor(document.remote) == nullptr) {
+        if (engineFor(engine) == nullptr) {
             continue;
         }
         // Compared with the engine before anything is sent to it: this
         // window's copy may be older than what changed while it was closed.
-        if (!stateFor(document.remote).compared) {
+        if (!stateFor(engine).compared) {
             continue;
         }
         // A saved list's unsaved edits stay in this window until Save.
@@ -255,9 +281,13 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
         }
         send(document, print);
     }
-    for (const bool remote : {false, true}) {
-        if (engineFor(remote) != nullptr && !stateFor(remote).compared) {
-            compare(remote);
+    std::vector<EngineKey> keys;
+    for (const auto& [key, engine] : engines_) {
+        keys.push_back(key);
+    }
+    for (const auto& key : keys) {
+        if (engineFor(key) != nullptr && !stateFor(key).compared) {
+            compare(key);
         }
     }
     // Gone from the window: a working list goes from its engine too; a saved
@@ -270,7 +300,7 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
         // Whether or not this window knows it was sent: after a reconnect or
         // a failed write it cannot tell, and the engine says if it had none.
         if (entry->second.working) {
-            remove(entry->first, entry->second.remote);
+            remove(entry->first, entry->second.engine);
         }
         waiting_.erase(entry->first);
         entry = known_.erase(entry);
@@ -278,12 +308,18 @@ void EngineListSync::update(const std::vector<persistence::ListDocument>& docume
 }
 
 void EngineListSync::reconnected(const EnginePlayback* engine) {
-    const bool remote = engine != nullptr && engine == remote_.data();
-    stateFor(remote) = Engine{};
-    flushRemovals(remote);
+    const auto key = keyOf(engine);
+    if (key.isNull()) {
+        return;
+    }
+    auto& state = stateFor(key);
+    const QPointer<EnginePlayback> playback = state.playback;
+    state = Engine{};
+    state.playback = playback;
+    flushRemovals(key);
     for (auto& [id, known] : known_) {
         static_cast<void>(id);
-        if (known.remote == remote) {
+        if (known.engine == key) {
             known.fingerprint.reset();
             known.revision.reset();
         }
@@ -291,9 +327,9 @@ void EngineListSync::reconnected(const EnginePlayback* engine) {
     emit wantsSave();
 }
 
-void EngineListSync::compare(const bool remote) {
-    auto& state = stateFor(remote);
-    auto* engine = engineFor(remote);
+void EngineListSync::compare(const EngineKey& key) {
+    auto& state = stateFor(key);
+    auto* engine = engineFor(key);
     if (state.comparing || engine == nullptr) {
         return;
     }
@@ -301,7 +337,7 @@ void EngineListSync::compare(const bool remote) {
     ++in_flight_;
     const QPointer self{this};
     engine->request(QStringLiteral("list.all"), Json::object(),
-                    [self, remote](core::Result<Json> answer) {
+                    [self, key](core::Result<Json> answer) {
                         if (!self) {
                             return;
                         }
@@ -316,19 +352,19 @@ void EngineListSync::compare(const bool remote) {
                         // and compared; the rest are the engine's to be given.
                         std::vector<std::string> wanted;
                         for (const auto& [id, known] : self->known_) {
-                            if (known.remote == remote && listed.contains(id)) {
+                            if (known.engine == key && listed.contains(id)) {
                                 wanted.push_back(id);
                             }
                         }
                         for (const auto& id : wanted) {
-                            self->fetch(id, remote, true);
+                            self->fetch(id, key, true);
                         }
-                        self->compared(remote);
+                        self->compared(key);
                     });
 }
 
-void EngineListSync::compared(const bool remote) {
-    auto& state = stateFor(remote);
+void EngineListSync::compared(const EngineKey& key) {
+    auto& state = stateFor(key);
     if (state.outstanding > 0 || state.compared) {
         return;
     }
@@ -337,26 +373,26 @@ void EngineListSync::compared(const bool remote) {
     emit wantsSave();
 }
 
-void EngineListSync::fetch(const std::string& id, const bool remote, const bool comparing) {
-    auto* engine = engineFor(remote);
+void EngineListSync::fetch(const std::string& id, const EngineKey& key, const bool comparing) {
+    auto* engine = engineFor(key);
     if (engine == nullptr) {
         return;
     }
     ++in_flight_;
     if (comparing) {
-        ++stateFor(remote).outstanding;
+        ++stateFor(key).outstanding;
     }
     const QPointer self{this};
     engine->request(QStringLiteral("list.get"), Json{{"id", id}},
-                    [self, id, remote, comparing](core::Result<Json> answer) {
+                    [self, id, key, comparing](core::Result<Json> answer) {
                         if (!self) {
                             return;
                         }
                         --self->in_flight_;
-                        const auto settle = [&self, remote, comparing] {
+                        const auto settle = [&self, &key, comparing] {
                             if (comparing) {
-                                --self->stateFor(remote).outstanding;
-                                self->compared(remote);
+                                --self->stateFor(key).outstanding;
+                                self->compared(key);
                             }
                         };
                         const auto found = self->known_.find(id);
@@ -364,7 +400,7 @@ void EngineListSync::fetch(const std::string& id, const bool remote, const bool 
                             settle();
                             return;
                         }
-                        auto document = document_from(*answer, remote);
+                        auto document = document_from(*answer, key);
                         if (!document) {
                             settle();
                             return;
@@ -393,9 +429,9 @@ void EngineListSync::fetch(const std::string& id, const bool remote, const bool 
 
 void EngineListSync::listChanged(const EnginePlayback* engine, const QString& id,
                                  const quint64 revision, const bool deleted) {
-    const bool remote = engine != nullptr && engine == remote_.data();
+    const auto key = keyOf(engine);
     const auto found = known_.find(id.toStdString());
-    if (found == known_.end() || found->second.remote != remote) {
+    if (key.isNull() || found == known_.end() || found->second.engine != key) {
         return;
     }
     auto& known = found->second;
@@ -407,7 +443,7 @@ void EngineListSync::listChanged(const EnginePlayback* engine, const QString& id
         waiting_.erase(found->first);
         known_.erase(found);
         if (writing) {
-            remove(id.toStdString(), remote);
+            remove(id.toStdString(), key);
         }
         emit removedElsewhere(id);
         return;
@@ -419,7 +455,7 @@ void EngineListSync::listChanged(const EnginePlayback* engine, const QString& id
     if (known.revision && revision <= *known.revision) {
         return;
     }
-    fetch(id.toStdString(), remote, false);
+    fetch(id.toStdString(), key, false);
 }
 
 void EngineListSync::keepMine(const QString& id) {
@@ -444,11 +480,11 @@ void EngineListSync::takeTheirs(const QString& id) {
     found->second.asked = false;
     found->second.dirty = false;
     found->second.local.reset();
-    fetch(id.toStdString(), found->second.remote, false);
+    fetch(id.toStdString(), found->second.engine, false);
 }
 
 void EngineListSync::send(const persistence::ListDocument& document, const std::size_t print) {
-    auto* engine = engineFor(document.remote);
+    auto* engine = engineFor(EngineKey::of(document));
     if (engine == nullptr) {
         return;
     }
@@ -514,21 +550,21 @@ void EngineListSync::send(const persistence::ListDocument& document, const std::
                     });
 }
 
-void EngineListSync::remove(const std::string& id, const bool remote) {
+void EngineListSync::remove(const std::string& id, const EngineKey& key) {
     // Kept until the engine has answered, across restarts: one that is away
     // is told when it is back, or the list stays on it for good.
-    removals_.emplace(remote, id);
+    removals_.emplace(key, id);
     storeRemovals();
-    flushRemovals(remote);
+    flushRemovals(key);
 }
 
-void EngineListSync::flushRemovals(const bool remote) {
-    auto* engine = engineFor(remote);
+void EngineListSync::flushRemovals(const EngineKey& key) {
+    auto* engine = engineFor(key);
     if (engine == nullptr || !engine->active()) {
         return;
     }
     for (const auto& pending : removals_) {
-        if (pending.first != remote || removing_.contains(pending)) {
+        if (pending.first != key || removing_.contains(pending)) {
             continue;
         }
         removing_.insert(pending);
@@ -554,9 +590,8 @@ void EngineListSync::flushRemovals(const bool remote) {
 
 void EngineListSync::storeRemovals() const {
     QStringList stored;
-    for (const auto& [remote, id] : removals_) {
-        stored.push_back((remote ? QStringLiteral("r:") : QStringLiteral("l:")) +
-                         QString::fromStdString(id));
+    for (const auto& [key, id] : removals_) {
+        stored.push_back(key.text() + QLatin1Char('\t') + QString::fromStdString(id));
     }
     QSettings settings;
     if (stored.isEmpty()) {

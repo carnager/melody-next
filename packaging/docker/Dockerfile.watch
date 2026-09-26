@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# melody-watch for a NAS (ADR-0232): watches the music folders there and tells
+# an engine elsewhere what changed. Only the watcher -- the light build, no
+# FFmpeg, PipeWire, SQLite or Qt. Build from the repository root:
+#   docker build -f packaging/docker/Dockerfile.watch -t melody-watch .
+
+FROM debian:trixie AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build pkg-config ca-certificates \
+        libutf8proc-dev nlohmann-json3-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY . /source
+RUN cmake -S /source -B /build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+        -DTRACKKNIFE_CLI_ONLY=ON -DBUILD_TESTING=OFF -DTRACKKNIFE_WARNINGS_AS_ERRORS=OFF \
+    && cmake --build /build --target melody_watch \
+    && DESTDIR=/out cmake --install /build --component watch
+
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libutf8proc3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/usr/bin/melody-watch /usr/bin/melody-watch
+# Everything in the environment, so a NAS's app form or a compose file sets
+# it without a command line:
+#   MELODY_SERVER          the engine, HOST:PORT
+#   MELODY_PASSWORD        its password (or --password-file in the options)
+#   MELODY_WATCH_OPTIONS   the folders, FOLDER=ENGINE_FOLDER, and any options
+ENV MELODY_WATCH_OPTIONS=""
+ENTRYPOINT ["/bin/sh", "-c", "exec melody-watch $MELODY_WATCH_OPTIONS \"$@\"", "melody-watch"]

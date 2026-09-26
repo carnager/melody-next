@@ -305,6 +305,13 @@ class Watcher final {
                 params["after"] = trackknife::protocol::encode_raw_path(after);
             }
             auto page = client_->call("catalogue.inventory", params, std::chrono::minutes{2});
+            if (!page && page.error().code == trackknife::core::ErrorCode::unsupported) {
+                // An engine from before ADR-0232: nothing to compare with.
+                // Changes from now on still reach it.
+                say("the engine cannot say what its library holds (it is older than this "
+                    "watcher), so changes made while this was not running are not caught up");
+                return true;
+            }
             if (!page) {
                 failed("could not ask what the library holds under " + folder.engine, page.error());
                 return false;

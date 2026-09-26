@@ -264,8 +264,19 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
     QSettings settings;
     settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
                       QStringLiteral("127.0.0.1:%1").arg(port));
-    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+    // One password everywhere, as melodyd has: this computer's reaches the
+    // remote too, with nothing entered for it -- and one entered for the
+    // remote alone wins when it differs.
+    settings.setValue(QLatin1String(SettingsDialog::engine_password_key),
                       QStringLiteral("correct horse"));
+    settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
+    settings.sync();
+    QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("correct horse"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                      QStringLiteral("its own"));
+    settings.sync();
+    QCOMPARE(SettingsDialog::remoteEnginePassword(), QStringLiteral("its own"));
+    settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
     settings.sync();
     QVERIFY(localEngineArguments(scratch.engine, localEngineSharing())
                 .contains(QStringLiteral("--play-for")));

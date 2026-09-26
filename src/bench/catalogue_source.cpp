@@ -248,11 +248,7 @@ CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role
             link_->failure = QObject::tr("no remote engine is configured");
             return;
         }
-        const auto token =
-            settings.value(QLatin1String(SettingsDialog::library_engine_token_key), QString{})
-                .toString()
-                .trimmed()
-                .toStdString();
+        const auto token = SettingsDialog::remoteEnginePassword().toStdString();
         endpoint_ = protocol::Endpoint::parse(configured.toStdString(), token);
         if (!endpoint_) {
             link_->failure = QObject::tr("not an engine address: %1").arg(configured);

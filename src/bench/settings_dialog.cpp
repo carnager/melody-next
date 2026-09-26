@@ -308,6 +308,23 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_intro->setForegroundRole(QPalette::PlaceholderText);
     engine_layout->addWidget(engine_intro);
 
+    // ADR-0223: one password for the engines on this network, as melodyd has
+    // one: what this computer's engine asks of others when shared, and what
+    // this computer gives the remote engine unless that one differs.
+    auto* password_form = new QFormLayout;
+    engine_password_ = new QLineEdit(engine);
+    engine_password_->setObjectName(QStringLiteral("bench-settings-engine-password"));
+    engine_password_->setEchoMode(QLineEdit::Password);
+    engine_password_->setPlaceholderText(QStringLiteral("the same on every engine and agent"));
+    engine_password_->setToolTip(QStringLiteral(
+        "Needed to share this computer's engine, and given to the remote engine unless it has a "
+        "password of its own below. It travels unencrypted: across an untrusted network, use "
+        "WireGuard or a TLS proxy."));
+    engine_password_->setText(
+        settings.value(QLatin1String(engine_password_key), QString{}).toString());
+    password_form->addRow(QStringLiteral("Password:"), engine_password_);
+    engine_layout->addLayout(password_form);
+
     // ADR-0226/0228: this computer's engine, shared on the network so output
     // agents -- the bedside speaker -- can play what it plays.
     auto* sharing = new QGroupBox(QStringLiteral("This computer's engine"), engine);
@@ -344,16 +361,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_stream_port_->setToolTip(QStringLiteral(
         "Where agents without a copy of the music fetch it, on the same address"));
     sharing_form->addRow(QStringLiteral("Stream port:"), engine_stream_port_);
-    engine_password_ = new QLineEdit(sharing);
-    engine_password_->setObjectName(QStringLiteral("bench-settings-engine-password"));
-    engine_password_->setEchoMode(QLineEdit::Password);
-    engine_password_->setPlaceholderText(QStringLiteral("required to share"));
-    engine_password_->setToolTip(QStringLiteral(
-        "Every agent and client on the network gives this. It travels unencrypted: across an "
-        "untrusted network, use WireGuard or a TLS proxy."));
-    engine_password_->setText(
-        settings.value(QLatin1String(engine_password_key), QString{}).toString());
-    sharing_form->addRow(QStringLiteral("Password:"), engine_password_);
     engine_music_root_ = new QLineEdit(sharing);
     engine_music_root_->setObjectName(QStringLiteral("bench-settings-engine-music-root"));
     engine_music_root_->setPlaceholderText(QStringLiteral("optional"));
@@ -383,8 +390,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     sharing_form->addRow(engine_agent_command_);
     const auto refresh_sharing = [this] {
         const bool on = engine_share_->isChecked();
-        for (QWidget* field : std::initializer_list<QWidget*>{
-                 engine_listen_, engine_stream_port_, engine_password_}) {
+        for (QWidget* field :
+             std::initializer_list<QWidget*>{engine_listen_, engine_stream_port_}) {
             field->setEnabled(on);
         }
         if (!on) {
@@ -401,8 +408,8 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         const auto port = colon > 0 ? listen.mid(colon + 1) : QString{};
         if (engine_password_->text().isEmpty()) {
             engine_agent_command_->setText(
-                QStringLiteral("Set a password to share: every connection from the network "
-                               "must give it."));
+                QStringLiteral("Set the password above to share: every connection from the "
+                               "network must give it."));
             return;
         }
         const auto command =
@@ -478,7 +485,9 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_token_ = new QLineEdit(remote);
     engine_token_->setObjectName(QStringLiteral("bench-settings-engine-token"));
     engine_token_->setEchoMode(QLineEdit::Password);
-    engine_token_->setPlaceholderText(QStringLiteral("only if the engine has one"));
+    engine_token_->setPlaceholderText(QStringLiteral("the password above"));
+    engine_token_->setToolTip(
+        QStringLiteral("Only when the remote engine's password differs from yours"));
     engine_token_->setText(
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString());
     engine_form->addRow(QStringLiteral("Remote password:"), engine_token_);
@@ -774,6 +783,14 @@ metadata::ArtworkStoragePolicy SettingsDialog::artworkPolicy() {
                 0, settings.value(QLatin1String(artwork_max_embedded_edge_key), 0).toInt())),
             .max_folder_edge = static_cast<std::uint32_t>(std::max(
                 0, settings.value(QLatin1String(artwork_max_folder_edge_key), 0).toInt()))};
+}
+
+QString SettingsDialog::remoteEnginePassword() {
+    const QSettings settings;
+    const auto own =
+        settings.value(QLatin1String(library_engine_token_key), QString{}).toString().trimmed();
+    return own.isEmpty() ? settings.value(QLatin1String(engine_password_key), QString{}).toString()
+                         : own;
 }
 
 void SettingsDialog::save() {

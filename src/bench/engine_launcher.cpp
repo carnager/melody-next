@@ -127,8 +127,7 @@ LocalEngineSharing localEngineSharing() {
                               .toString()
                               .trimmed()
                         : QString{},
-        .play_for_password =
-            settings.value(QLatin1String(SettingsDialog::library_engine_token_key)).toString(),
+        .play_for_password = SettingsDialog::remoteEnginePassword(),
         .play_for_music_root =
             settings.value(QLatin1String(SettingsDialog::library_remote_mount_key))
                 .toString()

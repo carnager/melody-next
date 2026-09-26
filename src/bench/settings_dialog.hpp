@@ -64,6 +64,10 @@ class SettingsDialog final : public QDialog {
     void editCustomBuffer();
     void focusReplayGainPreamp();
     [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();
+    // What to give the remote engine: its own password when one is set,
+    // otherwise this computer's -- one password everywhere, as melodyd
+    // falls back to its own for the engines it plays for.
+    [[nodiscard]] static QString remoteEnginePassword();
 
     // QSettings keys shared with the consumers.
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
@@ -76,7 +80,8 @@ class SettingsDialog final : public QDialog {
     // than the one the workspace starts. Not shown in Settings: it is for
     // tests and for developing the engine, which run their own.
     static constexpr auto library_local_engine_socket_key = "library/local-engine-socket";
-    // ADR-0223: the password every TCP engine asks for. The key
+    // ADR-0223: the remote engine's password, when it differs from
+    // engine_password_key; read it through remoteEnginePassword(). The key
     // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
     // ADR-0227: where this computer sees the remote engine's music. Both
@@ -92,6 +97,8 @@ class SettingsDialog final : public QDialog {
     static constexpr auto engine_listen_default = "0.0.0.0:6600";
     static constexpr auto engine_stream_port_key = "engine/stream-port";
     static constexpr int engine_stream_port_default = 6601;
+    // The password of the engines on this network: this computer's, and the
+    // remote's unless library_engine_token_key says otherwise.
     static constexpr auto engine_password_key = "engine/password";
     static constexpr auto engine_music_root_key = "engine/music-root";
     // ADR-0228: the remote engine may play on this computer's speakers

@@ -31,8 +31,10 @@ Or use the Docker image instead.
 
 On your desktop, in Trackknife:
 
-1. **Settings → Engine → Remote engine**: pick the server under
-   **On the network** and enter its password.
+1. **Settings → Engine**: enter the password at the top -- the same one the
+   server has -- and under **Remote engine** pick the server from
+   **On the network**. The remote password field is only for a server whose
+   password differs from yours.
 2. The server's library shows up as its own tab in the library panel. Click
    **Folders…** there and add the music folder as the *server* sees it, then
    **Refresh**.

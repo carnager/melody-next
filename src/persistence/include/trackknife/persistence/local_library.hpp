@@ -94,6 +94,22 @@ struct LibraryScanProgress {
     std::atomic<std::size_t> failed{0};
 };
 
+// ADR-0232: one indexed file as the index last saw it, for a watcher on the
+// files' own machine to compare with what is there now.
+struct LibraryInventoryEntry {
+    std::string raw_path;
+    // As indexed; 0 and 0 when the row predates recording them, which
+    // compares as changed.
+    std::uint64_t size{0};
+    std::int64_t modified_seconds{0};
+    bool available{true};
+};
+
+struct LibraryInventoryPage {
+    std::vector<LibraryInventoryEntry> entries;
+    bool more{false};
+};
+
 struct LibraryScanResult {
     bool cancelled{false};
     bool incomplete{false};
@@ -157,8 +173,18 @@ class LocalLibrary final {
     // as a scan would; one that is gone is dropped from the index, as a
     // moved file's old path is. Paths outside every folder are ignored.
     // Returns how many were re-read or dropped.
+    //
+    // A path that is gone and was a folder -- moved or deleted as a whole --
+    // drops every track indexed under it (ADR-0232), provided the folder it
+    // was in is still there: a share that is not mounted must not read as a
+    // library that was deleted.
     core::Result<std::size_t> refresh(const std::vector<std::string>& raw_paths,
                                       const core::CancellationToken& cancellation = {});
+    // ADR-0232: what is indexed under `folder`, in path order, the page after
+    // the path `after` (empty for the first). No filesystem access.
+    core::Result<LibraryInventoryPage> inventory(const std::string& folder,
+                                                 const std::string& after,
+                                                 std::size_t limit) const;
 
   private:
     struct Impl;

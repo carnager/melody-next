@@ -137,6 +137,7 @@ class LocalLibraryTest final : public QObject {
     void rootsRetainOfflineMusicAndRawPaths();
     void incrementalScanSearchAndPaging();
     void refreshRereadsNamedFilesWithoutAWalk();
+    void refreshDropsAVanishedFolderAndInventoryPages();
     void deletedSubfoldersArePrunedOnlyAfterCompleteScans();
     void missingFilesOnAnotherDeviceAreRetained();
     void deletionCleanupPagesWithoutChangingWorkingLists();
@@ -308,6 +309,63 @@ void LocalLibraryTest::refreshRereadsNamedFilesWithoutAWalk() {
     const auto ignored = library->refresh({elsewhere});
     QVERIFY(ignored && *ignored == 0U);
     QCOMPARE(library->paths(tracks())->size(), 1U);
+}
+
+// ADR-0232: melody-watch sees a folder moved or deleted as a whole only as
+// the folder -- its files are not reported one by one -- so the folder's
+// path, gone, drops what was under it. And it compares what is indexed with
+// what the NAS holds through inventory(), a page at a time.
+void LocalLibraryTest::refreshDropsAVanishedFolderAndInventoryPages() {
+    QTemporaryDir temporary;
+    const std::filesystem::path base{temporary.path().toStdString()};
+    const auto root = base / "music";
+    const auto kept = fixture(root / "Kept", "01.flac", "Kept");
+    const auto first = fixture(root / "Album", "01.flac", "One");
+    const auto second = fixture(root / "Album" / "CD2", "02.flac", "Two");
+    // A sibling whose name starts like the folder's must not go with it.
+    const auto sibling = fixture(root / "Album0", "03.flac", "Sibling");
+    auto library = persistence::LocalLibrary::open(base / "state.sqlite");
+    QVERIFY(library && library->add_root(root.native()));
+    persistence::LibraryScanProgress scanned;
+    QVERIFY(library->scan({}, scanned));
+    QCOMPARE(library->paths(tracks())->size(), 4U);
+
+    auto page = library->inventory(root.native(), {}, 2U);
+    QVERIFY(page && page->entries.size() == 2U && page->more);
+    const auto cursor = page->entries.back().raw_path;
+    auto rest = library->inventory(root.native(), cursor, 10U);
+    QVERIFY(rest && rest->entries.size() == 2U && !rest->more);
+    QCOMPARE(rest->entries.front().raw_path > cursor, true);
+    // As indexed: the size and time the files have, so a watcher that finds
+    // them unchanged sends nothing.
+    for (const auto* listed : {&page->entries, &rest->entries}) {
+        for (const auto& entry : *listed) {
+            QCOMPARE(entry.size, std::filesystem::file_size(entry.raw_path));
+            QVERIFY(entry.modified_seconds > 0);
+            QVERIFY(entry.available);
+        }
+    }
+    auto album = library->inventory((root / "Album").native(), {}, 10U);
+    QVERIFY(album && album->entries.size() == 2U);
+
+    // The whole folder moved out of the library.
+    std::filesystem::rename(root / "Album", base / "Album");
+    const auto dropped = library->refresh({(root / "Album").native()});
+    QVERIFY(dropped && *dropped == 2U);
+    const auto left = library->paths(tracks());
+    QCOMPARE(left->size(), 2U);
+    QVERIFY(std::ranges::find(*left, kept) != left->end());
+    QVERIFY(std::ranges::find(*left, sibling) != left->end());
+
+    // A folder whose parent is gone too is not taken as deleted: that is a
+    // share that is not there, not an empty one.
+    std::filesystem::rename(base / "Album", root / "Album");
+    QVERIFY(library->refresh({first, second}));
+    QCOMPARE(library->paths(tracks())->size(), 4U);
+    std::filesystem::rename(root / "Album", base / "Moved");
+    const auto unseen = library->refresh({(root / "Missing" / "Album").native()});
+    QVERIFY(unseen && *unseen == 0U);
+    QCOMPARE(library->paths(tracks())->size(), 4U);
 }
 
 void LocalLibraryTest::deletedSubfoldersArePrunedOnlyAfterCompleteScans() {

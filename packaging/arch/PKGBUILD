@@ -1,10 +1,11 @@
 # Maintainer: Rasmus Steinke <rasi@xssn.at>
 #
-# One build, four packages: the window, the engine, the agent and the CLI.
-# A server needs only melodyd-git; a room with speakers only
-# melody-agent-git; a desktop trackknife-git, which brings the engine.
+# One build, five packages: the window, the engine, the agent, the CLI and
+# the watcher. A server needs only melodyd-git; a room with speakers only
+# melody-agent-git; a desktop trackknife-git, which brings the engine; a NAS
+# that cannot run the engine, melody-watch-git.
 pkgbase=trackknife-git
-pkgname=(trackknife-git melodyd-git melody-agent-git melody-cli-git)
+pkgname=(trackknife-git melodyd-git melody-agent-git melody-cli-git melody-watch-git)
 pkgver=r0
 pkgrel=1
 arch=(x86_64 aarch64)
@@ -81,5 +82,14 @@ package_melody-cli-git() {
   provides=(melody-cli)
   conflicts=(melody-cli)
   _install cli
+  install -Dm644 "$srcdir/melody-next/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_melody-watch-git() {
+  pkgdesc="Tells a Melody engine which music files changed on a NAS, so it need not scan"
+  depends=(libutf8proc)
+  provides=(melody-watch)
+  conflicts=(melody-watch)
+  _install watch
   install -Dm644 "$srcdir/melody-next/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

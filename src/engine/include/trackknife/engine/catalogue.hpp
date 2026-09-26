@@ -129,6 +129,19 @@ class Catalogue {
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const = 0;
 
+    // ADR-0232: what is indexed under a folder, a page at a time after the
+    // path `after`, as it was when indexed. A catalogue that cannot say
+    // answers unsupported.
+    [[nodiscard]] virtual core::Result<persistence::LibraryInventoryPage>
+    inventory(const std::string& folder, const std::string& after, std::size_t limit) const {
+        static_cast<void>(folder);
+        static_cast<void>(after);
+        static_cast<void>(limit);
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "this catalogue has no inventory",
+                                           .context = {}});
+    }
+
     // Walks the configured roots and updates the index. Blocks; `progress` is
     // a set of atomic counters the caller reads while it runs.
     [[nodiscard]] virtual core::Result<persistence::LibraryScanResult>
@@ -188,6 +201,9 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<persistence::LibraryInventoryPage>
+    inventory(const std::string& folder, const std::string& after,
+              std::size_t limit) const override;
 
   private:
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;

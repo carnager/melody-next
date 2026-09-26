@@ -9,6 +9,7 @@ extern "C" {
 
 #include <attachedpictureframe.h>
 #include <fileref.h>
+#include <tfilestream.h>
 #include <flacfile.h>
 #include <flacpicture.h>
 #include <id3v2tag.h>
@@ -538,7 +539,10 @@ read_artwork_image_bytes(const ArtworkImageFile& image, const std::uint64_t maxi
         // Every embedded adapter rereads through the same derivation the
         // inventory used, so the equality contract below stays exact.
         if (is_native_flac(image.raw_path)) {
-            TagLib::FLAC::File file{image.raw_path.c_str(), false};
+            // Read-only: opened for writing, closing it reads as a change to
+            // anything watching the folder (ADR-0232).
+            TagLib::FileStream stream{image.raw_path.c_str(), true};
+            TagLib::FLAC::File file{&stream, false};
             if (!file.isValid()) {
                 return std::unexpected(error(core::ErrorCode::backend,
                                              "TagLib rejected the embedded artwork donor",
@@ -567,7 +571,8 @@ read_artwork_image_bytes(const ArtworkImageFile& image, const std::uint64_t maxi
                     ? std::optional{static_cast<std::uint32_t>(picture->height())}
                     : inspected.and_then([](const auto& value) { return value.height; });
         } else if (is_native_mp4(image.raw_path)) {
-            TagLib::MP4::File file{image.raw_path.c_str(), false};
+            TagLib::FileStream stream{image.raw_path.c_str(), true};
+            TagLib::MP4::File file{&stream, false};
             if (!file.isValid()) {
                 return std::unexpected(error(core::ErrorCode::backend,
                                              "TagLib rejected the embedded artwork donor",
@@ -588,7 +593,8 @@ read_artwork_image_bytes(const ArtworkImageFile& image, const std::uint64_t maxi
             observed_width = inspected.and_then([](const auto& value) { return value.width; });
             observed_height = inspected.and_then([](const auto& value) { return value.height; });
         } else if (is_native_mpeg(image.raw_path)) {
-            TagLib::MPEG::File file{image.raw_path.c_str(), false};
+            TagLib::FileStream stream{image.raw_path.c_str(), true};
+            TagLib::MPEG::File file{&stream, false};
             if (!file.isValid()) {
                 return std::unexpected(error(core::ErrorCode::backend,
                                              "TagLib rejected the embedded artwork donor",
@@ -686,7 +692,8 @@ read_local_artwork_inventory(const std::string& raw_media_path,
 
     bool embedded_read = false;
     if (is_native_flac(raw_media_path)) {
-        TagLib::FLAC::File file{raw_media_path.c_str(), false};
+        TagLib::FileStream stream{raw_media_path.c_str(), true};
+        TagLib::FLAC::File file{&stream, false};
         if (!file.isValid()) {
             return std::unexpected(error(core::ErrorCode::backend,
                                          "TagLib rejected the FLAC artwork source",
@@ -729,7 +736,8 @@ read_local_artwork_inventory(const std::string& raw_media_path,
             }
         }
     } else if (is_native_mp4(raw_media_path)) {
-        TagLib::MP4::File file{raw_media_path.c_str(), false};
+        TagLib::FileStream stream{raw_media_path.c_str(), true};
+        TagLib::MP4::File file{&stream, false};
         if (!file.isValid()) {
             return std::unexpected(error(core::ErrorCode::backend,
                                          "TagLib rejected the MP4 artwork source", raw_media_path));
@@ -768,7 +776,8 @@ read_local_artwork_inventory(const std::string& raw_media_path,
             ++ordinal;
         }
     } else if (is_native_mpeg(raw_media_path)) {
-        TagLib::MPEG::File file{raw_media_path.c_str(), false};
+        TagLib::FileStream stream{raw_media_path.c_str(), true};
+        TagLib::MPEG::File file{&stream, false};
         if (!file.isValid()) {
             return std::unexpected(error(core::ErrorCode::backend,
                                          "TagLib rejected the MP3 artwork source", raw_media_path));

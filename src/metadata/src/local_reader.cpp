@@ -5,6 +5,7 @@
 #include "trackknife/metadata/flac_mapping.hpp"
 
 #include <fileref.h>
+#include <tfilestream.h>
 #include <flacfile.h>
 #include <mp4file.h>
 #include <mpegfile.h>
@@ -109,7 +110,11 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
         return std::unexpected(std::move(revision_before.error()));
     }
 
-    TagLib::FileRef reference{raw_path.c_str(), false};
+    // Read-only. TagLib opens for writing when it may, and a file opened for
+    // writing reads as changed when closed -- to inotify, and so to
+    // melody-watch, which would send it back to be read again (ADR-0232).
+    TagLib::FileStream stream{raw_path.c_str(), true};
+    TagLib::FileRef reference{&stream, false};
     if (reference.isNull() || reference.file() == nullptr) {
         return std::unexpected(error(core::ErrorCode::unsupported,
                                      "TagLib has no metadata reader for this source", raw_path));

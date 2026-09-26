@@ -64,6 +64,29 @@ ports off the internet and use a VPN from outside -- or, if you want TLS, put
 a proxy (stunnel, an nginx or Caddy stream proxy) in front of an engine
 listening on `127.0.0.1`. `melodyd --help` lists everything.
 
+## A NAS that can't run the engine
+
+When the music is on a NAS and the engine runs on another machine, the engine
+reads the files over the network mount, and a scan walks the whole library
+across it. `melody-watch` runs on the NAS instead and tells the engine which
+files changed, so it re-reads just those.
+
+```sh
+melody-watch --server myserver:6603 --password-file ~/.config/melody/password \
+    /volume1/music=/mnt/nas/music
+```
+
+Each folder is `WHERE_IT_IS_HERE=WHERE_THE_ENGINE_SEES_IT` (one path if they
+are the same), and the engine's library must include the second. At start it
+compares the folder with the engine's library, so changes made while it wasn't
+running are found without a scan. It needs only `libutf8proc`: build it on the
+NAS with `cmake -DTRACKKNIFE_CLI_ONLY=ON`, which also builds `melody-cli`.
+There's a user unit, `melody-watch.service`, reading its options from
+`~/.config/melody/watch.conf` (`MELODY_WATCH_OPTIONS=...`).
+
+A large library may need more inotify watches than the default; the watcher
+says so, and `sysctl fs.inotify.max_user_watches=524288` raises the limit.
+
 ## Agents
 
 There are three kinds:

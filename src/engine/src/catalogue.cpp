@@ -38,6 +38,16 @@ LocalCatalogue::artwork_source(const std::string& album_key,
     return library->artwork_source(album_key, cancellation);
 }
 
+core::Result<persistence::LibraryInventoryPage>
+LocalCatalogue::inventory(const std::string& folder, const std::string& after,
+                          const std::size_t limit) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->inventory(folder, after, limit);
+}
+
 core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>& raw_paths,
                                                   const core::CancellationToken& cancellation) {
     auto library = open();

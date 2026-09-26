@@ -398,6 +398,23 @@ add_test(
 )
 set_tests_properties(melody-cli PROPERTIES TIMEOUT 90)
 
+# ADR-0232: melody-watch, its parts and against a real engine.
+add_executable(trackknife_watch_tests watch_test.cpp)
+target_link_libraries(
+    trackknife_watch_tests
+    PRIVATE Trackknife::Watch Trackknife::Core trackknife_project_options
+            trackknife_project_warnings
+)
+add_test(NAME watch COMMAND trackknife_watch_tests)
+set_tests_properties(watch PROPERTIES TIMEOUT 60)
+
+add_test(
+    NAME melody-watch
+    COMMAND bash "${CMAKE_CURRENT_SOURCE_DIR}/watch_daemon_test.sh"
+            "$<TARGET_FILE:trackknife_engine_daemon>" "$<TARGET_FILE:melody_watch>"
+)
+set_tests_properties(melody-watch PROPERTIES TIMEOUT 90)
+
 if(TARGET trackknife_bench_ui)
     qt_add_executable(trackknife_remote_mount_tests remote_mount_test.cpp)
     target_link_libraries(trackknife_remote_mount_tests PRIVATE Trackknife::BenchUi Qt6::Test

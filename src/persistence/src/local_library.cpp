@@ -784,13 +784,45 @@ struct Filter {
     }
 };
 
-bool audio_path(const std::filesystem::path& path) {
-    static constexpr std::array extensions{
-        ".flac", ".mp3",  ".ogg", ".oga",  ".opus", ".m4a",  ".mp4", ".aac", ".wv",
-        ".wav",  ".rf64", ".w64", ".aiff", ".aif",  ".aifc", ".ape", ".mpc", ".tta",
-        ".spx",  ".mka",  ".wma", ".dsf",  ".dff",  ".mod",  ".xm",  ".s3m", ".it"};
-    const auto extension = lower(path.extension().native());
-    return std::ranges::find(extensions, extension) != extensions.end();
+bool audio_path(const std::filesystem::path& path) { return core::is_audio_path(path.native()); }
+
+// Every raw path under a folder, as a half-open byte range: "dir/" up to
+// "dir0", '0' being the byte after '/'. SQLite compares blobs bytewise.
+std::pair<std::string, std::string> subtree_range(std::string folder) {
+    while (folder.size() > 1U && folder.back() == '/') {
+        folder.pop_back();
+    }
+    if (folder == "/") {
+        return {"/", std::string(1, '\xff')};
+    }
+    return {folder + '/', folder + '0'};
+}
+
+// The size and modification time in a revision key (revision_key below);
+// zeros for a row from before they were recorded.
+std::pair<std::uint64_t, std::int64_t> revision_size_and_time(const std::string& revision) {
+    std::vector<std::string_view> parts;
+    std::string_view rest{revision};
+    while (true) {
+        const auto colon = rest.find(':');
+        parts.push_back(rest.substr(0, colon));
+        if (colon == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(colon + 1U);
+    }
+    if (parts.size() != 6U || parts[0] != "2") {
+        return {0U, 0};
+    }
+    std::uint64_t size = 0U;
+    std::int64_t seconds = 0;
+    if (std::from_chars(parts[3].data(), parts[3].data() + parts[3].size(), size).ec !=
+            std::errc{} ||
+        std::from_chars(parts[4].data(), parts[4].data() + parts[4].size(), seconds).ec !=
+            std::errc{}) {
+        return {0U, 0};
+    }
+    return {size, seconds};
 }
 
 } // namespace
@@ -1942,7 +1974,28 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
                 Statement drop{db, "DELETE FROM local_library_tracks WHERE raw_path=?"};
                 drop.blob(1, raw_path);
                 drop.next();
-                refreshed += sqlite3_changes(db) > 0 ? 1U : 0U;
+                if (sqlite3_changes(db) > 0) {
+                    ++refreshed;
+                    continue;
+                }
+                // Not a track: a folder, perhaps, moved or deleted whole
+                // (ADR-0232). Its tracks go -- if the folder it was in is
+                // still there, so an unmounted share is not taken for an
+                // empty one -- and if it is really gone, not merely a path
+                // this machine cannot reach.
+                std::error_code error;
+                const auto parent = std::filesystem::path{raw_path}.parent_path();
+                if (!std::filesystem::is_directory(parent, error) ||
+                    std::filesystem::exists(std::filesystem::path{raw_path}, error) || error) {
+                    continue;
+                }
+                const auto [from, to] = subtree_range(raw_path);
+                Statement subtree{db, "DELETE FROM local_library_tracks "
+                                      "WHERE raw_path>=? AND raw_path<?"};
+                subtree.blob(1, from);
+                subtree.blob(2, to);
+                subtree.next();
+                refreshed += static_cast<std::size_t>(sqlite3_changes(db));
                 continue;
             }
             if (!audio_path(std::filesystem::path{raw_path})) {
@@ -1962,6 +2015,36 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
             }
         }
         return refreshed;
+    });
+}
+
+core::Result<LibraryInventoryPage> LocalLibrary::inventory(const std::string& folder,
+                                                          const std::string& after,
+                                                          const std::size_t limit) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        const auto [from, to] = subtree_range(folder);
+        Statement select{db, "SELECT raw_path,revision,available FROM local_library_tracks "
+                             "WHERE raw_path>=? AND raw_path<? AND raw_path>? "
+                             "ORDER BY raw_path LIMIT ?"};
+        select.blob(1, from);
+        select.blob(2, to);
+        select.blob(3, after);
+        const auto bounded = std::clamp<std::size_t>(limit, 1U, 10'000U);
+        select.number(4, static_cast<sqlite3_int64>(bounded + 1U));
+        LibraryInventoryPage page;
+        while (select.next()) {
+            if (page.entries.size() == bounded) {
+                page.more = true;
+                break;
+            }
+            const auto [size, seconds] = revision_size_and_time(select.bytes(1));
+            page.entries.push_back(LibraryInventoryEntry{.raw_path = select.bytes(0),
+                                                         .size = size,
+                                                         .modified_seconds = seconds,
+                                                         .available = select.number(2) != 0});
+        }
+        return page;
     });
 }
 

@@ -78,6 +78,11 @@ struct LocalSourceRevision {
 [[nodiscard]] Result<LocalSourceRevision>
 observe_local_source_revision(const std::string& raw_path);
 
+// Whether a file is one the library indexes, by its extension (ASCII, any
+// case). One list, for the index and for anything that tells it about files
+// (ADR-0232), so the two cannot disagree about what counts.
+[[nodiscard]] bool is_audio_path(std::string_view raw_path);
+
 // Filesystem revalidation for file operations: resolves the configured root
 // and the referenced path to their final targets and requires the result to
 // be a regular file strictly inside the resolved root. This is the

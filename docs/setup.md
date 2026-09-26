@@ -39,6 +39,10 @@ On your desktop, in Trackknife:
 
 Tabs you fill from the server's library play on the server.
 
+If the music is on a NAS and the engine runs elsewhere, run `melody-watch` on
+the NAS so the engine hears about changes instead of scanning over the network
+([how](melody.md#a-nas-that-cant-run-the-engine)).
+
 ## Editing tags on server files
 
 The engine never writes to your files; Trackknife does. Mount the server's

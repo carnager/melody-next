@@ -351,4 +351,23 @@ Result<ContainedLocalSource> revalidate_contained_source(const std::string& raw_
     };
 }
 
+bool is_audio_path(const std::string_view raw_path) {
+    static constexpr std::array<std::string_view, 27> extensions{
+        ".flac", ".mp3",  ".ogg", ".oga",  ".opus", ".m4a",  ".mp4", ".aac", ".wv",
+        ".wav",  ".rf64", ".w64", ".aiff", ".aif",  ".aifc", ".ape", ".mpc", ".tta",
+        ".spx",  ".mka",  ".wma", ".dsf",  ".dff",  ".mod",  ".xm",  ".s3m", ".it"};
+    const auto slash = raw_path.rfind('/');
+    const auto name = slash == std::string_view::npos ? raw_path : raw_path.substr(slash + 1U);
+    const auto dot = name.rfind('.');
+    // A leading dot names a hidden file, not an extension.
+    if (dot == std::string_view::npos || dot == 0U || name.size() - dot > 5U) {
+        return false;
+    }
+    std::string extension{name.substr(dot)};
+    std::ranges::transform(extension, extension.begin(), [](const char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    });
+    return std::ranges::find(extensions, extension) != extensions.end();
+}
+
 } // namespace trackknife::core

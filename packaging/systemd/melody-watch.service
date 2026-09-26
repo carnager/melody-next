@@ -1,0 +1,19 @@
+[Unit]
+# ADR-0232: on a NAS that cannot run the engine, tells the engine elsewhere
+# which music files changed, so it re-reads just those instead of scanning
+# the library over the network. Run it where the files are.
+Description=melody-watch, telling a Melody engine what changed
+After=network-online.target local-fs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Options in ~/.config/melody/watch.conf, e.g.
+#   MELODY_WATCH_OPTIONS=--server gemenon:6603 --password-file /home/you/.config/melody/password /volume1/music=/mnt/nas/music
+EnvironmentFile=-%h/.config/melody/watch.conf
+ExecStart=/usr/bin/melody-watch $MELODY_WATCH_OPTIONS
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

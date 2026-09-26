@@ -472,6 +472,41 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         return Json{{"refreshed", Json::array({*refreshed})}};
     });
 
+    // ADR-0232: what is indexed under a folder, for melody-watch to compare
+    // with what the folder holds on its own machine. Paged by path:
+    // {"path", "after"?, "limit"?} -> {"entries": [{"path", "size",
+    // "modified", "available"}], "more"}.
+    dispatcher.on("catalogue.inventory", [&catalogue](const Json& params) -> core::Result<Json> {
+        auto encoded = required_string(params, "path");
+        if (!encoded) {
+            return std::unexpected(std::move(encoded.error()));
+        }
+        auto folder = protocol::decode_raw_path(*encoded);
+        if (!folder) {
+            return std::unexpected(bad_params("path is not an encoded path", "path"));
+        }
+        std::string after;
+        if (const auto cursor = params.find("after"); cursor != params.end() && cursor->is_string()) {
+            auto decoded = protocol::decode_raw_path(cursor->get<std::string>());
+            if (!decoded) {
+                return std::unexpected(bad_params("after is not an encoded path", "after"));
+            }
+            after = std::move(*decoded);
+        }
+        auto page = catalogue.inventory(*folder, after, params.value("limit", std::size_t{1000}));
+        if (!page) {
+            return std::unexpected(std::move(page.error()));
+        }
+        auto entries = Json::array();
+        for (const auto& entry : page->entries) {
+            entries.push_back(Json{{"path", protocol::encode_raw_path(entry.raw_path)},
+                                   {"size", entry.size},
+                                   {"modified", entry.modified_seconds},
+                                   {"available", entry.available}});
+        }
+        return Json{{"entries", std::move(entries)}, {"more", page->more}};
+    });
+
     // The cover itself, read where the files are, so a client shows it with
     // no access to them. Null when the track has none.
     dispatcher.on("catalogue.artwork", [&catalogue](const Json& params) -> core::Result<Json> {

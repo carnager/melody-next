@@ -458,7 +458,9 @@ void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
 // not asked about again: left unanswered, it would be asked on every look at
 // the tab, ahead of everything else on the connection.
 void BenchMainWindow::enrichRemoteRows(ListTab& tab) {
-    if (!remoteCatalogue()) {
+    // Asked of the engine the tab is of -- not reached, nothing to ask.
+    auto* source = catalogueOf(EngineKey::of(tab.document));
+    if (source == nullptr) {
         return;
     }
     std::vector<std::string> paths;
@@ -474,7 +476,7 @@ void BenchMainWindow::enrichRemoteRows(ListTab& tab) {
     }
     // Opened here, used there: it holds its own reference to the connection,
     // and connects there, not on this thread.
-    std::shared_ptr<engine::Catalogue> catalogue{remoteCatalogue()->openDeferred()};
+    std::shared_ptr<engine::Catalogue> catalogue{source->openDeferred()};
     using Found = std::vector<persistence::LibraryTrackSnapshot>;
     auto* watcher = new QFutureWatcher<Found>(this);
     const auto id = QString::fromStdString(tab.document.id.to_string());
@@ -649,11 +651,12 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     // A remote tab's files are on the remote's machine (ADR-0227), and
     // nothing of it need be mounted here: its covers come from its engine.
     std::shared_ptr<engine::Catalogue> engine;
-    if (!EngineKey::of(tab.document).isLocal()) {
-        if (!remoteCatalogue()) {
+    if (const auto key = EngineKey::of(tab.document); !key.isLocal()) {
+        auto* source = catalogueOf(key);
+        if (source == nullptr) {
             return;
         }
-        engine = remoteCatalogue()->openDeferred();
+        engine = source->openDeferred();
     }
     const auto& rows = tab.model->rows();
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {

@@ -214,6 +214,32 @@ void EngineListSync::setEngine(const EngineKey& key, EnginePlayback* playback) {
     flushRemovals(key);
 }
 
+void EngineListSync::rekey(const EngineKey& from, const EngineKey& to) {
+    if (from == to) {
+        return;
+    }
+    if (auto moved = engines_.extract(from); !moved.empty()) {
+        moved.key() = to;
+        engines_.insert(std::move(moved));
+    }
+    for (auto& [id, known] : known_) {
+        static_cast<void>(id);
+        if (known.engine == from) {
+            known.engine = to;
+        }
+    }
+    const auto move_all = [&from, &to](std::set<std::pair<EngineKey, std::string>>& entries) {
+        std::set<std::pair<EngineKey, std::string>> kept;
+        for (const auto& [key, id] : entries) {
+            kept.emplace(key == from ? to : key, id);
+        }
+        entries = std::move(kept);
+    };
+    move_all(removals_);
+    move_all(removing_);
+    storeRemovals();
+}
+
 EnginePlayback* EngineListSync::engineFor(const EngineKey& key) const {
     const auto found = engines_.find(key);
     if (found == engines_.end()) {

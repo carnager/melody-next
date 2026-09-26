@@ -1209,9 +1209,10 @@ void BenchMainWindow::openSearchDialog() {
                     const auto first = std::ranges::find_if(list_tabs_, [&engine](const auto& tab) {
                         return EngineKey::of(tab->document) == engine;
                     });
-                    destination = first != list_tabs_.end()       ? first->get()
-                                  : engine == EngineKey::remote() ? remoteQueueTab()
-                                                                  : nullptr;
+                    destination = first != list_tabs_.end() ? first->get()
+                                  : remoteEngine() != nullptr && engine == remoteEngine()->key
+                                      ? remoteQueueTab()
+                                      : nullptr;
                 }
                 int insertion = -1;
                 if (action == LocalLibraryAction::new_list) {
@@ -1522,9 +1523,10 @@ void BenchMainWindow::selectPreferredSource() {
     } else if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote")) {
         wanted = QStringLiteral("library");
     }
+    // A library tab of another engine carries that engine's key.
     int remote = -1;
     for (int index = 0; index < local_source_tabs_->count(); ++index) {
-        if (local_source_tabs_->tabData(index).toString() == QStringLiteral("remote")) {
+        if (!local_source_tabs_->tabData(index).toString().isEmpty()) {
             remote = index;
         }
     }

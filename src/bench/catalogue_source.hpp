@@ -92,6 +92,9 @@ class CatalogueSource final {
     // What name() is before the remote has said what it is called: its host,
     // or its socket's file name.
     [[nodiscard]] QString addressName() const;
+    // ADR-0234: the id the engine keeps, once connected; empty until then,
+    // or from an engine too old to say.
+    [[nodiscard]] QString engineId() const;
 
     // One line naming the source, for a panel to show. Three states, and the
     // difference between the last two is what was previously invisible.

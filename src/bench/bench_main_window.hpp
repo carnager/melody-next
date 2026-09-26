@@ -493,6 +493,7 @@ class BenchMainWindow final : public QMainWindow {
     void rememberEngineState(EnginePlayback* playback);
     // Builds the remote connection, its library panel and its default tab.
     void connectRemoteEngine();
+    void adoptRemoteIdentity();
     [[nodiscard]] ListTab* remoteQueueTab();
     // True, having said why, when `view` lists the remote engine's files:
     // work that reads or writes files cannot run here on those (ADR-0227).
@@ -668,7 +669,16 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<std::unique_ptr<EngineLink>> engines_;
     [[nodiscard]] EngineLink* link(const EngineKey& key) const;
     [[nodiscard]] EngineLink& localEngine() const { return *engines_.front(); }
-    [[nodiscard]] EngineLink* remoteEngine() const { return link(EngineKey::remote()); }
+    // The remote configured in Settings -- by its id once it has said it,
+    // "remote" until then. Null when none is configured.
+    [[nodiscard]] EngineLink* remoteEngine() const {
+        for (const auto& engine : engines_) {
+            if (!engine->key.isLocal()) {
+                return engine.get();
+            }
+        }
+        return nullptr;
+    }
     // The link a connection belongs to; null for none of this window's.
     [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
     // Parts of an engine's link; null when it or the part is not there.
@@ -676,14 +686,16 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
     [[nodiscard]] LocalLibraryPanel* libraryOf(const EngineKey& key) const;
     [[nodiscard]] EnginePlayback* localPlayback() const { return localEngine().playback; }
-    [[nodiscard]] EnginePlayback* remotePlayback() const { return playbackOf(EngineKey::remote()); }
+    [[nodiscard]] EnginePlayback* remotePlayback() const {
+        return remoteEngine() != nullptr ? remoteEngine()->playback : nullptr;
+    }
     [[nodiscard]] CatalogueSource* localCatalogue() const { return localEngine().catalogue.get(); }
     [[nodiscard]] CatalogueSource* remoteCatalogue() const {
-        return catalogueOf(EngineKey::remote());
+        return remoteEngine() != nullptr ? remoteEngine()->catalogue.get() : nullptr;
     }
     [[nodiscard]] LocalLibraryPanel* localLibrary() const { return localEngine().library; }
     [[nodiscard]] LocalLibraryPanel* remoteLibrary() const {
-        return libraryOf(EngineKey::remote());
+        return remoteEngine() != nullptr ? remoteEngine()->library : nullptr;
     }
     // ADR-0233: this window's lists, on the engines that own their files.
     EngineListSync* list_sync_{nullptr};

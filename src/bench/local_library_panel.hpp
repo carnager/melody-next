@@ -57,6 +57,8 @@ class LocalLibraryPanel final : public QWidget {
     void addRoot(std::string raw_path);
     QWidget* createFoldersWidget(QWidget* parent);
     [[nodiscard]] const EngineKey& engine() const noexcept { return engine_; }
+    // The same engine under the key it is known by now (ADR-0234).
+    void setEngine(EngineKey engine) { engine_ = std::move(engine); }
     // Reload committed index records; filesystem scans require the Refresh button.
     void refreshLibrary();
     // Puts the cursor in the search field, its text selected to type over.

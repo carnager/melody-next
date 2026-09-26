@@ -204,6 +204,8 @@ struct CatalogueSource::Link {
     QString failure;
     // The name the engine gave for itself once connected (engine.info).
     QString announced;
+    // ADR-0234: the id the engine keeps, once it has said it.
+    QString announced_id;
     // Whether the engine answered and said no, as opposed to not answering.
     // Decided from the error code: a client must never parse the message.
     bool refused{false};
@@ -295,9 +297,16 @@ std::shared_ptr<protocol::Client> CatalogueSource::Link::connectLocked() {
     // What the engine calls itself, shown in place of its address. An
     // engine too old to say keeps being shown by address.
     QString name;
+    QString id;
     if (auto info = made->call("engine.info", protocol::Json::object(), std::chrono::seconds{2});
-        info && info->contains("name") && info->at("name").is_string()) {
-        name = QString::fromStdString(protocol::displayable_text(info->at("name").get<std::string>()));
+        info) {
+        if (info->contains("name") && info->at("name").is_string()) {
+            name = QString::fromStdString(
+                protocol::displayable_text(info->at("name").get<std::string>()));
+        }
+        if (info->contains("id") && info->at("id").is_string()) {
+            id = QString::fromStdString(info->at("id").get<std::string>());
+        }
     }
     const std::lock_guard guard{mutex};
     client = made;
@@ -305,6 +314,9 @@ std::shared_ptr<protocol::Client> CatalogueSource::Link::connectLocked() {
     refused = false;
     if (!name.isEmpty()) {
         announced = name;
+    }
+    if (!id.isEmpty()) {
+        announced_id = id;
     }
     return made;
 }
@@ -397,6 +409,11 @@ QString CatalogueSource::name() const {
         }
     }
     return addressName();
+}
+
+QString CatalogueSource::engineId() const {
+    const std::lock_guard guard{link_->mutex};
+    return link_->announced_id;
 }
 
 QString CatalogueSource::addressName() const {

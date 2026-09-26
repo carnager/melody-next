@@ -84,6 +84,9 @@ class SettingsDialog final : public QDialog {
     // engine_password_key; read it through remoteEnginePassword(). The key
     // keeps its old name so a saved value survives.
     static constexpr auto library_engine_token_key = "library/engine-token";
+    // ADR-0234: the id the configured remote gave, once reached -- which its
+    // lists are kept under. Forgotten when the address changes.
+    static constexpr auto library_engine_id_key = "library/engine-id";
     // ADR-0227: where this computer sees the remote engine's music. Both
     // empty: the same paths on both machines.
     static constexpr auto library_remote_folder_key = "library/remote-folder";

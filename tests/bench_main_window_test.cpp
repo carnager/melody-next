@@ -255,6 +255,8 @@ class BenchMainWindowTest final : public QObject {
     void aMoveIsFollowedInListsNotOpenHere();
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
+    void theRemotesListsTakeItsIdOnceItSaysIt();
+    void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
@@ -1938,7 +1940,10 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     QVERIFY(std::ranges::any_of(targets, [&](const auto& target) {
         return target.first == chosen_id && target.second == QStringLiteral("Chosen");
     }));
-    QVERIFY(window.listTargets(EngineKey::remote()).empty());
+    QVERIFY(window
+                .listTargets(window.remoteEngine() != nullptr ? window.remoteEngine()->key
+                                                              : EngineKey::remote())
+                .empty());
 
     persistence::LibraryQuery albums;
     albums.kind = persistence::LibraryEntryKind::album;
@@ -2232,6 +2237,97 @@ void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
     QTRY_VERIFY(!listed());
     QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
+}
+
+// ADR-0234: an older release's remote lists said only "the remote". Reached,
+// the remote says who it is: its lists take its id, which is remembered, and
+// a restart finds them under it without asking again.
+void BenchMainWindowTest::theRemotesListsTakeItsIdOnceItSaysIt() {
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    QFile id_file{remote_state.path() + QStringLiteral("/engine-id")};
+    QVERIFY(id_file.open(QIODevice::ReadOnly));
+    const auto id = QString::fromUtf8(id_file.readAll()).trimmed();
+    QVERIFY(!id.isEmpty());
+    QSettings{}.remove(QStringLiteral("library/engine-id"));
+    std::string list_id;
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+        auto* tab = window.remoteQueueTab();
+        QVERIFY(tab != nullptr);
+        list_id = tab->document.id.to_string();
+        QTRY_COMPARE(QString::fromStdString(tab->document.engine), id);
+        QCOMPARE(window.remoteEngine()->key.text(), id);
+        QCOMPARE(engineOfView(tab->view).text(), id);
+        QCOMPARE(window.remoteLibrary()->engine().text(), id);
+        QCOMPARE(QSettings{}.value(QStringLiteral("library/engine-id")).toString(), id);
+        window.persistNow(true);
+        window.close();
+    }
+    // Stored under the id, not the placeholder.
+    {
+        auto repository = persistence::ListRepository::open(
+            std::filesystem::path{
+                QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString()} /
+            "lists.sqlite");
+        QVERIFY(repository.has_value());
+        const auto loaded = repository->load_all();
+        QVERIFY(loaded.has_value());
+        const auto found = std::ranges::find(
+            *loaded, list_id, [](const auto& document) { return document.id.to_string(); });
+        QVERIFY(found != loaded->end());
+        QCOMPARE(QString::fromStdString(found->engine), id);
+    }
+    // Again: known by its id from the start, and its tab with it.
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY(window.remoteEngine() != nullptr);
+    QCOMPARE(window.remoteEngine()->key.text(), id);
+    auto* tab = window.tabForDocument(QString::fromStdString(list_id));
+    QVERIFY(tab != nullptr);
+    QCOMPARE(QString::fromStdString(tab->document.engine), id);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QCOMPARE(window.remoteQueueTab(), tab);
+    QSettings{}.remove(QStringLiteral("library/engine-id"));
+}
+
+// The address now leads to another engine than the one whose id was kept --
+// a NAS replaced, say. The link takes the new id; the lists of the engine it
+// led to before stay that engine's rather than move to one without their files.
+void BenchMainWindowTest::anotherEngineAtTheSameAddressLeavesTheOldOnesLists() {
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    const auto before = QString::fromStdString(core::StableId::random().to_string());
+    QSettings{}.setValue(QStringLiteral("library/engine-id"), before);
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    // A list of the engine that was there before, open as the window starts.
+    auto* old_tab =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Of the old NAS",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {},
+                                                    .engine = before.toStdString()},
+                          false);
+    QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
+    QTRY_VERIFY(window.remoteEngine()->key.text() != before);
+    QCOMPARE(QString::fromStdString(old_tab->document.engine), before);
+    QCOMPARE(QSettings{}.value(QStringLiteral("library/engine-id")).toString(),
+             window.remoteEngine()->key.text());
+    // The remote's own tab is its own, not the old engine's list.
+    QVERIFY(window.remoteQueueTab() != old_tab);
+    QSettings{}.remove(QStringLiteral("library/engine-id"));
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {
@@ -5983,7 +6079,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QVERIFY(remote_tab != nullptr && !EngineKey::of(remote_tab->document).isLocal());
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
-    QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
+    QCOMPARE(sources->tabData(sources->count() - 1).toString(), window.remoteEngine()->key.text());
     // Someone whose music is all on the remote can hide this computer's
     // library; its tab goes, and the remote's stays in front.
     {
@@ -5993,7 +6089,8 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
         QSettings{}.setValue(QLatin1String(SettingsDialog::library_show_local_key), false);
         window.applyLocalLibraryVisibility();
         QVERIFY(!sources->isTabVisible(library_tab));
-        QCOMPARE(sources->tabData(sources->currentIndex()).toString(), QStringLiteral("remote"));
+        QCOMPARE(sources->tabData(sources->currentIndex()).toString(),
+                 window.remoteEngine()->key.text());
         QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
         window.applyLocalLibraryVisibility();
         QVERIFY(sources->isTabVisible(library_tab));
@@ -6125,7 +6222,8 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                  qPrintable(status->text()));
     }
     // Up Next holds one engine's asks.
-    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1, EngineKey::remote());
+    window.enqueueLocalRequests({remote_tab->model->rows().front()}, -1,
+                                window.remoteEngine()->key);
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
     window.enqueueLocalRequests({local_tab->model->rows().front()}, -1, EngineKey::local());
     QCOMPARE(window.playback_.requests.pending().size(), 1U);
@@ -6338,7 +6436,7 @@ void BenchMainWindowTest::sourcePanelOpensOnALibrary() {
     QTRY_VERIFY(window.lists_restored_);
     QTRY_COMPARE(
         window.local_source_tabs_->tabData(window.local_source_tabs_->currentIndex()).toString(),
-        QStringLiteral("remote"));
+        window.remoteEngine()->key.text());
     QSettings{}.remove(QLatin1String(SettingsDialog::library_show_local_key));
 }
 
@@ -6559,7 +6657,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
             [&asked](std::vector<LocalTrackRow> rows) { asked = std::move(rows); });
         QTRY_COMPARE(asked.size(), std::size_t{1});
         asked_title = asked.front().title;
-        window.enqueueLocalRequests(asked, -1, EngineKey::remote());
+        window.enqueueLocalRequests(asked, -1, window.remoteEngine()->key);
         // An ask is an occurrence of its own, with an identity of its own.
         QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
         asked_id = window.playback_.requests.pending().front().source.entry_id.to_string();
@@ -6577,7 +6675,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
     QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     QCOMPARE(window.playback_.requests.pending().size(), std::size_t{1});
     QCOMPARE(window.playback_.requests.pending().front().source.entry_id.to_string(), asked_id);
-    QVERIFY(window.up_next_engine_ == EngineKey::remote());
+    QVERIFY(window.up_next_engine_ == window.remoteEngine()->key);
     QVERIFY(engine_requests() == std::vector<std::string>{asked_id});
     // Played, it is named in the header by its title, and leaves the waiting list.
     QTRY_VERIFY(window.transport_ == window.remotePlayback());
@@ -6642,10 +6740,9 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
         locate->trigger();
         menu->close();
         // The remote's library comes forward, on the album or its artist.
-        QTRY_COMPARE(window.local_source_tabs_
-                         ->tabData(window.local_source_tabs_->currentIndex())
+        QTRY_COMPARE(window.local_source_tabs_->tabData(window.local_source_tabs_->currentIndex())
                          .toString(),
-                     QStringLiteral("remote"));
+                     window.remoteEngine()->key.text());
         QTRY_VERIFY(tree->currentIndex().data().toString().contains(album ? album_name
                                                                           : artist_name));
     }
@@ -6805,7 +6902,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     auto* results = dialog->findChild<QListWidget*>(QStringLiteral("bench-search-results"));
     auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-search-status"));
     QVERIFY(scope && query_mode && input && results && status);
-    QCOMPARE(scope->currentData().toString(), QStringLiteral("remote"));
+    QCOMPARE(scope->currentData().toString(), window.remoteEngine()->key.text());
     QTRY_COMPARE(dialog->focusWidget(), static_cast<QWidget*>(input));
     // From a local tab, this computer's; and back again, the remote's.
     window.tabs_->setCurrentWidget(local->view);
@@ -6813,7 +6910,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     QCOMPARE(scope->currentData().toString(), QStringLiteral("local"));
     window.tabs_->setCurrentWidget(tab->view);
     window.openSearchDialog();
-    QCOMPARE(scope->currentData().toString(), QStringLiteral("remote"));
+    QCOMPARE(scope->currentData().toString(), window.remoteEngine()->key.text());
     query_mode->setChecked(false);
     input->setText(QStringLiteral("fixture"));
     QTRY_VERIFY(status->text().contains(QStringLiteral("1 album")));

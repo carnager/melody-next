@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -62,6 +63,7 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
                 trailingContent = { Text("Change", color = MaterialTheme.colorScheme.primary) },
                 modifier = Modifier.clickable(onClick = onChangeEngine),
             )
+            OtherEngines(vm)
             Section("This phone as a speaker")
             ListItem(
                 headlineContent = { Text("Offer it to the engine") },
@@ -139,4 +141,75 @@ fun SettingsScreen(vm: MainViewModel, onChangeEngine: () -> Unit, onClose: () ->
             }
         }
     }
+}
+
+/**
+ * ADR-0234: engines besides the one this phone plays through, whose lists
+ * show too -- a desktop's open tabs beside the NAS's. Found on the network,
+ * or by address where the network does not reach (a VPN); with this phone's
+ * engine password.
+ */
+@Composable
+private fun OtherEngines(vm: MainViewModel) {
+    val settings = vm.app.settings
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val found by androidx.compose.runtime.remember { com.melody.next.engine.discoverEngines(context) }
+        .collectAsState(initial = emptyList())
+    val clients by vm.app.otherClients.collectAsState()
+    val password = settings.endpoint?.password ?: ""
+    val update = { engines: List<com.melody.next.engine.Endpoint> ->
+        settings.updateOtherEngines(engines)
+        vm.app.updateOtherEngines()
+    }
+    Section("Lists from other engines")
+    settings.otherEngines.forEachIndexed { index, endpoint ->
+        val connection = clients.getOrNull(index)?.connection?.collectAsState()?.value
+        ListItem(
+            headlineContent = { Text((connection as? ConnectionState.Connected)?.name ?: endpoint.host) },
+            supportingContent = {
+                Text(
+                    when (connection) {
+                        is ConnectionState.Connected -> "Connected · $endpoint"
+                        is ConnectionState.Refused -> connection.reason
+                        is ConnectionState.Connecting -> "Connecting…"
+                        else -> endpoint.toString()
+                    },
+                )
+            },
+            trailingContent = {
+                IconButton(onClick = { update(settings.otherEngines - endpoint) }) {
+                    Icon(androidx.compose.material.icons.Icons.Default.Close, "Remove")
+                }
+            },
+        )
+    }
+    val main = settings.endpoint
+    val offered = found.filter { engine ->
+        (main == null || engine.host != main.host || engine.port != main.port) &&
+            settings.otherEngines.none { it.host == engine.host && it.port == engine.port }
+    }
+    offered.forEach { engine ->
+        ListItem(
+            headlineContent = { Text(engine.name) },
+            supportingContent = { Text("On the network · ${engine.host}:${engine.port}") },
+            trailingContent = { Text("Add", color = MaterialTheme.colorScheme.primary) },
+            modifier = Modifier.clickable { update(settings.otherEngines + engine.endpoint(password)) },
+        )
+    }
+    var typed by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.material3.OutlinedTextField(
+        value = typed,
+        onValueChange = { typed = it },
+        label = { Text("Add by address") },
+        placeholder = { Text("host or host:port") },
+        singleLine = true,
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = {
+            com.melody.next.engine.Endpoint.parse(typed, password)?.let {
+                update(settings.otherEngines + it)
+                typed = ""
+            }
+        }),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+        modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+    )
 }

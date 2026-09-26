@@ -262,6 +262,16 @@ std::vector<LocalTrackRow> EnginePlayback::queueRows(const protocol::Json& answe
                 row.entry_id = *parsed;
             }
         }
+        // Its tags as the engine holds them -- given by whoever queued it --
+        // so a list made from the queue is not a list of filenames, and
+        // handed back it does not strip them.
+        row.title = item.value("title", std::string{});
+        if (const auto group = item.find("group"); group != item.end() && group->is_object()) {
+            row.album_artist = group->value("album_artist", std::string{});
+            row.artist = group->value("artist", std::string{});
+            row.album = group->value("album", std::string{});
+            row.date = group->value("date", std::string{});
+        }
         if (const auto duration = item.find("duration_ms");
             duration != item.end() && duration->is_number_integer()) {
             const auto value = duration->get<std::int64_t>();

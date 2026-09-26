@@ -102,7 +102,7 @@ void BenchMainWindow::initializePersistence() {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     list_sync_ = new EngineListSync(this);
-    list_sync_->setEngines(local_playback_, nullptr);
+    list_sync_->setEngine(EngineKey::local(), local_playback_);
     connect(list_sync_, &EngineListSync::adopted, this, &BenchMainWindow::adoptEngineList);
     connect(list_sync_, &EngineListSync::wantsSave, this, &BenchMainWindow::schedulePersist);
     connect(list_sync_, &EngineListSync::conflicted, this, &BenchMainWindow::settleListConflict);
@@ -808,7 +808,8 @@ void BenchMainWindow::openEngineList(const bool remote, const QString& id,
                                          5'000);
                 return;
             }
-            auto document = EngineListSync::documentFromAnswer(*answer, remote);
+            auto document = EngineListSync::documentFromAnswer(
+                *answer, remote ? EngineKey::remote() : EngineKey::local());
             if (!document) {
                 return;
             }

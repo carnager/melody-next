@@ -258,6 +258,7 @@ class BenchMainWindowTest final : public QObject {
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
     void aListDeletedElsewhereWhileBeingWrittenStaysDeleted();
+    void aRemovalLeftPendingByAnOlderReleaseIsCarriedOut();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -2192,6 +2193,35 @@ void BenchMainWindowTest::aListDeletedElsewhereWhileBeingWrittenStaysDeleted() {
     window.persistNow(false);
     QTRY_VERIFY(!window.list_sync_->busy());
     QVERIFY(!listed(id));
+    (*engine)->close();
+}
+
+// ADR-0234: pending removals are kept by engine key now; one an older release
+// left as "l:<id>" is still carried out on connecting.
+void BenchMainWindowTest::aRemovalLeftPendingByAnOlderReleaseIsCarriedOut() {
+    auto engine = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(engine.has_value());
+    const auto made = (*engine)->call(
+        "list.save", protocol::Json{{"name", "Closed long ago"}, {"kind", "working"},
+                                    {"items", protocol::Json::array()}});
+    QVERIFY(made.has_value());
+    const auto id = made->value("id", std::string{});
+    QSettings{}.setValue(QStringLiteral("lists/pending-removals"),
+                         QStringList{QStringLiteral("l:") + QString::fromStdString(id)});
+    const auto listed = [&engine, &id] {
+        auto all = (*engine)->call("list.all");
+        return all && std::ranges::any_of(all->value("lists", protocol::Json::array()),
+                                          [&id](const protocol::Json& list) {
+                                              return list.value("id", std::string{}) == id;
+                                          });
+    };
+    QVERIFY(listed());
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(!listed());
+    QTRY_VERIFY(QSettings{}.value(QStringLiteral("lists/pending-removals")).toStringList().isEmpty());
     (*engine)->close();
 }
 

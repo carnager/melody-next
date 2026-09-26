@@ -1,9 +1,9 @@
 # The image builds from source alone: no local builds, packages or VCS.
 build/
 .git/
-packaging/arch/src/
-packaging/arch/pkg/
-packaging/arch/trackknife/
+packaging/arch/*/src/
+packaging/arch/*/pkg/
+packaging/arch/*/melody-next/
 **/*.pkg.tar.zst
 Screenshots/
 android/

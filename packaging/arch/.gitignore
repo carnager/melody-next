@@ -1,6 +1,7 @@
-# makepkg works in this directory: VCS clone, build/package trees, products.
-/melody-next/
-/src/
-/pkg/
+# makepkg works in each package's directory: VCS clone, build/package
+# trees, products.
+*/melody-next/
+*/src/
+*/pkg/
 *.pkg.tar.zst
 *.log

@@ -5,13 +5,17 @@
 From the AUR:
 
 - `trackknife-git`: the desktop app
-- `melody-git`: the engine (`melodyd`), `melody-agent` and `melody-cli`. On a
-  server you only need `melodyd-git`.
+- `melody-git`: the engine (`melodyd-git`) and `melody-agent-git`. On a server
+  you only need `melodyd-git`.
+- `melody-cli-git`: `melody-cli`, for scripts, key bindings and status bars
+- `melody-watch-git`: `melody-watch`, for a NAS that can't run the engine
+  ([what it does](melody.md#a-nas-that-cant-run-the-engine))
 
-Or build the same packages from this repository:
+The same packages are in [`packaging/arch/`](../packaging/arch/README.md), one
+directory each:
 
 ```sh
-cd packaging/arch
+cd packaging/arch/melody-git
 makepkg -si
 ```
 

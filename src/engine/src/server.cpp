@@ -6,11 +6,11 @@
 #include "trackknife/protocol/message.hpp"
 
 #include <arpa/inet.h>
-#include <sys/time.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -316,10 +316,9 @@ core::Result<std::unique_ptr<Server>> Server::listen_tcp(const std::string& host
     // anyone who could reach the port controlled the engine and could fetch
     // any file it can read.
     if (password.empty()) {
-        return std::unexpected(
-            core::Error{.code = core::ErrorCode::invalid_argument,
-                        .message = "a TCP listener needs a password",
-                        .context = {{.key = "host", .value = host}}});
+        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                           .message = "a TCP listener needs a password",
+                                           .context = {{.key = "host", .value = host}}});
     }
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
@@ -595,6 +594,13 @@ void Server::serve(Connection& connection_ref) {
             }
             // EAGAIN is the authentication deadline running out; anything
             // else is the connection gone.
+            break;
+        }
+        if (received == 0 && !connection->authenticated.load()) {
+            // A stranger that has said all it will: it is answered, and hears
+            // nothing else -- no events reach it -- so waiting for a write to
+            // it to fail would hold it for good. A probe without the password
+            // does exactly this.
             break;
         }
         if (received == 0 && connection->ends_at_eof) {

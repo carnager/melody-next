@@ -675,6 +675,30 @@ void a_stranger_has_seconds_to_authenticate() {
     (*server)->stop();
 }
 
+// A stranger that asks, gets its refusal and leaves -- a probe without the
+// password -- sent EOF, and a peer that has sent EOF was waited on until a
+// write to it failed. A stranger is written nothing, so it was held for
+// good: dozens of dead sockets on an engine others probe. It has nothing
+// more to hear once answered.
+void a_stranger_that_leaves_is_let_go() {
+    protocol::Dispatcher dispatcher;
+    auto server = engine::Server::listen_tcp("127.0.0.1", 0, dispatcher, "the-password");
+    require(server.has_value(), "the engine binds a TCP port");
+    (*server)->start();
+    Client stranger{(*server)->port()};
+    stranger.send("{\"id\":1,\"method\":\"playback.state\"}\n");
+    stranger.half_close();
+    require(stranger.line().find("error") != std::string::npos, "the stranger is still answered");
+    require(stranger.closed_by_peer(std::chrono::seconds{3}),
+            "and then hung up on, well before its time to authenticate is up");
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while ((*server)->connections() > 0U && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    require((*server)->connections() == 0U, "and its place given back");
+    (*server)->stop();
+}
+
 int main() {
     const auto directory = std::filesystem::temp_directory_path() /
                            ("trackknife-server-" + core::StableId::random().to_string());
@@ -693,8 +717,9 @@ int main() {
     a_client_that_does_not_read_is_let_go(directory / "g.sock");
     connections_are_bounded(directory / "h.sock");
     a_stranger_has_seconds_to_authenticate();
+    a_stranger_that_leaves_is_let_go();
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 14 scenarios\n";
+    std::cout << "engine server: 15 scenarios\n";
     return EXIT_SUCCESS;
 }

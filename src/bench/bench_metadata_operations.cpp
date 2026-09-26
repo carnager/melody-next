@@ -873,7 +873,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
             auto view_layouts = collectTrackViewLayouts();
             const auto recovery_was_running = metadata_operation_running_;
             return FilePublicationPlanApplier{
-                [this, database_path, persistence_service, documents = std::move(documents),
+                [database_path, persistence_service, documents = std::move(documents),
                  view_layouts = std::move(view_layouts), recovery_was_running](
                     const operations::PreparationPlan& plan,
                     const operations::FilePublicationApplyProgressCallback& progress,
@@ -931,7 +931,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                          : std::unexpected(std::move(refreshed.error()));
                     };
                     const auto relocate =
-                        [this, persistence_service](
+                        [persistence_service](
                             const operations::FilePublicationCommitResult& result,
                             const metadata::MetadataDocument* document) -> core::Result<void> {
                         if (!persistence_service) {

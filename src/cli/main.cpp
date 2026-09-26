@@ -131,7 +131,7 @@ void usage(std::ostream& out) {
 }
 
 [[nodiscard]] std::unique_ptr<Client> connect(const Options& options) {
-    const auto open = [&options](const Endpoint& endpoint) {
+    const auto open = [](const Endpoint& endpoint) {
         auto client = Client::connect(endpoint);
         if (!client) {
             fail("cannot reach the engine at " + endpoint.describe() + ": " +

@@ -4623,7 +4623,7 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
     }
     // -12.04 dB over a 0.8 peak must land near 0.2; an untouched copy at
     // 0.8 means the dialog's gain option silently did nothing.
-    QVERIFY2(peak > 0.17F && peak < 0.23F, qPrintable(QString::number(peak)));
+    QVERIFY2(peak > 0.17F && peak < 0.23F, qPrintable(QString::number(static_cast<double>(peak))));
     delete dialog;
     ConvertDialog reopened{{}};
     QCOMPARE(

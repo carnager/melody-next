@@ -16,6 +16,8 @@ struct AlbumRowKey final {
     std::string artist;
     std::string album;
     std::string date;
+
+    friend bool operator==(const AlbumRowKey&, const AlbumRowKey&) = default;
 };
 
 // Album shuffle builds one key per row and holds them all at once, so a

@@ -258,7 +258,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     const auto make_preamp = [&](const QString& name, const QString& key) {
         auto* spin = new QDoubleSpinBox(playback);
         spin->setObjectName(name);
-        const double limit = audio::maximum_replay_gain_preamp_db;
+        const auto limit = static_cast<double>(audio::maximum_replay_gain_preamp_db);
         spin->setRange(-limit, limit);
         spin->setSingleStep(0.5);
         spin->setDecimals(1);

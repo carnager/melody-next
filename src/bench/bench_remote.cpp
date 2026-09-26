@@ -51,7 +51,7 @@ LocalLibraryPanel* BenchMainWindow::libraryOf(const EngineKey& key) const {
 
 BenchMainWindow::ListTab* BenchMainWindow::remoteQueueTab() {
     for (const auto& tab : list_tabs_) {
-        if (tab->document.remote) {
+        if (!EngineKey::of(tab->document).isLocal()) {
             return tab.get();
         }
     }
@@ -66,7 +66,7 @@ BenchMainWindow::ListTab* BenchMainWindow::remoteQueueTab() {
                                                      .pinned = false,
                                                      .dirty = false,
                                                      .items = {},
-                                                     .remote = true},
+                                                     .engine = remoteEngine()->key.stored()},
                            false);
     schedulePersist();
     return tab;
@@ -123,7 +123,7 @@ void BenchMainWindow::connectRemoteEngine() {
         // The remote tabs were restored before there was a remote to ask for
         // their covers and missing tags -- or while it was away: they ask now.
         for (auto& tab : list_tabs_) {
-            if (tab->document.remote) {
+            if (!EngineKey::of(tab->document).isLocal()) {
                 // Named now that the remote has said its name.
                 static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(
                     emptyListTitle(EngineKey::of(tab->document)),
@@ -205,7 +205,7 @@ void BenchMainWindow::connectRemoteEngine() {
             // Into the remote tab on screen, or the remote's own: a
             // remote file never lands in a local tab.
             auto* target = currentListTab();
-            if (target == nullptr || !target->document.remote) {
+            if (target == nullptr || EngineKey::of(target->document).isLocal()) {
                 target = remoteQueueTab();
             }
             if (target == nullptr) {
@@ -220,7 +220,7 @@ void BenchMainWindow::connectRemoteEngine() {
                                               .pinned = false,
                                               .dirty = false,
                                               .items = {},
-                                              .remote = true},
+                                              .engine = remoteEngine()->key.stored()},
                     true);
                 schedulePersist();
             }
@@ -289,7 +289,7 @@ void BenchMainWindow::connectRemoteEngine() {
                         .pinned = false,
                         .dirty = false,
                         .items = {},
-                        .remote = true},
+                        .engine = remoteEngine()->key.stored()},
                     true);
                 destination->model->appendRows(std::move(rows));
                 markTabDirty(*destination);

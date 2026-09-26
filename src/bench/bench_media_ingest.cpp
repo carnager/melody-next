@@ -433,7 +433,7 @@ void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
     // ADR-0227: a remote tab's files are on the remote's machine, and need
     // not be reachable from this one. What a row is missing is asked of that
     // engine's index instead of read from a file here.
-    if (tab.document.remote) {
+    if (!EngineKey::of(tab.document).isLocal()) {
         enrichRemoteRows(tab);
         return;
     }
@@ -649,7 +649,7 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     // A remote tab's files are on the remote's machine (ADR-0227), and
     // nothing of it need be mounted here: its covers come from its engine.
     std::shared_ptr<engine::Catalogue> engine;
-    if (tab.document.remote) {
+    if (!EngineKey::of(tab.document).isLocal()) {
         if (!remoteCatalogue()) {
             return;
         }
@@ -860,9 +860,10 @@ void BenchMainWindow::openLocalPaths(std::vector<std::string> raw_paths) {
     // screen when it is one, else the first there is, else a new one. Into a
     // remote tab they would be the remote's paths, which they are not.
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->document.remote) {
-        const auto local = std::ranges::find_if(
-            list_tabs_, [](const auto& candidate) { return !candidate->document.remote; });
+    if (tab == nullptr || !EngineKey::of(tab->document).isLocal()) {
+        const auto local = std::ranges::find_if(list_tabs_, [](const auto& candidate) {
+            return EngineKey::of(candidate->document).isLocal();
+        });
         tab = local != list_tabs_.end()
                   ? local->get()
                   : addListTab(persistence::ListDocument{.id = core::StableId::random(),
@@ -871,7 +872,7 @@ void BenchMainWindow::openLocalPaths(std::vector<std::string> raw_paths) {
                                                          .pinned = false,
                                                          .dirty = false,
                                                          .items = {},
-                                                         .remote = false},
+                                                         .engine = {}},
                                true);
         tabs_->setCurrentWidget(tab->view);
     }

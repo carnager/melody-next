@@ -257,7 +257,7 @@ bool BenchMainWindow::handleTabFileDrop(QDropEvent* drop, const int tab_index) {
                                                       .pinned = false,
                                                       .dirty = false,
                                                       .items = {},
-                                                      .remote = !files_engine.isLocal()},
+                                                      .engine = files_engine.stored()},
                             true);
         schedulePersist();
     }

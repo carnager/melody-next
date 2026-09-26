@@ -107,7 +107,7 @@ using protocol::Json;
                                        .pinned = false,
                                        .dirty = false,
                                        .items = {},
-                                       .remote = !engine.isLocal()};
+                                       .engine = engine.stored()};
     for (const auto& value : answer.value("items", Json::array())) {
         auto path = protocol::decode_raw_path(value.value("path", std::string{}));
         auto entry = core::StableId::parse(value.value("entry", std::string{}));

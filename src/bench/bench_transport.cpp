@@ -1410,7 +1410,7 @@ void BenchMainWindow::playRow(ListTab& tab, const int row) {
     // ADR-0227: a tab plays on the engine whose files it lists.
     auto* target = playbackOf(EngineKey::of(tab.document));
     if (target == nullptr || !target->active()) {
-        statusBar()->showMessage(tab.document.remote
+        statusBar()->showMessage(!EngineKey::of(tab.document).isLocal()
                                      ? QStringLiteral("Nothing can play: the remote engine is "
                                                       "not connected")
                                      : QStringLiteral("Nothing can play: this computer's engine "

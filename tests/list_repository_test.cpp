@@ -290,7 +290,8 @@ void list_documents_round_trip_transactionally() {
             .dirty = false,
             .items = {},
         },
-        // ADR-0227: a list of the remote engine's files keeps that binding.
+        // ADR-0227, ADR-0234: a list of another engine's files keeps which
+        // engine, by the id it keeps.
         persistence::ListDocument{
             .id = trackknife::core::StableId::random(),
             .kind = persistence::ListKind::scratch,
@@ -298,7 +299,7 @@ void list_documents_round_trip_transactionally() {
             .pinned = false,
             .dirty = false,
             .items = {},
-            .remote = true,
+            .engine = "6b0f3c52-8f7a-4c1e-9d2b-3e5a7c9d1f20",
         },
         // ADR-0181: a client-owned server list — an mpd-kind document whose
         // items are pure snapshot rows.
@@ -331,7 +332,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 46U, "state repository schema must be explicit");
+        require(repository.schema_version() == 47U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -710,7 +711,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 46U,
+        require(repository.schema_version() == 47U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1446,7 +1447,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 46U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 47U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1998,11 +1999,62 @@ void engine_lists_round_trip_and_refuse_stale_writes() {
 
 } // namespace
 
+// ADR-0234: an older release's lists said only whether they were the
+// remote's. Upgraded, the remote's say "remote" -- the configured remote,
+// until it has said who it is -- and this computer's say nothing.
+void lists_of_an_older_release_name_their_engine() {
+    namespace persistence = trackknife::persistence;
+    namespace core = trackknife::core;
+    const auto directory = std::filesystem::temp_directory_path() /
+                           ("trackbench-list-engine-" + core::StableId::random().to_string());
+    std::filesystem::create_directory(directory);
+    const auto path = directory / "state.sqlite3";
+    const auto here = core::StableId::random();
+    const auto there = core::StableId::random();
+    {
+        auto repository = persistence::ListRepository::open(path);
+        require(repository.has_value(), "the database opens");
+        const auto document = [](const core::StableId& id, std::string engine) {
+            return persistence::ListDocument{.id = id,
+                                             .kind = persistence::ListKind::scratch,
+                                             .name = "list",
+                                             .pinned = false,
+                                             .dirty = false,
+                                             .items = {},
+                                             .engine = std::move(engine)};
+        };
+        const std::vector<persistence::ListDocument> lists{document(here, ""),
+                                                           document(there, "remote")};
+        require(repository->replace_all(lists).has_value(), "lists are saved");
+    }
+    // Back to how version 46 had it: only the flag.
+    sqlite3* db = nullptr;
+    require(sqlite3_open(path.c_str(), &db) == SQLITE_OK, "the database opens directly");
+    require(sqlite3_exec(db,
+                         "ALTER TABLE list_documents DROP COLUMN engine;"
+                         "UPDATE schema_version SET version = 46;",
+                         nullptr, nullptr, nullptr) == SQLITE_OK,
+            "the database goes back to version 46");
+    sqlite3_close(db);
+
+    auto reopened = persistence::ListRepository::open(path);
+    require(reopened.has_value() && reopened->schema_version() == 47U, "and is upgraded");
+    const auto loaded = reopened->load_all();
+    require(loaded.has_value() && loaded->size() == 2U, "with both lists");
+    for (const auto& list : *loaded) {
+        require(list.engine == (list.id == there ? "remote" : ""),
+                "the remote's lists name the remote; this computer's name nothing");
+    }
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
 int main() {
     saved_searches_are_persistent_and_conflict_checked();
     local_listening_history_is_monotonic_and_persistent();
     local_listening_occurrences_are_idempotent_and_source_qualified();
     list_documents_round_trip_transactionally();
+    lists_of_an_older_release_name_their_engine();
     metadata_transformation_chains_round_trip_transactionally();
     output_layout_and_destination_profiles_round_trip_transactionally();
     encoder_presets_round_trip_transactionally();

@@ -1100,7 +1100,7 @@ void BenchMainWindowTest::quickTrackFindsATrackByItsTitle() {
         QVERIFY(catalogue->scan({}, progress).has_value());
     }
     auto* tab = window.currentListTab();
-    QVERIFY(tab != nullptr && !tab->document.remote);
+    QVERIFY(tab != nullptr && EngineKey::of(tab->document).isLocal());
     tab->model->replaceRows({}, true);
     auto* action = window.findChild<QAction*>(QStringLiteral("action-quick-track"));
     QVERIFY(action != nullptr);
@@ -1138,7 +1138,7 @@ void BenchMainWindowTest::quickAlbumShiftEnterReplacesAndPlays() {
         QVERIFY(catalogue->scan({}, progress).has_value());
     }
     auto* tab = window.currentListTab();
-    QVERIFY(tab != nullptr && !tab->document.remote);
+    QVERIFY(tab != nullptr && EngineKey::of(tab->document).isLocal());
     window.findChild<QAction*>(QStringLiteral("action-quick-album"))->trigger();
     QuickPickPopup* popup = nullptr;
     for (auto* candidate : window.findChildren<QuickPickPopup*>()) {
@@ -1179,7 +1179,7 @@ void BenchMainWindowTest::quickAlbumFindsByWordsAndPutsItAway() {
         album = page->entries.front();
     }
     auto* tab = window.currentListTab();
-    QVERIFY(tab != nullptr && !tab->document.remote);
+    QVERIFY(tab != nullptr && EngineKey::of(tab->document).isLocal());
     tab->model->replaceRows({}, true);
     // A word of the album and its year, in any case.
     const auto words = QString::fromStdString(album.album).section(QLatin1Char(' '), 0, 0).toUpper() +
@@ -5980,7 +5980,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QTRY_VERIFY(window.lists_restored_);
     QTRY_VERIFY(window.remotePlayback() != nullptr && window.remotePlayback()->active());
     auto* remote_tab = window.remoteQueueTab();
-    QVERIFY(remote_tab != nullptr && remote_tab->document.remote);
+    QVERIFY(remote_tab != nullptr && !EngineKey::of(remote_tab->document).isLocal());
     auto* sources = window.findChild<QTabBar*>(QStringLiteral("bench-local-source-tabs"));
     QVERIFY(sources != nullptr);
     QCOMPARE(sources->tabData(sources->count() - 1).toString(), QStringLiteral("remote"));
@@ -6036,7 +6036,8 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && !page->entries.empty());
     window.openLocalPaths({QFile::encodeName(here).toStdString()});
-    QTRY_VERIFY(window.currentListTab() != nullptr && !window.currentListTab()->document.remote &&
+    QTRY_VERIFY(window.currentListTab() != nullptr &&
+                EngineKey::of(window.currentListTab()->document).isLocal() &&
                 window.currentListTab()->model->rowCount() == 1);
     auto* local_tab = window.currentListTab();
     emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
@@ -6135,8 +6136,9 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     QVERIFY(window.close());
     BenchMainWindow restored;
     QTRY_VERIFY(restored.lists_restored_);
-    const auto remote_tabs = std::ranges::count_if(
-        restored.list_tabs_, [](const auto& tab) { return tab->document.remote; });
+    const auto remote_tabs = std::ranges::count_if(restored.list_tabs_, [](const auto& tab) {
+        return !EngineKey::of(tab->document).isLocal();
+    });
     QCOMPARE(remote_tabs, 1);
 }
 
@@ -6488,7 +6490,7 @@ void BenchMainWindowTest::dynamicPlaylistsReadTheLibraryChosen() {
     const auto before = window.list_tabs_.size();
     dialog->findChild<QPushButton*>(QStringLiteral("dynamic-open"))->click();
     QTRY_COMPARE(window.list_tabs_.size(), before + 1);
-    QVERIFY(window.list_tabs_.back()->document.remote);
+    QVERIFY(!EngineKey::of(window.list_tabs_.back()->document).isLocal());
     QCOMPARE(window.list_tabs_.back()->model->rows().front().raw_path, remote_path);
 
     // This computer's library, which has no such track.
@@ -6742,14 +6744,15 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     // to where this computer sees the file -- here the same path, as with the
     // NAS mounted at the same place on both -- and what is not reachable here
     // is left out, with a word why.
-    auto* local = window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                              .kind = persistence::ListKind::scratch,
-                                                              .name = "Here",
-                                                              .pinned = false,
-                                                              .dirty = false,
-                                                              .items = {},
-                                                              .remote = false},
-                                    true);
+    auto* local =
+        window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                    .kind = persistence::ListKind::scratch,
+                                                    .name = "Here",
+                                                    .pinned = false,
+                                                    .dirty = false,
+                                                    .items = {},
+                                                    .engine = {}},
+                          true);
     const auto local_id = QString::fromStdString(local->document.id.to_string());
     QVERIFY(window.transferRows(tab->view, {0, 2}, local_id, false, -1));
     QCOMPARE(local->model->rowCount(), 1);
@@ -6845,10 +6848,12 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
         const auto opened = media.filePath(QStringLiteral("opened-here.wav"));
         write_wave(opened, wave_sample_rate);
         window.openLocalPaths({QFile::encodeName(opened).toStdString()});
-        QTRY_VERIFY(window.currentListTab() != nullptr && !window.currentListTab()->document.remote &&
-                    std::ranges::any_of(window.currentListTab()->model->rows(), [&opened](const auto& row) {
-                        return row.raw_path == QFile::encodeName(opened).toStdString();
-                    }));
+        QTRY_VERIFY(
+            window.currentListTab() != nullptr &&
+            EngineKey::of(window.currentListTab()->document).isLocal() &&
+            std::ranges::any_of(window.currentListTab()->model->rows(), [&opened](const auto& row) {
+                return row.raw_path == QFile::encodeName(opened).toStdString();
+            }));
         QCOMPARE(tab->model->rowCount(), rows_before);
     }
 
@@ -6905,7 +6910,7 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
     };
     const auto remote_tab = [](BenchMainWindow& window) -> BenchMainWindow::ListTab* {
         for (const auto& tab : window.list_tabs_) {
-            if (tab->document.remote && tab->model->rowCount() > 0) {
+            if (!EngineKey::of(tab->document).isLocal() && tab->model->rowCount() > 0) {
                 return tab.get();
             }
         }
@@ -10291,7 +10296,7 @@ void BenchMainWindowTest::filesDroppedOnTheTabBarMakeATab() {
     QVERIFY(drop_files(album, empty));
     QCOMPARE(tabs->count(), before + 1);
     auto* made = window.currentListTab();
-    QVERIFY(made != nullptr && !made->document.remote);
+    QVERIFY(made != nullptr && EngineKey::of(made->document).isLocal());
     QCOMPARE(QString::fromStdString(made->document.name), QStringLiteral("Some Album"));
     QTRY_COMPARE(made->model->rowCount(), 2);
 

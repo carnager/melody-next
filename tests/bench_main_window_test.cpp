@@ -2,11 +2,6 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
-#include "bench/lists_panel.hpp"
-#include "bench/up_next_delegate.hpp"
-#include "bench/quick_pick_popup.hpp"
-#include "trackknife/discovery/mdns.hpp"
-#include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -15,20 +10,26 @@
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/lastfm_service.hpp"
+#include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
-#include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_artwork_section.hpp"
+#include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/quick_pick_popup.hpp"
+#include "bench/remote_engines.hpp"
 #include "bench/replaygain_dialog.hpp"
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "bench/up_next_delegate.hpp"
 #include "test_engine.hpp"
+#include "trackknife/discovery/mdns.hpp"
+#include "uicommon/local_files_mime_data.hpp"
 
 #include <signal.h>
 
@@ -256,6 +257,7 @@ class BenchMainWindowTest final : public QObject {
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
     void theRemotesListsTakeItsIdOnceItSaysIt();
+    void remoteEnginesStartFromTheOneRemoteOfBefore();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2328,6 +2330,49 @@ void BenchMainWindowTest::anotherEngineAtTheSameAddressLeavesTheOldOnesLists() {
     // The remote's own tab is its own, not the old engine's list.
     QVERIFY(window.remoteQueueTab() != old_tab);
     QSettings{}.remove(QStringLiteral("library/engine-id"));
+}
+
+// ADR-0234: several engines elsewhere, kept as a list; the one remote an
+// older release kept becomes its first, once, and the old keys keep naming
+// the first for a release that reads only them.
+void BenchMainWindowTest::remoteEnginesStartFromTheOneRemoteOfBefore() {
+    QSettings settings;
+    settings.remove(QStringLiteral("engines"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                      QStringLiteral("192.0.2.7:6603"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key), QString{});
+    settings.setValue(QLatin1String(SettingsDialog::library_remote_folder_key),
+                      QStringLiteral("/mnt/nas/Music"));
+    settings.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), QString{});
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_id_key), QStringLiteral("abc"));
+    settings.sync();
+
+    auto engines = loadRemoteEngines();
+    QCOMPARE(engines.size(), std::size_t{1});
+    QCOMPARE(engines.front().address, QStringLiteral("192.0.2.7:6603"));
+    QCOMPARE(engines.front().music_folder, QStringLiteral("/mnt/nas/Music"));
+    QCOMPARE(engines.front().id, QStringLiteral("abc"));
+
+    engines.push_back({.address = QStringLiteral("198.51.100.3:6603"),
+                       .password = QStringLiteral("other"),
+                       .music_folder = QStringLiteral("/srv/music"),
+                       .reachable_at = QStringLiteral("/media/galactica"),
+                       .id = {}});
+    saveRemoteEngines(engines);
+    QCOMPARE(loadRemoteEngines(), engines);
+    QCOMPARE(loadRemoteEngines().back().effectivePassword(), QStringLiteral("other"));
+
+    rememberEngineId(QStringLiteral("198.51.100.3:6603"), QStringLiteral("def"));
+    QCOMPARE(loadRemoteEngines().back().id, QStringLiteral("def"));
+
+    // With none left, the old keys say so too.
+    saveRemoteEngines({});
+    QVERIFY(loadRemoteEngines().empty());
+    QVERIFY(QSettings{}
+                .value(QLatin1String(SettingsDialog::library_engine_socket_key))
+                .toString()
+                .isEmpty());
+    QSettings{}.remove(QStringLiteral("engines"));
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

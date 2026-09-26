@@ -43,6 +43,9 @@ class CatalogueSource final {
     // engine that cannot be reached leaves its library unavailable, and says
     // why, rather than showing some other database as if it were that one.
     explicit CatalogueSource(std::filesystem::path database, Role role = Role::local);
+    // ADR-0234: one engine elsewhere, of those configured (remote role).
+    CatalogueSource(std::filesystem::path database, const QString& address,
+                    const QString& password);
     CatalogueSource(const CatalogueSource&) = delete;
     CatalogueSource(CatalogueSource&&) = delete;
     CatalogueSource& operator=(const CatalogueSource&) = delete;
@@ -103,6 +106,10 @@ class CatalogueSource final {
     [[nodiscard]] bool reachable() const;
 
   private:
+    // The address and password of an engine elsewhere; false, said why.
+    bool configureRemote(const QString& address, const QString& password);
+    // What every constructor ends with, once the endpoint is known.
+    void finishConstruction();
     std::filesystem::path database_;
     Role role_{Role::local};
     std::optional<protocol::Endpoint> endpoint_;

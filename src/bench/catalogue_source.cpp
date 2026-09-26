@@ -242,21 +242,39 @@ CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role
                 .socket = local_engine_->socket, .host = {}, .port = 0, .token = {}};
         }
     } else {
-        // The one engine elsewhere, if one is configured (ADR-0227).
+        // The first engine elsewhere, if one is configured (ADR-0227).
         const auto configured =
             settings.value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
                 .toString();
-        if (configured.isEmpty()) {
-            link_->failure = QObject::tr("no remote engine is configured");
-            return;
-        }
-        const auto token = SettingsDialog::remoteEnginePassword().toStdString();
-        endpoint_ = protocol::Endpoint::parse(configured.toStdString(), token);
-        if (!endpoint_) {
-            link_->failure = QObject::tr("not an engine address: %1").arg(configured);
+        if (!configureRemote(configured, SettingsDialog::remoteEnginePassword())) {
             return;
         }
     }
+    finishConstruction();
+}
+
+CatalogueSource::CatalogueSource(std::filesystem::path database, const QString& address,
+                                 const QString& password)
+    : database_(std::move(database)), role_(Role::remote), link_(std::make_shared<Link>()) {
+    if (configureRemote(address, password)) {
+        finishConstruction();
+    }
+}
+
+bool CatalogueSource::configureRemote(const QString& address, const QString& password) {
+    if (address.trimmed().isEmpty()) {
+        link_->failure = QObject::tr("no remote engine is configured");
+        return false;
+    }
+    endpoint_ = protocol::Endpoint::parse(address.trimmed().toStdString(), password.toStdString());
+    if (!endpoint_) {
+        link_->failure = QObject::tr("not an engine address: %1").arg(address);
+        return false;
+    }
+    return true;
+}
+
+void CatalogueSource::finishConstruction() {
     // An engine over TCP is not connected to here, on the window's thread at
     // startup: one that is switched off holds a connect for seconds. The
     // first open() connects -- from a worker, as the library panel's are.

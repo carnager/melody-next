@@ -48,7 +48,7 @@ class PlaybackTabBar final : public QTabBar {
     using QTabBar::QTabBar;
 
     // ADR-0233: tabs grouped by the engine their lists are on. Each tab's
-    // group, by name; where it changes from the tab before, a divider and the
+    // group, by name; where it changes from the tab before, a gap and the
     // group's name stand at the start of the new group. The first group is
     // this computer's, and goes unnamed.
     void setGroupOf(std::function<QString(int)> group_of) {
@@ -59,7 +59,7 @@ class PlaybackTabBar final : public QTabBar {
     [[nodiscard]] QString groupOf(int index) const {
         return group_of_ && index >= 0 && index < count() ? group_of_(index) : QString{};
     }
-    // The room before a tab that starts a group: the divider and the name.
+    // The room before a tab that starts a group: the gap and the name.
     [[nodiscard]] int groupLead(int index) const {
         if (!group_of_ || index <= 0 || index >= count()) {
             return 0;
@@ -85,16 +85,14 @@ class PlaybackTabBar final : public QTabBar {
             QStyleOptionTab option;
             initStyleOption(&option, index);
             if (const auto lead = groupLead(index); lead > 0) {
-                // The divider, and the name of the engine these tabs are on.
+                // A gap, and the name of the engine these tabs are on: quiet
+                // enough to read as a heading, not as a tab.
                 const auto area = option.rect;
                 painter.save();
-                painter.setPen(QPen(palette().color(QPalette::Mid), 1));
-                painter.drawLine(QPointF(area.left() + 4.5, area.top() + 7),
-                                 QPointF(area.left() + 4.5, area.bottom() - 5));
                 painter.setFont(groupFont());
                 painter.setPen(palette().color(QPalette::PlaceholderText));
                 painter.drawText(
-                    QRect(area.left() + 12, area.top() + 3, lead - 14, area.height() - 3),
+                    QRect(area.left() + 14, area.top() + 3, lead - 16, area.height() - 3),
                     Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, groupOf(index));
                 painter.restore();
                 option.rect.setLeft(option.rect.left() + lead);

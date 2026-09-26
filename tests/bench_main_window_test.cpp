@@ -1997,7 +1997,7 @@ void BenchMainWindowTest::tabsAreGroupedByEngine() {
     QVERIFY2(local_at() < remote_at(), "a local list opens before the remote's group");
     QCOMPARE(bar->groupOf(remote_at()), window.remote_catalogue_source_->name());
     QVERIFY(bar->groupOf(local_at()).isEmpty());
-    // The divider and name stand before the remote group, and only there.
+    // The gap and name stand before the remote group, and only there.
     QVERIFY(bar->groupLead(remote_at()) > 0);
     QCOMPARE(bar->groupLead(local_at()), 0);
     if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");

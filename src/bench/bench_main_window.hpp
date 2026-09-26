@@ -189,6 +189,9 @@ class BenchMainWindow final : public QMainWindow {
     // one that someone else saved first.
     void adoptEngineList(const persistence::ListDocument& document);
     void settleListConflict(const QString& id);
+    // The lists of every engine this window reaches, to open one as a tab.
+    void showOpenListDialog();
+    void openEngineList(bool remote, const QString& id);
     void backupWorkspace();
     void scheduleWorkspaceRestore();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();

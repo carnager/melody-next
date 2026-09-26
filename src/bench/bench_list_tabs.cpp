@@ -38,6 +38,10 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QDialogButtonBox>
+#include <QTreeWidget>
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
@@ -617,6 +621,133 @@ void BenchMainWindow::adoptEngineList(const persistence::ListDocument& document)
     enqueueUnprobedRows(*tab);
     syncArtwork(*tab);
     schedulePersist();
+}
+
+void BenchMainWindow::showOpenListDialog() {
+    if (auto* existing = findChild<QDialog*>(QStringLiteral("bench-open-list"))) {
+        existing->raise();
+        existing->activateWindow();
+        return;
+    }
+    auto* dialog = new QDialog(this);
+    dialog->setObjectName(QStringLiteral("bench-open-list"));
+    dialog->setWindowTitle(QStringLiteral("Open list"));
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* layout = new QVBoxLayout(dialog);
+    auto* tree = new QTreeWidget(dialog);
+    tree->setObjectName(QStringLiteral("bench-open-list-tree"));
+    tree->setHeaderLabels({QStringLiteral("List"), QStringLiteral("Tracks")});
+    tree->setRootIsDecorated(true);
+    tree->header()->setStretchLastSection(false);
+    tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    layout->addWidget(tree);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, dialog);
+    layout->addWidget(buttons);
+    dialog->resize(480, 420);
+    const auto open = [this, tree, dialog] {
+        const auto* item = tree->currentItem();
+        if (item == nullptr || !item->data(0, Qt::UserRole).isValid()) {
+            return;
+        }
+        openEngineList(item->data(0, Qt::UserRole + 1).toBool(),
+                       item->data(0, Qt::UserRole).toString());
+        dialog->accept();
+    };
+    connect(buttons, &QDialogButtonBox::accepted, dialog, open);
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    connect(tree, &QTreeWidget::itemActivated, dialog, open);
+
+    // Each engine's lists under its name, saved ones first: they are the ones
+    // kept for a reason.
+    const QPointer<QTreeWidget> guarded{tree};
+    const auto fill = [guarded](EnginePlayback* engine, const bool remote, const QString& name) {
+        if (engine == nullptr || !engine->active()) {
+            return;
+        }
+        auto* group = new QTreeWidgetItem(guarded, {name});
+        group->setFlags(Qt::ItemIsEnabled);
+        group->setExpanded(true);
+        engine->request(
+            QStringLiteral("list.all"), protocol::Json::object(),
+            [guarded, remote, name](const core::Result<protocol::Json>& answer) {
+                if (guarded == nullptr) {
+                    return;
+                }
+                QTreeWidgetItem* parent = nullptr;
+                for (int index = 0; index < guarded->topLevelItemCount(); ++index) {
+                    if (guarded->topLevelItem(index)->text(0) == name) {
+                        parent = guarded->topLevelItem(index);
+                    }
+                }
+                if (parent == nullptr) {
+                    return;
+                }
+                auto lists = answer ? answer->value("lists", std::vector<protocol::Json>{})
+                                    : std::vector<protocol::Json>{};
+                std::ranges::stable_partition(lists, [](const protocol::Json& list) {
+                    return list.value("kind", std::string{}) == "saved";
+                });
+                for (const auto& list : lists) {
+                    auto label = QString::fromStdString(list.value("name", std::string{}));
+                    if (list.value("kind", std::string{}) != "saved") {
+                        label += QStringLiteral(" (working)");
+                    }
+                    auto* item = new QTreeWidgetItem(
+                        parent, {label, QString::number(list.value("tracks", 0))});
+                    item->setData(0, Qt::UserRole,
+                                  QString::fromStdString(list.value("id", std::string{})));
+                    item->setData(0, Qt::UserRole + 1, remote);
+                }
+                if (lists.empty()) {
+                    auto* none = new QTreeWidgetItem(
+                        parent, {answer ? QStringLiteral("No lists")
+                                        : QStringLiteral("Cannot say: %1")
+                                              .arg(QString::fromStdString(answer.error().message))});
+                    none->setFlags(Qt::NoItemFlags);
+                }
+            });
+    };
+    fill(local_playback_, false, QStringLiteral("This computer"));
+    if (remote_catalogue_source_ != nullptr) {
+        fill(remote_playback_, true, remote_catalogue_source_->name());
+    }
+    dialog->open();
+}
+
+void BenchMainWindow::openEngineList(const bool remote, const QString& id) {
+    // Already open here: shown, not opened twice.
+    if (auto* tab = tabForDocument(id); tab != nullptr) {
+        tabs_->setCurrentWidget(tab->view);
+        return;
+    }
+    auto* engine = remote ? remote_playback_ : local_playback_;
+    if (engine == nullptr) {
+        return;
+    }
+    engine->request(QStringLiteral("list.get"), protocol::Json{{"id", id.toStdString()}},
+                    [this, remote](const core::Result<protocol::Json>& answer) {
+                        if (!answer) {
+                            statusBar()->showMessage(
+                                QStringLiteral("Could not open the list: %1")
+                                    .arg(QString::fromStdString(answer.error().message)),
+                                5'000);
+                            return;
+                        }
+                        auto document = EngineListSync::documentFromAnswer(*answer, remote);
+                        if (!document) {
+                            return;
+                        }
+                        if (auto* open = tabForDocument(document->id); open != nullptr) {
+                            tabs_->setCurrentWidget(open->view);
+                            return;
+                        }
+                        list_sync_->opened(*document,
+                                           answer->value("revision", std::uint64_t{0}));
+                        auto* tab = addListTab(std::move(*document), true);
+                        enqueueUnprobedRows(*tab);
+                        syncArtwork(*tab);
+                        schedulePersist();
+                    });
 }
 
 void BenchMainWindow::settleListConflict(const QString& id) {

@@ -165,6 +165,21 @@ using protocol::Json;
 
 EngineListSync::EngineListSync(QObject* parent) : QObject(parent) {}
 
+std::optional<persistence::ListDocument>
+EngineListSync::documentFromAnswer(const protocol::Json& answer, const bool remote) {
+    return document_from(answer, remote);
+}
+
+void EngineListSync::opened(const persistence::ListDocument& document, const std::uint64_t revision) {
+    auto& known = known_[document.id.to_string()];
+    known.working = document.kind != persistence::ListKind::saved;
+    known.remote = document.remote;
+    known.dirty = false;
+    known.fingerprint = fingerprint(document);
+    known.local = known.fingerprint;
+    known.revision = revision;
+}
+
 void EngineListSync::setEngines(EnginePlayback* local, EnginePlayback* remote) {
     if (remote_.data() != remote) {
         remote_state_ = Engine{};

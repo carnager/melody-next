@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trackknife/persistence/list_repository.hpp"
+#include "trackknife/protocol/message.hpp"
 
 #include <QObject>
 #include <QPointer>
@@ -55,6 +56,14 @@ class EngineListSync final : public QObject {
     // the engine's.
     void keepMine(const QString& id);
     void takeTheirs(const QString& id);
+
+    // A list as list.get answers it, in the window's terms; empty for an
+    // answer that is not one.
+    [[nodiscard]] static std::optional<persistence::ListDocument>
+    documentFromAnswer(const protocol::Json& answer, bool remote);
+    // A list the window has just opened from its engine, as it is there: not
+    // sent back, since that is what it already is.
+    void opened(const persistence::ListDocument& document, std::uint64_t revision);
 
     // For tests: whether anything is on its way to or from an engine.
     [[nodiscard]] bool busy() const noexcept { return in_flight_ > 0; }

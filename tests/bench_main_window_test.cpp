@@ -249,6 +249,7 @@ class BenchMainWindowTest final : public QObject {
     void theWindowsListsAreOnItsEngine();
     void anotherClientsListChangesReachTheWindow();
     void aListChangedWhileClosedIsTakenUpOnOpening();
+    void aListFromElsewhereOpensAsATab();
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
@@ -1776,6 +1777,54 @@ void BenchMainWindowTest::aListChangedWhileClosedIsTakenUpOnOpening() {
     auto stored = (*other)->call("list.get", protocol::Json{{"id", id}});
     QVERIFY(stored.has_value());
     QCOMPARE(stored->at("items").size(), std::size_t{1});
+    (*other)->close();
+}
+
+// ADR-0233: a list this window does not have open -- saved from another
+// window, the CLI, the phone -- is found under its engine and opened as a
+// tab, without being written back just for having been opened.
+void BenchMainWindowTest::aListFromElsewhereOpensAsATab() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY(window.local_playback_ != nullptr && window.local_playback_->active());
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    auto made = (*other)->call(
+        "list.save", protocol::Json{{"name", "From elsewhere"},
+                                    {"kind", "saved"},
+                                    {"items", listItems({"/music/elsewhere/1.flac",
+                                                         "/music/elsewhere/2.flac"})}});
+    QVERIFY(made.has_value());
+    const auto id = made->value("id", std::string{});
+
+    window.findChild<QAction*>(QStringLiteral("action-open-list"))->trigger();
+    auto* dialog = window.findChild<QDialog*>(QStringLiteral("bench-open-list"));
+    QVERIFY(dialog != nullptr);
+    auto* tree = dialog->findChild<QTreeWidget*>(QStringLiteral("bench-open-list-tree"));
+    QTreeWidgetItem* found = nullptr;
+    QTRY_VERIFY([&] {
+        const auto items = tree->findItems(QStringLiteral("From elsewhere"),
+                                           Qt::MatchExactly | Qt::MatchRecursive);
+        found = items.isEmpty() ? nullptr : items.front();
+        return found != nullptr;
+    }());
+    QCOMPARE(found->text(1), QStringLiteral("2"));
+    QCOMPARE(found->parent()->text(0), QStringLiteral("This computer"));
+    tree->setCurrentItem(found);
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Open)->click();
+
+    auto* tab = static_cast<BenchMainWindow::ListTab*>(nullptr);
+    QTRY_VERIFY((tab = window.tabForDocument(QString::fromStdString(id))) != nullptr);
+    QCOMPARE(rowPaths(*tab->model),
+             (std::vector<std::string>{"/music/elsewhere/1.flac", "/music/elsewhere/2.flac"}));
+    QCOMPARE(tab->document.kind, persistence::ListKind::saved);
+    QVERIFY(window.tabs_->currentWidget() == tab->view);
+    window.persistNow(false);
+    QTest::qWait(300);
+    QTRY_VERIFY(!window.list_sync_->busy());
+    QCOMPARE((*other)->call("list.get", protocol::Json{{"id", id}})->value("revision", 0), 1);
     (*other)->close();
 }
 

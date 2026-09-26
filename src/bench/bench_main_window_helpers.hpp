@@ -45,7 +45,8 @@ inline constexpr auto untitled_list_name = "Untitled";
 // by default. Device names, rating values, column names and transient
 // context-menu choices are parameters, not commands.
 inline constexpr std::array workspace_command_ids{
-    "action-open-files",        "action-open-folder",       "action-new-list",
+    "action-open-files",        "action-open-folder",       "action-open-list",
+    "action-new-list",
     "action-import-m3u8",       "action-export-m3u8",       "action-dynamic-playlists",
     "action-settings",          "action-search-dialog",     "action-focus-library-search",
     "action-quick-album",       "action-quick-track",       "action-find-in-list",

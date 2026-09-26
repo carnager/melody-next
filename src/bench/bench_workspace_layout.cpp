@@ -281,6 +281,11 @@ void BenchMainWindow::buildWorkspace() {
     open_folder->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
     connect(open_folder, &QAction::triggered, this, &BenchMainWindow::openFolderDialog);
     buildPlaylistActions(file_menu);
+    // ADR-0233: the lists of every engine this window reaches.
+    auto* open_list = file_menu->addAction(QStringLiteral("Open list…"));
+    open_list->setObjectName(QStringLiteral("action-open-list"));
+    open_list->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+O")));
+    connect(open_list, &QAction::triggered, this, &BenchMainWindow::showOpenListDialog);
     auto* dynamic = file_menu->addAction(QStringLiteral("Dynamic playlists…"));
     dynamic->setObjectName(QStringLiteral("action-dynamic-playlists"));
     connect(dynamic, &QAction::triggered, this, &BenchMainWindow::showDynamicPlaylists);

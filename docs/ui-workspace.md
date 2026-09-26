@@ -603,6 +603,7 @@ These are application shortcuts, not desktop-wide hotkeys.
 | Cursor follows playback | Ctrl+Shift+J |
 | Find in list / Search | Ctrl+F / Ctrl+Shift+F |
 | Open files / Open folder | Ctrl+O / Ctrl+Shift+O |
+| Open list (any engine's lists, ADR-0233) | Ctrl+Alt+O |
 | New / Duplicate / Close tab | Ctrl+N / Ctrl+Shift+D / Ctrl+W |
 | Rename / Save list | F2 / Ctrl+S |
 | Edit tags / Settings | Alt+Return / Ctrl+, |

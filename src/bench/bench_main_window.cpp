@@ -47,8 +47,8 @@ void BenchMainWindow::stopBackgroundWork() {
     if (list_edit_bar_ != nullptr) {
         list_edit_bar_->cancel();
     }
-    if (local_library_ != nullptr) {
-        local_library_->stop();
+    if (localLibrary() != nullptr) {
+        localLibrary()->stop();
     }
     probe_cancellation_.request_cancellation();
     metadata_operation_cancellation_.request_cancellation();

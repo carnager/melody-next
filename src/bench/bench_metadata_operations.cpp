@@ -398,16 +398,16 @@ void BenchMainWindow::flushEngineRelocations() {
         }
         return mount.remote_folder + path.substr(mount.local_folder.size());
     };
-    const bool has_remote =
-        remote_catalogue_source_ != nullptr && remote_catalogue_source_->configured();
+    const bool has_remote = remoteCatalogue() != nullptr && remoteCatalogue()->configured();
     for (auto& move : pending_relocations_) {
         if (!has_remote || (!remote_path(move.from) && !remote_path(move.to))) {
             move.remote_done = true;
         }
     }
     const auto send = [this](EnginePlayback* engine, const bool remote, auto path_for) {
-        auto& relocating = remote ? remote_relocating_ : local_relocating_;
-        if (engine == nullptr || !engine->active() || relocating) {
+        auto* engine_link = linkOf(engine);
+        if (engine == nullptr || engine_link == nullptr || !engine->active() ||
+            engine_link->relocating) {
             return;
         }
         auto moves = protocol::Json::array();
@@ -428,11 +428,14 @@ void BenchMainWindow::flushEngineRelocations() {
         if (sent.empty()) {
             return;
         }
-        relocating = true;
+        engine_link->relocating = true;
         engine->request(
             QStringLiteral("list.relocate"), protocol::Json{{"moves", std::move(moves)}},
-            [this, remote, sent](const core::Result<protocol::Json>& answer) {
-                (remote ? remote_relocating_ : local_relocating_) = false;
+            [this, key = engine_link->key, remote,
+             sent](const core::Result<protocol::Json>& answer) {
+                if (auto* relocated = link(key); relocated != nullptr) {
+                    relocated->relocating = false;
+                }
                 // An engine that predates lists has nothing to follow: done.
                 if (!answer && answer.error().code != core::ErrorCode::unsupported) {
                     return;
@@ -453,8 +456,8 @@ void BenchMainWindow::flushEngineRelocations() {
         return move.local_done && move.remote_done;
     });
     storePendingRelocations();
-    send(local_playback_, false, [](const std::string& path) { return std::optional{path}; });
-    send(remote_playback_, true, remote_path);
+    send(localPlayback(), false, [](const std::string& path) { return std::optional{path}; });
+    send(remotePlayback(), true, remote_path);
 }
 
 void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitResult& result) {
@@ -495,26 +498,26 @@ void BenchMainWindow::queueRemoteRefresh(std::string remote_path) {
 }
 
 void BenchMainWindow::sendRemoteRefresh() {
-    if (!remote_catalogue_source_ || pending_remote_refresh_.empty()) {
+    if (!remoteCatalogue() || pending_remote_refresh_.empty()) {
         return;
     }
     auto paths = std::exchange(pending_remote_refresh_, {});
-    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->openDeferred()};
+    std::shared_ptr<engine::Catalogue> catalogue{remoteCatalogue()->openDeferred()};
     auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
         watcher->deleteLater();
         if (!watcher->result()) {
-            statusBar()->showMessage(
-                QStringLiteral("%1 has not re-read the changed files: %2")
-                    .arg(remote_catalogue_source_ ? remote_catalogue_source_->name()
+            statusBar()->showMessage(QStringLiteral("%1 has not re-read the changed files: %2")
+                                         .arg(remoteCatalogue()
+                                                  ? remoteCatalogue()->name()
                                                   : QStringLiteral("The remote engine"),
-                         displayText(watcher->result().error().message)),
-                8'000);
+                                              displayText(watcher->result().error().message)),
+                                     8'000);
             return;
         }
         // Its index has the new tags and paths: what shows them catches up.
-        if (remote_library_ != nullptr) {
-            remote_library_->refreshLibrary();
+        if (remoteLibrary() != nullptr) {
+            remoteLibrary()->refreshLibrary();
         }
         for (auto& tab : list_tabs_) {
             if (tab->document.remote) {
@@ -627,8 +630,8 @@ void BenchMainWindow::openConvertItems(std::vector<ConvertDialogItem> items) {
         },
         this);
     connect(dialog, &ConvertDialog::filesConverted, this, [this] {
-        if (local_library_ != nullptr) {
-            local_library_->refreshLibrary();
+        if (localLibrary() != nullptr) {
+            localLibrary()->refreshLibrary();
         }
     });
     dialog->show();
@@ -1300,8 +1303,8 @@ void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitRes
     // Cached misses and previous covers must not survive either path.
     invalidateArtwork(result.source_raw_path);
     followRemoteRetag(result);
-    if (local_library_ != nullptr) {
-        local_library_->refreshLibrary();
+    if (localLibrary() != nullptr) {
+        localLibrary()->refreshLibrary();
     }
     for (auto& tab : list_tabs_) {
         auto applied = tab->model->applyCommittedMetadata(result.source_raw_path, result.document,
@@ -1320,8 +1323,8 @@ void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitRes
 
 void BenchMainWindow::applyCommittedCueReplayGain(
     const operations::CueReplayGainCommitResult& result) {
-    if (local_library_ != nullptr) {
-        local_library_->refreshLibrary();
+    if (localLibrary() != nullptr) {
+        localLibrary()->refreshLibrary();
     }
     const auto to_updates = [](const std::vector<operations::CueReplayGainAppliedField>& fields) {
         std::vector<LocalListModel::CueReplayGainFieldUpdate> updates;
@@ -1359,8 +1362,8 @@ void BenchMainWindow::applyCommittedCueReplayGain(
 
 void BenchMainWindow::applyCommittedLoudnessSidecar(
     const operations::LoudnessSidecarCommitResult& result) {
-    if (local_library_ != nullptr) {
-        local_library_->refreshLibrary();
+    if (localLibrary() != nullptr) {
+        localLibrary()->refreshLibrary();
     }
     for (const auto& entry : result.entries) {
         std::vector<LocalListModel::CueReplayGainFieldUpdate> updates;
@@ -1390,8 +1393,8 @@ void BenchMainWindow::applyCommittedRelocation(
     const operations::FilePublicationCommitResult& result) {
     queueEngineRelocation(result.source_raw_path, result.target_raw_path);
     followRemoteMove(result);
-    if (local_library_ != nullptr) {
-        local_library_->refreshLibrary();
+    if (localLibrary() != nullptr) {
+        localLibrary()->refreshLibrary();
     }
     for (auto& tab : list_tabs_) {
         auto applied =

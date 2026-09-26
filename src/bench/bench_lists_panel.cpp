@@ -77,28 +77,30 @@ void BenchMainWindow::buildListsPanel() {
     lists_fetch_timer_->setSingleShot(true);
     lists_fetch_timer_->setInterval(150);
     connect(lists_fetch_timer_, &QTimer::timeout, this, [this] {
-        const auto ask = [this](EnginePlayback* engine, const int slot) {
-            if (engine == nullptr || !engine->active()) {
-                engine_lists_[slot].reset();
-                engine_lists_error_[slot] = QStringLiteral("Not connected");
-                return;
+        for (const auto& engine : engines_) {
+            auto* playback = engine->playback;
+            if (playback == nullptr || !playback->active()) {
+                engine->lists.reset();
+                engine->lists_error = QStringLiteral("Not connected");
+                continue;
             }
-            engine->request(QStringLiteral("list.all"), protocol::Json::object(),
-                            [this, slot](const core::Result<protocol::Json>& answer) {
-                                if (answer) {
-                                    engine_lists_[slot] =
-                                        answer->value("lists", std::vector<protocol::Json>{});
-                                    engine_lists_error_[slot].clear();
-                                } else {
-                                    engine_lists_[slot].reset();
-                                    engine_lists_error_[slot] =
-                                        QString::fromStdString(answer.error().message);
-                                }
-                                refreshListsPanel();
-                            });
-        };
-        ask(local_playback_, 0);
-        ask(remote_playback_, 1);
+            playback->request(
+                QStringLiteral("list.all"), protocol::Json::object(),
+                [this, key = engine->key](const core::Result<protocol::Json>& answer) {
+                    auto* answered = link(key);
+                    if (answered == nullptr) {
+                        return;
+                    }
+                    if (answer) {
+                        answered->lists = answer->value("lists", std::vector<protocol::Json>{});
+                        answered->lists_error.clear();
+                    } else {
+                        answered->lists.reset();
+                        answered->lists_error = QString::fromStdString(answer.error().message);
+                    }
+                    refreshListsPanel();
+                });
+        }
         refreshListsPanel();
     });
     lists_present_timer_ = new QTimer(this);
@@ -145,16 +147,15 @@ void BenchMainWindow::presentListsPanel() {
     if (lists_panel_ == nullptr) {
         return;
     }
-    const auto group_for = [this](const bool remote) {
+    const auto group_for = [this](const EngineLink& engine) {
         ListsPanel::Group group;
-        group.remote = remote;
-        group.name = !remote                               ? QStringLiteral("This computer")
-                     : remote_catalogue_source_ != nullptr ? remote_catalogue_source_->name()
-                                                           : QStringLiteral("Remote");
-        const auto slot = remote ? 1 : 0;
+        group.remote = !engine.key.isLocal();
+        group.name = engine.key.isLocal() ? QStringLiteral("This computer")
+                     : engine.catalogue   ? engine.catalogue->name()
+                                          : QStringLiteral("Remote");
         std::unordered_map<std::string, std::size_t> at;
-        if (engine_lists_[slot]) {
-            for (const auto& list : *engine_lists_[slot]) {
+        if (engine.lists) {
+            for (const auto& list : *engine.lists) {
                 const auto id = list.value("id", std::string{});
                 at.emplace(id, group.lists.size());
                 group.lists.push_back(ListsPanel::List{
@@ -171,7 +172,7 @@ void BenchMainWindow::presentListsPanel() {
             auto* view = tabs_->widget(index);
             const auto id = view->property("bench-document-id").toString();
             auto* tab = id.isEmpty() ? nullptr : tabForDocument(id);
-            if (tab == nullptr || tab->view != view || tab->document.remote != remote) {
+            if (tab == nullptr || tab->view != view || EngineKey::of(tab->document) != engine.key) {
                 continue;
             }
             const auto known = at.find(id.toStdString());
@@ -196,16 +197,15 @@ void BenchMainWindow::presentListsPanel() {
             return left.saved && QString::localeAwareCompare(left.name, right.name) < 0;
         });
         if (group.lists.empty()) {
-            group.note = engine_lists_error_[slot].isEmpty()
+            group.note = engine.lists_error.isEmpty()
                              ? QStringLiteral("No lists")
-                             : QStringLiteral("No lists: %1").arg(engine_lists_error_[slot]);
+                             : QStringLiteral("No lists: %1").arg(engine.lists_error);
         }
         return group;
     };
     std::vector<ListsPanel::Group> groups;
-    groups.push_back(group_for(false));
-    if (remote_catalogue_source_ != nullptr) {
-        groups.push_back(group_for(true));
+    for (const auto& engine : engines_) {
+        groups.push_back(group_for(*engine));
     }
     std::vector<ListsPanel::Other> others;
     for (int index = 0; index < tabs_->count(); ++index) {
@@ -255,7 +255,7 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
                 openEngineList(remote, id, [this] { renameCurrentList(); });
                 return;
             }
-            auto* engine = remote ? remote_playback_ : local_playback_;
+            auto* engine = remote ? remotePlayback() : localPlayback();
             if (engine == nullptr) {
                 return;
             }
@@ -302,7 +302,7 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
                             open->document.pinned = false;
                             closeTabAt(tabs_->indexOf(open->view));
                         }
-                        auto* engine = remote ? remote_playback_ : local_playback_;
+                        auto* engine = remote ? remotePlayback() : localPlayback();
                         if (engine == nullptr) {
                             return;
                         }

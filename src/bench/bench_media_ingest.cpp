@@ -458,7 +458,7 @@ void BenchMainWindow::enqueueUnprobedRows(ListTab& tab) {
 // not asked about again: left unanswered, it would be asked on every look at
 // the tab, ahead of everything else on the connection.
 void BenchMainWindow::enrichRemoteRows(ListTab& tab) {
-    if (!remote_catalogue_source_) {
+    if (!remoteCatalogue()) {
         return;
     }
     std::vector<std::string> paths;
@@ -474,7 +474,7 @@ void BenchMainWindow::enrichRemoteRows(ListTab& tab) {
     }
     // Opened here, used there: it holds its own reference to the connection,
     // and connects there, not on this thread.
-    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->openDeferred()};
+    std::shared_ptr<engine::Catalogue> catalogue{remoteCatalogue()->openDeferred()};
     using Found = std::vector<persistence::LibraryTrackSnapshot>;
     auto* watcher = new QFutureWatcher<Found>(this);
     const auto id = QString::fromStdString(tab.document.id.to_string());
@@ -650,10 +650,10 @@ void BenchMainWindow::syncArtwork(ListTab& tab) {
     // nothing of it need be mounted here: its covers come from its engine.
     std::shared_ptr<engine::Catalogue> engine;
     if (tab.document.remote) {
-        if (!remote_catalogue_source_) {
+        if (!remoteCatalogue()) {
             return;
         }
-        engine = remote_catalogue_source_->openDeferred();
+        engine = remoteCatalogue()->openDeferred();
     }
     const auto& rows = tab.model->rows();
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
@@ -695,10 +695,10 @@ QImage BenchMainWindow::coverFor(const LocalTrackRow& track, const bool remote) 
     // the file when it is the remote's.
     std::shared_ptr<engine::Catalogue> engine;
     if (remote) {
-        if (!remote_catalogue_source_) {
+        if (!remoteCatalogue()) {
             return {};
         }
-        engine = remote_catalogue_source_->openDeferred();
+        engine = remoteCatalogue()->openDeferred();
     }
     if (!artwork_pending_.contains(key)) {
         artwork_pending_.insert(key);

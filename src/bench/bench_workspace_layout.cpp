@@ -1068,9 +1068,9 @@ void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind)
     // engine and go where that tab's would.
     const auto* current = currentListTab();
     const bool remote = current != nullptr && current->document.remote &&
-                        remote_catalogue_source_ != nullptr && remote_library_ != nullptr;
-    auto* library = remote ? remote_library_ : local_library_;
-    const auto* source = remote ? remote_catalogue_source_.get() : catalogue_source_.get();
+                        remoteCatalogue() != nullptr && remoteLibrary() != nullptr;
+    auto* library = remote ? remoteLibrary() : localLibrary();
+    const auto* source = remote ? remoteCatalogue() : localCatalogue();
     if (library == nullptr || source == nullptr) {
         return;
     }
@@ -1113,9 +1113,9 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
         }
     }
     std::function<QWidget*(QWidget*)> library_folders;
-    if (local_library_) {
+    if (localLibrary()) {
         library_folders = [this](QWidget* parent) {
-            return local_library_->createFoldersWidget(parent);
+            return localLibrary()->createFoldersWidget(parent);
         };
     }
     auto* dialog = new SettingsDialog(
@@ -1137,9 +1137,9 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
         // ADR-0226: this computer's engine runs apart from the window, so a
         // change to how it is shared means starting it again.
-        if (localEngineSharing() != sharing && catalogue_source_) {
+        if (localEngineSharing() != sharing && localCatalogue()) {
             QApplication::setOverrideCursor(Qt::WaitCursor);
-            const bool restarted = catalogue_source_->restartLocalEngine();
+            const bool restarted = localCatalogue()->restartLocalEngine();
             QApplication::restoreOverrideCursor();
             statusBar()->showMessage(
                 restarted ? QStringLiteral("This computer's engine restarted with its new settings")

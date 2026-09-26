@@ -76,33 +76,33 @@ void BenchMainWindow::initializePersistence() {
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
     // Built once, before anything that needs a catalogue: the panel, the
     // search dialog and dynamic playlists all take this rather than a path.
-    catalogue_source_ =
+    localEngine().catalogue =
         std::make_unique<CatalogueSource>(database_path_, CatalogueSource::Role::local);
     // Its own connection: the engine serves one connection in order, so a
     // transport command behind a library query would wait for it.
-    local_playback_ = new EnginePlayback(*catalogue_source_, this);
-    transport_ = local_playback_;
-    connect(local_playback_, &EnginePlayback::changed, this, [this] {
-        followIfStartedElsewhere(local_playback_);
-        if (transport_ == local_playback_) {
+    localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
+    transport_ = localPlayback();
+    connect(localPlayback(), &EnginePlayback::changed, this, [this] {
+        followIfStartedElsewhere(localPlayback());
+        if (transport_ == localPlayback()) {
             refreshTransport();
         }
         // An outdated engine left alone while it played is renewed once it
         // has stopped.
         if (engine_renewal_pending_ &&
-            local_playback_->state().status != QStringLiteral("playing")) {
+            localPlayback()->state().status != QStringLiteral("playing")) {
             QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         }
     });
-    connect(local_playback_, &EnginePlayback::ratingChanged, this,
+    connect(localPlayback(), &EnginePlayback::ratingChanged, this,
             [this](const QString& hash, const unsigned rating) {
                 adoptEngineRating(false, hash, rating);
             });
-    connect(local_playback_, &EnginePlayback::failed, this, [this](const QString& message) {
+    connect(localPlayback(), &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     list_sync_ = new EngineListSync(this);
-    list_sync_->setEngine(EngineKey::local(), local_playback_);
+    list_sync_->setEngine(EngineKey::local(), localPlayback());
     connect(list_sync_, &EngineListSync::adopted, this, &BenchMainWindow::adoptEngineList);
     connect(list_sync_, &EngineListSync::wantsSave, this, &BenchMainWindow::schedulePersist);
     connect(list_sync_, &EngineListSync::conflicted, this, &BenchMainWindow::settleListConflict);
@@ -114,22 +114,22 @@ void BenchMainWindow::initializePersistence() {
             closeTabAt(tabs_->indexOf(tab->view));
         }
     });
-    connect(local_playback_, &EnginePlayback::listChanged, this,
+    connect(localPlayback(), &EnginePlayback::listChanged, this,
             [this](const QString& id, const quint64 revision, const bool deleted) {
-                list_sync_->listChanged(local_playback_, id, revision, deleted);
+                list_sync_->listChanged(localPlayback(), id, revision, deleted);
                 fetchEngineLists();
             });
     loadPendingRelocations();
-    connect(local_playback_, &EnginePlayback::connected, this, [this] {
+    connect(localPlayback(), &EnginePlayback::connected, this, [this] {
         // A new engine, or this one restarted: compared again, and given its
         // lists -- and any moves it missed.
-        list_sync_->reconnected(local_playback_);
+        list_sync_->reconnected(localPlayback());
         flushEngineRelocations();
         fetchEngineLists();
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // What it is doing now is not news; a start after this is.
-        rememberEngineState(local_playback_);
-        if (transport_ != local_playback_) {
+        rememberEngineState(localPlayback());
+        if (transport_ != localPlayback()) {
             return;
         }
         // A reconnection is a new engine as far as it is concerned: it knows
@@ -137,7 +137,7 @@ void BenchMainWindow::initializePersistence() {
         applyLocalPlaybackModes();
         reattachToEngine();
     });
-    if (local_playback_->active()) {
+    if (localPlayback()->active()) {
         QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
         // An engine starts with its own defaults and has never heard of this
         // window's settings, so they are handed over the moment the connection
@@ -175,16 +175,16 @@ void BenchMainWindow::initializePersistence() {
         connectRemoteEngine();
         applyLocalLibraryVisibility();
         if (error.isEmpty()) {
-            local_library_ = new LocalLibraryPanel(*catalogue_source_, source_stack_);
-            connect(local_library_, &LocalLibraryPanel::manageFoldersRequested, this,
+            localEngine().library = new LocalLibraryPanel(*localCatalogue(), source_stack_);
+            connect(localLibrary(), &LocalLibraryPanel::manageFoldersRequested, this,
                     [this] { showSettingsDialog(SettingsDialog::Page::library); });
-            source_stack_->addWidget(local_library_);
+            source_stack_->addWidget(localLibrary());
             connect(
-                local_library_, &LocalLibraryPanel::actionRequested, this,
+                localLibrary(), &LocalLibraryPanel::actionRequested, this,
                 [this](std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action) {
                     if (action == LocalLibraryAction::request_next ||
                         action == LocalLibraryAction::request_end) {
-                        local_library_->resolveEntries(
+                        localLibrary()->resolveEntries(
                             std::move(entries), [this, action](std::vector<std::string> paths) {
                                 std::vector<LocalTrackRow> rows;
                                 for (auto& path : paths) {
@@ -224,7 +224,7 @@ void BenchMainWindow::initializePersistence() {
                     }
                     const QPersistentModelIndex anchor{target->model->index(insertion, 0)};
                     const bool anchored = anchor.isValid();
-                    local_library_->resolveEntries(
+                    localLibrary()->resolveEntries(
                         std::move(entries), [this, id, name, action, insertion, anchor,
                                              anchored](std::vector<std::string> paths) {
                             auto* destination = tabForDocument(id);
@@ -255,16 +255,16 @@ void BenchMainWindow::initializePersistence() {
                                 action == LocalLibraryAction::replace);
                         });
                 });
-            connect(local_library_, &LocalLibraryPanel::ratingsChanged, this,
+            connect(localLibrary(), &LocalLibraryPanel::ratingsChanged, this,
                     &BenchMainWindow::refreshLocalRatings);
             // "Add to list": this computer's lists, in tab order.
-            local_library_->setListTargets([this] { return listTargets(false); });
-            connect(local_library_, &LocalLibraryPanel::addToListRequested, this,
+            localLibrary()->setListTargets([this] { return listTargets(false); });
+            connect(localLibrary(), &LocalLibraryPanel::addToListRequested, this,
                     [this](std::vector<persistence::LibraryEntry> entries, const QString& id) {
                         if (tabForDocument(id) == nullptr || entries.empty()) {
                             return;
                         }
-                        local_library_->resolveEntries(
+                        localLibrary()->resolveEntries(
                             std::move(entries), [this, id](std::vector<std::string> paths) {
                                 if (tabForDocument(id) == nullptr) {
                                     return;
@@ -282,7 +282,7 @@ void BenchMainWindow::initializePersistence() {
             refreshLocalRatings();
             // ADR-0140: Enter in the library search keeps the full result
             // set as an ordinary scratch list tab.
-            connect(local_library_, &LocalLibraryPanel::searchCommitted, this,
+            connect(localLibrary(), &LocalLibraryPanel::searchCommitted, this,
                     [this](const QString& query, std::vector<LocalTrackRow> rows) {
                         auto* destination = addListTab(
                             persistence::ListDocument{
@@ -778,9 +778,9 @@ void BenchMainWindow::showOpenListDialog() {
                 }
             });
     };
-    fill(local_playback_, false, QStringLiteral("This computer"));
-    if (remote_catalogue_source_ != nullptr) {
-        fill(remote_playback_, true, remote_catalogue_source_->name());
+    fill(localPlayback(), false, QStringLiteral("This computer"));
+    if (remoteCatalogue() != nullptr) {
+        fill(remotePlayback(), true, remoteCatalogue()->name());
     }
     dialog->open();
 }
@@ -795,7 +795,7 @@ void BenchMainWindow::openEngineList(const bool remote, const QString& id,
         }
         return;
     }
-    auto* engine = remote ? remote_playback_ : local_playback_;
+    auto* engine = remote ? remotePlayback() : localPlayback();
     if (engine == nullptr) {
         return;
     }
@@ -1155,7 +1155,7 @@ void BenchMainWindow::openSearchDialog() {
     // snapshots the current local tab's rows and reports on-demand
     // technicals back onto every tab holding the probed file.
     search_dialog_ = new SearchDialog(
-        *catalogue_source_,
+        *localCatalogue(),
         [this]() -> std::optional<SearchDialog::TabSnapshot> {
             auto* tab = currentListTab();
             if (tab == nullptr) {
@@ -1169,8 +1169,7 @@ void BenchMainWindow::openSearchDialog() {
                 tab->model->applyTechnicals(raw_path, technicals);
             }
         },
-        this, remote_catalogue_source_.get(),
-        remote_catalogue_source_ ? remote_catalogue_source_->name() : QString{});
+        this, remoteCatalogue(), remoteCatalogue() ? remoteCatalogue()->name() : QString{});
     search_dialog_->setAttribute(Qt::WA_DeleteOnClose);
     const auto watch_tab = [this, dialog = search_dialog_] {
         if (!dialog)
@@ -1248,8 +1247,8 @@ void BenchMainWindow::refreshActiveContext() {
         const bool remote_view = local_source_tabs_ != nullptr &&
                                  local_source_tabs_->tabData(index) == QStringLiteral("remote");
         auto* source =
-            remote_view && remote_library_ != nullptr ? static_cast<QWidget*>(remote_library_)
-            : index == 1 && local_library_ != nullptr ? static_cast<QWidget*>(local_library_)
+            remote_view && remoteLibrary() != nullptr ? static_cast<QWidget*>(remoteLibrary())
+            : index == 1 && localLibrary() != nullptr ? static_cast<QWidget*>(localLibrary())
                                                       : static_cast<QWidget*>(folder_view_);
         source_stack_->setCurrentWidget(source);
     }
@@ -1431,13 +1430,13 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
 }
 
 void BenchMainWindow::renewOutdatedLocalEngine() {
-    if (!catalogue_source_ || !catalogue_source_->localEngineOutdated()) {
+    if (!localCatalogue() || !localCatalogue()->localEngineOutdated()) {
         engine_renewal_pending_ = false;
         return;
     }
     // Restarting it stops the music, so not while it plays: once it stops.
-    if (local_playback_ != nullptr &&
-        local_playback_->state().status == QStringLiteral("playing")) {
+    if (localPlayback() != nullptr &&
+        localPlayback()->state().status == QStringLiteral("playing")) {
         if (!engine_renewal_pending_) {
             statusBar()->showMessage(QStringLiteral("This computer's engine is out of date; it "
                                                     "restarts when playback stops"),
@@ -1448,7 +1447,7 @@ void BenchMainWindow::renewOutdatedLocalEngine() {
     }
     engine_renewal_pending_ = false;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool renewed = catalogue_source_->restartLocalEngine();
+    const bool renewed = localCatalogue()->restartLocalEngine();
     QApplication::restoreOverrideCursor();
     statusBar()->showMessage(renewed ? QStringLiteral("This computer's engine was out of date and "
                                                       "has been restarted")
@@ -1472,7 +1471,7 @@ QString BenchMainWindow::emptyListHint(const bool remote) const {
 }
 
 QString BenchMainWindow::remoteName() const {
-    return remote_catalogue_source_ ? remote_catalogue_source_->name() : tr("the remote");
+    return remoteCatalogue() ? remoteCatalogue()->name() : tr("the remote");
 }
 
 void BenchMainWindow::applyLocalLibraryVisibility() {
@@ -1543,13 +1542,13 @@ void BenchMainWindow::quitAndStopEngine() {
     // Nothing may start it again. The event loop runs on after this until
     // the process ends, and an engine connection's reconnect timer revives
     // an engine that stopped: it did, and quitting left it running.
-    for (auto* playback : {local_playback_, remote_playback_}) {
+    for (auto* playback : {localPlayback(), remotePlayback()}) {
         if (playback != nullptr) {
             playback->retire();
         }
     }
-    if (catalogue_source_) {
-        static_cast<void>(catalogue_source_->stopLocalEngine());
+    if (localCatalogue()) {
+        static_cast<void>(localCatalogue()->stopLocalEngine());
     }
     // Rather than waiting for the last window to be seen closing: a window
     // still open elsewhere -- a tag editor, say -- kept the process, and
@@ -1561,10 +1560,10 @@ std::vector<std::string> BenchMainWindow::remoteRoots() const {
     // Asked now, not remembered: a folder added to the remote's library since
     // it was last asked is part of it.
     std::vector<std::string> roots;
-    if (!remote_catalogue_source_) {
+    if (!remoteCatalogue()) {
         return roots;
     }
-    if (auto known = remote_catalogue_source_->open()->roots()) {
+    if (auto known = remoteCatalogue()->open()->roots()) {
         for (auto& root : *known) {
             roots.push_back(std::move(root.raw_path));
         }
@@ -1591,8 +1590,8 @@ std::vector<std::string> BenchMainWindow::crossEnginePaths(std::vector<std::stri
                                  "them; they were left out")
                       .arg(left)
                       .arg(paths.size())
-                      .arg(remote_catalogue_source_ ? remote_catalogue_source_->name()
-                                                    : QStringLiteral("the remote engine"))
+                      .arg(remoteCatalogue() ? remoteCatalogue()->name()
+                                             : QStringLiteral("the remote engine"))
                 : QStringLiteral("%1 of %2 tracks are not reachable on this computer; they were "
                                  "left out. Where the remote's music is mounted here is set in "
                                  "Settings → Engine.")
@@ -1973,7 +1972,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
         // Found in the library of the engine the tab plays on: a remote
         // tab's file is in the remote's library, which also shows it.
         const bool remote = source_tab->document.remote;
-        auto* library = remote ? remote_library_ : local_library_;
+        auto* library = remote ? remoteLibrary() : localLibrary();
         const bool available = library != nullptr && (remote || localLibraryShown());
         for (const bool album : {false, true}) {
             auto* locate = track_context_menu_->addAction(album ? QStringLiteral("Locate album")
@@ -1982,7 +1981,7 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
                                         : QStringLiteral("action-local-locate-artist"));
             locate->setEnabled(available);
             connect(locate, &QAction::triggered, this, [this, path, album, remote] {
-                auto* finder = remote ? remote_library_ : local_library_;
+                auto* finder = remote ? remoteLibrary() : localLibrary();
                 if (finder == nullptr)
                     return;
                 int source = 1;
@@ -2084,7 +2083,7 @@ void BenchMainWindow::refreshLocalRatings() {
     // Ratings live with the engine whose library holds the track, so each
     // side's tabs ask their own engine.
     for (const bool remote : {false, true}) {
-        auto* library = remote ? remote_library_ : local_library_;
+        auto* library = remote ? remoteLibrary() : localLibrary();
         if (library == nullptr) {
             continue;
         }
@@ -2179,7 +2178,7 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
     // A rating belongs to the engine whose library holds the track: a
     // remote tab's ratings are stored there, where its queries see them.
     const bool remote = isRemoteView(view);
-    auto* const library = remote ? remote_library_ : local_library_;
+    auto* const library = remote ? remoteLibrary() : localLibrary();
     const auto store_ready = library != nullptr;
     menu->addSeparator();
     auto* rate_menu = menu->addMenu(QStringLiteral("Rate"));

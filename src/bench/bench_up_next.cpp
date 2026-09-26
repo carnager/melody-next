@@ -242,7 +242,7 @@ void BenchMainWindow::buildUpNext() {
 
 bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, const int position) {
     const auto carried = files.property(library_entries_property).toList();
-    auto* library = files.remote() ? remote_library_ : local_library_;
+    auto* library = files.remote() ? remoteLibrary() : localLibrary();
     if (carried.isEmpty() || library == nullptr) {
         return false;
     }
@@ -305,10 +305,10 @@ void BenchMainWindow::refreshUpNext() {
                                              playback_.requests.active()->source.title);
         // Up Next belongs to the engine that is playing (ADR-0227), so it is
         // named by it -- "Local" was the MPD era's word for this computer.
-        const auto engine = transport_ != nullptr && transport_ == remote_playback_ &&
-                                    remote_catalogue_source_
-                                ? remote_catalogue_source_->name()
-                                : QStringLiteral("This computer");
+        const auto engine =
+            transport_ != nullptr && transport_ == remotePlayback() && remoteCatalogue()
+                ? remoteCatalogue()->name()
+                : QStringLiteral("This computer");
         up_next_status_->setText(QStringLiteral("%1 · %2 waiting")
                                      .arg(engine)
                                      .arg(playback_.requests.pending().size()));

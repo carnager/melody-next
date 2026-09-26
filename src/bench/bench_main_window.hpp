@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "bench/engine_key.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
 #include "bench/lastfm_service.hpp"
@@ -221,9 +222,6 @@ class BenchMainWindow final : public QMainWindow {
     QAction* lists_panel_action_{nullptr};
     QTimer* lists_fetch_timer_{nullptr};
     QTimer* lists_present_timer_{nullptr};
-    // The last list.all of each engine: this computer's, the remote's.
-    std::optional<std::vector<protocol::Json>> engine_lists_[2];
-    QString engine_lists_error_[2];
     void backupWorkspace();
     void scheduleWorkspaceRestore();
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
@@ -540,9 +538,6 @@ class BenchMainWindow final : public QMainWindow {
     void seekToMs(qint64 position_ms);
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
-    LocalLibraryPanel* local_library_{nullptr};
-    // ADR-0227: the remote engine's library, beside this computer's.
-    LocalLibraryPanel* remote_library_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
     // temporary page hosting its file list (ADR-0183 addendum).
     QTabBar* local_source_tabs_{nullptr};
@@ -644,25 +639,51 @@ class BenchMainWindow final : public QMainWindow {
     QAction* notifications_action_{nullptr};
     ui::ListPersistenceService* persistence_{nullptr};
     std::filesystem::path database_path_;
-    // ADR-0227: two engines. This computer's is always there and plays the
-    // local tabs; the remote one, when configured, plays the remote tabs.
-    // Everything that needs a catalogue asks the right one of these.
-    std::unique_ptr<CatalogueSource> catalogue_source_;
-    std::unique_ptr<CatalogueSource> remote_catalogue_source_;
-    EnginePlayback* local_playback_{nullptr};
-    EnginePlayback* remote_playback_{nullptr};
-    // ADR-0233: this window's lists, on the engines that own their files.
-    EngineListSync* list_sync_{nullptr};
-    std::vector<PendingRelocation> pending_relocations_;
-    bool local_relocating_{false};
-    bool remote_relocating_{false};
     struct SeenEngine {
         QString status;
         QString entry;
         std::uint64_t queue_revision{0};
     };
-    SeenEngine local_seen_;
-    SeenEngine remote_seen_;
+    // ADR-0234: one engine this window reaches -- this computer's, which is
+    // always there, or a remote configured in Settings -- and everything the
+    // window keeps for it. Code that needs an engine asks for its link.
+    struct EngineLink {
+        EngineKey key;
+        std::unique_ptr<CatalogueSource> catalogue;
+        EnginePlayback* playback{nullptr};
+        LocalLibraryPanel* library{nullptr};
+        // What it was last seen doing, to tell a start elsewhere.
+        SeenEngine seen;
+        // A move is being told to it.
+        bool relocating{false};
+        // Its last list.all, for the lists pane; empty, not known.
+        std::optional<std::vector<protocol::Json>> lists;
+        QString lists_error;
+    };
+    // This computer's first.
+    std::vector<std::unique_ptr<EngineLink>> engines_;
+    [[nodiscard]] EngineLink* link(const EngineKey& key) const;
+    [[nodiscard]] EngineLink& localEngine() const { return *engines_.front(); }
+    [[nodiscard]] EngineLink* remoteEngine() const { return link(EngineKey::remote()); }
+    // The link a connection belongs to; null for none of this window's.
+    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
+    // Parts of an engine's link; null when it or the part is not there.
+    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
+    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
+    [[nodiscard]] LocalLibraryPanel* libraryOf(const EngineKey& key) const;
+    [[nodiscard]] EnginePlayback* localPlayback() const { return localEngine().playback; }
+    [[nodiscard]] EnginePlayback* remotePlayback() const { return playbackOf(EngineKey::remote()); }
+    [[nodiscard]] CatalogueSource* localCatalogue() const { return localEngine().catalogue.get(); }
+    [[nodiscard]] CatalogueSource* remoteCatalogue() const {
+        return catalogueOf(EngineKey::remote());
+    }
+    [[nodiscard]] LocalLibraryPanel* localLibrary() const { return localEngine().library; }
+    [[nodiscard]] LocalLibraryPanel* remoteLibrary() const {
+        return libraryOf(EngineKey::remote());
+    }
+    // ADR-0233: this window's lists, on the engines that own their files.
+    EngineListSync* list_sync_{nullptr};
+    std::vector<PendingRelocation> pending_relocations_;
     // The engine the transport follows: the one the playing tab belongs to.
     // One engine plays at a time, so this is also the one that may.
     EnginePlayback* transport_{nullptr};

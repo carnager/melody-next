@@ -282,6 +282,8 @@ class BenchMainWindowTest final : public QObject {
     void upNextPreservesNormalPlayback();
     void aRemoteEnginePlaysItsOwnTabs();
     void theWindowFollowsAnEngineStartedElsewhere();
+    void theRemoteTabTakesTheNameItsEngineAnnounces();
+    void anUnreachableRemoteDoesNotHoldTheWindow();
     void aListReplacedOnTheFollowedEngineMarksWhatPlays();
     void aRemoteTabGetsTagsAndCoversFromItsEngine();
     void aRemoteTabRatesOnItsEngine();
@@ -4945,6 +4947,70 @@ void BenchMainWindowTest::upNextEditingAndPersistence() {
 // Another client -- a picker, a script -- starts the remote engine while the
 // window follows this computer's: the window follows the music there, and
 // the remote's tab shows what plays, rather than the list it had.
+// A remote that is away when the window opens has its tab made anyway, named
+// by its address; when it comes back and says what it is called, the tab
+// takes that name. It used to keep the address -- or an old name -- for good.
+void BenchMainWindowTest::theRemoteTabTakesTheNameItsEngineAnnounces() {
+    QTemporaryDir remote_state;
+    QVERIFY(remote_state.isValid());
+    testing::TestEngine remote;
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    remote.stop();
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY(window.remote_catalogue_source_ != nullptr);
+    auto* tab = window.remoteQueueTab();
+    QVERIFY(tab != nullptr);
+    const auto address = window.remote_catalogue_source_->addressName();
+    QCOMPARE(displayText(tab->document.name), address);
+
+    QVERIFY2(remote.start(remote_state.path().toStdString(), true), remote.log().constData());
+    QTRY_VERIFY_WITH_TIMEOUT(window.remote_playback_->active(), 10'000);
+    QTRY_VERIFY(displayText(tab->document.name) != address);
+    QCOMPARE(displayText(tab->document.name), window.remote_catalogue_source_->name());
+}
+
+// A remote engine over TCP whose host is off -- the NAS -- held a connect for
+// about two minutes of SYN retries, on the window's thread, at startup and
+// again every few seconds after. It is reached from a worker now.
+void BenchMainWindowTest::anUnreachableRemoteDoesNotHoldTheWindow() {
+    QSettings settings;
+    // TEST-NET-1 (RFC 5737): routed nowhere, so a connect waits rather than
+    // being refused.
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                      QStringLiteral("192.0.2.1:6603"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key),
+                      QStringLiteral("a password"));
+    settings.sync();
+
+    QElapsedTimer opening;
+    opening.start();
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QVERIFY2(opening.elapsed() < 2'000, QByteArray::number(opening.elapsed()).constData());
+    QVERIFY(window.remote_playback_ != nullptr);
+    QVERIFY(!window.remote_playback_->active());
+
+    // And across the reconnect timer's next attempt, the event loop keeps
+    // turning.
+    QElapsedTimer waiting;
+    waiting.start();
+    qint64 longest = 0;
+    qint64 last = 0;
+    while (waiting.elapsed() < 4'000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QTest::qWait(20);
+        longest = std::max(longest, waiting.elapsed() - last);
+        last = waiting.elapsed();
+    }
+    QVERIFY2(longest < 1'000, QByteArray::number(longest).constData());
+    settings.remove(QLatin1String(SettingsDialog::library_engine_socket_key));
+    settings.remove(QLatin1String(SettingsDialog::library_engine_token_key));
+}
+
 void BenchMainWindowTest::theWindowFollowsAnEngineStartedElsewhere() {
     QTemporaryDir remote_state;
     QTemporaryDir media;

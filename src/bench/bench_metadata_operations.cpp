@@ -375,7 +375,7 @@ void BenchMainWindow::sendRemoteRefresh() {
         return;
     }
     auto paths = std::exchange(pending_remote_refresh_, {});
-    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->open()};
+    std::shared_ptr<engine::Catalogue> catalogue{remote_catalogue_source_->openDeferred()};
     auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
     connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
         watcher->deleteLater();

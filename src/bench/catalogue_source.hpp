@@ -55,6 +55,11 @@ class CatalogueSource final {
     // this computer's engine again if that is the one -- so the library comes
     // back after an engine restart without restarting the window.
     [[nodiscard]] std::unique_ptr<engine::Catalogue> open() const;
+    // For a caller on the window's thread: answers at once, and the
+    // catalogue connects on its first question, on whichever thread asks
+    // it -- the worker it is handed to. Like open()'s, it holds what it needs
+    // of the connection and may outlive this.
+    [[nodiscard]] std::unique_ptr<engine::Catalogue> openDeferred() const;
 
     [[nodiscard]] bool usingEngine() const;
     // Where the engine is -- a socket or a TCP address with its token
@@ -81,9 +86,12 @@ class CatalogueSource final {
     // Whether this names an engine at all: a remote role with nothing
     // configured does not.
     [[nodiscard]] bool configured() const noexcept { return endpoint_.has_value(); }
-    // What to call it in a source switch: "This computer", or the remote's
-    // host.
+    // What to call it in a source switch: "This computer", or the name the
+    // remote announced -- its address until it has.
     [[nodiscard]] QString name() const;
+    // What name() is before the remote has said what it is called: its host,
+    // or its socket's file name.
+    [[nodiscard]] QString addressName() const;
 
     // One line naming the source, for a panel to show. Three states, and the
     // difference between the last two is what was previously invisible.
@@ -96,17 +104,10 @@ class CatalogueSource final {
     Role role_{Role::local};
     std::optional<protocol::Endpoint> endpoint_;
     std::optional<LocalEngine> local_engine_;
-    [[nodiscard]] std::shared_ptr<protocol::Client> connectLocked() const;
-
-    // Replaced on reconnect, from whichever worker notices first.
-    mutable std::mutex mutex_;
-    mutable std::shared_ptr<protocol::Client> client_;
-    mutable QString failure_;
-    // The name the engine gave for itself once connected (engine.info).
-    mutable QString announced_;
-    // Whether the engine answered and said no, as opposed to not answering.
-    // Decided from the error code: a client must never parse the message.
-    mutable bool refused_{false};
+    // The connection and what is known about it, shared with the catalogues
+    // handed out, which may outlive this.
+    struct Link;
+    std::shared_ptr<Link> link_;
 };
 
 } // namespace trackknife::bench

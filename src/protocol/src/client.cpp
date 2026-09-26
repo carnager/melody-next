@@ -4,12 +4,15 @@
 
 #include "trackknife/protocol/dispatch.hpp"
 
+#include <fcntl.h>
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include <array>
+#include <chrono>
 #include <cerrno>
 #include <cstring>
 #include <utility>
@@ -43,6 +46,51 @@ std::unique_ptr<Client> Client::adopt(const int descriptor) {
     client->reader_ = std::thread{[raw = client.get()] { raw->read_loop(); }};
     return client;
 }
+
+namespace {
+
+// How long reaching an engine over TCP may take. On a home network or a
+// WireGuard tunnel it is milliseconds; left to the kernel, a host that is
+// switched off -- the NAS -- holds a connect for about two minutes of SYN
+// retries, and whoever asked waits that long.
+constexpr std::chrono::milliseconds connect_timeout{5'000};
+
+// connect(), but giving up after connect_timeout. The socket is left
+// blocking, as the rest of the client expects.
+[[nodiscard]] bool connect_within(const int descriptor, const sockaddr* address,
+                                  const socklen_t length) {
+    const auto flags = ::fcntl(descriptor, F_GETFL);
+    if (flags < 0 || ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0) {
+        return ::connect(descriptor, address, length) == 0;
+    }
+    bool connected = ::connect(descriptor, address, length) == 0;
+    if (!connected && errno == EINPROGRESS) {
+        const auto deadline = std::chrono::steady_clock::now() + connect_timeout;
+        pollfd watched{.fd = descriptor, .events = POLLOUT, .revents = 0};
+        while (true) {
+            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now());
+            if (left.count() <= 0) {
+                break;
+            }
+            const auto ready = ::poll(&watched, 1, static_cast<int>(left.count()));
+            if (ready < 0 && errno == EINTR) {
+                continue;
+            }
+            if (ready > 0) {
+                int error = 0;
+                socklen_t size = sizeof(error);
+                connected = ::getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &error, &size) == 0 &&
+                            error == 0;
+            }
+            break;
+        }
+    }
+    static_cast<void>(::fcntl(descriptor, F_SETFL, flags));
+    return connected;
+}
+
+} // namespace
 
 core::Result<int> open_connection(const Endpoint& endpoint) {
     if (!endpoint.tcp()) {
@@ -83,11 +131,12 @@ core::Result<int> open_connection(const Endpoint& endpoint) {
     }
     int descriptor = -1;
     for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
-        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype, candidate->ai_protocol);
+        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype | SOCK_CLOEXEC,
+                              candidate->ai_protocol);
         if (descriptor < 0) {
             continue;
         }
-        if (::connect(descriptor, candidate->ai_addr, candidate->ai_addrlen) == 0) {
+        if (connect_within(descriptor, candidate->ai_addr, candidate->ai_addrlen)) {
             break;
         }
         ::close(descriptor);

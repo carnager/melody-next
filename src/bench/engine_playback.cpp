@@ -26,7 +26,11 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
         // stops, rather than waited for -- nothing else is going to.
         revive_ = [&catalogues] { return catalogues.reviveLocalEngine(); };
     }
-    static_cast<void>(open());
+    if (endpoint_.tcp()) {
+        connectInBackground();
+    } else {
+        static_cast<void>(open());
+    }
 
     // An engine is a separate process with its own lifetime: it can be
     // restarted, or started after the window. Without this the only way back
@@ -49,14 +53,19 @@ EnginePlayback::EnginePlayback(const CatalogueSource& catalogues, QObject* paren
 }
 
 bool EnginePlayback::open() {
-    auto client = protocol::Client::connect(endpoint_);
-    if (!client) {
-        return false;
+    client_ = handshake();
+    return client_ != nullptr;
+}
+
+std::unique_ptr<protocol::Client> EnginePlayback::handshake() {
+    auto connected = protocol::Client::connect(endpoint_);
+    if (!connected) {
+        return nullptr;
     }
-    client_ = std::move(*client);
+    auto client = std::move(*connected);
 
     const QPointer self{this};
-    client_->on_event([self, this](const protocol::Event& event) {
+    client->on_event([self, this](const protocol::Event& event) {
         // Parsed here, on the reader thread, so the signal carries nothing
         // that needs decoding on the UI thread.
         if (event.name == "catalogue.rating_changed") {
@@ -94,19 +103,52 @@ bool EnginePlayback::open() {
     });
 
     // Asked once, so the workspace is correct before the first event arrives.
-    if (auto answer = client_->call("playback.state")) {
+    if (auto answer = client->call("playback.state")) {
         adopt(*answer);
     }
     // An engine from before output agents has no list; it plays on its own
     // audio, which is what an empty list means here.
-    if (auto answer = client_->call("outputs.list")) {
+    if (auto answer = client->call("outputs.list")) {
         adoptOutputs(*answer);
     }
     engine_scrobbles_.store(false);
-    if (auto answer = client_->call("lastfm.status")) {
+    if (auto answer = client->call("lastfm.status")) {
         engine_scrobbles_.store(answer->value("enabled", false));
     }
-    return true;
+    return client;
+}
+
+void EnginePlayback::connectInBackground() {
+    if (connecting_) {
+        return;
+    }
+    connecting_ = true;
+    // On the command worker, which has nothing to do while there is no
+    // connection, and which the destructor already waits for.
+    static_cast<void>(QtConcurrent::run(&pool_, [this] {
+        auto client = handshake();
+        {
+            const std::lock_guard guard{mutex_};
+            arrived_ = std::move(client);
+        }
+        // Dropped if this object is gone by then; arrived_ goes with it.
+        QMetaObject::invokeMethod(this, [this] { takeArrived(); }, Qt::QueuedConnection);
+    }));
+}
+
+void EnginePlayback::takeArrived() {
+    connecting_ = false;
+    std::unique_ptr<protocol::Client> client;
+    {
+        const std::lock_guard guard{mutex_};
+        client = std::move(arrived_);
+    }
+    if (!client) {
+        return;
+    }
+    client_ = std::move(client);
+    emit connected();
+    emit changed();
 }
 
 void EnginePlayback::maintain() {
@@ -124,6 +166,10 @@ void EnginePlayback::maintain() {
             state_ = State{};
         }
         emit changed();
+    }
+    if (endpoint_.tcp()) {
+        connectInBackground();
+        return;
     }
     if (!open() && !(revive_ && revive_() && open())) {
         return;

@@ -193,7 +193,16 @@ class EnginePlayback final : public QObject {
 
   private:
     // Connects if one is configured. Answers whether a connection now exists.
+    // Blocks: for a unix socket, which answers or refuses at once.
     bool open();
+    // Connects, subscribes and reads the engine's state, on whatever thread
+    // calls it. Null when the engine cannot be reached.
+    [[nodiscard]] std::unique_ptr<protocol::Client> handshake();
+    // An engine over TCP is connected to on the worker: one that is switched
+    // off holds a connect for seconds, which the window must not.
+    void connectInBackground();
+    // On this object's thread: takes up what connectInBackground() found.
+    void takeArrived();
     // Drops a dead connection and tries again. Cheap when connected.
     void maintain();
 
@@ -211,6 +220,10 @@ class EnginePlayback final : public QObject {
     protocol::Endpoint endpoint_;
     std::function<bool()> revive_;
     std::unique_ptr<protocol::Client> client_;
+    // A connection made on the worker, waiting for this object's thread.
+    // Under mutex_.
+    std::unique_ptr<protocol::Client> arrived_;
+    bool connecting_{false};
     QTimer* reconnect_timer_{nullptr};
     QThreadPool pool_;
     // The engine does not broadcast position -- it moves continuously and

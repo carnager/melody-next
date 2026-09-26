@@ -81,10 +81,14 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
                          QStringLiteral("the-right-token"));
     {
         CatalogueSource catalogues{database, CatalogueSource::Role::remote};
+        // Not reached from the constructor, which runs on the window's thread
+        // at startup: an engine over TCP may be switched off. The first open
+        // -- from a worker, in the panel -- reaches it.
+        QVERIFY(!catalogues.usingEngine());
+        auto opened = catalogues.open();
         QVERIFY2(catalogues.usingEngine(), qPrintable(catalogues.failure()));
         QVERIFY(catalogues.describe().contains(address));
         QVERIFY(!catalogues.describe().contains(QStringLiteral("the-right-token")));
-        auto opened = catalogues.open();
         QVERIFY(opened->roots().has_value());
     }
 
@@ -92,6 +96,7 @@ void LibraryPanelEngineTest::aTcpEngineIsReachedWithItsToken() {
                          QStringLiteral("a-wrong-token"));
     {
         CatalogueSource catalogues{database, CatalogueSource::Role::remote};
+        QVERIFY(!catalogues.open()->roots().has_value());
         QVERIFY(!catalogues.usingEngine());
         QVERIFY2(catalogues.describe().contains(QStringLiteral("refused the password")),
                  qPrintable(catalogues.describe()));

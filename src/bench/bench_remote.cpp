@@ -92,7 +92,18 @@ void BenchMainWindow::connectRemoteEngine() {
         // is the one the user sees, so it is stated again.
         engine_requests_.clear();
         syncEngineRequests();
-        static_cast<void>(remoteQueueTab());
+        // Its tab, named after it -- by address if it was made while the
+        // remote was away, which is renamed now that it has said its name.
+        // A name someone chose is theirs, and kept.
+        if (auto* tab = remoteQueueTab(); tab != nullptr) {
+            const auto address = remote_catalogue_source_->addressName();
+            const auto announced = remote_catalogue_source_->name();
+            if (displayText(tab->document.name) == address && announced != address) {
+                tab->document.name = utf8Bytes(announced);
+                refreshTabChrome(*tab);
+                schedulePersist();
+            }
+        }
         // Music the remote was already playing is followed, unless this
         // computer is playing: then that is what the transport shows, and
         // the remote waits until one of its tabs is played.

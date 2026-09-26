@@ -2,11 +2,6 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
-#include "bench/lists_panel.hpp"
-#include "bench/up_next_delegate.hpp"
-#include "bench/quick_pick_popup.hpp"
-#include "trackknife/discovery/mdns.hpp"
-#include "uicommon/local_files_mime_data.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -15,20 +10,26 @@
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/lastfm_service.hpp"
+#include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/local_list_model.hpp"
-#include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_artwork_section.hpp"
+#include "bench/metadata_grid_model.hpp"
 #include "bench/metadata_properties_dialog.hpp"
 #include "bench/musicbrainz_track_match_widget.hpp"
 #include "bench/playback_tab_widget.hpp"
 #include "bench/playlist_transfer_bar.hpp"
+#include "bench/quick_pick_popup.hpp"
+#include "bench/remote_engines.hpp"
 #include "bench/replaygain_dialog.hpp"
 #include "bench/search_dialog.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
+#include "bench/up_next_delegate.hpp"
 #include "test_engine.hpp"
+#include "trackknife/discovery/mdns.hpp"
+#include "uicommon/local_files_mime_data.hpp"
 
 #include <signal.h>
 
@@ -256,6 +257,9 @@ class BenchMainWindowTest final : public QObject {
     void libraryAndFoldersAddToAChosenList();
     void tabsAreGroupedByEngine();
     void theRemotesListsTakeItsIdOnceItSaysIt();
+    void remoteEnginesStartFromTheOneRemoteOfBefore();
+    void twoEnginesElsewhereSideBySide();
+    void settingsListTheEnginesElsewhere();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2328,6 +2332,179 @@ void BenchMainWindowTest::anotherEngineAtTheSameAddressLeavesTheOldOnesLists() {
     // The remote's own tab is its own, not the old engine's list.
     QVERIFY(window.remoteQueueTab() != old_tab);
     QSettings{}.remove(QStringLiteral("library/engine-id"));
+}
+
+// ADR-0234: several engines elsewhere, kept as a list; the one remote an
+// older release kept becomes its first, once, and the old keys keep naming
+// the first for a release that reads only them.
+void BenchMainWindowTest::remoteEnginesStartFromTheOneRemoteOfBefore() {
+    QSettings settings;
+    settings.remove(QStringLiteral("engines"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key),
+                      QStringLiteral("192.0.2.7:6603"));
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key), QString{});
+    settings.setValue(QLatin1String(SettingsDialog::library_remote_folder_key),
+                      QStringLiteral("/mnt/nas/Music"));
+    settings.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), QString{});
+    settings.setValue(QLatin1String(SettingsDialog::library_engine_id_key), QStringLiteral("abc"));
+    settings.sync();
+
+    auto engines = loadRemoteEngines();
+    QCOMPARE(engines.size(), std::size_t{1});
+    QCOMPARE(engines.front().address, QStringLiteral("192.0.2.7:6603"));
+    QCOMPARE(engines.front().music_folder, QStringLiteral("/mnt/nas/Music"));
+    QCOMPARE(engines.front().id, QStringLiteral("abc"));
+
+    engines.push_back({.address = QStringLiteral("198.51.100.3:6603"),
+                       .password = QStringLiteral("other"),
+                       .music_folder = QStringLiteral("/srv/music"),
+                       .reachable_at = QStringLiteral("/media/galactica"),
+                       .id = {}});
+    saveRemoteEngines(engines);
+    QCOMPARE(loadRemoteEngines(), engines);
+    QCOMPARE(loadRemoteEngines().back().effectivePassword(), QStringLiteral("other"));
+
+    rememberEngineId(QStringLiteral("198.51.100.3:6603"), QStringLiteral("def"));
+    QCOMPARE(loadRemoteEngines().back().id, QStringLiteral("def"));
+
+    // With none left, the old keys say so too.
+    saveRemoteEngines({});
+    QVERIFY(loadRemoteEngines().empty());
+    QVERIFY(QSettings{}
+                .value(QLatin1String(SettingsDialog::library_engine_socket_key))
+                .toString()
+                .isEmpty());
+    QSettings{}.remove(QStringLiteral("engines"));
+}
+
+// ADR-0234: two engines elsewhere at once -- a desktop's library and a
+// NAS's -- each by its own id, with its own library tab and its own lists,
+// grouped after this computer's in the order Settings have them.
+void BenchMainWindowTest::twoEnginesElsewhereSideBySide() {
+    QTemporaryDir first_state;
+    QTemporaryDir second_state;
+    QVERIFY(first_state.isValid() && second_state.isValid());
+    testing::TestEngine first;
+    testing::TestEngine second;
+    QVERIFY2(first.start(first_state.path().toStdString(), true), first.log().constData());
+    QVERIFY2(second.start(second_state.path().toStdString(), true), second.log().constData());
+    const auto id_of = [](const QTemporaryDir& state) {
+        QFile file{state.path() + QStringLiteral("/engine-id")};
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).trimmed()
+                                              : QString{};
+    };
+    const auto first_id = id_of(first_state);
+    const auto second_id = id_of(second_state);
+    QVERIFY(!first_id.isEmpty() && !second_id.isEmpty() && first_id != second_id);
+    saveRemoteEngines({{.address = first.socket(),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}},
+                       {.address = second.socket(),
+                        .password = {},
+                        .music_folder = {},
+                        .reachable_at = {},
+                        .id = {}}});
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QCOMPARE(window.engines_.size(), std::size_t{3});
+    QTRY_VERIFY(window.engines_[1]->playback->active() && window.engines_[2]->playback->active());
+    QTRY_COMPARE(window.engines_[1]->key.text(), first_id);
+    QTRY_COMPARE(window.engines_[2]->key.text(), second_id);
+    // Each remembered, by its address.
+    const auto kept = loadRemoteEngines();
+    QCOMPARE(kept.size(), std::size_t{2});
+    QCOMPARE(kept[0].id, first_id);
+    QCOMPARE(kept[1].id, second_id);
+
+    // A library tab each, found by the engine's key.
+    QStringList keys;
+    for (int index = 0; index < window.local_source_tabs_->count(); ++index) {
+        keys << window.local_source_tabs_->tabData(index).toString();
+    }
+    QVERIFY2(keys.contains(first_id) && keys.contains(second_id), qPrintable(keys.join(u',')));
+    QVERIFY(window.engines_[1]->library != window.engines_[2]->library);
+    QCOMPARE(window.engines_[2]->library->engine().text(), second_id);
+
+    // Each its own tab, of its own engine, after this computer's.
+    auto* first_tab = window.engineTab(*window.engines_[1]);
+    auto* second_tab = window.engineTab(*window.engines_[2]);
+    QVERIFY(first_tab != nullptr && second_tab != nullptr && first_tab != second_tab);
+    QCOMPARE(QString::fromStdString(first_tab->document.engine), first_id);
+    QCOMPARE(QString::fromStdString(second_tab->document.engine), second_id);
+    const auto at = [&window](const BenchMainWindow::ListTab* tab) {
+        return window.tabs_->indexOf(tab->view);
+    };
+    QVERIFY(at(window.list_tabs_.front().get()) < at(first_tab));
+    QVERIFY(at(first_tab) < at(second_tab));
+    QCOMPARE(window.playbackOf(EngineKey::of(second_tab->document)), window.engines_[2]->playback);
+    saveRemoteEngines({});
+}
+
+// ADR-0234: Settings list the engines elsewhere; the form below edits the
+// one chosen, Add and Remove change the list, and what is saved is those
+// with an address, in order.
+void BenchMainWindowTest::settingsListTheEnginesElsewhere() {
+    saveRemoteEngines({{.address = QStringLiteral("192.0.2.10:6603"),
+                        .password = {},
+                        .music_folder = QStringLiteral("/mnt/nas/Music"),
+                        .reachable_at = {},
+                        .id = QStringLiteral("nas-id")}});
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    auto* dialog = window.showSettingsDialog(SettingsDialog::Page::engine);
+    QVERIFY(dialog != nullptr);
+    auto* list = dialog->findChild<QListWidget*>(QStringLiteral("bench-settings-engines"));
+    auto* address = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-engine-socket"));
+    auto* folder = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-remote-folder"));
+    auto* reachable = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-remote-mount"));
+    auto* add = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-add"));
+    auto* remove = dialog->findChild<QPushButton*>(QStringLiteral("bench-settings-engine-remove"));
+    QVERIFY(list && address && folder && reachable && add && remove);
+    QCOMPARE(list->count(), 1);
+    QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
+    QCOMPARE(folder->text(), QStringLiteral("/mnt/nas/Music"));
+
+    // One more, filled in.
+    add->click();
+    QCOMPARE(list->count(), 2);
+    QVERIFY(address->text().isEmpty());
+    address->setText(QStringLiteral("192.0.2.20:6603"));
+    folder->setText(QStringLiteral("/srv/music"));
+    reachable->setText(QStringLiteral("/media/desktop"));
+    QCOMPARE(list->item(1)->text(), QStringLiteral("192.0.2.20:6603"));
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(dialog->grab().save(directory + QStringLiteral("/settings-engines.png")));
+    }
+    // Back to the first: its fields, untouched.
+    list->setCurrentRow(0);
+    QCOMPARE(address->text(), QStringLiteral("192.0.2.10:6603"));
+    QVERIFY(reachable->text().isEmpty());
+    // A third, left empty, and removed again.
+    add->click();
+    QCOMPARE(list->count(), 3);
+    remove->click();
+    QCOMPARE(list->count(), 2);
+
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    const auto saved = loadRemoteEngines();
+    QCOMPARE(saved.size(), std::size_t{2});
+    QCOMPARE(saved[0].address, QStringLiteral("192.0.2.10:6603"));
+    QCOMPARE(saved[0].id, QStringLiteral("nas-id"));
+    QCOMPARE(saved[1].address, QStringLiteral("192.0.2.20:6603"));
+    QCOMPARE(saved[1].music_folder, QStringLiteral("/srv/music"));
+    QCOMPARE(saved[1].reachable_at, QStringLiteral("/media/desktop"));
+    QVERIFY(saved[1].id.isEmpty());
+    saveRemoteEngines({});
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

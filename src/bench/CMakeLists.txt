@@ -10,6 +10,7 @@ qt_add_library(
     bench_media_ingest.cpp
     bench_remote.cpp
     remote_mount.cpp
+    remote_engines.cpp
     bench_playlists.cpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp

@@ -47,14 +47,40 @@ the Lists panel show one group per engine, as they already do for one.
 
 Each stage leaves the application working and is committed on its own.
 
-1. Stable engine id (this ADR's first commit).
+1. Stable engine id (this ADR's first commit). Done.
 2. The connection object: one class for an engine connection, used for this
    computer's engine and the single remote; `bool remote` replaced by it
-   throughout. No change in behaviour.
-3. Lists persist their engine's id; migration as above.
-4. Several remotes: Settings, sidebar, grouping.
+   throughout. No change in behaviour. Done.
+3. Lists persist their engine's id; migration as above. Done (schema 47).
+4. Several remotes: Settings, sidebar, grouping. Done; see below.
 5. The last synchronous call on the UI thread (`queueEntries()`, review item
    B2) goes with the old remote plumbing.
+
+## Several remotes, as built (stage 4)
+
+- **Settings list them.** Each: an address, a password (empty: this
+  computer's engine's), its music folder as it sees it, and -- optional --
+  where that folder is also reachable on this computer, when the user has
+  mounted it; Trackknife mounts nothing. "On the network" adds a found
+  engine, or chooses it when listed. The one remote of an older release
+  becomes the first entry, and the old single-remote keys keep naming the
+  first. Engines added or removed apply after restarting Trackknife; a
+  changed mount applies at once.
+- **Keys before an id.** An engine not yet reached is known by a
+  placeholder: `remote` for the first (the key an older release's remote
+  lists carry), `address:<address>` for any other. When it says its id, what
+  was kept under the placeholder moves to the id; an id other than the one
+  kept means another engine at that address, and the lists of the one
+  before stay its.
+- **The sidebar has a library tab per engine**, named by it, found by its
+  key; tab groups and the Lists panel follow the order of the list.
+- **Per engine:** the mount and library folders used to move tracks
+  between engines and for file work, the index asked to re-read changed
+  files, and whether a file move has been told to it.
+- **Speakers.** This computer's engine offers its speakers ("play for") to
+  the first engine listed only: melodyd takes one `--play-for`. Offering
+  them to several needs the engine to hold several agent connections, and
+  is left for then.
 
 ## Consequences
 

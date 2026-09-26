@@ -1282,10 +1282,10 @@ void BenchMainWindow::reattachToEngine() {
     for (auto& row : rows) {
         row.title = core::display_raw_path(row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
     }
-    const auto* playing_engine = linkOf(transport_);
-    // A remote engine's queue goes into its tab, which it always has.
+    auto* playing_engine = linkOf(transport_);
+    // An engine elsewhere's queue goes into its tab, which it always has.
     auto* tab = playing_engine != nullptr && !playing_engine->key.isLocal()
-                    ? remoteQueueTab()
+                    ? engineTab(*playing_engine)
                     : addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                            .kind = persistence::ListKind::scratch,
                                                            .name = "Playing on the engine",
@@ -1671,8 +1671,13 @@ void BenchMainWindow::refreshEngineTransport() {
         // Paused because another engine is playing on these speakers: said
         // where the album would be, so the silence has a reason.
         if (!state.speakers_taken_by.isEmpty() && state.status != QStringLiteral("playing")) {
-            const auto taker = remoteEngine() != nullptr ? engineName(remoteEngine()->key)
-                                                         : state.speakers_taken_by;
+            // Named as the engine at that address is, when it is one of ours.
+            auto taker = state.speakers_taken_by;
+            for (const auto& engine : engines_) {
+                if (!engine->key.isLocal() && engine->setting.address == state.speakers_taken_by) {
+                    taker = engineName(engine->key);
+                }
+            }
             context = tr("Paused · %1 is playing on these speakers").arg(taker);
         }
         now_playing_->setText(label);

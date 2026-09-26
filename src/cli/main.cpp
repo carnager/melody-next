@@ -61,7 +61,7 @@ void usage(std::ostream& out) {
            "                              Trackknife (default \"$if(%artist%,%artist% - "
            ")%title%\"):\n"
            "                              %artist% %title% %album% %date% %tracknumber%\n"
-           "                              %rating% (0-5) %length% %path% %playback_state%\n"
+           "                              %rating% (1-10) %length% %path% %playback_state%\n"
            "                              %playback_time% %playback_remaining%; a field\n"
            "                              not known is empty. Literal ( ) , $ % are\n"
            "                              escaped with a backslash.\n"
@@ -510,10 +510,10 @@ class NowPlaying final : public trackknife::titleformat::EvaluationContext {
         if (const auto number = track.value("track_number", 0); number > 0) {
             fields_["tracknumber"] = std::to_string(number);
         }
-        // In stars, as `rate` says and sets them; the engine keeps half
-        // stars, 0-10. Unrated is no rating, not a rating of nought.
+        // As the engine keeps it: 1-10, half stars. Unrated is no rating,
+        // not a rating of nought.
         if (const auto rating = track.value("rating", 0); rating > 0) {
-            fields_["rating"] = std::to_string(rating / 2);
+            fields_["rating"] = std::to_string(rating);
         }
         fields_["path"] = decoded_path(text_of(track, "path"));
         const auto position = state.value("position_ms", std::int64_t{0});

@@ -328,7 +328,10 @@ class BenchMainWindow final : public QMainWindow {
     void revealFolderStep(const QPersistentModelIndex& parent_index, const std::string& raw_path);
     void playCurrentRow();
     void showMetadataProperties();
-    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader);
+    // ADR-0237: `work` is the engine that does the file work, or null for
+    // this process.
+    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader,
+                                std::shared_ptr<engine::RemoteFileWork> work = nullptr);
     void showConvertDialog();
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);

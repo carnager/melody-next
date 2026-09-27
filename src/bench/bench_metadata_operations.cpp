@@ -991,20 +991,6 @@ BenchMainWindow::engineMetadataPlanApplierFactory(std::shared_ptr<engine::Remote
     };
 }
 
-namespace {
-
-FileWorkTools engineFileWorkTools(const std::shared_ptr<engine::RemoteFileWork>& work) {
-    return FileWorkTools{.access = work->access(),
-                         .scanner = [work](std::span<const loudness::LoudnessScanItem> items,
-                                           const loudness::LoudnessScanOptions& options,
-                                           const loudness::LoudnessScanProgressCallback& progress,
-                                           const core::CancellationToken& cancellation) {
-                             return work->scan(items, options, progress, cancellation);
-                         }};
-}
-
-} // namespace
-
 void BenchMainWindow::showReplayGainDialog() {
     auto* tab = currentListTab();
     showReplayGainForView(tab ? tab->view : nullptr);
@@ -1126,12 +1112,17 @@ void BenchMainWindow::showMetadataForView(QTableView* view) {
     if (!model || !view->selectionModel()) {
         return;
     }
-    if (auto remote = remoteFileWorkRows(view)) {
-        if (!remote->empty()) {
-            const auto count = remote->size();
-            openMetadataProperties(count, selectionSourceReader(model, {}, std::move(*remote)));
+    // ADR-0237: the engine holding the files reads, probes and writes them at
+    // its own paths; this process only when it does not do file work.
+    auto work = fileWorkOf(view);
+    if (!work) {
+        if (auto remote = remoteFileWorkRows(view)) {
+            if (!remote->empty()) {
+                const auto count = remote->size();
+                openMetadataProperties(count, selectionSourceReader(model, {}, std::move(*remote)));
+            }
+            return;
         }
-        return;
     }
     auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
@@ -1145,16 +1136,18 @@ void BenchMainWindow::showMetadataForView(QTableView* view) {
     }
     const auto selected_row_count = selected_rows.size();
     openMetadataProperties(selected_row_count,
-                           selectionSourceReader(model, std::move(selected_rows)));
+                           selectionSourceReader(model, std::move(selected_rows)), std::move(work));
 }
 
 void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_count,
-                                             MetadataPropertiesSourceReader reader) {
+                                             MetadataPropertiesSourceReader reader,
+                                             std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
     const auto database_path = database_path_;
     auto* properties = new MetadataPropertiesDialog(
         selected_row_count, std::move(reader), std::span{default_metadata_fields},
-        metadataPlanApplierFactory(), metadataApplyObserver(),
+        work ? engineMetadataPlanApplierFactory(work) : metadataPlanApplierFactory(),
+        metadataApplyObserver(),
         MetadataTransformationStore{
             .load =
                 [persistence_service](MetadataTransformationStore::LoadCompletion completion) {
@@ -1345,7 +1338,11 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                                      std::move(completion));
                 },
         },
-        musicBrainzLookupService());
+        musicBrainzLookupService(), work ? engineFileWorkTools(work) : FileWorkTools{});
+    if (work) {
+        // Observable for tests and diagnostics: which did the work.
+        properties->setProperty("trackknife-file-work", QStringLiteral("engine"));
+    }
     properties->setArtworkMutationServices(
         [this, database_path, persistence_service] {
             auto documents = collectDocuments();

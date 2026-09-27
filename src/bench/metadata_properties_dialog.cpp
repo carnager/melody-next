@@ -143,7 +143,8 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     MetadataTransformationStore transformation_store, OutputProfileStore output_profile_store,
     FilePublicationPlanApplierFactory file_plan_applier_factory,
     FilePublicationApplyObserver file_apply_observer, QWidget* parent,
-    MetadataDialogLayoutStore layout_store, MusicBrainzLookupService musicbrainz)
+    MetadataDialogLayoutStore layout_store, MusicBrainzLookupService musicbrainz,
+    FileWorkTools tools)
     : QDialog(parent), selection_watcher_(this), write_plan_watcher_(this),
       metadata_apply_watcher_(this), file_apply_watcher_(this),
       source_reader_(std::move(source_reader)),
@@ -153,7 +154,8 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
       output_profile_store_(std::move(output_profile_store)),
       file_plan_applier_factory_(std::move(file_plan_applier_factory)),
       file_apply_observer_(std::move(file_apply_observer)), layout_store_(std::move(layout_store)),
-      musicbrainz_(std::move(musicbrainz)), requested_item_count_(requested_item_count) {
+      musicbrainz_(std::move(musicbrainz)), tools_(std::move(tools)),
+      requested_item_count_(requested_item_count) {
     setObjectName(QStringLiteral("bench-metadata-properties"));
     setWindowTitle(QStringLiteral("Edit tags"));
     setModal(false);
@@ -928,10 +930,11 @@ void MetadataPropertiesDialog::captureSources() {
 }
 
 void MetadataPropertiesDialog::startSelection() {
-    selection_watcher_.setFuture(
-        QtConcurrent::run([sources = std::move(sources_), preferred = std::move(preferred_fields_),
-                           token = technical_cancellation_.token()]() mutable {
-            auto prepared = metadata::capture_uncached_metadata_sources(std::move(sources), token);
+    selection_watcher_.setFuture(QtConcurrent::run(
+        [sources = std::move(sources_), preferred = std::move(preferred_fields_),
+         access = tools_.access, token = technical_cancellation_.token()]() mutable {
+            auto prepared =
+                metadata::capture_uncached_metadata_sources(std::move(sources), access, token);
             if (!prepared) {
                 return std::make_shared<SelectionResult>(std::unexpected(prepared.error()));
             }
@@ -2369,11 +2372,12 @@ void MetadataPropertiesDialog::startReplayGainScan(std::vector<std::size_t> forc
     settings.grouping = std::move(grouping);
     settings.true_peak = true_peak;
     settings.sidecar_only = sidecar_only;
-    replaygain_watcher_.setFuture(QtConcurrent::run(
-        [selection = std::move(selection), draft = std::move(draft), items = std::move(items),
-         audio_sources, settings = std::move(settings), completed, cancellation] {
+    replaygain_watcher_.setFuture(
+        QtConcurrent::run([selection = std::move(selection), draft = std::move(draft),
+                           items = std::move(items), audio_sources, settings = std::move(settings),
+                           completed, cancellation, scanner = tools_.scanner] {
             return run_replaygain_scan(selection, draft, items, audio_sources, settings, completed,
-                                       cancellation);
+                                       cancellation, scanner);
         }));
 }
 
@@ -2637,18 +2641,19 @@ void MetadataPropertiesDialog::startWritePlan() {
     }
     updateWritePlanButton();
     read_only_->setText(QStringLiteral("Checking files…"));
-    write_plan_watcher_.setFuture(QtConcurrent::run(
-        [selection, draft = std::move(draft), items = std::move(items), operation_selection,
-         output_layout = std::move(output_layout), destination = std::move(destination),
-         cancellation, plan_options, artwork_intents, cover_policy]() mutable {
+    write_plan_watcher_.setFuture(
+        QtConcurrent::run([selection, draft = std::move(draft), items = std::move(items),
+                           operation_selection, output_layout = std::move(output_layout),
+                           destination = std::move(destination), cancellation, plan_options,
+                           artwork_intents, cover_policy, access = tools_.access]() mutable {
             // WYSIWYG apply: the plan writes exactly the staged draft.
             // Automatic scripts already staged their edits into the grid.
             const auto metadata_context_change_count =
                 (operation_selection.save_tags ? draft.patch_count() : 0U) + artwork_intents.size();
             std::optional<metadata::MetadataWritePlan> metadata_plan;
             if (operation_selection.save_tags && !draft.empty()) {
-                auto revalidated = metadata::revalidate_metadata_write_plan(
-                    *selection, draft, cancellation, plan_options);
+                auto revalidated = metadata::build_metadata_write_plan(*selection, draft, access,
+                                                                       cancellation, plan_options);
                 if (!revalidated) {
                     return std::make_shared<WritePlanResult>(
                         std::unexpected(std::move(revalidated.error())));
@@ -3625,24 +3630,19 @@ void MetadataPropertiesDialog::pumpTechnicalQueue() {
     technical_queue_.pop_front();
     technical_probing_ = true;
     technical_watcher_.setFuture(
-        QtConcurrent::run([path, token = technical_cancellation_.token()]()
+        QtConcurrent::run([path, probe = tools_.probe, token = technical_cancellation_.token()]()
                               -> std::pair<std::string, std::optional<TechnicalInfo>> {
-            auto probe = formats::probe_local_media(path, token);
-            if (!probe || !probe->best_audio_stream) {
-                return {path, std::nullopt};
-            }
-            const auto found = std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
-                                                 &formats::AudioStreamInfo::stream_index);
-            if (found == probe->audio_streams.end()) {
+            auto facts = probe ? probe(path, token) : engine::probe_local_technicals(path, token);
+            if (!facts) {
                 return {path, std::nullopt};
             }
             TechnicalInfo info;
-            info.codec = found->codec_name;
-            info.sample_rate = found->sample_rate;
-            info.bits = formats::bits_per_sample_hint(found->sample_format);
-            info.channels = found->channels;
-            info.bit_rate = found->bit_rate > 0 ? found->bit_rate : probe->bit_rate;
-            info.duration_ms = probe->duration_ms.value_or(-1);
+            info.codec = facts->codec;
+            info.sample_rate = facts->sample_rate;
+            info.bits = facts->bits;
+            info.channels = facts->channels;
+            info.bit_rate = facts->bit_rate;
+            info.duration_ms = facts->duration_ms;
             return {path, info};
         }));
 }

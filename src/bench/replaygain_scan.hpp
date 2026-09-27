@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/file_work_tools.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
@@ -42,16 +43,6 @@ struct ReplayGainScanOutcome {
     std::vector<std::size_t> retry_items;
     // ADR-0147: pre-escaped CSV data rows snapshotting the measurement.
     QStringList export_rows;
-};
-
-// ADR-0237: what the file tools read and measure with -- this process, or the
-// engine that holds the files. Empty members mean this process.
-using LoudnessScanner = std::function<core::Result<loudness::LoudnessScanResult>(
-    std::span<const loudness::LoudnessScanItem>, const loudness::LoudnessScanOptions&,
-    const loudness::LoudnessScanProgressCallback&, const core::CancellationToken&)>;
-struct FileWorkTools {
-    metadata::MetadataFileAccess access{metadata::local_metadata_file_access()};
-    LoudnessScanner scanner{};
 };
 
 struct ReplayGainScanSettings {

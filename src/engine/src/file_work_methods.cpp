@@ -3,6 +3,7 @@
 #include "trackknife/engine/file_work_methods.hpp"
 
 #include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
@@ -54,6 +55,39 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database,
 
 void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
                                 FileWorkRecovery recovery) {
+    dispatcher.on("media.probe", [](const Json& params) -> core::Result<Json> {
+        const auto paths = params.find("paths");
+        if (paths == params.end() || !paths->is_array() || paths->size() > metadata_read_limit) {
+            return std::unexpected(core::Error{
+                .code = core::ErrorCode::invalid_argument,
+                .message = "up to " + std::to_string(metadata_read_limit) + " paths are required",
+                .context = {{.key = "param", .value = "paths"}}});
+        }
+        auto files = Json::array();
+        for (const auto& encoded : *paths) {
+            const auto raw_path = encoded.is_string()
+                                      ? protocol::decode_raw_path(encoded.get<std::string>())
+                                      : core::Result<std::string>{std::unexpected(core::Error{})};
+            if (!raw_path) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::invalid_argument,
+                                .message = "a path is not an encoded path",
+                                .context = {{.key = "param", .value = "paths"}}});
+            }
+            Json file = Json::object();
+            if (auto facts = probe_local_technicals(*raw_path, {})) {
+                file["technicals"] =
+                    Json{{"codec", facts->codec},       {"sample_rate", facts->sample_rate},
+                         {"bits", facts->bits},         {"channels", facts->channels},
+                         {"bit_rate", facts->bit_rate}, {"duration_ms", facts->duration_ms}};
+            } else {
+                file["error"] = wire::encode(facts.error());
+            }
+            files.push_back(std::move(file));
+        }
+        return Json{{"files", std::move(files)}};
+    });
+
     dispatcher.on(
         "metadata.interrupted",
         [database = std::move(database),

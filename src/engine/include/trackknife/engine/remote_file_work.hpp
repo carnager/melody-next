@@ -10,12 +10,29 @@
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/protocol/client.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <span>
 #include <string>
 
 namespace trackknife::engine {
+
+// A file's best audio stream, as the tagger's technical panel shows it.
+struct FileTechnicals {
+    std::string codec;
+    int sample_rate{0};
+    int bits{0};
+    int channels{0};
+    std::int64_t bit_rate{0};
+    std::int64_t duration_ms{-1};
+
+    friend bool operator==(const FileTechnicals&, const FileTechnicals&) = default;
+};
+
+// This process's reading of it: formats::probe_local_media.
+[[nodiscard]] core::Result<FileTechnicals>
+probe_local_technicals(const std::string& raw_path, const core::CancellationToken& cancellation);
 
 // ADR-0237: the file tools' reads, measurements and writes, done by the
 // engine that holds the files. The tools keep their own code and their own
@@ -42,6 +59,10 @@ class RemoteFileWork final {
          const loudness::LoudnessScanOptions& options,
          const loudness::LoudnessScanProgressCallback& progress,
          const core::CancellationToken& cancellation);
+
+    // media.probe: the file's technicals as the engine's decoder sees them.
+    [[nodiscard]] core::Result<FileTechnicals> probe(const std::string& raw_path,
+                                                     const core::CancellationToken& cancellation);
 
     [[nodiscard]] core::Result<operations::MetadataApplyResult>
     apply(const metadata::MetadataWritePlan& plan,

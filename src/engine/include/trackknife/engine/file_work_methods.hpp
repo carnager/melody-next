@@ -21,6 +21,11 @@ namespace trackknife::engine {
 // file exists but has no tags to read, which can still take gains in a
 // sidecar. At most metadata_read_limit paths per call.
 inline constexpr std::size_t metadata_read_limit = 256U;
+//
+// media.probe {paths: [encoded]} answers {files: [...]}, one per path: its
+// best audio stream as {codec, sample_rate, bits, channels, bit_rate,
+// duration_ms} -- what the tagger's technical panel shows -- or {error}.
+// At most metadata_read_limit paths per call.
 
 // What the engine did at startup about file work a crash interrupted: how
 // many operations it finished or rolled back, or why it could not look.

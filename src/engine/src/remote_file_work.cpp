@@ -3,6 +3,9 @@
 #include "trackknife/engine/remote_file_work.hpp"
 
 #include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/formats/probe.hpp"
+
+#include <algorithm>
 
 #include <utility>
 #include <vector>
@@ -34,6 +37,28 @@ template <typename T, typename Decode>
 }
 
 } // namespace
+
+core::Result<FileTechnicals> probe_local_technicals(const std::string& raw_path,
+                                                    const core::CancellationToken& cancellation) {
+    auto probe = formats::probe_local_media(raw_path, cancellation);
+    if (!probe) {
+        return std::unexpected(std::move(probe.error()));
+    }
+    const auto best = probe->best_audio_stream
+                          ? std::ranges::find(probe->audio_streams, *probe->best_audio_stream,
+                                              &formats::AudioStreamInfo::stream_index)
+                          : probe->audio_streams.end();
+    if (best == probe->audio_streams.end()) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::unsupported, .message = "no audio stream", .context = {}});
+    }
+    return FileTechnicals{.codec = best->codec_name,
+                          .sample_rate = best->sample_rate,
+                          .bits = formats::bits_per_sample_hint(best->sample_format),
+                          .channels = best->channels,
+                          .bit_rate = best->bit_rate > 0 ? best->bit_rate : probe->bit_rate,
+                          .duration_ms = probe->duration_ms.value_or(-1)};
+}
 
 RemoteFileWork::RemoteFileWork(protocol::Endpoint endpoint) : endpoint_(std::move(endpoint)) {}
 
@@ -156,6 +181,43 @@ RemoteFileWork::scan(const std::span<const loudness::LoudnessScanItem> items,
     }
     return outcome_of<loudness::LoudnessScanResult>(
         *outcome, [](const Json& value) { return wire::decode_scan_result(value); });
+}
+
+core::Result<FileTechnicals> RemoteFileWork::probe(const std::string& raw_path,
+                                                   const core::CancellationToken& cancellation) {
+    if (cancellation.is_cancellation_requested()) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::cancelled, .message = "probe cancelled", .context = {}});
+    }
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)
+                      ->call("media.probe",
+                             Json{{"paths", Json::array({protocol::encode_raw_path(raw_path)})}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto files = answer->find("files");
+    if (files == answer->end() || !files->is_array() || files->size() != 1U) {
+        return std::unexpected(unexpected_answer("media.probe"));
+    }
+    const auto& file = files->front();
+    if (const auto facts = file.find("technicals"); facts != file.end() && facts->is_object()) {
+        return FileTechnicals{.codec = facts->value("codec", std::string{}),
+                              .sample_rate = facts->value("sample_rate", 0),
+                              .bits = facts->value("bits", 0),
+                              .channels = facts->value("channels", 0),
+                              .bit_rate = facts->value("bit_rate", std::int64_t{0}),
+                              .duration_ms = facts->value("duration_ms", std::int64_t{-1})};
+    }
+    const auto error = file.find("error");
+    auto decoded =
+        error != file.end()
+            ? wire::decode_error(*error)
+            : core::Result<core::Error>{std::unexpected(unexpected_answer("media.probe"))};
+    return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
 }
 
 core::Result<operations::MetadataApplyResult>

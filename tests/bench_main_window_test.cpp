@@ -269,6 +269,7 @@ class BenchMainWindowTest final : public QObject {
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
+    void metadataReadyPlanAppliesAndRefreshesHistory_data();
     void metadataReadyPlanAppliesAndRefreshesHistory();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
@@ -3104,7 +3105,16 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     QCOMPARE(source_tabs->count(), sidebar_tabs_before);
 }
 
+void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory_data() {
+    // ADR-0237: tagged by the engine holding the file, or by this process as
+    // with an engine older than file work -- the same window, the same result.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto source_path = media.filePath(QStringLiteral("apply-ready.flac"));
@@ -3130,10 +3140,16 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     view->selectionModel()->select(list_model->index(0, 0),
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    if (!through_engine) {
+        window.localEngine().does_file_work = false;
+    }
     properties_action->trigger();
 
     auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
+    QCOMPARE(properties->property("trackknife-file-work").toString(),
+             through_engine ? QStringLiteral("engine") : QString{});
     // ADR-0221: a window, so the tab strip is untouched and the list the
     // selection came from stays current.
     QVERIFY(properties->isWindow());

@@ -15,6 +15,8 @@ qt_add_library(
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
     replaygain_scan.cpp
+    file_work_tools.cpp
+    file_work_tools.hpp
     search_dialog.cpp
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp

@@ -503,6 +503,12 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(revision && *revision == here->source_revision, "and so is its revision");
     require(!access.read((directory / "absent.flac").string(), {}),
             "a file that is not there fails through the engine too");
+    const auto probed_there = remote.probe(flac, {});
+    const auto probed_here = engine::probe_local_technicals(flac, {});
+    require(probed_there && probed_here && *probed_there == *probed_here &&
+                probed_there->sample_rate > 0,
+            "a file's technicals through the engine are its technicals here");
+    require(!remote.probe((directory / "absent.flac").string(), {}), "and a missing file has none");
 
     const std::vector<loudness::LoudnessScanItem> items{{.item_index = 0,
                                                          .raw_path = flac,

@@ -327,6 +327,147 @@ core::Result<void> RemoteFileWork::set_acoustid_key(const std::string& key) {
     return {};
 }
 
+namespace {
+
+// A call's answer, or the connection's failure, in one.
+[[nodiscard]] core::Result<Json>
+answer_of(core::Result<std::shared_ptr<protocol::Client>> connection, const std::string& method,
+          const Json& params) {
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    return (*connection)->call(method, params, std::chrono::seconds{60});
+}
+
+[[nodiscard]] core::Result<metadata::ArtworkImageFile> image_of(const core::Result<Json>& answer,
+                                                                const std::string& method) {
+    if (!answer) {
+        return std::unexpected(answer.error());
+    }
+    const auto image = answer->find("image");
+    if (image == answer->end() || image->is_null()) {
+        return std::unexpected(unexpected_answer(method));
+    }
+    return wire::decode_image_file(*image);
+}
+
+} // namespace
+
+operations::ArtworkFileAccess RemoteFileWork::artwork_access() {
+    return operations::ArtworkFileAccess{
+        .inventory = [this](const std::string& raw_path,
+                            const metadata::ArtworkInventoryPolicy& policy,
+                            const core::CancellationToken& cancellation)
+            -> core::Result<metadata::LocalArtworkInventory> {
+            if (cancellation.is_cancellation_requested()) {
+                return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                                   .message = "reading cancelled",
+                                                   .context = {}});
+            }
+            auto answer =
+                answer_of(client(), "artwork.inventory",
+                          Json{{"paths", Json::array({protocol::encode_raw_path(raw_path)})},
+                               {"policy", wire::encode(policy)}});
+            if (!answer) {
+                return std::unexpected(std::move(answer.error()));
+            }
+            const auto files = answer->find("files");
+            if (files == answer->end() || !files->is_array() || files->size() != 1U) {
+                return std::unexpected(unexpected_answer("artwork.inventory"));
+            }
+            const auto& file = files->front();
+            if (const auto inventory = file.find("inventory"); inventory != file.end()) {
+                return wire::decode_inventory(*inventory);
+            }
+            const auto error = file.find("error");
+            auto decoded = error != file.end() ? wire::decode_error(*error)
+                                               : core::Result<core::Error>{std::unexpected(
+                                                     unexpected_answer("artwork.inventory"))};
+            return std::unexpected(decoded ? std::move(*decoded) : std::move(decoded.error()));
+        },
+        .image_file =
+            [this](const std::string& raw_path, const std::uint64_t maximum_bytes,
+                   const core::CancellationToken&) {
+                return image_of(answer_of(client(), "artwork.image_file",
+                                          Json{{"path", protocol::encode_raw_path(raw_path)},
+                                               {"maximum_bytes", maximum_bytes}}),
+                                "artwork.image_file");
+            },
+        .image_bytes =
+            [this](const metadata::ArtworkImageFile& image, const std::uint64_t maximum_bytes,
+                   const core::CancellationToken&) -> core::Result<std::vector<unsigned char>> {
+            auto answer =
+                answer_of(client(), "artwork.image_bytes",
+                          Json{{"image", wire::encode(image)}, {"maximum_bytes", maximum_bytes}});
+            if (!answer) {
+                return std::unexpected(std::move(answer.error()));
+            }
+            const auto bytes = answer->find("bytes");
+            if (bytes == answer->end() || !bytes->is_string()) {
+                return std::unexpected(unexpected_answer("artwork.image_bytes"));
+            }
+            auto decoded = protocol::decode_raw_path(bytes->get<std::string>());
+            if (!decoded) {
+                return std::unexpected(std::move(decoded.error()));
+            }
+            return std::vector<unsigned char>(decoded->begin(), decoded->end());
+        },
+        .revision = access().revision,
+        .destination = [this](const std::string& raw_path, const core::CancellationToken&)
+            -> core::Result<std::optional<metadata::ArtworkImageFile>> {
+            auto answer = answer_of(client(), "artwork.destination",
+                                    Json{{"path", protocol::encode_raw_path(raw_path)}});
+            if (!answer) {
+                return std::unexpected(std::move(answer.error()));
+            }
+            const auto image = answer->find("image");
+            if (image == answer->end() || image->is_null()) {
+                return std::optional<metadata::ArtworkImageFile>{};
+            }
+            auto decoded = wire::decode_image_file(*image);
+            if (!decoded) {
+                return std::unexpected(std::move(decoded.error()));
+            }
+            return std::optional{std::move(*decoded)};
+        }};
+}
+
+core::Result<metadata::ArtworkImageFile>
+RemoteFileWork::stage(const std::span<const unsigned char> bytes) {
+    return image_of(
+        answer_of(client(), "artwork.stage",
+                  Json{{"bytes", protocol::encode_raw_path(std::string{
+                                     reinterpret_cast<const char*>(bytes.data()), bytes.size()})}}),
+        "artwork.stage");
+}
+
+core::Result<operations::ArtworkApplyResult>
+RemoteFileWork::artwork_apply(const metadata::ArtworkWritePlan& plan,
+                              const operations::ArtworkApplyProgressCallback& progress,
+                              const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto outcome = (*connection)
+                       ->run_job(
+                           "artwork.apply", Json{{"plan", wire::encode(plan)}},
+                           [&progress](const Json& reported) {
+                               if (!progress) {
+                                   return;
+                               }
+                               if (auto step = wire::decode_artwork_apply_progress(reported)) {
+                                   progress(*step);
+                               }
+                           },
+                           cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    return outcome_of<operations::ArtworkApplyResult>(
+        *outcome, [](const Json& value) { return wire::decode_artwork_apply_result(value); });
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

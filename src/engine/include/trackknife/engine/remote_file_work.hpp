@@ -8,6 +8,7 @@
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/protocol/client.hpp"
 
@@ -69,6 +70,17 @@ class RemoteFileWork final {
     apply(const metadata::MetadataWritePlan& plan,
           const operations::MetadataApplyProgressCallback& progress,
           const core::CancellationToken& cancellation);
+
+    // Stage 4, artwork: the planner's reads (artwork.inventory, image_file,
+    // image_bytes, destination), an image handed over to be written from
+    // (artwork.stage), and a reviewed artwork plan written (artwork.apply).
+    [[nodiscard]] operations::ArtworkFileAccess artwork_access();
+    [[nodiscard]] core::Result<metadata::ArtworkImageFile>
+    stage(std::span<const unsigned char> bytes);
+    [[nodiscard]] core::Result<operations::ArtworkApplyResult>
+    artwork_apply(const metadata::ArtworkWritePlan& plan,
+                  const operations::ArtworkApplyProgressCallback& progress,
+                  const core::CancellationToken& cancellation);
 
     // The tagger's lookups, made by the engine (musicbrainz.fetch,
     // acoustid.fingerprint, acoustid.lookup): the bytes a service answered.

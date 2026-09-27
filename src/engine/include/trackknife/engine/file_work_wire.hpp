@@ -7,9 +7,12 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/loudness/scan.hpp"
+#include "trackknife/metadata/artwork.hpp"
+#include "trackknife/metadata/artwork_write_plan.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -73,5 +76,32 @@ using protocol::Json;
 [[nodiscard]] Json encode(const operations::MetadataApplyProgress& progress);
 [[nodiscard]] core::Result<operations::MetadataApplyProgress>
 decode_apply_progress(const Json& value);
+
+// ADR-0237 stage 4: artwork. Images are named by path, revision and content
+// fingerprint, never carried as bytes in these.
+[[nodiscard]] Json encode(const metadata::ArtworkImageFile& image);
+[[nodiscard]] core::Result<metadata::ArtworkImageFile> decode_image_file(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::ArtworkInventoryPolicy& policy);
+[[nodiscard]] core::Result<metadata::ArtworkInventoryPolicy>
+decode_inventory_policy(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::LocalArtworkInventory& inventory);
+[[nodiscard]] core::Result<metadata::LocalArtworkInventory> decode_inventory(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::ArtworkWritePlanSource& source);
+[[nodiscard]] core::Result<metadata::ArtworkWritePlanSource>
+decode_artwork_source(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::ArtworkWritePlan& plan);
+[[nodiscard]] core::Result<metadata::ArtworkWritePlan> decode_artwork_plan(const Json& value);
+
+[[nodiscard]] Json encode(const operations::ArtworkApplyResult& result);
+[[nodiscard]] core::Result<operations::ArtworkApplyResult>
+decode_artwork_apply_result(const Json& value);
+
+[[nodiscard]] Json encode(const operations::ArtworkApplyProgress& progress);
+[[nodiscard]] core::Result<operations::ArtworkApplyProgress>
+decode_artwork_apply_progress(const Json& value);
 
 } // namespace trackknife::engine::wire

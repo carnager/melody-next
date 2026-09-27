@@ -29,13 +29,38 @@ using ArtworkImageFitter = std::function<core::Result<metadata::ArtworkImageFile
 // to be: shrinking it is the point.
 inline constexpr std::uint64_t maximum_fittable_artwork_bytes = 64U * 1024U * 1024U;
 
+// Where the planner reads: this process, or (ADR-0237) the engine that holds
+// the files. `destination` says what sits where a folder image would go:
+// nothing (nullopt), a regular file with one link (its image), or -- an
+// error -- anything else.
+struct ArtworkFileAccess {
+    std::function<core::Result<metadata::LocalArtworkInventory>(
+        const std::string&, const metadata::ArtworkInventoryPolicy&,
+        const core::CancellationToken&)>
+        inventory;
+    std::function<core::Result<metadata::ArtworkImageFile>(const std::string&, std::uint64_t,
+                                                           const core::CancellationToken&)>
+        image_file;
+    std::function<core::Result<std::vector<unsigned char>>(
+        const metadata::ArtworkImageFile&, std::uint64_t, const core::CancellationToken&)>
+        image_bytes;
+    std::function<core::Result<core::LocalSourceRevision>(const std::string&)> revision;
+    std::function<core::Result<std::optional<metadata::ArtworkImageFile>>(
+        const std::string&, const core::CancellationToken&)>
+        destination;
+};
+
+// This process's own.
+[[nodiscard]] ArtworkFileAccess local_artwork_file_access();
+
 // Captures policy destinations and detects conflicting images for a shared
 // folder. A policy with a size limit needs a fitter.
 [[nodiscard]] core::Result<metadata::ArtworkWritePlan>
 plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
                      const metadata::ArtworkStoragePolicy& policy,
                      const core::CancellationToken& cancellation = {},
-                     const ArtworkImageFitter& fitter = {});
+                     const ArtworkImageFitter& fitter = {},
+                     const ArtworkFileAccess& access = local_artwork_file_access());
 
 enum class ArtworkApplySourceState : std::uint8_t {
     pending,

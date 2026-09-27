@@ -54,6 +54,10 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 // in the same commit, reporting each file; it finishes with {result} or
 // {error}. A plan with blocking issues is refused at submit: what was
 // previewed must be clean. Files outside the library are written too.
+//
+// artwork.apply {plan} writes a reviewed artwork plan the same way: embedded
+// pictures and folder images, journaled and refreshed. Its images are ones
+// the engine holds -- its own files, or ones staged (artwork.stage).
 void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                              LocalCatalogue& catalogue);
 

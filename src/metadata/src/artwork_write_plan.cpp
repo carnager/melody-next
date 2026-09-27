@@ -13,7 +13,6 @@ namespace trackknife::metadata {
 namespace {
 
 constexpr std::size_t maximum_logical_intents = 100'000U;
-constexpr std::uint64_t maximum_replacement_bytes = 16U * 1024U * 1024U;
 constexpr std::size_t maximum_added_description_bytes = 4'096U;
 
 struct PhysicalKey {

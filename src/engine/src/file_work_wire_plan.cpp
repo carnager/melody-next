@@ -6,6 +6,8 @@
 
 #include "trackknife/engine/file_work_wire.hpp"
 
+#include "file_work_wire_internal.hpp"
+
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <array>
@@ -18,247 +20,7 @@
 namespace trackknife::engine::wire {
 namespace {
 
-// Reads one object, keeping the first thing found wrong; every accessor
-// answers a default once something is, and the caller checks ok() at the end.
-class Reader final {
-  public:
-    explicit Reader(const Json& object) : object_(object) {
-        if (!object.is_object()) {
-            fail("expected an object");
-        }
-    }
-
-    [[nodiscard]] bool ok() const noexcept { return !error_.has_value(); }
-    [[nodiscard]] core::Error error() const { return *error_; }
-    void fail(const std::string& what) {
-        if (!error_) {
-            error_ = core::Error{.code = core::ErrorCode::invalid_argument,
-                                 .message = "malformed file-work document: " + what,
-                                 .context = {}};
-        }
-    }
-    void adopt(const core::Error& error) {
-        if (!error_) {
-            error_ = error;
-        }
-    }
-
-    [[nodiscard]] const Json* find(const std::string_view name) {
-        if (!ok()) {
-            return nullptr;
-        }
-        const auto found = object_.find(name);
-        return found == object_.end() || found->is_null() ? nullptr : &*found;
-    }
-    [[nodiscard]] const Json* need(const std::string_view name) {
-        const auto* found = find(name);
-        if (found == nullptr) {
-            fail(std::string{name} + " is missing");
-        }
-        return found;
-    }
-
-    [[nodiscard]] std::size_t index(const std::string_view name) {
-        const auto* value = need(name);
-        if (value == nullptr) {
-            return 0U;
-        }
-        if (value->is_number_unsigned()) {
-            return value->get<std::size_t>();
-        }
-        if (value->is_number_integer() && value->get<std::int64_t>() >= 0) {
-            return static_cast<std::size_t>(value->get<std::int64_t>());
-        }
-        fail(std::string{name} + " must be a non-negative integer");
-        return 0U;
-    }
-    [[nodiscard]] std::optional<std::size_t> optional_index(const std::string_view name) {
-        if (find(name) == nullptr) {
-            return std::nullopt;
-        }
-        return index(name);
-    }
-    [[nodiscard]] std::vector<std::size_t> indexes(const std::string_view name) {
-        std::vector<std::size_t> result;
-        const auto* value = need(name);
-        if (value == nullptr) {
-            return result;
-        }
-        if (!value->is_array()) {
-            fail(std::string{name} + " must be a list");
-            return result;
-        }
-        for (const auto& entry : *value) {
-            if (entry.is_number_unsigned()) {
-                result.push_back(entry.get<std::size_t>());
-            } else {
-                fail(std::string{name} + " must hold non-negative integers");
-            }
-        }
-        return result;
-    }
-    [[nodiscard]] bool flag(const std::string_view name) {
-        const auto* value = need(name);
-        if (value != nullptr && !value->is_boolean()) {
-            fail(std::string{name} + " must be true or false");
-            return false;
-        }
-        return value != nullptr && value->get<bool>();
-    }
-    [[nodiscard]] std::string text(const std::string_view name) {
-        const auto* value = need(name);
-        return value == nullptr ? std::string{} : take(decode_text(*value));
-    }
-    [[nodiscard]] std::optional<std::string> optional_text(const std::string_view name) {
-        const auto* value = find(name);
-        return value == nullptr ? std::nullopt : std::optional{take(decode_text(*value))};
-    }
-    [[nodiscard]] std::vector<std::string> texts(const std::string_view name) {
-        std::vector<std::string> result;
-        const auto* value = need(name);
-        if (value == nullptr) {
-            return result;
-        }
-        if (!value->is_array()) {
-            fail(std::string{name} + " must be a list");
-            return result;
-        }
-        for (const auto& entry : *value) {
-            result.push_back(take(decode_text(entry)));
-        }
-        return result;
-    }
-    [[nodiscard]] std::string bytes(const std::string_view name) {
-        const auto* value = need(name);
-        if (value == nullptr) {
-            return {};
-        }
-        if (value->is_string()) {
-            if (auto decoded = protocol::decode_raw_path(value->get<std::string>())) {
-                return std::move(*decoded);
-            }
-        }
-        fail(std::string{name} + " must be encoded bytes");
-        return {};
-    }
-    [[nodiscard]] core::LocalSourceRevision revision(const std::string_view name) {
-        const auto* value = need(name);
-        return value == nullptr ? core::LocalSourceRevision{} : take(decode_revision(*value));
-    }
-    [[nodiscard]] std::optional<core::LocalSourceRevision>
-    optional_revision(const std::string_view name) {
-        const auto* value = find(name);
-        return value == nullptr ? std::nullopt : std::optional{take(decode_revision(*value))};
-    }
-    [[nodiscard]] std::optional<core::Error> optional_error(const std::string_view name) {
-        const auto* value = find(name);
-        return value == nullptr ? std::nullopt : std::optional{take(decode_error(*value))};
-    }
-    template <typename Enum, std::size_t Count>
-    [[nodiscard]] Enum named(const std::string_view name,
-                             const std::array<std::pair<Enum, std::string_view>, Count>& names) {
-        const auto* value = need(name);
-        if (value != nullptr && value->is_string()) {
-            for (const auto& [kind, spelled] : names) {
-                if (spelled == value->get_ref<const std::string&>()) {
-                    return kind;
-                }
-            }
-        }
-        fail(std::string{name} + " is not one of its known values");
-        return names.front().first;
-    }
-    template <typename T>
-    [[nodiscard]] std::vector<T> list(const std::string_view name,
-                                      const std::function<T(Reader&)>& read) {
-        std::vector<T> result;
-        const auto* value = need(name);
-        if (value == nullptr) {
-            return result;
-        }
-        if (!value->is_array()) {
-            fail(std::string{name} + " must be a list");
-            return result;
-        }
-        for (const auto& entry : *value) {
-            Reader nested{entry};
-            auto item = read(nested);
-            if (!nested.ok()) {
-                adopt(nested.error());
-                return result;
-            }
-            result.push_back(std::move(item));
-        }
-        return result;
-    }
-    template <typename T>
-    [[nodiscard]] std::optional<T> optional_object(const std::string_view name,
-                                                   const std::function<T(Reader&)>& read) {
-        const auto* value = find(name);
-        if (value == nullptr) {
-            return std::nullopt;
-        }
-        Reader nested{*value};
-        auto item = read(nested);
-        if (!nested.ok()) {
-            adopt(nested.error());
-            return std::nullopt;
-        }
-        return item;
-    }
-
-  private:
-    template <typename T> [[nodiscard]] T take(core::Result<T> result) {
-        if (!result) {
-            adopt(result.error());
-            return T{};
-        }
-        return std::move(*result);
-    }
-
-    const Json& object_;
-    std::optional<core::Error> error_;
-};
-
-template <typename Enum, std::size_t Count>
-[[nodiscard]] std::string
-name_of(const Enum value, const std::array<std::pair<Enum, std::string_view>, Count>& names) {
-    for (const auto& [kind, spelled] : names) {
-        if (kind == value) {
-            return std::string{spelled};
-        }
-    }
-    return std::string{names.front().second};
-}
-
-[[nodiscard]] Json encode_texts(const std::vector<std::string>& texts) {
-    auto list = Json::array();
-    for (const auto& text : texts) {
-        list.push_back(encode_text(text));
-    }
-    return list;
-}
-
-[[nodiscard]] Json encode_optional_revision(const std::optional<core::LocalSourceRevision>& value) {
-    return value ? encode(*value) : Json();
-}
-
-[[nodiscard]] Json encode_optional_text(const std::optional<std::string>& value) {
-    return value ? encode_text(*value) : Json();
-}
-
-[[nodiscard]] Json encode_optional_error(const std::optional<core::Error>& value) {
-    return value ? encode(*value) : Json();
-}
-
-template <typename T, typename Encode>
-[[nodiscard]] Json encode_list(const std::vector<T>& values, Encode encode_one) {
-    auto list = Json::array();
-    for (const auto& value : values) {
-        list.push_back(encode_one(value));
-    }
-    return list;
-}
+using namespace detail;
 
 constexpr std::array<std::pair<metadata::MetadataWritePlanIssueKind, std::string_view>, 10>
     issue_kinds{{
@@ -303,6 +65,48 @@ constexpr std::array<std::pair<operations::MetadataOperationContentKind, std::st
         {operations::MetadataOperationContentKind::loudness_sidecar, "loudness_sidecar"},
         {operations::MetadataOperationContentKind::folder_image, "folder_image"},
     }};
+
+} // namespace
+
+namespace detail {
+
+Json encode_commit(const operations::MetadataCommitResult& done) {
+    return Json{{"journal_id", done.journal_id.to_string()},
+                {"source_path", protocol::encode_raw_path(done.source_raw_path)},
+                {"backup_path", protocol::encode_raw_path(done.backup_raw_path)},
+                {"previous_revision", encode(done.previous_revision)},
+                {"published_revision", encode(done.published_revision)},
+                {"document", encode(done.document)},
+                {"occurrence_indexes", done.occurrence_indexes},
+                {"content_kind", name_of(done.content_kind, content_kinds)}};
+}
+
+operations::MetadataCommitResult read_commit(Reader& commit_in) {
+    operations::MetadataCommitResult commit;
+    if (auto id = core::StableId::parse(commit_in.text("journal_id"))) {
+        commit.journal_id = *id;
+    } else {
+        commit_in.fail("journal_id is not an identity");
+    }
+    commit.source_raw_path = commit_in.bytes("source_path");
+    commit.backup_raw_path = commit_in.bytes("backup_path");
+    commit.previous_revision = commit_in.revision("previous_revision");
+    commit.published_revision = commit_in.revision("published_revision");
+    if (const auto* document = commit_in.need("document")) {
+        if (auto decoded = decode_document(*document)) {
+            commit.document = std::move(*decoded);
+        } else {
+            commit_in.adopt(decoded.error());
+        }
+    }
+    commit.occurrence_indexes = commit_in.indexes("occurrence_indexes");
+    commit.content_kind = commit_in.named("content_kind", content_kinds);
+    return commit;
+}
+
+} // namespace detail
+
+namespace {
 
 [[nodiscard]] Json encode_issue(const metadata::MetadataWritePlanIssue& issue) {
     return Json{{"kind", name_of(issue.kind, issue_kinds)},
@@ -421,9 +225,7 @@ Json encode(const metadata::MetadataWritePlan& plan) {
                     {"adapter_name", encode_text(source.adapter_name)},
                     {"changes", std::move(changes)},
                     {"issues", encode_list(source.issues, encode_issue)},
-                    // Artwork is stage 4: marked, so a decoder refuses rather than
-                    // silently writing a plan without it.
-                    {"artwork", source.artwork != nullptr}};
+                    {"artwork", source.artwork ? encode(*source.artwork) : Json()}};
     });
     auto sheets =
         encode_list(plan.cue_sheets, [](const metadata::MetadataWritePlanCueSheet& sheet) {
@@ -496,8 +298,18 @@ core::Result<metadata::MetadataWritePlan> decode_write_plan(const Json& value) {
                 return change;
             });
         source.issues = source_in.list<metadata::MetadataWritePlanIssue>("issues", read_issue);
-        if (source_in.flag("artwork")) {
-            source_in.fail("artwork is not written by the engine yet");
+        if (const auto* artwork = source_in.find("artwork")) {
+            if (artwork->is_boolean()) {
+                // An older client's marker: no artwork, or refused.
+                if (artwork->get<bool>()) {
+                    source_in.fail("artwork was marked but not sent");
+                }
+            } else if (auto decoded = decode_artwork_source(*artwork)) {
+                source.artwork =
+                    std::make_shared<const metadata::ArtworkWritePlanSource>(std::move(*decoded));
+            } else {
+                source_in.adopt(decoded.error());
+            }
         }
         return source;
     });
@@ -556,18 +368,7 @@ core::Result<metadata::MetadataWritePlan> decode_write_plan(const Json& value) {
 Json encode(const operations::MetadataApplyResult& result) {
     auto sources =
         encode_list(result.sources, [](const operations::MetadataApplySourceResult& source) {
-            Json commit = nullptr;
-            if (source.commit) {
-                const auto& done = *source.commit;
-                commit = Json{{"journal_id", done.journal_id.to_string()},
-                              {"source_path", protocol::encode_raw_path(done.source_raw_path)},
-                              {"backup_path", protocol::encode_raw_path(done.backup_raw_path)},
-                              {"previous_revision", encode(done.previous_revision)},
-                              {"published_revision", encode(done.published_revision)},
-                              {"document", encode(done.document)},
-                              {"occurrence_indexes", done.occurrence_indexes},
-                              {"content_kind", name_of(done.content_kind, content_kinds)}};
-            }
+            Json commit = source.commit ? encode_commit(*source.commit) : Json();
             return Json{{"source_index", source.source_index},
                         {"path", protocol::encode_raw_path(source.raw_path)},
                         {"state", name_of(source.state, apply_states)},
@@ -635,29 +436,8 @@ core::Result<operations::MetadataApplyResult> decode_apply_result(const Json& va
             source.source_index = source_in.index("source_index");
             source.raw_path = source_in.bytes("path");
             source.state = source_in.named("state", apply_states);
-            source.commit = source_in.optional_object<operations::MetadataCommitResult>(
-                "commit", [](Reader& commit_in) {
-                    operations::MetadataCommitResult commit;
-                    if (auto id = core::StableId::parse(commit_in.text("journal_id"))) {
-                        commit.journal_id = *id;
-                    } else {
-                        commit_in.fail("journal_id is not an identity");
-                    }
-                    commit.source_raw_path = commit_in.bytes("source_path");
-                    commit.backup_raw_path = commit_in.bytes("backup_path");
-                    commit.previous_revision = commit_in.revision("previous_revision");
-                    commit.published_revision = commit_in.revision("published_revision");
-                    if (const auto* document = commit_in.need("document")) {
-                        if (auto decoded = decode_document(*document)) {
-                            commit.document = std::move(*decoded);
-                        } else {
-                            commit_in.adopt(decoded.error());
-                        }
-                    }
-                    commit.occurrence_indexes = commit_in.indexes("occurrence_indexes");
-                    commit.content_kind = commit_in.named("content_kind", content_kinds);
-                    return commit;
-                });
+            source.commit =
+                source_in.optional_object<operations::MetadataCommitResult>("commit", read_commit);
             source.issue = source_in.optional_error("issue");
             return source;
         });

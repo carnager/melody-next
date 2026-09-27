@@ -48,4 +48,24 @@ void register_file_work_methods(protocol::Dispatcher& dispatcher,
                                 std::filesystem::path database = {},
                                 FileWorkRecovery recovery = {});
 
+// Stage 4, artwork:
+//   artwork.inventory {paths, policy?} -> {files: [{inventory} | {error}]}:
+//     embedded pictures and the configured sibling images of each file.
+//   artwork.image_file {path, maximum_bytes?} -> {image}: an image file
+//     inspected -- a PNG or JPEG, as a plan names it.
+//   artwork.image_bytes {image, maximum_bytes?} -> {bytes}: its encoded
+//     bytes, re-read under its revision and fingerprint, for showing it.
+//   artwork.destination {path} -> {image | null}: what sits where a folder
+//     image would go -- nothing, or a regular file with one link and its
+//     image; anything else is an error.
+//   artwork.stage {bytes} -> {image}: a client's image -- one picked on its
+//     own disk, downloaded, or resized -- kept where the engine can write it
+//     from, in `staging`, and inspected there. Named by content, so staging
+//     the same image twice keeps one copy.
+void register_artwork_methods(protocol::Dispatcher& dispatcher, std::filesystem::path staging);
+
+// Staged images outlive the plan that used them by a week, then go; run at
+// startup.
+void clean_artwork_staging(const std::filesystem::path& staging);
+
 } // namespace trackknife::engine

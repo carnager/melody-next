@@ -509,6 +509,9 @@ int main(int argc, char** argv) {
         std::cerr << "melodyd: recovered " << file_work_recovery.recovered
                   << " interrupted file operation(s)\n";
     }
+    // ADR-0237: artwork a client hands over is kept here until written.
+    trackknife::engine::clean_artwork_staging(state_directory / "artwork-staging");
+    trackknife::engine::register_artwork_methods(dispatcher, state_directory / "artwork-staging");
     // ADR-0237: the tagger's online lookups, made here for this engine's files.
     trackknife::engine::MetadataServices metadata_services{database, state_directory};
     trackknife::engine::register_metadata_service_jobs(job_catalogue, metadata_services);

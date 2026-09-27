@@ -53,7 +53,8 @@ struct FittedCovers {
 [[nodiscard]] core::Result<FittedCovers>
 fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
            const metadata::ArtworkStoragePolicy& policy,
-           const core::CancellationToken& cancellation, const ArtworkImageFitter& fitter) {
+           const core::CancellationToken& cancellation, const ArtworkImageFitter& fitter,
+           const ArtworkFileAccess& access) {
     FittedCovers fitted{.intents = intents, .folder_images = {}};
     const auto embed_edge = policy.embed ? policy.max_embedded_edge : 0U;
     const auto folder_edge = policy.write_folder_image ? policy.max_folder_edge : 0U;
@@ -88,9 +89,8 @@ fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
                             .byte_size = donor->byte_size,
                             .content_fingerprint = donor->content_fingerprint,
                             .embedded_source_ordinal = donor->source_ordinal}}
-                      : metadata::read_artwork_image_file(*intent.replacement_raw_path,
-                                                          maximum_fittable_artwork_bytes,
-                                                          cancellation);
+                      : access.image_file(*intent.replacement_raw_path,
+                                          maximum_fittable_artwork_bytes, cancellation);
             if (!source)
                 return std::unexpected(source.error());
             const auto fit =
@@ -125,11 +125,54 @@ fit_covers(const std::vector<metadata::ArtworkWritePlanIntent>& intents,
 
 } // namespace
 
+ArtworkFileAccess local_artwork_file_access() {
+    return ArtworkFileAccess{
+        .inventory =
+            [](const std::string& raw_path, const metadata::ArtworkInventoryPolicy& policy,
+               const core::CancellationToken& token) {
+                return metadata::read_local_artwork_inventory(raw_path, policy, token);
+            },
+        .image_file =
+            [](const std::string& raw_path, const std::uint64_t maximum_bytes,
+               const core::CancellationToken& token) {
+                return metadata::read_artwork_image_file(raw_path, maximum_bytes, token);
+            },
+        .image_bytes =
+            [](const metadata::ArtworkImageFile& image, const std::uint64_t maximum_bytes,
+               const core::CancellationToken& token) {
+                return metadata::read_artwork_image_bytes(image, maximum_bytes, token);
+            },
+        .revision =
+            [](const std::string& raw_path) {
+                return core::observe_local_source_revision(raw_path);
+            },
+        .destination = [](const std::string& destination, const core::CancellationToken& token)
+            -> core::Result<std::optional<metadata::ArtworkImageFile>> {
+            struct stat status{};
+            if (::lstat(destination.c_str(), &status) == 0) {
+                if (!S_ISREG(status.st_mode) || status.st_nlink != 1)
+                    return std::unexpected(apply_error(
+                        core::ErrorCode::conflict,
+                        "Folder image must be a regular file with one link", destination));
+                auto original =
+                    metadata::read_artwork_image_file(destination, 16U * 1024U * 1024U, token);
+                if (!original)
+                    return std::unexpected(original.error());
+                return std::optional{std::move(*original)};
+            }
+            if (errno != ENOENT) {
+                return std::unexpected(
+                    apply_error(core::ErrorCode::io, "Cannot inspect folder image", destination));
+            }
+            return std::optional<metadata::ArtworkImageFile>{};
+        }};
+}
+
 core::Result<metadata::ArtworkWritePlan>
 plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& requested_intents,
                      const metadata::ArtworkStoragePolicy& policy,
-                     const core::CancellationToken& cancellation,
-                     const ArtworkImageFitter& fitter) {
+                     const core::CancellationToken& cancellation, const ArtworkImageFitter& fitter,
+                     const ArtworkFileAccess& access) {
     if (requested_intents.empty() || requested_intents.size() > 100'000U)
         return std::unexpected(apply_error(core::ErrorCode::invalid_argument,
                                            "Cover review requires 1–100000 intents"));
@@ -142,13 +185,23 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
             core::ErrorCode::invalid_argument,
             "Choose embedding and/or a folder image with a plain filename in Cover settings"));
     }
-    auto fitted = fit_covers(requested_intents, policy, cancellation, fitter);
+    auto fitted = fit_covers(requested_intents, policy, cancellation, fitter, access);
     if (!fitted)
         return std::unexpected(fitted.error());
     const auto& intents = fitted->intents;
     core::Result<metadata::ArtworkWritePlan> plan = metadata::ArtworkWritePlan{};
     if (policy.embed) {
-        plan = metadata::revalidate_artwork_write_plan(intents, cancellation);
+        plan = metadata::build_artwork_write_plan(
+            intents,
+            [&access](const std::string& raw_path, const core::CancellationToken& token) {
+                auto inventory_policy = metadata::default_artwork_inventory_policy();
+                inventory_policy.external_patterns.clear();
+                return access.inventory(raw_path, inventory_policy, token);
+            },
+            [&access](const std::string& raw_path, const core::CancellationToken& token) {
+                return access.image_file(raw_path, metadata::maximum_replacement_bytes, token);
+            },
+            cancellation);
         if (!plan || !plan->ready())
             return plan;
     } else {
@@ -163,9 +216,9 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
                 continue;
             auto role = intent.added_role;
             if (intent.kind == metadata::ArtworkWritePlanIntentKind::replace) {
-                auto inventory = metadata::read_local_artwork_inventory(
-                    intent.raw_media_path, metadata::default_artwork_inventory_policy(),
-                    cancellation);
+                auto inventory =
+                    access.inventory(intent.raw_media_path,
+                                     metadata::default_artwork_inventory_policy(), cancellation);
                 if (!inventory)
                     return std::unexpected(inventory.error());
                 const auto target = std::ranges::find_if(inventory->items, [&](const auto& item) {
@@ -186,7 +239,7 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
                 return std::unexpected(apply_error(core::ErrorCode::unsupported,
                                                    "Folder-only mode accepts front images; enable "
                                                    "embedding for other artwork roles"));
-            auto observed = core::observe_local_source_revision(intent.raw_media_path);
+            auto observed = access.revision(intent.raw_media_path);
             if (!observed || !intent.expected_media_revision ||
                 *observed != *intent.expected_media_revision)
                 return std::unexpected(apply_error(core::ErrorCode::conflict,
@@ -204,13 +257,12 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
                                                    .byte_size = donor.byte_size,
                                                    .content_fingerprint = donor.content_fingerprint,
                                                    .embedded_source_ordinal = donor.source_ordinal};
-                auto verified =
-                    metadata::read_artwork_image_bytes(*image, 16U * 1024U * 1024U, cancellation);
+                auto verified = access.image_bytes(*image, 16U * 1024U * 1024U, cancellation);
                 if (!verified)
                     return std::unexpected(verified.error());
             } else {
-                image = metadata::read_artwork_image_file(*intent.replacement_raw_path,
-                                                          16U * 1024U * 1024U, cancellation);
+                image = access.image_file(*intent.replacement_raw_path, 16U * 1024U * 1024U,
+                                          cancellation);
             }
             if (!image)
                 return std::unexpected(image.error());
@@ -274,21 +326,10 @@ plan_artwork_storage(const std::vector<metadata::ArtworkWritePlanIntent>& reques
                         "Different front covers target the same folder image", destination));
                 metadata::FolderImageWritePlan folder{
                     .raw_path = destination, .image = std::move(image), .original = std::nullopt};
-                struct stat status{};
-                if (::lstat(destination.c_str(), &status) == 0) {
-                    if (!S_ISREG(status.st_mode) || status.st_nlink != 1)
-                        return std::unexpected(apply_error(
-                            core::ErrorCode::conflict,
-                            "Folder image must be a regular file with one link", destination));
-                    auto original = metadata::read_artwork_image_file(
-                        destination, 16U * 1024U * 1024U, cancellation);
-                    if (!original)
-                        return std::unexpected(original.error());
-                    folder.original = std::move(*original);
-                } else if (errno != ENOENT) {
-                    return std::unexpected(apply_error(core::ErrorCode::io,
-                                                       "Cannot inspect folder image", destination));
-                }
+                auto existing = access.destination(destination, cancellation);
+                if (!existing)
+                    return std::unexpected(existing.error());
+                folder.original = std::move(*existing);
                 source.folder_image = std::move(folder);
             }
         }

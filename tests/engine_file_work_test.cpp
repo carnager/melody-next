@@ -12,10 +12,13 @@
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/loudness/scan.hpp"
+#include "trackknife/metadata/artwork.hpp"
+#include "trackknife/metadata/artwork_write_plan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/persistence/musicbrainz_cache.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -492,6 +495,7 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     engine::MetadataServices services{database, directory};
     engine::register_metadata_service_jobs(jobs, services);
     engine::register_metadata_service_methods(dispatcher, services);
+    engine::register_artwork_methods(dispatcher, directory / "staging");
     auto server = engine::Server::listen(socket, dispatcher);
     require(server.has_value(), "an engine listens");
     {
@@ -575,6 +579,89 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(!remote.fetch("https://example.org/", {}), "a URL elsewhere is refused");
     require(remote.set_acoustid_key("handed-over").has_value() && services.has_acoustid_key(),
             "the AcoustID key is handed to the engine");
+    // Artwork: what a file holds, an image handed over, a plan built from the
+    // engine's reading and written by it.
+    {
+        namespace operations = trackknife::operations;
+        const auto art = materialize(fixtures, "art-tone-flac", directory / "art.flac").string();
+        const auto cover_path =
+            materialize(fixtures, "external-blue-jpeg", directory / "cover.jpg");
+        const auto remote_access = remote.artwork_access();
+        const auto local_access = operations::local_artwork_file_access();
+        const auto policy = metadata::default_artwork_inventory_policy();
+        const auto art_there = remote_access.inventory(art, policy, {});
+        const auto art_here = local_access.inventory(art, policy, {});
+        require(art_there && art_here && *art_there == *art_here,
+                "a file's pictures through the engine are its pictures");
+        require(!art_here->items.empty(), "and it has one to replace");
+
+        std::ifstream input{cover_path, std::ios::binary};
+        const std::vector<unsigned char> cover((std::istreambuf_iterator<char>(input)),
+                                               std::istreambuf_iterator<char>());
+        const auto staged = remote.stage(cover);
+        require(staged && staged->raw_path.starts_with((directory / "staging").string()),
+                "an image handed over is kept where the engine writes from");
+        const auto again = remote.stage(cover);
+        require(again && *again == *staged,
+                "the same image is kept once, as it was -- a plan naming it stays good");
+        const auto bytes = remote_access.image_bytes(*staged, 1U << 20U, {});
+        require(bytes && *bytes == cover, "and reads back as it was");
+        require(remote_access.destination((directory / "none.jpg").string(), {}) &&
+                    !*remote_access.destination((directory / "none.jpg").string(), {}),
+                "an empty folder-image destination is empty");
+
+        const auto& front = art_here->items.front();
+        const std::vector<metadata::ArtworkWritePlanIntent> intents{
+            metadata::ArtworkWritePlanIntent{.occurrence_index = 0,
+                                             .raw_media_path = art,
+                                             .expected_media_revision = art_here->media_revision,
+                                             .target_ordinal = front.source_ordinal,
+                                             .expected_target_fingerprint =
+                                                 front.content_fingerprint,
+                                             .kind = metadata::ArtworkWritePlanIntentKind::replace,
+                                             .replacement_raw_path = staged->raw_path,
+                                             .added_role = metadata::ArtworkRole::front,
+                                             .added_description = {},
+                                             .replacement_embedded_source = std::nullopt}};
+        const metadata::ArtworkStoragePolicy storage{};
+        const auto plan_there =
+            operations::plan_artwork_storage(intents, storage, {}, {}, remote_access);
+        const auto plan_here =
+            operations::plan_artwork_storage(intents, storage, {}, {}, local_access);
+        require(plan_there && plan_here && *plan_there == *plan_here && plan_there->ready(),
+                "an artwork plan built through the engine is the plan built here");
+        const auto round = wire::decode_artwork_plan(over_the_wire(wire::encode(*plan_there)));
+        require(round && *round == *plan_there, "and round-trips exactly");
+
+        // Inside a tag plan, as a combined Apply sends it.
+        metadata::MetadataWritePlan combined;
+        combined.sources.push_back(metadata::MetadataWritePlanSource{
+            .raw_path = art,
+            .occurrence_indexes = {0},
+            .expected_revision = art_here->media_revision,
+            .observed_revision = art_here->media_revision,
+            .adapter_name = "taglib-flac-v1",
+            .changes = {},
+            .issues = {},
+            .artwork = std::make_shared<const metadata::ArtworkWritePlanSource>(
+                plan_there->sources.front())});
+        const auto carried = wire::decode_write_plan(over_the_wire(wire::encode(combined)));
+        require(carried && carried->sources.front().artwork &&
+                    *carried->sources.front().artwork == plan_there->sources.front(),
+                "a tag plan carries its artwork");
+
+        const auto art_applied = remote.artwork_apply(*plan_there, {}, {});
+        require(art_applied && art_applied->committed_source_count() == 1U,
+                "the engine writes the picture");
+        const auto art_after = local_access.inventory(art, policy, {});
+        require(art_after && !art_after->items.empty() &&
+                    art_after->items.front().content_fingerprint == staged->content_fingerprint,
+                "and the file now holds the image handed over");
+        const auto result_round =
+            wire::decode_artwork_apply_result(over_the_wire(wire::encode(*art_applied)));
+        require(result_round && *result_round == *art_applied, "its result round-trips exactly");
+    }
+
     const auto printed_there = remote.fingerprint(flac, {});
     const auto printed_here = services.fingerprint(flac, {});
     require(printed_there.has_value() == printed_here.has_value() &&

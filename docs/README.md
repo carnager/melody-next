@@ -31,7 +31,7 @@ two-authority model in older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
-- [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md) — proposed; the UI and workflow stay exactly as they are.
+- [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md) — the UI and workflow stay exactly as they are.
 - [ADR-0236: Playback states are numbered, and say what the output was told](adr/0236-playback-states-are-numbered.md).
 - [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — optional, not planned; for a fork or contributor.
 - [ADR-0234: Engines are connections, not a switch](adr/0234-engines-are-connections.md).

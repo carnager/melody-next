@@ -41,4 +41,10 @@ void register_job_methods(protocol::Dispatcher& dispatcher, JobRegistry& registr
 // remote engine to scan is submitting a job to that engine, not proxying one.
 void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 
+// ADR-0237: file work in the engine. loudness.scan measures what the
+// ReplayGain tools ask for -- {items, options} as file_work_wire encodes them
+// -- on the engine's own bounded pool, reporting each finished item, and
+// finishes with {result} or {error}. It reads files and writes nothing.
+void register_file_work_jobs(JobCatalog& jobs);
+
 } // namespace trackknife::engine

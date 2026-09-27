@@ -2,6 +2,9 @@
 
 #include "trackknife/engine/job_methods.hpp"
 
+#include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/loudness/scan.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -116,6 +119,47 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
             result["cancelled"] = outcome->cancelled;
             result["incomplete"] = outcome->incomplete;
             return result;
+        };
+    });
+}
+
+void register_file_work_jobs(JobCatalog& jobs) {
+    jobs.on("loudness.scan", [](const Json& params) -> core::Result<JobRegistry::Work> {
+        const auto listed = params.find("items");
+        if (listed == params.end() || !listed->is_array()) {
+            return std::unexpected(bad_params("items to measure are required", "items"));
+        }
+        std::vector<loudness::LoudnessScanItem> items;
+        items.reserve(listed->size());
+        for (const auto& value : *listed) {
+            auto item = wire::decode_scan_item(value);
+            if (!item) {
+                return std::unexpected(std::move(item.error()));
+            }
+            items.push_back(std::move(*item));
+        }
+        loudness::LoudnessScanOptions options;
+        if (const auto given = params.find("options"); given != params.end()) {
+            auto decoded = wire::decode_scan_options(*given);
+            if (!decoded) {
+                return std::unexpected(std::move(decoded.error()));
+            }
+            options = *decoded;
+        }
+        return [items = std::move(items), options](const core::CancellationToken& token,
+                                                   const JobRegistry::Reporter& report) {
+            auto scanned = loudness::scan_loudness(
+                items, options,
+                [&report](const loudness::LoudnessScanProgress& progress) {
+                    report(Json{{"item_index", progress.item_index},
+                                {"completed_items", progress.completed_items},
+                                {"total_items", progress.total_items}});
+                },
+                token);
+            if (!scanned) {
+                return Json{{"error", wire::encode(scanned.error())}};
+            }
+            return Json{{"result", wire::encode(*scanned)}};
         };
     });
 }

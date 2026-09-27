@@ -1,6 +1,6 @@
 # ADR-0237: File work moves into the engine
 
-Status: Proposed (2026-09-27)
+Status: Accepted (2026-09-27)
 
 Reopens the 2026-09-23 decision that file work stays in Trackknife, by path
 over a mount. Continues ADR-0220 ("one engine owning catalogue, mutation and
@@ -90,15 +90,15 @@ sees changes.
 6. **Conversion**, with output to a destination on the engine's machine.
 7. Trackknife's own file-writing path goes.
 
-## Open decisions
+## Decided with it (2026-09-27)
 
-- **Unknown: write access.** A client with the engine's password could now
-  change the music. Is that enough, or does each engine get a read-only
-  setting (or a second password for writing)?
-- **Unknown: where an engine may write.** Anywhere its process can, or only
-  within its library folders and configured destinations?
-- **Unknown: MusicBrainz and AcoustID lookups** -- in the engine (next to the
-  files, one place for the API keys) or in the client (as today)?
+- **Write access is the engine's password.** A client that may control an
+  engine may change its files; there is no read-only setting or second
+  password. Every TCP peer already needs the password (ADR-0223).
+- **An engine may write wherever its process can.** Not only inside its
+  library folders: it tags what it can reach, as Trackknife does today.
+- **MusicBrainz and AcoustID lookups run in the engine,** next to the files,
+  with the API keys kept there.
 - **Proposal:** the phone and the CLI get file operations only after stage 3,
   and read-only views of plans before that.
 

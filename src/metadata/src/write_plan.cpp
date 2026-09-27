@@ -286,10 +286,24 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
     const StagedMetadataSelection& selection, const StagedMetadataPatchSet& patches,
     const MetadataWritePlanReader& reader, const core::CancellationToken& cancellation,
     const MetadataWritePlanOptions& options) {
+    return build_metadata_write_plan(
+        selection, patches,
+        MetadataFileAccess{.read = reader,
+                           .revision = [](const std::string& raw_path) {
+                               return core::observe_local_source_revision(raw_path);
+                           }},
+        cancellation, options);
+}
+
+core::Result<MetadataWritePlan> build_metadata_write_plan(
+    const StagedMetadataSelection& selection, const StagedMetadataPatchSet& patches,
+    const MetadataFileAccess& access, const core::CancellationToken& cancellation,
+    const MetadataWritePlanOptions& options) {
+    const auto& reader = access.read;
     if (cancellation.is_cancellation_requested()) {
         return cancelled();
     }
-    if (!reader) {
+    if (!reader || !access.revision) {
         return std::unexpected(planner_error(core::ErrorCode::invalid_argument,
                                              "metadata write-plan reader is not configured"));
     }
@@ -513,7 +527,7 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
             }
         }
 
-        auto observed = core::observe_local_source_revision(raw_cue_path);
+        auto observed = access.revision(raw_cue_path);
         if (!observed) {
             add_cue_issue(sheet, MetadataWritePlanIssueKind::source_revalidation_failed,
                           std::move(observed.error()));
@@ -630,7 +644,7 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
             sidecar.entries.push_back(std::move(entry));
         }
 
-        auto observed = core::observe_local_source_revision(raw_audio_path);
+        auto observed = access.revision(raw_audio_path);
         if (!observed) {
             add_sidecar_issue(sidecar, MetadataWritePlanIssueKind::source_revalidation_failed,
                               std::move(observed.error()));

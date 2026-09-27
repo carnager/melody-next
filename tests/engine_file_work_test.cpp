@@ -8,6 +8,8 @@
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
+#include "trackknife/engine/server.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
@@ -445,6 +447,103 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
             "and no interrupted work is reported");
 }
 
+// What a client's file tools get: the same reads, scans and writes, done by an
+// engine over a real connection.
+void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
+                                                const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "remote.flac").string();
+    const auto socket = directory / "engine.sock";
+    const auto database = directory / "remote.sqlite3";
+
+    struct Relay {
+        std::mutex mutex;
+        engine::EventSink sink;
+    } relay;
+    engine::LocalCatalogue catalogue{database};
+    engine::JobRegistry registry{[&relay](const protocol::Event& event) {
+        const std::lock_guard guard{relay.mutex};
+        if (relay.sink) {
+            relay.sink(event);
+        }
+    }};
+    engine::JobCatalog jobs;
+    engine::register_file_work_jobs(jobs, database, catalogue);
+    protocol::Dispatcher dispatcher;
+    engine::register_job_methods(dispatcher, registry, jobs);
+    engine::register_file_work_methods(dispatcher, database, {});
+    auto server = engine::Server::listen(socket, dispatcher);
+    require(server.has_value(), "an engine listens");
+    {
+        const std::lock_guard guard{relay.mutex};
+        relay.sink = (*server)->sink();
+    }
+    (*server)->start();
+
+    engine::RemoteFileWork remote{protocol::Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}}};
+    require(remote.supported(), "an engine with file work says so");
+    const auto access = remote.access();
+    const auto here = metadata::read_local_metadata(flac);
+    const auto there = access.read(flac, {});
+    require(here && there && *here == *there, "a file read through the engine is the file read here");
+    const auto revision = access.revision(flac);
+    require(revision && *revision == here->source_revision, "and so is its revision");
+    require(!access.read((directory / "absent.flac").string(), {}),
+            "a file that is not there fails through the engine too");
+
+    const std::vector<loudness::LoudnessScanItem> items{
+        {.item_index = 0, .raw_path = flac, .selection = {}, .range = std::nullopt,
+         .album_key = std::nullopt}};
+    std::size_t reported = 0;
+    const auto measured = remote.scan(items, {.measure_true_peak = false, .maximum_parallelism = 1},
+                                      [&reported](const loudness::LoudnessScanProgress&) {
+                                          ++reported;
+                                      },
+                                      {});
+    const auto local = loudness::scan_loudness(items, {.measure_true_peak = false,
+                                                       .maximum_parallelism = 1});
+    require(measured && local, "a scan runs through the engine and here");
+    require_same(*local, *measured, "and measures the same");
+    require(reported >= 1U, "reporting its progress");
+
+    // A plan built from what the engine read, written by the engine.
+    const std::array<std::string_view, 1> preferred{"title"};
+    auto selection = metadata::StagedMetadataSelection::create(
+        {metadata::StagedMetadataSource{.raw_path = flac,
+                                        .source_revision = there->source_revision,
+                                        .baseline = there->document}},
+        preferred);
+    require(selection.has_value(), "a selection of what the engine read");
+    std::size_t title = 0;
+    for (std::size_t index = 0; index < selection->field_count(); ++index) {
+        if (selection->field(index).canonical_name == "title") {
+            title = index;
+        }
+    }
+    metadata::StagedMetadataPatchSet patches;
+    require(patches.replace_values(*selection, 0, title, {"Through the engine"}).has_value(),
+            "a title is staged");
+    const auto plan = metadata::build_metadata_write_plan(*selection, patches, access);
+    require(plan && plan->ready(), "the plan is built through the engine");
+    const auto applied = remote.apply(*plan, {}, {});
+    require(applied && applied->committed_source_count() == 1U, "and written by it");
+    const auto after = metadata::read_local_metadata(flac);
+    require(after && after->document.first_effective_value("title") ==
+                         std::optional<std::string>{"Through the engine"},
+            "the file has it");
+    (*server)->stop();
+
+    // An engine older than file work: the tools do it themselves, as before.
+    protocol::Dispatcher bare;
+    auto old_socket = directory / "old.sock";
+    auto old = engine::Server::listen(old_socket, bare);
+    require(old.has_value(), "an old engine listens");
+    (*old)->start();
+    engine::RemoteFileWork older{protocol::Endpoint{.socket = old_socket, .host = {}, .port = 0, .token = {}}};
+    require(!older.supported(), "an engine without file work says it has none");
+    (*old)->stop();
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -456,6 +555,7 @@ int main(int argc, char** argv) {
     documents_are_exact();
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
+    a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_measures_as_this_process_would(directory, argv[1]);
     std::filesystem::remove_all(directory);
     std::cout << "engine file work: ok\n";

@@ -305,6 +305,16 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         library_layout->addWidget(note);
         library_layout->addStretch(1);
     }
+    ratings_in_tags_ =
+        new QCheckBox(QStringLiteral("Also write track ratings into the files"), library);
+    ratings_in_tags_->setObjectName(QStringLiteral("bench-settings-ratings-in-tags"));
+    ratings_in_tags_->setToolTip(
+        QStringLiteral("Ratings stay in each engine's library either way. With this on, each "
+                       "engine also writes a track's rating into its files as FMPS_RATING, "
+                       "which other players read. Album ratings are not written."));
+    ratings_in_tags_->setChecked(
+        settings.value(QLatin1String(ratings_in_tags_key), false).toBool());
+    library_layout->addWidget(ratings_in_tags_);
     add_page(QStringLiteral("Library"), library);
 
     // --- Engine ------------------------------------------------------------
@@ -905,6 +915,7 @@ void SettingsDialog::chooseFoundEngine(const QString& address) {
 void SettingsDialog::save() {
     QSettings settings;
     settings.setValue(QLatin1String(acoustid_client_key), acoustid_key_->text().trimmed());
+    settings.setValue(QLatin1String(ratings_in_tags_key), ratings_in_tags_->isChecked());
     settings.setValue(QStringLiteral("lastfm/api-key"), lastfm_key_->text().trimmed());
     settings.setValue(QStringLiteral("appearance/panel-animations"),
                       panel_animations_->isChecked());

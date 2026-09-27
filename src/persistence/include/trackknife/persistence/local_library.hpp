@@ -170,6 +170,11 @@ class LocalLibrary final {
     core::Result<std::vector<unsigned>>
     ratings(const std::vector<std::string>& hashes,
             const core::CancellationToken& cancellation = {}) const;
+    // ADR-0237 stage 2: the files a track rating belongs to, and every rated
+    // track with its rating -- what writing ratings into tags visits.
+    core::Result<std::vector<std::string>> rated_paths(const std::string& track_hash) const;
+    core::Result<std::vector<std::pair<std::string, unsigned>>>
+    rated_tracks(const core::CancellationToken& cancellation = {}) const;
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
     // Re-reads the named files now, without a walk: after they were tagged

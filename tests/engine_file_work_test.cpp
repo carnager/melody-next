@@ -10,6 +10,7 @@
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/engine/metadata_services.hpp"
 #include "trackknife/engine/player.hpp"
+#include "trackknife/engine/rating_tags.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/workspace.hpp"
@@ -716,6 +717,82 @@ void the_engine_moves_what_was_previewed(const std::filesystem::path& directory,
             "an interrupted move, with where it was going");
 }
 
+// ADR-0237 stage 2: ratings copied into the files they rate, only when asked.
+void ratings_go_into_tags_when_asked(const std::filesystem::path& directory,
+                                     const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto music = directory / "rated";
+    std::filesystem::create_directories(music);
+    const auto flac = materialize(fixtures, "tagged-tone-flac", music / "rated.flac").string();
+    const auto database = directory / "ratings.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value() && catalogue.add_root(music.string()).has_value(),
+            "a library");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "scanned");
+    trackknife::persistence::LibraryQuery lookup;
+    lookup.kind = trackknife::persistence::LibraryEntryKind::track;
+    lookup.raw_path = flac;
+    lookup.limit = 1;
+    const auto found = catalogue.query(lookup);
+    require(found && found->entries.size() == 1U, "the track is in it");
+    const auto hash = found->entries.front().rating_hash;
+    require(!hash.empty(), "with a rating key");
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "a workspace");
+    const auto in_file = [&flac] {
+        const auto read = metadata::read_local_metadata(flac);
+        return read ? read->document.effective_values("FMPS_RATING")
+                    : std::vector<std::string>{"unreadable"};
+    };
+    const auto rate = [&catalogue](engine::RatingTags& tags, const std::string& key,
+                                   const unsigned rating) {
+        require(catalogue.set_rating(key, false, rating).has_value(), "rated");
+        tags.rated(key, false, rating);
+        tags.wait_idle();
+    };
+
+    {
+        engine::RatingTags tags{database, catalogue, *workspace};
+        require(!tags.enabled(), "off until turned on");
+        rate(tags, hash, 6);
+        require(in_file().empty(), "so a rating stays in the engine");
+        // Turned on: what is already rated is written.
+        require(tags.set_enabled(true).has_value(), "turned on");
+        tags.wait_idle();
+        require(in_file() == std::vector<std::string>{"0.6"}, "the rating reaches the file");
+        rate(tags, hash, 10);
+        require(in_file() == std::vector<std::string>{"1.0"}, "and follows a change");
+        // Album ratings stay in the engine.
+        tags.rated(found->entries.front().album_rating_hash, true, 4);
+        tags.wait_idle();
+        require(in_file() == std::vector<std::string>{"1.0"}, "an album rating is not written");
+    }
+    {
+        // Kept across restarts.
+        engine::RatingTags tags{database, catalogue, *workspace};
+        require(tags.enabled(), "still on after a restart");
+        rate(tags, hash, 0);
+        require(in_file().empty(), "unrated takes it out");
+        // The library still knows the file under the same key.
+        const auto again = catalogue.query(lookup);
+        require(again && again->entries.size() == 1U && again->entries.front().rating_hash == hash,
+                "and the file keeps its rating key");
+        protocol::Dispatcher methods;
+        engine::register_rating_tag_methods(methods, tags);
+        const auto off = methods.dispatch(protocol::Request{
+            .id = 1, .method = "ratings.set_tags", .params = {{"write_tags", false}}});
+        require(off.result && off.result->at("write_tags") == false, "turned off by a client");
+        rate(tags, hash, 3);
+        require(in_file().empty(), "and nothing more is written");
+        const auto asked =
+            methods.dispatch(protocol::Request{.id = 2, .method = "ratings.tags", .params = {}});
+        require(asked.result && asked.result->at("write_tags") == false &&
+                    asked.result->at("pending") == 0,
+                "as the engine says");
+    }
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1054,6 +1131,7 @@ int main(int argc, char** argv) {
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
+    ratings_go_into_tags_when_asked(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

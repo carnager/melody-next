@@ -614,6 +614,18 @@ core::Result<void> RemoteFileWork::download_original(const std::string& raw_path
     return {};
 }
 
+core::Result<void> RemoteFileWork::set_rating_tags(const bool write_tags) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("ratings.set_tags", Json{{"write_tags", write_tags}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

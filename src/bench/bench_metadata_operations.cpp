@@ -932,6 +932,13 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                 if (!key.isEmpty()) {
                     static_cast<void>(work->set_acoustid_key(key.toStdString()));
                 }
+                // Once chosen in Settings, whether ratings go into the files
+                // is the same on every engine this window reaches.
+                const QSettings chosen;
+                if (chosen.contains(QLatin1String(SettingsDialog::ratings_in_tags_key))) {
+                    static_cast<void>(work->set_rating_tags(
+                        chosen.value(QLatin1String(SettingsDialog::ratings_in_tags_key)).toBool()));
+                }
                 if (auto answer = work->interrupted()) {
                     for (const auto& entry :
                          answer->value("interrupted", protocol::Json::array())) {

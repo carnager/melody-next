@@ -1660,6 +1660,37 @@ LocalLibrary::ratings(const std::vector<std::string>& hashes,
     });
 }
 
+core::Result<std::vector<std::string>>
+LocalLibrary::rated_paths(const std::string& track_hash) const {
+    return checked([&] {
+        Statement select{implementation_->db,
+                         "SELECT raw_path FROM local_library_tracks WHERE rating_hash=? "
+                         "ORDER BY raw_path"};
+        select.text(1, track_hash);
+        std::vector<std::string> paths;
+        while (select.next()) {
+            paths.push_back(select.bytes(0));
+        }
+        return paths;
+    });
+}
+
+core::Result<std::vector<std::pair<std::string, unsigned>>>
+LocalLibrary::rated_tracks(const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        Statement select{db, "SELECT t.raw_path, r.rating FROM local_library_tracks t "
+                             "JOIN local_ratings r ON r.hash=t.rating_hash "
+                             "WHERE t.rating_hash<>'' ORDER BY t.raw_path"};
+        std::vector<std::pair<std::string, unsigned>> rated;
+        while (select.next()) {
+            rated.emplace_back(select.bytes(0), static_cast<unsigned>(select.number(1)));
+        }
+        return rated;
+    });
+}
+
 core::Result<std::optional<std::string>>
 LocalLibrary::artwork_source(const std::string& album_key,
                              const core::CancellationToken& cancellation) const {

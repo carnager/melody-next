@@ -205,6 +205,13 @@ class LocalCatalogue final : public Catalogue {
     inventory(const std::string& folder, const std::string& after,
               std::size_t limit) const override;
 
+    // ADR-0237 stage 2: the files carrying a track rating, and every rated
+    // track with its rating.
+    [[nodiscard]] core::Result<std::vector<std::string>>
+    rated_paths(const std::string& track_hash) const;
+    [[nodiscard]] core::Result<std::vector<std::pair<std::string, unsigned>>>
+    rated_tracks(const core::CancellationToken& cancellation = {}) const;
+
   private:
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;
 

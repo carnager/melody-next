@@ -354,6 +354,7 @@ class BenchMainWindowTest final : public QObject {
     void coverPolicyRoundTrip();
     void playbackSettingsApplyLiveAndCancel();
     void librarySettingsManageFoldersWithoutScanning();
+    void ratingsInTagsIsAnEngineOption();
     void metadataServiceSettingsAndCompactPages();
     void coverThumbnailAppliesPolicy_data();
     void coverThumbnailAppliesPolicy();
@@ -9315,6 +9316,43 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     QCOMPARE(pages->currentItem()->text(), QStringLiteral("Playback"));
     QVERIFY(!window.findChild<QDialog*>(QStringLiteral("bench-rg-preamp-dialog")));
     dialog->reject();
+}
+
+// ADR-0237 stage 2: writing ratings into the files is an option in
+// Settings, off by default, handed to the engines that keep the ratings.
+void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    const auto writes_tags = [&client] {
+        auto answer = (*client)->call("ratings.tags");
+        return answer && answer->value("write_tags", false);
+    };
+    QVERIFY(!writes_tags());
+    const auto choose = [&window](const bool on) {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* option =
+            dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-ratings-in-tags"));
+        QVERIFY(option != nullptr);
+        option->setChecked(on);
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    };
+    choose(true);
+    QVERIFY(QSettings{}.value(QLatin1String(SettingsDialog::ratings_in_tags_key)).toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(writes_tags(), 5'000);
+    choose(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!writes_tags(), 5'000);
+    (*client)->close();
 }
 
 void BenchMainWindowTest::librarySettingsManageFoldersWithoutScanning() {

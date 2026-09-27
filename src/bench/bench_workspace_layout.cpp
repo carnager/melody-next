@@ -1141,10 +1141,14 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
                              .toString()
                              .trimmed()
                              .toStdString();
+        // Stage 2: so is whether ratings also go into the files.
+        const auto rating_tags =
+            QSettings{}.value(QLatin1String(SettingsDialog::ratings_in_tags_key), false).toBool();
         for (const auto& engine : engines_) {
             if (engine->does_file_work && engine->file_work) {
-                static_cast<void>(QtConcurrent::run([work = engine->file_work, key] {
+                static_cast<void>(QtConcurrent::run([work = engine->file_work, key, rating_tags] {
                     static_cast<void>(work->set_acoustid_key(key));
+                    static_cast<void>(work->set_rating_tags(rating_tags));
                 }));
             }
         }

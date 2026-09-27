@@ -93,7 +93,15 @@ sees changes.
    `metadata.interrupted`, and `RemoteFileWork` as the client's end. The
    Properties window's scan button follows with stage 3, the tagger.
 2. **Ratings into tags**, as an engine job over a selection or the library
-   (the tag mapping is its own decision).
+   (the tag mapping is its own decision). **Done** (decided 2026-09-27:
+   ratings are for every client, tags are an option): ratings stay in each
+   engine's library, where every client reads and sets them. With the option
+   on (`ratings.set_tags`; Trackknife's Settings → Library hands it to every
+   engine it reaches), the engine also writes each track rating into its
+   files as `FMPS_RATING` (the rating over ten, 0.1-1.0; unrated removes it),
+   through the tagger's own plan and journal, on a thread of its own. Turning
+   it on writes every rated track once; turning it off leaves the files as
+   they are. Album ratings are not written: no player reads them from tags.
 3. **Tag edits** -- the spreadsheet tagger on the plan/commit protocol.
    **Done:** Properties captures, probes (`media.probe`), scans, plans and
    applies through the engine; MusicBrainz, the Cover Art Archive and

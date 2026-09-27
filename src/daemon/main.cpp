@@ -22,6 +22,7 @@
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/playback_store.hpp"
+#include "trackknife/engine/rating_tags.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/stream_server.hpp"
@@ -407,6 +408,9 @@ int main(int argc, char** argv) {
     // A cover is given for what this engine may stream -- what it holds to
     // play -- as well as for its library: a list of files it does not index
     // shows its covers too, as does an engine with no library at all.
+    // ADR-0237 stage 2: ratings copied into the files, when that is on.
+    trackknife::engine::RatingTags rating_tags{database, catalogue, *workspace};
+    trackknife::engine::register_rating_tag_methods(dispatcher, rating_tags);
     trackknife::engine::register_catalogue_methods(
         dispatcher, catalogue,
         [relay](const trackknife::protocol::Event& event) {
@@ -415,7 +419,10 @@ int main(int argc, char** argv) {
                 relay->sink(event);
             }
         },
-        [&player](const std::string& raw_path) { return player->holds(raw_path); });
+        [&player](const std::string& raw_path) { return player->holds(raw_path); },
+        [&rating_tags](const std::string& hash, const bool album, const unsigned rating) {
+            rating_tags.rated(hash, album, rating);
+        });
     trackknife::engine::register_playback_methods(dispatcher, *player);
     trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its

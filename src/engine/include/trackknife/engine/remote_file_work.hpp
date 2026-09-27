@@ -113,6 +113,8 @@ class RemoteFileWork final {
                     const core::CancellationToken& cancellation);
     // Hands the engine the AcoustID key it looks up with; empty forgets it.
     [[nodiscard]] core::Result<void> set_acoustid_key(const std::string& key);
+    // Stage 2: whether the engine also writes track ratings into the files.
+    [[nodiscard]] core::Result<void> set_rating_tags(bool write_tags);
 
     // metadata.interrupted: what the engine recovered at startup and what it
     // could not. Absent (not_found) when the engine is older than file work.

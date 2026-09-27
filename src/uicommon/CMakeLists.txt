@@ -26,8 +26,6 @@ qt_add_library(
     queue_item_delegate.hpp
     debug_log.cpp
     debug_log.hpp
-    engine_connection.cpp
-    engine_connection.hpp
     queue_table_view.cpp
     queue_table_view.hpp
     rating_stars.cpp

@@ -736,6 +736,8 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
     [[nodiscard]] MetadataWritePlanApplierFactory
     engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    [[nodiscard]] ArtworkWritePlanApplierFactory
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
     // Parts of an engine's link; null when it or the part is not there.
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;

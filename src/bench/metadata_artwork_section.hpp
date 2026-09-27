@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/file_work_tools.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
@@ -96,6 +97,9 @@ class MetadataArtworkSection final : public QWidget {
     void setScope(std::vector<MetadataArtworkScopeSource> sources,
                   bool source_limit_exceeded = false);
     void setActive(bool active);
+    // ADR-0237: where the section reads, resizes and hands over artwork --
+    // this process's until set.
+    void setFileWorkTools(FileWorkTools tools) { tools_ = std::move(tools); }
     void setMutationServices(ArtworkWritePlanApplierFactory applier_factory,
                              ArtworkApplyObserver observer);
     void setCoverArtService(ArtworkCoverArtService service);
@@ -208,6 +212,7 @@ class MetadataArtworkSection final : public QWidget {
     std::vector<std::optional<ActionTarget>> action_targets_;
     std::vector<ActionTarget> copy_targets_;
     ArtworkWritePlanApplierFactory applier_factory_;
+    FileWorkTools tools_;
     ArtworkApplyObserver apply_observer_;
     ArtworkCoverArtService cover_service_;
     std::optional<QString> cover_release_id_;

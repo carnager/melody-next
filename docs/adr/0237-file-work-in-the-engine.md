@@ -95,7 +95,19 @@ sees changes.
 2. **Ratings into tags**, as an engine job over a selection or the library
    (the tag mapping is its own decision).
 3. **Tag edits** -- the spreadsheet tagger on the plan/commit protocol.
-4. **Artwork** -- bytes to and from the engine.
+   **Done:** Properties captures, probes (`media.probe`), scans, plans and
+   applies through the engine; MusicBrainz, the Cover Art Archive and
+   AcoustID are looked up by the engine (`musicbrainz.fetch`,
+   `acoustid.fingerprint`, `acoustid.lookup`), with the AcoustID key kept
+   there.
+4. **Artwork** -- bytes to and from the engine. **Done:** the artwork
+   section shows, reviews and writes pictures through the engine
+   (`artwork.inventory`, `.image_file`, `.image_bytes`, `.destination`, the
+   `artwork.apply` job), and tag plans carry artwork to `metadata.apply`.
+   An image of the client's -- picked on its disk, downloaded, or resized --
+   is handed over with `artwork.stage` into the engine's staging folder,
+   named by content, and the plan names that copy. Resizing stays the
+   client's Qt code, so a resized cover is the same bytes either way.
 5. **Moves and renames**, with lists, queue and history following in the
    engine's own transaction. Choosing a destination uses the folder chooser
    as it is today, listing the engine's folders instead of this computer's

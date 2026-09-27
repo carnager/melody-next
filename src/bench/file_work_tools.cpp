@@ -2,11 +2,14 @@
 
 #include "bench/file_work_tools.hpp"
 
+#include "bench/artwork_fitting.hpp"
+
 #include <QFile>
 #include <QMetaObject>
 #include <QPointer>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <map>
 #include <utility>
 
 namespace trackknife::bench {
@@ -24,7 +27,49 @@ FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work) 
         .probe =
             [work](const std::string& raw_path, const core::CancellationToken& cancellation) {
                 return work->probe(raw_path, cancellation);
-            }};
+            },
+        .artwork = work->artwork_access(),
+        .stage = [work](std::span<const unsigned char> bytes) { return work->stage(bytes); }};
+}
+
+operations::ArtworkImageFitter artworkFitterFor(const FileWorkTools& tools) {
+    return tools.stage ? engineArtworkFitter(tools.artwork, tools.stage) : artworkFitter();
+}
+
+core::Result<std::vector<metadata::ArtworkWritePlanIntent>>
+stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const FileWorkTools& tools,
+                  const core::CancellationToken& cancellation) {
+    if (!tools.stage) {
+        return intents;
+    }
+    // One handover per distinct image, however many files it goes into.
+    std::map<std::string, std::string> staged;
+    for (auto& intent : intents) {
+        if (!intent.replacement_raw_path) {
+            continue;
+        }
+        const auto here = *intent.replacement_raw_path;
+        auto found = staged.find(here);
+        if (found == staged.end()) {
+            auto image = metadata::read_artwork_image_file(
+                here, operations::maximum_fittable_artwork_bytes, cancellation);
+            if (!image) {
+                return std::unexpected(std::move(image.error()));
+            }
+            auto bytes = metadata::read_artwork_image_bytes(
+                *image, operations::maximum_fittable_artwork_bytes, cancellation);
+            if (!bytes) {
+                return std::unexpected(std::move(bytes.error()));
+            }
+            auto there = tools.stage(*bytes);
+            if (!there) {
+                return std::unexpected(std::move(there.error()));
+            }
+            found = staged.emplace(here, there->raw_path).first;
+        }
+        intent.replacement_raw_path = found->second;
+    }
+    return intents;
 }
 
 namespace {

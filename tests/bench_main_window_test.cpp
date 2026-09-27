@@ -343,6 +343,7 @@ class BenchMainWindowTest final : public QObject {
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
+    void artworkFetchesCoverArtFromArchiveAndAddsFront_data();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
@@ -381,6 +382,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataPropertiesFileSelectionDrivesIndividualAndBulkEdits();
     void metadataFieldReviewPreservesDraftAndSelectionScope();
     void metadataPropertiesArtworkSectionShowsProvenanceAndCapabilities();
+    void metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes_data();
     void metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes();
     void cueSheetsExpandIntoPersistentSegmentRows();
     void containerChaptersExpandIntoPersistentSegmentRows();
@@ -9583,7 +9585,16 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
     QCOMPARE(backups->size(), 1U);
 }
 
+void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront_data() {
+    // ADR-0237: a downloaded cover is handed to the engine and written by it,
+    // or written by this process -- the same section, the same result.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto media_path = media.filePath(QStringLiteral("cover-fetch.flac"));
@@ -9656,66 +9667,89 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
         std::filesystem::path{media.filePath(QStringLiteral("cover.sqlite3")).toStdString()};
     std::optional<operations::ArtworkApplyResult> observed;
     std::optional<operations::MetadataApplyResult> tags_observed;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
         {},
-        [database_path] {
+        work ? MetadataWritePlanApplierFactory{[work] {
             return MetadataWritePlanApplier{
-                [database_path](const metadata::MetadataWritePlan& plan,
-                                const operations::MetadataApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::MetadataApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_metadata_write_plan(
-                        plan,
-                        [&journal](const metadata::MetadataWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_flac_metadata_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        {}, {}, progress, cancellation);
+                [work](const metadata::MetadataWritePlan& plan,
+                       const operations::MetadataApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : MetadataWritePlanApplierFactory{[database_path] {
+                   return MetadataWritePlanApplier{
+                       [database_path](const metadata::MetadataWritePlan& plan,
+                                       const operations::MetadataApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::MetadataApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_metadata_write_plan(
+                               plan,
+                               [&journal](const metadata::MetadataWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_flac_metadata_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               {}, {}, progress, cancellation);
+                       }};
+               }},
         [&tags_observed](const operations::MetadataApplyResult& result) { tags_observed = result; },
-        {}, {}, {}, {}, nullptr, {}, service);
+        {}, {}, {}, {}, nullptr, {}, service, work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->setArtworkMutationServices(
-        [database_path] {
+        work ? ArtworkWritePlanApplierFactory{[work] {
             return ArtworkWritePlanApplier{
-                [database_path](const metadata::ArtworkWritePlan& plan,
-                                const operations::ArtworkApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::ArtworkApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_artwork_write_plan(
-                        plan,
-                        [&journal](const metadata::ArtworkWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_artwork_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                [work](const metadata::ArtworkWritePlan& plan,
+                       const operations::ArtworkApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->artwork_apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : ArtworkWritePlanApplierFactory{[database_path] {
+                   return ArtworkWritePlanApplier{
+                       [database_path](const metadata::ArtworkWritePlan& plan,
+                                       const operations::ArtworkApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::ArtworkApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_artwork_write_plan(
+                               plan,
+                               [&journal](const metadata::ArtworkWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_artwork_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               progress, cancellation,
+                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                       }};
+               }},
         [&observed](const operations::ArtworkApplyResult& result) { observed = result; });
     properties->show();
 
@@ -12632,7 +12666,16 @@ void BenchMainWindowTest::metadataPropertiesArtworkSectionShowsProvenanceAndCapa
     QTRY_VERIFY(guard.isNull());
 }
 
+void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes_data() {
+    // ADR-0237: the artwork shown, reviewed and written by the engine holding
+    // the file, or by this process -- the same section, the same result.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto media_path = media.filePath(QStringLiteral("artwork-remove.flac"));
@@ -12677,39 +12720,55 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     const auto database_path =
         std::filesystem::path{media.filePath(QStringLiteral("artwork.sqlite3")).toStdString()};
     std::optional<operations::ArtworkApplyResult> observed;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
-        {}, {}, {});
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, {},
+        work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->setArtworkMutationServices(
-        [database_path] {
+        work ? ArtworkWritePlanApplierFactory{[work] {
             return ArtworkWritePlanApplier{
-                [database_path](const metadata::ArtworkWritePlan& plan,
-                                const operations::ArtworkApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::ArtworkApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_artwork_write_plan(
-                        plan,
-                        [&journal](const metadata::ArtworkWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_artwork_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                [work](const metadata::ArtworkWritePlan& plan,
+                       const operations::ArtworkApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->artwork_apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : ArtworkWritePlanApplierFactory{[database_path] {
+                   return ArtworkWritePlanApplier{
+                       [database_path](const metadata::ArtworkWritePlan& plan,
+                                       const operations::ArtworkApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::ArtworkApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_artwork_write_plan(
+                               plan,
+                               [&journal](const metadata::ArtworkWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_artwork_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               progress, cancellation,
+                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                       }};
+               }},
         [&observed](const operations::ArtworkApplyResult& result) { observed = result; });
     properties->show();
 

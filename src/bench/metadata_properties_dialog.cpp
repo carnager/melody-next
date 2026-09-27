@@ -1105,6 +1105,7 @@ void MetadataPropertiesDialog::buildGrid(metadata::StagedMetadataSelection selec
     metadata_sections_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     metadata_sections_->addTab(fields_pane, QStringLiteral("Fields"));
     artwork_section_ = new MetadataArtworkSection(metadata_sections_);
+    artwork_section_->setFileWorkTools(tools_);
     fields_body->addWidget(artwork_section_->createCompactCover(fields_pane));
     connect(artwork_section_, &MetadataArtworkSection::openArtworkRequested, this,
             [this] { metadata_sections_->setCurrentWidget(artwork_section_); });
@@ -2641,11 +2642,11 @@ void MetadataPropertiesDialog::startWritePlan() {
     }
     updateWritePlanButton();
     read_only_->setText(QStringLiteral("Checking files…"));
-    write_plan_watcher_.setFuture(
-        QtConcurrent::run([selection, draft = std::move(draft), items = std::move(items),
-                           operation_selection, output_layout = std::move(output_layout),
-                           destination = std::move(destination), cancellation, plan_options,
-                           artwork_intents, cover_policy, access = tools_.access]() mutable {
+    write_plan_watcher_.setFuture(QtConcurrent::run(
+        [selection, draft = std::move(draft), items = std::move(items), operation_selection,
+         output_layout = std::move(output_layout), destination = std::move(destination),
+         cancellation, plan_options, artwork_intents, cover_policy, access = tools_.access,
+         tools = tools_]() mutable {
             // WYSIWYG apply: the plan writes exactly the staged draft.
             // Automatic scripts already staged their edits into the grid.
             const auto metadata_context_change_count =
@@ -2662,8 +2663,14 @@ void MetadataPropertiesDialog::startWritePlan() {
             }
 
             if (!artwork_intents.empty()) {
-                auto art = operations::plan_artwork_storage(artwork_intents, cover_policy,
-                                                            cancellation, artworkFitter());
+                // ADR-0237: images of this computer handed over first when the
+                // engine writes; planned against the files where they are.
+                auto staged = stageReplacements(artwork_intents, tools, cancellation);
+                if (!staged) {
+                    return std::make_shared<WritePlanResult>(std::unexpected(staged.error()));
+                }
+                auto art = operations::plan_artwork_storage(*staged, cover_policy, cancellation,
+                                                            artworkFitterFor(tools), tools.artwork);
                 if (!art) {
                     return std::make_shared<WritePlanResult>(std::unexpected(art.error()));
                 }

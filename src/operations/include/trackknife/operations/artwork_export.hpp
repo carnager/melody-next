@@ -65,6 +65,11 @@ struct ArtworkExportResult {
 struct ArtworkExportOptions {
     std::size_t maximum_parallelism{2U};
     std::uint64_t maximum_item_bytes{16U * 1024U * 1024U};
+    // Where the images are read: this process when empty, or (ADR-0237) the
+    // engine holding the files. The destinations are always this process's.
+    std::function<core::Result<std::vector<unsigned char>>(
+        const metadata::ArtworkImageFile&, std::uint64_t, const core::CancellationToken&)>
+        image_bytes{};
 };
 
 using ArtworkExportProgressCallback = std::function<void(const ArtworkExportProgress&)>;

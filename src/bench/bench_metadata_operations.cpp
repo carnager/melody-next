@@ -949,6 +949,50 @@ std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::fileWorkOf(QTableView* 
     return engine_link->file_work;
 }
 
+ArtworkWritePlanApplierFactory
+BenchMainWindow::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+    auto* const persistence_service = persistence_;
+    return [this, persistence_service, work = std::move(work)] {
+        auto documents = collectDocuments();
+        auto view_layouts = collectTrackViewLayouts();
+        return ArtworkWritePlanApplier{[persistence_service, work, documents = std::move(documents),
+                                        view_layouts = std::move(view_layouts)](
+                                           const metadata::ArtworkWritePlan& plan,
+                                           const operations::ArtworkApplyProgressCallback& progress,
+                                           const core::CancellationToken& cancellation) mutable
+                                           -> core::Result<operations::ArtworkApplyResult> {
+            if (!persistence_service) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::cancelled,
+                    .message = "Trackknife closed during artwork Apply",
+                    .context = {},
+                });
+            }
+            const auto persistence_error = persistence_service->saveWorkspaceAndWait(
+                std::move(documents), std::move(view_layouts));
+            if (!persistence_error.isEmpty()) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::database,
+                    .message = utf8Bytes(persistence_error),
+                    .context = {},
+                });
+            }
+            // ADR-0237: the engine writes the pictures and journals them.
+            auto applied = work->artwork_apply(plan, progress, cancellation);
+            if (!applied) {
+                return applied;
+            }
+            for (const auto& source : applied->sources) {
+                if (source.commit) {
+                    static_cast<void>(persistence_service->refreshLocalMetadataAndWait(
+                        metadata_refresh(*source.commit)));
+                }
+            }
+            return applied;
+        }};
+    };
+}
+
 MetadataWritePlanApplierFactory
 BenchMainWindow::engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
@@ -1354,63 +1398,66 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
         properties->setProperty("trackknife-file-work", QStringLiteral("engine"));
     }
     properties->setArtworkMutationServices(
-        [this, database_path, persistence_service] {
-            auto documents = collectDocuments();
-            auto view_layouts = collectTrackViewLayouts();
-            return ArtworkWritePlanApplier{
-                [database_path, persistence_service, documents = std::move(documents),
-                 view_layouts = std::move(view_layouts)](
-                    const metadata::ArtworkWritePlan& plan,
-                    const operations::ArtworkApplyProgressCallback& progress,
-                    const core::CancellationToken& cancellation) mutable
-                    -> core::Result<operations::ArtworkApplyResult> {
-                    if (!persistence_service) {
-                        return std::unexpected(core::Error{
-                            .code = core::ErrorCode::cancelled,
-                            .message = "Trackknife closed during artwork Apply",
-                            .context = {},
-                        });
-                    }
-                    const auto persistence_error = persistence_service->saveWorkspaceAndWait(
-                        std::move(documents), std::move(view_layouts));
-                    if (!persistence_error.isEmpty()) {
-                        return std::unexpected(core::Error{
-                            .code = core::ErrorCode::database,
-                            .message = utf8Bytes(persistence_error),
-                            .context = {},
-                        });
-                    }
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    const auto dependent =
-                        [persistence_service](
-                            const operations::MetadataCommitResult& result) -> core::Result<void> {
-                        if (!persistence_service) {
-                            return std::unexpected(core::Error{
-                                .code = core::ErrorCode::cancelled,
-                                .message = "Trackknife closed during artwork reconciliation",
-                                .context = {},
-                            });
-                        }
-                        auto refreshed = persistence_service->refreshLocalMetadataAndWait(
-                            metadata_refresh(result));
-                        return refreshed ? core::Result<void>{}
-                                         : std::unexpected(std::move(refreshed.error()));
-                    };
-                    return operations::apply_artwork_write_plan(
-                        plan,
-                        [&journal, &dependent](const metadata::ArtworkWritePlanSource& source,
-                                               const core::CancellationToken& source_cancellation) {
-                            return operations::commit_artwork_source(source, journal, dependent,
-                                                                     source_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
-                }};
-        },
+        work ? engineArtworkPlanApplierFactory(work)
+             : ArtworkWritePlanApplierFactory{[this, database_path, persistence_service] {
+                   auto documents = collectDocuments();
+                   auto view_layouts = collectTrackViewLayouts();
+                   return ArtworkWritePlanApplier{
+                       [database_path, persistence_service, documents = std::move(documents),
+                        view_layouts = std::move(view_layouts)](
+                           const metadata::ArtworkWritePlan& plan,
+                           const operations::ArtworkApplyProgressCallback& progress,
+                           const core::CancellationToken& cancellation) mutable
+                           -> core::Result<operations::ArtworkApplyResult> {
+                           if (!persistence_service) {
+                               return std::unexpected(core::Error{
+                                   .code = core::ErrorCode::cancelled,
+                                   .message = "Trackknife closed during artwork Apply",
+                                   .context = {},
+                               });
+                           }
+                           const auto persistence_error = persistence_service->saveWorkspaceAndWait(
+                               std::move(documents), std::move(view_layouts));
+                           if (!persistence_error.isEmpty()) {
+                               return std::unexpected(core::Error{
+                                   .code = core::ErrorCode::database,
+                                   .message = utf8Bytes(persistence_error),
+                                   .context = {},
+                               });
+                           }
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           const auto dependent =
+                               [persistence_service](const operations::MetadataCommitResult& result)
+                               -> core::Result<void> {
+                               if (!persistence_service) {
+                                   return std::unexpected(core::Error{
+                                       .code = core::ErrorCode::cancelled,
+                                       .message = "Trackknife closed during artwork reconciliation",
+                                       .context = {},
+                                   });
+                               }
+                               auto refreshed = persistence_service->refreshLocalMetadataAndWait(
+                                   metadata_refresh(result));
+                               return refreshed ? core::Result<void>{}
+                                                : std::unexpected(std::move(refreshed.error()));
+                           };
+                           return operations::apply_artwork_write_plan(
+                               plan,
+                               [&journal,
+                                &dependent](const metadata::ArtworkWritePlanSource& source,
+                                            const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_artwork_source(
+                                       source, journal, dependent, source_cancellation);
+                               },
+                               progress, cancellation,
+                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                       }};
+               }},
         [this](const operations::ArtworkApplyResult& result) {
             auto committed = false;
             for (const auto& source : result.sources) {

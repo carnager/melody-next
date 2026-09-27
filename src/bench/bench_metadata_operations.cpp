@@ -883,6 +883,15 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
             const bool does = work->supported();
             std::vector<EngineInterruption> interrupted;
             if (does) {
+                // ADR-0237: the engine looks things up with the key kept in
+                // Settings; handed over whenever it connects.
+                const auto key = QSettings{}
+                                     .value(QLatin1String(SettingsDialog::acoustid_client_key))
+                                     .toString()
+                                     .trimmed();
+                if (!key.isEmpty()) {
+                    static_cast<void>(work->set_acoustid_key(key.toStdString()));
+                }
                 if (auto answer = work->interrupted()) {
                     for (const auto& entry :
                          answer->value("interrupted", protocol::Json::array())) {
@@ -1338,7 +1347,8 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                                      std::move(completion));
                 },
         },
-        musicBrainzLookupService(), work ? engineFileWorkTools(work) : FileWorkTools{});
+        work ? engineLookupService(work, this) : musicBrainzLookupService(),
+        work ? engineFileWorkTools(work) : FileWorkTools{});
     if (work) {
         // Observable for tests and diagnostics: which did the work.
         properties->setProperty("trackknife-file-work", QStringLiteral("engine"));

@@ -247,6 +247,86 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
         *outcome, [](const Json& value) { return wire::decode_apply_result(value); });
 }
 
+namespace {
+
+// A lookup job's {result: {body}}, decoded.
+[[nodiscard]] core::Result<std::string> body_of(const core::Result<Json>& outcome) {
+    if (!outcome) {
+        return std::unexpected(outcome.error());
+    }
+    return outcome_of<std::string>(*outcome, [](const Json& result) -> core::Result<std::string> {
+        const auto body = result.find("body");
+        if (body == result.end() || !body->is_string()) {
+            return std::unexpected(unexpected_answer("a lookup"));
+        }
+        return protocol::decode_raw_path(body->get<std::string>());
+    });
+}
+
+} // namespace
+
+core::Result<std::string> RemoteFileWork::fetch(const std::string& url,
+                                                const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    return body_of(
+        (*connection)->run_job("musicbrainz.fetch", Json{{"url", url}}, {}, cancellation));
+}
+
+core::Result<MetadataServices::Fingerprint>
+RemoteFileWork::fingerprint(const std::string& raw_path,
+                            const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto outcome =
+        (*connection)
+            ->run_job("acoustid.fingerprint", Json{{"path", protocol::encode_raw_path(raw_path)}},
+                      {}, cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    return outcome_of<MetadataServices::Fingerprint>(
+        *outcome, [](const Json& result) -> core::Result<MetadataServices::Fingerprint> {
+            MetadataServices::Fingerprint fingerprint{
+                .duration_seconds = result.value("duration_seconds", std::size_t{0}),
+                .fingerprint = result.value("fingerprint", std::string{})};
+            if (fingerprint.duration_seconds == 0U || fingerprint.fingerprint.empty()) {
+                return std::unexpected(unexpected_answer("acoustid.fingerprint"));
+            }
+            return fingerprint;
+        });
+}
+
+core::Result<std::string>
+RemoteFileWork::acoustid_lookup(const MetadataServices::Fingerprint& fingerprint,
+                                const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    return body_of((*connection)
+                       ->run_job("acoustid.lookup",
+                                 Json{{"duration_seconds", fingerprint.duration_seconds},
+                                      {"fingerprint", fingerprint.fingerprint}},
+                                 {}, cancellation));
+}
+
+core::Result<void> RemoteFileWork::set_acoustid_key(const std::string& key) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("metadata_services.set", Json{{"acoustid_client_key", key}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

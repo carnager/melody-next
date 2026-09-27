@@ -17,6 +17,7 @@
 #include "trackknife/engine/lastfm.hpp"
 #include "trackknife/engine/list_methods.hpp"
 #include "trackknife/engine/media_streams.hpp"
+#include "trackknife/engine/metadata_services.hpp"
 #include "trackknife/engine/now_playing_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
@@ -508,6 +509,10 @@ int main(int argc, char** argv) {
         std::cerr << "melodyd: recovered " << file_work_recovery.recovered
                   << " interrupted file operation(s)\n";
     }
+    // ADR-0237: the tagger's online lookups, made here for this engine's files.
+    trackknife::engine::MetadataServices metadata_services{database, state_directory};
+    trackknife::engine::register_metadata_service_jobs(job_catalogue, metadata_services);
+    trackknife::engine::register_metadata_service_methods(dispatcher, metadata_services);
     trackknife::engine::register_file_work_methods(dispatcher, database,
                                                    std::move(file_work_recovery));
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);

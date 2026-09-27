@@ -54,6 +54,7 @@
 #include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 #include <filesystem>
 #include <memory>
 
@@ -1129,6 +1130,22 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
         for (int index = 0; index < tabs_->count(); ++index) {
             if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
                 properties->reloadOutputProfiles();
+            }
+        }
+    });
+    // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
+    // each engine that does file work (an emptied one makes them forget it).
+    connect(dialog, &QDialog::accepted, this, [this] {
+        const auto key = QSettings{}
+                             .value(QLatin1String(SettingsDialog::acoustid_client_key))
+                             .toString()
+                             .trimmed()
+                             .toStdString();
+        for (const auto& engine : engines_) {
+            if (engine->does_file_work && engine->file_work) {
+                static_cast<void>(QtConcurrent::run([work = engine->file_work, key] {
+                    static_cast<void>(work->set_acoustid_key(key));
+                }));
             }
         }
     });

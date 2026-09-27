@@ -8,6 +8,7 @@
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
+#include "trackknife/engine/metadata_services.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/loudness/scan.hpp"
@@ -15,12 +16,17 @@
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/persistence/musicbrainz_cache.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <sys/stat.h>
+
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -483,6 +489,9 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     protocol::Dispatcher dispatcher;
     engine::register_job_methods(dispatcher, registry, jobs);
     engine::register_file_work_methods(dispatcher, database, {});
+    engine::MetadataServices services{database, directory};
+    engine::register_metadata_service_jobs(jobs, services);
+    engine::register_metadata_service_methods(dispatcher, services);
     auto server = engine::Server::listen(socket, dispatcher);
     require(server.has_value(), "an engine listens");
     {
@@ -550,6 +559,27 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     require(after && after->document.first_effective_value("title") ==
                          std::optional<std::string>{"Through the engine"},
             "the file has it");
+
+    // The tagger's lookups through the engine: a cached answer comes back as
+    // it was, a URL elsewhere is refused, the key is handed over.
+    const std::string url = "https://musicbrainz.org/ws/2/release/remote?fmt=json";
+    {
+        auto cache = trackknife::persistence::SqliteMusicBrainzResponseCache::open(database);
+        require(cache && cache->store(url, "{\"from\":\"engine\"}",
+                                      static_cast<std::int64_t>(std::time(nullptr)),
+                                      14LL * 24 * 60 * 60, 100U),
+                "the engine has an answer cached");
+    }
+    const auto fetched = remote.fetch(url, {});
+    require(fetched && *fetched == "{\"from\":\"engine\"}", "fetched through the engine");
+    require(!remote.fetch("https://example.org/", {}), "a URL elsewhere is refused");
+    require(remote.set_acoustid_key("handed-over").has_value() && services.has_acoustid_key(),
+            "the AcoustID key is handed to the engine");
+    const auto printed_there = remote.fingerprint(flac, {});
+    const auto printed_here = services.fingerprint(flac, {});
+    require(printed_there.has_value() == printed_here.has_value() &&
+                (!printed_there || printed_there->fingerprint == printed_here->fingerprint),
+            "a fingerprint through the engine is the engine's own");
     (*server)->stop();
 
     // An engine older than file work: the tools do it themselves, as before.
@@ -564,6 +594,120 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     (*old)->stop();
 }
 
+// The tagger's lookups, made by the engine: nothing here goes to the
+// network -- a cached answer is served as it is, and the rest is refused or
+// local.
+void the_engine_makes_the_taggers_lookups(const std::filesystem::path& parent) {
+    const auto directory = parent / "services";
+    std::filesystem::create_directories(directory);
+    const auto database = directory / "services.sqlite3";
+    engine::MetadataServices services{database, directory};
+
+    require(
+        engine::MetadataServices::fetchable("https://musicbrainz.org/ws/2/release/x?fmt=json") &&
+            engine::MetadataServices::fetchable("https://coverartarchive.org/release/x"),
+        "MusicBrainz and the Cover Art Archive are fetched");
+    for (const auto* url : {"http://musicbrainz.org/ws/2/release/x", "https://example.org/",
+                            "file:///etc/passwd", "https://musicbrainz.org.evil.example/ws/2/",
+                            "https://coverartarchive.org.evil.example/"}) {
+        require(!engine::MetadataServices::fetchable(url), url);
+        require(!services.fetch(url, {}), "and fetch() refuses it too");
+    }
+
+    // An answer already cached is served without touching the network.
+    const std::string url = "https://musicbrainz.org/ws/2/release/cached?fmt=json";
+    const std::string cached = R"({"id":"cached","title":"From the cache"})";
+    {
+        auto cache = trackknife::persistence::SqliteMusicBrainzResponseCache::open(database);
+        require(cache.has_value(), "the engine's cache opens");
+        require(cache
+                    ->store(url, cached, static_cast<std::int64_t>(std::time(nullptr)),
+                            14LL * 24 * 60 * 60, 100U)
+                    .has_value(),
+                "and takes an answer");
+    }
+    const auto started = std::chrono::steady_clock::now();
+    const auto served = services.fetch(url, {});
+    require(served && *served == cached, "a cached answer is served as it was");
+    require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds{500},
+            "at once, without waiting its turn");
+
+    // The AcoustID key is the engine's, readable by its owner only.
+    require(!services.has_acoustid_key(), "no key to begin with");
+    const auto keyless =
+        services.acoustid_lookup({.duration_seconds = 10, .fingerprint = "AQAD"}, {});
+    require(!keyless && keyless.error().code == core::ErrorCode::unsupported,
+            "a lookup without a key says what to set");
+    require(services.set_acoustid_key("client-key").has_value() && services.has_acoustid_key(),
+            "a key is kept");
+    struct stat kept{};
+    require(::stat((directory / "acoustid.key").c_str(), &kept) == 0 && (kept.st_mode & 0077) == 0,
+            "readable by its owner only");
+    require(services.set_acoustid_key("").has_value() && !services.has_acoustid_key(),
+            "and forgotten when emptied");
+
+    // Its own files, fingerprinted here -- where fpcalc is installed.
+    // Twelve seconds of changing tones: the fixtures are too short for
+    // Chromaprint, which needs a few seconds of something to hear.
+    const auto flac = (directory / "print.wav").string();
+    {
+        constexpr std::uint32_t rate = 22050;
+        constexpr std::uint32_t seconds = 12;
+        std::vector<std::int16_t> samples;
+        samples.reserve(rate * seconds);
+        std::uint32_t noise = 1;
+        for (std::uint32_t index = 0; index < rate * seconds; ++index) {
+            const double time = static_cast<double>(index) / rate;
+            const double pitch = 220.0 * (1 + static_cast<int>(time * 2) % 5);
+            noise = noise * 1664525U + 1013904223U;
+            const double value = 0.4 * std::sin(2 * 3.14159265358979 * pitch * time) +
+                                 0.05 * (static_cast<double>(noise >> 8) / 16777216.0 - 0.5);
+            samples.push_back(static_cast<std::int16_t>(value * 32767));
+        }
+        const auto bytes = static_cast<std::uint32_t>(samples.size() * sizeof(std::int16_t));
+        std::ofstream wav{flac, std::ios::binary};
+        const auto put32 = [&wav](const std::uint32_t value) {
+            wav.write(reinterpret_cast<const char*>(&value), 4);
+        };
+        const auto put16 = [&wav](const std::uint16_t value) {
+            wav.write(reinterpret_cast<const char*>(&value), 2);
+        };
+        wav.write("RIFF", 4);
+        put32(36 + bytes);
+        wav.write("WAVEfmt ", 8);
+        put32(16);
+        put16(1);
+        put16(1);
+        put32(rate);
+        put32(rate * 2);
+        put16(2);
+        put16(16);
+        wav.write("data", 4);
+        put32(bytes);
+        wav.write(reinterpret_cast<const char*>(samples.data()), bytes);
+    }
+    const auto printed = services.fingerprint(flac, {});
+    if (printed) {
+        require(printed->duration_seconds == 12U && !printed->fingerprint.empty(),
+                "a file is fingerprinted by the engine");
+    } else {
+        require(printed.error().code == core::ErrorCode::unsupported,
+                "or, with no fpcalc, says it is not installed");
+    }
+    trackknife::core::CancellationSource stop;
+    stop.request_cancellation();
+    require(!services.fingerprint(flac, stop.token()), "a cancelled fingerprint stops");
+
+    // Over the protocol: a URL elsewhere is refused at submit.
+    engine::JobCatalog jobs;
+    engine::register_metadata_service_jobs(jobs, services);
+    require(!jobs.build("musicbrainz.fetch", {{"url", "https://example.org/"}}),
+            "musicbrainz.fetch refuses a URL elsewhere");
+    require(jobs.build("musicbrainz.fetch", {{"url", url}}).has_value(), "and takes MusicBrainz");
+    require(!jobs.build("acoustid.lookup", protocol::Json::object()),
+            "acoustid.lookup needs a fingerprint");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -576,6 +720,7 @@ int main(int argc, char** argv) {
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
+    the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);
     std::filesystem::remove_all(directory);
     std::cout << "engine file work: ok\n";

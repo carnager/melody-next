@@ -4,6 +4,7 @@
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
+#include "trackknife/engine/metadata_services.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
@@ -68,6 +69,18 @@ class RemoteFileWork final {
     apply(const metadata::MetadataWritePlan& plan,
           const operations::MetadataApplyProgressCallback& progress,
           const core::CancellationToken& cancellation);
+
+    // The tagger's lookups, made by the engine (musicbrainz.fetch,
+    // acoustid.fingerprint, acoustid.lookup): the bytes a service answered.
+    [[nodiscard]] core::Result<std::string> fetch(const std::string& url,
+                                                  const core::CancellationToken& cancellation);
+    [[nodiscard]] core::Result<MetadataServices::Fingerprint>
+    fingerprint(const std::string& raw_path, const core::CancellationToken& cancellation);
+    [[nodiscard]] core::Result<std::string>
+    acoustid_lookup(const MetadataServices::Fingerprint& fingerprint,
+                    const core::CancellationToken& cancellation);
+    // Hands the engine the AcoustID key it looks up with; empty forgets it.
+    [[nodiscard]] core::Result<void> set_acoustid_key(const std::string& key);
 
     // metadata.interrupted: what the engine recovered at startup and what it
     // could not. Absent (not_found) when the engine is older than file work.

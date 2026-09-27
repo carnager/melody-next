@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/musicbrainz_identify_dialog.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
@@ -32,5 +33,11 @@ struct FileWorkTools {
 
 // The engine's, through its file-work connection.
 [[nodiscard]] FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work);
+
+// The tagger's MusicBrainz, Cover Art Archive and AcoustID lookups, made by
+// the engine: each off this thread, answered on `context`'s, as the lookups
+// made here are.
+[[nodiscard]] MusicBrainzLookupService
+engineLookupService(std::shared_ptr<engine::RemoteFileWork> work, QObject* context);
 
 } // namespace trackknife::bench

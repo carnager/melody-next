@@ -43,26 +43,7 @@ namespace {
     return true;
 }
 
-[[nodiscard]] std::string form_encoded(const std::string_view value) {
-    const auto encoded = QUrl::toPercentEncoding(
-        QString::fromUtf8(value.data(), static_cast<qsizetype>(value.size())));
-    return std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())};
-}
-
 } // namespace
-
-core::Result<std::string> build_acoustid_lookup_body(const std::string_view client_key,
-                                                     const std::size_t duration_seconds,
-                                                     const std::string_view fingerprint) {
-    if (client_key.empty() || duration_seconds == 0U || fingerprint.empty()) {
-        return std::unexpected(
-            service_error(core::ErrorCode::invalid_argument,
-                          "an AcoustID lookup needs a client key, a duration, and a fingerprint"));
-    }
-    return "client=" + form_encoded(client_key) + "&format=json&meta=recordings+releases" +
-           "&duration=" + std::to_string(duration_seconds) +
-           "&fingerprint=" + form_encoded(fingerprint);
-}
 
 core::Result<AcoustIdLookup> parse_acoustid_lookup(const std::string_view body,
                                                    const WebServiceLimits& limits) {

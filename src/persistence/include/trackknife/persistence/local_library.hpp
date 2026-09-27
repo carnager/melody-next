@@ -175,6 +175,10 @@ class LocalLibrary final {
     core::Result<std::vector<std::string>> rated_paths(const std::string& track_hash) const;
     core::Result<std::vector<std::pair<std::string, unsigned>>>
     rated_tracks(const core::CancellationToken& cancellation = {}) const;
+    // Once, for a library indexed before ratings were imported: each unrated
+    // track takes the rating its files' tags carry, from what was indexed.
+    // Returns how many were rated.
+    core::Result<std::size_t> import_indexed_tag_ratings();
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
     // Re-reads the named files now, without a walk: after they were tagged

@@ -26,6 +26,7 @@ using protocol::Json;
 
 constexpr std::string_view rating_field = "FMPS_RATING";
 constexpr std::string_view enabled_key = "ratings.write-tags";
+constexpr std::string_view imported_key = "ratings.imported-from-tags";
 
 // The freedesktop spelling: the rating over ten, one decimal.
 [[nodiscard]] std::string fmps_value(const unsigned rating) {
@@ -47,6 +48,16 @@ RatingTags::RatingTags(std::filesystem::path database, LocalCatalogue& catalogue
     : database_(std::move(database)), catalogue_(catalogue), workspace_(workspace) {
     if (auto stored = workspace_.load_engine_state(enabled_key); stored && *stored) {
         enabled_ = **stored == "1";
+    }
+    // Ratings in files are imported as they are read. A library read before
+    // that is caught up once, from what it read.
+    if (auto done = workspace_.load_engine_state(imported_key); done && !*done) {
+        if (auto imported = catalogue_.import_indexed_tag_ratings()) {
+            static_cast<void>(workspace_.save_engine_state(imported_key, "1", now_ms()));
+            if (*imported > 0U) {
+                std::cerr << "melodyd: took " << *imported << " rating(s) from the files\n";
+            }
+        }
     }
     worker_ = std::thread{[this] { run(); }};
 }
@@ -75,6 +86,10 @@ core::Result<void> RatingTags::set_enabled(const bool enabled) {
         const std::lock_guard guard{mutex_};
         const auto was = enabled_;
         enabled_ = enabled;
+        if (was != enabled) {
+            std::cerr << "melodyd: ratings are " << (enabled ? "now" : "no longer")
+                      << " written into the files\n";
+        }
         if (!enabled) {
             // What is waiting is not written; what is in the files stays.
             queue_.clear();

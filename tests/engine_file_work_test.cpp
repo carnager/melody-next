@@ -793,6 +793,63 @@ void ratings_go_into_tags_when_asked(const std::filesystem::path& directory,
     }
 }
 
+// A rating another player put in a file is taken into the library.
+void ratings_in_files_are_imported(const std::filesystem::path& directory,
+                                   const std::filesystem::path& fixtures) {
+    const auto music = directory / "imported";
+    std::filesystem::create_directories(music);
+    const auto flac = materialize(fixtures, "tagged-tone-flac", music / "imported.flac").string();
+    const auto database = directory / "imports.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value(), "a library");
+    // Tagged before the library knows the file, as by another player.
+    require(engine::RatingTags::write(database, catalogue, flac, 8).value_or(false),
+            "a rating is put in the file");
+    require(catalogue.add_root(music.string()).has_value(), "its folder is added");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "scanned");
+    trackknife::persistence::LibraryQuery lookup;
+    lookup.kind = trackknife::persistence::LibraryEntryKind::track;
+    lookup.raw_path = flac;
+    lookup.limit = 1;
+    const auto rating = [&catalogue, &lookup] {
+        const auto found = catalogue.query(lookup);
+        return found && found->entries.size() == 1U ? found->entries.front().rating : 99U;
+    };
+    const auto hash = [&catalogue, &lookup] {
+        return catalogue.query(lookup)->entries.front().rating_hash;
+    }();
+    require(rating() == 8U, "the file's rating is the library's");
+
+    // Cleared here: the same tag read again does not bring it back.
+    require(catalogue.set_rating(hash, false, 0).has_value(), "cleared");
+    require(catalogue.refresh({flac}).has_value(), "the file is read again");
+    require(rating() == 0U, "and it stays cleared");
+
+    // A library read before ratings were imported is caught up once, when
+    // the engine starts: an unrated track takes the rating in its file.
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "a workspace");
+    {
+        engine::RatingTags caught_up{database, catalogue, *workspace};
+    }
+    require(rating() == 8U, "caught up from what the library read");
+    require(catalogue.set_rating(hash, false, 0).has_value(), "cleared again");
+    {
+        engine::RatingTags again{database, catalogue, *workspace};
+    }
+    require(rating() == 0U, "and only once");
+
+    // Changed in the file by another player: that is taken.
+    require(engine::RatingTags::write(database, catalogue, flac, 4).value_or(false),
+            "the tag changes");
+    require(rating() == 4U, "and the library follows it");
+    // The library's own rating over a tag it already saw stays.
+    require(catalogue.set_rating(hash, false, 9).has_value(), "rated here");
+    require(catalogue.refresh({flac}).has_value(), "read again");
+    require(rating() == 9U, "a rating made here is kept");
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1132,6 +1189,7 @@ int main(int argc, char** argv) {
     the_engine_writes_what_was_previewed(directory, argv[1]);
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
+    ratings_in_files_are_imported(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

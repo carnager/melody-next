@@ -22,13 +22,16 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
-#include <ctime>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
+#include <cstdlib>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -410,6 +413,92 @@ Technicals technicals_from(const formats::MediaProbe& probe) {
 constexpr std::size_t maximum_field_names = 4'096U;
 constexpr std::size_t maximum_field_values = 16'384U;
 constexpr std::size_t maximum_field_text_bytes = 4U * 1024U * 1024U;
+
+// ADR-0237 stage 2: a rating another player put in the file, on the 0-10
+// scale. FMPS_RATING (0.0-1.0) first; else RATING, as five stars (1-5) or a
+// percentage (above five). Nothing for no tag or one that is not a number.
+[[nodiscard]] std::optional<unsigned> rating_from_tag(std::string_view fmps,
+                                                      std::string_view plain) {
+    const auto number = [](std::string_view text) -> std::optional<double> {
+        const std::string owned{text};
+        char* end = nullptr;
+        const auto value = std::strtod(owned.c_str(), &end);
+        if (owned.empty() || end == owned.c_str() || !std::isfinite(value) || value < 0.0) {
+            return std::nullopt;
+        }
+        return value;
+    };
+    const auto clamp = [](const double value) {
+        return static_cast<unsigned>(std::clamp(std::lround(value), 0L, 10L));
+    };
+    if (!fmps.empty()) {
+        const auto value = number(fmps);
+        return value && *value <= 1.0 ? std::optional{clamp(*value * 10.0)} : std::nullopt;
+    }
+    if (!plain.empty()) {
+        const auto value = number(plain);
+        if (!value || *value > 100.0) {
+            return std::nullopt;
+        }
+        return clamp(*value <= 5.0 ? *value * 2.0 : *value / 10.0);
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] std::optional<unsigned> document_rating(const metadata::MetadataDocument& document) {
+    const auto first = [&document](std::string_view name) {
+        const auto values = document.effective_values(name);
+        return values.empty() ? std::string{} : values.front();
+    };
+    return rating_from_tag(first("FMPS_RATING"), first("RATING"));
+}
+
+// What the library last read of the file's rating tag, before it is read
+// again.
+[[nodiscard]] std::optional<unsigned> indexed_rating(sqlite3* db, const std::string& raw_path) {
+    Statement select{db,
+                     "SELECT canonical_name,value FROM local_library_fields "
+                     "WHERE raw_path=? AND canonical_name IN ('fmps_rating','fmpsrating','rating') "
+                     "ORDER BY position"};
+    select.blob(1, raw_path);
+    std::string fmps;
+    std::string plain;
+    while (select.next()) {
+        auto& slot = select.bytes(0) == "rating" ? plain : fmps;
+        if (slot.empty()) {
+            slot = select.bytes(1);
+        }
+    }
+    return rating_from_tag(fmps, plain);
+}
+
+// A rating in the file becomes the library's when the tag is new to it --
+// another player changed it since the last read -- or when the library has
+// none. One the library has, over a tag it already saw, stays: clearing a
+// rating here is not undone by an old tag.
+void import_file_rating(sqlite3* db, const std::string& raw_path, const std::string& track_hash,
+                        const metadata::MetadataDocument& document, const bool seen_before) {
+    const auto in_file = document_rating(document);
+    if (!in_file || *in_file == 0U || track_hash.empty()) {
+        return;
+    }
+    const auto before = seen_before ? indexed_rating(db, raw_path) : std::nullopt;
+    if (before == in_file) {
+        return;
+    }
+    Statement stored{db, "SELECT rating FROM local_ratings WHERE hash=?"};
+    stored.text(1, track_hash);
+    const bool rated = stored.next();
+    if (rated && (!before || static_cast<unsigned>(stored.number(0)) == *in_file)) {
+        return;
+    }
+    Statement upsert{db, "INSERT INTO local_ratings(hash,type,rating,updated_at) "
+                         "VALUES(?,'track',?,datetime('now')) ON CONFLICT(hash) DO UPDATE SET "
+                         "rating=excluded.rating,updated_at=excluded.updated_at"};
+    upsert.text(1, track_hash);
+    upsert.number(2, static_cast<int>(*in_file));
+    upsert.next();
+}
 
 void write_field_rows(sqlite3* db, const std::string& raw_path,
                       const metadata::MetadataDocument& document) {
@@ -1675,6 +1764,38 @@ LocalLibrary::rated_paths(const std::string& track_hash) const {
     });
 }
 
+core::Result<std::size_t> LocalLibrary::import_indexed_tag_ratings() {
+    return checked([&] {
+        auto* db = implementation_->db;
+        Transaction transaction{db};
+        Statement select{db, "SELECT t.raw_path,t.rating_hash FROM local_library_tracks t "
+                             "WHERE t.rating_hash<>'' AND NOT EXISTS(SELECT 1 FROM local_ratings "
+                             "r WHERE r.hash=t.rating_hash) AND EXISTS(SELECT 1 FROM "
+                             "local_library_fields f WHERE f.raw_path=t.raw_path AND "
+                             "f.canonical_name IN ('fmps_rating','fmpsrating','rating'))"};
+        std::vector<std::pair<std::string, std::string>> candidates;
+        while (select.next()) {
+            candidates.emplace_back(select.bytes(0), select.bytes(1));
+        }
+        std::size_t imported = 0U;
+        Statement upsert{db, "INSERT INTO local_ratings(hash,type,rating,updated_at) "
+                             "VALUES(?,'track',?,datetime('now')) ON CONFLICT(hash) DO NOTHING"};
+        for (const auto& [path, hash] : candidates) {
+            const auto rating = indexed_rating(db, path);
+            if (!rating || *rating == 0U) {
+                continue;
+            }
+            upsert.reset();
+            upsert.text(1, hash);
+            upsert.number(2, static_cast<int>(*rating));
+            upsert.next();
+            ++imported;
+        }
+        transaction.commit();
+        return imported;
+    });
+}
+
 core::Result<std::vector<std::pair<std::string, unsigned>>>
 LocalLibrary::rated_tracks(const core::CancellationToken& cancellation) const {
     return checked([&] {
@@ -1799,6 +1920,11 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
         return CommitOutcome::root_lost;
     }
     const auto identity = rating_identity(prepared.document, prepared.raw_path);
+    const bool known = [&] {
+        Statement row{db, "SELECT 1 FROM local_library_tracks WHERE raw_path=?"};
+        row.blob(1, prepared.raw_path);
+        return row.next();
+    }();
     Statement upsert{
         db, "INSERT INTO "
             "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
@@ -1833,6 +1959,7 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
     upsert.number(22, first_scan ? prepared.before.modification_time_seconds
                                  : static_cast<std::int64_t>(std::time(nullptr)));
     upsert.next();
+    import_file_rating(db, prepared.raw_path, identity.track_hash, prepared.document, known);
     write_field_rows(db, prepared.raw_path, prepared.document);
     transaction.commit();
     return CommitOutcome::committed;

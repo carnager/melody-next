@@ -211,6 +211,7 @@ class LocalCatalogue final : public Catalogue {
     rated_paths(const std::string& track_hash) const;
     [[nodiscard]] core::Result<std::vector<std::pair<std::string, unsigned>>>
     rated_tracks(const core::CancellationToken& cancellation = {}) const;
+    [[nodiscard]] core::Result<std::size_t> import_indexed_tag_ratings();
 
   private:
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;

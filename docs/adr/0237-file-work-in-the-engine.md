@@ -102,6 +102,13 @@ sees changes.
    through the tagger's own plan and journal, on a thread of its own. Turning
    it on writes every rated track once; turning it off leaves the files as
    they are. Album ratings are not written: no player reads them from tags.
+   **Import** (wanted, 2026-09-27): whenever the library reads a file, a
+   rating in it -- `FMPS_RATING`, else `RATING` as stars (1-5) or a
+   percentage -- becomes the track's when the tag is new to the library or
+   the track is unrated. A rating the library has over a tag it already saw
+   stays, so a cleared rating is not brought back by an old tag. A library
+   read before this is caught up once, at the engine's start, from the tags
+   it indexed.
 3. **Tag edits** -- the spreadsheet tagger on the plan/commit protocol.
    **Done:** Properties captures, probes (`media.probe`), scans, plans and
    applies through the engine; MusicBrainz, the Cover Art Archive and

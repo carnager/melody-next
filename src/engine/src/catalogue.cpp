@@ -66,6 +66,14 @@ LocalCatalogue::rated_paths(const std::string& track_hash) const {
     return library->rated_paths(track_hash);
 }
 
+core::Result<std::size_t> LocalCatalogue::import_indexed_tag_ratings() {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->import_indexed_tag_ratings();
+}
+
 core::Result<std::vector<std::pair<std::string, unsigned>>>
 LocalCatalogue::rated_tracks(const core::CancellationToken& cancellation) const {
     auto library = open();

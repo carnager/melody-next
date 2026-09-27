@@ -163,6 +163,27 @@ sees changes.
 7. Trackknife's own path for writing library files goes; conversion, which
    writes only its own new files, stays.
 
+## Naming layouts and move destinations are the engine's (decided 2026-09-28)
+
+A move destination is a folder on one machine, and a naming layout is what
+any client that moves files must name them with -- the CLI and the phone
+too, not only Trackknife. Both belong to the engine that moves the files:
+
+- Each engine keeps its own naming layouts and move destinations, in its
+  workspace beside its lists (`layouts.*`, `destinations.*`); every client
+  reads and saves them there. This computer's engine shares Trackknife's
+  database, so the ones saved today are already its own.
+- Whatever shows or picks them names the engine. Properties offers only the
+  layouts and destinations of the engine the selected tracks belong to --
+  never a mixed list; the windows that manage them are titled for it ("Move
+  destinations on gemenon"); choosing a destination folder browses that
+  engine's folders (this computer's with the usual file dialog, an engine
+  elsewhere's through `folders.list`).
+- Conversion runs here, so it uses this computer's engine's.
+- An engine elsewhere starts with none; its manage windows offer to copy
+  this computer's -- layouts as they are, destinations only through a
+  configured mount, translated to that engine's paths.
+
 ## Decided with it (2026-09-27)
 
 - **Write access is the engine's password.** A client that may control an

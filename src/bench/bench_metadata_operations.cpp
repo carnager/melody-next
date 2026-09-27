@@ -562,19 +562,58 @@ void BenchMainWindow::showConvertForView(QTableView* view) {
     if (!model || !view->selectionModel()) {
         return;
     }
-    if (auto remote = remoteFileWorkRows(view)) {
+    const auto engine = engineOfView(view);
+    if (const auto* engine_link = link(engine); !engine.isLocal() && engine_link != nullptr) {
+        // A remote tab's files are converted where this computer has them --
+        // through the mount -- and otherwise fetched from their engine first
+        // (ADR-0237 stage 6), as the phone downloads them.
+        const auto work = engine_link->does_file_work ? engine_link->file_work : nullptr;
+        const auto mount = mountOf(*engine_link);
+        auto selected = view->selectionModel()->selectedRows();
+        std::ranges::sort(selected, {}, &QModelIndex::row);
         std::vector<ConvertDialogItem> items;
-        for (auto& row : *remote) {
+        std::size_t unreachable = 0U;
+        for (const auto& index : selected) {
+            const auto position = static_cast<std::size_t>(index.row());
+            if (position >= model->rows().size()) {
+                continue;
+            }
+            const auto& row = model->rows()[position];
             auto label = displayText(row.title.empty() ? row.raw_path : row.title);
             if (!row.artist.empty()) {
                 label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
             }
-            items.push_back(ConvertDialogItem{.raw_path = row.raw_path,
-                                              .selection = row.selection,
-                                              .segment = row.segment,
-                                              .source_revision = row.source_revision,
-                                              .metadata = row.metadata,
-                                              .label = std::move(label)});
+            ConvertDialogItem item{.raw_path = row.raw_path,
+                                   .selection = row.selection,
+                                   .segment = row.segment,
+                                   .source_revision = row.source_revision,
+                                   .metadata = row.metadata,
+                                   .label = std::move(label),
+                                   .fetch = {}};
+            if (auto here = mount.to_local(row.raw_path)) {
+                item.raw_path = std::move(*here);
+                // What was known of it came from the remote; read afresh here.
+                item.source_revision.reset();
+            } else if (work) {
+                item.fetch = [work,
+                              remote = row.raw_path](const std::filesystem::path& to,
+                                                     const core::CancellationToken& cancellation) {
+                    return work->download_original(remote, to, cancellation);
+                };
+            } else {
+                ++unreachable;
+                continue;
+            }
+            items.push_back(std::move(item));
+        }
+        if (unreachable > 0U) {
+            statusBar()->showMessage(
+                QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
+                               "out. Where that engine's music is reachable here is set in "
+                               "Settings → Engine.")
+                    .arg(unreachable)
+                    .arg(selected.size()),
+                10'000);
         }
         if (!items.empty()) {
             openConvertItems(std::move(items));
@@ -605,6 +644,7 @@ void BenchMainWindow::showConvertForView(QTableView* view) {
             .source_revision = row.source_revision,
             .metadata = row.metadata,
             .label = std::move(label),
+            .fetch = {},
         });
     }
     if (items.empty()) {

@@ -15,6 +15,7 @@
 #include "trackknife/protocol/client.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -93,6 +94,13 @@ class RemoteFileWork final {
     publish(const operations::PreparationPlan& plan,
             const operations::FilePublicationApplyProgressCallback& progress,
             const core::CancellationToken& cancellation);
+
+    // Stage 6: a library file as it is, fetched into `to` on this computer
+    // (streams.ticket, then the stream port) -- what the converter reads
+    // when it cannot reach the engine's files itself.
+    [[nodiscard]] core::Result<void> download_original(const std::string& raw_path,
+                                                       const std::filesystem::path& to,
+                                                       const core::CancellationToken& cancellation);
 
     // The tagger's lookups, made by the engine (musicbrainz.fetch,
     // acoustid.fingerprint, acoustid.lookup): the bytes a service answered.

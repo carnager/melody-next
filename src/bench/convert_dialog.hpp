@@ -41,6 +41,11 @@ struct ConvertDialogItem {
     std::optional<core::LocalSourceRevision> source_revision;
     metadata::MetadataDocument metadata;
     QString label;
+    // ADR-0237 stage 6: a file of an engine elsewhere that this computer
+    // cannot reach -- fetched from that engine into the given path, and
+    // converted from there. Empty: read at raw_path.
+    std::function<core::Result<void>(const std::filesystem::path&, const core::CancellationToken&)>
+        fetch;
 };
 
 // Loads the saved naming layouts and destination roots the rest of the app

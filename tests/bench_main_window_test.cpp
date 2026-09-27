@@ -340,6 +340,7 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanPreservesLogicalSources();
     void convertDialogPlansAndConvertsSelection();
     void convertDialogAppliesPermanentReplayGain();
+    void convertDialogFetchesFilesItCannotReach();
     void propertiesFileListLivesInTheTaggerWindow();
     void selectionActionsFollowTheActiveTab();
     void closingATabReturnsToThePreviousOne();
@@ -5544,6 +5545,7 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
                     .unsupported_native_objects = {},
                 },
             .label = title,
+            .fetch = {},
         };
     };
     const auto saved_layouts = std::vector{persistence::SavedOutputLayoutProfile{
@@ -5785,6 +5787,81 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     delete dialog;
 }
 
+// ADR-0237 stage 6: a file of an engine elsewhere is fetched first and
+// converted from the copy; the preview and the output are as for any file.
+void BenchMainWindowTest::convertDialogFetchesFilesItCannotReach() {
+    QTemporaryDir media;
+    QTemporaryDir destination;
+    QVERIFY(media.isValid());
+    QVERIFY(destination.isValid());
+    const auto original = media.filePath(QStringLiteral("original.wav"));
+    write_sine_wav_fixture(original, 0.5);
+    std::vector<std::filesystem::path> fetched_to;
+    ConvertDialogItem item{
+        .raw_path = "/srv/elsewhere/Album/fetched.wav",
+        .selection = {},
+        .segment = {},
+        .source_revision = std::nullopt,
+        .metadata =
+            metadata::MetadataDocument{
+                .fields = {metadata::MetadataField{.canonical_name = "title",
+                                                   .native_name = "TITLE",
+                                                   .values = {"Fetched"},
+                                                   .qualifier = {},
+                                                   .provenance =
+                                                       metadata::FieldProvenance::embedded}},
+                .unsupported_native_objects = {},
+            },
+        .label = QStringLiteral("Fetched"),
+        .fetch = [&fetched_to, original](const std::filesystem::path& to,
+                                         const core::CancellationToken&) -> core::Result<void> {
+            fetched_to.push_back(to);
+            std::error_code copied;
+            std::filesystem::copy_file(QFile::encodeName(original).toStdString(), to, copied);
+            if (copied) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::io, .message = copied.message(), .context = {}});
+            }
+            return {};
+        }};
+    auto* dialog = new ConvertDialog({std::move(item)},
+                                     [](auto completion) { completion({}, {}, QString{}); }, {});
+    dialog->show();
+    auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
+    auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-destination"));
+    auto* directories =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-directory-expression"));
+    auto* names =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-basename-expression"));
+    auto* mirror = dialog->findChild<QCheckBox*>(QStringLiteral("bench-convert-mirror"));
+    auto* gain_mode = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-gain"));
+    auto* preview = dialog->findChild<QListWidget*>(QStringLiteral("bench-convert-preview"));
+    auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-run"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-status"));
+    QVERIFY(preset != nullptr && root != nullptr && directories != nullptr && names != nullptr &&
+            mirror != nullptr && gain_mode != nullptr && preview != nullptr && run != nullptr &&
+            status != nullptr);
+    mirror->setChecked(false);
+    gain_mode->setCurrentIndex(gain_mode->findData(0));
+    preset->setCurrentIndex(preset->findData(QStringLiteral("flac")));
+    root->setText(destination.path());
+    directories->setText({});
+    names->setText(QStringLiteral("%title%"));
+    // Planned from what the engine knows of it, before anything is fetched.
+    QTRY_VERIFY(preview->count() > 0 && preview->item(0)->text() == QStringLiteral("Fetched.flac"));
+    QVERIFY(fetched_to.empty());
+    QTRY_VERIFY(run->isEnabled());
+    QTest::mouseClick(run, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Converted 1 of 1 files.")),
+                             15'000);
+    QCOMPARE(fetched_to.size(), 1U);
+    QCOMPARE(fetched_to.front().filename().string(), std::string{"fetched.wav"});
+    QVERIFY(QFileInfo::exists(QDir{destination.path()}.filePath(QStringLiteral("Fetched.flac"))));
+    // The copy goes once converted.
+    QVERIFY(!std::filesystem::exists(fetched_to.front()));
+    delete dialog;
+}
+
 // ADR-0173: the dialog's Gain choice permanently applies the item's
 // ReplayGain metadata to the encoded PCM, exactly like the core path.
 void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
@@ -5820,6 +5897,7 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
                 .unsupported_native_objects = {},
             },
         .label = QStringLiteral("Gained"),
+        .fetch = {},
     };
     ConvertPresetStore preset_store{
         .load = [](ConvertPresetStore::LoadCompletion completion) { completion({}, QString{}); },

@@ -4,11 +4,13 @@
 
 #include "bench_main_window_helpers.hpp"
 #include "trackknife/convert/preset.hpp"
+#include "trackknife/core/stable_id.hpp"
 
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -26,6 +28,7 @@
 #include <QSettings>
 #include <QSpinBox>
 #include <QStandardItemModel>
+#include <QStandardPaths>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
@@ -33,6 +36,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <map>
 #include <system_error>
 #include <utility>
 
@@ -747,6 +751,16 @@ void ConvertDialog::refreshPreview() {
     QStringList problems;
     for (std::size_t index = 0U; index < items_.size(); ++index) {
         auto& item = items_[index];
+        if (!item.source_revision && item.fetch) {
+            // Not on this computer to look at: known by its path, which is
+            // all the plan needs to tell two items apart.
+            item.source_revision =
+                core::LocalSourceRevision{.device = 0U,
+                                          .inode = std::hash<std::string>{}(item.raw_path) | 1U,
+                                          .size = 0U,
+                                          .modification_time_seconds = 0,
+                                          .modification_time_nanoseconds = 0};
+        }
         if (!item.source_revision) {
             auto observed = core::observe_local_source_revision(item.raw_path);
             if (!observed) {
@@ -873,6 +887,7 @@ void ConvertDialog::startConversion() {
 
     std::vector<convert::ConversionScanItem> scan_items;
     scan_items.reserve(plan_->sources.size());
+    std::map<std::size_t, decltype(ConvertDialogItem::fetch)> fetches;
     for (const auto& source : plan_->sources) {
         for (const auto item_index : source.item_indexes) {
             const auto& item = items_[item_index];
@@ -884,6 +899,9 @@ void ConvertDialog::startConversion() {
                 .destination_raw_path = source.target_raw_path,
                 .metadata = item.metadata,
             });
+            if (item.fetch) {
+                fetches.emplace(item_index, item.fetch);
+            }
         }
     }
 
@@ -926,9 +944,53 @@ void ConvertDialog::startConversion() {
                                                                : convert::ConversionGainMode::none;
     const auto carry_artwork = embed_artwork_->isChecked();
     watcher_.setFuture(QtConcurrent::run(
-        [scan_items = std::move(scan_items), preset = *preset, parallelism, target_sample_rate,
-         sample_rate_cap, target_bit_depth, keep_source_depth, channel_policy, gain_mode,
-         carry_artwork, completed = completed_, cancellation] {
+        [scan_items = std::move(scan_items), fetches = std::move(fetches), preset = *preset,
+         parallelism, target_sample_rate, sample_rate_cap, target_bit_depth, keep_source_depth,
+         channel_policy, gain_mode, carry_artwork, completed = completed_, cancellation]() mutable {
+            // ADR-0237 stage 6: files of an engine elsewhere, fetched first
+            // into a folder of their own and converted from there.
+            std::vector<convert::ConvertedItemScan> fetch_failures;
+            std::optional<std::filesystem::path> fetched_folder;
+            if (!fetches.empty()) {
+                // On disk, not in /tmp: a batch of originals can be large.
+                fetched_folder =
+                    std::filesystem::path{QFile::encodeName(QStandardPaths::writableLocation(
+                                                                QStandardPaths::CacheLocation))
+                                              .toStdString()} /
+                    ("convert-" + core::StableId::random().to_string());
+                std::vector<convert::ConversionScanItem> reachable;
+                for (auto& item : scan_items) {
+                    const auto fetch = fetches.find(item.item_index);
+                    if (fetch == fetches.end()) {
+                        reachable.push_back(std::move(item));
+                        continue;
+                    }
+                    const auto folder = *fetched_folder / std::to_string(item.item_index);
+                    std::error_code made;
+                    std::filesystem::create_directories(folder, made);
+                    const auto copy =
+                        folder / std::filesystem::path{item.source_raw_path}.filename();
+                    auto fetched = made ? core::Result<void>{std::unexpected(
+                                              core::Error{.code = core::ErrorCode::io,
+                                                          .message = made.message(),
+                                                          .context = {}})}
+                                        : fetch->second(copy, cancellation);
+                    if (!fetched) {
+                        fetch_failures.push_back(convert::ConvertedItemScan{
+                            .item_index = item.item_index,
+                            .source_raw_path = item.source_raw_path,
+                            .destination_raw_path = item.destination_raw_path,
+                            .state = convert::ConversionScanState::failed,
+                            .converted = std::nullopt,
+                            .source_revision = std::nullopt,
+                            .issue = std::move(fetched.error())});
+                        continue;
+                    }
+                    item.source_raw_path = copy.native();
+                    reachable.push_back(std::move(item));
+                }
+                scan_items = std::move(reachable);
+            }
             // The conversion core requires existing target directories; create
             // them up front so parallel workers never race directory creation.
             for (const auto& item : scan_items) {
@@ -951,6 +1013,15 @@ void ConvertDialog::startConversion() {
                     completed->store(update.completed_items);
                 },
                 cancellation);
+            if (fetched_folder) {
+                std::error_code removed;
+                std::filesystem::remove_all(*fetched_folder, removed);
+            }
+            if (scan) {
+                scan->items.insert(scan->items.end(),
+                                   std::make_move_iterator(fetch_failures.begin()),
+                                   std::make_move_iterator(fetch_failures.end()));
+            }
             return std::make_shared<core::Result<convert::ConversionScanResult>>(std::move(scan));
         }));
 }

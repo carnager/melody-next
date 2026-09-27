@@ -5,7 +5,12 @@
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/formats/probe.hpp"
 
+#include <curl/curl.h>
+
 #include <algorithm>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
 
 #include <utility>
 #include <vector>
@@ -34,6 +39,25 @@ template <typename T, typename Decode>
         return std::unexpected(unexpected_answer("a job"));
     }
     return decode(*result);
+}
+
+// Writes a download into its file, stopping when cancelled.
+struct Download {
+    std::FILE* file;
+    const core::CancellationToken* cancellation;
+};
+
+std::size_t write_download(char* data, std::size_t size, std::size_t count, void* user) {
+    auto* download = static_cast<Download*>(user);
+    return std::fwrite(data, size, count, download->file) * size;
+}
+
+int stop_download(void* user, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return static_cast<Download*>(user)->cancellation->is_cancellation_requested() ? 1 : 0;
+}
+
+[[nodiscard]] core::Error download_error(core::ErrorCode code, std::string message) {
+    return core::Error{.code = code, .message = std::move(message), .context = {}};
 }
 
 } // namespace
@@ -511,6 +535,83 @@ RemoteFileWork::publish(const operations::PreparationPlan& plan,
     }
     return outcome_of<operations::FilePublicationApplyResult>(
         *outcome, [](const Json& value) { return wire::decode_publication_apply_result(value); });
+}
+
+core::Result<void> RemoteFileWork::download_original(const std::string& raw_path,
+                                                     const std::filesystem::path& to,
+                                                     const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto ticket = (*connection)
+                      ->call("streams.ticket", Json{{"path", protocol::encode_raw_path(raw_path)},
+                                                    {"format", "original"}});
+    if (!ticket) {
+        return std::unexpected(std::move(ticket.error()));
+    }
+    if (!ticket->contains("port") || !ticket->at("port").is_number_integer() ||
+        !ticket->contains("query") || !ticket->at("query").is_string()) {
+        return std::unexpected(unexpected_answer("a download ticket"));
+    }
+    // The stream port is beside the one this connection uses; an engine
+    // reached through its socket is this machine's.
+    auto host = endpoint_.host.empty() ? std::string{"127.0.0.1"} : endpoint_.host;
+    if (host.find(':') != std::string::npos) {
+        host = "[" + host + "]";
+    }
+    const auto url = "http://" + host + ":" + std::to_string(ticket->at("port").get<int>()) +
+                     "/stream?" + ticket->at("query").get<std::string>();
+
+    auto part = to;
+    part += ".part";
+    struct Close {
+        void operator()(std::FILE* open) const { static_cast<void>(std::fclose(open)); }
+    };
+    std::unique_ptr<std::FILE, Close> file{std::fopen(part.c_str(), "wb")};
+    if (!file) {
+        return std::unexpected(
+            download_error(core::ErrorCode::io, "could not create " + part.string()));
+    }
+    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl{curl_easy_init(), curl_easy_cleanup};
+    if (!curl) {
+        return std::unexpected(download_error(core::ErrorCode::backend, "curl did not start"));
+    }
+    Download download{.file = file.get(), .cancellation = &cancellation};
+    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl.get(), CURLOPT_PROTOCOLS_STR, "http");
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, write_download);
+    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &download);
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, 10'000L);
+    curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, stop_download);
+    curl_easy_setopt(curl.get(), CURLOPT_XFERINFODATA, &download);
+    const auto performed = curl_easy_perform(curl.get());
+    long status = 0;
+    curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status);
+    const auto closed = std::fclose(file.release()) == 0;
+    std::error_code ignored;
+    if (cancellation.is_cancellation_requested()) {
+        std::filesystem::remove(part, ignored);
+        return std::unexpected(
+            download_error(core::ErrorCode::cancelled, "the download was cancelled"));
+    }
+    if (performed != CURLE_OK || status != 200 || !closed) {
+        std::filesystem::remove(part, ignored);
+        return std::unexpected(download_error(
+            core::ErrorCode::io,
+            performed != CURLE_OK
+                ? std::string{"the engine could not be reached: "} + curl_easy_strerror(performed)
+                : "the engine answered " + std::to_string(status)));
+    }
+    std::error_code renamed;
+    std::filesystem::rename(part, to, renamed);
+    if (renamed) {
+        std::filesystem::remove(part, ignored);
+        return std::unexpected(download_error(core::ErrorCode::io, renamed.message()));
+    }
+    return {};
 }
 
 core::Result<Json> RemoteFileWork::interrupted() {

@@ -130,7 +130,12 @@ sees changes.
    phone -- and changes nothing in the library, so it belongs where the
    user sits. For files of an engine elsewhere, Trackknife fetches the
    originals from that engine, as the phone downloads albums (ADR-0230),
-   and converts them here: no mount needed.
+   and converts them here: no mount needed. **Done:** a remote tab's files
+   reachable through the mount convert as before; the others are fetched
+   by `RemoteFileWork::download_original` (a `streams.ticket` for the file
+   as it is, then the stream port) into Trackknife's cache folder when
+   Convert starts, converted from there and deleted. The preview plans them
+   from what the engine knows, so it shows before anything is fetched.
 7. Trackknife's own path for writing library files goes; conversion, which
    writes only its own new files, stays.
 

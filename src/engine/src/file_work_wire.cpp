@@ -510,4 +510,226 @@ core::Result<loudness::LoudnessScanResult> decode_scan_result(const Json& value)
     return result;
 }
 
+namespace {
+
+constexpr std::array<std::pair<metadata::FieldProvenance, std::string_view>, 6> provenances{{
+    {metadata::FieldProvenance::cached_snapshot, "cached_snapshot"},
+    {metadata::FieldProvenance::annotation, "annotation"},
+    {metadata::FieldProvenance::embedded, "embedded"},
+    {metadata::FieldProvenance::stream, "stream"},
+    {metadata::FieldProvenance::segment, "segment"},
+    {metadata::FieldProvenance::sidecar, "sidecar"},
+}};
+
+[[nodiscard]] core::Result<std::vector<std::string>> texts_of(const Json& value,
+                                                             const std::string_view name) {
+    if (!value.is_array()) {
+        return std::unexpected(malformed(std::string{name} + " must be a list"));
+    }
+    std::vector<std::string> texts;
+    texts.reserve(value.size());
+    for (const auto& entry : value) {
+        auto text = decode_text(entry);
+        if (!text) {
+            return std::unexpected(std::move(text.error()));
+        }
+        texts.push_back(std::move(*text));
+    }
+    return texts;
+}
+
+[[nodiscard]] Json encode_texts(const std::vector<std::string>& texts) {
+    auto list = Json::array();
+    for (const auto& text : texts) {
+        list.push_back(encode_text(text));
+    }
+    return list;
+}
+
+[[nodiscard]] core::Result<std::optional<std::string>> optional_text_of(const Json& object,
+                                                                       std::string_view name) {
+    const auto* value = optional_member(object, name);
+    if (value == nullptr) {
+        return std::optional<std::string>{};
+    }
+    auto text = decode_text(*value);
+    if (!text) {
+        return std::unexpected(std::move(text.error()));
+    }
+    return std::optional{std::move(*text)};
+}
+
+} // namespace
+
+Json encode_text(const std::string_view text) {
+    if (protocol::displayable_text(text) == text) {
+        return std::string{text};
+    }
+    return Json{{"bytes", protocol::encode_raw_path(std::string{text})}};
+}
+
+core::Result<std::string> decode_text(const Json& value) {
+    if (value.is_string()) {
+        return value.get<std::string>();
+    }
+    if (const auto* bytes = optional_member(value, "bytes")) {
+        return bytes_of(*bytes, "bytes");
+    }
+    return std::unexpected(malformed("text must be a string or {bytes}"));
+}
+
+Json encode(const metadata::MetadataDocument& document) {
+    auto fields = Json::array();
+    for (const auto& field : document.fields) {
+        std::string_view provenance = "embedded";
+        for (const auto& [value, name] : provenances) {
+            if (value == field.provenance) {
+                provenance = name;
+            }
+        }
+        fields.push_back(Json{
+            {"canonical_name", encode_text(field.canonical_name)},
+            {"native_name", encode_text(field.native_name)},
+            {"values", encode_texts(field.values)},
+            {"language",
+             field.qualifier.language ? encode_text(*field.qualifier.language) : Json()},
+            {"description",
+             field.qualifier.description ? encode_text(*field.qualifier.description) : Json()},
+            {"provenance", std::string{provenance}}});
+    }
+    auto objects = Json::array();
+    for (const auto& object : document.unsupported_native_objects) {
+        objects.push_back(encode_text(object.identity));
+    }
+    return Json{{"fields", std::move(fields)}, {"unsupported_native_objects", std::move(objects)}};
+}
+
+core::Result<metadata::MetadataDocument> decode_document(const Json& value) {
+    auto fields = member(value, "fields");
+    if (!fields || !(*fields)->is_array()) {
+        return std::unexpected(malformed("a document's fields must be a list"));
+    }
+    metadata::MetadataDocument document;
+    for (const auto& entry : **fields) {
+        auto canonical = member(entry, "canonical_name");
+        auto native = member(entry, "native_name");
+        auto values = member(entry, "values");
+        auto provenance = member(entry, "provenance");
+        if (!canonical || !native || !values || !provenance) {
+            return std::unexpected(malformed("a field lacks its names, values or provenance"));
+        }
+        auto canonical_name = decode_text(**canonical);
+        auto native_name = decode_text(**native);
+        auto texts = texts_of(**values, "values");
+        auto language = optional_text_of(entry, "language");
+        auto description = optional_text_of(entry, "description");
+        if (!canonical_name || !native_name || !texts || !language || !description) {
+            return std::unexpected(malformed("a field's text is malformed"));
+        }
+        std::optional<metadata::FieldProvenance> found;
+        if ((*provenance)->is_string()) {
+            for (const auto& [kind, name] : provenances) {
+                if (name == (*provenance)->get_ref<const std::string&>()) {
+                    found = kind;
+                }
+            }
+        }
+        if (!found) {
+            return std::unexpected(malformed("a field's provenance is not known"));
+        }
+        document.fields.push_back(metadata::MetadataField{
+            .canonical_name = std::move(*canonical_name),
+            .native_name = std::move(*native_name),
+            .values = std::move(*texts),
+            .qualifier = {.language = std::move(*language),
+                          .description = std::move(*description)},
+            .provenance = *found});
+    }
+    if (const auto* objects = optional_member(value, "unsupported_native_objects")) {
+        auto identities = texts_of(*objects, "unsupported_native_objects");
+        if (!identities) {
+            return std::unexpected(std::move(identities.error()));
+        }
+        for (auto& identity : *identities) {
+            document.unsupported_native_objects.push_back({.identity = std::move(identity)});
+        }
+    }
+    return document;
+}
+
+Json encode(const metadata::MetadataCapabilities& capabilities) {
+    return Json{{"fields_readable", capabilities.fields_readable},
+                {"fields_writable", capabilities.fields_writable},
+                {"pictures_readable", capabilities.pictures_readable},
+                {"pictures_writable", capabilities.pictures_writable},
+                {"unknown_data_preserved_on_write", capabilities.unknown_data_preserved_on_write}};
+}
+
+core::Result<metadata::MetadataCapabilities> decode_capabilities(const Json& value) {
+    metadata::MetadataCapabilities capabilities;
+    for (const auto& [name, target] :
+         {std::pair{"fields_readable", &capabilities.fields_readable},
+          std::pair{"fields_writable", &capabilities.fields_writable},
+          std::pair{"pictures_readable", &capabilities.pictures_readable},
+          std::pair{"pictures_writable", &capabilities.pictures_writable},
+          std::pair{"unknown_data_preserved_on_write",
+                    &capabilities.unknown_data_preserved_on_write}}) {
+        auto found = member(value, name);
+        if (!found) {
+            return std::unexpected(std::move(found.error()));
+        }
+        auto flag = bool_of(**found, name);
+        if (!flag) {
+            return std::unexpected(std::move(flag.error()));
+        }
+        *target = *flag;
+    }
+    return capabilities;
+}
+
+Json encode(const metadata::LocalMetadataRead& read) {
+    return Json{{"path", protocol::encode_raw_path(read.raw_path)},
+                {"revision", encode(read.source_revision)},
+                {"document", encode(read.document)},
+                {"adapter_name", encode_text(read.adapter_name)},
+                {"capabilities", encode(read.capabilities)}};
+}
+
+core::Result<metadata::LocalMetadataRead> decode_metadata_read(const Json& value) {
+    auto path = member(value, "path");
+    auto revision = member(value, "revision");
+    auto document = member(value, "document");
+    auto adapter = member(value, "adapter_name");
+    auto capabilities = member(value, "capabilities");
+    if (!path || !revision || !document || !adapter || !capabilities) {
+        return std::unexpected(malformed("a read lacks its path, revision, document, adapter "
+                                         "or capabilities"));
+    }
+    auto raw_path = bytes_of(**path, "path");
+    auto observed = decode_revision(**revision);
+    auto decoded = decode_document(**document);
+    auto adapter_name = decode_text(**adapter);
+    auto abilities = decode_capabilities(**capabilities);
+    if (!raw_path) {
+        return std::unexpected(std::move(raw_path.error()));
+    }
+    if (!observed) {
+        return std::unexpected(std::move(observed.error()));
+    }
+    if (!decoded) {
+        return std::unexpected(std::move(decoded.error()));
+    }
+    if (!adapter_name) {
+        return std::unexpected(std::move(adapter_name.error()));
+    }
+    if (!abilities) {
+        return std::unexpected(std::move(abilities.error()));
+    }
+    return metadata::LocalMetadataRead{.raw_path = std::move(*raw_path),
+                                       .source_revision = *observed,
+                                       .document = std::move(*decoded),
+                                       .adapter_name = std::move(*adapter_name),
+                                       .capabilities = *abilities};
+}
+
 } // namespace trackknife::engine::wire

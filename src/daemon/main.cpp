@@ -12,6 +12,7 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
@@ -497,6 +498,7 @@ int main(int argc, char** argv) {
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
     trackknife::engine::register_file_work_jobs(job_catalogue);
+    trackknife::engine::register_file_work_methods(dispatcher);
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
     trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);

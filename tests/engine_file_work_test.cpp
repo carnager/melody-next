@@ -4,13 +4,16 @@
 // protocol exactly, and a scan asked of the engine gives what the same scan
 // gives run here.
 
+#include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/loudness/scan.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -240,6 +243,91 @@ void the_engine_measures_as_this_process_would(const std::filesystem::path& dire
     require(dispatcher.dispatch(none).error.has_value(), "so is a scan of nothing");
 }
 
+void documents_are_exact() {
+    namespace metadata = trackknife::metadata;
+    metadata::MetadataDocument document;
+    const std::array provenances{metadata::FieldProvenance::cached_snapshot,
+                                 metadata::FieldProvenance::annotation,
+                                 metadata::FieldProvenance::embedded,
+                                 metadata::FieldProvenance::stream,
+                                 metadata::FieldProvenance::segment,
+                                 metadata::FieldProvenance::sidecar};
+    for (const auto provenance : provenances) {
+        document.fields.push_back(metadata::MetadataField{
+            .canonical_name = "comment",
+            .native_name = "COMMENT",
+            .values = {"plain", std::string{"not text \xff\xfe"}, ""},
+            .qualifier = {.language = "eng", .description = std::nullopt},
+            .provenance = provenance});
+    }
+    document.unsupported_native_objects.push_back({.identity = "APIC:0"});
+    const auto decoded = wire::decode_document(over_the_wire(wire::encode(document)));
+    require(decoded && *decoded == document,
+            "a document round-trips: every provenance, a value that is not text, an empty one");
+    require(wire::encode_text("plain").is_string(), "text travels as text");
+    require(wire::encode_text(std::string{"\xff"}).is_object(), "bytes travel as bytes");
+}
+
+void the_engine_reads_as_this_process_would(const std::filesystem::path& directory,
+                                            const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    std::vector<std::string> paths;
+    for (const auto* name : {"tagged-tone-flac", "tagged-tone-mp3", "tagged-tone-opus",
+                             "tagged-tone-m4a", "container-chapters-mka", "rf64-tone-wav"}) {
+        paths.push_back(materialize(fixtures, name, directory / name).string());
+    }
+    paths.push_back((directory / "missing.flac").string());
+
+    protocol::Dispatcher dispatcher;
+    engine::register_file_work_methods(dispatcher);
+    auto encoded = protocol::Json::array();
+    for (const auto& path : paths) {
+        encoded.push_back(protocol::encode_raw_path(path));
+    }
+    const auto answer = dispatcher.dispatch(protocol::Request{
+        .id = 1, .method = "metadata.read", .params = over_the_wire({{"paths", encoded}})});
+    require(answer.result.has_value(), "the engine reads");
+    const auto files = over_the_wire(answer.result->at("files"));
+    require(files.size() == paths.size(), "one answer per path, in order");
+
+    bool read_one = false;
+    bool failed_one = false;
+    for (std::size_t index = 0; index < paths.size(); ++index) {
+        const auto here = metadata::read_local_metadata(paths[index]);
+        const auto& file = files[index];
+        if (here) {
+            require(file.contains("read"), "a file read here is read by the engine");
+            const auto there = wire::decode_metadata_read(file.at("read"));
+            require(there && *there == *here, "and exactly the same");
+            read_one = true;
+            continue;
+        }
+        failed_one = true;
+        require(file.contains("error"), "a file that fails here fails there");
+        const auto error = wire::decode_error(file.at("error"));
+        require(error && error->code == here.error().code, "with the same kind of error");
+        const auto revision = core::observe_local_source_revision(paths[index]);
+        if (here.error().code == core::ErrorCode::unsupported && revision) {
+            const auto there = wire::decode_revision(file.at("revision"));
+            require(there && *there == *revision,
+                    "and a file with no tags to read comes with its revision");
+        } else {
+            require(file.at("revision").is_null(), "a file that is not there has none");
+        }
+    }
+    require(read_one && failed_one, "both a read and a failure are covered");
+
+    auto too_many = protocol::Json::array();
+    for (std::size_t index = 0; index <= engine::metadata_read_limit; ++index) {
+        too_many.push_back(protocol::encode_raw_path(paths[0]));
+    }
+    require(dispatcher
+                .dispatch(protocol::Request{
+                    .id = 2, .method = "metadata.read", .params = {{"paths", too_many}}})
+                .error.has_value(),
+            "a read of too many paths is refused");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -248,6 +336,8 @@ int main(int argc, char** argv) {
                            ("trackknife-file-work-" + core::StableId::random().to_string());
     std::filesystem::create_directories(directory);
     encodings_are_exact();
+    documents_are_exact();
+    the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_measures_as_this_process_would(directory, argv[1]);
     std::filesystem::remove_all(directory);
     std::cout << "engine file work: ok\n";

@@ -263,6 +263,25 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
 core::Result<std::vector<StagedMetadataSource>>
 capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
                                   const core::CancellationToken& cancellation) {
+    return capture_uncached_metadata_sources(std::move(sources), local_metadata_file_access(),
+                                             cancellation);
+}
+
+MetadataFileAccess local_metadata_file_access() {
+    return MetadataFileAccess{
+        .read = [](const std::string& raw_path,
+                   const core::CancellationToken& cancellation) {
+            return read_local_metadata(raw_path, cancellation);
+        },
+        .revision = [](const std::string& raw_path) {
+            return core::observe_local_source_revision(raw_path);
+        }};
+}
+
+core::Result<std::vector<StagedMetadataSource>>
+capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const MetadataFileAccess& access,
+                                  const core::CancellationToken& cancellation) {
     std::map<std::string, LocalMetadataRead> captured;
     for (auto& source : sources) {
         if (cancellation.is_cancellation_requested()) {
@@ -273,14 +292,14 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
         }
         auto found = captured.find(source.raw_path);
         if (found == captured.end()) {
-            auto read = read_local_metadata(source.raw_path, cancellation);
+            auto read = access.read(source.raw_path, cancellation);
             if (!read) {
                 // Tagless decodable formats can still store gains in a sidecar.
                 // No native metadata baseline is claimed for these sources.
                 if (read.error().code != core::ErrorCode::unsupported) {
                     return std::unexpected(read.error());
                 }
-                auto revision = core::observe_local_source_revision(source.raw_path);
+                auto revision = access.revision(source.raw_path);
                 if (!revision)
                     return std::unexpected(revision.error());
                 source.source_revision = *revision;

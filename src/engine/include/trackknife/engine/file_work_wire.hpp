@@ -7,6 +7,8 @@
 #include "trackknife/core/result.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/loudness/scan.hpp"
+#include "trackknife/metadata/document.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/protocol/message.hpp"
 
 namespace trackknife::engine::wire {
@@ -43,5 +45,19 @@ using protocol::Json;
 
 [[nodiscard]] Json encode(const loudness::LoudnessScanResult& result);
 [[nodiscard]] core::Result<loudness::LoudnessScanResult> decode_scan_result(const Json& value);
+
+// Tag text is valid UTF-8 almost always, and travels as a JSON string then;
+// anything else travels as {"bytes": encoded}, so a value is never altered.
+[[nodiscard]] Json encode_text(std::string_view text);
+[[nodiscard]] core::Result<std::string> decode_text(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::MetadataDocument& document);
+[[nodiscard]] core::Result<metadata::MetadataDocument> decode_document(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::MetadataCapabilities& capabilities);
+[[nodiscard]] core::Result<metadata::MetadataCapabilities> decode_capabilities(const Json& value);
+
+[[nodiscard]] Json encode(const metadata::LocalMetadataRead& read);
+[[nodiscard]] core::Result<metadata::LocalMetadataRead> decode_metadata_read(const Json& value);
 
 } // namespace trackknife::engine::wire

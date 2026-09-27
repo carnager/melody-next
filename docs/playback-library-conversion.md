@@ -1,5 +1,11 @@
 # Playback, server library, working lists, conversion, and verification
 
+> **Partly historical.** Playback, the queue, Up Next, history and scrobbling
+> now belong to the engine that plays ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md)),
+> and the MPD server library is gone ([ADR-0224](adr/0224-retire-the-mpd-backend.md)).
+> The working-list, conversion and verification sections still describe what
+> Trackknife does. Current state: [unified engine](unified-engine.md).
+
 ADR-0058 unifies the authorities in Trackbench. ADR-0115 adds the optional
 [local library](local-library.md): chosen folders, background indexing,
 artist/album browsing, album and track search, and retained unavailable files.

@@ -1,5 +1,9 @@
 # Sources and research notes
 
+> The MPD and Melody references below informed the retired MPD client
+> ([ADR-0224](adr/0224-retire-the-mpd-backend.md)); they matter again only if
+> the MPD bridge (Phase 5 of the [unified engine](unified-engine.md)) is built.
+
 Accessed 2026-08-23 unless noted. These links describe observable behavior and
 standards; they are not licenses to copy proprietary implementation code or
 branding. ADR-0008 superseded the original foobar2000 scripting-compatibility

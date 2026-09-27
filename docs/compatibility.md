@@ -1,126 +1,121 @@
 # Compatibility and inspiration
 
-ADR-0058 makes Trackbench the primary workspace for two authority-bound
-contexts: MPD/Melody server work and foobar2000-inspired local-file work. The
-former standalone Trackknife MPD executable was retired in ADR-0071.
-Compatibility requirements attach to the authority and adapter, not to a
-permanent process split.
+Updated on 2026-09-27. Trackknife is one application, a client of engines
+(`melodyd`, ADR-0220): each engine owns its library, lists and playback, and
+Trackknife, the phone and `melody-cli` talk to it over protocol v1. The
+two-authority model -- an MPD side and a local side in one window, ADR-0058 --
+is retired, and with it the MPD client (ADR-0224).
 
-## MPD compatibility
+## Protocols
 
-Trackbench's MPD authority targets the documented MPD protocol. It discovers
-commands and tag
-types at connection time and must work with stock MPD without Melody
-extensions. The server remains authoritative for its database, current queue,
-playback, mixer/options, outputs, and stored playlists.
+**Trackknife decision:** the engines' own protocol, v1 (ADR-0222, ADR-0223),
+is the only one Trackknife and its clients speak. It is JSON lines over a unix
+socket or TCP; a TCP peer must give a password. It is versioned by the
+`protocol` number in `engine.info`, and a field added to a document is ignored
+by a client that does not know it, so older clients keep working (ADR-0236's
+`sequence` is such a field).
 
-Melody is a first-class server target because it speaks MPD. The MPD authority
-may use advertised Melody additions such as richer output state and exclusive
-output handoff, but those additions remain capability-gated and cannot change
-stock MPD behavior. Protocol fixtures name whether they come from official MPD
-documentation, stock MPD, or the local `../melody` implementation.
-
-**Trackknife decision:** an `idle` event invalidates cached state; it does not
-itself confirm the result of a command. A pending playback action is confirmed
-only when the refreshed status matches the requested state. A stale refresh
-must not visually roll back the action while later `player` events are pending;
-failure or a bounded confirmation timeout ends the pending presentation.
+**MPD** is not a compatibility target of Trackknife any more: it does not
+speak MPD, and a library that used to be an MPD server is now an engine on
+that machine. The opposite direction -- an engine answering MPD clients such
+as `mpc` or Cantata -- is Phase 5 of the engine plan, the MPD bridge. It has
+not started and nothing waits for it. **Proposal:** if it is built, it targets
+the documented MPD protocol and must work with stock MPD clients; MPD song ids
+and queue versions are derived from the engine's entry identities, not the
+other way round.
 
 ## Product relationship to foobar2000
 
-Trackbench is a spiritual successor to foobar2000, not a clone. It preserves
-the high-value outcomes: tabbed playlist/working surfaces, fast interaction,
-gapless local playback, ReplayGain, broad formats, powerful metadata workflows,
-configurable views, conversion, and predictable bulk operations. It does not
-reproduce foobar2000's UI, component ABI, private configuration formats, or
-scripting quirks. The MPD authority's reference points are different: Cantata's
-interaction density and MPD/Melody protocol compatibility, not foobar2000.
+Trackknife is a spiritual successor to foobar2000, not a clone. It keeps what
+makes foobar2000 valuable: tabbed lists, fast interaction, gapless playback,
+ReplayGain, broad format support, powerful metadata work, configurable views,
+conversion, and predictable bulk operations. It does not reproduce
+foobar2000's interface, component ABI, private configuration formats, or
+scripting quirks.
 
 ## Formatting language: no external compatibility promise
 
 ADR-0008 replaces the former 1:1 foobar2000 title-formatting target. The
-shared `tkfmt-1` language, used by both authorities, uses the familiar
-`%field%` and `$function(arguments)` shape also used by MusicBrainz Picard,
-but the project's own specification and executable corpus are normative.
+`tkfmt-1` language uses the familiar `%field%` and `$function(arguments)`
+shape also used by MusicBrainz Picard, but the project's own specification
+([title-formatting.md](title-formatting.md)) and its test corpus are
+normative. The same language serves Trackknife's views, the engine
+(`playback.format`, `catalogue.find`), `melody-cli --format`, and conversion
+and file naming.
 
 Consequences:
 
 - foobar2000 and Picard scripts may look similar but are not promised to run;
-- there is no separate foobar truth flag or optional-section behavior;
-- Picard metadata-mutating functions such as `$set` are intentionally absent
-  from `tkfmt-1`; ADR-0065's bounded paste importer may translate a documented
-  subset into ordinary Trackbench rules without executing Picard code;
-- missing fields, escaping, integer conversion, multi-values, and every
-  built-in follow `docs/title-formatting.md`;
-- an importer or compatibility dialect must remain separate and must not
-  change `tkfmt-1`.
+- there is no separate foobar truth flag or optional-section behaviour;
+- Picard's metadata-changing functions such as `$set` are intentionally
+  absent; ADR-0065's paste importer may translate a documented subset into
+  ordinary Trackknife rules without running Picard code;
+- missing fields, escaping, integer conversion, multi-values and every
+  built-in follow `title-formatting.md`;
+- an importer or compatibility dialect stays separate and must not change
+  `tkfmt-1`.
 
-## Search/query syntax
+## Search and query syntax
 
-Foobar-style query syntax is not a compatibility requirement. MPD's advertised
-search/filter behavior serves the MPD authority. Local structured queries are
+Foobar-style query syntax is not a compatibility requirement. Queries are
 `tkq-1` (ADR-0150): Trackknife's own versioned dialect with a foobar-inspired
-keyword surface, specified normatively in
-[query-language.md](query-language.md). Persisted queries follow the same
-contract as formatting expressions — exact source plus dialect, dialect
-version, and compiler schema. Formatting expressions and queries remain
-different languages; a query may embed `tkfmt-1` for sort keys and expression
-predicates.
+keyword surface, specified in [query-language.md](query-language.md). The
+engine evaluates them, for every client. Persisted queries follow the same
+contract as formatting expressions: exact source, dialect, dialect version and
+compiler schema. A query may embed `tkfmt-1`, for sort keys
+(`SORT BY $num(%tracknumber%,2)`) and expression predicates.
 
 ## Metadata and workflow parity
 
-Trackbench needs equivalent outcomes for mass editing, arbitrary and
-multi-value tags, value derivation, safe file operations, ReplayGain,
-conversion, library views, playlists, and integrity checks. Equivalent outcomes
-do not require matching dialog layouts, menu locations, preset file formats, or
+Trackknife needs equivalent outcomes for mass editing, arbitrary and
+multi-value tags, derived values, safe file operations, ReplayGain,
+conversion, library views, lists and integrity checks. Equivalent outcomes do
+not require matching dialog layouts, menu locations, preset file formats or
 implementation details.
 
-## Deliberately unsupported compatibility surfaces
+## Deliberately unsupported
 
 - foobar2000 component binaries or SDK ABI;
-- Default UI/Columns UI layouts, themes, and color-control strings;
-- proprietary configuration databases and `.fpl` as native storage;
-- Windows-only path, shell, output, or codec behavior;
+- Default UI/Columns UI layouts, themes and colour-control strings;
+- proprietary configuration databases, and `.fpl` as native storage;
+- Windows-only path, shell, output or codec behaviour;
 - undocumented title-formatting and query quirks;
-- Picard plugin APIs and metadata-mutating tagging scripts.
+- Picard plugin APIs and metadata-changing tagging scripts;
+- acting as an MPD client.
 
 The ADR-0065 paste importer helps migrate a small documented cleanup subset by
-translating it into Trackbench's versioned models. It does not make the
+translating it into Trackknife's versioned models. It does not make the
 external language or source text canonical. Per ADR-0066, imported deletion
-targets the exact adapter-exposed native name; Trackbench does not interpret a
-legacy/custom spelling as an alias of a conventional field.
+targets the exact native field name; Trackknife does not read a legacy or
+custom spelling as an alias of a conventional field.
 
-## Rich source references: retained lesson
+## Identity: an entry is not a path
 
-A playlist and library need more than a path. Both Trackbench authorities use
-one shared logical record:
+A list needs more than a path. ADR-0221 gives every list entry two identities
+and never lets one stand in for the other:
 
-```text
-TrackRef
-  source kind: remote MPD | mapped local | local-only
-  remote identity: profile ID + exact MPD URI + optional queue song ID
-  local identity: SourceId + subsong/segment + observed filesystem identity
-  cached arbitrary ordered multi-value metadata
-  cached technical information
-  cached loudness with provenance
-  availability and freshness state
-```
+- **Entry identity** -- which slot in this list. Assigned when the entry is
+  added, kept through reordering, gone when it is removed. It tells the same
+  track queued twice apart, and it is what the engine's queue, Up Next and
+  resume name.
+- **Track identity** -- which piece of music. A hash over a fixed set of
+  metadata fields; it survives a re-encode or a move, and ratings and history
+  hang on it.
 
-A path or MPD queue position is mutable data, not identity. When a local move
-or rename succeeds in Trackbench, its lists, local playback, statistics, and
-sidecar references follow one logical transaction. Updating the MPD database
-remains a separate visible server-authority operation and is never an implicit
-part of a local publication.
+A path is data, not identity. When a move or rename succeeds, the library,
+lists, queue and statistics follow it as one logical change, on every engine
+that holds the file (`list.relocate`, ADR-0233).
 
 Metadata precedence is:
 
-1. freshly read embedded/container data;
-2. explicit Trackbench sidecar overrides;
-3. a current library record, once Trackbench gains a local index;
-4. a playlist snapshot only while the source is unavailable or unscanned.
+1. freshly read embedded or container data;
+2. explicit Trackknife sidecar overrides (`.tkmeta`);
+3. the engine's current library record;
+4. what a list entry carries -- the tags whoever queued it gave -- only while
+   the file is unavailable or unread.
 
-Reconciliation compares source identity and revision before replacing cached
-data, and the UI exposes stale/fallback state.
+Reconciliation compares identity and revision before replacing cached data,
+and the UI shows when it is presenting stale or fallback data.
 
 ## Versioned persistence
 
@@ -132,5 +127,5 @@ Persist every formatting expression with:
 - typed usage context;
 - optional human name.
 
-Never persist only a compiled AST. Parser implementations evolve, while users
-must retain editable source and stable behavior.
+Never persist only a compiled AST. Parsers change; users must keep editable
+source and stable behaviour. The same rule holds for `tkq-1` queries.

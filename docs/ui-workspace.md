@@ -1,5 +1,13 @@
 # Workspace, panels, views, and performance
 
+> **Written for the two-authority model.** Where this says MPD tab, server
+> library or active authority, read: another engine's tab or library. Tabs
+> now belong to engines, several may be open side by side, and there is no
+> authority switch ([ADR-0234](adr/0234-engines-are-connections.md)); the MPD
+> client is gone ([ADR-0224](adr/0224-retire-the-mpd-backend.md)). The layout
+> rules, performance budgets and UI-thread prohibitions still apply. Current
+> state: [unified engine](unified-engine.md).
+
 ## Application scope
 
 ADR-0115 adds a local source switch with **Folders** and **Library**. Folders

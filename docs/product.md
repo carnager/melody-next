@@ -1,51 +1,53 @@
 # Product definition
 
-The Trackknife project builds **Trackbench**, the Qt 6 application in
-`src/bench`, installed as `trackknife`. It combines an MPD/Melody client with
-local playback and file tools in one Linux window.
+**Trackknife** is a Qt 6 application for Linux, built from `src/bench` and
+installed as `trackknife`. **Melody** is the family of programs around it: the
+engine `melodyd`, output agents, `melody-cli`, `melody-watch` and the Android
+app.
 
-The active tab decides which player the controls operate. In an MPD tab, the
-server owns the queue, library, playlists, and outputs. In a local tab,
-Trackbench plays files through PipeWire and offers tagging, MusicBrainz lookup,
-ReplayGain, conversion, and file operations. Local editing commands are never
-available for server queue entries.
+An engine owns a library, its lists and playback, and keeps playing when every
+client is closed (ADR-0220). Trackknife is a client of engines -- this
+computer's, and any others you list, each with its own library and lists
+(ADR-0234). Sound comes out of output agents: an engine's own speakers,
+another computer, a phone. Trackknife also does the collection work --
+tagging, MusicBrainz lookup, ReplayGain, conversion and file operations -- on
+files it can reach, including an engine's files over a mount.
 
-The main references are foobar2000 for collection tools and Cantata for MPD
-browsing. The useful ideas are tabbed lists, fast keyboard access, gapless
-playback, and control over your own files. The app has its own interface and
-formatting language; it does not load foobar2000 components.
+The main reference is foobar2000 for collection tools. The useful ideas are
+tabbed lists, fast keyboard access, gapless playback, and control over your
+own files. The app has its own interface and formatting language; it does not
+load foobar2000 components.
 
-A collection can be used directly from folders or added to the optional local
-index. Scanning is explicit. Searching the index, opening results, and browsing
-albums should not require rereading the collection.
+Files can be used directly from folders or added to an engine's library.
+Scanning is explicit. Searching the library, opening results, and browsing
+albums do not reread the collection.
 
 The sections below describe product priorities and requirements. For what is
 currently implemented, including restrictions, see the [feature matrix](feature-matrix.md).
 
 ## Priorities
 
-### Priority 1: MPD playback and library browsing
+### Priority 1: playback and library browsing on every engine
 
-- Reliable profiles, authentication, reconnect, capability discovery, and
-  visible connection state.
-- Fast server-library browsing and search with MusicBrainz-aware sorting and
+- Reliable connections to several engines at once, with passwords,
+  reconnection and visible state; engines found on the network.
+- Fast library browsing and search with MusicBrainz-aware sorting and
   grouping where metadata permits it.
 - Responsive transport, now playing, seek, volume, playback modes, ReplayGain
-  mode, and output selection.
-- Live-queue editing using stable song IDs and incremental updates.
-- Multiple queue/list tabs for scratch work, named lists, stored playlists, and
-  the live server queue.
+  mode, and choosing where the music plays.
+- Gapless playback through FFmpeg, exact seeking, and following changes other
+  clients make -- another window, the phone, a script.
+- Tabs for scratch work, named lists and searches, each belonging to one
+  engine, with the same operations on every engine's lists.
 - A default layout that works with mouse or keyboard without configuration.
 
-Support standard MPD first. Show Melody's additional outputs and controls when
-the server advertises them. Local playback keeps its own player and outputs.
+### Priority 2: playing anywhere
 
-### Priority 2: local playback workspace
-
-- Local playback through FFmpeg and PipeWire: gapless transitions, exact seeking,
-  per-list progression, volume, and device selection.
-- Album-grouped track lists that can open files directly, without a library scan.
-- Consistent tabs, shortcuts, and command access across local and MPD views.
+- Output agents: an engine plays on its own speakers, on another computer, or
+  on a phone, and moves the music between them where it is.
+- The phone as remote control and as speaker, with Opus over mobile data and
+  albums kept for offline listening.
+- One engine plays at a time: starting one stops the other.
 
 ### Priority 3: metadata, MusicBrainz, and ReplayGain
 
@@ -70,33 +72,25 @@ the server advertises them. Local playback keeps its own player and outputs.
 - Channel/bit-depth policy, dither, metadata/artwork mapping, optional DSP,
   verification, and output ReplayGain.
 - Complete path/conflict preview and atomic publication, including into an
-  MPD music root by plain filesystem access.
-
-### Priority 5: Melody output endpoint
-
-Trackbench can later register as a Melody streaming endpoint
-and play the server-provided stream through the shared local audio engine. This
-comes after the existing local and server playback paths are finished.
+  engine's music folder over a mount.
 
 ## Established requirements
 
-- One native Linux Qt 6 Widgets application, with no Wine dependency. The
-  separate MPD application was retired in ADR-0071.
-- Standard MPD compatibility before optional Melody extensions.
-- MPD is authoritative for its database, current queue, stored playlists,
-  transport, and outputs. The MPD client is one of potentially several
-  connected clients and must follow changes made by the others.
-- Only the server controls issue MPD commands. The local library caches file
-  metadata; a local index entry does not mean the file belongs to MPD's library.
-- Tabs keep queues and working lists accessible, with persistence appropriate
-  to the kind of list.
+- One native Linux Qt 6 Widgets application, with no Wine dependency.
+- The engine is authoritative for its library, lists, queue, playback and
+  outputs. Every client is one of several and must follow changes made by the
+  others. Features are built once, not once per location (ADR-0220).
+- The UI asks and the engine answers: Trackknife holds no library database of
+  its own and does not decide what an engine plays.
+- Tabs keep lists accessible; a tab belongs to one engine, and a list mixing
+  engines is not planned.
 - Local paths remain raw OS paths internally and need not be valid UTF-8.
 - MusicBrainz identifiers, artist credits, sort names, release/disc identity,
   and related metadata remain intact and influence useful default organization.
-- One versioned, pure `tkfmt-1` language serves display, sorting, grouping, and
-  conversion/file naming in both authorities.
-- FFmpeg is the common decode/encode backbone; PipeWire is the primary local
-  output backend.
+- One versioned, pure `tkfmt-1` language serves display, sorting, grouping,
+  conversion and file naming, in Trackknife, the engine and `melody-cli`.
+- FFmpeg is the common decode/encode backbone; PipeWire is the primary audio
+  output on Linux.
 - Long work is asynchronous, cancellable, progress-reporting, and bounded.
 - Metadata, ReplayGain, conversion, and filesystem writes use complete previews,
   revision checks, conflict detection, verification, and recovery journals.
@@ -104,17 +98,16 @@ comes after the existing local and server playback paths are finished.
 
 ## Product principles
 
-### Keep server and local work separate
+### One implementation, whichever engine
 
-The two players share views, shortcuts, and formatting rules. The active tab
-must make it clear which player a command will affect. Moving a local list
-entry must not change an MPD queue or move a file on disk.
+A list on this computer's engine and one on a NAS have the same operations.
+What differs is only which engine a tab's list came from, and a tab says so.
+Moving a list entry never moves a file on disk.
 
 ### Make lists useful for ongoing work
 
 Tabs let someone keep a playlist, review search results, or set aside an album
-for tagging. Local lists persist. The live MPD queue follows the server, and
-stored playlists remain server-owned.
+for tagging. Lists live in their engine, so every client sees the same ones.
 
 ### Include the collection tools
 
@@ -177,8 +170,8 @@ and fingerprinting require an explicit request.
 These are requirements for the finished interface; the command palette and
 job center are still on the roadmap.
 
-- The default window makes both server and local work available without
-  building a layout first.
+- The default window makes every engine's library and lists available
+  without building a layout first.
 - Important actions have a menu or command-palette entry and a keyboard path.
 - Track lists support selection, rearrangement, add-next/end, removal, crop,
   transfer between tabs, sort, reverse, randomize, and total duration.
@@ -191,20 +184,20 @@ job center are still on the roadmap.
 
 ## Anti-goals
 
-The project is not an MPD server, a streaming-service shop, a DAW, a waveform
-editor, or a mastering suite. It does not reproduce foobar2000's interface,
-component ABI, or scripting behavior.
+The project is not a streaming-service shop, a DAW, a waveform editor, or a
+mastering suite. It does not reproduce foobar2000's interface, component ABI,
+or scripting behavior.
 
-It must not require an index before files can be used, mix server entries and
-local files in a queue, or infer permission to edit a local file from a server
-path. Metadata cannot be reduced to one string per field. Decoding a format
+It must not require an index before files can be used, mix engines' entries
+in one queue, or infer permission to edit a file from another machine's path. Metadata cannot be reduced to one string per field. Decoding a format
 does not establish support for writing it, and collection work must not block
 the UI thread.
 
 ## Primary users and jobs
 
-An MPD listener needs to connect, browse, manage playlists and the queue, and
-choose outputs. The app must keep up when another client changes the server.
+A listener needs to connect to their engines, browse, manage lists and the
+queue, and choose where it plays -- from the desktop, the phone or a script.
+Each client must keep up when another changes something.
 
 Someone maintaining a collection needs to listen to new files, identify an
 album, edit tags and covers, scan ReplayGain, and rename or convert the files.
@@ -216,11 +209,10 @@ output loudness values.
 
 ## First public releases
 
-The first releases need reliable MPD connections, browse/search, playlists,
-queue editing, transport, and output controls. Local playback must be gapless,
-and tagging, MusicBrainz matching, ReplayGain, and conversion must be dependable
-with their documented formats.
+The first releases need reliable engine connections, browse and search,
+lists, queue editing, transport and output choice. Playback must be gapless,
+and tagging, MusicBrainz matching, ReplayGain and conversion must be
+dependable with their documented formats.
 
-The local library already exists, but it was not a release prerequisite.
-Plugins, a Melody playback endpoint, and an upload protocol are also not
-prerequisites for releasing the player and file tools.
+Plugins, an MPD bridge and a terminal client are not prerequisites for
+releasing the player and file tools.

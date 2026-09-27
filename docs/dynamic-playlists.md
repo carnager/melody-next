@@ -1,7 +1,7 @@
 # Dynamic playlists
 
 Choose **File → Dynamic playlists**. The dropdown at the top picks the
-library: this computer's or the server's. It starts on the library of the tab
+library: one per engine, by its name. It starts on the library of the tab
 you opened it from, like Search. Saved definitions are shared, so the same rule
 can run against either library, and what it finds plays on that library's
 engine.
@@ -68,7 +68,6 @@ fresh selection keeps Last.fm’s ranking order. If your library has too few
 matches to vary the selection, the result reports that all available matches
 are included. Missing matches can leave fewer tracks than requested.
 
-Local results come entirely from the index. Use Library Refresh first if new
-files are not indexed. Closing the dynamic editor leaves saved definitions and
-opened snapshots intact. Changing between local and MPD authority closes it;
-reopen from File for the new library.
+Results come entirely from the chosen engine's library. Use Library Refresh
+first if new files are not indexed. Closing the dynamic editor leaves saved
+definitions and opened snapshots intact.

@@ -1,15 +1,16 @@
 # Local music library
 
-The local library is an optional index of folders you choose. You can still
-open files through **Folders** without adding them to the library. MPD keeps
-its own library on the server.
+Each engine has a library: an index of the folders you chose for it. The
+sidebar has a **Library** tab per engine -- this computer's, and each engine
+listed under Settings. You can still open files through **Folders** without
+adding them to a library.
 
 Press **Refresh** to scan for changes. Starting the app, searching, or opening
 results uses the existing index and does not start a scan.
 
 ## Using the library
 
-1. Select a local queue or list, then choose **Library** in the sidebar.
+1. Select a list, then choose **Library** in the sidebar.
 2. Open **Folders…**, add one or more music folders, then press **Refresh** to
    scan them in the background. The footer shows progress; **Stop** cancels the scan.
 3. Click an artist to browse albums, and an album to browse files. Enter toggles
@@ -19,17 +20,15 @@ results uses the existing index and does not start a scan.
    search word must match, ignoring Unicode letter case. Punctuation is literal.
 
 Artist rows show the number of albums on the second line. The counts load in
-the background, before you expand an artist. Local and MPD library trees use
-the same spacing and expansion animation.
+the background, before you expand an artist.
 
-Drag artists, albums, or tracks into a local queue/list's contents to copy them
+Drag artists, albums, or tracks into a list's contents to copy them
 at the insertion marker. Ctrl/Shift selects multiple entries. Right-click
 offers **Append to current list**, **Insert next in current list**,
 **Replace list and play**, **Open in new tab**, and branch **Expand/Collapse**.
-Append, insert-next, and replace/play are also available as inline row buttons,
-using the same controls as the MPD library. Insert next follows the playing row
-in that list, otherwise the selected row or the beginning of an unselected list.
-The MPD queue does not accept local library drops.
+Append, insert-next, and replace/play are also available as inline row buttons.
+Insert next follows the playing row in that list, otherwise the selected row or
+the beginning of an unselected list.
 
 Right-click a local track and choose **Locate artist** or **Locate album** to
 open its indexed entry in the Library sidebar. Navigation uses the exact file
@@ -42,7 +41,7 @@ keep their title without a numeric prefix. Album rows show embedded covers or
 fall back to sibling `cover`, `folder`, or `front` JPEG/PNG files. Covers load
 one at a time for visible albums and keep the record placeholder when absent.
 No network lookup or library scan is triggered. Press **Refresh** after changing
-folder images outside Trackbench; in-app operation notifications refresh cached
+folder images outside Trackknife; in-app operation notifications refresh cached
 covers automatically.
 
 Children and search results arrive in pages of 200; **Show more…** loads the
@@ -84,7 +83,7 @@ The [query reference](query-language.md) describes all operators and limits.
 **Browse presets** in the Search window offers grouped starting points for years,
 decades, artists, genres, ratings, listening, audio properties and missing tags.
 Parameterized presets ask for a value and fill the editable Query field. They
-work in local and supported Melody scopes; unsupported server choices are hidden.
+work on every engine's library.
 Choosing a built-in does not update a saved search. Use **Save as…** to keep your
 own version. Missing ReplayGain presets check cached tags, not sidecar analysis.
 
@@ -122,8 +121,7 @@ skipped. Scans stop after one million visited entries and report incompleteness.
 Cancellation and incomplete traversal retain previously indexed entries.
 
 Migration 35 adds track and album ratings (ADR-0179): the `local_ratings`
-table stores an integer 0-10 keyed by sha256 content-identity hashes that are
-byte-compatible with the Melody server, and each track row carries its
+table stores an integer 0-10 keyed by sha256 content-identity hashes, and each track row carries its
 precomputed track and album hash so queries join stored ratings into track
 rows and album aggregates. Because identity follows tags rather than paths,
 ratings survive rescans, renames, and moves without relocation bookkeeping; a
@@ -184,9 +182,8 @@ different filesystem; they cannot distinguish same-device bind-mount substitutio
 The `local-library` tests use real FLAC files to check indexing, query results,
 raw filenames, refresh, cancellation, offline folders, deletion cleanup, and
 metadata/path updates. They also cover album counts, cached search tabs,
-artwork, navigation through paged results, and keeping local actions out of the
-MPD queue. The related `bench-main-window`, `queue-table-view`, and
-`server-library-tree-model` suites check the workspace behavior.
+artwork, and navigation through paged results. The related `bench-main-window`
+and `queue-table-view` suites check the workspace behavior.
 
 Older test runs and sanitizer results are recorded in ADRs 0115–0118 and 0126.
 These tests do not establish scan-time budgets for large collections or slow
@@ -198,4 +195,5 @@ Use **Settings → Library**, or the sidebar’s **Folders…** shortcut, to add
 remove indexed folders and see their scan/availability status. Changes save
 immediately; removing a folder leaves its files untouched. Only **Refresh** in
 the Library sidebar starts a filesystem scan. These folders are separate from
-Folders-browser bookmarks and the MPD server’s music-folder mapping.
+Folders-browser bookmarks and from where an engine elsewhere's music folder is
+mounted here (**Settings → Engine → Engines elsewhere**).

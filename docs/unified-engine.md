@@ -4,7 +4,7 @@ Plan for [ADR-0220](adr/0220-unified-engine-and-remote-agents.md): one engine
 process owning catalogue, mutation and playback; thin clients that may be
 remote; audio produced by output agents.
 
-## Where it stands (2026-09-24)
+## Where it stands (2026-09-27)
 
 The plan below is kept as written, with notes where later decisions changed
 it. In short:
@@ -14,10 +14,18 @@ it. In short:
   agents. The agent is C++, not Go (ADR-0228), and engines find and play for
   each other without configuration (ADR-0229).
 - **Phase 5, the MPD bridge, hasn't started**, and nothing waits for it.
-- **Phase 6 is mostly done**: one catalogue, ratings and history in the
-  engine. Trackknife still does the file work itself, over the mount.
+- **Phase 6 is done** as far as its own check goes: `grep -rn supportsCommand
+  src` finds nothing. One catalogue, ratings and history in the engine; lists
+  live in the engine too (ADR-0233), with Trackknife's own copy still to go.
+  Trackknife still does the file work itself, over the mount.
+- **Several engines at once** (ADR-0234): Trackknife holds a connection per
+  engine, lists name their engine by a stable id, and the speakers of this
+  computer and of the phone are offered to every engine listed.
 - **Phase 7** has `melody-cli` and the Android client (ADR-0231), with Opus
-  streams and offline albums for the phone (ADR-0230). There is no TUI yet.
+  streams and offline albums for the phone (ADR-0230), and `melody-watch`
+  for NAS changes (ADR-0232). There is no TUI yet.
+- **Playback states are numbered** (ADR-0236), so a client holding an event
+  and a command's answer keeps the later.
 - **Repository layout is settled:** everything lives in this repository.
   The Go tree isn't needed any more.
 

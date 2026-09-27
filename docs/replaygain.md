@@ -1,5 +1,11 @@
 # ReplayGain and loudness
 
+> **Older in wording.** Analysis and writing are still done by Trackknife;
+> playback gain is applied by the engine that plays, on whichever output it
+> plays. The Trackbench/Trackknife split and MPD's ReplayGain mode described
+> below are retired ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md),
+> [ADR-0224](adr/0224-retire-the-mpd-backend.md)).
+
 ## Application scope
 
 Per ADR-0025, ReplayGain analysis, tag/sidecar storage, and local playback

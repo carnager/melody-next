@@ -1,5 +1,13 @@
 # Metadata, tagging, artwork, and file operations
 
+> **Still current in substance, older in wording.** The file work described
+> here -- tags, artwork, MusicBrainz, moves, recovery -- is still done by
+> Trackknife, on files it can reach: this computer's, or an engine's through a
+> mount. Where it says Local Queue authority or MPD Queue, read: any list, and
+> the MPD client that no longer exists ([ADR-0224](adr/0224-retire-the-mpd-backend.md)).
+> After a move, every engine holding the file is told (`list.relocate`,
+> [ADR-0233](adr/0233-lists-live-in-the-engine.md)).
+
 ## Application scope
 
 This document specifies Trackbench's Local Queue authority. Per ADR-0058, all

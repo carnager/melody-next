@@ -9,14 +9,15 @@ Right-click selected tracks and choose **Queue next** to put them first, or
 results offer the same actions. Selected tracks retain their order, and
 intentional duplicates are separate requests. The old track-selection append /
 insert-next actions are removed; use **Send to tab** for ordinary list edits.
-Every list tab, this computer's or a server's, has the same track menu.
+Every list tab, whichever engine it belongs to, has the same track menu.
 
 Click **Up Next · N** in the transport, or press **Ctrl+Shift+U**, to open its
-side panel. The panel shows the current authority, pending tracks, and normal
+side panel. The panel shows the engine it belongs to, pending tracks, and normal
 playback destination. Its rows stay single-line, with artist, title, and length.
 Drag one or more rows to reorder requests, or drag tracks from a queue/list
 tab into the panel at the insertion line. Adding requests leaves the source
-list intact; local and server tracks stay in their respective authorities.
+list intact. Up Next belongs to the engine that is playing and holds that
+engine's tracks only.
 Dropping onto the transport button appends.
 The compact toolbar and right-click menu offer Remove, Move up/down, Clear,
 and Undo for pending requests. Ctrl/Shift-click selects multiple rows; Delete
@@ -26,7 +27,7 @@ double-click starts a selected request now. **Return to playlist now** skips the
 active request, clears pending requests, and returns immediately.
 
 The resizable right-side panel uses the same flat rows as normal queues. Its
-footer identifies the authority and return destination. Opening and closing
+footer names the engine and the return destination. Opening and closing
 animate briefly and preserve the expanded width, including when toggled midway.
 Turn motion off in **Settings → General → Animate panel opening and closing**.
 

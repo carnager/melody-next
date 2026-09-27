@@ -1,5 +1,12 @@
 # Open decisions
 
+> **Partly settled since.** Questions framed around the MPD authority or the
+> two-authority workspace were settled by the unified engine
+> ([ADR-0220](adr/0220-unified-engine-and-remote-agents.md),
+> [ADR-0224](adr/0224-retire-the-mpd-backend.md),
+> [ADR-0234](adr/0234-engines-are-connections.md)); the engine's own open
+> questions are listed in [unified engine](unified-engine.md).
+
 Accepted foundations are recorded in ADRs through 0174. ADR-0058 supersedes
 ADR-0025's permanent process split: Trackbench is the primary workspace and
 hosts authority-bound MPD Queue and Local Queue tabs. The active primary tab

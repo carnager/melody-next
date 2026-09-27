@@ -163,26 +163,33 @@ sees changes.
 7. Trackknife's own path for writing library files goes; conversion, which
    writes only its own new files, stays.
 
-## Naming layouts and move destinations are the engine's (decided 2026-09-28)
+## Naming layouts are global; move destinations are the engine's (decided 2026-09-28)
 
-A move destination is a folder on one machine, and a naming layout is what
-any client that moves files must name them with -- the CLI and the phone
-too, not only Trackknife. Both belong to the engine that moves the files:
+A move destination is a folder on one machine. A naming layout is a rule
+that is the same everywhere -- and what any client that moves files must
+name them with, the CLI and the phone too, not only Trackknife.
 
-- Each engine keeps its own naming layouts and move destinations, in its
-  workspace beside its lists (`layouts.*`, `destinations.*`); every client
-  reads and saves them there. This computer's engine shares Trackknife's
-  database, so the ones saved today are already its own.
-- Whatever shows or picks them names the engine. Properties offers only the
-  layouts and destinations of the engine the selected tracks belong to --
-  never a mixed list; the windows that manage them are titled for it ("Move
-  destinations on gemenon"); choosing a destination folder browses that
-  engine's folders (this computer's with the usual file dialog, an engine
-  elsewhere's through `folders.list`).
-- Conversion runs here, so it uses this computer's engine's.
-- An engine elsewhere starts with none; its manage windows offer to copy
-  this computer's -- layouts as they are, destinations only through a
-  configured mount, translated to that engine's paths.
+- **Naming layouts are global presets.** They are made and edited in
+  Trackknife, as today, and every engine holds a copy: Trackknife hands its
+  whole set to each engine when it connects and whenever one changes (as
+  the AcoustID key and rating options are handed over), replacing the
+  engine's. Clients that move files through an engine name them with the
+  engine's copy, so the CLI and phone have them with Trackknife closed;
+  they use them and do not edit them, so the copies never need merging.
+- **Move destinations are the engine's.** Each engine keeps its own, in its
+  workspace beside its lists (`destinations.*`); every client reads and
+  saves them there. This computer's engine shares Trackknife's database, so
+  the ones saved today are already its own.
+- Whatever shows or picks destinations names the engine. Properties offers
+  only those of the engine the selected tracks belong to -- never a mixed
+  list; the window that manages them is titled for it ("Move destinations
+  on gemenon"); choosing a destination folder browses that engine's folders
+  (this computer's with the usual file dialog, an engine elsewhere's
+  through `folders.list`).
+- Conversion runs here, so it uses this computer's destinations.
+- An engine elsewhere starts with no destinations; its window offers to
+  copy this computer's that lie under a configured mount, translated to
+  that engine's paths.
 
 ## Decided with it (2026-09-27)
 

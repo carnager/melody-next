@@ -71,6 +71,15 @@ window tests for these workflows keep passing unchanged, and are the check.
 The index, lists, ratings and history change in the same step as the write,
 on the engine that did it.
 
+**As built, stage 1:** the plan is built by the client, from what the
+engine reads (`metadata.read`), with the metadata library's own planner --
+the one the dialogs already use -- rather than by a `plan.create` on the
+engine. The engine holds it to the same contract: `metadata.apply` refuses
+a plan with blocking issues, and re-checks every file's revision before
+writing it. The dialogs keep their code; only where they read, measure and
+write moves (`FileWorkTools`, `MetadataFileAccess`). `plan.create` stays
+available if a client without the planner ever needs it.
+
 ## Stages
 
 Each leaves the application working and Trackknife's own path in place for
@@ -78,7 +87,11 @@ what has not moved yet, and each is held to the rule above: nothing a user
 sees changes.
 
 1. **ReplayGain scans** in the engine: a job with a result preview and little
-   UI; results written to tags, CUE sheets or sidecars as today.
+   UI; results written to tags, CUE sheets or sidecars as today. **Done for the
+   ReplayGain dialog** (the track menu's ReplayGain…): `metadata.read`,
+   the `loudness.scan` and `metadata.apply` jobs, startup recovery and
+   `metadata.interrupted`, and `RemoteFileWork` as the client's end. The
+   Properties window's scan button follows with stage 3, the tagger.
 2. **Ratings into tags**, as an engine job over a selection or the library
    (the tag mapping is its own decision).
 3. **Tag edits** -- the spreadsheet tagger on the plan/commit protocol.

@@ -1041,7 +1041,7 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         switch (query.kind) {
         case LibraryEntryKind::artist:
             columns = "artist,artist,artist,'',count(*),sum(available),0,"
-                      "count(DISTINCT album_key),'',0,'',0,-1";
+                      "count(DISTINCT album_key),'',0,'',0,-1,'',0";
             order = query.random ? " GROUP BY artist ORDER BY random()"
                                  : " GROUP BY artist ORDER BY artist COLLATE NOCASE";
             break;
@@ -1052,7 +1052,9 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             columns = "album_key,min(album),min(artist),min(album),count(*),sum(available),0,1,"
                       "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
                       "WHERE hash=album_rating_hash),0),min(date),max(added),"
-                      "CASE WHEN min(duration_ms)<0 THEN -1 ELSE sum(duration_ms) END";
+                      "CASE WHEN min(duration_ms)<0 THEN -1 ELSE sum(duration_ms) END,"
+                      "album_rating_hash,coalesce((SELECT rating FROM local_ratings "
+                      "WHERE hash=album_rating_hash),0)";
             order = query.random ? " GROUP BY album_key ORDER BY random()"
                     : query.newest_first
                         ? " GROUP BY album_key ORDER BY max(added) DESC,min(artist) COLLATE "
@@ -1063,7 +1065,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
         case LibraryEntryKind::track:
             columns = "raw_path,title,artist,album,1,available,track,1,rating_hash,"
                       "coalesce((SELECT rating FROM local_ratings WHERE hash=rating_hash),0),date,"
-                      "added,duration_ms";
+                      "added,duration_ms,album_rating_hash,"
+                      "coalesce((SELECT rating FROM local_ratings WHERE hash=album_rating_hash),0)";
             order = query.random ? " ORDER BY random()"
                     : query.newest_first
                         ? " ORDER BY added DESC,album_key,disc,track,raw_path"
@@ -1101,6 +1104,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
             page.entries.back().date = statement.bytes(10);
             page.entries.back().added = statement.number(11);
             page.entries.back().duration_ms = statement.number(12);
+            page.entries.back().album_rating_hash = statement.bytes(13);
+            page.entries.back().album_rating = static_cast<unsigned>(statement.number(14));
             if (query.kind == LibraryEntryKind::track) {
                 page.entries.back().title = page.entries.back().label;
             }

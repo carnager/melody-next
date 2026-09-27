@@ -127,7 +127,8 @@ melody-cli next track riders storm    # plays after the current track
 melody-cli lists                      # the engine's lists, saved and working
 melody-cli play list road trip        # one of them, by name or its words
 melody-cli output "Pixel 10 Pro"
-melody-cli rate 4                     # stars for what plays, 0-5
+melody-cli rating 8                   # what plays, 1-10; 0 clears
+melody-cli albumrating 9              # its album
 melody-cli love                       # on Last.fm, with the engine's account
 melody-cli --json watch               # a line each time something changes
 melody-cli watch --all                # the same, for whichever engine plays
@@ -139,7 +140,7 @@ Trackknife formats with. The engine has each track's whole library row, so
 every tag is a field (`%replaygain_track_gain%`, `%genre%`, `%composer%`, ...),
 the technicals come through `$info(codec)`, `$info(samplerate)`,
 `$info(bitspersample)`, `$info(channels)`, and `%path%`, `%length%` and
-`%rating%` (1-10, half stars; absent when unrated) are there too. `current`
+`%rating%` (1-10; absent when unrated) are there too. `current`
 adds `%playback_state%`, `%playback_time%` and `%playback_remaining%`.
 `find` takes a [Trackknife query](query-language.md) -- plain words, or
 `artist IS "Alice in Chains" SORT BY $num(%tracknumber%,2)` -- and prints a

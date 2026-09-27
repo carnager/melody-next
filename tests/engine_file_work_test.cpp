@@ -9,6 +9,7 @@
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/engine/metadata_services.hpp"
+#include "trackknife/engine/naming_methods.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/rating_tags.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
@@ -968,6 +969,78 @@ void other_players_ratings_are_imported(const std::filesystem::path& directory,
     require(rating(flac) == 8U, "and four stars are taken as an 8");
 }
 
+// Naming layouts copied in whole; this engine's own move destinations; and
+// its folders, to choose one.
+void naming_and_destinations_are_the_engines(const std::filesystem::path& directory) {
+    namespace operations = trackknife::operations;
+    auto workspace = engine::Workspace::open(directory / "naming.sqlite3");
+    require(workspace.has_value(), "a workspace");
+    std::vector<protocol::Event> events;
+    protocol::Dispatcher dispatcher;
+    engine::register_naming_methods(
+        dispatcher, *workspace,
+        [&events](const protocol::Event& event) { events.push_back(event); });
+    const auto call = [&dispatcher](const std::string& method, protocol::Json params) {
+        return dispatcher.dispatch(
+            protocol::Request{.id = 1, .method = method, .params = over_the_wire(params)});
+    };
+    const auto layout = [](std::string name, std::string basename) {
+        return trackknife::persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                       .name = std::move(name),
+                                                       .dialect = {},
+                                                       .relative_directory_expression = "%artist%",
+                                                       .basename_expression = std::move(basename),
+                                                       .sanitization_policy = {"linux", 1U}}};
+    };
+    auto first = layout("By title", "%title%");
+    auto second = layout("Numbered", "$num(%tracknumber%,2) %title%");
+    auto set = call("layouts.set", {{"layouts", {wire::encode(first), wire::encode(second)}}});
+    require(set.result && set.result->at("layouts").size() == 2U, "the layouts are copied in");
+    // Replaced whole: one gone, one renamed to the other's old name.
+    second.profile.name = "By title";
+    set = call("layouts.set", {{"layouts", {wire::encode(second)}}});
+    require(set.result && set.result->at("layouts").size() == 1U, "and replaced whole");
+    const auto held = wire::decode_saved_layout(set.result->at("layouts").front());
+    require(held && *held == second, "exactly");
+
+    const trackknife::persistence::SavedDestinationProfile destination{
+        .id = core::StableId::random(),
+        .profile =
+            operations::DestinationProfile{.schema_version = 1U,
+                                           .name = "Sorted",
+                                           .root_raw_path = "/srv/music/sorted",
+                                           .containment_policy = {"lexical-beneath-root", 1U}}};
+    auto saved = call("destinations.save", {{"destination", wire::encode(destination)}});
+    require(saved.result && saved.result->at("destinations").size() == 1U, "a destination is kept");
+    require(!events.empty() && events.back().name == "destinations.changed",
+            "and every client hears of it");
+    auto removed = call("destinations.remove", {{"id", destination.id.to_string()}});
+    require(removed.result && removed.result->at("destinations").empty(), "and forgotten");
+
+    const auto root = directory / "browse";
+    std::filesystem::create_directories(root / "b");
+    std::filesystem::create_directories(root / "a");
+    std::ofstream{root / "file.flac"} << "not a folder";
+    std::filesystem::create_directory_symlink(root / "a", root / "link");
+    const auto listed = call("folders.list", {{"path", protocol::encode_raw_path(root.string())}});
+    require(listed.result.has_value(), "a folder is listed");
+    std::vector<std::string> names;
+    for (const auto& name : listed.result->at("folders")) {
+        names.push_back(*protocol::decode_raw_path(name.get<std::string>()));
+    }
+    require(names == std::vector<std::string>{"a", "b"}, "its folders, in order, without links");
+    require(protocol::decode_raw_path(listed.result->at("parent").get<std::string>()) ==
+                core::Result<std::string>{directory.string()},
+            "with its parent");
+    require(
+        call("folders.list", {{"path", protocol::encode_raw_path("relative")}}).error.has_value(),
+        "only absolute paths");
+    const auto top = call("folders.list", {{"path", protocol::encode_raw_path("/")}});
+    require(top.result && top.result->at("parent").is_null(), "the root has no parent");
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1310,6 +1383,7 @@ int main(int argc, char** argv) {
     ratings_in_files_are_imported(directory, argv[1]);
     ratings_are_written_where_players_read_them(directory, argv[1]);
     other_players_ratings_are_imported(directory, argv[1]);
+    naming_and_destinations_are_the_engines(directory);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

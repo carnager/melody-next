@@ -18,6 +18,7 @@
 #include "trackknife/operations/output_path_plan.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/message.hpp"
 
 namespace trackknife::engine::wire {
@@ -133,5 +134,13 @@ decode_publication_apply_result(const Json& value);
 [[nodiscard]] Json encode(const operations::FilePublicationApplyProgress& progress);
 [[nodiscard]] core::Result<operations::FilePublicationApplyProgress>
 decode_publication_apply_progress(const Json& value);
+
+// Naming layouts and move destinations as saved: {id, profile}.
+[[nodiscard]] Json encode(const persistence::SavedOutputLayoutProfile& saved);
+[[nodiscard]] core::Result<persistence::SavedOutputLayoutProfile>
+decode_saved_layout(const Json& value);
+[[nodiscard]] Json encode(const persistence::SavedDestinationProfile& saved);
+[[nodiscard]] core::Result<persistence::SavedDestinationProfile>
+decode_saved_destination(const Json& value);
 
 } // namespace trackknife::engine::wire

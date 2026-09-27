@@ -119,12 +119,12 @@ void encodings_are_exact() {
     require(decoded_revision && *decoded_revision == revision, "a revision round-trips");
 
     // Raw path bytes that are not text, a segment and a subsong.
-    const loudness::LoudnessScanItem item{.item_index = 7,
-                                          .raw_path = std::string{"/music/\xff\xfe.flac"},
-                                          .selection = {.stream_index = 1, .subsong_index = 3},
-                                          .range = trackknife::formats::SampleRange{
-                                              .start_sample = 44100, .end_sample = 88200},
-                                          .album_key = std::string{"key\x01\xff"}};
+    const loudness::LoudnessScanItem item{
+        .item_index = 7,
+        .raw_path = std::string{"/music/\xff\xfe.flac"},
+        .selection = {.stream_index = 1, .subsong_index = 3},
+        .range = trackknife::formats::SampleRange{.start_sample = 44100, .end_sample = 88200},
+        .album_key = std::string{"key\x01\xff"}};
     const auto decoded_item = wire::decode_scan_item(over_the_wire(wire::encode(item)));
     require(decoded_item && *decoded_item == item, "a scan item round-trips, bytes and all");
 
@@ -134,20 +134,21 @@ void encodings_are_exact() {
         .item_index = 0,
         .raw_path = "/music/short.flac",
         .state = loudness::LoudnessScanState::analyzed,
-        .loudness = loudness::TrackLoudness{.integrated_lufs =
-                                                -std::numeric_limits<double>::infinity(),
-                                            .sample_peak = 0.123456789012345678,
-                                            .true_peak = std::numeric_limits<double>::quiet_NaN()},
+        .loudness =
+            loudness::TrackLoudness{.integrated_lufs = -std::numeric_limits<double>::infinity(),
+                                    .sample_peak = 0.123456789012345678,
+                                    .true_peak = std::numeric_limits<double>::quiet_NaN()},
         .opus = true,
         .source_revision = revision,
         .issue = std::nullopt});
-    result.tracks.push_back(loudness::LoudnessTrackScan{.item_index = 1,
-                                                        .raw_path = "/music/gone.flac",
-                                                        .state = loudness::LoudnessScanState::failed,
-                                                        .loudness = std::nullopt,
-                                                        .opus = false,
-                                                        .source_revision = std::nullopt,
-                                                        .issue = error});
+    result.tracks.push_back(
+        loudness::LoudnessTrackScan{.item_index = 1,
+                                    .raw_path = "/music/gone.flac",
+                                    .state = loudness::LoudnessScanState::failed,
+                                    .loudness = std::nullopt,
+                                    .opus = false,
+                                    .source_revision = std::nullopt,
+                                    .issue = error});
     result.albums.push_back(loudness::LoudnessAlbumScan{.album_key = "album",
                                                         .item_indexes = {0, 1},
                                                         .integrated_lufs = std::nullopt,
@@ -169,16 +170,25 @@ void encodings_are_exact() {
 }
 
 void the_engine_measures_as_this_process_would(const std::filesystem::path& directory,
-                                                const std::filesystem::path& fixtures) {
+                                               const std::filesystem::path& fixtures) {
     const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "one.flac");
     const auto opus = materialize(fixtures, "loudness-tone-opus", directory / "two.opus");
     const std::vector<loudness::LoudnessScanItem> items{
-        {.item_index = 0, .raw_path = flac.string(), .selection = {}, .range = std::nullopt,
+        {.item_index = 0,
+         .raw_path = flac.string(),
+         .selection = {},
+         .range = std::nullopt,
          .album_key = std::string{"album"}},
-        {.item_index = 1, .raw_path = opus.string(), .selection = {}, .range = std::nullopt,
+        {.item_index = 1,
+         .raw_path = opus.string(),
+         .selection = {},
+         .range = std::nullopt,
          .album_key = std::string{"album"}},
-        {.item_index = 2, .raw_path = (directory / "missing.flac").string(), .selection = {},
-         .range = std::nullopt, .album_key = std::nullopt},
+        {.item_index = 2,
+         .raw_path = (directory / "missing.flac").string(),
+         .selection = {},
+         .range = std::nullopt,
+         .album_key = std::nullopt},
     };
     const loudness::LoudnessScanOptions options{.measure_true_peak = true,
                                                 .maximum_parallelism = 2};
@@ -238,11 +248,11 @@ void the_engine_measures_as_this_process_would(const std::filesystem::path& dire
     require(measured->albums.size() == 1U, "and the two share one album");
 
     // A request the engine cannot run fails at submit, not in a job.
-    const protocol::Request bad{
-        .id = 2,
-        .method = "job.submit",
-        .params = protocol::Json{{"job", "loudness.scan"},
-                                 {"params", {{"items", {{{"item_index", 0}}}}}}}};
+    const protocol::Request bad{.id = 2,
+                                .method = "job.submit",
+                                .params =
+                                    protocol::Json{{"job", "loudness.scan"},
+                                                   {"params", {{"items", {{{"item_index", 0}}}}}}}};
     require(dispatcher.dispatch(bad).error.has_value(), "a malformed item is refused at submit");
     const protocol::Request none{
         .id = 3, .method = "job.submit", .params = protocol::Json{{"job", "loudness.scan"}}};
@@ -252,19 +262,17 @@ void the_engine_measures_as_this_process_would(const std::filesystem::path& dire
 void documents_are_exact() {
     namespace metadata = trackknife::metadata;
     metadata::MetadataDocument document;
-    const std::array provenances{metadata::FieldProvenance::cached_snapshot,
-                                 metadata::FieldProvenance::annotation,
-                                 metadata::FieldProvenance::embedded,
-                                 metadata::FieldProvenance::stream,
-                                 metadata::FieldProvenance::segment,
-                                 metadata::FieldProvenance::sidecar};
+    const std::array provenances{
+        metadata::FieldProvenance::cached_snapshot, metadata::FieldProvenance::annotation,
+        metadata::FieldProvenance::embedded,        metadata::FieldProvenance::stream,
+        metadata::FieldProvenance::segment,         metadata::FieldProvenance::sidecar};
     for (const auto provenance : provenances) {
-        document.fields.push_back(metadata::MetadataField{
-            .canonical_name = "comment",
-            .native_name = "COMMENT",
-            .values = {"plain", std::string{"not text \xff\xfe"}, ""},
-            .qualifier = {.language = "eng", .description = std::nullopt},
-            .provenance = provenance});
+        document.fields.push_back(
+            metadata::MetadataField{.canonical_name = "comment",
+                                    .native_name = "COMMENT",
+                                    .values = {"plain", std::string{"not text \xff\xfe"}, ""},
+                                    .qualifier = {.language = "eng", .description = std::nullopt},
+                                    .provenance = provenance});
     }
     document.unsupported_native_objects.push_back({.identity = "APIC:0"});
     const auto decoded = wire::decode_document(over_the_wire(wire::encode(document)));
@@ -353,10 +361,10 @@ struct Jobs {
 
     // Submits and waits: the outcome, or the submit's refusal.
     [[nodiscard]] protocol::Json run(const std::string& job, const protocol::Json& params) {
-        const auto answer = dispatcher.dispatch(protocol::Request{
-            .id = 1,
-            .method = "job.submit",
-            .params = over_the_wire({{"job", job}, {"params", params}})});
+        const auto answer = dispatcher.dispatch(
+            protocol::Request{.id = 1,
+                              .method = "job.submit",
+                              .params = over_the_wire({{"job", job}, {"params", params}})});
         if (answer.error) {
             return protocol::Json{{"refused", answer.error->message}};
         }
@@ -418,7 +426,8 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
     const auto stale = jobs.run("metadata.apply", {{"plan", wire::encode(*plan)}});
     const auto refused = wire::decode_apply_result(stale.at("result"));
     require(refused && refused->committed_source_count() == 0U &&
-                refused->sources.front().state == trackknife::operations::MetadataApplySourceState::failed,
+                refused->sources.front().state ==
+                    trackknife::operations::MetadataApplySourceState::failed,
             "a file changed since the preview is not written");
     const auto kept = metadata::read_local_metadata(flac);
     require(kept && kept->source_revision == written->source_revision, "and is left as it is");
@@ -427,7 +436,8 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
     auto blocked = *plan;
     blocked.sources.front().issues.push_back(metadata::MetadataWritePlanIssue{
         .kind = metadata::MetadataWritePlanIssueKind::source_changed,
-        .error = core::Error{.code = core::ErrorCode::conflict, .message = "changed", .context = {}},
+        .error =
+            core::Error{.code = core::ErrorCode::conflict, .message = "changed", .context = {}},
         .field_index = std::nullopt,
         .item_indexes = {0},
         .blocking = true});
@@ -437,11 +447,12 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
             "so is no plan at all");
     // A clean journal: nothing to recover, nothing to show the user.
     const auto recovery = engine::recover_file_work(directory / "engine.sqlite3", jobs.catalogue);
-    require(!recovery.error && recovery.recovered == 0U, "finished writes leave nothing to recover");
+    require(!recovery.error && recovery.recovered == 0U,
+            "finished writes leave nothing to recover");
     protocol::Dispatcher methods;
     engine::register_file_work_methods(methods, directory / "engine.sqlite3", recovery);
-    const auto interrupted = methods.dispatch(
-        protocol::Request{.id = 9, .method = "metadata.interrupted", .params = protocol::Json::object()});
+    const auto interrupted = methods.dispatch(protocol::Request{
+        .id = 9, .method = "metadata.interrupted", .params = protocol::Json::object()});
     require(interrupted.result && interrupted.result->at("interrupted").empty() &&
                 interrupted.result->at("error").is_null(),
             "and no interrupted work is reported");
@@ -480,28 +491,30 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     }
     (*server)->start();
 
-    engine::RemoteFileWork remote{protocol::Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}}};
+    engine::RemoteFileWork remote{
+        protocol::Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}}};
     require(remote.supported(), "an engine with file work says so");
     const auto access = remote.access();
     const auto here = metadata::read_local_metadata(flac);
     const auto there = access.read(flac, {});
-    require(here && there && *here == *there, "a file read through the engine is the file read here");
+    require(here && there && *here == *there,
+            "a file read through the engine is the file read here");
     const auto revision = access.revision(flac);
     require(revision && *revision == here->source_revision, "and so is its revision");
     require(!access.read((directory / "absent.flac").string(), {}),
             "a file that is not there fails through the engine too");
 
-    const std::vector<loudness::LoudnessScanItem> items{
-        {.item_index = 0, .raw_path = flac, .selection = {}, .range = std::nullopt,
-         .album_key = std::nullopt}};
+    const std::vector<loudness::LoudnessScanItem> items{{.item_index = 0,
+                                                         .raw_path = flac,
+                                                         .selection = {},
+                                                         .range = std::nullopt,
+                                                         .album_key = std::nullopt}};
     std::size_t reported = 0;
-    const auto measured = remote.scan(items, {.measure_true_peak = false, .maximum_parallelism = 1},
-                                      [&reported](const loudness::LoudnessScanProgress&) {
-                                          ++reported;
-                                      },
-                                      {});
-    const auto local = loudness::scan_loudness(items, {.measure_true_peak = false,
-                                                       .maximum_parallelism = 1});
+    const auto measured =
+        remote.scan(items, {.measure_true_peak = false, .maximum_parallelism = 1},
+                    [&reported](const loudness::LoudnessScanProgress&) { ++reported; }, {});
+    const auto local =
+        loudness::scan_loudness(items, {.measure_true_peak = false, .maximum_parallelism = 1});
     require(measured && local, "a scan runs through the engine and here");
     require_same(*local, *measured, "and measures the same");
     require(reported >= 1U, "reporting its progress");
@@ -539,7 +552,8 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
     auto old = engine::Server::listen(old_socket, bare);
     require(old.has_value(), "an old engine listens");
     (*old)->start();
-    engine::RemoteFileWork older{protocol::Endpoint{.socket = old_socket, .host = {}, .port = 0, .token = {}}};
+    engine::RemoteFileWork older{
+        protocol::Endpoint{.socket = old_socket, .host = {}, .port = 0, .token = {}}};
     require(!older.supported(), "an engine without file work says it has none");
     (*old)->stop();
 }

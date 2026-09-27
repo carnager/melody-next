@@ -54,39 +54,39 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database,
 
 void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
                                 FileWorkRecovery recovery) {
-    dispatcher.on("metadata.interrupted", [database = std::move(database),
-                                           recovery = std::move(recovery)](
-                                              const Json&) -> core::Result<Json> {
-        auto interrupted = Json::array();
-        std::optional<core::Error> error = recovery.error;
-        if (!database.empty()) {
-            auto opened = persistence::SqliteMetadataOperationJournal::open(database);
-            auto incomplete = opened ? opened->load_incomplete()
-                                     : core::Result<std::vector<
-                                           operations::MetadataOperationJournalRecord>>{
-                                           std::unexpected(opened.error())};
-            if (!incomplete) {
-                error = std::move(incomplete.error());
-            } else {
-                for (const auto& record : *incomplete) {
-                    if (record.state !=
-                        operations::MetadataOperationJournalState::needs_reconciliation) {
-                        continue;
+    dispatcher.on(
+        "metadata.interrupted",
+        [database = std::move(database),
+         recovery = std::move(recovery)](const Json&) -> core::Result<Json> {
+            auto interrupted = Json::array();
+            std::optional<core::Error> error = recovery.error;
+            if (!database.empty()) {
+                auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+                auto incomplete =
+                    opened ? opened->load_incomplete()
+                           : core::Result<std::vector<operations::MetadataOperationJournalRecord>>{
+                                 std::unexpected(opened.error())};
+                if (!incomplete) {
+                    error = std::move(incomplete.error());
+                } else {
+                    for (const auto& record : *incomplete) {
+                        if (record.state !=
+                            operations::MetadataOperationJournalState::needs_reconciliation) {
+                            continue;
+                        }
+                        interrupted.push_back(
+                            Json{{"id", record.id.to_string()},
+                                 {"path", protocol::encode_raw_path(record.source_raw_path)},
+                                 {"message", record.failure ? Json(protocol::displayable_text(
+                                                                  record.failure->message))
+                                                            : Json()}});
                     }
-                    interrupted.push_back(
-                        Json{{"id", record.id.to_string()},
-                             {"path", protocol::encode_raw_path(record.source_raw_path)},
-                             {"message", record.failure ? Json(protocol::displayable_text(
-                                                              record.failure->message))
-                                                        : Json()}});
                 }
             }
-        }
-        return Json{{"recovered", recovery.recovered},
-                    {"error", error ? wire::encode(*error) : Json()},
-                    {"interrupted", std::move(interrupted)}};
-    });
-
+            return Json{{"recovered", recovery.recovered},
+                        {"error", error ? wire::encode(*error) : Json()},
+                        {"interrupted", std::move(interrupted)}};
+        });
 
     dispatcher.on("metadata.read", [](const Json& params) -> core::Result<Json> {
         const auto paths = params.find("paths");

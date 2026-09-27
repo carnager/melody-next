@@ -81,6 +81,7 @@ void BenchMainWindow::initializePersistence() {
     // Its own connection: the engine serves one connection in order, so a
     // transport command behind a library query would wait for it.
     localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
+    watchFileWork(localEngine());
     transport_ = localPlayback();
     connect(localPlayback(), &EnginePlayback::changed, this, [this] {
         followIfStartedElsewhere(localPlayback());

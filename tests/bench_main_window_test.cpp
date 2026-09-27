@@ -8489,14 +8489,24 @@ void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
 void BenchMainWindowTest::contextReplayGainScansAndApplies_data() {
     QTest::addColumn<bool>("cached");
     QTest::addColumn<bool>("embedded");
-    QTest::newRow("imported") << false << false;
-    QTest::newRow("cached-sidecar") << true << false;
-    QTest::newRow("cached-embedded") << true << true;
+    // ADR-0237: done by the engine holding the files, or -- an engine older
+    // than file work -- by this process; the same dialog, the same result.
+    QTest::addColumn<bool>("through_engine");
+    for (const bool engine : {true, false}) {
+        const auto suffix = engine ? "" : "-by-this-process";
+        QTest::newRow(qPrintable(QStringLiteral("imported%1").arg(QLatin1String{suffix})))
+            << false << false << engine;
+        QTest::newRow(qPrintable(QStringLiteral("cached-sidecar%1").arg(QLatin1String{suffix})))
+            << true << false << engine;
+        QTest::newRow(qPrintable(QStringLiteral("cached-embedded%1").arg(QLatin1String{suffix})))
+            << true << true << engine;
+    }
 }
 
 void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     QFETCH(bool, cached);
     QFETCH(bool, embedded);
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto first =
@@ -8563,12 +8573,20 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
         view->selectAll();
     }
 
+    // This build's engine does file work; once it has said so, the dialog
+    // goes through it -- unless it is taken as an older one.
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    if (!through_engine) {
+        window.localEngine().does_file_work = false;
+    }
     auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
     QVERIFY(action != nullptr);
     action->trigger();
     QDialog* dialog = nullptr;
     QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog"))) !=
                 nullptr);
+    QCOMPARE(dialog->property("trackknife-file-work").toString(),
+             through_engine ? QStringLiteral("engine") : QString{});
     auto* grouping =
         dialog->findChild<QComboBox*>(QStringLiteral("bench-replaygain-dialog-grouping"));
     auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));

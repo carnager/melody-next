@@ -289,16 +289,18 @@ core::Result<MetadataWritePlan> build_metadata_write_plan(
     return build_metadata_write_plan(
         selection, patches,
         MetadataFileAccess{.read = reader,
-                           .revision = [](const std::string& raw_path) {
-                               return core::observe_local_source_revision(raw_path);
-                           }},
+                           .revision =
+                               [](const std::string& raw_path) {
+                                   return core::observe_local_source_revision(raw_path);
+                               }},
         cancellation, options);
 }
 
-core::Result<MetadataWritePlan> build_metadata_write_plan(
-    const StagedMetadataSelection& selection, const StagedMetadataPatchSet& patches,
-    const MetadataFileAccess& access, const core::CancellationToken& cancellation,
-    const MetadataWritePlanOptions& options) {
+core::Result<MetadataWritePlan>
+build_metadata_write_plan(const StagedMetadataSelection& selection,
+                          const StagedMetadataPatchSet& patches, const MetadataFileAccess& access,
+                          const core::CancellationToken& cancellation,
+                          const MetadataWritePlanOptions& options) {
     const auto& reader = access.read;
     if (cancellation.is_cancellation_requested()) {
         return cancelled();

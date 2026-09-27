@@ -41,7 +41,8 @@ namespace {
     return found == object.end() || found->is_null() ? nullptr : &*found;
 }
 
-[[nodiscard]] core::Result<std::uint64_t> unsigned_of(const Json& value, const std::string_view name) {
+[[nodiscard]] core::Result<std::uint64_t> unsigned_of(const Json& value,
+                                                      const std::string_view name) {
     if (value.is_number_unsigned()) {
         return value.get<std::uint64_t>();
     }
@@ -225,9 +226,9 @@ core::Result<core::LocalSourceRevision> decode_revision(const Json& value) {
 }
 
 Json encode(const formats::AudioSourceSelection& selection) {
-    return Json{{"stream_index", selection.stream_index ? Json(*selection.stream_index) : Json()},
-                {"subsong_index",
-                 selection.subsong_index ? Json(*selection.subsong_index) : Json()}};
+    return Json{
+        {"stream_index", selection.stream_index ? Json(*selection.stream_index) : Json()},
+        {"subsong_index", selection.subsong_index ? Json(*selection.subsong_index) : Json()}};
 }
 
 core::Result<formats::AudioSourceSelection> decode_selection(const Json& value) {
@@ -235,9 +236,8 @@ core::Result<formats::AudioSourceSelection> decode_selection(const Json& value) 
         return std::unexpected(malformed("a selection is an object"));
     }
     formats::AudioSourceSelection selection;
-    for (const auto& [name, target] :
-         {std::pair{"stream_index", &selection.stream_index},
-          std::pair{"subsong_index", &selection.subsong_index}}) {
+    for (const auto& [name, target] : {std::pair{"stream_index", &selection.stream_index},
+                                       std::pair{"subsong_index", &selection.subsong_index}}) {
         if (const auto* index = optional_member(value, name)) {
             auto number = signed_of(*index, name);
             if (!number || *number < std::numeric_limits<int>::min() ||
@@ -276,12 +276,12 @@ core::Result<formats::SampleRange> decode_range(const Json& value) {
 }
 
 Json encode(const loudness::LoudnessScanItem& item) {
-    return Json{{"item_index", item.item_index},
-                {"path", protocol::encode_raw_path(item.raw_path)},
-                {"selection", encode(item.selection)},
-                {"range", item.range ? encode(*item.range) : Json()},
-                {"album_key",
-                 item.album_key ? Json(protocol::encode_raw_path(*item.album_key)) : Json()}};
+    return Json{
+        {"item_index", item.item_index},
+        {"path", protocol::encode_raw_path(item.raw_path)},
+        {"selection", encode(item.selection)},
+        {"range", item.range ? encode(*item.range) : Json()},
+        {"album_key", item.album_key ? Json(protocol::encode_raw_path(*item.album_key)) : Json()}};
 }
 
 core::Result<loudness::LoudnessScanItem> decode_scan_item(const Json& value) {
@@ -289,8 +289,9 @@ core::Result<loudness::LoudnessScanItem> decode_scan_item(const Json& value) {
     auto path = member(value, "path");
     auto selection = member(value, "selection");
     if (!index || !path || !selection) {
-        return std::unexpected(
-            std::move(!index ? index.error() : !path ? path.error() : selection.error()));
+        return std::unexpected(std::move(!index  ? index.error()
+                                         : !path ? path.error()
+                                                 : selection.error()));
     }
     auto item_index = unsigned_of(**index, "item_index");
     auto raw_path = bytes_of(**path, "path");
@@ -360,26 +361,25 @@ Json encode(const loudness::LoudnessScanResult& result) {
                                               ? encode_double(*track.loudness->true_peak)
                                               : Json()}};
         }
-        tracks.push_back(
-            Json{{"item_index", track.item_index},
-                 {"path", protocol::encode_raw_path(track.raw_path)},
-                 {"state", std::string{scan_state_name(track.state)}},
-                 {"loudness", std::move(loudness)},
-                 {"opus", track.opus},
-                 {"source_revision",
-                  track.source_revision ? encode(*track.source_revision) : Json()},
-                 {"issue", encode_optional_error(track.issue)}});
+        tracks.push_back(Json{
+            {"item_index", track.item_index},
+            {"path", protocol::encode_raw_path(track.raw_path)},
+            {"state", std::string{scan_state_name(track.state)}},
+            {"loudness", std::move(loudness)},
+            {"opus", track.opus},
+            {"source_revision", track.source_revision ? encode(*track.source_revision) : Json()},
+            {"issue", encode_optional_error(track.issue)}});
     }
     auto albums = Json::array();
     for (const auto& album : result.albums) {
-        albums.push_back(Json{
-            {"album_key", protocol::encode_raw_path(album.album_key)},
-            {"item_indexes", album.item_indexes},
-            {"integrated_lufs",
-             album.integrated_lufs ? encode_double(*album.integrated_lufs) : Json()},
-            {"sample_peak", encode_double(album.sample_peak)},
-            {"true_peak", album.true_peak ? encode_double(*album.true_peak) : Json()},
-            {"issue", encode_optional_error(album.issue)}});
+        albums.push_back(
+            Json{{"album_key", protocol::encode_raw_path(album.album_key)},
+                 {"item_indexes", album.item_indexes},
+                 {"integrated_lufs",
+                  album.integrated_lufs ? encode_double(*album.integrated_lufs) : Json()},
+                 {"sample_peak", encode_double(album.sample_peak)},
+                 {"true_peak", album.true_peak ? encode_double(*album.true_peak) : Json()},
+                 {"issue", encode_optional_error(album.issue)}});
     }
     return Json{{"tracks", std::move(tracks)},
                 {"albums", std::move(albums)},
@@ -522,7 +522,7 @@ constexpr std::array<std::pair<metadata::FieldProvenance, std::string_view>, 6> 
 }};
 
 [[nodiscard]] core::Result<std::vector<std::string>> texts_of(const Json& value,
-                                                             const std::string_view name) {
+                                                              const std::string_view name) {
     if (!value.is_array()) {
         return std::unexpected(malformed(std::string{name} + " must be a list"));
     }
@@ -547,7 +547,7 @@ constexpr std::array<std::pair<metadata::FieldProvenance, std::string_view>, 6> 
 }
 
 [[nodiscard]] core::Result<std::optional<std::string>> optional_text_of(const Json& object,
-                                                                       std::string_view name) {
+                                                                        std::string_view name) {
     const auto* value = optional_member(object, name);
     if (value == nullptr) {
         return std::optional<std::string>{};
@@ -587,15 +587,15 @@ Json encode(const metadata::MetadataDocument& document) {
                 provenance = name;
             }
         }
-        fields.push_back(Json{
-            {"canonical_name", encode_text(field.canonical_name)},
-            {"native_name", encode_text(field.native_name)},
-            {"values", encode_texts(field.values)},
-            {"language",
-             field.qualifier.language ? encode_text(*field.qualifier.language) : Json()},
-            {"description",
-             field.qualifier.description ? encode_text(*field.qualifier.description) : Json()},
-            {"provenance", std::string{provenance}}});
+        fields.push_back(
+            Json{{"canonical_name", encode_text(field.canonical_name)},
+                 {"native_name", encode_text(field.native_name)},
+                 {"values", encode_texts(field.values)},
+                 {"language",
+                  field.qualifier.language ? encode_text(*field.qualifier.language) : Json()},
+                 {"description",
+                  field.qualifier.description ? encode_text(*field.qualifier.description) : Json()},
+                 {"provenance", std::string{provenance}}});
     }
     auto objects = Json::array();
     for (const auto& object : document.unsupported_native_objects) {
@@ -641,8 +641,7 @@ core::Result<metadata::MetadataDocument> decode_document(const Json& value) {
             .canonical_name = std::move(*canonical_name),
             .native_name = std::move(*native_name),
             .values = std::move(*texts),
-            .qualifier = {.language = std::move(*language),
-                          .description = std::move(*description)},
+            .qualifier = {.language = std::move(*language), .description = std::move(*description)},
             .provenance = *found});
     }
     if (const auto* objects = optional_member(value, "unsupported_native_objects")) {

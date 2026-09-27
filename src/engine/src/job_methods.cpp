@@ -10,6 +10,7 @@
 #include "trackknife/operations/metadata_commit.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -152,6 +153,12 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
             }
             options = *decoded;
         }
+        // The pool is the engine's own, sized by its hardware: the client's
+        // idea of how many workers suit its machine says nothing about this one.
+        const auto hardware = std::thread::hardware_concurrency();
+        options.maximum_parallelism =
+            std::min<std::size_t>(loudness::maximum_scan_parallelism,
+                                  std::max<std::size_t>(1U, hardware == 0U ? 2U : hardware / 2U));
         return [items = std::move(items), options](const core::CancellationToken& token,
                                                    const JobRegistry::Reporter& report) {
             auto scanned = loudness::scan_loudness(
@@ -169,64 +176,67 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
         };
     });
 
-    jobs.on("metadata.apply", [database = std::move(database),
-                               &catalogue](const Json& params) -> core::Result<JobRegistry::Work> {
-        const auto given = params.find("plan");
-        if (given == params.end()) {
-            return std::unexpected(bad_params("a plan to write is required", "plan"));
-        }
-        auto plan = wire::decode_write_plan(*given);
-        if (!plan) {
-            return std::unexpected(std::move(plan.error()));
-        }
-        if (!plan->ready()) {
-            return std::unexpected(
-                core::Error{.code = core::ErrorCode::conflict,
-                            .message = "the plan has blocking issues; nothing was written",
-                            .context = {{.key = "param", .value = "plan"}}});
-        }
-        return [plan = std::move(*plan), database,
-                &catalogue](const core::CancellationToken& token, const JobRegistry::Reporter& report) {
-            auto opened = persistence::SqliteMetadataOperationJournal::open(database);
-            if (!opened) {
-                return Json{{"error", wire::encode(opened.error())}};
-            }
-            auto journal = std::move(*opened);
-            // Part of the commit: a file written is a file re-read into the
-            // library before the write counts, so nothing sees it half done.
-            const operations::MetadataDependentStateCommitter dependent =
-                [&catalogue](const operations::MetadataCommitResult& result) -> core::Result<void> {
-                auto refreshed = catalogue.refresh({result.source_raw_path});
-                return refreshed ? core::Result<void>{}
-                                 : std::unexpected(std::move(refreshed.error()));
-            };
-            auto applied = operations::apply_metadata_write_plan(
-                plan,
-                [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
-                                       const core::CancellationToken& source_token) {
-                    return operations::commit_flac_metadata_source(source, journal, dependent,
-                                                                   source_token);
-                },
-                [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
-                                       const core::CancellationToken& sheet_token) {
-                    return operations::commit_cue_replay_gain_sheet(sheet, journal, dependent,
-                                                                    sheet_token);
-                },
-                [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
-                                       const core::CancellationToken& sidecar_token) {
-                    return operations::commit_loudness_sidecar(sidecar, journal, dependent,
-                                                               sidecar_token);
-                },
-                [&report](const operations::MetadataApplyProgress& progress) {
-                    report(wire::encode(progress));
-                },
-                token);
-            if (!applied) {
-                return Json{{"error", wire::encode(applied.error())}};
-            }
-            return Json{{"result", wire::encode(*applied)}};
-        };
-    });
+    jobs.on("metadata.apply",
+            [database = std::move(database),
+             &catalogue](const Json& params) -> core::Result<JobRegistry::Work> {
+                const auto given = params.find("plan");
+                if (given == params.end()) {
+                    return std::unexpected(bad_params("a plan to write is required", "plan"));
+                }
+                auto plan = wire::decode_write_plan(*given);
+                if (!plan) {
+                    return std::unexpected(std::move(plan.error()));
+                }
+                if (!plan->ready()) {
+                    return std::unexpected(
+                        core::Error{.code = core::ErrorCode::conflict,
+                                    .message = "the plan has blocking issues; nothing was written",
+                                    .context = {{.key = "param", .value = "plan"}}});
+                }
+                return [plan = std::move(*plan), database,
+                        &catalogue](const core::CancellationToken& token,
+                                    const JobRegistry::Reporter& report) {
+                    auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+                    if (!opened) {
+                        return Json{{"error", wire::encode(opened.error())}};
+                    }
+                    auto journal = std::move(*opened);
+                    // Part of the commit: a file written is a file re-read into the
+                    // library before the write counts, so nothing sees it half done.
+                    const operations::MetadataDependentStateCommitter dependent =
+                        [&catalogue](
+                            const operations::MetadataCommitResult& result) -> core::Result<void> {
+                        auto refreshed = catalogue.refresh({result.source_raw_path});
+                        return refreshed ? core::Result<void>{}
+                                         : std::unexpected(std::move(refreshed.error()));
+                    };
+                    auto applied = operations::apply_metadata_write_plan(
+                        plan,
+                        [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
+                                               const core::CancellationToken& source_token) {
+                            return operations::commit_flac_metadata_source(source, journal,
+                                                                           dependent, source_token);
+                        },
+                        [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
+                                               const core::CancellationToken& sheet_token) {
+                            return operations::commit_cue_replay_gain_sheet(sheet, journal,
+                                                                            dependent, sheet_token);
+                        },
+                        [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
+                                               const core::CancellationToken& sidecar_token) {
+                            return operations::commit_loudness_sidecar(sidecar, journal, dependent,
+                                                                       sidecar_token);
+                        },
+                        [&report](const operations::MetadataApplyProgress& progress) {
+                            report(wire::encode(progress));
+                        },
+                        token);
+                    if (!applied) {
+                        return Json{{"error", wire::encode(applied.error())}};
+                    }
+                    return Json{{"result", wire::encode(*applied)}};
+                };
+            });
 }
 
 } // namespace trackknife::engine

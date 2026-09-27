@@ -865,6 +865,146 @@ MetadataApplyObserver BenchMainWindow::metadataApplyObserver() {
     };
 }
 
+void BenchMainWindow::watchFileWork(EngineLink& link) {
+    if (link.playback == nullptr) {
+        return;
+    }
+    const auto probe = [this, &link] {
+        if (!link.catalogue || !link.catalogue->endpoint()) {
+            return;
+        }
+        // A fresh connection each time the engine connects: one restarted as
+        // a newer engine is asked again, not remembered as it was.
+        auto work = std::make_shared<engine::RemoteFileWork>(*link.catalogue->endpoint());
+        link.file_work = work;
+        link.does_file_work = false;
+        const QPointer window{this};
+        static_cast<void>(QtConcurrent::run([window, work] {
+            const bool does = work->supported();
+            std::vector<EngineInterruption> interrupted;
+            if (does) {
+                if (auto answer = work->interrupted()) {
+                    for (const auto& entry :
+                         answer->value("interrupted", protocol::Json::array())) {
+                        auto id = core::StableId::parse(entry.value("id", std::string{}));
+                        auto path = protocol::decode_raw_path(entry.value("path", std::string{}));
+                        if (!id || !path) {
+                            continue;
+                        }
+                        const auto message = entry.find("message");
+                        interrupted.push_back(EngineInterruption{
+                            .id = *id,
+                            .raw_path = std::move(*path),
+                            .detail = message != entry.end() && message->is_string()
+                                          ? QString::fromStdString(message->get<std::string>())
+                                          : QStringLiteral("An interrupted tag write could not "
+                                                           "be finished or safely rolled back; "
+                                                           "the file was left untouched")});
+                    }
+                }
+            }
+            QMetaObject::invokeMethod(
+                window,
+                [window, work, does, interrupted = std::move(interrupted)] {
+                    if (!window) {
+                        return;
+                    }
+                    if (!interrupted.empty()) {
+                        window->engine_interruptions_.insert(window->engine_interruptions_.end(),
+                                                             interrupted.begin(),
+                                                             interrupted.end());
+                        window->presentInterruptedOperations();
+                    }
+                    // By the connection, not the key: an engine's key changes
+                    // when it first says its id.
+                    for (const auto& candidate : window->engines_) {
+                        if (candidate->file_work == work) {
+                            candidate->does_file_work = does;
+                        }
+                    }
+                },
+                Qt::QueuedConnection);
+        }));
+    };
+    connect(link.playback, &EnginePlayback::connected, this, probe);
+    if (link.playback->active()) {
+        probe();
+    }
+}
+
+std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::fileWorkOf(QTableView* view) const {
+    const auto* engine_link = link(engineOfView(view));
+    if (engine_link == nullptr || !engine_link->does_file_work) {
+        return nullptr;
+    }
+    return engine_link->file_work;
+}
+
+MetadataWritePlanApplierFactory
+BenchMainWindow::engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+    auto* const persistence_service = persistence_;
+    return [this, persistence_service, work = std::move(work)] {
+        auto documents = collectDocuments();
+        auto view_layouts = collectTrackViewLayouts();
+        return MetadataWritePlanApplier{
+            [persistence_service, work, documents = std::move(documents),
+             view_layouts =
+                 std::move(view_layouts)](const metadata::MetadataWritePlan& plan,
+                                          const operations::MetadataApplyProgressCallback& progress,
+                                          const core::CancellationToken& cancellation) mutable
+                -> core::Result<operations::MetadataApplyResult> {
+                if (!persistence_service) {
+                    return std::unexpected(core::Error{
+                        .code = core::ErrorCode::cancelled,
+                        .message = "Trackknife closed during metadata Apply",
+                        .context = {},
+                    });
+                }
+                // As before the engine wrote: the lists are saved first, so
+                // what they cache of a written file can follow it.
+                const auto persistence_error = persistence_service->saveWorkspaceAndWait(
+                    std::move(documents), std::move(view_layouts));
+                if (!persistence_error.isEmpty()) {
+                    return std::unexpected(core::Error{
+                        .code = core::ErrorCode::database,
+                        .message = utf8Bytes(persistence_error),
+                        .context = {},
+                    });
+                }
+                // ADR-0237: the engine writes, journals, and refreshes its
+                // library in the same commit.
+                auto applied = work->apply(plan, progress, cancellation);
+                if (!applied) {
+                    return applied;
+                }
+                // What this window's lists cache of each written file.
+                for (const auto& source : applied->sources) {
+                    if (source.commit &&
+                        source.commit->content_kind ==
+                            operations::MetadataOperationContentKind::text_fields) {
+                        static_cast<void>(persistence_service->refreshLocalMetadataAndWait(
+                            metadata_refresh(*source.commit)));
+                    }
+                }
+                return applied;
+            }};
+    };
+}
+
+namespace {
+
+FileWorkTools engineFileWorkTools(const std::shared_ptr<engine::RemoteFileWork>& work) {
+    return FileWorkTools{.access = work->access(),
+                         .scanner = [work](std::span<const loudness::LoudnessScanItem> items,
+                                           const loudness::LoudnessScanOptions& options,
+                                           const loudness::LoudnessScanProgressCallback& progress,
+                                           const core::CancellationToken& cancellation) {
+                             return work->scan(items, options, progress, cancellation);
+                         }};
+}
+
+} // namespace
+
 void BenchMainWindow::showReplayGainDialog() {
     auto* tab = currentListTab();
     showReplayGainForView(tab ? tab->view : nullptr);
@@ -873,6 +1013,29 @@ void BenchMainWindow::showReplayGainDialog() {
 void BenchMainWindow::showReplayGainForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
     if (!model || !view->selectionModel()) {
+        return;
+    }
+    // ADR-0237: the engine holding the files measures and writes them, at its
+    // own paths -- the same dialog, doing the same work, somewhere else.
+    if (auto work = fileWorkOf(view)) {
+        auto selected = view->selectionModel()->selectedRows();
+        std::ranges::sort(selected, {}, &QModelIndex::row);
+        if (selected.empty()) {
+            return;
+        }
+        std::vector<QPersistentModelIndex> selected_rows;
+        selected_rows.reserve(static_cast<std::size_t>(selected.size()));
+        for (const auto& index : selected) {
+            selected_rows.emplace_back(index);
+        }
+        const auto count = selected_rows.size();
+        auto* dialog =
+            new ReplayGainDialog(count, selectionSourceReader(model, std::move(selected_rows)),
+                                 engineMetadataPlanApplierFactory(work), metadataApplyObserver(),
+                                 this, engineFileWorkTools(work));
+        // Observable for tests and diagnostics: which did the work.
+        dialog->setProperty("trackknife-file-work", QStringLiteral("engine"));
+        dialog->show();
         return;
     }
     if (auto remote = remoteFileWorkRows(view)) {
@@ -1541,9 +1704,11 @@ void BenchMainWindow::finishMetadataOperationJob() {
 // journal ids are remembered so a known incident does not reopen the window on
 // every start.
 void BenchMainWindow::presentInterruptedOperations() {
-    if (!metadata_operation_snapshot_) {
+    if (!metadata_operation_snapshot_ && engine_interruptions_.empty()) {
         return;
     }
+    static const MetadataOperationJobOutcome nothing{};
+    const auto& snapshot = metadata_operation_snapshot_ ? *metadata_operation_snapshot_ : nothing;
     constexpr auto acknowledged_key = "workspace/acknowledged-interrupted-operations-v2";
     constexpr auto legacy_acknowledged_key = "workspace/acknowledged-interrupted-operations-v1";
     QSettings settings;
@@ -1568,14 +1733,17 @@ void BenchMainWindow::presentInterruptedOperations() {
             .detail = std::move(detail),
         });
     };
-    for (const auto& record : metadata_operation_snapshot_->reconciliation) {
+    for (const auto& interruption : engine_interruptions_) {
+        collect(interruption.id, interruption.raw_path, interruption.detail);
+    }
+    for (const auto& record : snapshot.reconciliation) {
         collect(record.id, record.source_raw_path,
                 record.failure
                     ? displayText(record.failure->message)
                     : QStringLiteral("An interrupted tag write could not be finished or safely "
                                      "rolled back; the file was left untouched"));
     }
-    for (const auto& record : metadata_operation_snapshot_->file_publications) {
+    for (const auto& record : snapshot.file_publications) {
         if (record.state != operations::FilePublicationJournalState::needs_reconciliation) {
             continue;
         }

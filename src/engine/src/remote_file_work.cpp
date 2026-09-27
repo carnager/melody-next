@@ -55,16 +55,16 @@ core::Result<std::shared_ptr<protocol::Client>> RemoteFileWork::client() {
 core::Result<Json> RemoteFileWork::read_one(const std::string& raw_path,
                                             const core::CancellationToken& cancellation) {
     if (cancellation.is_cancellation_requested()) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
-                                           .message = "reading cancelled",
-                                           .context = {}});
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::cancelled, .message = "reading cancelled", .context = {}});
     }
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto answer = (*connection)->call(
-        "metadata.read", Json{{"paths", Json::array({protocol::encode_raw_path(raw_path)})}});
+    auto answer = (*connection)
+                      ->call("metadata.read",
+                             Json{{"paths", Json::array({protocol::encode_raw_path(raw_path)})}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }
@@ -99,8 +99,9 @@ metadata::MetadataFileAccess RemoteFileWork::access() {
             }
             if (const auto read = file->find("read"); read != file->end()) {
                 const auto revision = read->find("revision");
-                return revision != read->end() ? wire::decode_revision(*revision)
-                                               : std::unexpected(unexpected_answer("metadata.read"));
+                return revision != read->end()
+                           ? wire::decode_revision(*revision)
+                           : std::unexpected(unexpected_answer("metadata.read"));
             }
             if (const auto revision = file->find("revision");
                 revision != file->end() && !revision->is_null()) {
@@ -128,25 +129,28 @@ RemoteFileWork::scan(const std::span<const loudness::LoudnessScanItem> items,
     for (const auto& item : items) {
         encoded.push_back(wire::encode(item));
     }
-    auto outcome = (*connection)->run_job(
-        "loudness.scan", Json{{"items", std::move(encoded)}, {"options", wire::encode(options)}},
-        [&items, &progress](const Json& reported) {
-            if (!progress) {
-                return;
-            }
-            loudness::LoudnessScanProgress step;
-            step.item_index = reported.value("item_index", std::size_t{0});
-            step.completed_items = reported.value("completed_items", std::size_t{0});
-            step.total_items = reported.value("total_items", items.size());
-            step.state = loudness::LoudnessScanState::analyzed;
-            for (const auto& item : items) {
-                if (item.item_index == step.item_index) {
-                    step.raw_path = item.raw_path;
-                }
-            }
-            progress(step);
-        },
-        cancellation);
+    auto outcome = (*connection)
+                       ->run_job(
+                           "loudness.scan",
+                           Json{{"items", std::move(encoded)}, {"options", wire::encode(options)}},
+                           [&items, &progress](const Json& reported) {
+                               if (!progress) {
+                                   return;
+                               }
+                               loudness::LoudnessScanProgress step;
+                               step.item_index = reported.value("item_index", std::size_t{0});
+                               step.completed_items =
+                                   reported.value("completed_items", std::size_t{0});
+                               step.total_items = reported.value("total_items", items.size());
+                               step.state = loudness::LoudnessScanState::analyzed;
+                               for (const auto& item : items) {
+                                   if (item.item_index == step.item_index) {
+                                       step.raw_path = item.raw_path;
+                                   }
+                               }
+                               progress(step);
+                           },
+                           cancellation);
     if (!outcome) {
         return std::unexpected(std::move(outcome.error()));
     }
@@ -162,17 +166,18 @@ RemoteFileWork::apply(const metadata::MetadataWritePlan& plan,
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
     }
-    auto outcome = (*connection)->run_job(
-        "metadata.apply", Json{{"plan", wire::encode(plan)}},
-        [&progress](const Json& reported) {
-            if (!progress) {
-                return;
-            }
-            if (auto step = wire::decode_apply_progress(reported)) {
-                progress(*step);
-            }
-        },
-        cancellation);
+    auto outcome = (*connection)
+                       ->run_job(
+                           "metadata.apply", Json{{"plan", wire::encode(plan)}},
+                           [&progress](const Json& reported) {
+                               if (!progress) {
+                                   return;
+                               }
+                               if (auto step = wire::decode_apply_progress(reported)) {
+                                   progress(*step);
+                               }
+                           },
+                           cancellation);
     if (!outcome) {
         return std::unexpected(std::move(outcome.error()));
     }

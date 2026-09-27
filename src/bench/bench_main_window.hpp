@@ -19,6 +19,7 @@
 #include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
@@ -703,6 +704,11 @@ class BenchMainWindow final : public QMainWindow {
         // Its last list.all, for the lists pane; empty, not known.
         std::optional<std::vector<protocol::Json>> lists;
         QString lists_error;
+        // ADR-0237: the file tools' reads, scans and writes through it, and
+        // whether it does them -- asked each time it connects, off this
+        // thread. Until it has said so, the tools do the work themselves.
+        std::shared_ptr<engine::RemoteFileWork> file_work;
+        bool does_file_work{false};
     };
     // This computer's first.
     std::vector<std::unique_ptr<EngineLink>> engines_;
@@ -720,6 +726,13 @@ class BenchMainWindow final : public QMainWindow {
     }
     // The link a connection belongs to; null for none of this window's.
     [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
+    // ADR-0237: asks the link's engine whether it does file work, now and on
+    // every reconnection.
+    void watchFileWork(EngineLink& link);
+    // The engine that does the file work for a view's files, if one does.
+    [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
+    [[nodiscard]] MetadataWritePlanApplierFactory
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
     // Parts of an engine's link; null when it or the part is not there.
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
@@ -792,6 +805,14 @@ class BenchMainWindow final : public QMainWindow {
 
     QFutureWatcher<std::shared_ptr<MetadataOperationJobOutcome>> metadata_operation_watcher_;
     std::shared_ptr<MetadataOperationJobOutcome> metadata_operation_snapshot_;
+    // ADR-0237: file work engines could neither finish nor roll back after a
+    // crash, as each reports it -- shown with this window's own, once.
+    struct EngineInterruption {
+        core::StableId id;
+        std::string raw_path;
+        QString detail;
+    };
+    std::vector<EngineInterruption> engine_interruptions_;
     core::CancellationSource metadata_operation_cancellation_;
     QPointer<QDialog> interrupted_operations_dialog_;
     bool metadata_operation_running_{false};

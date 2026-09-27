@@ -221,8 +221,8 @@ class Reader final {
 };
 
 template <typename Enum, std::size_t Count>
-[[nodiscard]] std::string name_of(const Enum value,
-                                  const std::array<std::pair<Enum, std::string_view>, Count>& names) {
+[[nodiscard]] std::string
+name_of(const Enum value, const std::array<std::pair<Enum, std::string_view>, Count>& names) {
     for (const auto& [kind, spelled] : names) {
         if (kind == value) {
             return std::string{spelled};
@@ -280,8 +280,8 @@ constexpr std::array<std::pair<metadata::MetadataWritePlanIssueKind, std::string
          "unsupported_field_mapping"},
     }};
 
-constexpr std::array<std::pair<metadata::StagedMetadataPatchKind, std::string_view>, 2>
-    patch_kinds{{
+constexpr std::array<std::pair<metadata::StagedMetadataPatchKind, std::string_view>, 2> patch_kinds{
+    {
         {metadata::StagedMetadataPatchKind::replace_values, "replace_values"},
         {metadata::StagedMetadataPatchKind::remove_field, "remove_field"},
     }};
@@ -394,25 +394,26 @@ constexpr std::array<std::pair<operations::MetadataOperationContentKind, std::st
 
 Json encode(const metadata::MetadataWritePlan& plan) {
     auto sources = encode_list(plan.sources, [](const metadata::MetadataWritePlanSource& source) {
-        auto changes = encode_list(source.changes, [](const metadata::MetadataWritePlanChange&
-                                                          change) {
-            auto intents =
-                encode_list(change.intents, [](const metadata::MetadataWritePlanIntent& intent) {
-                    return Json{{"item_index", intent.item_index},
-                                {"kind", name_of(intent.kind, patch_kinds)},
-                                {"values", encode_texts(intent.values)}};
-                });
-            return Json{{"field_index", change.field_index},
-                        {"canonical_name", encode_text(change.canonical_name)},
-                        {"display_name", encode_text(change.display_name)},
-                        {"native_name", encode_text(change.native_name)},
-                        {"original_present", change.original_present},
-                        {"original_values", encode_texts(change.original_values)},
-                        {"intents", std::move(intents)},
-                        {"conflicting_intents", change.conflicting_intents},
-                        {"unresolved_non_embedded_target", change.unresolved_non_embedded_target},
-                        {"exact_native_name", encode_optional_text(change.exact_native_name)}};
-        });
+        auto changes =
+            encode_list(source.changes, [](const metadata::MetadataWritePlanChange& change) {
+                auto intents = encode_list(
+                    change.intents, [](const metadata::MetadataWritePlanIntent& intent) {
+                        return Json{{"item_index", intent.item_index},
+                                    {"kind", name_of(intent.kind, patch_kinds)},
+                                    {"values", encode_texts(intent.values)}};
+                    });
+                return Json{
+                    {"field_index", change.field_index},
+                    {"canonical_name", encode_text(change.canonical_name)},
+                    {"display_name", encode_text(change.display_name)},
+                    {"native_name", encode_text(change.native_name)},
+                    {"original_present", change.original_present},
+                    {"original_values", encode_texts(change.original_values)},
+                    {"intents", std::move(intents)},
+                    {"conflicting_intents", change.conflicting_intents},
+                    {"unresolved_non_embedded_target", change.unresolved_non_embedded_target},
+                    {"exact_native_name", encode_optional_text(change.exact_native_name)}};
+            });
         return Json{{"path", protocol::encode_raw_path(source.raw_path)},
                     {"occurrence_indexes", source.occurrence_indexes},
                     {"expected_revision", encode_optional_revision(source.expected_revision)},
@@ -471,8 +472,8 @@ core::Result<metadata::MetadataWritePlan> decode_write_plan(const Json& value) {
         source.expected_revision = source_in.optional_revision("expected_revision");
         source.observed_revision = source_in.optional_revision("observed_revision");
         source.adapter_name = source_in.text("adapter_name");
-        source.changes = source_in.list<metadata::MetadataWritePlanChange>(
-            "changes", [](Reader& change_in) {
+        source.changes =
+            source_in.list<metadata::MetadataWritePlanChange>("changes", [](Reader& change_in) {
                 metadata::MetadataWritePlanChange change;
                 change.field_index = change_in.index("field_index");
                 change.canonical_name = change_in.text("canonical_name");
@@ -522,31 +523,30 @@ core::Result<metadata::MetadataWritePlan> decode_write_plan(const Json& value) {
             sheet.issues = sheet_in.list<metadata::MetadataWritePlanIssue>("issues", read_issue);
             return sheet;
         });
-    plan.sidecars =
-        in.list<metadata::MetadataWritePlanSidecar>("sidecars", [](Reader& sidecar_in) {
-            metadata::MetadataWritePlanSidecar sidecar;
-            sidecar.raw_audio_path = sidecar_in.bytes("path");
-            sidecar.expected_revision = sidecar_in.optional_revision("expected_revision");
-            sidecar.observed_revision = sidecar_in.optional_revision("observed_revision");
-            sidecar.entries = sidecar_in.list<metadata::MetadataWritePlanSidecarEntry>(
-                "entries", [](Reader& entry_in) {
-                    metadata::MetadataWritePlanSidecarEntry entry;
-                    if (const auto* identity = entry_in.need("identity")) {
-                        Reader identity_in{*identity};
-                        entry.identity = read_identity(identity_in);
-                        if (!identity_in.ok()) {
-                            entry_in.adopt(identity_in.error());
-                        }
+    plan.sidecars = in.list<metadata::MetadataWritePlanSidecar>("sidecars", [](Reader& sidecar_in) {
+        metadata::MetadataWritePlanSidecar sidecar;
+        sidecar.raw_audio_path = sidecar_in.bytes("path");
+        sidecar.expected_revision = sidecar_in.optional_revision("expected_revision");
+        sidecar.observed_revision = sidecar_in.optional_revision("observed_revision");
+        sidecar.entries = sidecar_in.list<metadata::MetadataWritePlanSidecarEntry>(
+            "entries", [](Reader& entry_in) {
+                metadata::MetadataWritePlanSidecarEntry entry;
+                if (const auto* identity = entry_in.need("identity")) {
+                    Reader identity_in{*identity};
+                    entry.identity = read_identity(identity_in);
+                    if (!identity_in.ok()) {
+                        entry_in.adopt(identity_in.error());
                     }
-                    entry.occurrence_indexes = entry_in.indexes("occurrence_indexes");
-                    entry.fields = entry_in.list<metadata::MetadataWritePlanLoudnessField>(
-                        "fields", read_loudness_field);
-                    entry.true_peak = entry_in.flag("true_peak");
-                    return entry;
-                });
-            sidecar.issues = sidecar_in.list<metadata::MetadataWritePlanIssue>("issues", read_issue);
-            return sidecar;
-        });
+                }
+                entry.occurrence_indexes = entry_in.indexes("occurrence_indexes");
+                entry.fields = entry_in.list<metadata::MetadataWritePlanLoudnessField>(
+                    "fields", read_loudness_field);
+                entry.true_peak = entry_in.flag("true_peak");
+                return entry;
+            });
+        sidecar.issues = sidecar_in.list<metadata::MetadataWritePlanIssue>("issues", read_issue);
+        return sidecar;
+    });
     if (!in.ok()) {
         return std::unexpected(in.error());
     }
@@ -579,18 +579,19 @@ Json encode(const operations::MetadataApplyResult& result) {
             Json commit = nullptr;
             if (sheet.commit) {
                 const auto& done = *sheet.commit;
-                auto tracks =
-                    encode_list(done.tracks, [](const operations::CueReplayGainAppliedTrack& track) {
+                auto tracks = encode_list(
+                    done.tracks, [](const operations::CueReplayGainAppliedTrack& track) {
                         return Json{{"file_index", track.file_index},
                                     {"track_index", track.track_index},
                                     {"occurrence_indexes", track.occurrence_indexes},
                                     {"fields", encode_list(track.fields, encode_applied_field)}};
                     });
-                commit = Json{{"path", protocol::encode_raw_path(done.raw_cue_path)},
-                              {"previous_revision", encode(done.previous_revision)},
-                              {"published_revision", encode(done.published_revision)},
-                              {"album_fields", encode_list(done.album_fields, encode_applied_field)},
-                              {"tracks", std::move(tracks)}};
+                commit =
+                    Json{{"path", protocol::encode_raw_path(done.raw_cue_path)},
+                         {"previous_revision", encode(done.previous_revision)},
+                         {"published_revision", encode(done.published_revision)},
+                         {"album_fields", encode_list(done.album_fields, encode_applied_field)},
+                         {"tracks", std::move(tracks)}};
             }
             return Json{{"path", protocol::encode_raw_path(sheet.raw_cue_path)},
                         {"state", name_of(sheet.state, apply_states)},

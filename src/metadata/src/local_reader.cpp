@@ -269,13 +269,14 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
 
 MetadataFileAccess local_metadata_file_access() {
     return MetadataFileAccess{
-        .read = [](const std::string& raw_path,
-                   const core::CancellationToken& cancellation) {
-            return read_local_metadata(raw_path, cancellation);
-        },
-        .revision = [](const std::string& raw_path) {
-            return core::observe_local_source_revision(raw_path);
-        }};
+        .read =
+            [](const std::string& raw_path, const core::CancellationToken& cancellation) {
+                return read_local_metadata(raw_path, cancellation);
+            },
+        .revision =
+            [](const std::string& raw_path) {
+                return core::observe_local_source_revision(raw_path);
+            }};
 }
 
 core::Result<std::vector<StagedMetadataSource>>

@@ -58,8 +58,8 @@ class RemoteFileWork final {
 
   private:
     [[nodiscard]] core::Result<std::shared_ptr<protocol::Client>> client();
-    [[nodiscard]] core::Result<protocol::Json> read_one(const std::string& raw_path,
-                                                        const core::CancellationToken& cancellation);
+    [[nodiscard]] core::Result<protocol::Json>
+    read_one(const std::string& raw_path, const core::CancellationToken& cancellation);
 
     protocol::Endpoint endpoint_;
     std::mutex mutex_;

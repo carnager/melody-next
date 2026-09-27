@@ -202,10 +202,11 @@ struct MetadataWritePlanOptions {
     const MetadataWritePlanOptions& options = {});
 // The same, reading every file -- tags, CUE sheets, sidecar audio -- through
 // `access`: this process, or (ADR-0237) the engine that holds the files.
-[[nodiscard]] core::Result<MetadataWritePlan> build_metadata_write_plan(
-    const StagedMetadataSelection& selection, const StagedMetadataPatchSet& patches,
-    const MetadataFileAccess& access, const core::CancellationToken& cancellation = {},
-    const MetadataWritePlanOptions& options = {});
+[[nodiscard]] core::Result<MetadataWritePlan>
+build_metadata_write_plan(const StagedMetadataSelection& selection,
+                          const StagedMetadataPatchSet& patches, const MetadataFileAccess& access,
+                          const core::CancellationToken& cancellation = {},
+                          const MetadataWritePlanOptions& options = {});
 
 // Production convenience using the active bounded local metadata reader.
 // Callers must dispatch this synchronous filesystem work off the UI thread.

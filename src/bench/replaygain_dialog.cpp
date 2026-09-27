@@ -37,10 +37,11 @@ namespace {
 ReplayGainDialog::ReplayGainDialog(const std::size_t item_count,
                                    MetadataPropertiesSourceReader source_reader,
                                    MetadataWritePlanApplierFactory plan_applier_factory,
-                                   MetadataApplyObserver apply_observer, QWidget* parent)
+                                   MetadataApplyObserver apply_observer, QWidget* parent,
+                                   FileWorkTools tools)
     : QDialog(parent), item_count_(item_count), source_reader_(std::move(source_reader)),
       plan_applier_factory_(std::move(plan_applier_factory)),
-      apply_observer_(std::move(apply_observer)) {
+      apply_observer_(std::move(apply_observer)), tools_(std::move(tools)) {
     setWindowTitle(QStringLiteral("ReplayGain %1 track%2")
                        .arg(item_count_)
                        .arg(item_count_ == 1U ? QString{} : QStringLiteral("s")));
@@ -269,6 +270,7 @@ void ReplayGainDialog::startCapture() {
     progress_->setRange(0, 0);
     capture_watcher_.setFuture(QtConcurrent::run([reader = source_reader_, count = item_count_,
                                                   grouping = settings_.grouping,
+                                                  access = tools_.access,
                                                   token = cancellation_.token()] {
         auto capture = std::make_shared<Capture>();
         std::vector<metadata::StagedMetadataSource> sources;
@@ -289,7 +291,8 @@ void ReplayGainDialog::startCapture() {
             sources.push_back(std::move(source->source));
             capture->audio.push_back(source->audio);
         }
-        auto prepared = metadata::capture_uncached_metadata_sources(std::move(sources), token);
+        auto prepared =
+            metadata::capture_uncached_metadata_sources(std::move(sources), access, token);
         if (!prepared) {
             capture->selection = std::unexpected(prepared.error());
             return capture;
@@ -379,11 +382,12 @@ void ReplayGainDialog::finishCapture() {
     for (std::size_t index = 0U; index < item_count_; ++index) {
         items.push_back(index);
     }
-    scan_watcher_.setFuture(QtConcurrent::run(
-        [selection = selection_, items = std::move(items), audio = audio_sources_,
-         settings = settings_, completed = completed_, token = cancellation_.token()] {
+    scan_watcher_.setFuture(
+        QtConcurrent::run([selection = selection_, items = std::move(items), audio = audio_sources_,
+                           settings = settings_, completed = completed_, scanner = tools_.scanner,
+                           token = cancellation_.token()] {
             return run_replaygain_scan(selection, metadata::StagedMetadataPatchSet{}, items, audio,
-                                       settings, completed, token);
+                                       settings, completed, token, scanner);
         }));
 }
 
@@ -406,9 +410,10 @@ void ReplayGainDialog::finishScan() {
     }
     status_->setText(QStringLiteral("Writing ReplayGain tags… Audio samples are not changed."));
     progress_->setRange(0, 0);
-    apply_watcher_.setFuture(QtConcurrent::run(
-        [selection = selection_, proposals = std::move(*outcome->proposals), settings = settings_,
-         applier = plan_applier_factory_(), token = cancellation_.token()]() {
+    apply_watcher_.setFuture(
+        QtConcurrent::run([selection = selection_, proposals = std::move(*outcome->proposals),
+                           settings = settings_, applier = plan_applier_factory_(),
+                           access = tools_.access, token = cancellation_.token()]() {
             auto apply = std::make_shared<ApplyOutcome>();
             const auto fail = [&apply](core::Error error) {
                 apply->result = std::unexpected(std::move(error));
@@ -446,8 +451,8 @@ void ReplayGainDialog::finishScan() {
             if (apply->staged_fields == 0U) {
                 return apply;
             }
-            auto plan = metadata::revalidate_metadata_write_plan(
-                staged_selection, patches, token,
+            auto plan = metadata::build_metadata_write_plan(
+                staged_selection, patches, access, token,
                 metadata::MetadataWritePlanOptions{.sidecar_loudness = settings.sidecar_only,
                                                    .true_peak_loudness = settings.true_peak});
             if (!plan) {

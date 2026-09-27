@@ -9,6 +9,8 @@
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/document.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/metadata/write_plan.hpp"
+#include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/protocol/message.hpp"
 
 namespace trackknife::engine::wire {
@@ -59,5 +61,17 @@ using protocol::Json;
 
 [[nodiscard]] Json encode(const metadata::LocalMetadataRead& read);
 [[nodiscard]] core::Result<metadata::LocalMetadataRead> decode_metadata_read(const Json& value);
+
+// The plan a client previewed and the engine writes. A plan carrying artwork
+// is refused on decoding: artwork is written by the engine from stage 4.
+[[nodiscard]] Json encode(const metadata::MetadataWritePlan& plan);
+[[nodiscard]] core::Result<metadata::MetadataWritePlan> decode_write_plan(const Json& value);
+
+[[nodiscard]] Json encode(const operations::MetadataApplyResult& result);
+[[nodiscard]] core::Result<operations::MetadataApplyResult> decode_apply_result(const Json& value);
+
+[[nodiscard]] Json encode(const operations::MetadataApplyProgress& progress);
+[[nodiscard]] core::Result<operations::MetadataApplyProgress>
+decode_apply_progress(const Json& value);
 
 } // namespace trackknife::engine::wire

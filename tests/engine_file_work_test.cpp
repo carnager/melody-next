@@ -10,6 +10,9 @@
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/metadata/staged_patch.hpp"
+#include "trackknife/metadata/staged_selection.hpp"
+#include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
@@ -185,7 +188,8 @@ void the_engine_measures_as_this_process_would(const std::filesystem::path& dire
         events.push_back(event);
     }};
     engine::JobCatalog jobs;
-    engine::register_file_work_jobs(jobs);
+    engine::LocalCatalogue catalogue{directory / "library.sqlite3"};
+    engine::register_file_work_jobs(jobs, directory / "library.sqlite3", catalogue);
     protocol::Dispatcher dispatcher;
     engine::register_job_methods(dispatcher, registry, jobs);
 
@@ -328,6 +332,119 @@ void the_engine_reads_as_this_process_would(const std::filesystem::path& directo
             "a read of too many paths is refused");
 }
 
+struct Jobs {
+    std::mutex mutex;
+    std::vector<protocol::Event> events;
+    engine::LocalCatalogue catalogue;
+    engine::JobRegistry registry;
+    engine::JobCatalog catalog;
+    protocol::Dispatcher dispatcher;
+
+    explicit Jobs(const std::filesystem::path& database)
+        : catalogue(database), registry([this](const protocol::Event& event) {
+              const std::lock_guard guard{mutex};
+              events.push_back(event);
+          }) {
+        engine::register_file_work_jobs(catalog, database, catalogue);
+        engine::register_job_methods(dispatcher, registry, catalog);
+    }
+
+    // Submits and waits: the outcome, or the submit's refusal.
+    [[nodiscard]] protocol::Json run(const std::string& job, const protocol::Json& params) {
+        const auto answer = dispatcher.dispatch(protocol::Request{
+            .id = 1,
+            .method = "job.submit",
+            .params = over_the_wire({{"job", job}, {"params", params}})});
+        if (answer.error) {
+            return protocol::Json{{"refused", answer.error->message}};
+        }
+        const auto job_id = answer.result->at("job_id").get<std::string>();
+        registry.wait_all();
+        const std::lock_guard guard{mutex};
+        for (const auto& event : events) {
+            if (event.name == "job.finished" && event.data.at("job_id") == job_id) {
+                return over_the_wire(event.data.at("outcome"));
+            }
+        }
+        return protocol::Json{{"refused", "no finish"}};
+    }
+};
+
+void the_engine_writes_what_was_previewed(const std::filesystem::path& directory,
+                                          const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "write.flac").string();
+    const auto read = metadata::read_local_metadata(flac);
+    require(read.has_value(), "the file to write is read");
+    const std::array<std::string_view, 1> preferred{"title"};
+    auto selection = metadata::StagedMetadataSelection::create(
+        {metadata::StagedMetadataSource{.raw_path = flac,
+                                        .source_revision = read->source_revision,
+                                        .baseline = read->document}},
+        preferred);
+    require(selection.has_value(), "a selection of it");
+    std::optional<std::size_t> title;
+    for (std::size_t index = 0; index < selection->field_count(); ++index) {
+        if (selection->field(index).canonical_name == "title") {
+            title = index;
+        }
+    }
+    require(title.has_value(), "with a title field");
+    metadata::StagedMetadataPatchSet patches;
+    require(patches.replace_values(*selection, 0, *title, {"Written by the engine"}).has_value(),
+            "a title is staged");
+    const auto plan = metadata::revalidate_metadata_write_plan(*selection, patches);
+    require(plan && plan->ready(), "the preview is clean");
+
+    const auto decoded = wire::decode_write_plan(over_the_wire(wire::encode(*plan)));
+    require(decoded && *decoded == *plan, "the plan round-trips exactly");
+
+    Jobs jobs{directory / "engine.sqlite3"};
+    const auto outcome = jobs.run("metadata.apply", {{"plan", wire::encode(*plan)}});
+    require(outcome.contains("result"), "the engine writes the plan");
+    const auto result = wire::decode_apply_result(outcome.at("result"));
+    require(result && result->committed_source_count() == 1U, "and commits the file");
+    const auto again = wire::decode_apply_result(over_the_wire(wire::encode(*result)));
+    require(again && *again == *result, "the result round-trips exactly");
+    const auto written = metadata::read_local_metadata(flac);
+    require(written && written->document.first_effective_value("title") ==
+                           std::optional<std::string>{"Written by the engine"},
+            "the file has what was previewed");
+
+    // The same plan again: the file has changed since it was previewed, so the
+    // engine refuses to write it, and the file keeps what it has.
+    const auto stale = jobs.run("metadata.apply", {{"plan", wire::encode(*plan)}});
+    const auto refused = wire::decode_apply_result(stale.at("result"));
+    require(refused && refused->committed_source_count() == 0U &&
+                refused->sources.front().state == trackknife::operations::MetadataApplySourceState::failed,
+            "a file changed since the preview is not written");
+    const auto kept = metadata::read_local_metadata(flac);
+    require(kept && kept->source_revision == written->source_revision, "and is left as it is");
+
+    // A preview with a blocking issue is refused before anything runs.
+    auto blocked = *plan;
+    blocked.sources.front().issues.push_back(metadata::MetadataWritePlanIssue{
+        .kind = metadata::MetadataWritePlanIssueKind::source_changed,
+        .error = core::Error{.code = core::ErrorCode::conflict, .message = "changed", .context = {}},
+        .field_index = std::nullopt,
+        .item_indexes = {0},
+        .blocking = true});
+    require(jobs.run("metadata.apply", {{"plan", wire::encode(blocked)}}).contains("refused"),
+            "a plan with a blocking issue is refused at submit");
+    require(jobs.run("metadata.apply", protocol::Json::object()).contains("refused"),
+            "so is no plan at all");
+    // A clean journal: nothing to recover, nothing to show the user.
+    const auto recovery = engine::recover_file_work(directory / "engine.sqlite3", jobs.catalogue);
+    require(!recovery.error && recovery.recovered == 0U, "finished writes leave nothing to recover");
+    protocol::Dispatcher methods;
+    engine::register_file_work_methods(methods, directory / "engine.sqlite3", recovery);
+    const auto interrupted = methods.dispatch(
+        protocol::Request{.id = 9, .method = "metadata.interrupted", .params = protocol::Json::object()});
+    require(interrupted.result && interrupted.result->at("interrupted").empty() &&
+                interrupted.result->at("error").is_null(),
+            "and no interrupted work is reported");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -338,6 +455,7 @@ int main(int argc, char** argv) {
     encodings_are_exact();
     documents_are_exact();
     the_engine_reads_as_this_process_would(directory, argv[1]);
+    the_engine_writes_what_was_previewed(directory, argv[1]);
     the_engine_measures_as_this_process_would(directory, argv[1]);
     std::filesystem::remove_all(directory);
     std::cout << "engine file work: ok\n";

@@ -4,6 +4,10 @@
 
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
+
+#include <ctime>
 
 #include <string>
 #include <utility>
@@ -12,7 +16,78 @@ namespace trackknife::engine {
 
 using protocol::Json;
 
-void register_file_work_methods(protocol::Dispatcher& dispatcher) {
+FileWorkRecovery recover_file_work(const std::filesystem::path& database,
+                                   LocalCatalogue& catalogue) {
+    FileWorkRecovery recovery;
+    auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+    if (!opened) {
+        recovery.error = std::move(opened.error());
+        return recovery;
+    }
+    auto journal = std::move(*opened);
+    const operations::MetadataDependentStateCommitter dependent =
+        [&catalogue](const operations::MetadataCommitResult& result) -> core::Result<void> {
+        auto refreshed = catalogue.refresh({result.source_raw_path});
+        return refreshed ? core::Result<void>{} : std::unexpected(std::move(refreshed.error()));
+    };
+    auto recovered = operations::recover_metadata_operations(journal, dependent);
+    if (!recovered) {
+        recovery.error = std::move(recovered.error());
+        return recovery;
+    }
+    for (const auto& result : *recovered) {
+        if (result.outcome != operations::MetadataRecoveryOutcome::needs_reconciliation) {
+            ++recovery.recovered;
+        }
+    }
+    // No undo is offered, so a finished write keeps no backup (as in
+    // Trackknife, whose policy this is).
+    constexpr operations::MetadataBackupRetentionPolicy release_all{
+        .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U};
+    if (auto maintained = operations::maintain_metadata_backups(
+            journal, release_all, static_cast<std::int64_t>(std::time(nullptr)));
+        !maintained) {
+        recovery.error = std::move(maintained.error());
+    }
+    return recovery;
+}
+
+void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesystem::path database,
+                                FileWorkRecovery recovery) {
+    dispatcher.on("metadata.interrupted", [database = std::move(database),
+                                           recovery = std::move(recovery)](
+                                              const Json&) -> core::Result<Json> {
+        auto interrupted = Json::array();
+        std::optional<core::Error> error = recovery.error;
+        if (!database.empty()) {
+            auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+            auto incomplete = opened ? opened->load_incomplete()
+                                     : core::Result<std::vector<
+                                           operations::MetadataOperationJournalRecord>>{
+                                           std::unexpected(opened.error())};
+            if (!incomplete) {
+                error = std::move(incomplete.error());
+            } else {
+                for (const auto& record : *incomplete) {
+                    if (record.state !=
+                        operations::MetadataOperationJournalState::needs_reconciliation) {
+                        continue;
+                    }
+                    interrupted.push_back(
+                        Json{{"id", record.id.to_string()},
+                             {"path", protocol::encode_raw_path(record.source_raw_path)},
+                             {"message", record.failure ? Json(protocol::displayable_text(
+                                                              record.failure->message))
+                                                        : Json()}});
+                }
+            }
+        }
+        return Json{{"recovered", recovery.recovered},
+                    {"error", error ? wire::encode(*error) : Json()},
+                    {"interrupted", std::move(interrupted)}};
+    });
+
+
     dispatcher.on("metadata.read", [](const Json& params) -> core::Result<Json> {
         const auto paths = params.find("paths");
         if (paths == params.end() || !paths->is_array()) {

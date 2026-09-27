@@ -497,8 +497,19 @@ int main(int argc, char** argv) {
     trackknife::engine::JobRegistry jobs{sink};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
-    trackknife::engine::register_file_work_jobs(job_catalogue);
-    trackknife::engine::register_file_work_methods(dispatcher);
+    trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue);
+    // File work a crash interrupted is finished or rolled back before anyone
+    // connects (ADR-0237), and what could not be is kept for Trackknife to show.
+    auto file_work_recovery = trackknife::engine::recover_file_work(database, catalogue);
+    if (file_work_recovery.error) {
+        std::cerr << "melodyd: could not recover interrupted file work: "
+                  << file_work_recovery.error->message << "\n";
+    } else if (file_work_recovery.recovered > 0U) {
+        std::cerr << "melodyd: recovered " << file_work_recovery.recovered
+                  << " interrupted file operation(s)\n";
+    }
+    trackknife::engine::register_file_work_methods(dispatcher, database,
+                                                   std::move(file_work_recovery));
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
     trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);

@@ -6,6 +6,7 @@
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -41,10 +42,19 @@ void register_job_methods(protocol::Dispatcher& dispatcher, JobRegistry& registr
 // remote engine to scan is submitting a job to that engine, not proxying one.
 void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 
-// ADR-0237: file work in the engine. loudness.scan measures what the
-// ReplayGain tools ask for -- {items, options} as file_work_wire encodes them
-// -- on the engine's own bounded pool, reporting each finished item, and
-// finishes with {result} or {error}. It reads files and writes nothing.
-void register_file_work_jobs(JobCatalog& jobs);
+// ADR-0237: file work in the engine.
+//
+// loudness.scan measures what the ReplayGain tools ask for -- {items,
+// options} as file_work_wire encodes them -- on the engine's own bounded
+// pool, reporting each finished item, and finishes with {result} or {error}.
+// It reads files and writes nothing.
+//
+// metadata.apply writes a reviewed plan -- {plan} -- journaled in the
+// engine's database (`database`), each written file refreshed in its library
+// in the same commit, reporting each file; it finishes with {result} or
+// {error}. A plan with blocking issues is refused at submit: what was
+// previewed must be clean. Files outside the library are written too.
+void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
+                             LocalCatalogue& catalogue);
 
 } // namespace trackknife::engine

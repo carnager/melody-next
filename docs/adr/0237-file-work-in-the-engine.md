@@ -112,8 +112,14 @@ sees changes.
    engine's own transaction. Choosing a destination uses the folder chooser
    as it is today, listing the engine's folders instead of this computer's
    -- not a new dialog.
-6. **Conversion**, with output to a destination on the engine's machine.
-7. Trackknife's own file-writing path goes.
+6. **Conversion stays in Trackknife** (decided 2026-09-27). It makes new
+   files where the user wants them -- this computer's disk, a stick, a
+   phone -- and changes nothing in the library, so it belongs where the
+   user sits. For files of an engine elsewhere, Trackknife fetches the
+   originals from that engine, as the phone downloads albums (ADR-0230),
+   and converts them here: no mount needed.
+7. Trackknife's own path for writing library files goes; conversion, which
+   writes only its own new files, stays.
 
 ## Decided with it (2026-09-27)
 

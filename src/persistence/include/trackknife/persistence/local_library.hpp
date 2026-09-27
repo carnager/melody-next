@@ -65,6 +65,10 @@ struct LibraryEntry {
     // and its stored 0-10 rating; empty/0 for artists and unrated entries.
     std::string rating_hash{};
     unsigned rating{0};
+    // A track's album's rating key and rating, so its album can be rated from
+    // the track; an album's own, repeated; empty/0 for artists.
+    std::string album_rating_hash{};
+    unsigned album_rating{0};
     // An album's or a track's date, as tagged; empty for artists.
     std::string date{};
     // A track's own title, as tagged -- `label` is how the tree shows it.

@@ -9,6 +9,7 @@
 #include "trackknife/protocol/client.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
@@ -64,7 +65,8 @@ void usage(std::ostream& out) {
            ")%title%\"):\n"
            "                              every tag as %name% (%replaygain_track_gain%...),\n"
            "                              $info(samplerate) $info(bitspersample)\n"
-           "                              $info(codec) $info(channels), %rating% (1-10)\n"
+           "                              $info(codec) $info(channels), %rating%\n"
+           "                              %albumrating% (1-10)\n"
            "                              %length% %path% %playback_state% %playback_time%\n"
            "                              %playback_remaining%; a field not known is\n"
            "                              empty. Literal ( ) , $ % are escaped with a\n"
@@ -106,7 +108,10 @@ void usage(std::ostream& out) {
            "  watch [--all]               print the state each time it changes; with\n"
            "                              --all, of whichever engine here or nearby plays\n"
            "                              (only those named, with --server given for each)\n"
-           "  rate [0-5]                  say or set the playing track's stars\n"
+           "  rating [0-10]               say or set the playing track's rating, 1-10\n"
+           "                              as Trackknife keeps it; 0 clears it, and is\n"
+           "                              what an unrated track says (also: rate)\n"
+           "  albumrating [0-10]          the same, for the playing track's album\n"
            "  love | unlove               the playing track, on Last.fm\n"
            "\n"
            "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
@@ -483,6 +488,10 @@ look_around(const std::string& wanted = {}) {
     if (!known.empty() && !text_of(known.front(), "rating_hash").empty()) {
         track["rating_hash"] = text_of(known.front(), "rating_hash");
         track["rating"] = known.front().value("rating", 0);
+        if (!text_of(known.front(), "album_rating_hash").empty()) {
+            track["album_rating_hash"] = text_of(known.front(), "album_rating_hash");
+            track["album_rating"] = known.front().value("album_rating", 0);
+        }
     }
     return track;
 }
@@ -1130,35 +1139,46 @@ int run(const Options& options) {
                 last_line = std::move(line);
             }
         }
-    } else if (command == "rate") {
+    } else if (command == "rating" || command == "rate" || command == "albumrating") {
+        // As the engine keeps them: 1-10, 0 for none. The album's is keyed
+        // by the album, found through the track that plays.
+        const bool album = command == "albumrating";
         const auto track = now_playing(*client, state());
         if (track.is_null()) {
             fail("nothing is playing");
         }
-        if (!track.contains("rating_hash")) {
-            fail("what plays is not in the library, so it has no rating");
+        const auto hash_field = album ? "album_rating_hash" : "rating_hash";
+        const auto rating_field = album ? "album_rating" : "rating";
+        if (!track.contains(hash_field)) {
+            fail(album ? "what plays is not in the library, or its engine is older and does "
+                         "not say its album's key, so the album has no rating here"
+                       : "what plays is not in the library, so it has no rating");
         }
-        // Stars, as people count them; the engine keeps 0-10.
         if (words.size() == 1U) {
-            const auto rating = track.value("rating", 0);
+            const auto rating = track.value(rating_field, 0);
             if (options.json) {
-                std::cout << Json{{"stars", rating / 2}, {"rating", rating}}.dump() << "\n";
+                std::cout << Json{{"rating", rating}}.dump() << "\n";
             } else {
-                std::cout << rating / 2 << "\n";
+                std::cout << rating << "\n";
             }
             return EXIT_SUCCESS;
         }
         const auto& given = words[1];
-        if (given.size() != 1U || given.front() < '0' || given.front() > '5') {
-            fail("rate wants stars from 0 to 5");
+        int rating = -1;
+        const auto* const end_of = given.data() + given.size();
+        if (const auto [rest, error] = std::from_chars(given.data(), end_of, rating);
+            error != std::errc{} || rest != end_of || rating < 0 || rating > 10) {
+            fail(command + " wants a whole number from 0 to 10 (0 clears it)");
         }
-        const auto stars = given.front() - '0';
-        static_cast<void>(
-            call(*client, "catalogue.set_rating",
-                 Json{{"hash", text_of(track, "rating_hash")}, {"rating", stars * 2}}));
+        static_cast<void>(call(*client, "catalogue.set_rating",
+                               Json{{"hash", text_of(track, hash_field)},
+                                    {"album", album},
+                                    {"rating", rating}}));
         if (!options.json) {
-            std::cout << "rated " << stars << (stars == 1 ? " star: " : " stars: ")
-                      << describe_track(track) << "\n";
+            const auto what = album ? text_of(track, "album") : describe_track(track);
+            std::cout << (rating == 0 ? std::string{"cleared: "}
+                                      : "rated " + std::to_string(rating) + ": ")
+                      << (what.empty() ? describe_track(track) : what) << "\n";
         }
     } else if (command == "love" || command == "unlove") {
         const auto track = now_playing(*client, state());

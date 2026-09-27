@@ -182,6 +182,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             put("albums", entry.albums);
             put("rating_hash", entry.rating_hash);
             put("rating", entry.rating);
+            put("album_rating_hash", entry.album_rating_hash);
+            put("album_rating", entry.album_rating);
             if (chosen("date")) {
                 put("date", protocol::displayable_text(entry.date));
             }

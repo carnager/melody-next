@@ -60,12 +60,14 @@ inline void name_by_file(persistence::TkqRowFacts& facts, const std::string& raw
 }
 
 // The fields a track has besides its tags, by canonical name: its path,
-// length and rating (1-10, half stars; absent when unrated).
+// length, and its own and its album's rating (1-10; absent when unrated).
 [[nodiscard]] inline std::map<std::string, std::string>
 track_fields(const persistence::TkqRowFacts& facts, const std::string& raw_path) {
     std::map<std::string, std::string> fields{
         {"path", core::display_raw_path(raw_path)},
         {"rating", facts.rating > 0 ? std::to_string(facts.rating) : std::string{}},
+        {"albumrating",
+         facts.album_rating > 0 ? std::to_string(facts.album_rating) : std::string{}},
     };
     if (facts.duration_ms >= 0) {
         fields.emplace("length", clock(facts.duration_ms));

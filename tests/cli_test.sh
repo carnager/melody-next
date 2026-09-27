@@ -179,15 +179,29 @@ cli seek 10 > /dev/null
 position="$(cli --json status | python3 -c 'import json,sys; print(json.load(sys.stdin)["position_ms"])')"
 [ "${position}" -ge 9000 ] || fail "seek moves the position (at ${position})"
 
-# Stars for what plays: stored as the engine counts, 0-10.
-cli rate 5 | grep -q "^rated 5 stars: .*gamma" || fail "rate rates what plays"
-[ "$(cli rate)" = "5" ] || fail "rate reads the stars back"
-[ "$(cli current --format '%rating%')" = "10" ] || fail "current's rating is the engine's 1-10"
-cli --json rate | python3 -c 'import json,sys; assert json.load(sys.stdin)["rating"] == 10' \
-    || fail "five stars are a 10 to the engine"
-if cli rate 7 2>/dev/null; then
-    fail "more than five stars fails"
-fi
+# Ratings for what plays, 1-10 as the engine keeps them; 0 clears.
+[ "$(cli rating)" = "0" ] || fail "an unrated track says 0"
+cli rating 7 | grep -q "^rated 7: .*gamma" || fail "rating rates what plays"
+[ "$(cli rating)" = "7" ] || fail "rating reads it back"
+[ "$(cli current --format '%rating%')" = "7" ] || fail "current's rating is the same 1-10"
+cli rate 10 > /dev/null || fail "rate is rating by another name"
+cli --json rating | python3 -c 'import json,sys; assert json.load(sys.stdin)["rating"] == 10' \
+    || fail "rating --json says the number"
+for wrong in 11 -1 3.5 five; do
+    if cli rating "${wrong}" 2>/dev/null; then
+        fail "rating ${wrong} fails"
+    fi
+done
+[ "$(cli rating)" = "10" ] || fail "and a refused rating changes nothing"
+
+# The album of what plays has its own rating.
+[ "$(cli albumrating)" = "0" ] || fail "an unrated album says 0"
+cli albumrating 8 | grep -q "^rated 8: " || fail "albumrating rates the album"
+[ "$(cli albumrating)" = "8" ] || fail "albumrating reads it back"
+[ "$(cli current --format '%albumrating%')" = "8" ] || fail "current formats the album's rating"
+[ "$(cli rating)" = "10" ] || fail "and leaves the track's own alone"
+cli albumrating 0 | grep -q "^cleared: " || fail "0 clears the album's"
+[ "$(cli albumrating)" = "0" ] || fail "cleared, it says 0"
 
 # No Last.fm account here: love says why and fails.
 if cli love 2>"${work}/love.txt"; then
@@ -224,7 +238,7 @@ for _ in $(seq 1 100); do
     [ -s "${work}/rated.txt" ] && break
     sleep 0.05
 done
-cli rate 2 > /dev/null
+cli rating 4 > /dev/null
 for _ in $(seq 1 100); do
     grep -q '"rating":4' "${work}/rated.txt" && break
     sleep 0.05

@@ -1004,6 +1004,10 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                             candidate->does_file_work = does;
                         }
                     }
+                    if (does) {
+                        // ADR-0237: it names files with this window's layouts.
+                        window->pushLayouts();
+                    }
                 },
                 Qt::QueuedConnection);
         }));
@@ -1351,54 +1355,252 @@ void BenchMainWindow::showReplayGainForView(QTableView* view) {
     dialog->show();
 }
 
-OutputProfileStore BenchMainWindow::buildOutputProfileStore() {
+namespace {
+
+// Blocking engine work off the UI thread, answered on `context`'s.
+template <typename Work, typename Done> void offThread(QObject* context, Work work, Done done) {
+    const QPointer guard{context};
+    static_cast<void>(
+        QtConcurrent::run([guard, work = std::move(work), done = std::move(done)]() mutable {
+            auto result = work();
+            if (!guard) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                guard.data(),
+                [guard, done = std::move(done), result = std::move(result)]() mutable {
+                    if (guard) {
+                        done(std::move(result));
+                    }
+                },
+                Qt::QueuedConnection);
+        }));
+}
+
+[[nodiscard]] QString failure(const core::Result<void>& result) {
+    return result ? QString{} : QString::fromStdString(result.error().message);
+}
+
+} // namespace
+
+OutputProfileStore BenchMainWindow::buildOutputProfileStore(const EngineKey& destinations_of) {
     auto* const persistence_service = persistence_;
+    const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
+    // This computer's destinations are in this workspace, which its engine
+    // shares; an engine elsewhere is asked for its own.
+    const auto place_of = [this, persistence_service,
+                           unavailable](const EngineLink& engine) -> DestinationPlace {
+        if (engine.key.isLocal()) {
+            return DestinationPlace{
+                .key = engine.key.text(),
+                .name = engineName(engine.key),
+                .load =
+                    [persistence_service, unavailable](DestinationPlace::LoadCompletion done) {
+                        if (!persistence_service) {
+                            done({}, unavailable);
+                            return;
+                        }
+                        persistence_service->loadOutputProfiles(
+                            [done = std::move(done)](auto, auto destinations, QString error) {
+                                done(std::move(destinations), error);
+                            });
+                    },
+                .save =
+                    [persistence_service, unavailable](persistence::SavedDestinationProfile profile,
+                                                       DestinationPlace::Completion done) {
+                        if (!persistence_service) {
+                            done(unavailable);
+                            return;
+                        }
+                        persistence_service->saveDestinationProfile(std::move(profile),
+                                                                    std::move(done));
+                    },
+                .remove =
+                    [persistence_service, unavailable](core::StableId id,
+                                                       DestinationPlace::Completion done) {
+                        if (!persistence_service) {
+                            done(unavailable);
+                            return;
+                        }
+                        persistence_service->removeDestinationProfile(id, std::move(done));
+                    },
+                .folders = {},
+                .copyable = {},
+            };
+        }
+        const auto work = engine.file_work;
+        const auto mount = mountOf(engine);
+        return DestinationPlace{
+            .key = engine.key.text(),
+            .name = engineName(engine.key),
+            .load =
+                [this, work](DestinationPlace::LoadCompletion done) {
+                    offThread(
+                        this, [work] { return work->destinations(); },
+                        [done = std::move(done)](auto listed) {
+                            if (!listed) {
+                                done({}, QString::fromStdString(listed.error().message));
+                                return;
+                            }
+                            done(std::move(*listed), {});
+                        });
+                },
+            .save =
+                [this, work](persistence::SavedDestinationProfile profile,
+                             DestinationPlace::Completion done) {
+                    offThread(
+                        this, [work, profile] { return work->save_destination(profile); },
+                        [done = std::move(done)](auto saved) { done(failure(saved)); });
+                },
+            .remove =
+                [this, work](core::StableId id, DestinationPlace::Completion done) {
+                    offThread(
+                        this, [work, id] { return work->remove_destination(id); },
+                        [done = std::move(done)](auto removed) { done(failure(removed)); });
+                },
+            .folders =
+                [this, work](std::string path, EngineFolderDialog::ListingCompletion done) {
+                    offThread(
+                        this, [work, path] { return work->folders(path); },
+                        [done = std::move(done)](auto listed) {
+                            if (!listed) {
+                                done(std::unexpected(std::move(listed.error())));
+                                return;
+                            }
+                            done(EngineFolderDialog::Listing{.path = std::move(listed->path),
+                                                             .parent = std::move(listed->parent),
+                                                             .folders =
+                                                                 std::move(listed->folders)});
+                        });
+                },
+            // Only through a mount: a folder of this computer is that
+            // engine's only where the mount says it is.
+            .copyable = mount.local_folder.empty() || mount.remote_folder.empty()
+                            ? std::function<std::vector<persistence::SavedDestinationProfile>()>{}
+                            : [this, mount] {
+                                  std::vector<persistence::SavedDestinationProfile> there;
+                                  for (auto destination : local_destinations_) {
+                                      if (!path_within(destination.profile.root_raw_path,
+                                                       mount.local_folder)) {
+                                          continue;
+                                      }
+                                      if (auto remote = mount.remote_path_of(
+                                              destination.profile.root_raw_path)) {
+                                          destination.profile.root_raw_path = std::move(*remote);
+                                          there.push_back(std::move(destination));
+                                      }
+                                  }
+                                  return there;
+                              },
+        };
+    };
+
+    std::vector<DestinationPlace> places;
+    for (const auto& engine : engines_) {
+        if (engine->key.isLocal() || (engine->does_file_work && engine->file_work)) {
+            places.push_back(place_of(*engine));
+        }
+    }
+    const auto* chosen = link(destinations_of);
+    auto destinations = chosen != nullptr && (chosen->key.isLocal() ||
+                                              (chosen->does_file_work && chosen->file_work))
+                            ? place_of(*chosen)
+                            : place_of(localEngine());
+    const bool elsewhere =
+        !destinations.key.isEmpty() && destinations.key != EngineKey::local().text();
     return OutputProfileStore{
         .load =
-            [persistence_service](OutputProfileStore::LoadCompletion completion) {
+            [this, persistence_service, unavailable, elsewhere,
+             load_destinations = destinations.load](OutputProfileStore::LoadCompletion completion) {
                 if (!persistence_service) {
-                    completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
+                    completion({}, {}, unavailable);
                     return;
                 }
-                persistence_service->loadOutputProfiles(std::move(completion));
+                const QPointer window{this};
+                persistence_service->loadOutputProfiles(
+                    [window, elsewhere, load_destinations, completion = std::move(completion)](
+                        std::vector<persistence::SavedOutputLayoutProfile> layouts,
+                        std::vector<persistence::SavedDestinationProfile> here,
+                        QString error) mutable {
+                        if (window) {
+                            window->local_destinations_ = here;
+                        }
+                        if (!error.isEmpty() || !elsewhere) {
+                            completion(std::move(layouts), std::move(here), error);
+                            return;
+                        }
+                        load_destinations(
+                            [layouts = std::move(layouts), completion = std::move(completion)](
+                                std::vector<persistence::SavedDestinationProfile> there,
+                                QString failed) mutable {
+                                completion(std::move(layouts), std::move(there), failed);
+                            });
+                    });
             },
         .save_layout =
-            [persistence_service](persistence::SavedOutputLayoutProfile profile,
-                                  OutputProfileStore::Completion completion) {
+            [this, persistence_service, unavailable](persistence::SavedOutputLayoutProfile profile,
+                                                     OutputProfileStore::Completion completion) {
                 if (!persistence_service) {
-                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    completion(unavailable);
                     return;
                 }
-                persistence_service->saveOutputLayoutProfile(std::move(profile),
-                                                             std::move(completion));
+                const QPointer window{this};
+                persistence_service->saveOutputLayoutProfile(
+                    std::move(profile),
+                    [window, completion = std::move(completion)](QString error) {
+                        if (window && error.isEmpty()) {
+                            window->pushLayouts();
+                        }
+                        completion(error);
+                    });
             },
         .remove_layout =
-            [persistence_service](core::StableId id, OutputProfileStore::Completion completion) {
+            [this, persistence_service, unavailable](core::StableId id,
+                                                     OutputProfileStore::Completion completion) {
                 if (!persistence_service) {
-                    completion(QStringLiteral("Trackknife persistence is unavailable"));
+                    completion(unavailable);
                     return;
                 }
-                persistence_service->removeOutputLayoutProfile(id, std::move(completion));
+                const QPointer window{this};
+                persistence_service->removeOutputLayoutProfile(
+                    id, [window, completion = std::move(completion)](QString error) {
+                        if (window && error.isEmpty()) {
+                            window->pushLayouts();
+                        }
+                        completion(error);
+                    });
             },
-        .save_destination =
-            [persistence_service](persistence::SavedDestinationProfile profile,
-                                  OutputProfileStore::Completion completion) {
-                if (!persistence_service) {
-                    completion(QStringLiteral("Trackknife persistence is unavailable"));
-                    return;
-                }
-                persistence_service->saveDestinationProfile(std::move(profile),
-                                                            std::move(completion));
-            },
-        .remove_destination =
-            [persistence_service](core::StableId id, OutputProfileStore::Completion completion) {
-                if (!persistence_service) {
-                    completion(QStringLiteral("Trackknife persistence is unavailable"));
-                    return;
-                }
-                persistence_service->removeDestinationProfile(id, std::move(completion));
-            },
+        .save_destination = destinations.save,
+        .remove_destination = destinations.remove,
+        .destinations_on = elsewhere ? destinations.name : QString{},
+        .places = std::move(places),
     };
+}
+
+void BenchMainWindow::pushLayouts() {
+    if (persistence_ == nullptr) {
+        return;
+    }
+    const QPointer window{this};
+    persistence_->loadOutputProfiles(
+        [window](std::vector<persistence::SavedOutputLayoutProfile> layouts, auto, QString error) {
+            if (!window || !error.isEmpty()) {
+                return;
+            }
+            for (const auto& engine : window->engines_) {
+                // This computer's engine keeps its layouts in this workspace:
+                // they are these, and a copy sent to it could only be older.
+                if (engine->key.isLocal() || !engine->does_file_work || !engine->file_work) {
+                    continue;
+                }
+                // In the order they were made: one thread, so an older set
+                // never lands after a newer one.
+                static_cast<void>(
+                    QtConcurrent::run(&window->layout_pushes_, [work = engine->file_work, layouts] {
+                        static_cast<void>(work->set_layouts(layouts));
+                    }));
+            }
+        });
 }
 
 void BenchMainWindow::showMetadataProperties() {
@@ -1443,32 +1645,14 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                              std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
     const auto database_path = database_path_;
-    // Stage 5: an engine elsewhere moves files below the saved destination
-    // as its machine names that folder, and its moves are followed here
+    // Stage 5: an engine elsewhere moves files to its own destinations
+    // (ADR-0237: they are the engine's), and its moves are followed here
     // through its mount.
     const auto* work_link = work ? linkOfWork(work.get()) : nullptr;
     const bool elsewhere = work && (work_link == nullptr || !work_link->key.isLocal());
     const auto work_engine = work_link != nullptr ? work_link->key : EngineKey::local();
     const auto mount = work_link != nullptr && elsewhere ? mountOf(*work_link) : RemoteMount{};
     auto mounted = std::make_shared<MountedMoves>();
-    DestinationMapper destination_mapper;
-    if (elsewhere) {
-        destination_mapper = [mount](operations::DestinationProfile destination)
-            -> core::Result<operations::DestinationProfile> {
-            auto there = mount.remote_path_of(destination.root_raw_path);
-            if (!there) {
-                return std::unexpected(core::Error{
-                    .code = core::ErrorCode::invalid_argument,
-                    .message = "The move destination " +
-                               core::display_raw_path(destination.root_raw_path) +
-                               " is outside the folder the engine's music is mounted at here",
-                    .context = {},
-                });
-            }
-            destination.root_raw_path = std::move(*there);
-            return destination;
-        };
-    }
     auto* properties = new MetadataPropertiesDialog(
         selected_row_count, std::move(reader), std::span{default_metadata_fields},
         work ? engineMetadataPlanApplierFactory(work) : metadataPlanApplierFactory(),
@@ -1503,7 +1687,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                                                            std::move(completion));
                 },
         },
-        buildOutputProfileStore(),
+        buildOutputProfileStore(work_engine),
         work
             ? enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted)
             : FilePublicationPlanApplierFactory{[this, database_path, persistence_service] {
@@ -1683,7 +1867,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                 },
         },
         work ? engineLookupService(work, this) : musicBrainzLookupService(),
-        work ? engineFileWorkTools(work, std::move(destination_mapper)) : FileWorkTools{});
+        work ? engineFileWorkTools(work) : FileWorkTools{});
     if (work) {
         // Observable for tests and diagnostics: which did the work.
         properties->setProperty("trackknife-file-work", QStringLiteral("engine"));
@@ -1764,8 +1948,14 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
         });
     connect(properties, &MetadataPropertiesDialog::statusMessage, this,
             [this](const QString& message) { statusBar()->showMessage(message, 12'000); });
+    // Its "Edit…" opens the destinations of the engine its tracks are on.
     connect(properties, &MetadataPropertiesDialog::openSettingsRequested, this,
-            [this](const SettingsDialog::Page page) { showSettingsDialog(page); });
+            [this, work_engine](const SettingsDialog::Page page) {
+                auto* settings = showSettingsDialog(page);
+                if (settings != nullptr && page == SettingsDialog::Page::naming) {
+                    settings->showDestinationsOf(work_engine.text());
+                }
+            });
     // ADR-0221: the tagger is a window, not a tab. Every tab is a list of
     // playable tracks; this is an editing surface holding staged, uncommitted
     // state with its own commit/cancel lifecycle, and tabs get closed

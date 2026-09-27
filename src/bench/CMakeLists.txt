@@ -80,6 +80,7 @@ qt_add_library(
     metadata_rule_script_import_dialog.hpp
     metadata_scalar_delegate.cpp
     metadata_scalar_delegate.hpp
+    engine_folder_dialog.cpp
     output_profiles_widget.cpp
     output_profiles_widget.hpp
     shortcut_settings.cpp

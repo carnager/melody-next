@@ -33,12 +33,9 @@ using TechnicalsProbe = std::function<core::Result<engine::FileTechnicals>(
 using ArtworkStager =
     std::function<core::Result<metadata::ArtworkImageFile>(std::span<const unsigned char>)>;
 // Stage 5: how a path plan is checked against the filesystem its files are
-// on, and where a saved move destination -- a folder of this computer, as
-// the destination manager chose it -- is for the engine.
+// on.
 using PathPreflight = std::function<core::Result<operations::OutputPathPreflight>(
     const operations::OutputPathPlan&, const core::CancellationToken&)>;
-using DestinationMapper =
-    std::function<core::Result<operations::DestinationProfile>(operations::DestinationProfile)>;
 
 struct FileWorkTools {
     metadata::MetadataFileAccess access{metadata::local_metadata_file_access()};
@@ -49,7 +46,6 @@ struct FileWorkTools {
     operations::ArtworkFileAccess artwork{operations::local_artwork_file_access()};
     ArtworkStager stage{};
     PathPreflight preflight{};
-    DestinationMapper destination{};
 };
 
 // The cover resizer for these tools: drafts here, or resized here from the
@@ -63,11 +59,8 @@ struct FileWorkTools {
 stageReplacements(std::vector<metadata::ArtworkWritePlanIntent> intents, const FileWorkTools& tools,
                   const core::CancellationToken& cancellation);
 
-// The engine's, through its file-work connection. `destination` says where
-// a folder of this computer is on the engine's machine; empty is the same
-// place, as it is for this computer's engine.
-[[nodiscard]] FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work,
-                                                DestinationMapper destination = {});
+// The engine's, through its file-work connection.
+[[nodiscard]] FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work);
 
 // The tagger's MusicBrainz, Cover Art Archive and AcoustID lookups, made by
 // the engine: each off this thread, answered on `context`'s, as the lookups

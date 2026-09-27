@@ -144,11 +144,9 @@ sees changes.
    the library index, every engine list (`list.changed`) and the player's
    queue. Startup recovery covers interrupted moves, and
    `metadata.interrupted` lists those it could not settle with their target.
-   **As built:** destinations stay the saved ones, chosen with this
-   computer's folder chooser; for an engine elsewhere a destination is
-   translated through that engine's mount, and a move is followed in this
-   computer's lists at the mount's path. Listing an engine's own folders is
-   left for stage 7, when the mount settings go.
+   A move made by an engine elsewhere is followed in this computer's lists
+   at its mount's path. Destinations are the engine's own (below), chosen
+   among its folders.
 6. **Conversion stays in Trackknife** (decided 2026-09-27). It makes new
    files where the user wants them -- this computer's disk, a stick, a
    phone -- and changes nothing in the library, so it belongs where the

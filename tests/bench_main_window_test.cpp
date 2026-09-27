@@ -9,6 +9,7 @@
 #include "bench/desktop_notifier.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
+#include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
@@ -29,6 +30,7 @@
 #include "bench/up_next_delegate.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
+#include "trackknife/engine/file_work_wire.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 
 #include <signal.h>
@@ -282,6 +284,8 @@ class BenchMainWindowTest final : public QObject {
     void metadataCapturePatternSavesReloadsAndStagesAllFields();
     void preparationSidePanelEditsReusableOutputProfiles();
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
+    void moveDestinationsArePerEngine();
+    void namingLayoutsReachEveryEngine();
     void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
     void metadataSuggestionsStageSelectionConsistency();
@@ -3654,6 +3658,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
                 std::erase_if(destinations, [id](const auto& saved) { return saved.id == id; });
                 completion({});
             },
+        .destinations_on = {},
+        .places = {},
     };
 
     auto* properties = new MetadataPropertiesDialog(
@@ -3882,6 +3888,8 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
         .remove_layout = {},
         .save_destination = {},
         .remove_destination = {},
+        .destinations_on = {},
+        .places = {},
     };
     const std::vector automatic_chains{persistence::SavedMetadataTransformationChain{
         .id = core::StableId::random(),
@@ -4017,6 +4025,191 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QVERIFY(status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
 }
 
+// ADR-0237: a move destination is a folder on one engine's machine; the
+// manager shows whose, browses that machine's folders, and saves there.
+void BenchMainWindowTest::moveDestinationsArePerEngine() {
+    const auto destination = [](std::string name, std::string root) {
+        return persistence::SavedDestinationProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::DestinationProfile{.schema_version = 1U,
+                                               .name = std::move(name),
+                                               .root_raw_path = std::move(root),
+                                               .containment_policy = {"lexical-beneath-root", 1U}}};
+    };
+    std::vector here{destination("Library here", "/mnt/nas/music/library")};
+    std::vector there{destination("Library there", "/srv/music/library")};
+    std::vector<std::string> listed_paths;
+    const auto place = [](QString key, QString name,
+                          std::vector<persistence::SavedDestinationProfile>& held) {
+        return DestinationPlace{
+            .key = std::move(key),
+            .name = std::move(name),
+            .load = [&held](DestinationPlace::LoadCompletion done) { done(held, {}); },
+            .save =
+                [&held](persistence::SavedDestinationProfile saved,
+                        DestinationPlace::Completion done) {
+                    std::erase_if(held, [&saved](const auto& old) { return old.id == saved.id; });
+                    held.push_back(std::move(saved));
+                    done({});
+                },
+            .remove =
+                [&held](core::StableId id, DestinationPlace::Completion done) {
+                    std::erase_if(held, [id](const auto& old) { return old.id == id; });
+                    done({});
+                },
+            .folders = {},
+            .copyable = {},
+        };
+    };
+    auto local = place(QStringLiteral("local"), QStringLiteral("this computer"), here);
+    auto remote = place(QStringLiteral("gemenon-id"), QStringLiteral("gemenon"), there);
+    remote.folders = [&listed_paths](std::string path, EngineFolderDialog::ListingCompletion done) {
+        listed_paths.push_back(path);
+        const auto at = path.empty() ? std::string{"/srv/music"} : path;
+        done(EngineFolderDialog::Listing{
+            .path = at, .parent = std::string{"/srv"}, .folders = {"incoming", "sorted"}});
+    };
+    remote.copyable = [] {
+        return std::vector{
+            persistence::SavedDestinationProfile{
+                .id = core::StableId::random(),
+                .profile =
+                    operations::DestinationProfile{
+                        .schema_version = 1U,
+                        .name = "Library here",
+                        .root_raw_path = "/srv/music/sorted",
+                        .containment_policy = {"lexical-beneath-root", 1U}}},
+        };
+    };
+    const OutputProfileStore store{
+        .load = [&here](OutputProfileStore::LoadCompletion done) { done({}, here, {}); },
+        .save_layout = {},
+        .remove_layout = {},
+        .save_destination = local.save,
+        .remove_destination = local.remove,
+        .destinations_on = {},
+        .places = {local, remote},
+    };
+    SettingsDialog settings{nullptr, store};
+    settings.showDestinationsOf(QStringLiteral("gemenon-id"));
+    settings.show();
+    auto* engine = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-engine"));
+    auto* list = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-list"));
+    auto* copy = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-copy"));
+    auto* browse = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-browse"));
+    auto* name = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
+    auto* root = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-root"));
+    auto* create = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-new"));
+    auto* save = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-save"));
+    auto* sections =
+        settings.findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"));
+    QVERIFY(engine && list && copy && browse && name && root && create && save && sections);
+    // Opened for an engine: its destinations, and its name in sight.
+    QCOMPARE(sections->currentIndex(), 1);
+    QCOMPARE(engine->currentText(), QStringLiteral("gemenon"));
+    QTRY_COMPARE(list->count(), 1);
+    QCOMPARE(list->currentText(), QStringLiteral("Library there"));
+
+    // This computer's that lie under the engine's mount are offered.
+    QTRY_VERIFY(copy->isVisible());
+    QCOMPARE(copy->text(), QStringLiteral("Copy 1 from this computer"));
+    QTest::mouseClick(copy, Qt::LeftButton);
+    QTRY_COMPARE(there.size(), 2U);
+    QVERIFY(std::ranges::any_of(there, [](const auto& saved) {
+        return saved.profile.root_raw_path == "/srv/music/sorted";
+    }));
+    QTRY_VERIFY(!copy->isVisible());
+    QCOMPARE(here.size(), 1U);
+
+    // A new one, its folder chosen on that machine.
+    QTest::mouseClick(create, Qt::LeftButton);
+    name->setText(QStringLiteral("Incoming there"));
+    QTest::mouseClick(browse, Qt::LeftButton);
+    EngineFolderDialog* chooser = nullptr;
+    QTRY_VERIFY((chooser = settings.findChild<EngineFolderDialog*>()) != nullptr);
+    QCOMPARE(chooser->windowTitle(), QStringLiteral("Choose a folder on gemenon"));
+    auto* folders = chooser->findChild<QListWidget*>(QStringLiteral("bench-engine-folder-list"));
+    QVERIFY(folders != nullptr);
+    QTRY_COMPARE(folders->count(), 2);
+    folders->setCurrentRow(0);
+    chooser->findChild<QPushButton*>(QStringLiteral("bench-engine-folder-choose"))->click();
+    QCOMPARE(root->text(), QStringLiteral("/srv/music/incoming"));
+    QTRY_VERIFY(save->isEnabled());
+    QTest::mouseClick(save, Qt::LeftButton);
+    QTRY_COMPARE(there.size(), 3U);
+    QCOMPARE(here.size(), 1U);
+
+    // This computer's are its own.
+    engine->setCurrentIndex(0);
+    QTRY_COMPARE(list->count(), 1);
+    QCOMPARE(list->currentText(), QStringLiteral("Library here"));
+
+    // Properties for tracks on that engine says whose destinations it offers.
+    auto* properties = new MetadataPropertiesDialog(
+        0U, [](std::size_t) -> std::optional<MetadataPropertiesSource> { return std::nullopt; }, {},
+        {}, {}, {},
+        OutputProfileStore{
+            .load = [](OutputProfileStore::LoadCompletion done) { done({}, {}, {}); },
+            .save_layout = {},
+            .remove_layout = {},
+            .save_destination = {},
+            .remove_destination = {},
+            .destinations_on = QStringLiteral("gemenon"),
+            .places = {}});
+    auto* offered = properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QVERIFY(offered != nullptr);
+    QCOMPARE(offered->placeholderText(), QStringLiteral("None saved on gemenon yet"));
+    QCOMPARE(offered->toolTip(), QStringLiteral("Move destinations on gemenon"));
+    delete properties;
+}
+
+// ADR-0237: naming layouts are global -- made here, and a copy in every
+// engine, so whatever moves files through one can name them. This
+// computer's engine shares the workspace: what it holds is what was saved,
+// and a copy sent on connecting never lands on top of a newer one.
+void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    const auto names = [&client] {
+        std::vector<std::string> found;
+        auto answer = (*client)->call("layouts.list");
+        for (const auto& layout :
+             answer ? answer->value("layouts", protocol::Json::array()) : protocol::Json::array()) {
+            if (auto decoded = engine::wire::decode_saved_layout(layout)) {
+                found.push_back(decoded->profile.name);
+            }
+        }
+        return found;
+    };
+    const auto id = core::StableId::random();
+    bool saved = false;
+    window.buildOutputProfileStore().save_layout(
+        persistence::SavedOutputLayoutProfile{
+            .id = id,
+            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                       .name = "Everywhere",
+                                                       .dialect = {},
+                                                       .relative_directory_expression = "%artist%",
+                                                       .basename_expression = "%title%",
+                                                       .sanitization_policy = {"linux", 1U}},
+        },
+        [&saved](const QString& error) { saved = error.isEmpty(); });
+    QTRY_VERIFY(saved);
+    QTRY_VERIFY_WITH_TIMEOUT(std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
+    bool removed = false;
+    window.buildOutputProfileStore().remove_layout(
+        id, [&removed](const QString& error) { removed = error.isEmpty(); });
+    QTRY_VERIFY(removed);
+    QTRY_VERIFY_WITH_TIMEOUT(!std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
+    (*client)->close();
+}
+
 void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply_data() {
     // ADR-0237 stage 5: the rename checked and published by the engine holding
     // the file, or reaching this process's applier -- the same window, the
@@ -4064,6 +4257,8 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
         .remove_layout = {},
         .save_destination = {},
         .remove_destination = {},
+        .destinations_on = {},
+        .places = {},
     };
     const MetadataTransformationStore transformation_store{
         .load = [](MetadataTransformationStore::LoadCompletion completion) { completion({}, {}); },

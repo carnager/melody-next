@@ -261,6 +261,15 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
         QStringLiteral("Create, change, or remove move destinations"));
     move_row->addWidget(manage_destinations_button);
     side_layout->addLayout(move_row);
+    // ADR-0237: destinations are folders on the engine the tracks are on;
+    // for one elsewhere, it says whose.
+    if (!output_profile_store_.destinations_on.isEmpty()) {
+        const auto& engine = output_profile_store_.destinations_on;
+        destination_combo_->setPlaceholderText(QStringLiteral("None saved on %1 yet").arg(engine));
+        destination_combo_->setToolTip(QStringLiteral("Move destinations on %1").arg(engine));
+        manage_destinations_button->setToolTip(
+            QStringLiteral("Create, change, or remove move destinations on %1").arg(engine));
+    }
     auto* replaygain_row = new QHBoxLayout;
     replaygain_row->setContentsMargins(0, 0, 0, 0);
     replaygain_row->setSpacing(4);
@@ -2713,16 +2722,6 @@ void MetadataPropertiesDialog::startWritePlan() {
                         .source_revision = *source.source_revision,
                         .final_metadata = std::move((*documents)[position]),
                     });
-                }
-                if (destination && tools.destination) {
-                    // ADR-0237: the engine moves them, below the same folder
-                    // as its machine names it.
-                    auto mapped = tools.destination(std::move(*destination));
-                    if (!mapped) {
-                        return std::make_shared<WritePlanResult>(
-                            std::unexpected(std::move(mapped.error())));
-                    }
-                    destination = std::move(*mapped);
                 }
                 auto planned = operations::plan_output_paths(
                     planning_items,

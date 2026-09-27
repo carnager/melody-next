@@ -623,6 +623,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* naming_layout = new QVBoxLayout(naming);
     if (profile_store.load) {
         auto* manager = new OutputProfilesManagerWidget(std::move(profile_store), naming);
+        output_profiles_ = manager;
         connect(manager, &OutputProfilesManagerWidget::profilesChanged, this,
                 &SettingsDialog::outputProfilesChanged);
         naming_layout->addWidget(manager, 1);
@@ -848,6 +849,13 @@ void SettingsDialog::editCustomBuffer() {
 void SettingsDialog::focusReplayGainPreamp() {
     showPage(Page::playback);
     preamp_with_->setFocus();
+}
+
+void SettingsDialog::showDestinationsOf(const QString& key) {
+    showPage(Page::naming);
+    if (output_profiles_ != nullptr) {
+        output_profiles_->showDestinationsOf(key);
+    }
 }
 
 void SettingsDialog::showPage(const Page page) { pages_->setCurrentRow(static_cast<int>(page)); }

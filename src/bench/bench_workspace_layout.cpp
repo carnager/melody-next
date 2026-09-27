@@ -1127,10 +1127,9 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {
-        for (int index = 0; index < tabs_->count(); ++index) {
-            if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
-                properties->reloadOutputProfiles();
-            }
+        // ADR-0221: tag editors are windows of this one, not tabs.
+        for (auto* properties : findChildren<MetadataPropertiesDialog*>()) {
+            properties->reloadOutputProfiles();
         }
     });
     // ADR-0237: the AcoustID key is the engines'; a changed one is handed to

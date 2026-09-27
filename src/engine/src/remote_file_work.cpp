@@ -638,6 +638,116 @@ core::Result<void> RemoteFileWork::set_rating_scale(const std::string& scale) {
     return {};
 }
 
+core::Result<void>
+RemoteFileWork::set_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto list = Json::array();
+    for (const auto& layout : layouts) {
+        list.push_back(wire::encode(layout));
+    }
+    auto answer = (*connection)->call("layouts.set", Json{{"layouts", std::move(list)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
+namespace {
+
+[[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>>
+destinations_of(const core::Result<Json>& answer) {
+    if (!answer) {
+        return std::unexpected(answer.error());
+    }
+    const auto listed = answer->find("destinations");
+    if (listed == answer->end() || !listed->is_array()) {
+        return std::unexpected(unexpected_answer("the destinations"));
+    }
+    std::vector<persistence::SavedDestinationProfile> result;
+    for (const auto& value : *listed) {
+        auto destination = wire::decode_saved_destination(value);
+        if (!destination) {
+            return std::unexpected(std::move(destination.error()));
+        }
+        result.push_back(std::move(*destination));
+    }
+    return result;
+}
+
+} // namespace
+
+core::Result<std::vector<persistence::SavedDestinationProfile>> RemoteFileWork::destinations() {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    return destinations_of((*connection)->call("destinations.list"));
+}
+
+core::Result<void>
+RemoteFileWork::save_destination(const persistence::SavedDestinationProfile& destination) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto saved = destinations_of(
+        (*connection)->call("destinations.save", Json{{"destination", wire::encode(destination)}}));
+    if (!saved) {
+        return std::unexpected(std::move(saved.error()));
+    }
+    return {};
+}
+
+core::Result<void> RemoteFileWork::remove_destination(const core::StableId& id) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto removed =
+        destinations_of((*connection)->call("destinations.remove", Json{{"id", id.to_string()}}));
+    if (!removed) {
+        return std::unexpected(std::move(removed.error()));
+    }
+    return {};
+}
+
+core::Result<RemoteFileWork::FolderListing> RemoteFileWork::folders(const std::string& path) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer =
+        (*connection)
+            ->call("folders.list",
+                   path.empty() ? Json::object() : Json{{"path", protocol::encode_raw_path(path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto decoded = [](const Json& value) -> std::optional<std::string> {
+        if (!value.is_string()) {
+            return std::nullopt;
+        }
+        auto raw = protocol::decode_raw_path(value.get<std::string>());
+        return raw ? std::optional{std::move(*raw)} : std::nullopt;
+    };
+    FolderListing listing;
+    auto here = decoded(answer->value("path", Json()));
+    if (!here || !answer->contains("folders") || !answer->at("folders").is_array()) {
+        return std::unexpected(unexpected_answer("a folder listing"));
+    }
+    listing.path = std::move(*here);
+    listing.parent = decoded(answer->value("parent", Json()));
+    for (const auto& name : answer->at("folders")) {
+        if (auto folder = decoded(name)) {
+            listing.folders.push_back(std::move(*folder));
+        }
+    }
+    return listing;
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

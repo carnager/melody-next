@@ -14,8 +14,7 @@
 
 namespace trackknife::bench {
 
-FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work,
-                                  DestinationMapper destination) {
+FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work) {
     return FileWorkTools{
         .access = work->access(),
         .scanner =
@@ -35,8 +34,7 @@ FileWorkTools engineFileWorkTools(std::shared_ptr<engine::RemoteFileWork> work,
             [work](const operations::OutputPathPlan& plan,
                    const core::CancellationToken& cancellation) {
                 return work->preflight(plan, cancellation);
-            },
-        .destination = std::move(destination)};
+            }};
 }
 
 operations::ArtworkImageFitter artworkFitterFor(const FileWorkTools& tools) {

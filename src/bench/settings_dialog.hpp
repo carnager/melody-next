@@ -27,6 +27,8 @@ class Browser;
 
 namespace trackknife::bench {
 
+class OutputProfilesManagerWidget;
+
 // The application settings screen (ADR-0112, ADR-0185): a paged dialog —
 // General (notifications, appearance), Playback (local
 // buffering and ReplayGain preamps), Naming (the reusable
@@ -63,6 +65,9 @@ class SettingsDialog final : public QDialog {
                             QList<QAction*> shortcuts = {});
     ~SettingsDialog() override;
     void showPage(Page page);
+    // ADR-0237: the Naming page, with the move destinations of the engine
+    // `key` names.
+    void showDestinationsOf(const QString& key);
     void editCustomBuffer();
     void focusReplayGainPreamp();
     [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();
@@ -164,6 +169,7 @@ class SettingsDialog final : public QDialog {
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* ratings_in_tags_{nullptr};
+    OutputProfilesManagerWidget* output_profiles_{nullptr};
     QComboBox* rating_tag_scale_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};
     QCheckBox* replaygain_true_peak_{nullptr};

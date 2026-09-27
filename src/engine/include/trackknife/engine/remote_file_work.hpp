@@ -12,14 +12,17 @@
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace trackknife::engine {
 
@@ -118,6 +121,22 @@ class RemoteFileWork final {
     // "5", "10", "100").
     [[nodiscard]] core::Result<void> set_rating_tags(bool write_tags);
     [[nodiscard]] core::Result<void> set_rating_scale(const std::string& scale);
+
+    // Naming layouts, handed over whole (layouts.set), and this engine's own
+    // move destinations; folders.list for choosing one on its machine.
+    [[nodiscard]] core::Result<void>
+    set_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts);
+    [[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>> destinations();
+    [[nodiscard]] core::Result<void>
+    save_destination(const persistence::SavedDestinationProfile& destination);
+    [[nodiscard]] core::Result<void> remove_destination(const core::StableId& id);
+    struct FolderListing {
+        std::string path;
+        std::optional<std::string> parent;
+        std::vector<std::string> folders;
+    };
+    // `path` empty: where the engine starts, its home.
+    [[nodiscard]] core::Result<FolderListing> folders(const std::string& path);
 
     // metadata.interrupted: what the engine recovered at startup and what it
     // could not. Absent (not_found) when the engine is older than file work.

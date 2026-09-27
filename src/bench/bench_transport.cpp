@@ -163,6 +163,7 @@ local_replay_gain_override(const LocalTrackRow& row) {
 } // namespace
 
 BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
+    layout_pushes_.setMaxThreadCount(1);
     // ADR-0234: this computer's engine is always the first link, connected
     // or not; remotes follow when configured.
     engines_.push_back(std::make_unique<EngineLink>());

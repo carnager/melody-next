@@ -37,6 +37,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 
 #include <cstdint>
 #include <deque>
@@ -338,7 +339,14 @@ class BenchMainWindow final : public QMainWindow {
     void showMetadataForView(QTableView* view);
     void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
-    [[nodiscard]] OutputProfileStore buildOutputProfileStore();
+    // Naming layouts, and the move destinations of `destinations_of`; with
+    // every engine's destinations as places for the manager (ADR-0237).
+    [[nodiscard]] OutputProfileStore
+    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    // ADR-0237: the naming layouts are global; every engine that does file
+    // work holds a copy, handed over whole after each change and when it
+    // connects.
+    void pushLayouts();
     void startMetadataOperationRecovery();
     [[nodiscard]] MusicBrainzLookupService musicBrainzLookupService();
     void finishMetadataOperationJob();
@@ -835,6 +843,11 @@ class BenchMainWindow final : public QMainWindow {
         QString detail;
     };
     std::vector<EngineInterruption> engine_interruptions_;
+    // This computer's move destinations as last loaded, for offering them to
+    // an engine elsewhere through its mount.
+    std::vector<persistence::SavedDestinationProfile> local_destinations_;
+    // Layout hand-overs to engines, one at a time and in order.
+    QThreadPool layout_pushes_;
     core::CancellationSource metadata_operation_cancellation_;
     QPointer<QDialog> interrupted_operations_dialog_;
     bool metadata_operation_running_{false};

@@ -6,9 +6,11 @@
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
+#include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 
 #include <algorithm>
@@ -131,7 +133,7 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
 }
 
 void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
-                             LocalCatalogue& catalogue) {
+                             LocalCatalogue& catalogue, MoveFollower follow) {
     jobs.on("loudness.scan", [](const Json& params) -> core::Result<JobRegistry::Work> {
         const auto listed = params.find("items");
         if (listed == params.end() || !listed->is_array()) {
@@ -280,6 +282,84 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                         report(wire::encode(progress));
                     },
                     token, operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                if (!applied) {
+                    return Json{{"error", wire::encode(applied.error())}};
+                }
+                return Json{{"result", wire::encode(*applied)}};
+            };
+        });
+    jobs.on("paths.preflight", [](const Json& params) -> core::Result<JobRegistry::Work> {
+        const auto given = params.find("plan");
+        if (given == params.end()) {
+            return std::unexpected(bad_params("a path plan to check is required", "plan"));
+        }
+        auto plan = wire::decode_path_plan(*given);
+        if (!plan) {
+            return std::unexpected(std::move(plan.error()));
+        }
+        return [plan = std::move(*plan)](const core::CancellationToken& token,
+                                         const JobRegistry::Reporter&) {
+            auto checked = operations::preflight_output_paths(plan, token);
+            if (!checked) {
+                return Json{{"error", wire::encode(checked.error())}};
+            }
+            return Json{{"result", wire::encode(*checked)}};
+        };
+    });
+
+    jobs.on(
+        "preparation.apply",
+        [database = database, &catalogue,
+         follow = std::move(follow)](const Json& params) -> core::Result<JobRegistry::Work> {
+            const auto given = params.find("plan");
+            if (given == params.end()) {
+                return std::unexpected(bad_params("a reviewed plan is required", "plan"));
+            }
+            auto plan = wire::decode_preparation_plan(*given);
+            if (!plan) {
+                return std::unexpected(std::move(plan.error()));
+            }
+            if (!plan->ready() || !plan->has_path_operation()) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::conflict,
+                    .message = "the plan is not ready to move files; nothing was changed",
+                    .context = {{.key = "param", .value = "plan"}}});
+            }
+            return [plan = std::move(*plan), database, &catalogue, follow](
+                       const core::CancellationToken& token, const JobRegistry::Reporter& report) {
+                auto file_opened = persistence::SqliteFilePublicationJournal::open(database);
+                if (!file_opened) {
+                    return Json{{"error", wire::encode(file_opened.error())}};
+                }
+                auto metadata_opened = persistence::SqliteMetadataOperationJournal::open(database);
+                if (!metadata_opened) {
+                    return Json{{"error", wire::encode(metadata_opened.error())}};
+                }
+                auto file_journal = std::move(*file_opened);
+                auto metadata_journal = std::move(*metadata_opened);
+                const operations::MetadataDependentStateCommitter metadata_dependent =
+                    [&catalogue](
+                        const operations::MetadataCommitResult& result) -> core::Result<void> {
+                    auto refreshed = catalogue.refresh({result.source_raw_path});
+                    return refreshed ? core::Result<void>{}
+                                     : std::unexpected(std::move(refreshed.error()));
+                };
+                const operations::FilePublicationDependentStateCommitter file_dependent =
+                    [&follow](const operations::FilePublicationCommitResult& result) {
+                        return follow(result, nullptr);
+                    };
+                const operations::DestinationArtifactDependentStateCommitter artifact_dependent =
+                    [&follow](const operations::FilePublicationCommitResult& result,
+                              const metadata::MetadataDocument& document) {
+                        return follow(result, &document);
+                    };
+                auto applied = operations::apply_preparation_publications(
+                    plan, file_journal, metadata_journal, metadata_dependent, file_dependent,
+                    artifact_dependent,
+                    [&report](const operations::FilePublicationApplyProgress& progress) {
+                        report(wire::encode(progress));
+                    },
+                    token, operations::FilePublicationApplyOptions{.maximum_parallelism = 2U});
                 if (!applied) {
                     return Json{{"error", wire::encode(applied.error())}};
                 }

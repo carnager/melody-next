@@ -468,6 +468,51 @@ RemoteFileWork::artwork_apply(const metadata::ArtworkWritePlan& plan,
         *outcome, [](const Json& value) { return wire::decode_artwork_apply_result(value); });
 }
 
+core::Result<operations::OutputPathPreflight>
+RemoteFileWork::preflight(const operations::OutputPathPlan& plan,
+                          const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto outcome = (*connection)
+                       ->run_job(
+                           "paths.preflight", Json{{"plan", wire::encode(plan)}},
+                           [](const Json&) {}, cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    return outcome_of<operations::OutputPathPreflight>(
+        *outcome, [](const Json& value) { return wire::decode_path_preflight(value); });
+}
+
+core::Result<operations::FilePublicationApplyResult>
+RemoteFileWork::publish(const operations::PreparationPlan& plan,
+                        const operations::FilePublicationApplyProgressCallback& progress,
+                        const core::CancellationToken& cancellation) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto outcome = (*connection)
+                       ->run_job(
+                           "preparation.apply", Json{{"plan", wire::encode(plan)}},
+                           [&progress](const Json& reported) {
+                               if (!progress) {
+                                   return;
+                               }
+                               if (auto step = wire::decode_publication_apply_progress(reported)) {
+                                   progress(*step);
+                               }
+                           },
+                           cancellation);
+    if (!outcome) {
+        return std::unexpected(std::move(outcome.error()));
+    }
+    return outcome_of<operations::FilePublicationApplyResult>(
+        *outcome, [](const Json& value) { return wire::decode_publication_apply_result(value); });
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

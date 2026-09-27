@@ -738,6 +738,23 @@ class BenchMainWindow final : public QMainWindow {
     engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
     [[nodiscard]] ArtworkWritePlanApplierFactory
     engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    // Stage 5: moves and renames the engine makes. For an engine elsewhere,
+    // `mounted` receives each move as this computer sees it through the
+    // engine's mount -- this computer's paths and revisions -- for its own
+    // lists to follow.
+    using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
+    [[nodiscard]] FilePublicationPlanApplierFactory
+    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                        bool elsewhere, RemoteMount mount,
+                                        std::shared_ptr<MountedMoves> mounted);
+    // An engine elsewhere moved a file: its own tabs follow at its paths,
+    // everything of this computer's at `here`, the move seen through the
+    // mount, when it is.
+    void applyEngineRelocation(const EngineKey& engine,
+                               const operations::FilePublicationCommitResult& result,
+                               const operations::FilePublicationCommitResult* here);
+    // The engine link whose file-work connection this is.
+    [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
     // Parts of an engine's link; null when it or the part is not there.
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;

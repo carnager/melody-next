@@ -9,7 +9,9 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
+#include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
+#include "trackknife/operations/preparation_plan.hpp"
 #include "trackknife/protocol/client.hpp"
 
 #include <cstdint>
@@ -81,6 +83,16 @@ class RemoteFileWork final {
     artwork_apply(const metadata::ArtworkWritePlan& plan,
                   const operations::ArtworkApplyProgressCallback& progress,
                   const core::CancellationToken& cancellation);
+
+    // Stage 5, moves and renames: a path plan built here, looked at on the
+    // engine's filesystem (paths.preflight), and a reviewed preparation --
+    // tags, paths, or both -- published there (preparation.apply).
+    [[nodiscard]] core::Result<operations::OutputPathPreflight>
+    preflight(const operations::OutputPathPlan& plan, const core::CancellationToken& cancellation);
+    [[nodiscard]] core::Result<operations::FilePublicationApplyResult>
+    publish(const operations::PreparationPlan& plan,
+            const operations::FilePublicationApplyProgressCallback& progress,
+            const core::CancellationToken& cancellation);
 
     // The tagger's lookups, made by the engine (musicbrainz.fetch,
     // acoustid.fingerprint, acoustid.lookup): the bytes a service answered.

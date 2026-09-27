@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trackknife/engine/job_registry.hpp"
+#include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 namespace trackknife::engine {
@@ -28,5 +29,10 @@ class Workspace;
 // for a new list, `revision` 0 refuses if the id is taken.
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
                            Player& player);
+
+// list.changed, as every change to a list is announced: `summary` null when
+// it was deleted.
+void announce_list_change(const EventSink& sink, const persistence::EngineListSummary* summary,
+                          const core::StableId& id);
 
 } // namespace trackknife::engine

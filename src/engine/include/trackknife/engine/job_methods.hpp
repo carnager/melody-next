@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
@@ -58,7 +59,15 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue);
 // artwork.apply {plan} writes a reviewed artwork plan the same way: embedded
 // pictures and folder images, journaled and refreshed. Its images are ones
 // the engine holds -- its own files, or ones staged (artwork.stage).
+//
+// Stage 5, moves and renames. paths.preflight {plan} looks at the engine's
+// filesystem for a path plan the client built -- which files move how,
+// whose target is taken -- and finishes with {result} (the preflight) or
+// {error}; it writes nothing. preparation.apply {plan} publishes a reviewed
+// preparation (tags, paths, or both), journaled like metadata.apply; every
+// file moved is followed by `follow` in the same commit, and it finishes
+// with {result} or {error}. A plan that is not ready is refused at submit.
 void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
-                             LocalCatalogue& catalogue);
+                             LocalCatalogue& catalogue, MoveFollower follow);
 
 } // namespace trackknife::engine

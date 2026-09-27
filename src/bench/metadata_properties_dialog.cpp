@@ -2714,6 +2714,16 @@ void MetadataPropertiesDialog::startWritePlan() {
                         .final_metadata = std::move((*documents)[position]),
                     });
                 }
+                if (destination && tools.destination) {
+                    // ADR-0237: the engine moves them, below the same folder
+                    // as its machine names it.
+                    auto mapped = tools.destination(std::move(*destination));
+                    if (!mapped) {
+                        return std::make_shared<WritePlanResult>(
+                            std::unexpected(std::move(mapped.error())));
+                    }
+                    destination = std::move(*mapped);
+                }
                 auto planned = operations::plan_output_paths(
                     planning_items,
                     operations::OutputPathOperationSelection{
@@ -2727,7 +2737,10 @@ void MetadataPropertiesDialog::startWritePlan() {
                 }
                 path_plan = std::move(*planned);
                 if (path_plan->ready()) {
-                    auto checked = operations::preflight_output_paths(*path_plan, cancellation);
+                    auto checked =
+                        tools.preflight
+                            ? tools.preflight(*path_plan, cancellation)
+                            : operations::preflight_output_paths(*path_plan, cancellation);
                     if (!checked) {
                         return std::make_shared<WritePlanResult>(
                             std::unexpected(std::move(checked.error())));

@@ -493,6 +493,30 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
     refresh_gapless_locked();
 }
 
+void Player::relocate(const std::string& from_raw_path, const std::string& to_raw_path) {
+    const std::lock_guard guard{mutex_};
+    auto moved = false;
+    const auto follow = [&](audio::TrackSource& source) {
+        if (source.raw_path == from_raw_path) {
+            source.raw_path = to_raw_path;
+            moved = true;
+        }
+    };
+    for (auto& entry : queue_) {
+        follow(entry.source);
+    }
+    for (auto& entry : asks_) {
+        follow(entry.source);
+    }
+    follow(anchors_.source);
+    if (!moved) {
+        return;
+    }
+    ++revision_;
+    // A continuation armed with the old path would not open: offered again.
+    refresh_gapless_locked();
+}
+
 std::vector<QueueEntry> Player::queue() const {
     const std::lock_guard guard{mutex_};
     return queue_;

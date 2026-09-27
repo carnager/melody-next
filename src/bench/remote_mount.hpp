@@ -33,6 +33,12 @@ struct RemoteMount final {
     // those are the only files it is known to have.
     [[nodiscard]] std::optional<std::string>
     to_remote(const std::string& local_path, const std::vector<std::string>& remote_roots) const;
+
+    // The same folder or file named on the other side, whether or not it is
+    // there or in a library: where a move goes, where it went. Nothing when
+    // it is outside the configured folder.
+    [[nodiscard]] std::optional<std::string> remote_path_of(const std::string& local_path) const;
+    [[nodiscard]] std::optional<std::string> local_path_of(const std::string& remote_path) const;
 };
 
 // Whether `path` is `folder` or inside it, on a component boundary.

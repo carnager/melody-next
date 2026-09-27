@@ -3058,15 +3058,10 @@ ListRepository::relocate_local_source(const LocalSourceRelocation& relocation) {
             rollback();
             return std::unexpected(std::move(error));
         }
+        // ADR-0237: a file no list holds -- one only in the library, moved
+        // by the engine -- still takes its library row and listening history
+        // with it; there is just no list item to rewrite.
         occurrences_already_at_target = !relocated_occurrences.empty();
-        if (!occurrences_already_at_target) {
-            rollback();
-            return std::unexpected(core::Error{
-                .code = core::ErrorCode::not_found,
-                .message = "Relocated source has no persisted list occurrence",
-                .context = {{"source_path", relocation.source_reference}},
-            });
-        }
     }
     const auto affected_occurrences = relocated_occurrences.size();
 
@@ -3421,33 +3416,39 @@ ListRepository::relocate_local_source(const LocalSourceRelocation& relocation) {
         }
     }
 
-    auto insert_relocation = prepare(
-        database,
-        "INSERT INTO local_source_relocations(operation_id, source_reference, target_reference, "
-        "previous_device, previous_inode, previous_size, previous_mtime_seconds, "
-        "previous_mtime_nanoseconds, published_device, published_inode, published_size, "
-        "published_mtime_seconds, published_mtime_nanoseconds, affected_occurrences, "
-        "cache_rekeyed, metadata_refreshed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-    if (!insert_relocation || !bind_text(insert_relocation->get(), 1, operation_id) ||
-        !bind_blob(insert_relocation->get(), 2, relocation.source_reference) ||
-        !bind_blob(insert_relocation->get(), 3, relocation.target_reference) ||
-        !bind_revision(insert_relocation->get(), 4, relocation.previous_revision) ||
-        !bind_revision(insert_relocation->get(), 9, relocation.published_revision) ||
-        sqlite3_bind_int64(insert_relocation->get(), 14,
-                           static_cast<sqlite3_int64>(affected_occurrences)) != SQLITE_OK ||
-        sqlite3_bind_int(insert_relocation->get(), 15, *source_cache ? 1 : 0) != SQLITE_OK ||
-        sqlite3_bind_int(insert_relocation->get(), 16, published_fields ? 1 : 0) != SQLITE_OK) {
-        auto error = insert_relocation
-                         ? database_error(database, "Could not bind local-source relocation")
-                         : std::move(insert_relocation.error());
-        rollback();
-        return std::unexpected(std::move(error));
-    }
-    if (auto stored = step_done(database, insert_relocation->get(),
-                                "Could not store local-source relocation");
-        !stored) {
-        rollback();
-        return std::unexpected(std::move(stored.error()));
+    // The record is of list items rewritten, for a replay to find: with none
+    // there is nothing to replay, and moving the library row and history
+    // again finds nothing left at the old path.
+    if (affected_occurrences > 0U) {
+        auto insert_relocation = prepare(
+            database,
+            "INSERT INTO local_source_relocations(operation_id, source_reference, "
+            "target_reference, "
+            "previous_device, previous_inode, previous_size, previous_mtime_seconds, "
+            "previous_mtime_nanoseconds, published_device, published_inode, published_size, "
+            "published_mtime_seconds, published_mtime_nanoseconds, affected_occurrences, "
+            "cache_rekeyed, metadata_refreshed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        if (!insert_relocation || !bind_text(insert_relocation->get(), 1, operation_id) ||
+            !bind_blob(insert_relocation->get(), 2, relocation.source_reference) ||
+            !bind_blob(insert_relocation->get(), 3, relocation.target_reference) ||
+            !bind_revision(insert_relocation->get(), 4, relocation.previous_revision) ||
+            !bind_revision(insert_relocation->get(), 9, relocation.published_revision) ||
+            sqlite3_bind_int64(insert_relocation->get(), 14,
+                               static_cast<sqlite3_int64>(affected_occurrences)) != SQLITE_OK ||
+            sqlite3_bind_int(insert_relocation->get(), 15, *source_cache ? 1 : 0) != SQLITE_OK ||
+            sqlite3_bind_int(insert_relocation->get(), 16, published_fields ? 1 : 0) != SQLITE_OK) {
+            auto error = insert_relocation
+                             ? database_error(database, "Could not bind local-source relocation")
+                             : std::move(insert_relocation.error());
+            rollback();
+            return std::unexpected(std::move(error));
+        }
+        if (auto stored = step_done(database, insert_relocation->get(),
+                                    "Could not store local-source relocation");
+            !stored) {
+            rollback();
+            return std::unexpected(std::move(stored.error()));
+        }
     }
     if (auto result = refresh_library_source(
             database, relocation.source_reference, relocation.target_reference,

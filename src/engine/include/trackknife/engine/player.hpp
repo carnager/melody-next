@@ -78,6 +78,10 @@ class Player final {
     // to whatever now occupies its row.
     void replace_queue(std::vector<QueueEntry> entries);
     [[nodiscard]] std::vector<QueueEntry> queue() const;
+    // ADR-0237: a file this engine moved or renamed, followed wherever the
+    // player names it -- the queue, the asks, what plays. Identities stay, so
+    // nothing restarts; the playing track keeps its open file.
+    void relocate(const std::string& from_raw_path, const std::string& to_raw_path);
     // An entry the player holds, in the queue or among the asks.
     [[nodiscard]] std::optional<QueueEntry> entry(const core::StableId& entry_id) const;
 

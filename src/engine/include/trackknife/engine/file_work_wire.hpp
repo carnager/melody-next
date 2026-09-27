@@ -13,7 +13,11 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
+#include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_apply.hpp"
+#include "trackknife/operations/output_path_plan.hpp"
+#include "trackknife/operations/output_path_preflight.hpp"
+#include "trackknife/operations/preparation_plan.hpp"
 #include "trackknife/protocol/message.hpp"
 
 namespace trackknife::engine::wire {
@@ -103,5 +107,31 @@ decode_artwork_apply_result(const Json& value);
 [[nodiscard]] Json encode(const operations::ArtworkApplyProgress& progress);
 [[nodiscard]] core::Result<operations::ArtworkApplyProgress>
 decode_artwork_apply_progress(const Json& value);
+
+// ADR-0237 stage 5: moves and renames. The path plan is built by the client
+// from the saved layout and destination; the engine observes its filesystem
+// for it (the preflight) and publishes a reviewed preparation -- tags, paths,
+// or both at once.
+[[nodiscard]] Json encode(const operations::OutputPathPlan& plan);
+[[nodiscard]] core::Result<operations::OutputPathPlan> decode_path_plan(const Json& value);
+
+[[nodiscard]] Json encode(const operations::OutputPathPreflight& preflight);
+[[nodiscard]] core::Result<operations::OutputPathPreflight>
+decode_path_preflight(const Json& value);
+
+[[nodiscard]] Json encode(const operations::PreparationPlan& plan);
+[[nodiscard]] core::Result<operations::PreparationPlan> decode_preparation_plan(const Json& value);
+
+[[nodiscard]] Json encode(const operations::FilePublicationCommitResult& commit);
+[[nodiscard]] core::Result<operations::FilePublicationCommitResult>
+decode_publication_commit(const Json& value);
+
+[[nodiscard]] Json encode(const operations::FilePublicationApplyResult& result);
+[[nodiscard]] core::Result<operations::FilePublicationApplyResult>
+decode_publication_apply_result(const Json& value);
+
+[[nodiscard]] Json encode(const operations::FilePublicationApplyProgress& progress);
+[[nodiscard]] core::Result<operations::FilePublicationApplyProgress>
+decode_publication_apply_progress(const Json& value);
 
 } // namespace trackknife::engine::wire

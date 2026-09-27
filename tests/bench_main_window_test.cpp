@@ -271,6 +271,8 @@ class BenchMainWindowTest final : public QObject {
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
     void metadataReadyPlanAppliesAndRefreshesHistory_data();
     void metadataReadyPlanAppliesAndRefreshesHistory();
+    void metadataRenameMovesTheFileAndItsRow_data();
+    void metadataRenameMovesTheFileAndItsRow();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
     void metadataFieldLayoutsLoadFilterAndPersist();
@@ -280,6 +282,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataCapturePatternSavesReloadsAndStagesAllFields();
     void preparationSidePanelEditsReusableOutputProfiles();
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
+    void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
     void metadataSuggestionsStageSelectionConsistency();
     void musicBrainzMatchingHandlesUnequalCounts_data();
@@ -3189,6 +3192,104 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
                              5'000);
 }
 
+void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow_data() {
+    // ADR-0237 stage 5: renamed by the engine holding the file, or by this
+    // process -- the same window, the same steps, the same list afterwards.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
+void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
+    QFETCH(bool, through_engine);
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto source_path = media.filePath(QStringLiteral("rename-me.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), source_path));
+    const auto encoded = QFile::encodeName(source_path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    bool layout_saved = false;
+    window.persistence_->saveOutputLayoutProfile(
+        persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::OutputLayoutProfile{
+                    .schema_version = 1U,
+                    .name = "By title",
+                    .dialect = {},
+                    .relative_directory_expression = {},
+                    .basename_expression = "%title%",
+                    .sanitization_policy = {"linux", 1U},
+                },
+        },
+        [&layout_saved](const QString& error) { layout_saved = error.isEmpty(); });
+    QTRY_VERIFY(layout_saved);
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr);
+    QVERIFY(properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    QTRY_VERIFY(!window.property("trackknife-metadata-operation-running").toBool());
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(list_model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    if (!through_engine) {
+        window.localEngine().does_file_work = false;
+    }
+    properties_action->trigger();
+
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    QCOMPARE(properties->property("trackknife-file-work").toString(),
+             through_engine ? QStringLiteral("engine") : QString{});
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* rename_files =
+        properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-rename-files"));
+    auto* preview =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QVERIFY(aggregate_model != nullptr);
+    QVERIFY(rename_files != nullptr);
+    QVERIFY(preview != nullptr);
+    QTRY_VERIFY(rename_files->isEnabled());
+    const auto title_row = aggregate_model->fieldRow(QStringLiteral("title"));
+    QVERIFY(title_row.has_value());
+    QVERIFY(aggregate_model->setData(aggregate_model->index(*title_row, 2),
+                                     QStringLiteral("Renamed by title"), Qt::EditRole));
+    rename_files->setChecked(true);
+    QTRY_VERIFY(preview->isEnabled());
+    QTest::mouseClick(preview, Qt::LeftButton);
+
+    // The row follows the file to its new name, which the new title made.
+    const auto target = media.filePath(QStringLiteral("Renamed by title.flac"));
+    const auto target_raw = QFile::encodeName(target).toStdString();
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().raw_path, target_raw, 10'000);
+    QCOMPARE(list_model->rows().front().title, std::string{"Renamed by title"});
+    QVERIFY(!QFile::exists(source_path));
+    const auto reread = metadata::read_local_metadata(target_raw);
+    QVERIFY(reread.has_value());
+    QCOMPARE(reread->document.effective_values("title"),
+             (std::vector<std::string>{"Renamed by title"}));
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
+    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
+                             5'000);
+}
+
 void BenchMainWindowTest::metadataApplyCancellationPreservesDraftForFreshPreview() {
     QTemporaryDir media;
     QVERIFY(media.isValid());
@@ -3914,7 +4015,17 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QVERIFY(status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
 }
 
+void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply_data() {
+    // ADR-0237 stage 5: the rename checked and published by the engine holding
+    // the file, or reaching this process's applier -- the same window, the
+    // same plan.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto path = media.filePath(QStringLiteral("combined-ui-before.flac"));
@@ -3959,18 +4070,26 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
     };
     bool combined_applied = false;
     std::string reviewed_target;
+    std::optional<operations::FilePublicationApplyResult> published;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
         {}, {}, {}, transformation_store, output_store,
-        [&combined_applied, &reviewed_target] {
+        [&combined_applied, &reviewed_target, &published, work] {
             return FilePublicationPlanApplier{
-                [&combined_applied,
-                 &reviewed_target](const operations::PreparationPlan& plan,
-                                   const operations::FilePublicationApplyProgressCallback& progress,
-                                   const core::CancellationToken&)
+                [&combined_applied, &reviewed_target, &published,
+                 work](const operations::PreparationPlan& plan,
+                       const operations::FilePublicationApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation)
                     -> core::Result<operations::FilePublicationApplyResult> {
                     if (!plan.ready() || !plan.metadata || !plan.path_preflight ||
                         plan.metadata->sources.size() != 1U ||
@@ -3981,9 +4100,17 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
                             .context = {},
                         });
                     }
-                    combined_applied = true;
                     const auto& checked = plan.path_preflight->sources.front();
                     reviewed_target = checked.planned.target_raw_path;
+                    if (work) {
+                        auto applied = work->publish(plan, progress, cancellation);
+                        if (applied) {
+                            published = *applied;
+                        }
+                        combined_applied = true;
+                        return applied;
+                    }
+                    combined_applied = true;
                     if (progress) {
                         progress(operations::FilePublicationApplyProgress{
                             .source_index = 0U,
@@ -4023,7 +4150,7 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
                     };
                 }};
         },
-        {});
+        {}, nullptr, {}, {}, work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->show();
     // Success auto-closes the WA_DeleteOnClose dialog; only a pointer
     // guarded from the start may observe that.
@@ -4059,6 +4186,15 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
     QVERIFY(QString::fromStdString(reviewed_target)
                 .endsWith(QStringLiteral("/Combined UI title.flac")));
     QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
+    if (through_engine) {
+        // Written once, at its new place, by the engine.
+        QVERIFY(published && published->committed_source_count() == 1U);
+        QVERIFY(!QFile::exists(path));
+        const auto written = metadata::read_local_metadata(reviewed_target);
+        QVERIFY(written.has_value());
+        QCOMPARE(written->document.first_effective_value("title"),
+                 std::optional<std::string>{"Combined UI title"});
+    }
 }
 
 void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() {

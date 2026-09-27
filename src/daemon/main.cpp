@@ -498,10 +498,15 @@ int main(int argc, char** argv) {
     trackknife::engine::JobRegistry jobs{sink};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
-    trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue);
+    // ADR-0237: a file moved here is followed, in the same commit, by the
+    // workspace, the library, the lists and the queue.
+    const auto follow_moves =
+        trackknife::engine::follow_moves(*workspace, catalogue, player.get(), sink);
+    trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
     // File work a crash interrupted is finished or rolled back before anyone
     // connects (ADR-0237), and what could not be is kept for Trackknife to show.
-    auto file_work_recovery = trackknife::engine::recover_file_work(database, catalogue);
+    auto file_work_recovery =
+        trackknife::engine::recover_file_work(database, catalogue, follow_moves);
     if (file_work_recovery.error) {
         std::cerr << "melodyd: could not recover interrupted file work: "
                   << file_work_recovery.error->message << "\n";

@@ -9,16 +9,23 @@
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/job_registry.hpp"
 #include "trackknife/engine/metadata_services.hpp"
+#include "trackknife/engine/player.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/workspace.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/artwork.hpp"
 #include "trackknife/metadata/artwork_write_plan.hpp"
+#include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
+#include "trackknife/operations/output_path_plan.hpp"
+#include "trackknife/operations/output_path_preflight.hpp"
+#include "trackknife/operations/preparation_plan.hpp"
+#include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/musicbrainz_cache.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -35,6 +42,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -56,6 +64,11 @@ void require(const bool condition, const std::string_view message) {
 }
 
 // Through text and back, as the wire carries it.
+// For jobs that move nothing.
+const engine::MoveFollower no_follow = [](const auto&, const auto*) -> core::Result<void> {
+    return {};
+};
+
 [[nodiscard]] protocol::Json over_the_wire(const protocol::Json& value) {
     return protocol::Json::parse(value.dump());
 }
@@ -210,7 +223,7 @@ void the_engine_measures_as_this_process_would(const std::filesystem::path& dire
     }};
     engine::JobCatalog jobs;
     engine::LocalCatalogue catalogue{directory / "library.sqlite3"};
-    engine::register_file_work_jobs(jobs, directory / "library.sqlite3", catalogue);
+    engine::register_file_work_jobs(jobs, directory / "library.sqlite3", catalogue, no_follow);
     protocol::Dispatcher dispatcher;
     engine::register_job_methods(dispatcher, registry, jobs);
 
@@ -355,17 +368,25 @@ struct Jobs {
     std::mutex mutex;
     std::vector<protocol::Event> events;
     engine::LocalCatalogue catalogue;
+    engine::Workspace workspace;
+    std::unique_ptr<engine::Player> player{engine::Player::create_without_audio()};
     engine::JobRegistry registry;
     engine::JobCatalog catalog;
     protocol::Dispatcher dispatcher;
+    engine::MoveFollower follow;
 
     explicit Jobs(const std::filesystem::path& database)
-        : catalogue(database), registry([this](const protocol::Event& event) {
-              const std::lock_guard guard{mutex};
-              events.push_back(event);
-          }) {
-        engine::register_file_work_jobs(catalog, database, catalogue);
+        : catalogue(database), workspace(engine::Workspace::open(database).value()),
+          registry([this](const protocol::Event& event) { record(event); }),
+          follow(engine::follow_moves(workspace, catalogue, player.get(),
+                                      [this](const protocol::Event& event) { record(event); })) {
+        engine::register_file_work_jobs(catalog, database, catalogue, follow);
         engine::register_job_methods(dispatcher, registry, catalog);
+    }
+
+    void record(const protocol::Event& event) {
+        const std::lock_guard guard{mutex};
+        events.push_back(event);
     }
 
     // Submits and waits: the outcome, or the submit's refusal.
@@ -455,7 +476,8 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
     require(jobs.run("metadata.apply", protocol::Json::object()).contains("refused"),
             "so is no plan at all");
     // A clean journal: nothing to recover, nothing to show the user.
-    const auto recovery = engine::recover_file_work(directory / "engine.sqlite3", jobs.catalogue);
+    const auto recovery =
+        engine::recover_file_work(directory / "engine.sqlite3", jobs.catalogue, jobs.follow);
     require(!recovery.error && recovery.recovered == 0U,
             "finished writes leave nothing to recover");
     protocol::Dispatcher methods;
@@ -469,6 +491,231 @@ void the_engine_writes_what_was_previewed(const std::filesystem::path& directory
 
 // What a client's file tools get: the same reads, scans and writes, done by an
 // engine over a real connection.
+// ADR-0237 stage 5: a path plan built here, looked at and published by the
+// engine, with the engine's lists, queue and library following the file.
+void the_engine_moves_what_was_previewed(const std::filesystem::path& directory,
+                                         const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    namespace operations = trackknife::operations;
+    const auto root = directory / "moves";
+    std::filesystem::create_directories(root / "sorted");
+    const auto flac = materialize(fixtures, "tagged-tone-flac", root / "old.flac").string();
+    const auto read = metadata::read_local_metadata(flac);
+    require(read.has_value(), "the file to move is read");
+
+    Jobs jobs{directory / "moves.sqlite3"};
+    // A list and a queue that name it.
+    const auto list_id = core::StableId::random();
+    trackknife::persistence::EngineListItem item;
+    item.raw_path = flac;
+    require(jobs.workspace
+                .save_engine_list(list_id, "Moves", trackknife::persistence::EngineListKind::saved,
+                                  {item}, std::nullopt, 0)
+                .has_value(),
+            "a list names the file");
+    engine::QueueEntry queued;
+    queued.source.raw_path = flac;
+    jobs.player->replace_queue({queued});
+
+    const auto plan_for = [&](const std::string& source, const core::LocalSourceRevision& revision,
+                              metadata::MetadataDocument document,
+                              const operations::OutputPathOperationSelection selection,
+                              std::string directory_expression) {
+        const std::array items{
+            operations::OutputPathPlanningItem{.item_index = 0U,
+                                               .source_raw_path = source,
+                                               .source_revision = revision,
+                                               .final_metadata = std::move(document)}};
+        auto planned = operations::plan_output_paths(
+            items, selection,
+            operations::OutputLayoutProfile{.schema_version = 1U,
+                                            .name = "Title",
+                                            .dialect = {},
+                                            .relative_directory_expression =
+                                                std::move(directory_expression),
+                                            .basename_expression = "%title%",
+                                            .sanitization_policy = {"linux", 1U}},
+            selection.move_files ? std::optional{operations::DestinationProfile{
+                                       .schema_version = 1U,
+                                       .name = "Sorted",
+                                       .root_raw_path = (root / "sorted").string(),
+                                       .containment_policy = {"lexical-beneath-root", 1U}}}
+                                 : std::nullopt);
+        require(planned && planned->ready(), "the path plan is clean");
+        return *planned;
+    };
+
+    // A move into a folder that is not there yet.
+    const auto plan = plan_for(flac, read->source_revision, read->document,
+                               {.rename_files = true, .move_files = true}, "New folder");
+    const auto round = wire::decode_path_plan(over_the_wire(wire::encode(plan)));
+    require(round && *round == plan, "the path plan round-trips exactly");
+    const auto checked = jobs.run("paths.preflight", {{"plan", wire::encode(plan)}});
+    require(checked.contains("result"), "the engine looks at its filesystem for the plan");
+    const auto preflight = wire::decode_path_preflight(checked.at("result"));
+    const auto here = operations::preflight_output_paths(plan);
+    require(preflight && here && *preflight == *here, "and sees what this process sees");
+    require(preflight->ready() && !preflight->sources.front().missing_directory_raw_paths.empty(),
+            "a move into a folder still to be made");
+    const auto target = preflight->sources.front().planned.target_raw_path;
+
+    auto preparation = operations::assemble_preparation_plan(
+        {.save_tags = false, .rename_files = true, .move_files = true, .replaygain = false}, 0U,
+        std::nullopt, plan, *preflight);
+    require(preparation && preparation->ready(), "the preparation is ready");
+    const auto decoded = wire::decode_preparation_plan(over_the_wire(wire::encode(*preparation)));
+    require(decoded && decoded->operations == preparation->operations &&
+                decoded->output_paths == preparation->output_paths &&
+                decoded->path_preflight == preparation->path_preflight &&
+                decoded->issues == preparation->issues && !decoded->metadata,
+            "and round-trips exactly");
+
+    const auto moved = jobs.run("preparation.apply", {{"plan", wire::encode(*preparation)}});
+    require(moved.contains("result"), "the engine moves the file");
+    const auto result = wire::decode_publication_apply_result(moved.at("result"));
+    require(result && result->committed_source_count() == 1U, "and commits it");
+    const auto again = wire::decode_publication_apply_result(over_the_wire(wire::encode(*result)));
+    require(again && *again == *result, "the result round-trips exactly");
+    require(!std::filesystem::exists(flac) && std::filesystem::is_regular_file(target),
+            "the file is where the preview said");
+
+    const auto list = jobs.workspace.load_engine_list(list_id);
+    require(list && *list && (*list)->items.front().raw_path == target,
+            "the engine's list follows it");
+    require(jobs.player->queue().front().source.raw_path == target, "and so does its queue");
+    {
+        const std::lock_guard guard{jobs.mutex};
+        require(std::ranges::any_of(jobs.events,
+                                    [&](const protocol::Event& event) {
+                                        return event.name == "list.changed" &&
+                                               event.data.at("id") == list_id.to_string();
+                                    }),
+                "and every client hears the list changed");
+    }
+
+    // The same preparation again: the file is not where it was previewed, so
+    // nothing moves.
+    const auto stale = jobs.run("preparation.apply", {{"plan", wire::encode(*preparation)}});
+    const auto refused = wire::decode_publication_apply_result(stale.at("result"));
+    require((refused && refused->committed_source_count() == 0U) || stale.contains("error"),
+            "a file gone since the preview is not moved");
+    require(std::filesystem::is_regular_file(target), "and the moved file stays");
+
+    // Tags and a rename in one: the new name comes from the new title, and the
+    // file is written once, at its new place.
+    const auto current = metadata::read_local_metadata(target);
+    require(current.has_value(), "the moved file is read");
+    const std::array<std::string_view, 1> preferred{"title"};
+    auto selection = metadata::StagedMetadataSelection::create(
+        {metadata::StagedMetadataSource{.raw_path = target,
+                                        .source_revision = current->source_revision,
+                                        .baseline = current->document}},
+        preferred);
+    require(selection.has_value(), "a selection of it");
+    std::optional<std::size_t> title;
+    for (std::size_t index = 0; index < selection->field_count(); ++index) {
+        if (selection->field(index).canonical_name == "title") {
+            title = index;
+        }
+    }
+    require(title.has_value(), "with a title field");
+    metadata::StagedMetadataPatchSet patches;
+    require(patches.replace_values(*selection, 0, *title, {"Tagged and renamed"}).has_value(),
+            "a title is staged");
+    auto tags = metadata::revalidate_metadata_write_plan(*selection, patches);
+    require(tags && tags->ready(), "the tag preview is clean");
+    const std::array<std::size_t, 1> first{0U};
+    auto documents = metadata::materialize_metadata_draft(*selection, patches, first);
+    require(documents.has_value(), "the new tags name the file");
+    const auto renaming = plan_for(target, current->source_revision, documents->front(),
+                                   {.rename_files = true, .move_files = false}, "");
+    const auto renaming_checked = jobs.run("paths.preflight", {{"plan", wire::encode(renaming)}});
+    const auto renaming_preflight = wire::decode_path_preflight(renaming_checked.at("result"));
+    require(renaming_preflight && renaming_preflight->ready(), "the rename is clean");
+    auto combined = operations::assemble_preparation_plan(
+        {.save_tags = true, .rename_files = true, .move_files = false, .replaygain = false}, 0U,
+        std::move(*tags), renaming, *renaming_preflight);
+    require(combined && combined->ready(), "tags and rename make one preparation");
+    const auto both = jobs.run("preparation.apply", {{"plan", wire::encode(*combined)}});
+    const auto both_result = wire::decode_publication_apply_result(both.at("result"));
+    require(both_result && both_result->committed_source_count() == 1U &&
+                both_result->sources.front().published_metadata.has_value(),
+            "the engine writes and renames it");
+    const auto renamed = renaming_preflight->sources.front().planned.target_raw_path;
+    require(renamed.ends_with("Tagged and renamed.flac") && !std::filesystem::exists(target),
+            "under its new title");
+    const auto written = metadata::read_local_metadata(renamed);
+    require(written && written->document.first_effective_value("title") ==
+                           std::optional<std::string>{"Tagged and renamed"},
+            "with the tags that were previewed");
+    const auto relisted = jobs.workspace.load_engine_list(list_id);
+    require(relisted && *relisted && (*relisted)->items.front().raw_path == renamed,
+            "the list follows again");
+    require(jobs.player->queue().front().source.raw_path == renamed, "as does the queue");
+
+    // Finished moves leave nothing to recover.
+    const auto recovery =
+        engine::recover_file_work(directory / "moves.sqlite3", jobs.catalogue, jobs.follow);
+    require(!recovery.error && recovery.recovered == 0U, "finished moves leave nothing to recover");
+
+    // One recovery could not settle is shown with where it was going.
+    {
+        auto journal = trackknife::persistence::SqliteFilePublicationJournal::open(directory /
+                                                                                   "moves.sqlite3");
+        require(journal.has_value(), "the engine's move journal opens");
+        const auto id = core::StableId::random();
+        const core::LocalSourceRevision revision{.device = 1U,
+                                                 .inode = 2U,
+                                                 .size = 3U,
+                                                 .modification_time_seconds = 4,
+                                                 .modification_time_nanoseconds = 5};
+        require(
+            journal
+                ->create(operations::FilePublicationJournalRecord{
+                    .id = id,
+                    .state = operations::FilePublicationJournalState::planned,
+                    .publication = operations::OutputPathPublicationKind::same_filesystem_rename,
+                    .source_raw_path = "/music/original.flac",
+                    .target_raw_path = "/music/renamed.flac",
+                    .prepared_raw_path = {},
+                    .expected_source_revision = revision,
+                    .prepared_revision = std::nullopt,
+                    .target_revision = std::nullopt,
+                    .occurrence_indexes = {0U},
+                    .planned_missing_directory_raw_paths = {},
+                    .reverses_journal_id = std::nullopt,
+                    .failure = std::nullopt,
+                })
+                .has_value(),
+            "an interrupted move is journaled");
+        require(journal
+                    ->transition(
+                        id,
+                        operations::FilePublicationJournalTransition{
+                            .expected_state = operations::FilePublicationJournalState::planned,
+                            .state = operations::FilePublicationJournalState::needs_reconciliation,
+                            .prepared_revision = std::nullopt,
+                            .target_revision = std::nullopt,
+                            .failure = core::Error{.code = core::ErrorCode::conflict,
+                                                   .message = "Ambiguous rename topology",
+                                                   .context = {}},
+                        })
+                    .has_value(),
+                "and left for the user");
+    }
+    protocol::Dispatcher methods;
+    engine::register_file_work_methods(methods, directory / "moves.sqlite3", {});
+    const auto answer = methods.dispatch(
+        protocol::Request{.id = 1, .method = "metadata.interrupted", .params = {}});
+    require(answer.result.has_value(), "the engine says what it could not settle");
+    const auto listed = answer.result->at("interrupted");
+    require(listed.size() == 1U &&
+                protocol::decode_raw_path(listed.front().at("target").get<std::string>()) ==
+                    core::Result<std::string>{"/music/renamed.flac"} &&
+                listed.front().at("message") == "Ambiguous rename topology",
+            "an interrupted move, with where it was going");
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -488,7 +735,7 @@ void a_client_does_file_work_through_the_engine(const std::filesystem::path& dir
         }
     }};
     engine::JobCatalog jobs;
-    engine::register_file_work_jobs(jobs, database, catalogue);
+    engine::register_file_work_jobs(jobs, database, catalogue, no_follow);
     protocol::Dispatcher dispatcher;
     engine::register_job_methods(dispatcher, registry, jobs);
     engine::register_file_work_methods(dispatcher, database, {});
@@ -806,6 +1053,7 @@ int main(int argc, char** argv) {
     documents_are_exact();
     the_engine_reads_as_this_process_would(directory, argv[1]);
     the_engine_writes_what_was_previewed(directory, argv[1]);
+    the_engine_moves_what_was_previewed(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

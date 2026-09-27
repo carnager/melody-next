@@ -4,13 +4,20 @@
 
 #include "trackknife/core/error.hpp"
 #include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/job_registry.hpp"
+#include "trackknife/metadata/document.hpp"
+#include "trackknife/operations/file_publication.hpp"
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <optional>
 
 namespace trackknife::engine {
+
+class Player;
+class Workspace;
 
 // ADR-0237: what the engine reads for the file tools, answered at once --
 // the long work (measuring, writing) is jobs.
@@ -34,16 +41,31 @@ struct FileWorkRecovery {
     std::optional<core::Error> error;
 };
 
-// Recovers the engine's metadata journal, as Trackknife recovers its own:
-// finished or rolled back where that is safe, left for the user otherwise.
-// Backups are released, as there is no undo to keep them for. Run once, at
-// startup, before clients connect.
+// Stage 5: what follows a file the engine moved or renamed, as part of the
+// move's commit -- and again, harmlessly, when recovery replays it: the
+// workspace's record of the file and its library row (so ratings and history
+// stay with it; `published` is the document of a file whose tags were
+// written on the way), the library index at both paths, every list naming it
+// (announced as list.changed on `sink`), and the player's queue.
+using MoveFollower =
+    std::function<core::Result<void>(const operations::FilePublicationCommitResult& result,
+                                     const metadata::MetadataDocument* published)>;
+[[nodiscard]] MoveFollower follow_moves(Workspace& workspace, LocalCatalogue& catalogue,
+                                        Player* player, EventSink sink);
+
+// Recovers the engine's journals, as Trackknife recovers its own: tag writes
+// and moves finished or rolled back where that is safe, left for the user
+// otherwise. A move finished here is followed by `follow`. Backups are
+// released, as there is no undo to keep them for. Run once, at startup,
+// before clients connect.
 [[nodiscard]] FileWorkRecovery recover_file_work(const std::filesystem::path& database,
-                                                 LocalCatalogue& catalogue);
+                                                 LocalCatalogue& catalogue,
+                                                 const MoveFollower& follow);
 
 // metadata.interrupted answers {recovered, error, interrupted: [{id, path,
-// message}]}: what startup recovery did, and each operation it could neither
-// finish nor roll back -- what Trackknife's "Interrupted file work" lists.
+// message, target?}]}: what startup recovery did, and each operation it could
+// neither finish nor roll back -- what Trackknife's "Interrupted file work"
+// lists. `target` is where an interrupted move was going.
 void register_file_work_methods(protocol::Dispatcher& dispatcher,
                                 std::filesystem::path database = {},
                                 FileWorkRecovery recovery = {});

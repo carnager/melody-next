@@ -3,11 +3,15 @@
 #include "trackknife/engine/file_work_methods.hpp"
 
 #include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/engine/list_methods.hpp"
+#include "trackknife/engine/player.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
+#include "trackknife/engine/workspace.hpp"
 #include "trackknife/metadata/artwork.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/persistence/file_publication_journal.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 
 #include <fcntl.h>
@@ -26,9 +30,77 @@ namespace trackknife::engine {
 
 using protocol::Json;
 
-FileWorkRecovery recover_file_work(const std::filesystem::path& database,
-                                   LocalCatalogue& catalogue) {
+MoveFollower follow_moves(Workspace& workspace, LocalCatalogue& catalogue, Player* player,
+                          EventSink sink) {
+    return [&workspace, &catalogue, player, sink = std::move(sink)](
+               const operations::FilePublicationCommitResult& result,
+               const metadata::MetadataDocument* published) -> core::Result<void> {
+        auto relocated = workspace.relocate_local_source(persistence::LocalSourceRelocation{
+            .operation_id = result.journal_id,
+            .source_reference = result.source_raw_path,
+            .target_reference = result.target_raw_path,
+            .previous_revision = result.source_revision,
+            .published_revision = result.target_revision,
+            .published_document = published == nullptr ? std::nullopt : std::optional{*published},
+        });
+        if (!relocated) {
+            return std::unexpected(std::move(relocated.error()));
+        }
+        if (auto refreshed = catalogue.refresh({result.source_raw_path, result.target_raw_path});
+            !refreshed) {
+            return std::unexpected(std::move(refreshed.error()));
+        }
+        const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        auto lists = workspace.relocate_engine_list_paths(
+            {{result.source_raw_path, result.target_raw_path}}, now_ms);
+        if (!lists) {
+            return std::unexpected(std::move(lists.error()));
+        }
+        for (const auto& summary : *lists) {
+            announce_list_change(sink, &summary, summary.id);
+        }
+        if (player != nullptr) {
+            player->relocate(result.source_raw_path, result.target_raw_path);
+        }
+        return {};
+    };
+}
+
+namespace {
+
+// The tags of a file a move published with new content, read back where it
+// now is -- only while it is still what was published.
+[[nodiscard]] core::Result<std::optional<metadata::MetadataDocument>>
+published_document(const operations::FilePublicationCommitResult& result) {
+    if (result.content != operations::FilePublicationContentKind::prepared_destination_artifact) {
+        return std::nullopt;
+    }
+    auto read = metadata::read_local_metadata(result.target_raw_path);
+    if (!read) {
+        return std::unexpected(std::move(read.error()));
+    }
+    if (read->source_revision != result.target_revision) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::conflict,
+            .message = "Published destination artifact changed before metadata reconciliation",
+            .context = {},
+        });
+    }
+    return std::move(read->document);
+}
+
+} // namespace
+
+FileWorkRecovery recover_file_work(const std::filesystem::path& database, LocalCatalogue& catalogue,
+                                   const MoveFollower& follow) {
     FileWorkRecovery recovery;
+    const auto remember = [&recovery](core::Error error) {
+        if (!recovery.error) {
+            recovery.error = std::move(error);
+        }
+    };
     auto opened = persistence::SqliteMetadataOperationJournal::open(database);
     if (!opened) {
         recovery.error = std::move(opened.error());
@@ -40,25 +112,54 @@ FileWorkRecovery recover_file_work(const std::filesystem::path& database,
         auto refreshed = catalogue.refresh({result.source_raw_path});
         return refreshed ? core::Result<void>{} : std::unexpected(std::move(refreshed.error()));
     };
-    auto recovered = operations::recover_metadata_operations(journal, dependent);
-    if (!recovered) {
-        recovery.error = std::move(recovered.error());
-        return recovery;
-    }
-    for (const auto& result : *recovered) {
-        if (result.outcome != operations::MetadataRecoveryOutcome::needs_reconciliation) {
-            ++recovery.recovered;
+    if (auto recovered = operations::recover_metadata_operations(journal, dependent); !recovered) {
+        remember(std::move(recovered.error()));
+    } else {
+        for (const auto& result : *recovered) {
+            if (result.outcome != operations::MetadataRecoveryOutcome::needs_reconciliation) {
+                ++recovery.recovered;
+            }
+        }
+        // No undo is offered, so a finished write keeps no backup (as in
+        // Trackknife, whose policy this is).
+        constexpr operations::MetadataBackupRetentionPolicy release_all{
+            .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U};
+        if (auto maintained = operations::maintain_metadata_backups(
+                journal, release_all, static_cast<std::int64_t>(std::time(nullptr)));
+            !maintained) {
+            remember(std::move(maintained.error()));
         }
     }
-    // No undo is offered, so a finished write keeps no backup (as in
-    // Trackknife, whose policy this is).
-    constexpr operations::MetadataBackupRetentionPolicy release_all{
-        .maximum_age_seconds = 0, .maximum_entries = 0U, .maximum_total_bytes = 0U};
-    if (auto maintained = operations::maintain_metadata_backups(
-            journal, release_all, static_cast<std::int64_t>(std::time(nullptr)));
-        !maintained) {
-        recovery.error = std::move(maintained.error());
+
+    auto file_opened = persistence::SqliteFilePublicationJournal::open(database);
+    if (!file_opened) {
+        remember(std::move(file_opened.error()));
+        return recovery;
     }
+    auto file_journal = std::move(*file_opened);
+    const operations::FilePublicationDependentStateCommitter moved =
+        [&follow](const operations::FilePublicationCommitResult& result) -> core::Result<void> {
+        auto document = published_document(result);
+        if (!document) {
+            return std::unexpected(std::move(document.error()));
+        }
+        return follow(result, *document ? &**document : nullptr);
+    };
+    const auto count =
+        [&recovery, &remember](
+            core::Result<std::vector<operations::FilePublicationRecoveryResult>> recovered) {
+            if (!recovered) {
+                remember(std::move(recovered.error()));
+                return;
+            }
+            recovery.recovered +=
+                static_cast<std::size_t>(std::ranges::count_if(*recovered, [](const auto& result) {
+                    return result.outcome !=
+                           operations::FilePublicationRecoveryOutcome::needs_reconciliation;
+                }));
+        };
+    count(operations::recover_same_filesystem_publications(file_journal, moved));
+    count(operations::recover_cross_filesystem_publications(file_journal, moved));
     return recovery;
 }
 
@@ -120,6 +221,32 @@ void register_file_work_methods(protocol::Dispatcher& dispatcher, std::filesyste
                         interrupted.push_back(
                             Json{{"id", record.id.to_string()},
                                  {"path", protocol::encode_raw_path(record.source_raw_path)},
+                                 {"message", record.failure ? Json(protocol::displayable_text(
+                                                                  record.failure->message))
+                                                            : Json()}});
+                    }
+                }
+            }
+            if (!database.empty()) {
+                auto opened = persistence::SqliteFilePublicationJournal::open(database);
+                auto recent =
+                    opened ? opened->load_recent()
+                           : core::Result<std::vector<operations::FilePublicationJournalRecord>>{
+                                 std::unexpected(opened.error())};
+                if (!recent) {
+                    if (!error) {
+                        error = std::move(recent.error());
+                    }
+                } else {
+                    for (const auto& record : *recent) {
+                        if (record.state !=
+                            operations::FilePublicationJournalState::needs_reconciliation) {
+                            continue;
+                        }
+                        interrupted.push_back(
+                            Json{{"id", record.id.to_string()},
+                                 {"path", protocol::encode_raw_path(record.source_raw_path)},
+                                 {"target", protocol::encode_raw_path(record.target_raw_path)},
                                  {"message", record.failure ? Json(protocol::displayable_text(
                                                                   record.failure->message))
                                                             : Json()}});

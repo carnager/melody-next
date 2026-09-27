@@ -9,14 +9,20 @@
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/mp4_writer.hpp"
 #include "trackknife/metadata/ogg_writer.hpp"
+#include "trackknife/metadata/ratings.hpp"
 #include "trackknife/metadata/wavpack_writer.hpp"
 
+#include <id3v2tag.h>
 #include <mpegfile.h>
+#include <popularimeterframe.h>
+#include <textidentificationframe.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
@@ -172,19 +178,100 @@ preservation_detail::verify_mp3_binary_preservation(const std::string& source_ra
 
 namespace {
 
-[[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,
-                                                    const std::string& prepared_raw_path,
-                                                    const core::CancellationToken& cancellation) {
+// ADR-0237 stage 2: the rating, where MP3 players look for it. The generic
+// mapping wrote FMPS_RATING as a TXXX frame named in capitals; it is named
+// as the specification spells it, and Windows Media Player's POPM -- what
+// Windows, foobar2000, MusicBee and MediaMonkey read -- carries the same
+// rating. Without a rating change, nothing here is touched.
+[[nodiscard]] std::optional<std::optional<unsigned>>
+planned_rating(const MetadataWritePlanSource& source_plan) {
+    const auto canonical = canonicalize_field_name(fmps_rating_field);
+    for (const auto& change : source_plan.changes) {
+        if (change.canonical_name != canonical) {
+            continue;
+        }
+        const auto& intent = change.intents.front();
+        if (intent.kind == StagedMetadataPatchKind::replace_values && !intent.values.empty()) {
+            return std::optional{rating_from_fmps(intent.values.front())};
+        }
+        return std::optional<unsigned>{};
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] core::Result<void> apply_rating_frames(const MetadataWritePlanSource& source_plan,
+                                                     const std::string& prepared_raw_path) {
+    const auto planned = planned_rating(source_plan);
+    if (!planned) {
+        return {};
+    }
     TagLib::MPEG::File file{prepared_raw_path.c_str(), false};
     if (!file.isValid()) {
         return std::unexpected(writer_error(core::ErrorCode::backend,
                                             "TagLib rejected the prepared MP3 copy",
                                             source_plan.raw_path, prepared_raw_path));
     }
-    // ID3 carries no Picard-paired totals spellings; every field writes
-    // exactly one mapped frame.
-    return text_writer_detail::apply_text_changes_to_properties(
-        mp3_label, source_plan, file, prepared_raw_path, cancellation, false);
+    auto* tag = file.ID3v2Tag(true);
+    const TagLib::String spelling{std::string{fmps_rating_spelling}};
+    for (auto* frame : tag->frameList("TXXX")) {
+        auto* user = dynamic_cast<TagLib::ID3v2::UserTextIdentificationFrame*>(frame);
+        if (user != nullptr && user->description().upper() == spelling.upper()) {
+            user->setDescription(spelling);
+        }
+    }
+    const TagLib::String owner{std::string{popularimeter_owner}};
+    TagLib::ID3v2::PopularimeterFrame* ours = nullptr;
+    for (auto* frame : tag->frameList("POPM")) {
+        auto* popm = dynamic_cast<TagLib::ID3v2::PopularimeterFrame*>(frame);
+        if (popm != nullptr && popm->email() == owner) {
+            ours = popm;
+            break;
+        }
+    }
+    const auto rating = *planned;
+    if (!rating || *rating == 0U) {
+        if (ours != nullptr) {
+            tag->removeFrame(ours);
+        }
+    } else {
+        if (ours == nullptr) {
+            auto frame = std::make_unique<TagLib::ID3v2::PopularimeterFrame>();
+            frame->setEmail(owner);
+            ours = frame.get();
+            tag->addFrame(frame.release());
+        }
+        ours->setRating(popularimeter_byte(*rating));
+    }
+    if (!file.save()) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib failed to save the prepared MP3 rating",
+                                            source_plan.raw_path, prepared_raw_path));
+    }
+    return {};
+}
+
+[[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,
+                                                    const std::string& prepared_raw_path,
+                                                    const core::CancellationToken& cancellation) {
+    {
+        // Closed before the rating frames are written: TagLib finishes its
+        // writes only when the file is closed, and a second writer must see
+        // the file as this one left it.
+        TagLib::MPEG::File file{prepared_raw_path.c_str(), false};
+        if (!file.isValid()) {
+            return std::unexpected(writer_error(core::ErrorCode::backend,
+                                                "TagLib rejected the prepared MP3 copy",
+                                                source_plan.raw_path, prepared_raw_path));
+        }
+        // ID3 carries no Picard-paired totals spellings; every field writes
+        // exactly one mapped frame.
+        auto applied = text_writer_detail::apply_text_changes_to_properties(
+            mp3_label, source_plan, file, prepared_raw_path, cancellation, false);
+        if (!applied) {
+            return applied;
+        }
+    }
+    return apply_rating_frames(source_plan, prepared_raw_path);
 }
 
 } // namespace
@@ -288,8 +375,27 @@ prepare_mp3_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (!after) {
         return std::unexpected(std::move(after.error()));
     }
+    // A rating change rewrites Windows Media Player's POPM, which is no text
+    // tag: it is left out of the text comparison and checked on its own.
+    auto before_document = before->document;
+    auto after_document = after->document;
+    if (const auto planned = planned_rating(source_plan)) {
+        const auto popularimeter = [](const NativeObjectIdentity& object) {
+            return object.identity.starts_with("POPM");
+        };
+        std::erase_if(before_document.unsupported_native_objects, popularimeter);
+        std::erase_if(after_document.unsupported_native_objects, popularimeter);
+        const auto expected = *planned && **planned > 0U
+                                  ? std::optional{popularimeter_byte(**planned)}
+                                  : std::nullopt;
+        if (expected && after->popularimeter != expected) {
+            return std::unexpected(writer_error(core::ErrorCode::conflict,
+                                                "prepared MP3 rating frame differs from the plan",
+                                                source_plan.raw_path, prepared_raw_path));
+        }
+    }
     auto text_verified = text_writer_detail::verify_text_result(
-        mp3_label, before->document, after->document, source_plan, prepared_raw_path, false);
+        mp3_label, before_document, after_document, source_plan, prepared_raw_path, false);
     if (!text_verified) {
         return std::unexpected(std::move(text_verified.error()));
     }

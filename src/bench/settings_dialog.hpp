@@ -75,6 +75,8 @@ class SettingsDialog final : public QDialog {
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
     // ADR-0237 stage 2: engines also write track ratings into the files.
     static constexpr auto ratings_in_tags_key = "library/ratings-in-tags";
+    // The scale other players' plain RATING tags are read on: off, 5, 10, 100.
+    static constexpr auto rating_tag_scale_key = "library/rating-tag-scale";
     // ADR-0220: empty means the library is opened in this process, which is
     // what it has always done. A socket path routes it through an engine
     // instead, so pointing at one is a deliberate act and the default is
@@ -162,6 +164,7 @@ class SettingsDialog final : public QDialog {
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* ratings_in_tags_{nullptr};
+    QComboBox* rating_tag_scale_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};
     QCheckBox* replaygain_true_peak_{nullptr};
     QCheckBox* artwork_embed_{nullptr};

@@ -31,7 +31,15 @@
 #include "trackknife/protocol/dispatch.hpp"
 #include "trackknife/protocol/message.hpp"
 
+#include <flacfile.h>
+#include <id3v2tag.h>
+#include <mp4file.h>
+#include <mp4tag.h>
+#include <mpegfile.h>
+#include <popularimeterframe.h>
 #include <sys/stat.h>
+#include <textidentificationframe.h>
+#include <xiphcomment.h>
 
 #include <array>
 #include <chrono>
@@ -850,6 +858,116 @@ void ratings_in_files_are_imported(const std::filesystem::path& directory,
     require(rating() == 9U, "a rating made here is kept");
 }
 
+// Each format's rating where its players read it: FMPS_RATING, spelled as
+// the specification has it in ID3v2 and MP4, and on MP3 Windows Media
+// Player's POPM as well.
+void ratings_are_written_where_players_read_them(const std::filesystem::path& directory,
+                                                 const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto database = directory / "formats.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value(), "a library");
+
+    const auto mp3 = materialize(fixtures, "tagged-tone-mp3", directory / "rated.mp3").string();
+    require(engine::RatingTags::write(database, catalogue, mp3, 7).value_or(false),
+            "an MP3 is rated");
+    const auto read = metadata::read_local_metadata(mp3);
+    require(read && read->document.first_effective_value("FMPS_RATING") ==
+                        std::optional<std::string>{"0.7"},
+            "with FMPS_RATING");
+    require(read->popularimeter == std::optional<std::uint8_t>{186U}, "and POPM, 3.5 stars");
+    {
+        TagLib::MPEG::File file{mp3.c_str(), false};
+        require(file.isValid() && file.hasID3v2Tag(), "the MP3 has ID3v2");
+        const auto frames = file.ID3v2Tag()->frameList("TXXX");
+        require(std::ranges::any_of(
+                    frames,
+                    [](auto* frame) {
+                        const auto* user =
+                            dynamic_cast<TagLib::ID3v2::UserTextIdentificationFrame*>(frame);
+                        return user != nullptr &&
+                               user->description() == TagLib::String{"FMPS_Rating"};
+                    }),
+                "the TXXX frame is named as the specification spells it");
+        const auto popm = file.ID3v2Tag()->frameList("POPM");
+        require(popm.size() == 1U &&
+                    dynamic_cast<TagLib::ID3v2::PopularimeterFrame*>(popm.front())->email() ==
+                        TagLib::String{"Windows Media Player 9 Series"},
+                "and POPM is Windows Media Player's");
+    }
+    require(engine::RatingTags::write(database, catalogue, mp3, 0).value_or(false),
+            "the MP3's rating is taken away");
+    const auto cleared = metadata::read_local_metadata(mp3);
+    require(cleared && cleared->document.effective_values("FMPS_RATING").empty() &&
+                !cleared->popularimeter,
+            "from both");
+
+    const auto m4a = materialize(fixtures, "tagged-tone-m4a", directory / "rated.m4a").string();
+    require(engine::RatingTags::write(database, catalogue, m4a, 4).value_or(false),
+            "an M4A is rated");
+    const auto m4a_read = metadata::read_local_metadata(m4a);
+    require(m4a_read && m4a_read->document.first_effective_value("FMPS_RATING") ==
+                            std::optional<std::string>{"0.4"},
+            "with FMPS_RATING");
+    TagLib::MP4::File m4a_file{m4a.c_str(), false};
+    require(m4a_file.isValid() && m4a_file.tag() != nullptr &&
+                m4a_file.tag()->contains("----:com.apple.iTunes:FMPS_Rating"),
+            "in an atom named as the specification spells it");
+}
+
+// POPM and plain RATING tags other players wrote come in too.
+void other_players_ratings_are_imported(const std::filesystem::path& directory,
+                                        const std::filesystem::path& fixtures) {
+    const auto music = directory / "others";
+    std::filesystem::create_directories(music);
+    const auto mp3 = materialize(fixtures, "tagged-tone-mp3", music / "popm.mp3").string();
+    const auto flac = materialize(fixtures, "tagged-tone-flac", music / "plain.flac").string();
+    const auto set_popm = [&mp3](const int byte) {
+        TagLib::MPEG::File file{mp3.c_str(), false};
+        auto* tag = file.ID3v2Tag(true);
+        const auto existing = TagLib::ID3v2::FrameList{tag->frameList("POPM")};
+        for (auto* frame : existing) {
+            tag->removeFrame(frame);
+        }
+        auto* popm = new TagLib::ID3v2::PopularimeterFrame;
+        popm->setEmail("someone@elsewhere");
+        popm->setRating(byte);
+        tag->addFrame(popm);
+        require(file.save(), "another player rates the MP3");
+    };
+    set_popm(196);
+    {
+        TagLib::FLAC::File file{flac.c_str(), false};
+        file.xiphComment(true)->addField("RATING", "4");
+        require(file.save(), "another player rates the FLAC, in stars");
+    }
+    const auto database = directory / "others.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value() && catalogue.add_root(music.string()).has_value(),
+            "a library");
+    trackknife::persistence::LibraryScanProgress progress;
+    require(catalogue.scan({}, progress).has_value(), "scanned");
+    const auto rating = [&catalogue](const std::string& path) {
+        trackknife::persistence::LibraryQuery lookup;
+        lookup.kind = trackknife::persistence::LibraryEntryKind::track;
+        lookup.raw_path = path;
+        lookup.limit = 1;
+        const auto found = catalogue.query(lookup);
+        return found && found->entries.size() == 1U ? found->entries.front().rating : 99U;
+    };
+    require(rating(mp3) == 8U, "a POPM of four stars is an 8");
+    set_popm(54);
+    require(catalogue.refresh({mp3}).has_value(), "the MP3 is read again");
+    require(rating(mp3) == 3U, "and a change there is followed");
+    require(rating(flac) == 0U, "a plain RATING is not read until its scale is known");
+    auto workspace = engine::Workspace::open(database);
+    require(workspace.has_value(), "a workspace");
+    engine::RatingTags tags{database, catalogue, *workspace};
+    require(tags.set_plain_scale(trackknife::metadata::PlainRatingScale::five).has_value(),
+            "RATING is said to be stars");
+    require(rating(flac) == 8U, "and four stars are taken as an 8");
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1190,6 +1308,8 @@ int main(int argc, char** argv) {
     the_engine_moves_what_was_previewed(directory, argv[1]);
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);
+    ratings_are_written_where_players_read_them(directory, argv[1]);
+    other_players_ratings_are_imported(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

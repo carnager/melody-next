@@ -9347,11 +9347,36 @@ void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
             ->click();
         QTRY_VERIFY(lifetime.isNull());
     };
+    const auto scale = [&client] {
+        auto answer = (*client)->call("ratings.tags");
+        return answer ? answer->value("rating_scale", std::string{}) : std::string{};
+    };
+    QCOMPARE(scale(), std::string{"off"});
     choose(true);
     QVERIFY(QSettings{}.value(QLatin1String(SettingsDialog::ratings_in_tags_key)).toBool());
     QTRY_VERIFY_WITH_TIMEOUT(writes_tags(), 5'000);
     choose(false);
     QTRY_VERIFY_WITH_TIMEOUT(!writes_tags(), 5'000);
+
+    // Other players' plain RATING tags: read on the scale chosen.
+    const auto choose_scale = [&window](const QString& value) {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* combo =
+            dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-rating-tag-scale"));
+        QVERIFY(combo != nullptr);
+        combo->setCurrentIndex(combo->findData(value));
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    };
+    choose_scale(QStringLiteral("100"));
+    QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"100"}, 5'000);
+    choose_scale(QStringLiteral("off"));
+    QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"off"}, 5'000);
     (*client)->close();
 }
 

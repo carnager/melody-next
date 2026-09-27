@@ -3,14 +3,17 @@
 #include "trackknife/metadata/local_reader.hpp"
 
 #include "trackknife/metadata/flac_mapping.hpp"
+#include "trackknife/metadata/ratings.hpp"
 
 #include <fileref.h>
-#include <tfilestream.h>
 #include <flacfile.h>
+#include <id3v2tag.h>
 #include <mp4file.h>
 #include <mpegfile.h>
 #include <opusfile.h>
+#include <popularimeterframe.h>
 #include <tfile.h>
+#include <tfilestream.h>
 #include <tpropertymap.h>
 #include <vorbisfile.h>
 #include <wavpackfile.h>
@@ -142,6 +145,26 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
                             dynamic_cast<TagLib::MP4::File*>(reference.file()) != nullptr &&
                             has_native_mp4_marker(raw_path);
     const auto properties = reference.file()->properties();
+    std::optional<std::uint8_t> popularimeter;
+    if (native_mpeg) {
+        auto* mpeg = dynamic_cast<TagLib::MPEG::File*>(reference.file());
+        if (mpeg != nullptr && mpeg->hasID3v2Tag()) {
+            for (auto* frame : mpeg->ID3v2Tag()->frameList("POPM")) {
+                const auto* popm = dynamic_cast<TagLib::ID3v2::PopularimeterFrame*>(frame);
+                if (popm == nullptr) {
+                    continue;
+                }
+                const auto byte = static_cast<std::uint8_t>(std::clamp(popm->rating(), 0, 255));
+                if (popm->email() == TagLib::String{std::string{popularimeter_owner}}) {
+                    popularimeter = byte;
+                    break;
+                }
+                if (!popularimeter) {
+                    popularimeter = byte;
+                }
+            }
+        }
+    }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(raw_path));
     }
@@ -257,6 +280,7 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
                 .pictures_writable = native_flac || native_mpeg || native_mp4,
                 .unknown_data_preserved_on_write = preservation_supported,
             },
+        .popularimeter = popularimeter,
     };
 }
 

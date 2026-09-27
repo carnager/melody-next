@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <optional>
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
@@ -30,6 +32,9 @@ struct LocalMetadataRead {
     MetadataDocument document;
     std::string adapter_name;
     MetadataCapabilities capabilities;
+    // ADR-0237 stage 2: an MP3's popularimeter (POPM) rating byte -- the
+    // Windows Media Player owner's, else the first -- which is no text tag.
+    std::optional<std::uint8_t> popularimeter;
 
     friend bool operator==(const LocalMetadataRead&, const LocalMetadataRead&) = default;
 };

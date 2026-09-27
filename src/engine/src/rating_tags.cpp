@@ -9,6 +9,7 @@
 #include "trackknife/metadata/staged_selection.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/persistence/local_library.hpp"
 #include "trackknife/persistence/operation_journal.hpp"
 
 #include <array>
@@ -24,16 +25,9 @@ namespace {
 
 using protocol::Json;
 
-constexpr std::string_view rating_field = "FMPS_RATING";
+constexpr std::string_view rating_field = metadata::fmps_rating_field;
 constexpr std::string_view enabled_key = "ratings.write-tags";
 constexpr std::string_view imported_key = "ratings.imported-from-tags";
-
-// The freedesktop spelling: the rating over ten, one decimal.
-[[nodiscard]] std::string fmps_value(const unsigned rating) {
-    std::array<char, 8> text{};
-    std::snprintf(text.data(), text.size(), "%.1f", static_cast<double>(rating) / 10.0);
-    return text.data();
-}
 
 [[nodiscard]] std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -121,6 +115,32 @@ void RatingTags::rated(const std::string& hash, const bool album, const unsigned
     changed_.notify_all();
 }
 
+metadata::PlainRatingScale RatingTags::plain_scale() const {
+    auto stored = workspace_.load_engine_state(persistence::plain_rating_scale_state_key);
+    return stored && *stored ? metadata::plain_rating_scale_named(**stored).value_or(
+                                   metadata::PlainRatingScale::off)
+                             : metadata::PlainRatingScale::off;
+}
+
+core::Result<void> RatingTags::set_plain_scale(const metadata::PlainRatingScale scale) {
+    if (scale == plain_scale()) {
+        return {};
+    }
+    if (auto saved =
+            workspace_.save_engine_state(persistence::plain_rating_scale_state_key,
+                                         metadata::plain_rating_scale_name(scale), now_ms());
+        !saved) {
+        return saved;
+    }
+    std::cerr << "melodyd: RATING tags are read on the scale "
+              << metadata::plain_rating_scale_name(scale) << "\n";
+    auto imported = catalogue_.import_indexed_tag_ratings();
+    if (!imported) {
+        return std::unexpected(std::move(imported.error()));
+    }
+    return {};
+}
+
 std::size_t RatingTags::pending() const {
     const std::lock_guard guard{mutex_};
     return queue_.size() + in_flight_;
@@ -192,7 +212,7 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
         return false;
     }
     const std::vector<std::string> wanted =
-        rating == 0U ? std::vector<std::string>{} : std::vector{fmps_value(rating)};
+        rating == 0U ? std::vector<std::string>{} : std::vector{metadata::fmps_rating_text(rating)};
     if (read->document.effective_values(rating_field) == wanted) {
         return false;
     }
@@ -243,19 +263,43 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
 
 void register_rating_tag_methods(protocol::Dispatcher& dispatcher, RatingTags& tags) {
     const auto state = [&tags] {
-        return Json{{"write_tags", tags.enabled()}, {"pending", tags.pending()}};
+        return Json{
+            {"write_tags", tags.enabled()},
+            {"rating_scale", std::string{metadata::plain_rating_scale_name(tags.plain_scale())}},
+            {"pending", tags.pending()}};
     };
     dispatcher.on("ratings.tags", [state](const Json&) -> core::Result<Json> { return state(); });
     dispatcher.on("ratings.set_tags", [&tags, state](const Json& params) -> core::Result<Json> {
         const auto wanted = params.find("write_tags");
-        if (wanted == params.end() || !wanted->is_boolean()) {
+        const auto scale = params.find("rating_scale");
+        if ((wanted == params.end() && scale == params.end()) ||
+            (wanted != params.end() && !wanted->is_boolean())) {
             return std::unexpected(
                 core::Error{.code = core::ErrorCode::invalid_argument,
                             .message = "write_tags must be true or false",
                             .context = {{.key = "param", .value = "write_tags"}}});
         }
-        if (auto set = tags.set_enabled(wanted->get<bool>()); !set) {
-            return std::unexpected(std::move(set.error()));
+        std::optional<metadata::PlainRatingScale> named;
+        if (scale != params.end()) {
+            named = scale->is_string()
+                        ? metadata::plain_rating_scale_named(scale->get<std::string>())
+                        : std::nullopt;
+            if (!named) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::invalid_argument,
+                                .message = "rating_scale must be off, 5, 10 or 100",
+                                .context = {{.key = "param", .value = "rating_scale"}}});
+            }
+        }
+        if (wanted != params.end()) {
+            if (auto set = tags.set_enabled(wanted->get<bool>()); !set) {
+                return std::unexpected(std::move(set.error()));
+            }
+        }
+        if (named) {
+            if (auto set = tags.set_plain_scale(*named); !set) {
+                return std::unexpected(std::move(set.error()));
+            }
         }
         return state();
     });

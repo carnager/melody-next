@@ -626,6 +626,18 @@ core::Result<void> RemoteFileWork::set_rating_tags(const bool write_tags) {
     return {};
 }
 
+core::Result<void> RemoteFileWork::set_rating_scale(const std::string& scale) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("ratings.set_tags", Json{{"rating_scale", scale}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
 core::Result<Json> RemoteFileWork::interrupted() {
     auto connection = client();
     if (!connection) {

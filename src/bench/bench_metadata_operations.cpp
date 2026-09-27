@@ -939,6 +939,12 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                     static_cast<void>(work->set_rating_tags(
                         chosen.value(QLatin1String(SettingsDialog::ratings_in_tags_key)).toBool()));
                 }
+                if (chosen.contains(QLatin1String(SettingsDialog::rating_tag_scale_key))) {
+                    static_cast<void>(work->set_rating_scale(
+                        chosen.value(QLatin1String(SettingsDialog::rating_tag_scale_key))
+                            .toString()
+                            .toStdString()));
+                }
                 if (auto answer = work->interrupted()) {
                     for (const auto& entry :
                          answer->value("interrupted", protocol::Json::array())) {

@@ -485,7 +485,8 @@ add_executable(trackknife_engine_file_work_tests engine_file_work_test.cpp)
 target_link_libraries(
     trackknife_engine_file_work_tests
     PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core Trackknife::Loudness
-            Threads::Threads trackknife_project_options trackknife_project_warnings
+            PkgConfig::TAGLIB Threads::Threads trackknife_project_options
+            trackknife_project_warnings
 )
 add_test(NAME engine-file-work COMMAND trackknife_engine_file_work_tests
                                     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")

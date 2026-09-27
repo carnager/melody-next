@@ -102,10 +102,19 @@ sees changes.
    through the tagger's own plan and journal, on a thread of its own. Turning
    it on writes every rated track once; turning it off leaves the files as
    they are. Album ratings are not written: no player reads them from tags.
+   Where each format's players read it (decided 2026-09-28): `FMPS_RATING`
+   everywhere, spelled `FMPS_Rating` in ID3v2 `TXXX` and the MP4 freeform
+   atom as the FMPS specification has it; on MP3 also `POPM` as Windows
+   Media Player's owner, with its whole-star bytes and MediaMonkey's and
+   MusicBee's half stars between (13, 1, 54, 64, 118, 128, 186, 196, 242,
+   255 for 1-10), so all ten levels survive there and foobar2000 and
+   Windows show the nearest star.
    **Import** (wanted, 2026-09-27): whenever the library reads a file, a
-   rating in it -- `FMPS_RATING`, else `RATING` as stars (1-5) or a
-   percentage -- becomes the track's when the tag is new to the library or
-   the track is unrated. A rating the library has over a tag it already saw
+   rating in it -- MP3 `POPM` (any owner; the ten bytes exactly, others by
+   the ranges players share), else `FMPS_RATING`, else a plain `RATING` on
+   the scale chosen in Settings (off by default; 1-5, 0-10 or 0-100: it has
+   no agreed one) -- becomes the track's when it differs from what the
+   library read there before, or the track is unrated. A rating the library has over a tag it already saw
    stays, so a cleared rating is not brought back by an old tag. A library
    read before this is caught up once, at the engine's start, from the tags
    it indexed.

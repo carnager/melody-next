@@ -315,6 +315,23 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     ratings_in_tags_->setChecked(
         settings.value(QLatin1String(ratings_in_tags_key), false).toBool());
     library_layout->addWidget(ratings_in_tags_);
+    auto* scale_form = new QFormLayout;
+    rating_tag_scale_ = new QComboBox(library);
+    rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));
+    rating_tag_scale_->addItem(QStringLiteral("Don't import"), QStringLiteral("off"));
+    rating_tag_scale_->addItem(QStringLiteral("1–5 (foobar2000)"), QStringLiteral("5"));
+    rating_tag_scale_->addItem(QStringLiteral("0–10"), QStringLiteral("10"));
+    rating_tag_scale_->addItem(QStringLiteral("0–100 (MusicBee, MediaMonkey)"),
+                               QStringLiteral("100"));
+    rating_tag_scale_->setToolTip(
+        QStringLiteral("Ratings other players left in your files are taken into the library. "
+                       "FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed "
+                       "scale, so it is read only on the one chosen here."));
+    rating_tag_scale_->setCurrentIndex(
+        std::max(0, rating_tag_scale_->findData(settings.value(QLatin1String(rating_tag_scale_key),
+                                                               QStringLiteral("off")))));
+    scale_form->addRow(QStringLiteral("RATING tags from other players:"), rating_tag_scale_);
+    library_layout->addLayout(scale_form);
     add_page(QStringLiteral("Library"), library);
 
     // --- Engine ------------------------------------------------------------
@@ -916,6 +933,7 @@ void SettingsDialog::save() {
     QSettings settings;
     settings.setValue(QLatin1String(acoustid_client_key), acoustid_key_->text().trimmed());
     settings.setValue(QLatin1String(ratings_in_tags_key), ratings_in_tags_->isChecked());
+    settings.setValue(QLatin1String(rating_tag_scale_key), rating_tag_scale_->currentData());
     settings.setValue(QStringLiteral("lastfm/api-key"), lastfm_key_->text().trimmed());
     settings.setValue(QStringLiteral("appearance/panel-animations"),
                       panel_animations_->isChecked());

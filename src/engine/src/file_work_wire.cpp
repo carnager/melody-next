@@ -691,7 +691,8 @@ Json encode(const metadata::LocalMetadataRead& read) {
                 {"revision", encode(read.source_revision)},
                 {"document", encode(read.document)},
                 {"adapter_name", encode_text(read.adapter_name)},
-                {"capabilities", encode(read.capabilities)}};
+                {"capabilities", encode(read.capabilities)},
+                {"popularimeter", read.popularimeter ? Json(*read.popularimeter) : Json()}};
 }
 
 core::Result<metadata::LocalMetadataRead> decode_metadata_read(const Json& value) {
@@ -724,11 +725,20 @@ core::Result<metadata::LocalMetadataRead> decode_metadata_read(const Json& value
     if (!abilities) {
         return std::unexpected(std::move(abilities.error()));
     }
+    // Absent from an engine older than ratings in tags: no popularimeter.
+    std::optional<std::uint8_t> popularimeter;
+    if (const auto found = value.find("popularimeter"); found != value.end() && !found->is_null()) {
+        if (!found->is_number_unsigned() || found->get<std::uint64_t>() > 255U) {
+            return std::unexpected(malformed("a popularimeter is a byte"));
+        }
+        popularimeter = static_cast<std::uint8_t>(found->get<std::uint64_t>());
+    }
     return metadata::LocalMetadataRead{.raw_path = std::move(*raw_path),
                                        .source_revision = *observed,
                                        .document = std::move(*decoded),
                                        .adapter_name = std::move(*adapter_name),
-                                       .capabilities = *abilities};
+                                       .capabilities = *abilities,
+                                       .popularimeter = popularimeter};
 }
 
 } // namespace trackknife::engine::wire

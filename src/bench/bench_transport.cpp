@@ -180,8 +180,6 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
     buildTransport();
     buildLastFm();
     buildShortcuts();
-    connect(&metadata_operation_watcher_, &QFutureWatcherBase::finished, this,
-            &BenchMainWindow::finishMetadataOperationJob);
     initializePersistence();
 
     transport_timer_ = new QTimer(this);

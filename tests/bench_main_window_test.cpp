@@ -271,10 +271,9 @@ class BenchMainWindowTest final : public QObject {
     void playbackBufferProfilesPersistAndExposeDiagnostics();
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
-    void metadataReadyPlanAppliesAndRefreshesHistory_data();
     void metadataReadyPlanAppliesAndRefreshesHistory();
-    void metadataRenameMovesTheFileAndItsRow_data();
     void metadataRenameMovesTheFileAndItsRow();
+    void fileWorkWithoutAnEngineSaysWhy();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
     void metadataFieldLayoutsLoadFilterAndPersist();
@@ -3116,16 +3115,7 @@ void BenchMainWindowTest::propertiesFileListLivesInTheTaggerWindow() {
     QCOMPARE(source_tabs->count(), sidebar_tabs_before);
 }
 
-void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory_data() {
-    // ADR-0237: tagged by the engine holding the file, or by this process as
-    // with an engine older than file work -- the same window, the same result.
-    QTest::addColumn<bool>("through_engine");
-    QTest::newRow("engine") << true;
-    QTest::newRow("this-process") << false;
-}
-
 void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
-    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto source_path = media.filePath(QStringLiteral("apply-ready.flac"));
@@ -3152,15 +3142,11 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTRY_VERIFY(properties_action->isEnabled());
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
-    if (!through_engine) {
-        window.localEngine().does_file_work = false;
-    }
     properties_action->trigger();
 
     auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
-    QCOMPARE(properties->property("trackknife-file-work").toString(),
-             through_engine ? QStringLiteral("engine") : QString{});
+    QCOMPARE(properties->property("trackknife-file-work").toString(), QStringLiteral("engine"));
     // ADR-0221: a window, so the tab strip is untouched and the list the
     // selection came from stays current.
     QVERIFY(properties->isWindow());
@@ -3198,16 +3184,7 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
                              5'000);
 }
 
-void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow_data() {
-    // ADR-0237 stage 5: renamed by the engine holding the file, or by this
-    // process -- the same window, the same steps, the same list afterwards.
-    QTest::addColumn<bool>("through_engine");
-    QTest::newRow("engine") << true;
-    QTest::newRow("this-process") << false;
-}
-
 void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
-    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto source_path = media.filePath(QStringLiteral("rename-me.flac"));
@@ -3251,15 +3228,11 @@ void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTRY_VERIFY(properties_action->isEnabled());
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
-    if (!through_engine) {
-        window.localEngine().does_file_work = false;
-    }
     properties_action->trigger();
 
     auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
-    QCOMPARE(properties->property("trackknife-file-work").toString(),
-             through_engine ? QStringLiteral("engine") : QString{});
+    QCOMPARE(properties->property("trackknife-file-work").toString(), QStringLiteral("engine"));
     QTableView* fields = nullptr;
     QTRY_VERIFY((fields = properties->findChild<QTableView*>(
                      QStringLiteral("bench-metadata-fields"))) != nullptr);
@@ -3294,6 +3267,46 @@ void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
     QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
+}
+
+// ADR-0237: files are written only by the engine holding them. Without one
+// that does file work, the tools say so rather than open to an Apply that
+// cannot happen.
+void BenchMainWindowTest::fileWorkWithoutAnEngineSaysWhy() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("unwritable.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({QFile::encodeName(path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    window.localEngine().does_file_work = false;
+
+    auto* properties = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(properties != nullptr);
+    QTRY_VERIFY(properties->isEnabled());
+    properties->trigger();
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QCOMPARE(window.statusBar()->currentMessage(),
+             QStringLiteral("Editing tags is done by the engine on this computer, which is not "
+                            "available right now"));
+
+    auto* replaygain = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
+    QVERIFY(replaygain != nullptr);
+    replaygain->trigger();
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog")) == nullptr);
+    QVERIFY(window.statusBar()->currentMessage().startsWith(
+        QStringLiteral("Measuring ReplayGain is done by the engine on this computer")));
 }
 
 void BenchMainWindowTest::metadataApplyCancellationPreservesDraftForFreshPreview() {
@@ -7636,39 +7649,6 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
             }));
         QCOMPARE(tab->model->rowCount(), rows_before);
     }
-
-    // Last, as it retags the fixture everything above searched for.
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), music);
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), mounted);
-    // Tools on a remote tab work on the file where this computer sees it --
-    // the mount -- and what they change reaches the remote's library without
-    // waiting for a scan.
-    tab->view->selectionModel()->select(tab->model->index(0, 0),
-                                        QItemSelectionModel::ClearAndSelect |
-                                            QItemSelectionModel::Rows);
-    const auto tooled = window.remoteFileWorkRows(tab->view);
-    QVERIFY(tooled && tooled->size() == 1U);
-    const auto here = QFile::encodeName(mounted + QStringLiteral("/art.flac")).toStdString();
-    QCOMPARE(tooled->front().raw_path, here);
-    // Retagged, as the tag editor would write it, and reported as committed.
-    QVERIFY(QFile::remove(art));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), art));
-    operations::MetadataCommitResult committed;
-    committed.source_raw_path = here;
-    committed.published_revision = *core::observe_local_source_revision(here);
-    committed.document.fields.push_back({.canonical_name = "title",
-                                         .native_name = "TITLE",
-                                         .values = {"Metadata Fixture"},
-                                         .qualifier = {},
-                                         .provenance = metadata::FieldProvenance::embedded});
-    window.applyCommittedMetadata(committed);
-    const auto remote_art = QFile::encodeName(art).toStdString();
-    QTRY_VERIFY([&] {
-        const auto indexed = window.remoteCatalogue()->open()->cached_tracks({remote_art});
-        return indexed && indexed->front().facts.title == "Metadata Fixture";
-    }());
-    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
-    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
 }
 
 // Lists are restored before the remote engine is connected, so a restored
@@ -8917,24 +8897,15 @@ void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
 void BenchMainWindowTest::contextReplayGainScansAndApplies_data() {
     QTest::addColumn<bool>("cached");
     QTest::addColumn<bool>("embedded");
-    // ADR-0237: done by the engine holding the files, or -- an engine older
-    // than file work -- by this process; the same dialog, the same result.
-    QTest::addColumn<bool>("through_engine");
-    for (const bool engine : {true, false}) {
-        const auto suffix = engine ? "" : "-by-this-process";
-        QTest::newRow(qPrintable(QStringLiteral("imported%1").arg(QLatin1String{suffix})))
-            << false << false << engine;
-        QTest::newRow(qPrintable(QStringLiteral("cached-sidecar%1").arg(QLatin1String{suffix})))
-            << true << false << engine;
-        QTest::newRow(qPrintable(QStringLiteral("cached-embedded%1").arg(QLatin1String{suffix})))
-            << true << true << engine;
-    }
+    // ADR-0237: done by the engine holding the files.
+    QTest::newRow("imported") << false << false;
+    QTest::newRow("cached-sidecar") << true << false;
+    QTest::newRow("cached-embedded") << true << true;
 }
 
 void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     QFETCH(bool, cached);
     QFETCH(bool, embedded);
-    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto first =
@@ -9004,17 +8975,13 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
     // This build's engine does file work; once it has said so, the dialog
     // goes through it -- unless it is taken as an older one.
     QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
-    if (!through_engine) {
-        window.localEngine().does_file_work = false;
-    }
     auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
     QVERIFY(action != nullptr);
     action->trigger();
     QDialog* dialog = nullptr;
     QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog"))) !=
                 nullptr);
-    QCOMPARE(dialog->property("trackknife-file-work").toString(),
-             through_engine ? QStringLiteral("engine") : QString{});
+    QCOMPARE(dialog->property("trackknife-file-work").toString(), QStringLiteral("engine"));
     auto* grouping =
         dialog->findChild<QComboBox*>(QStringLiteral("bench-replaygain-dialog-grouping"));
     auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));
@@ -11034,6 +11001,10 @@ void BenchMainWindowTest::combinedPublicationStartupRecoversMetadataAndPath() {
                 .failure = std::nullopt,
             }));
     }
+    // ADR-0237: the engine recovers its journal when it starts, as after the
+    // crash this stands for.
+    engine_.stop();
+    QVERIFY2(engine_.start(), engine_.log().constData());
 
     BenchMainWindow window;
     window.show();

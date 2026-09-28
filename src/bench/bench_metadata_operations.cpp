@@ -7,15 +7,12 @@
 #include "bench/convert_dialog.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/metadata_properties_dialog.hpp"
-#include "bench/musicbrainz_fetch_service.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/replaygain_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/operations/file_publication_apply.hpp"
 #include "trackknife/operations/metadata_commit.hpp"
-#include "trackknife/persistence/file_publication_journal.hpp"
-#include "trackknife/persistence/operation_journal.hpp"
 #include "uicommon/list_persistence_service.hpp"
 
 #include <QAbstractItemView>
@@ -55,29 +52,7 @@
 
 namespace trackknife::bench {
 
-struct MetadataOperationJobOutcome {
-    std::optional<core::Error> error;
-    std::vector<operations::MetadataRecoveryResult> recovery;
-    std::vector<operations::MetadataBackupMaintenanceResult> maintenance;
-    std::vector<operations::MetadataOperationBackupRecord> backups;
-    std::vector<operations::MetadataOperationJournalRecord> reconciliation;
-    std::vector<operations::MetadataCommitResult> refreshed_sources;
-    std::vector<operations::FilePublicationRecoveryResult> file_recovery;
-    std::vector<operations::FilePublicationJournalRecord> file_publications;
-    std::vector<operations::FilePublicationCommitResult> relocated_sources;
-    std::vector<std::pair<operations::FilePublicationCommitResult, metadata::MetadataDocument>>
-        refreshed_relocations;
-};
-
 namespace {
-
-// Undo backups exist only as part of the proven atomic commit protocol; there
-// is no user-facing undo surface, so retention keeps nothing across restarts.
-constexpr operations::MetadataBackupRetentionPolicy metadata_retention_policy{
-    .maximum_age_seconds = 0,
-    .maximum_entries = 0U,
-    .maximum_total_bytes = 0U,
-};
 
 constexpr std::array<std::string_view, 12> default_metadata_fields{
     "Title",        "Artist",      "Album Artist", "Album", "Date",     "Track Number",
@@ -95,245 +70,11 @@ metadata_refresh(const operations::MetadataCommitResult& result) {
     };
 }
 
-[[nodiscard]] core::Result<std::optional<metadata::MetadataDocument>>
-published_relocation_document(const operations::FilePublicationCommitResult& result,
-                              const core::CancellationToken& cancellation = {}) {
-    if (result.content != operations::FilePublicationContentKind::prepared_destination_artifact) {
-        return std::nullopt;
-    }
-    auto read = metadata::read_local_metadata(result.target_raw_path, cancellation);
-    if (!read) {
-        return std::unexpected(std::move(read.error()));
-    }
-    if (read->source_revision != result.target_revision) {
-        return std::unexpected(core::Error{
-            .code = core::ErrorCode::conflict,
-            .message = "Published destination artifact changed before metadata reconciliation",
-            .context = {},
-        });
-    }
-    return std::move(read->document);
-}
-
-[[nodiscard]] std::shared_ptr<MetadataOperationJobOutcome>
-run_metadata_operation_job(const std::filesystem::path& database_path,
-                           ui::ListPersistenceService* const persistence_service,
-                           const core::CancellationToken& cancellation) {
-    auto outcome = std::make_shared<MetadataOperationJobOutcome>();
-    auto metadata_opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-    if (!metadata_opened) {
-        outcome->error = std::move(metadata_opened.error());
-        return outcome;
-    }
-    auto file_opened = persistence::SqliteFilePublicationJournal::open(database_path);
-    if (!file_opened) {
-        outcome->error = std::move(file_opened.error());
-        return outcome;
-    }
-    auto metadata_journal = std::move(*metadata_opened);
-    auto file_journal = std::move(*file_opened);
-    const auto remember_error = [outcome](core::Error error) {
-        if (!outcome->error) {
-            outcome->error = std::move(error);
-        }
-    };
-    const auto metadata_dependent =
-        [persistence_service,
-         outcome](const operations::MetadataCommitResult& result) -> core::Result<void> {
-        if (!persistence_service) {
-            return std::unexpected(core::Error{
-                .code = core::ErrorCode::cancelled,
-                .message = "Trackknife closed during metadata recovery",
-                .context = {},
-            });
-        }
-        // ADR-0145: recovered carrier publications carry no tag document;
-        // the files are the source of truth and re-project on probing.
-        if (result.content_kind != operations::MetadataOperationContentKind::text_fields) {
-            return {};
-        }
-        auto refreshed = persistence_service->refreshLocalMetadataAndWait(metadata_refresh(result));
-        if (!refreshed) {
-            return std::unexpected(std::move(refreshed.error()));
-        }
-        outcome->refreshed_sources.push_back(result);
-        return {};
-    };
-    const auto file_dependent =
-        [persistence_service, cancellation,
-         outcome](const operations::FilePublicationCommitResult& result) -> core::Result<void> {
-        if (!persistence_service) {
-            return std::unexpected(core::Error{
-                .code = core::ErrorCode::cancelled,
-                .message = "Trackknife closed during source reconciliation",
-                .context = {},
-            });
-        }
-        auto published_document = published_relocation_document(result, cancellation);
-        if (!published_document) {
-            return std::unexpected(std::move(published_document.error()));
-        }
-        const auto durable = [persistence_service, result,
-                              published_document]() -> core::Result<void> {
-            if (!persistence_service) {
-                return std::unexpected(core::Error{
-                    .code = core::ErrorCode::cancelled,
-                    .message = "Trackknife closed during source reconciliation",
-                    .context = {},
-                });
-            }
-            auto relocated =
-                persistence_service->relocateLocalSourceAndWait(persistence::LocalSourceRelocation{
-                    .operation_id = result.journal_id,
-                    .source_reference = result.source_raw_path,
-                    .target_reference = result.target_raw_path,
-                    .previous_revision = result.source_revision,
-                    .published_revision = result.target_revision,
-                    .published_document = *published_document,
-                });
-            return relocated ? core::Result<void>{} : std::unexpected(std::move(relocated.error()));
-        };
-        if (auto relocated = durable(); !relocated) {
-            return std::unexpected(std::move(relocated.error()));
-        }
-        outcome->relocated_sources.push_back(result);
-        if (*published_document) {
-            outcome->refreshed_relocations.emplace_back(result, std::move(**published_document));
-        }
-        return {};
-    };
-
-    auto recovered =
-        operations::recover_metadata_operations(metadata_journal, metadata_dependent, cancellation);
-    if (!recovered) {
-        remember_error(std::move(recovered.error()));
-    } else {
-        outcome->recovery = std::move(*recovered);
-        auto maintained = operations::maintain_metadata_backups(
-            metadata_journal, metadata_retention_policy,
-            static_cast<std::int64_t>(std::time(nullptr)), cancellation);
-        if (!maintained) {
-            remember_error(std::move(maintained.error()));
-        } else {
-            outcome->maintenance = std::move(*maintained);
-        }
-    }
-
-    auto same = operations::recover_same_filesystem_publications(file_journal, file_dependent,
-                                                                 cancellation);
-    if (!same) {
-        remember_error(std::move(same.error()));
-    } else {
-        outcome->file_recovery.insert(outcome->file_recovery.end(),
-                                      std::make_move_iterator(same->begin()),
-                                      std::make_move_iterator(same->end()));
-    }
-    auto cross = operations::recover_cross_filesystem_publications(file_journal, file_dependent,
-                                                                   cancellation);
-    if (!cross) {
-        remember_error(std::move(cross.error()));
-    } else {
-        outcome->file_recovery.insert(outcome->file_recovery.end(),
-                                      std::make_move_iterator(cross->begin()),
-                                      std::make_move_iterator(cross->end()));
-    }
-
-    auto backups = metadata_journal.load_backups();
-    auto incomplete = metadata_journal.load_incomplete();
-    auto file_publications = file_journal.load_recent();
-    if (!backups && !outcome->error) {
-        outcome->error = std::move(backups.error());
-    }
-    if (!incomplete && !outcome->error) {
-        outcome->error = std::move(incomplete.error());
-    }
-    if (!file_publications && !outcome->error) {
-        outcome->error = std::move(file_publications.error());
-    }
-    if (backups) {
-        outcome->backups = std::move(*backups);
-    }
-    if (incomplete) {
-        for (auto& record : *incomplete) {
-            if (record.state == operations::MetadataOperationJournalState::needs_reconciliation) {
-                outcome->reconciliation.push_back(std::move(record));
-            }
-        }
-    }
-    if (file_publications) {
-        outcome->file_publications = std::move(*file_publications);
-    }
-    return outcome;
-}
-
 } // namespace
 
 void BenchMainWindow::showConvertDialog() {
     auto* tab = currentListTab();
     showConvertForView(tab ? tab->view : nullptr);
-}
-
-std::optional<std::vector<LocalTrackRow>> BenchMainWindow::remoteFileWorkRows(QTableView* view) {
-    auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    const auto engine = engineOfView(view);
-    const auto* engine_link = link(engine);
-    if (engine.isLocal() || engine_link == nullptr || model == nullptr ||
-        view->selectionModel() == nullptr) {
-        return std::nullopt;
-    }
-    // ADR-0227: the tools read and write files here, so a remote tab's are
-    // taken where this computer has them -- through the mount -- or not at
-    // all, rather than whatever is at the remote's paths on this machine.
-    auto selected = view->selectionModel()->selectedRows();
-    std::ranges::sort(selected, {}, &QModelIndex::row);
-    const auto mount = mountOf(*engine_link);
-    std::vector<LocalTrackRow> rows;
-    std::size_t unreachable = 0U;
-    for (const auto& index : selected) {
-        const auto row = static_cast<std::size_t>(index.row());
-        if (row >= model->rows().size()) {
-            continue;
-        }
-        auto local = model->rows()[row];
-        const auto remote_path = local.raw_path;
-        auto here = mount.to_local(remote_path);
-        if (!here) {
-            ++unreachable;
-            continue;
-        }
-        local.raw_path = std::move(*here);
-        // What was known of it came from the remote; this computer reads it
-        // afresh before writing.
-        local.source_revision.reset();
-        remote_file_work_[local.raw_path] = RemoteFile{.engine = engine, .path = remote_path};
-        rows.push_back(std::move(local));
-    }
-    if (unreachable > 0U) {
-        statusBar()->showMessage(
-            QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
-                           "out. Where that engine's music is reachable here is set in Settings "
-                           "→ Engine.")
-                .arg(unreachable)
-                .arg(selected.size()),
-            10'000);
-    }
-    return rows;
-}
-
-void BenchMainWindow::followRemoteRetag(const operations::MetadataCommitResult& result) {
-    const auto known = remote_file_work_.find(result.source_raw_path);
-    if (known == remote_file_work_.end()) {
-        return;
-    }
-    // The remote tabs' rows take the new tags by the remote's name for the
-    // file: where the mount differs, the local commit did not reach them.
-    for (auto& tab : list_tabs_) {
-        if (EngineKey::of(tab->document) == known->second.engine) {
-            static_cast<void>(tab->model->applyCommittedMetadata(
-                known->second.path, result.document, result.published_revision));
-        }
-    }
-    queueRemoteRefresh(known->second.engine, known->second.path);
 }
 
 namespace {
@@ -479,81 +220,6 @@ void BenchMainWindow::flushEngineRelocations() {
                 storePendingRelocations();
                 flushEngineRelocations();
             });
-    }
-}
-
-void BenchMainWindow::followRemoteMove(const operations::FilePublicationCommitResult& result) {
-    const auto known = remote_file_work_.find(result.source_raw_path);
-    if (known == remote_file_work_.end()) {
-        return;
-    }
-    const auto remote = known->second;
-    remote_file_work_.erase(known);
-    const auto* engine = link(remote.engine);
-    if (engine == nullptr) {
-        return;
-    }
-    // Where that engine sees the new place. Outside its library it has lost
-    // the file, which re-reading the old path records.
-    const auto remote_target = mountOf(*engine).to_remote(result.target_raw_path, rootsOf(*engine));
-    if (remote_target) {
-        remote_file_work_[result.target_raw_path] =
-            RemoteFile{.engine = remote.engine, .path = *remote_target};
-        for (auto& tab : list_tabs_) {
-            if (EngineKey::of(tab->document) == remote.engine) {
-                static_cast<void>(tab->model->applyCommittedRelocation(
-                    remote.path, *remote_target, result.source_revision, result.target_revision));
-            }
-        }
-        queueRemoteRefresh(remote.engine, *remote_target);
-    }
-    queueRemoteRefresh(remote.engine, remote.path);
-}
-
-void BenchMainWindow::queueRemoteRefresh(const EngineKey& engine, std::string remote_path) {
-    pending_remote_refresh_[engine].push_back(std::move(remote_path));
-    if (remote_refresh_timer_ == nullptr) {
-        // One request per engine for a whole apply, however many files it
-        // wrote.
-        remote_refresh_timer_ = new QTimer(this);
-        remote_refresh_timer_->setSingleShot(true);
-        remote_refresh_timer_->setInterval(300);
-        connect(remote_refresh_timer_, &QTimer::timeout, this, &BenchMainWindow::sendRemoteRefresh);
-    }
-    remote_refresh_timer_->start();
-}
-
-void BenchMainWindow::sendRemoteRefresh() {
-    auto pending = std::exchange(pending_remote_refresh_, {});
-    for (auto& [key, paths] : pending) {
-        const auto* engine = link(key);
-        if (engine == nullptr || engine->catalogue == nullptr || paths.empty()) {
-            continue;
-        }
-        std::shared_ptr<engine::Catalogue> catalogue{engine->catalogue->openDeferred()};
-        auto* watcher = new QFutureWatcher<core::Result<std::size_t>>(this);
-        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, key] {
-            watcher->deleteLater();
-            const auto* refreshed = link(key);
-            if (!watcher->result()) {
-                statusBar()->showMessage(
-                    QStringLiteral("%1 has not re-read the changed files: %2")
-                        .arg(engineName(key), displayText(watcher->result().error().message)),
-                    8'000);
-                return;
-            }
-            // Its index has the new tags and paths: what shows them catches up.
-            if (refreshed != nullptr && refreshed->library != nullptr) {
-                refreshed->library->refreshLibrary();
-            }
-            for (auto& tab : list_tabs_) {
-                if (EngineKey::of(tab->document) == key) {
-                    enqueueUnprobedRows(*tab);
-                }
-            }
-        });
-        watcher->setFuture(QtConcurrent::run(
-            [catalogue, paths = std::move(paths)] { return catalogue->refresh(paths); }));
     }
 }
 
@@ -797,84 +463,6 @@ BenchMainWindow::selectionSourceReader(LocalListModel* source_model,
     };
 }
 
-MetadataWritePlanApplierFactory BenchMainWindow::metadataPlanApplierFactory() {
-    auto* const persistence_service = persistence_;
-    const auto database_path = database_path_;
-    return [this, database_path, persistence_service] {
-        auto documents = collectDocuments();
-        auto view_layouts = collectTrackViewLayouts();
-        return MetadataWritePlanApplier{
-            [database_path, persistence_service, documents = std::move(documents),
-             view_layouts =
-                 std::move(view_layouts)](const metadata::MetadataWritePlan& plan,
-                                          const operations::MetadataApplyProgressCallback& progress,
-                                          const core::CancellationToken& cancellation) mutable
-                -> core::Result<operations::MetadataApplyResult> {
-                if (!persistence_service) {
-                    return std::unexpected(core::Error{
-                        .code = core::ErrorCode::cancelled,
-                        .message = "Trackknife closed during metadata Apply",
-                        .context = {},
-                    });
-                }
-                const auto persistence_error = persistence_service->saveWorkspaceAndWait(
-                    std::move(documents), std::move(view_layouts));
-                if (!persistence_error.isEmpty()) {
-                    return std::unexpected(core::Error{
-                        .code = core::ErrorCode::database,
-                        .message = utf8Bytes(persistence_error),
-                        .context = {},
-                    });
-                }
-                auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                if (!opened) {
-                    return std::unexpected(std::move(opened.error()));
-                }
-                auto journal = std::move(*opened);
-                const auto dependent =
-                    [persistence_service](
-                        const operations::MetadataCommitResult& result) -> core::Result<void> {
-                    if (!persistence_service) {
-                        return std::unexpected(core::Error{
-                            .code = core::ErrorCode::cancelled,
-                            .message = "Trackknife closed during metadata Apply",
-                            .context = {},
-                        });
-                    }
-                    // ADR-0145: carrier commits have no tag document;
-                    // their rows refresh through the apply observers.
-                    if (result.content_kind !=
-                        operations::MetadataOperationContentKind::text_fields) {
-                        return {};
-                    }
-                    auto refreshed =
-                        persistence_service->refreshLocalMetadataAndWait(metadata_refresh(result));
-                    return refreshed ? core::Result<void>{}
-                                     : std::unexpected(std::move(refreshed.error()));
-                };
-                return operations::apply_metadata_write_plan(
-                    plan,
-                    [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
-                                           const core::CancellationToken& source_cancellation) {
-                        return operations::commit_flac_metadata_source(source, journal, dependent,
-                                                                       source_cancellation);
-                    },
-                    [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
-                                           const core::CancellationToken& sheet_cancellation) {
-                        return operations::commit_cue_replay_gain_sheet(sheet, journal, dependent,
-                                                                        sheet_cancellation);
-                    },
-                    [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
-                                           const core::CancellationToken& sidecar_cancellation) {
-                        return operations::commit_loudness_sidecar(sidecar, journal, dependent,
-                                                                   sidecar_cancellation);
-                    },
-                    progress, cancellation,
-                    operations::MetadataApplyOptions{.maximum_parallelism = 2U});
-            }};
-    };
-}
-
 MetadataApplyObserver BenchMainWindow::metadataApplyObserver() {
     return [this](const operations::MetadataApplyResult& result) {
         auto committed = false;
@@ -922,6 +510,7 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
         static_cast<void>(QtConcurrent::run([window, work] {
             const bool does = work->supported();
             std::vector<EngineInterruption> interrupted;
+            std::size_t recovered = 0U;
             if (does) {
                 // ADR-0237: the engine looks things up with the key kept in
                 // Settings; handed over whenever it connects.
@@ -946,6 +535,8 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                             .toStdString()));
                 }
                 if (auto answer = work->interrupted()) {
+                    // What it finished or rolled back at its start, itself.
+                    recovered = answer->value("recovered", std::size_t{0U});
                     for (const auto& entry :
                          answer->value("interrupted", protocol::Json::array())) {
                         auto id = core::StableId::parse(entry.value("id", std::string{}));
@@ -980,21 +571,45 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                                 QStringLiteral(" · planned target %1")
                                     .arg(QString::fromStdString(core::display_raw_path(*target)));
                         }
-                        interrupted.push_back(EngineInterruption{
-                            .id = *id, .raw_path = std::move(*path), .detail = std::move(detail)});
+                        interrupted.push_back(EngineInterruption{.id = *id,
+                                                                 .raw_path = std::move(*path),
+                                                                 .detail = std::move(detail),
+                                                                 .move = target.has_value()});
                     }
                 }
             }
             QMetaObject::invokeMethod(
                 window,
-                [window, work, does, interrupted = std::move(interrupted)] {
+                [window, work, does, recovered, interrupted = std::move(interrupted)] {
                     if (!window) {
                         return;
                     }
+                    if (recovered > 0U) {
+                        window->statusBar()->showMessage(
+                            QStringLiteral("Recovered %1 interrupted file operation%2")
+                                .arg(recovered)
+                                .arg(recovered == 1U ? QString{} : QStringLiteral("s")),
+                            5'000);
+                    }
+                    for (const auto& reported : interrupted) {
+                        if (std::ranges::none_of(window->engine_interruptions_,
+                                                 [&reported](const auto& known) {
+                                                     return known.id == reported.id;
+                                                 })) {
+                            window->engine_interruptions_.push_back(reported);
+                        }
+                    }
+                    // Observable for tests: what engines could not settle.
+                    const auto moves =
+                        std::ranges::count_if(window->engine_interruptions_,
+                                              [](const auto& known) { return known.move; });
+                    window->setProperty("trackknife-file-reconciliation-count",
+                                        static_cast<qulonglong>(moves));
+                    window->setProperty(
+                        "trackknife-metadata-reconciliation-count",
+                        static_cast<qulonglong>(window->engine_interruptions_.size()) -
+                            static_cast<qulonglong>(moves));
                     if (!interrupted.empty()) {
-                        window->engine_interruptions_.insert(window->engine_interruptions_.end(),
-                                                             interrupted.begin(),
-                                                             interrupted.end());
                         window->presentInterruptedOperations();
                     }
                     // By the connection, not the key: an engine's key changes
@@ -1140,22 +755,13 @@ BenchMainWindow::enginePublicationPlanApplierFactory(std::shared_ptr<engine::Rem
             mounted = std::move(mounted)] {
         auto documents = collectDocuments();
         auto view_layouts = collectTrackViewLayouts();
-        const auto recovery_was_running = metadata_operation_running_;
         return FilePublicationPlanApplier{
             [persistence_service, work, elsewhere, mount, mounted, documents = std::move(documents),
-             view_layouts = std::move(view_layouts),
-             recovery_was_running](const operations::PreparationPlan& plan,
-                                   const operations::FilePublicationApplyProgressCallback& progress,
-                                   const core::CancellationToken& cancellation) mutable
+             view_layouts = std::move(view_layouts)](
+                const operations::PreparationPlan& plan,
+                const operations::FilePublicationApplyProgressCallback& progress,
+                const core::CancellationToken& cancellation) mutable
                 -> core::Result<operations::FilePublicationApplyResult> {
-                if (recovery_was_running) {
-                    return std::unexpected(core::Error{
-                        .code = core::ErrorCode::conflict,
-                        .message = "Startup operation recovery is still running; preview "
-                                   "again after it finishes",
-                        .context = {},
-                    });
-                }
                 if (!persistence_service) {
                     return std::unexpected(core::Error{
                         .code = core::ErrorCode::cancelled,
@@ -1306,36 +912,8 @@ void BenchMainWindow::showReplayGainForView(QTableView* view) {
     }
     // ADR-0237: the engine holding the files measures and writes them, at its
     // own paths -- the same dialog, doing the same work, somewhere else.
-    if (auto work = fileWorkOf(view)) {
-        auto selected = view->selectionModel()->selectedRows();
-        std::ranges::sort(selected, {}, &QModelIndex::row);
-        if (selected.empty()) {
-            return;
-        }
-        std::vector<QPersistentModelIndex> selected_rows;
-        selected_rows.reserve(static_cast<std::size_t>(selected.size()));
-        for (const auto& index : selected) {
-            selected_rows.emplace_back(index);
-        }
-        const auto count = selected_rows.size();
-        auto* dialog =
-            new ReplayGainDialog(count, selectionSourceReader(model, std::move(selected_rows)),
-                                 engineMetadataPlanApplierFactory(work), metadataApplyObserver(),
-                                 this, engineFileWorkTools(work));
-        // Observable for tests and diagnostics: which did the work.
-        dialog->setProperty("trackknife-file-work", QStringLiteral("engine"));
-        dialog->show();
-        return;
-    }
-    if (auto remote = remoteFileWorkRows(view)) {
-        if (remote->empty()) {
-            return;
-        }
-        const auto count = remote->size();
-        auto* dialog = new ReplayGainDialog(
-            count, selectionSourceReader(model, {}, std::move(*remote)),
-            metadataPlanApplierFactory(), metadataApplyObserver(), this);
-        dialog->show();
+    auto work = requireFileWork(view, tr("Measuring ReplayGain"));
+    if (!work) {
         return;
     }
     auto selected = view->selectionModel()->selectedRows();
@@ -1351,8 +929,23 @@ void BenchMainWindow::showReplayGainForView(QTableView* view) {
     const auto count = selected_rows.size();
     auto* dialog =
         new ReplayGainDialog(count, selectionSourceReader(model, std::move(selected_rows)),
-                             metadataPlanApplierFactory(), metadataApplyObserver(), this);
+                             engineMetadataPlanApplierFactory(work), metadataApplyObserver(), this,
+                             engineFileWorkTools(work));
+    // Observable for tests and diagnostics: which did the work.
+    dialog->setProperty("trackknife-file-work", QStringLiteral("engine"));
     dialog->show();
+}
+
+std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::requireFileWork(QTableView* view,
+                                                                         const QString& what) {
+    auto work = fileWorkOf(view);
+    if (!work) {
+        statusBar()->showMessage(
+            tr("%1 is done by the engine on %2, which is not available right now")
+                .arg(what, engineName(engineOfView(view))),
+            10'000);
+    }
+    return work;
 }
 
 namespace {
@@ -1614,16 +1207,10 @@ void BenchMainWindow::showMetadataForView(QTableView* view) {
         return;
     }
     // ADR-0237: the engine holding the files reads, probes and writes them at
-    // its own paths; this process only when it does not do file work.
-    auto work = fileWorkOf(view);
+    // its own paths.
+    auto work = requireFileWork(view, tr("Editing tags"));
     if (!work) {
-        if (auto remote = remoteFileWorkRows(view)) {
-            if (!remote->empty()) {
-                const auto count = remote->size();
-                openMetadataProperties(count, selectionSourceReader(model, {}, std::move(*remote)));
-            }
-            return;
-        }
+        return;
     }
     auto selected = view->selectionModel()->selectedRows();
     std::ranges::sort(selected, {}, &QModelIndex::row);
@@ -1644,19 +1231,17 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                              MetadataPropertiesSourceReader reader,
                                              std::shared_ptr<engine::RemoteFileWork> work) {
     auto* const persistence_service = persistence_;
-    const auto database_path = database_path_;
-    // Stage 5: an engine elsewhere moves files to its own destinations
-    // (ADR-0237: they are the engine's), and its moves are followed here
-    // through its mount.
-    const auto* work_link = work ? linkOfWork(work.get()) : nullptr;
-    const bool elsewhere = work && (work_link == nullptr || !work_link->key.isLocal());
+    // ADR-0237: the engine holding the files does all the work on them. One
+    // elsewhere moves files to its own destinations, and its moves are
+    // followed here through its mount.
+    const auto* work_link = linkOfWork(work.get());
+    const bool elsewhere = work_link == nullptr || !work_link->key.isLocal();
     const auto work_engine = work_link != nullptr ? work_link->key : EngineKey::local();
     const auto mount = work_link != nullptr && elsewhere ? mountOf(*work_link) : RemoteMount{};
     auto mounted = std::make_shared<MountedMoves>();
     auto* properties = new MetadataPropertiesDialog(
         selected_row_count, std::move(reader), std::span{default_metadata_fields},
-        work ? engineMetadataPlanApplierFactory(work) : metadataPlanApplierFactory(),
-        metadataApplyObserver(),
+        engineMetadataPlanApplierFactory(work), metadataApplyObserver(),
         MetadataTransformationStore{
             .load =
                 [persistence_service](MetadataTransformationStore::LoadCompletion completion) {
@@ -1688,125 +1273,7 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                 },
         },
         buildOutputProfileStore(work_engine),
-        work
-            ? enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted)
-            : FilePublicationPlanApplierFactory{[this, database_path, persistence_service] {
-                  auto documents = collectDocuments();
-                  auto view_layouts = collectTrackViewLayouts();
-                  const auto recovery_was_running = metadata_operation_running_;
-                  return FilePublicationPlanApplier{
-                      [database_path, persistence_service, documents = std::move(documents),
-                       view_layouts = std::move(view_layouts), recovery_was_running](
-                          const operations::PreparationPlan& plan,
-                          const operations::FilePublicationApplyProgressCallback& progress,
-                          const core::CancellationToken& cancellation) mutable
-                          -> core::Result<operations::FilePublicationApplyResult> {
-                          if (recovery_was_running) {
-                              return std::unexpected(core::Error{
-                                  .code = core::ErrorCode::conflict,
-                                  .message = "Startup operation recovery is still running; preview "
-                                             "again after it finishes",
-                                  .context = {},
-                              });
-                          }
-                          if (!persistence_service) {
-                              return std::unexpected(core::Error{
-                                  .code = core::ErrorCode::cancelled,
-                                  .message = "Trackknife closed during file publication",
-                                  .context = {},
-                              });
-                          }
-                          const auto persistence_error = persistence_service->saveWorkspaceAndWait(
-                              std::move(documents), std::move(view_layouts));
-                          if (!persistence_error.isEmpty()) {
-                              return std::unexpected(core::Error{
-                                  .code = core::ErrorCode::database,
-                                  .message = utf8Bytes(persistence_error),
-                                  .context = {},
-                              });
-                          }
-                          auto file_opened =
-                              persistence::SqliteFilePublicationJournal::open(database_path);
-                          if (!file_opened) {
-                              return std::unexpected(std::move(file_opened.error()));
-                          }
-                          auto metadata_opened =
-                              persistence::SqliteMetadataOperationJournal::open(database_path);
-                          if (!metadata_opened) {
-                              return std::unexpected(std::move(metadata_opened.error()));
-                          }
-                          auto file_journal = std::move(*file_opened);
-                          auto metadata_journal = std::move(*metadata_opened);
-                          const auto metadata_dependent =
-                              [persistence_service](const operations::MetadataCommitResult& result)
-                              -> core::Result<void> {
-                              if (!persistence_service) {
-                                  return std::unexpected(core::Error{
-                                      .code = core::ErrorCode::cancelled,
-                                      .message = "Trackknife closed during metadata reconciliation",
-                                      .context = {},
-                                  });
-                              }
-                              auto refreshed = persistence_service->refreshLocalMetadataAndWait(
-                                  metadata_refresh(result));
-                              return refreshed ? core::Result<void>{}
-                                               : std::unexpected(std::move(refreshed.error()));
-                          };
-                          const auto relocate =
-                              [persistence_service](
-                                  const operations::FilePublicationCommitResult& result,
-                                  const metadata::MetadataDocument* document)
-                              -> core::Result<void> {
-                              if (!persistence_service) {
-                                  return std::unexpected(core::Error{
-                                      .code = core::ErrorCode::cancelled,
-                                      .message = "Trackknife closed during source reconciliation",
-                                      .context = {},
-                                  });
-                              }
-                              const auto durable = [persistence_service, result,
-                                                    document]() -> core::Result<void> {
-                                  if (!persistence_service) {
-                                      return std::unexpected(core::Error{
-                                          .code = core::ErrorCode::cancelled,
-                                          .message =
-                                              "Trackknife closed during source reconciliation",
-                                          .context = {},
-                                      });
-                                  }
-                                  auto relocated = persistence_service->relocateLocalSourceAndWait(
-                                      persistence::LocalSourceRelocation{
-                                          .operation_id = result.journal_id,
-                                          .source_reference = result.source_raw_path,
-                                          .target_reference = result.target_raw_path,
-                                          .previous_revision = result.source_revision,
-                                          .published_revision = result.target_revision,
-                                          .published_document = document == nullptr
-                                                                    ? std::nullopt
-                                                                    : std::optional{*document},
-                                      });
-                                  return relocated ? core::Result<void>{}
-                                                   : std::unexpected(std::move(relocated.error()));
-                              };
-                              // The engine keeps its open file; its queue learns
-                              // the new path when the list is sent again below.
-                              return durable();
-                          };
-                          const auto file_dependent =
-                              [&relocate](const operations::FilePublicationCommitResult& result) {
-                                  return relocate(result, nullptr);
-                              };
-                          const auto artifact_dependent =
-                              [&relocate](const operations::FilePublicationCommitResult& result,
-                                          const metadata::MetadataDocument& document) {
-                                  return relocate(result, &document);
-                              };
-                          return operations::apply_preparation_publications(
-                              plan, file_journal, metadata_journal, metadata_dependent,
-                              file_dependent, artifact_dependent, progress, cancellation,
-                              operations::FilePublicationApplyOptions{.maximum_parallelism = 2U});
-                      }};
-              }},
+        enginePublicationPlanApplierFactory(work, elsewhere, mount, mounted),
         [this, elsewhere, work_engine,
          mounted](const operations::FilePublicationApplyResult& result) {
             auto committed = false;
@@ -1866,86 +1333,23 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                                      std::move(completion));
                 },
         },
-        work ? engineLookupService(work, this) : musicBrainzLookupService(),
-        work ? engineFileWorkTools(work) : FileWorkTools{});
-    if (work) {
-        // Observable for tests and diagnostics: which did the work.
-        properties->setProperty("trackknife-file-work", QStringLiteral("engine"));
-    }
-    properties->setArtworkMutationServices(
-        work ? engineArtworkPlanApplierFactory(work)
-             : ArtworkWritePlanApplierFactory{[this, database_path, persistence_service] {
-                   auto documents = collectDocuments();
-                   auto view_layouts = collectTrackViewLayouts();
-                   return ArtworkWritePlanApplier{
-                       [database_path, persistence_service, documents = std::move(documents),
-                        view_layouts = std::move(view_layouts)](
-                           const metadata::ArtworkWritePlan& plan,
-                           const operations::ArtworkApplyProgressCallback& progress,
-                           const core::CancellationToken& cancellation) mutable
-                           -> core::Result<operations::ArtworkApplyResult> {
-                           if (!persistence_service) {
-                               return std::unexpected(core::Error{
-                                   .code = core::ErrorCode::cancelled,
-                                   .message = "Trackknife closed during artwork Apply",
-                                   .context = {},
-                               });
-                           }
-                           const auto persistence_error = persistence_service->saveWorkspaceAndWait(
-                               std::move(documents), std::move(view_layouts));
-                           if (!persistence_error.isEmpty()) {
-                               return std::unexpected(core::Error{
-                                   .code = core::ErrorCode::database,
-                                   .message = utf8Bytes(persistence_error),
-                                   .context = {},
-                               });
-                           }
-                           auto opened =
-                               persistence::SqliteMetadataOperationJournal::open(database_path);
-                           if (!opened) {
-                               return std::unexpected(std::move(opened.error()));
-                           }
-                           auto journal = std::move(*opened);
-                           const auto dependent =
-                               [persistence_service](const operations::MetadataCommitResult& result)
-                               -> core::Result<void> {
-                               if (!persistence_service) {
-                                   return std::unexpected(core::Error{
-                                       .code = core::ErrorCode::cancelled,
-                                       .message = "Trackknife closed during artwork reconciliation",
-                                       .context = {},
-                                   });
-                               }
-                               auto refreshed = persistence_service->refreshLocalMetadataAndWait(
-                                   metadata_refresh(result));
-                               return refreshed ? core::Result<void>{}
-                                                : std::unexpected(std::move(refreshed.error()));
-                           };
-                           return operations::apply_artwork_write_plan(
-                               plan,
-                               [&journal,
-                                &dependent](const metadata::ArtworkWritePlanSource& source,
-                                            const core::CancellationToken& source_cancellation) {
-                                   return operations::commit_artwork_source(
-                                       source, journal, dependent, source_cancellation);
-                               },
-                               progress, cancellation,
-                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
-                       }};
-               }},
-        [this](const operations::ArtworkApplyResult& result) {
-            auto committed = false;
-            for (const auto& source : result.sources) {
-                if (!source.commit) {
-                    continue;
-                }
-                applyCommittedMetadata(*source.commit);
-                committed = true;
-            }
-            if (committed) {
-                schedulePersist();
-            }
-        });
+        engineLookupService(work, this), engineFileWorkTools(work));
+    // Observable for tests and diagnostics: which did the work.
+    properties->setProperty("trackknife-file-work", QStringLiteral("engine"));
+    properties->setArtworkMutationServices(engineArtworkPlanApplierFactory(work),
+                                           [this](const operations::ArtworkApplyResult& result) {
+                                               auto committed = false;
+                                               for (const auto& source : result.sources) {
+                                                   if (!source.commit) {
+                                                       continue;
+                                                   }
+                                                   applyCommittedMetadata(*source.commit);
+                                                   committed = true;
+                                               }
+                                               if (committed) {
+                                                   schedulePersist();
+                                               }
+                                           });
     connect(properties, &MetadataPropertiesDialog::statusMessage, this,
             [this](const QString& message) { statusBar()->showMessage(message, 12'000); });
     // Its "Edit…" opens the destinations of the engine its tracks are on.
@@ -1996,39 +1400,10 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
     properties->activateWindow();
 }
 
-MusicBrainzLookupService BenchMainWindow::musicBrainzLookupService() {
-    if (database_path_.empty()) {
-        return {};
-    }
-    if (musicbrainz_service_ == nullptr) {
-        musicbrainz_service_ = new MusicBrainzFetchService(database_path_, this);
-    }
-    return musicbrainz_service_->lookupService();
-}
-
-void BenchMainWindow::startMetadataOperationRecovery() {
-    if (metadata_recovery_started_ || metadata_operation_running_ || persistence_ == nullptr ||
-        database_path_.empty()) {
-        return;
-    }
-    metadata_recovery_started_ = true;
-    metadata_operation_running_ = true;
-    metadata_operation_cancellation_ = core::CancellationSource{};
-    setProperty("trackknife-metadata-operation-running", true);
-    auto* const persistence_service = persistence_;
-    const auto database_path = database_path_;
-    const auto cancellation = metadata_operation_cancellation_.token();
-    metadata_operation_watcher_.setFuture(
-        QtConcurrent::run([database_path, persistence_service, cancellation] {
-            return run_metadata_operation_job(database_path, persistence_service, cancellation);
-        }));
-}
-
 void BenchMainWindow::applyCommittedMetadata(const operations::MetadataCommitResult& result) {
     // The same commit boundary carries text-only and embedded-artwork writes.
     // Cached misses and previous covers must not survive either path.
     invalidateArtwork(result.source_raw_path);
-    followRemoteRetag(result);
     if (localLibrary() != nullptr) {
         localLibrary()->refreshLibrary();
     }
@@ -2118,7 +1493,6 @@ void BenchMainWindow::applyCommittedLoudnessSidecar(
 void BenchMainWindow::applyCommittedRelocation(
     const operations::FilePublicationCommitResult& result) {
     queueEngineRelocation(result.source_raw_path, result.target_raw_path);
-    followRemoteMove(result);
     if (localLibrary() != nullptr) {
         localLibrary()->refreshLibrary();
     }
@@ -2176,74 +1550,14 @@ void BenchMainWindow::applyCommittedPublicationMetadata(
     }
 }
 
-void BenchMainWindow::finishMetadataOperationJob() {
-    metadata_operation_running_ = false;
-    setProperty("trackknife-metadata-operation-running", false);
-    auto snapshot = metadata_operation_watcher_.result();
-    if (!snapshot) {
-        statusBar()->showMessage(QStringLiteral("Metadata operation returned no result"), 8'000);
-        return;
-    }
-    for (const auto& refreshed : snapshot->refreshed_sources) {
-        applyCommittedMetadata(refreshed);
-    }
-    for (const auto& relocated : snapshot->relocated_sources) {
-        applyCommittedRelocation(relocated);
-    }
-    for (const auto& [relocated, document] : snapshot->refreshed_relocations) {
-        applyCommittedPublicationMetadata(relocated, document);
-    }
-    if (!snapshot->refreshed_sources.empty() || !snapshot->relocated_sources.empty() ||
-        !snapshot->refreshed_relocations.empty()) {
-        schedulePersist();
-    }
-    metadata_operation_snapshot_ = std::move(snapshot);
-    const auto file_attention =
-        std::ranges::count(metadata_operation_snapshot_->file_publications,
-                           operations::FilePublicationJournalState::needs_reconciliation,
-                           &operations::FilePublicationJournalRecord::state);
-    const auto metadata_attention = metadata_operation_snapshot_->reconciliation.size();
-    setProperty("trackknife-metadata-reconciliation-count",
-                static_cast<qulonglong>(metadata_attention));
-    setProperty("trackknife-file-reconciliation-count", static_cast<qulonglong>(file_attention));
-
-    if (metadata_operation_snapshot_->error) {
-        statusBar()->showMessage(
-            QStringLiteral("Preparation operation failed: %1")
-                .arg(displayText(metadata_operation_snapshot_->error->message)),
-            10'000);
-    } else if (!metadata_operation_snapshot_->recovery.empty() ||
-               !metadata_operation_snapshot_->file_recovery.empty()) {
-        const auto metadata_recovered =
-            std::ranges::count_if(metadata_operation_snapshot_->recovery, [](const auto& result) {
-                return result.outcome != operations::MetadataRecoveryOutcome::needs_reconciliation;
-            });
-        const auto file_recovered = std::ranges::count_if(
-            metadata_operation_snapshot_->file_recovery, [](const auto& result) {
-                return result.outcome !=
-                       operations::FilePublicationRecoveryOutcome::needs_reconciliation;
-            });
-        const auto recovered = metadata_recovered + file_recovered;
-        if (recovered > 0) {
-            statusBar()->showMessage(QStringLiteral("Recovered %1 interrupted file operation%2")
-                                         .arg(recovered)
-                                         .arg(recovered == 1 ? QString{} : QStringLiteral("s")),
-                                     5'000);
-        }
-    }
-    presentInterruptedOperations();
-}
-
 // Crash recovery is silent when it succeeds. Only operations recovery could
 // neither finish nor safely roll back are surfaced, each exactly once: shown
 // journal ids are remembered so a known incident does not reopen the window on
 // every start.
 void BenchMainWindow::presentInterruptedOperations() {
-    if (!metadata_operation_snapshot_ && engine_interruptions_.empty()) {
+    if (engine_interruptions_.empty()) {
         return;
     }
-    static const MetadataOperationJobOutcome nothing{};
-    const auto& snapshot = metadata_operation_snapshot_ ? *metadata_operation_snapshot_ : nothing;
     constexpr auto acknowledged_key = "workspace/acknowledged-interrupted-operations-v2";
     constexpr auto legacy_acknowledged_key = "workspace/acknowledged-interrupted-operations-v1";
     QSettings settings;
@@ -2270,25 +1584,6 @@ void BenchMainWindow::presentInterruptedOperations() {
     };
     for (const auto& interruption : engine_interruptions_) {
         collect(interruption.id, interruption.raw_path, interruption.detail);
-    }
-    for (const auto& record : snapshot.reconciliation) {
-        collect(record.id, record.source_raw_path,
-                record.failure
-                    ? displayText(record.failure->message)
-                    : QStringLiteral("An interrupted tag write could not be finished or safely "
-                                     "rolled back; the file was left untouched"));
-    }
-    for (const auto& record : snapshot.file_publications) {
-        if (record.state != operations::FilePublicationJournalState::needs_reconciliation) {
-            continue;
-        }
-        auto detail = record.failure
-                          ? displayText(record.failure->message)
-                          : QStringLiteral("An interrupted move could not be finished or safely "
-                                           "rolled back");
-        detail += QStringLiteral(" · planned target %1")
-                      .arg(QString::fromStdString(core::display_raw_path(record.target_raw_path)));
-        collect(record.id, record.source_raw_path, std::move(detail));
     }
     // Keep acknowledgements even when a transient database/open error omits an
     // incident from one startup scan. Replacing the list with only the current

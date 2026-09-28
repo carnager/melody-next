@@ -90,8 +90,6 @@ qt_add_library(
     metadata_transformation_dialog.cpp
     metadata_transformation_dialog.hpp
     metadata_transformation_preview_model.cpp
-    musicbrainz_fetch_service.cpp
-    musicbrainz_fetch_service.hpp
     musicbrainz_identify_dialog.cpp
     musicbrainz_identify_dialog.hpp
     musicbrainz_track_match_widget.cpp

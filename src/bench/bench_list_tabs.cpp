@@ -309,7 +309,6 @@ void BenchMainWindow::initializePersistence() {
                     });
             refreshActiveContext();
         }
-        startMetadataOperationRecovery();
     });
 }
 

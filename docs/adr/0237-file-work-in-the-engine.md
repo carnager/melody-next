@@ -159,7 +159,15 @@ sees changes.
    Convert starts, converted from there and deleted. The preview plans them
    from what the engine knows, so it shows before anything is fetched.
 7. Trackknife's own path for writing library files goes; conversion, which
-   writes only its own new files, stays.
+   writes only its own new files, stays. **Done:** tags, ReplayGain,
+   artwork, moves and renames are written only by the engine holding the
+   files; with none that does file work, Properties and ReplayGain say so in
+   the status bar instead of opening. Trackknife no longer recovers a
+   journal of its own at startup: each engine recovers its own when it
+   starts (this computer's shares Trackknife's database) and reports what
+   it recovered and what it could not, which Trackknife shows as before.
+   Its own MusicBrainz fetching and the editing of a remote tab's files
+   through the mount went with it.
 
 ## Naming layouts are global; move destinations are the engine's (decided 2026-09-28)
 
@@ -205,7 +213,10 @@ name them with, the CLI and the phone too, not only Trackknife.
 
 - Any client can do file work on any engine it can reach, with no mount.
 - The per-engine mount settings ("music folder as it sees it", "reachable
-  here at") lose their purpose once stage 7 lands.
+  here at") no longer carry file work. They remain for what is done here
+  with an engine's files: converting ones reachable through the mount
+  without downloading them, following an engine's moves in this computer's
+  lists, and offering this computer's destinations to copy.
 - The protocol grows a plan/commit surface, which is the bulk of the work.
 - Choosing folders on an engine's machine needs the engine to list them; the
   chooser itself stays the one the user knows.

@@ -97,8 +97,6 @@ enum class QuickPickKind;
 class ListsPanel;
 struct ConvertDialogItem;
 
-struct MetadataOperationJobOutcome;
-class MusicBrainzFetchService;
 class LocalLibraryPanel;
 class MetadataPropertiesDialog;
 class SearchDialog;
@@ -257,7 +255,6 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
                           std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
-    [[nodiscard]] MetadataWritePlanApplierFactory metadataPlanApplierFactory();
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
@@ -332,7 +329,7 @@ class BenchMainWindow final : public QMainWindow {
     // ADR-0237: `work` is the engine that does the file work, or null for
     // this process.
     void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader,
-                                std::shared_ptr<engine::RemoteFileWork> work = nullptr);
+                                std::shared_ptr<engine::RemoteFileWork> work);
     void showConvertDialog();
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);
@@ -347,9 +344,6 @@ class BenchMainWindow final : public QMainWindow {
     // work holds a copy, handed over whole after each change and when it
     // connects.
     void pushLayouts();
-    void startMetadataOperationRecovery();
-    [[nodiscard]] MusicBrainzLookupService musicBrainzLookupService();
-    void finishMetadataOperationJob();
     void presentInterruptedOperations();
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
@@ -538,29 +532,6 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] ListTab* remoteQueueTab();
     // An engine's own tab: its first, or one made for it, named after it.
     [[nodiscard]] ListTab* engineTab(EngineLink& engine);
-    // True, having said why, when `view` lists the remote engine's files:
-    // work that reads or writes files cannot run here on those (ADR-0227).
-    // ADR-0227: the selected rows of a remote tab as this computer sees their
-    // files (RemoteMount), for the tools that read and write them here.
-    // Nothing when the view is not a remote tab's; what is not reachable
-    // here is left out and said. Remembers which local path is which remote
-    // one, so what the tools change reaches the remote's index.
-    [[nodiscard]] std::optional<std::vector<LocalTrackRow>> remoteFileWorkRows(QTableView* view);
-    // After a commit on a file a remote tab named: its rows follow, and the
-    // remote engine is asked to re-read it (batched).
-    void followRemoteRetag(const operations::MetadataCommitResult& result);
-    void followRemoteMove(const operations::FilePublicationCommitResult& result);
-    void queueRemoteRefresh(const EngineKey& engine, std::string remote_path);
-    void sendRemoteRefresh();
-    // A file of another engine that the tools work on here: whose, and by
-    // what path that engine knows it.
-    struct RemoteFile {
-        EngineKey engine;
-        std::string path;
-    };
-    std::unordered_map<std::string, RemoteFile> remote_file_work_;
-    std::map<EngineKey, std::vector<std::string>> pending_remote_refresh_;
-    QTimer* remote_refresh_timer_{nullptr};
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
     [[nodiscard]] bool playingOnEngine() const;
@@ -742,6 +713,10 @@ class BenchMainWindow final : public QMainWindow {
     void watchFileWork(EngineLink& link);
     // The engine that does the file work for a view's files, if one does.
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
+    // That engine, or -- having said in the status bar why `what` cannot be
+    // done -- nothing.
+    [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> requireFileWork(QTableView* view,
+                                                                          const QString& what);
     [[nodiscard]] MetadataWritePlanApplierFactory
     engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
     [[nodiscard]] ArtworkWritePlanApplierFactory
@@ -807,7 +782,6 @@ class BenchMainWindow final : public QMainWindow {
     // taken, an earlier one being out of date by the time it comes.
     quint64 engine_queue_asked_{0};
     quint64 engine_reattach_asked_{0};
-    MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};
 
@@ -833,14 +807,13 @@ class BenchMainWindow final : public QMainWindow {
     bool artwork_running_{false};
     std::optional<CrossTabMoveEdit> cross_tab_move_edit_;
 
-    QFutureWatcher<std::shared_ptr<MetadataOperationJobOutcome>> metadata_operation_watcher_;
-    std::shared_ptr<MetadataOperationJobOutcome> metadata_operation_snapshot_;
     // ADR-0237: file work engines could neither finish nor roll back after a
     // crash, as each reports it -- shown with this window's own, once.
     struct EngineInterruption {
         core::StableId id;
         std::string raw_path;
         QString detail;
+        bool move{false};
     };
     std::vector<EngineInterruption> engine_interruptions_;
     // This computer's move destinations as last loaded, for offering them to
@@ -848,10 +821,7 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<persistence::SavedDestinationProfile> local_destinations_;
     // Layout hand-overs to engines, one at a time and in order.
     QThreadPool layout_pushes_;
-    core::CancellationSource metadata_operation_cancellation_;
     QPointer<QDialog> interrupted_operations_dialog_;
-    bool metadata_operation_running_{false};
-    bool metadata_recovery_started_{false};
 
     // Paths opened before the asynchronous list restore finishes are queued
     // and flushed into the initial tab once it exists.

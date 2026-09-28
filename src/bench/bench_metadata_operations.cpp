@@ -7,6 +7,7 @@
 #include "bench/convert_dialog.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/metadata_properties_dialog.hpp"
+#include "bench/post_back.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/replaygain_dialog.hpp"
 #include "trackknife/audio/local_audition.hpp"
@@ -578,9 +579,8 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                     }
                 }
             }
-            QMetaObject::invokeMethod(
-                window,
-                [window, work, does, recovered, interrupted = std::move(interrupted)] {
+            postBack(
+                window, [window, work, does, recovered, interrupted = std::move(interrupted)] {
                     if (!window) {
                         return;
                     }
@@ -623,8 +623,7 @@ void BenchMainWindow::watchFileWork(EngineLink& link) {
                         // ADR-0237: it names files with this window's layouts.
                         window->pushLayouts();
                     }
-                },
-                Qt::QueuedConnection);
+                });
         }));
     };
     connect(link.playback, &EnginePlayback::connected, this, probe);
@@ -956,17 +955,9 @@ template <typename Work, typename Done> void offThread(QObject* context, Work wo
     static_cast<void>(
         QtConcurrent::run([guard, work = std::move(work), done = std::move(done)]() mutable {
             auto result = work();
-            if (!guard) {
-                return;
-            }
-            QMetaObject::invokeMethod(
-                guard.data(),
-                [guard, done = std::move(done), result = std::move(result)]() mutable {
-                    if (guard) {
-                        done(std::move(result));
-                    }
-                },
-                Qt::QueuedConnection);
+            postBack(guard, [done = std::move(done), result = std::move(result)]() mutable {
+                done(std::move(result));
+            });
         }));
 }
 

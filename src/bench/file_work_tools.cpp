@@ -2,6 +2,8 @@
 
 #include "bench/file_work_tools.hpp"
 
+#include "bench/post_back.hpp"
+
 #include "bench/artwork_fitting.hpp"
 
 #include <QFile>
@@ -87,15 +89,10 @@ void answered_on(QObject* context, Work work, std::function<void(core::Result<T>
     static_cast<void>(QtConcurrent::run(
         [guard, work = std::move(work), completion = std::move(completion)]() mutable {
             auto answer = work();
-            if (!guard) {
-                return;
-            }
-            QMetaObject::invokeMethod(
-                guard.data(),
-                [answer = std::move(answer), completion = std::move(completion)]() mutable {
-                    completion(std::move(answer));
-                },
-                Qt::QueuedConnection);
+            postBack(guard,
+                     [answer = std::move(answer), completion = std::move(completion)]() mutable {
+                         completion(std::move(answer));
+                     });
         }));
 }
 

@@ -2,6 +2,7 @@
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/output_path_preflight.hpp"
@@ -726,8 +727,8 @@ void crossFilesystemCopyPublishesExactBytesBeforeRemovingSource() {
     constexpr std::string_view attribute_name{"user.trackknife-copy-test"};
     constexpr std::string_view attribute_value{"preserved-cross-filesystem-xattr"};
     const bool xattrs_supported =
-        ::setxattr(source.c_str(), attribute_name.data(), attribute_value.data(),
-                   attribute_value.size(), 0) == 0;
+        core::set_path_extended_attribute(source.c_str(), attribute_name.data(),
+                                          attribute_value.data(), attribute_value.size()) == 0;
     struct stat source_status{};
     require(::stat(source.c_str(), &source_status) == 0,
             "copy source filesystem metadata must be observed");
@@ -766,8 +767,8 @@ void crossFilesystemCopyPublishesExactBytesBeforeRemovingSource() {
     }
     if (xattrs_supported) {
         std::string value(attribute_value.size(), '\0');
-        const auto read =
-            ::getxattr(target.c_str(), attribute_name.data(), value.data(), value.size());
+        const auto read = core::get_path_extended_attribute(target.c_str(), attribute_name.data(),
+                                                            value.data(), value.size());
         require(read == static_cast<ssize_t>(attribute_value.size()) && value == attribute_value,
                 "verified copy must preserve source extended attributes");
     }
@@ -1066,11 +1067,14 @@ int main() {
     failedUndoRestoresPublishedTargetAndCanBeRetried();
     undoJournalBoundaryRecoversByReplayingDependentState();
     changedUndoTopologyCreatesNoReverseJournal();
-    crossFilesystemCopyPublishesExactBytesBeforeRemovingSource();
-    crossFilesystemDependentFailureRemovesOnlyThePublishedCopy();
-    crossFilesystemRecoveryReplaysDependentStateThenRemovesSource();
-    crossFilesystemRecoveryAdoptsOnlyAnExactUnrecordedPreparedCopy();
-    crossFilesystemRecoveryInfersPublishedAndRemovedBoundaries();
+    std::error_code shared_memory_error;
+    if (std::filesystem::is_directory("/dev/shm", shared_memory_error) && !shared_memory_error) {
+        crossFilesystemCopyPublishesExactBytesBeforeRemovingSource();
+        crossFilesystemDependentFailureRemovesOnlyThePublishedCopy();
+        crossFilesystemRecoveryReplaysDependentStateThenRemovesSource();
+        crossFilesystemRecoveryAdoptsOnlyAnExactUnrecordedPreparedCopy();
+        crossFilesystemRecoveryInfersPublishedAndRemovedBoundaries();
+    }
     destinationArtifactPublishesChangedContentAndRecoversItsJournalBoundary();
     cancellationBeforeCommitCreatesNoJournal();
     std::cout << "file publication executor tests passed\n";

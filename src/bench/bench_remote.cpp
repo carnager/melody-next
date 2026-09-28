@@ -284,7 +284,7 @@ void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, co
             [this, link](const QString& hash, const unsigned rating) {
                 adoptEngineRating(link->key, hash, rating);
             });
-    connect(link->playback, &EnginePlayback::failed, this, [this, link](const QString& message) {
+    connect(link->playback, &EnginePlayback::failed, this, [this](const QString& message) {
         statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
     });
     const auto attached = [this, link] {
@@ -415,8 +415,7 @@ void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, co
             }
             const auto id = QString::fromStdString(target->document.id.to_string());
             link->library->resolveEntryRows(
-                std::move(entries),
-                [this, link, id, action, insertion](std::vector<LocalTrackRow> rows) {
+                std::move(entries), [this, id, action, insertion](std::vector<LocalTrackRow> rows) {
                     auto* destination = tabForDocument(id);
                     if (destination == nullptr || rows.empty()) {
                         return;
@@ -444,7 +443,7 @@ void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, co
                     return;
                 }
                 link->library->resolveEntryRows(
-                    std::move(entries), [this, link, id](std::vector<LocalTrackRow> rows) {
+                    std::move(entries), [this, id](std::vector<LocalTrackRow> rows) {
                         auto* destination = tabForDocument(id);
                         if (destination == nullptr || rows.empty()) {
                             return;

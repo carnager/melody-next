@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/operations/metadata_commit.hpp"
 
@@ -6,6 +7,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <limits.h>
 #include <mutex>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -58,7 +60,14 @@ std::string basename(const std::string& path) {
     return std::filesystem::path{path}.filename().native();
 }
 std::string descriptor_path(int fd, const std::string& name) {
+#ifdef __APPLE__
+    std::array<char, PATH_MAX> path{};
+    if (::fcntl(fd, F_GETPATH, path.data()) == 0)
+        return (std::filesystem::path{path.data()} / name).native();
+    return "/dev/fd/" + std::to_string(fd) + "/" + name;
+#else
     return "/proc/self/fd/" + std::to_string(fd) + "/" + name;
+#endif
 }
 core::Result<std::optional<core::LocalSourceRevision>> revision(int fd, const std::string& name) {
     struct stat st{};
@@ -337,16 +346,16 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
             return fail(io_error());
         if (::fsync(directory.fd) != 0)
             return fail(io_error());
-        if (::renameat2(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
-                        RENAME_EXCHANGE) != 0)
+        if (core::rename_with_flags(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
+                                    RENAME_EXCHANGE) != 0)
             return fail(io_error());
         auto displaced = revision(directory.fd, prepared);
         if (!displaced || *displaced != *current) {
             // Keep all evidence; never replace an unrecognized raced-in file.
             return fail(error("Folder image changed during publication; recovery required"));
         }
-    } else if (::renameat2(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
-                           RENAME_NOREPLACE) != 0) {
+    } else if (core::rename_with_flags(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
+                                       RENAME_NOREPLACE) != 0) {
         return fail(io_error());
     }
     auto recovered = recover_locked(record, journal, directory.fd);

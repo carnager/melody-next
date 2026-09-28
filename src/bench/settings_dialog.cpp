@@ -405,6 +405,19 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         "Lets output agents play this computer's music, and other Trackknife windows control it"));
     engine_share_->setChecked(settings.value(QLatin1String(engine_share_key), false).toBool());
     sharing_form->addRow(engine_share_);
+    engine_upnp_ = new QCheckBox(QStringLiteral("Discover UPnP speakers"), sharing);
+    engine_upnp_->setObjectName(QStringLiteral("bench-settings-engine-upnp"));
+    engine_upnp_->setChecked(settings.value(QLatin1String(engine_upnp_key), false).toBool());
+    engine_upnp_->setToolTip(
+        QStringLiteral("Play on network speakers. ReplayGain is unavailable on these outputs. "
+                       "Changing this restarts the engine."));
+#if !TRACKKNIFE_ENABLE_UPNP
+    engine_upnp_->setChecked(false);
+    engine_upnp_->setEnabled(false);
+    engine_upnp_->setToolTip(
+        QStringLiteral("UPnP support was disabled when this build was configured"));
+#endif
+    sharing_form->addRow(engine_upnp_);
     engine_listen_ = new QLineEdit(sharing);
     engine_listen_->setObjectName(QStringLiteral("bench-settings-engine-listen"));
     engine_listen_->setText(
@@ -452,11 +465,12 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         const bool on = engine_share_->isChecked();
         for (QWidget* field :
              std::initializer_list<QWidget*>{engine_listen_, engine_stream_port_}) {
-            field->setEnabled(on);
+            field->setEnabled(on || (field == engine_stream_port_ && engine_upnp_->isChecked()));
         }
         if (!on) {
-            engine_agent_command_->setText(QStringLiteral(
-                "Not shared: only this computer plays, and Trackknife here controls it."));
+            engine_agent_command_->setText(
+                QStringLiteral("Only Trackknife on this computer controls this engine. UPnP "
+                               "speakers can play when discovery is enabled."));
             return;
         }
         const auto listen = engine_listen_->text().trimmed();
@@ -480,6 +494,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                            "restarts this computer's engine; playback comes back paused.")
                 .arg(command));
     };
+    connect(engine_upnp_, &QCheckBox::toggled, this, refresh_sharing);
     connect(engine_share_, &QCheckBox::toggled, this, refresh_sharing);
     connect(engine_listen_, &QLineEdit::textChanged, this, refresh_sharing);
     connect(engine_password_, &QLineEdit::textChanged, this, refresh_sharing);
@@ -1035,6 +1050,8 @@ void SettingsDialog::save() {
         saveRemoteEngines(kept);
     }
     settings.setValue(QLatin1String(library_show_local_key), show_local_library_->isChecked());
+    settings.setValue(QLatin1String(engine_upnp_key),
+                      TRACKKNIFE_ENABLE_UPNP && engine_upnp_->isChecked());
     settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
     settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());
     settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());

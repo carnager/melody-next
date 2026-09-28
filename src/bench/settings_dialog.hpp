@@ -108,6 +108,7 @@ class SettingsDialog final : public QDialog {
     // Whether this computer's library has a tab: someone whose music is all
     // on the remote engine may not want it.
     static constexpr auto library_show_local_key = "library/show-local";
+    static constexpr auto engine_upnp_key = "engine/upnp";
     static constexpr auto engine_share_key = "engine/share";
     static constexpr auto engine_listen_key = "engine/listen";
     static constexpr auto engine_listen_default = "0.0.0.0:6600";
@@ -166,6 +167,7 @@ class SettingsDialog final : public QDialog {
     void refreshEngines(int current);
     void showEngine(int row);
     void chooseFoundEngine(const QString& address);
+    QCheckBox* engine_upnp_{nullptr};
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
     QComboBox* stream_nearby_{nullptr};

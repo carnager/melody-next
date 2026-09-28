@@ -20,6 +20,18 @@ option(TRACKKNIFE_BUILD_BENCHMARKS "Build generated-fixture benchmarks" ON)
 option(TRACKKNIFE_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
 option(TRACKKNIFE_WARNINGS_AS_ERRORS "Treat project warnings as errors" ON)
 option(TRACKKNIFE_ENABLE_CLANG_TIDY "Run clang-tidy during compilation" OFF)
+option(TRACKKNIFE_ENABLE_UPNP "Build UPnP renderer discovery and playback" ON)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(TRACKKNIFE_LOCAL_AUDIO_DEFAULT ON)
+    set(TRACKKNIFE_WATCH_DEFAULT ON)
+else()
+    set(TRACKKNIFE_LOCAL_AUDIO_DEFAULT OFF)
+    set(TRACKKNIFE_WATCH_DEFAULT OFF)
+endif()
+option(TRACKKNIFE_ENABLE_LOCAL_AUDIO "Build the PipeWire local-output backend"
+       ${TRACKKNIFE_LOCAL_AUDIO_DEFAULT})
+option(TRACKKNIFE_BUILD_WATCH "Build the Linux inotify melody-watch utility"
+       ${TRACKKNIFE_WATCH_DEFAULT})
 # melody-cli alone: it needs the protocol and discovery, not the media
 # libraries, so a package of just the CLI builds in seconds.
 option(TRACKKNIFE_CLI_ONLY "Build only melody-cli, without the media libraries" OFF)
@@ -41,7 +53,12 @@ if(NOT TRACKKNIFE_CLI_ONLY)
     pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET "libswscale>=7")
     pkg_check_modules(OPENMPT REQUIRED IMPORTED_TARGET "libopenmpt>=0.7")
     pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET "taglib>=2.0")
-    pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET "libpipewire-0.3>=0.3.50")
+    if(TRACKKNIFE_ENABLE_LOCAL_AUDIO)
+        pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET "libpipewire-0.3>=0.3.50")
+    endif()
+    if(TRACKKNIFE_ENABLE_UPNP)
+        pkg_check_modules(UPNP REQUIRED IMPORTED_TARGET "libupnp>=1.14")
+    endif()
     pkg_check_modules(EBUR128 REQUIRED IMPORTED_TARGET "libebur128>=1.2")
     # The engine's Last.fm client: HTTPS, and MD5 for its request signatures.
     pkg_check_modules(CURL REQUIRED IMPORTED_TARGET "libcurl>=7.68")
@@ -53,6 +70,12 @@ find_package(nlohmann_json 3.11 REQUIRED)
 
 add_library(trackknife_project_options INTERFACE)
 trackknife_enable_sanitizers(trackknife_project_options)
+target_compile_definitions(
+    trackknife_project_options
+    INTERFACE
+        TRACKKNIFE_ENABLE_UPNP=$<BOOL:${TRACKKNIFE_ENABLE_UPNP}>
+        TRACKKNIFE_ENABLE_LOCAL_AUDIO=$<BOOL:${TRACKKNIFE_ENABLE_LOCAL_AUDIO}>
+)
 
 add_library(trackknife_project_warnings INTERFACE)
 trackknife_set_project_warnings(
@@ -70,7 +93,9 @@ if(TRACKKNIFE_CLI_ONLY)
     add_subdirectory(src/protocol)
     add_subdirectory(src/discovery)
     add_subdirectory(src/cli)
-    add_subdirectory(src/watch)
+    if(TRACKKNIFE_BUILD_WATCH)
+        add_subdirectory(src/watch)
+    endif()
     return()
 endif()
 add_subdirectory(src/titleformat)
@@ -93,7 +118,9 @@ add_subdirectory(src/tools)
 add_subdirectory(src/daemon)
 add_subdirectory(src/agent)
 add_subdirectory(src/cli)
-add_subdirectory(src/watch)
+if(TRACKKNIFE_BUILD_WATCH)
+    add_subdirectory(src/watch)
+endif()
 
 if(TRACKKNIFE_BUILD_UI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Test Widgets)

@@ -425,8 +425,6 @@ struct RatingEvidence {
     std::string fmps;
     std::string plain;
     std::optional<std::uint8_t> popularimeter;
-
-    friend bool operator==(const RatingEvidence&, const RatingEvidence&) = default;
 };
 
 // The rating it amounts to: POPM first -- what other MP3 players change --

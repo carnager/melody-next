@@ -59,8 +59,8 @@ std::string MediaStreams::signature(const std::string& signed_text) const {
 
 std::string MediaStreams::ticket(const output::StreamRequest& request,
                                  const std::chrono::seconds lifetime) const {
-    const auto signed_text = output::stream_query(request) + "&expires=" +
-                             std::to_string(now_seconds() + lifetime.count());
+    const auto signed_text = output::stream_query(request) +
+                             "&expires=" + std::to_string(now_seconds() + lifetime.count());
     return signed_text + "&ticket=" + signature(signed_text);
 }
 
@@ -83,19 +83,32 @@ core::Result<std::string> MediaStreams::resolve(const std::string_view query) co
         const auto parsed = std::from_chars(expires.data(), expires.data() + expires.size(), until);
         const auto signed_text = output::stream_query(*request) + "&expires=" + expires;
         if (parsed.ec != std::errc{} || !same(*ticket, signature(signed_text))) {
-            return std::unexpected(refused(core::ErrorCode::unauthorized, "not a ticket this engine signed"));
+            return std::unexpected(
+                refused(core::ErrorCode::unauthorized, "not a ticket this engine signed"));
         }
         if (until < now_seconds()) {
-            return std::unexpected(refused(core::ErrorCode::unauthorized, "the ticket has expired"));
+            return std::unexpected(
+                refused(core::ErrorCode::unauthorized, "the ticket has expired"));
         }
     } else {
         return std::unexpected(refused(core::ErrorCode::unauthorized, "no token or ticket"));
+    }
+    if (request->artwork) {
+        if (!cache_) {
+            return std::unexpected(refused(core::ErrorCode::unsupported, "no artwork cache"));
+        }
+        auto cover = cache_->artwork(request->raw_path);
+        if (!cover) {
+            return std::unexpected(cover.error());
+        }
+        return cover->native();
     }
     if (!request->format) {
         return request->raw_path;
     }
     if (cache_ == nullptr) {
-        return std::unexpected(refused(core::ErrorCode::unsupported, "this engine converts nothing"));
+        return std::unexpected(
+            refused(core::ErrorCode::unsupported, "this engine converts nothing"));
     }
     auto converted = cache_->ensure(TranscodeSource{.raw_path = request->raw_path,
                                                     .selection = request->selection,
@@ -109,34 +122,40 @@ core::Result<std::string> MediaStreams::resolve(const std::string_view query) co
 
 void register_stream_methods(protocol::Dispatcher& dispatcher, const MediaStreams& streams,
                              Catalogue& catalogue, const std::uint16_t port) {
-    dispatcher.on("streams.ticket", [&streams, &catalogue, port](const protocol::Json& params)
-                                        -> core::Result<protocol::Json> {
-        const auto encoded = params.find("path");
-        if (encoded == params.end() || !encoded->is_string()) {
-            return std::unexpected(refused(core::ErrorCode::invalid_argument, "a path is required"));
-        }
-        auto raw_path = protocol::decode_raw_path(encoded->get<std::string>());
-        if (!raw_path) {
-            return std::unexpected(refused(core::ErrorCode::invalid_argument, "path is not an encoded path"));
-        }
-        persistence::LibraryQuery lookup;
-        lookup.kind = persistence::LibraryEntryKind::track;
-        lookup.raw_path = *raw_path;
-        lookup.limit = 1;
-        auto found = catalogue.query(lookup);
-        if (!found) {
-            return std::unexpected(std::move(found.error()));
-        }
-        if (found->entries.empty()) {
-            return std::unexpected(refused(core::ErrorCode::not_found, "not a track in the library"));
-        }
-        output::StreamRequest request{.raw_path = std::move(*raw_path), .format = {}, .selection = {}, .segment = {}};
-        if (params.value("format", std::string{"original"}) == "opus") {
-            request.format = output::StreamFormat{.bitrate_kbps = std::clamp(params.value("bitrate", 128), 16, 512)};
-        }
-        return protocol::Json{{"port", port},
-                              {"query", streams.ticket(request, std::chrono::hours{1})}};
-    });
+    dispatcher.on(
+        "streams.ticket",
+        [&streams, &catalogue, port](const protocol::Json& params) -> core::Result<protocol::Json> {
+            const auto encoded = params.find("path");
+            if (encoded == params.end() || !encoded->is_string()) {
+                return std::unexpected(
+                    refused(core::ErrorCode::invalid_argument, "a path is required"));
+            }
+            auto raw_path = protocol::decode_raw_path(encoded->get<std::string>());
+            if (!raw_path) {
+                return std::unexpected(
+                    refused(core::ErrorCode::invalid_argument, "path is not an encoded path"));
+            }
+            persistence::LibraryQuery lookup;
+            lookup.kind = persistence::LibraryEntryKind::track;
+            lookup.raw_path = *raw_path;
+            lookup.limit = 1;
+            auto found = catalogue.query(lookup);
+            if (!found) {
+                return std::unexpected(std::move(found.error()));
+            }
+            if (found->entries.empty()) {
+                return std::unexpected(
+                    refused(core::ErrorCode::not_found, "not a track in the library"));
+            }
+            output::StreamRequest request{
+                .raw_path = std::move(*raw_path), .format = {}, .selection = {}, .segment = {}};
+            if (params.value("format", std::string{"original"}) == "opus") {
+                request.format = output::StreamFormat{
+                    .bitrate_kbps = std::clamp(params.value("bitrate", 128), 16, 512)};
+            }
+            return protocol::Json{{"port", port},
+                                  {"query", streams.ticket(request, std::chrono::hours{1})}};
+        });
 }
 
 } // namespace trackknife::engine

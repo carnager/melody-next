@@ -6,6 +6,9 @@
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/output/agent_audition.hpp"
+#if TRACKKNIFE_ENABLE_UPNP
+#include "trackknife/output/upnp_audition.hpp"
+#endif
 #include "trackknife/protocol/dispatch.hpp"
 
 #include <map>
@@ -48,6 +51,7 @@ class Outputs final {
         bool selected{false};
         // For an agent: whether it opens files itself rather than streaming.
         bool files{true};
+        bool replay_gain{true};
     };
     [[nodiscard]] std::vector<Listed> list() const;
     // "local", or "agent:<name>". Persisted, so a restart plays on the same.
@@ -55,6 +59,12 @@ class Outputs final {
     // What was chosen last time. An agent chosen then and not connected yet
     // is waited for: playback resumes on it once it registers.
     void restore();
+#if TRACKKNIFE_ENABLE_UPNP
+    // Configured before discovery starts. A restored renderer can wait offline.
+    void configure_upnp(std::shared_ptr<discovery::UpnpControl> control,
+                        output::UpnpAudition::Prepare prepare);
+    void renderer_changed(const discovery::UpnpRenderer& renderer);
+#endif
 
   private:
     // Called with mutex_ held.
@@ -70,6 +80,11 @@ class Outputs final {
     // Stable addresses: the player holds a pointer to whichever is playing.
     std::map<std::string, std::unique_ptr<output::AgentAudition>> agents_;
     std::string selected_;
+#if TRACKKNIFE_ENABLE_UPNP
+    std::shared_ptr<discovery::UpnpControl> upnp_control_;
+    output::UpnpAudition::Prepare upnp_prepare_;
+    std::map<std::string, std::unique_ptr<output::UpnpAudition>> renderers_;
+#endif
 };
 
 void register_output_methods(protocol::Dispatcher& dispatcher, Outputs& outputs);

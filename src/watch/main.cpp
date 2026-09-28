@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 // melody-watch (ADR-0232): runs where the music is -- a NAS that cannot run
 // the engine -- and tells the engine which files changed, so it re-reads
@@ -163,7 +164,8 @@ class Watcher final {
                 return EXIT_FAILURE;
             }
         }
-        say("watching " + std::to_string(tree_->watched()) + " folders for " + endpoint_.describe());
+        say("watching " + std::to_string(tree_->watched()) + " folders for " +
+            endpoint_.describe());
         if (tree_->exhausted()) {
             say("out of inotify watches: some folders are not watched. Raise "
                 "fs.inotify.max_user_watches (sysctl) and restart");
@@ -186,8 +188,8 @@ class Watcher final {
             // or when they have been coming for long enough regardless.
             const auto now = Clock::now();
             const bool settled = now - quiet_since >= options_.settle;
-            const bool overdue = oldest != Clock::time_point::max() &&
-                                 now - oldest >= std::chrono::seconds{30};
+            const bool overdue =
+                oldest != Clock::time_point::max() && now - oldest >= std::chrono::seconds{30};
             if ((settled || overdue || !catch_up_.empty()) && now >= retry_at_) {
                 if (deliver()) {
                     oldest = Clock::time_point::max();
@@ -228,13 +230,14 @@ class Watcher final {
     // way, the engine's own read over NFS among them -- is reported as
     // written; sending it would have it read again, and round it goes.
     [[nodiscard]] bool unchanged(const std::string& path) {
-        struct stat status {};
+        struct stat status{};
         if (::lstat(path.c_str(), &status) != 0) {
             reported_.erase(path);
             return false;
         }
-        const auto now = std::pair{static_cast<std::int64_t>(status.st_size),
-                                   status.st_mtim.tv_sec * 1'000'000'000LL + status.st_mtim.tv_nsec};
+        const auto now =
+            std::pair{static_cast<std::int64_t>(status.st_size),
+                      status.st_mtim.tv_sec * 1'000'000'000LL + status.st_mtim.tv_nsec};
         const auto [known, added] = reported_.try_emplace(path, now);
         if (!added && known->second == now) {
             return true;
@@ -260,7 +263,8 @@ class Watcher final {
         while (!pending_.empty()) {
             auto batch = Json::array();
             std::vector<std::string> taken;
-            for (auto path = pending_.begin(); path != pending_.end() && taken.size() < 500U; ++path) {
+            for (auto path = pending_.begin(); path != pending_.end() && taken.size() < 500U;
+                 ++path) {
                 batch.push_back(trackknife::protocol::encode_raw_path(*path));
                 taken.push_back(*path);
             }
@@ -312,7 +316,8 @@ class Watcher final {
                 return false;
             }
             for (const auto& entry : page->value("entries", Json::array())) {
-                auto path = trackknife::protocol::decode_raw_path(entry.value("path", std::string{}));
+                auto path =
+                    trackknife::protocol::decode_raw_path(entry.value("path", std::string{}));
                 if (!path) {
                     continue;
                 }
@@ -327,8 +332,8 @@ class Watcher final {
             }
             after = indexed.back().path;
         }
-        const auto plan =
-            trackknife::watch::plan_catch_up(trackknife::watch::present_files(folder), std::move(indexed));
+        const auto plan = trackknife::watch::plan_catch_up(trackknife::watch::present_files(folder),
+                                                           std::move(indexed));
         say(folder.local + ": " + std::to_string(plan.added) + " new, " +
             std::to_string(plan.changed) + " changed, " + std::to_string(plan.vanished) +
             " gone since the library last saw them");

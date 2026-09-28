@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "agent/agent.hpp"
 
@@ -7,7 +8,7 @@
 #include "trackknife/protocol/message.hpp"
 
 #include <poll.h>
-#include <sys/random.h>
+
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -32,7 +33,7 @@ constexpr std::chrono::seconds handshake_timeout{10};
 
 [[nodiscard]] std::string random_instance() {
     std::array<unsigned char, 8> bytes{};
-    if (::getrandom(bytes.data(), bytes.size(), 0) != static_cast<ssize_t>(bytes.size())) {
+    if (core::random_bytes(bytes.data(), bytes.size()) != static_cast<ssize_t>(bytes.size())) {
         return "pid-" + std::to_string(::getpid());
     }
     static constexpr char digits[] = "0123456789abcdef";
@@ -220,9 +221,8 @@ void Agent::connect_loop() {
     // Which engine each line is about: one agent process can play for
     // several, and "the engine went away" did not say which.
     const auto& server = config_.server;
-    const auto engine = !server.host.empty()
-                            ? server.host + ":" + std::to_string(server.port)
-                            : server.socket.string();
+    const auto engine = !server.host.empty() ? server.host + ":" + std::to_string(server.port)
+                                             : server.socket.string();
     std::string last_problem;
     while (running_.load()) {
         auto descriptor = register_with_engine();

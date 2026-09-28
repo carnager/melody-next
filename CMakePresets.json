@@ -75,6 +75,27 @@
         "TRACKKNIFE_BUILD_UI": "ON",
         "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
       }
+    },
+    {
+      "name": "macos",
+      "displayName": "macOS desktop with UPnP outputs",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
+        "TRACKKNIFE_BUILD_UI": "ON",
+        "TRACKKNIFE_BUILD_WATCH": "OFF",
+        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "OFF",
+        "TRACKKNIFE_ENABLE_UPNP": "ON",
+        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
     }
   ],
   "buildPresets": [
@@ -101,6 +122,10 @@
     {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos"
     }
   ],
   "testPresets": [
@@ -142,6 +167,13 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos",
       "output": {
         "outputOnFailure": true
       }

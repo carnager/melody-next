@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/engine/stream_server.hpp"
 
 #include "trackknife/engine/token.hpp"
+#include "trackknife/output/stream_query.hpp"
 #include "trackknife/protocol/message.hpp"
 
 #include <fcntl.h>
@@ -125,8 +127,8 @@ void answer_status(const int descriptor, const std::string_view status) {
         if (line.empty()) {
             break;
         }
-        if (const auto colon = line.find(':'); colon != std::string_view::npos &&
-                                               equal_ignoring_case(line.substr(0, colon), name)) {
+        if (const auto colon = line.find(':');
+            colon != std::string_view::npos && equal_ignoring_case(line.substr(0, colon), name)) {
             auto value = line.substr(colon + 1U);
             while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) {
                 value.remove_prefix(1U);
@@ -212,13 +214,13 @@ struct StreamServer::Transfer final {
     std::thread worker;
 };
 
-core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::string& host,
-                                                                 const std::uint16_t port,
-                                                                 Resolve resolve) {
+core::Result<std::unique_ptr<StreamServer>>
+StreamServer::listen(const std::string& host, const std::uint16_t port, Resolve resolve) {
     if (!resolve) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
-                                           .message = "a stream server needs something to say what it serves",
-                                           .context = {}});
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::invalid_argument,
+                        .message = "a stream server needs something to say what it serves",
+                        .context = {}});
     }
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
@@ -237,8 +239,8 @@ core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::stri
     }
     int listener = -1;
     for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
-        listener = ::socket(candidate->ai_family, candidate->ai_socktype | SOCK_CLOEXEC,
-                            candidate->ai_protocol);
+        listener = core::socket_cloexec(candidate->ai_family, candidate->ai_socktype | SOCK_CLOEXEC,
+                                        candidate->ai_protocol);
         if (listener < 0) {
             continue;
         }
@@ -270,13 +272,13 @@ core::Result<std::unique_ptr<StreamServer>> StreamServer::listen(const std::stri
         }
     }
     std::array<int, 2> wakeup{-1, -1};
-    if (::pipe2(wakeup.data(), O_CLOEXEC) != 0) {
+    if (core::pipe_cloexec(wakeup.data()) != 0) {
         const auto failed = system_error("could not create the stream server's wakeup");
         ::close(listener);
         return std::unexpected(failed);
     }
-    return std::unique_ptr<StreamServer>{new StreamServer{
-        listener, wakeup[0], wakeup[1], bound_port, std::move(resolve)}};
+    return std::unique_ptr<StreamServer>{
+        new StreamServer{listener, wakeup[0], wakeup[1], bound_port, std::move(resolve)}};
 }
 
 StreamServer::StreamServer(const int listener, const int wakeup_read, const int wakeup_write,
@@ -356,7 +358,7 @@ void StreamServer::accept_loop() {
         if ((watched[0].revents & POLLIN) == 0) {
             continue;
         }
-        const auto accepted = ::accept4(listener_, nullptr, nullptr, SOCK_CLOEXEC);
+        const auto accepted = core::accept_cloexec(listener_);
         if (accepted < 0) {
             if (errno == EINTR || errno == ECONNABORTED) {
                 continue;
@@ -421,10 +423,11 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
     const auto resolved = resolve_(query);
     if (!resolved) {
         const auto code = resolved.error().code;
-        answer_status(descriptor, code == core::ErrorCode::unauthorized       ? "403 Forbidden"
-                                  : code == core::ErrorCode::not_found        ? "404 Not Found"
-                                  : code == core::ErrorCode::invalid_argument ? "400 Bad Request"
-                                                                              : "503 Service Unavailable");
+        answer_status(descriptor, code == core::ErrorCode::unauthorized ? "403 Forbidden"
+                                  : code == core::ErrorCode::not_found  ? "404 Not Found"
+                                  : code == core::ErrorCode::invalid_argument
+                                      ? "400 Bad Request"
+                                      : "503 Service Unavailable");
         finish();
         return;
     }
@@ -460,7 +463,8 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
     } else {
         response = "HTTP/1.1 200 OK\r\n";
     }
-    response += "Content-Type: application/octet-stream\r\nAccept-Ranges: bytes\r\n"
+    response += "Content-Type: " + output::stream_content_type(*resolved) +
+                "\r\nAccept-Ranges: bytes\r\n"
                 "Content-Length: " +
                 std::to_string(length) + "\r\nConnection: close\r\n\r\n";
     if (send_all(descriptor, response) && !head_only) {
@@ -478,8 +482,8 @@ void StreamServer::serve(const std::shared_ptr<Transfer>& transfer) {
                 continue;
             }
             if (read <= 0 ||
-                !send_all(descriptor, std::string_view{buffer.data(),
-                                                       static_cast<std::size_t>(read)})) {
+                !send_all(descriptor,
+                          std::string_view{buffer.data(), static_cast<std::size_t>(read)})) {
                 break;
             }
             offset += read;

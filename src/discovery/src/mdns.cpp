@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/discovery/mdns.hpp"
 
@@ -9,16 +10,18 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <poll.h>
+#ifndef __APPLE__
 #include <sys/eventfd.h>
+#endif
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
-#include <span>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <utility>
 
 namespace trackknife::discovery {
@@ -73,7 +76,7 @@ void join_group(const int socket) {
 // A socket on the mDNS port, shared with any other responder on this
 // machine (avahi-daemon among them), in the group on every interface.
 [[nodiscard]] core::Result<int> open_socket() {
-    const int socket = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    const int socket = core::socket_cloexec(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (socket < 0) {
         return std::unexpected(socket_error("socket"));
     }
@@ -104,7 +107,7 @@ void join_group(const int socket) {
 // this socket hears it, rather than whichever of those sharing 5353 the
 // system hands it to.
 [[nodiscard]] int open_direct_socket() {
-    const int socket = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    const int socket = core::socket_cloexec(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (socket < 0) {
         return -1;
     }
@@ -140,7 +143,7 @@ void send_via(const int socket, const Message& message, const std::uint32_t addr
 // This machine's address on the network `peer` is on: the one a packet to
 // it leaves from. Zero when there is no route.
 [[nodiscard]] std::uint32_t address_facing(const std::uint32_t peer) {
-    const int probe = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    const int probe = core::socket_cloexec(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (probe < 0) {
         return 0U;
     }
@@ -396,8 +399,11 @@ Browser::start(std::function<void(const std::vector<Found>&)> changed, std::stri
 
 Browser::Browser(const int socket, const int direct,
                  std::function<void(const std::vector<Found>&)> changed, std::string service)
-    : socket_(socket), direct_(direct), wake_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)),
-      changed_(std::move(changed)), service_(std::move(service)) {
+    : socket_(socket), direct_(direct), wake_(-1), changed_(std::move(changed)),
+      service_(std::move(service)) {
+#ifndef __APPLE__
+    wake_ = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+#endif
     worker_ = std::thread{[this] { run(); }};
 }
 
@@ -405,7 +411,9 @@ Browser::~Browser() {
     running_.store(false);
     if (wake_ >= 0) {
         // Failing, it wakes within a quarter second anyway.
+#ifndef __APPLE__
         static_cast<void>(::eventfd_write(wake_, 1U));
+#endif
     }
     if (worker_.joinable()) {
         worker_.join();
@@ -440,8 +448,8 @@ void Browser::ask(const bool unicast) {
 void Browser::run() {
     // Asked quickly at first, as a window opening wants the list now, then
     // now and then for what starts later without being heard.
-    const std::array<std::chrono::seconds, 3> early{std::chrono::seconds{0}, std::chrono::seconds{1},
-                                                    std::chrono::seconds{3}};
+    const std::array<std::chrono::seconds, 3> early{
+        std::chrono::seconds{0}, std::chrono::seconds{1}, std::chrono::seconds{3}};
     const auto started = clock::now();
     std::size_t asked = 0;
     auto next_question = started;
@@ -454,8 +462,8 @@ void Browser::run() {
             // those at once, whoever else asked a moment ago.
             ask(asked == 0U);
             ++asked;
-            next_question = asked < early.size() ? started + early[asked]
-                                                 : now + std::chrono::seconds{30};
+            next_question =
+                asked < early.size() ? started + early[asked] : now + std::chrono::seconds{30};
         }
         // Whichever of the two has something first: the group's port, and
         // the one direct answers come to.

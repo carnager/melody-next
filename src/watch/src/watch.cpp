@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/watch/watch.hpp"
 
@@ -61,11 +62,13 @@ bool contains(const std::string_view folder, const std::string_view path) {
            (path.size() > folder.size() && path.starts_with(folder) && path[folder.size()] == '/');
 }
 
-std::optional<std::string> to_engine(const FolderMapping& mapping, const std::string_view local_path) {
+std::optional<std::string> to_engine(const FolderMapping& mapping,
+                                     const std::string_view local_path) {
     if (!contains(mapping.local, local_path)) {
         return std::nullopt;
     }
-    const auto rest = mapping.local == "/" ? local_path.substr(1) : local_path.substr(mapping.local.size());
+    const auto rest =
+        mapping.local == "/" ? local_path.substr(1) : local_path.substr(mapping.local.size());
     if (mapping.engine == "/") {
         return rest.starts_with('/') ? std::string{rest} : '/' + std::string{rest};
     }
@@ -113,14 +116,15 @@ std::vector<PresentFile> present_files(const FolderMapping& mapping) {
     std::vector<PresentFile> files;
     std::error_code error;
     std::filesystem::recursive_directory_iterator walk{
-        std::filesystem::path{mapping.local}, std::filesystem::directory_options::skip_permission_denied,
-        error};
-    for (; !error && walk != std::filesystem::recursive_directory_iterator{}; walk.increment(error)) {
+        std::filesystem::path{mapping.local},
+        std::filesystem::directory_options::skip_permission_denied, error};
+    for (; !error && walk != std::filesystem::recursive_directory_iterator{};
+         walk.increment(error)) {
         const auto& raw = walk->path().native();
         if (!core::is_audio_path(raw)) {
             continue;
         }
-        struct stat status {};
+        struct stat status{};
         if (::lstat(raw.c_str(), &status) != 0 || !S_ISREG(status.st_mode)) {
             continue;
         }
@@ -138,9 +142,10 @@ std::vector<PresentFile> present_files(const FolderMapping& mapping) {
 core::Result<std::unique_ptr<TreeWatcher>> TreeWatcher::create() {
     const auto descriptor = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (descriptor < 0) {
-        return std::unexpected(core::Error{.code = core::ErrorCode::io,
-                                           .message = "could not start watching",
-                                           .context = {{.key = "errno", .value = std::strerror(errno)}}});
+        return std::unexpected(
+            core::Error{.code = core::ErrorCode::io,
+                        .message = "could not start watching",
+                        .context = {{.key = "errno", .value = std::strerror(errno)}}});
     }
     return std::unique_ptr<TreeWatcher>{new TreeWatcher{descriptor}};
 }
@@ -182,7 +187,8 @@ void TreeWatcher::watch_tree(const std::string& folder, std::vector<Change>* rep
     std::filesystem::recursive_directory_iterator walk{
         std::filesystem::path{folder}, std::filesystem::directory_options::skip_permission_denied,
         error};
-    for (; !error && walk != std::filesystem::recursive_directory_iterator{}; walk.increment(error)) {
+    for (; !error && walk != std::filesystem::recursive_directory_iterator{};
+         walk.increment(error)) {
         const auto status = walk->symlink_status(error);
         if (error) {
             error.clear();

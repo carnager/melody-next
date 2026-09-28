@@ -4,6 +4,7 @@
 // fetched with the agents' token or with a ticket the engine signed for a
 // client that gave the password -- and nothing else.
 
+#include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/media_streams.hpp"
@@ -42,13 +43,15 @@ void require(const bool condition, const std::string_view message) {
 }
 
 // One GET, the whole response: status line and body.
-[[nodiscard]] std::pair<std::string, std::string> get(const std::uint16_t port, const std::string& target) {
-    const int connection = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+[[nodiscard]] std::pair<std::string, std::string> get(const std::uint16_t port,
+                                                      const std::string& target) {
+    const int connection = trackknife::core::socket_cloexec(AF_INET, SOCK_STREAM, 0);
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     ::inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-    require(::connect(connection, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0,
+    require(::connect(connection, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) ==
+                0,
             "the stream port answers");
     const auto request = "GET " + target + " HTTP/1.1\r\nHost: test\r\n\r\n";
     require(::send(connection, request.data(), request.size(), MSG_NOSIGNAL) ==
@@ -73,20 +76,22 @@ void require(const bool condition, const std::string_view message) {
 
 int main(int argc, char** argv) {
     require(argc == 2, "usage: media_streams_test <fixture-dir>");
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("trackknife-streams-" + trackknife::core::StableId::random().to_string());
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("trackknife-streams-" + trackknife::core::StableId::random().to_string());
     const auto music = directory / "music";
     std::filesystem::create_directories(music);
     {
         std::ifstream input{std::filesystem::path{argv[1]} / "rich-metadata-long-flac.b64"};
-        std::string base64((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+        std::string base64((std::istreambuf_iterator<char>(input)),
+                           std::istreambuf_iterator<char>());
         std::erase(base64, '\n');
         const auto decoded = protocol::decode_raw_path(base64);
         require(decoded.has_value(), "the fixture decodes");
         std::ofstream file{music / "track.flac", std::ios::binary};
         file.write(decoded->data(), static_cast<std::streamsize>(decoded->size()));
     }
-    const auto track = (music / "track.flac").string();
+    const auto track = std::filesystem::weakly_canonical(music / "track.flac").string();
     std::ofstream{directory / "elsewhere.flac"} << "not in the library";
 
     engine::LocalCatalogue catalogue{directory / "library.sqlite3"};
@@ -97,8 +102,8 @@ int main(int argc, char** argv) {
 
     engine::TranscodeCache cache{directory / "transcodes", 64U * 1024U * 1024U};
     std::string playing;
-    engine::MediaStreams media{"agent-token", [&playing](const std::string& path) { return path == playing; },
-                               &cache};
+    engine::MediaStreams media{
+        "agent-token", [&playing](const std::string& path) { return path == playing; }, &cache};
     auto server = engine::StreamServer::listen(
         "127.0.0.1", 0, [&media](const std::string_view query) { return media.resolve(query); });
     require(server.has_value(), "the stream port opens");
@@ -109,9 +114,11 @@ int main(int argc, char** argv) {
     protocol::Dispatcher dispatcher;
     engine::register_stream_methods(dispatcher, media, catalogue, port);
     const auto ask = [&dispatcher](const protocol::Json& params) {
-        return dispatcher.dispatch(protocol::Request{.id = 1, .method = "streams.ticket", .params = params});
+        return dispatcher.dispatch(
+            protocol::Request{.id = 1, .method = "streams.ticket", .params = params});
     };
-    const auto answer = ask(protocol::Json{{"path", protocol::encode_raw_path(track)}, {"format", "opus"}, {"bitrate", 96}});
+    const auto answer = ask(protocol::Json{
+        {"path", protocol::encode_raw_path(track)}, {"format", "opus"}, {"bitrate", 96}});
     require(answer.result.has_value(), "a ticket for a library track");
     require(answer.result->at("port") == port, "with the port to fetch it from");
     const auto query = answer.result->at("query").get<std::string>();
@@ -124,7 +131,8 @@ int main(int argc, char** argv) {
     const auto again_started = std::chrono::steady_clock::now();
     const auto again = get(port, "/stream?" + query);
     require(again.second == body, "the same again");
-    require(std::chrono::steady_clock::now() - again_started < first, "from the cache, not converted twice");
+    require(std::chrono::steady_clock::now() - again_started < first,
+            "from the cache, not converted twice");
 
     // As it is: the original bytes.
     const auto original = ask(protocol::Json{{"path", protocol::encode_raw_path(track)}});
@@ -134,26 +142,36 @@ int main(int argc, char** argv) {
     // A ticket is for what it names, and until it says.
     auto forged = query;
     forged.replace(forged.find("bitrate=96"), 10, "bitrate=64");
-    require(get(port, "/stream?" + forged).first == "HTTP/1.1 403 Forbidden", "a changed ticket opens nothing");
-    const auto expired = media.ticket(output::StreamRequest{.raw_path = track, .format = {}, .selection = {}, .segment = {}},
-                                      std::chrono::seconds{-5});
-    require(get(port, "/stream?" + expired).first == "HTTP/1.1 403 Forbidden", "nor an expired one");
-    require(get(port, "/stream?path=" + output::percent_encoded(protocol::encode_raw_path(track))).first ==
-                "HTTP/1.1 403 Forbidden",
+    require(get(port, "/stream?" + forged).first == "HTTP/1.1 403 Forbidden",
+            "a changed ticket opens nothing");
+    const auto expired = media.ticket(
+        output::StreamRequest{.raw_path = track, .format = {}, .selection = {}, .segment = {}},
+        std::chrono::seconds{-5});
+    require(get(port, "/stream?" + expired).first == "HTTP/1.1 403 Forbidden",
+            "nor an expired one");
+    require(get(port, "/stream?path=" + output::percent_encoded(protocol::encode_raw_path(track)))
+                    .first == "HTTP/1.1 403 Forbidden",
             "nor no key at all");
 
     // Only library tracks get tickets.
-    const auto outside = ask(protocol::Json{{"path", protocol::encode_raw_path((directory / "elsewhere.flac").string())}});
-    require(outside.error.has_value() && outside.error->code == "not_found", "a file outside the library gets none");
+    const auto outside = ask(protocol::Json{
+        {"path", protocol::encode_raw_path((directory / "elsewhere.flac").string())}});
+    require(outside.error.has_value() && outside.error->code == "not_found",
+            "a file outside the library gets none");
 
     // The agents' token opens what plays, converted when asked.
-    const auto agent = output::stream_query(output::StreamRequest{
-                           .raw_path = track, .format = output::StreamFormat{.bitrate_kbps = 64}, .selection = {}, .segment = {}}) +
+    const auto agent = output::stream_query(
+                           output::StreamRequest{.raw_path = track,
+                                                 .format = output::StreamFormat{.bitrate_kbps = 64},
+                                                 .selection = {},
+                                                 .segment = {}}) +
                        "&token=agent-token";
-    require(get(port, "/stream?" + agent).first == "HTTP/1.1 404 Not Found", "not while it is not played");
+    require(get(port, "/stream?" + agent).first == "HTTP/1.1 404 Not Found",
+            "not while it is not played");
     playing = track;
     const auto streamed = get(port, "/stream?" + agent);
-    require(streamed.first == "HTTP/1.1 200 OK" && streamed.second.starts_with("OggS"), "and then, as Opus");
+    require(streamed.first == "HTTP/1.1 200 OK" && streamed.second.starts_with("OggS"),
+            "and then, as Opus");
     // A part of a file goes only converted.
     require(get(port, "/stream?path=" + output::percent_encoded(protocol::encode_raw_path(track)) +
                           "&start=0&end=1000&token=agent-token")

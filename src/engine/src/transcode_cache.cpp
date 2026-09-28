@@ -4,6 +4,8 @@
 #include "trackknife/convert/convert.hpp"
 #include "trackknife/convert/preset.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/formats/artwork.hpp"
+#include <fstream>
 
 #include <openssl/evp.h>
 
@@ -47,6 +49,9 @@ core::Result<std::filesystem::path> TranscodeCache::ensure(const TranscodeSource
     if (!revision) {
         return std::unexpected(std::move(revision.error()));
     }
+    const std::string extension = format.codec == output::StreamCodec::opus   ? "opus"
+                                  : format.codec == output::StreamCodec::flac ? "flac"
+                                                                              : "wav";
     std::ostringstream identity;
     identity << source.raw_path << '\0' << revision->device << ':' << revision->inode << ':'
              << revision->size << ':' << revision->modification_time_seconds << ':'
@@ -54,10 +59,10 @@ core::Result<std::filesystem::path> TranscodeCache::ensure(const TranscodeSource
              << source.selection.stream_index.value_or(-1) << ':'
              << source.selection.subsong_index.value_or(-1) << '\0'
              << (source.segment ? source.segment->start_sample : -1) << ':'
-             << (source.segment ? source.segment->end_sample.value_or(-1) : -1) << '\0' << "opus:"
-             << format.bitrate_kbps;
+             << (source.segment ? source.segment->end_sample.value_or(-1) : -1) << '\0' << extension
+             << ":" << (format.codec == output::StreamCodec::opus ? format.bitrate_kbps : 0);
     const auto key = hex_digest(identity.str());
-    const auto target = directory_ / (key + ".opus");
+    const auto target = directory_ / (key + "." + extension);
 
     std::shared_future<core::Result<std::filesystem::path>> waiting;
     std::promise<core::Result<std::filesystem::path>> making;
@@ -97,14 +102,20 @@ core::Result<std::filesystem::path> TranscodeCache::ensure(const TranscodeSource
 core::Result<std::filesystem::path> TranscodeCache::convert(const TranscodeSource& source,
                                                             const StreamFormat& format,
                                                             const std::filesystem::path& target) {
-    auto preset = convert::find_encoder_preset("opus-192");
+    const auto id = format.codec == output::StreamCodec::opus   ? "opus-192"
+                    : format.codec == output::StreamCodec::flac ? "flac"
+                                                                : "wav";
+    auto preset = convert::find_encoder_preset(id);
     if (!preset) {
         return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
-                                           .message = "this engine has no Opus encoder",
+                                           .message = "this engine has no requested stream encoder",
                                            .context = {}});
     }
-    preset->id = "opus-stream";
-    preset->bit_rate = static_cast<std::int64_t>(std::clamp(format.bitrate_kbps, 16, 512)) * 1000;
+    if (format.codec == output::StreamCodec::opus) {
+        preset->id = "opus-stream";
+        preset->bit_rate =
+            static_cast<std::int64_t>(std::clamp(format.bitrate_kbps, 16, 512)) * 1000;
+    }
     convert::AudioConversionRequest request;
     request.source_raw_path = source.raw_path;
     request.source_selection = source.selection;
@@ -123,6 +134,43 @@ core::Result<std::filesystem::path> TranscodeCache::convert(const TranscodeSourc
     return target;
 }
 
+core::Result<std::filesystem::path> TranscodeCache::artwork(const std::string& raw_path) {
+    const auto bytes = formats::load_track_artwork(raw_path);
+    if (bytes.empty()) {
+        return std::unexpected(core::Error{
+            .code = core::ErrorCode::not_found, .message = "track has no cover", .context = {}});
+    }
+    const bool png = bytes.size() >= 8 && bytes[0] == 0x89 && bytes[1] == 'P';
+    const bool jpeg = bytes.size() >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8;
+    if (!png && !jpeg) {
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "cover is not PNG or JPEG",
+                                           .context = {}});
+    }
+    const auto target = directory_ / (hex_digest(std::string{bytes.begin(), bytes.end()}) +
+                                      (png ? ".png" : ".jpg"));
+    const std::lock_guard guard{mutex_};
+    std::error_code ec;
+    if (!std::filesystem::exists(target, ec)) {
+        const auto temporary = target.string() + ".tmp";
+        std::ofstream out{temporary, std::ios::binary};
+        out.write(reinterpret_cast<const char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()));
+        out.close();
+        if (out) {
+            std::filesystem::rename(temporary, target, ec);
+        }
+        if (!out || ec) {
+            std::filesystem::remove(temporary, ec);
+            return std::unexpected(core::Error{.code = core::ErrorCode::io,
+                                               .message = "could not cache renderer artwork",
+                                               .context = {}});
+        }
+    }
+    evict(target);
+    return target;
+}
+
 void TranscodeCache::evict(const std::filesystem::path& keep) {
     struct Held {
         std::filesystem::path path;
@@ -133,7 +181,10 @@ void TranscodeCache::evict(const std::filesystem::path& keep) {
     std::uint64_t total = 0;
     std::error_code ignored;
     for (const auto& entry : std::filesystem::directory_iterator{directory_, ignored}) {
-        if (!entry.is_regular_file(ignored) || entry.path().extension() != ".opus") {
+        if (!entry.is_regular_file(ignored) ||
+            (entry.path().extension() != ".opus" && entry.path().extension() != ".flac" &&
+             entry.path().extension() != ".wav" && entry.path().extension() != ".jpg" &&
+             entry.path().extension() != ".png")) {
             continue;
         }
         const auto size = entry.file_size(ignored);

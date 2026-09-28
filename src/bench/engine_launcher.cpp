@@ -15,6 +15,9 @@
 #include <QStandardPaths>
 
 #include <signal.h>
+#ifdef __APPLE__
+#include <libproc.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -43,6 +46,10 @@ namespace {
     if (const auto* data_home = std::getenv("XDG_DATA_HOME"); data_home != nullptr && *data_home) {
         return std::filesystem::path{data_home} / "trackknife" / "trackknife";
     }
+#ifdef __APPLE__
+    return std::filesystem::path{QDir::homePath().toStdString()} / "Library" /
+           "Application Support" / "trackknife";
+#endif
     return std::filesystem::path{QDir::homePath().toStdString()} / ".local" / "share" /
            "trackknife" / "trackknife";
 }
@@ -168,11 +175,16 @@ LocalEngineSharing localEngineSharing() {
                 .toBool(),
         .found_nearby_kbps = streamNearbyKbps(settings),
         .found_away_kbps = streamAwayKbps(settings),
+        .upnp = TRACKKNIFE_ENABLE_UPNP &&
+                settings.value(QLatin1String(SettingsDialog::engine_upnp_key), false).toBool(),
     };
 }
 
 QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSharing& sharing) {
     QStringList arguments;
+    if (sharing.upnp) {
+        arguments << QStringLiteral("--upnp");
+    }
     const auto password_file = engine.state / "engine.password";
     std::error_code ignored;
     if (!sharing.music_root.isEmpty()) {
@@ -212,7 +224,8 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
                 file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
                 file.write(target.password.toUtf8() + '\n');
                 file.close();
-                arguments << QStringLiteral("--play-for-password-file") << path_text(guest_password);
+                arguments << QStringLiteral("--play-for-password-file")
+                          << path_text(guest_password);
             }
         }
         arguments << QStringLiteral("--play-for-bitrate-nearby")
@@ -226,19 +239,24 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     if (!sharing.share || sharing.listen.isEmpty() || sharing.password.isEmpty()) {
         arguments << QStringLiteral("--local-only");
         std::filesystem::remove(password_file, ignored);
+        if (sharing.upnp) {
+            arguments << QStringLiteral("--http")
+                      << QStringLiteral("0.0.0.0:%1").arg(sharing.stream_port);
+        }
         return arguments;
     }
     arguments << QStringLiteral("--listen") << sharing.listen;
     // Streams on the same address as the engine, on their own port.
     const auto colon = sharing.listen.lastIndexOf(QLatin1Char(':'));
     if (colon > 0 && sharing.stream_port > 0) {
-        arguments << QStringLiteral("--http")
-                  << QStringLiteral("%1:%2").arg(sharing.listen.left(colon)).arg(sharing.stream_port);
+        arguments
+            << QStringLiteral("--http")
+            << QStringLiteral("%1:%2").arg(sharing.listen.left(colon)).arg(sharing.stream_port);
     }
     QFile file{path_text(password_file)};
     // Owner-only from the moment it exists, not after.
-    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate, QFileDevice::ReadOwner |
-                                                                   QFileDevice::WriteOwner)) {
+    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate,
+                  QFileDevice::ReadOwner | QFileDevice::WriteOwner)) {
         file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
         file.write(sharing.password.toUtf8() + '\n');
         file.close();
@@ -285,8 +303,16 @@ bool localEngineOutdated(const LocalEngine& engine) {
     const auto program = engineProgram();
     for (const auto pid : lockHolders(engine.state / "engine.lock")) {
         std::error_code error;
+#ifdef __APPLE__
+        char executable[PROC_PIDPATHINFO_MAXSIZE]{};
+        if (::proc_pidpath(pid, executable, sizeof(executable)) <= 0) {
+            continue;
+        }
+        const std::filesystem::path running{executable};
+#else
         const auto running =
             std::filesystem::read_symlink("/proc/" + std::to_string(pid) + "/exe", error);
+#endif
         if (error) {
             continue;
         }
@@ -310,9 +336,24 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
     if (error) {
         return holders;
     }
+#ifdef __APPLE__
+    QProcess lsof;
+    lsof.start(QStringLiteral("/usr/sbin/lsof"),
+               {QStringLiteral("-t"), QStringLiteral("--"), path_text(target)});
+    if (lsof.waitForFinished(3000)) {
+        for (const auto& line : lsof.readAllStandardOutput().split('\n')) {
+            bool valid = false;
+            const int pid = line.toInt(&valid);
+            if (valid && pid > 0) {
+                holders.push_back(static_cast<pid_t>(pid));
+            }
+        }
+    }
+#else
     for (const auto& process : std::filesystem::directory_iterator{"/proc", error}) {
         const auto name = process.path().filename().string();
-        if (name.empty() || !std::ranges::all_of(name, [](const char c) { return c >= '0' && c <= '9'; })) {
+        if (name.empty() ||
+            !std::ranges::all_of(name, [](const char c) { return c >= '0' && c <= '9'; })) {
             continue;
         }
         std::error_code unreadable;
@@ -325,6 +366,7 @@ std::vector<pid_t> lockHolders(const std::filesystem::path& lock) {
             }
         }
     }
+#endif
     return holders;
 }
 

@@ -98,7 +98,11 @@ add_subdirectory(src/watch)
 if(TRACKKNIFE_BUILD_UI)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Concurrent DBus Gui Network Test Widgets)
     qt_standard_project_setup()
-    add_subdirectory(src/musicbrainz)
+endif()
+# Always: the engine builds AcoustID requests with its Qt-free core
+# (ADR-0237); its Qt client comes with the UI.
+add_subdirectory(src/musicbrainz)
+if(TRACKKNIFE_BUILD_UI)
     add_subdirectory(src/uicommon)
     add_subdirectory(src/bench)
 endif()

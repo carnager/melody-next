@@ -16,6 +16,10 @@ target_link_libraries(
 )
 target_compile_features(trackknife_musicbrainz_core PUBLIC cxx_std_23)
 
+if(NOT TRACKKNIFE_BUILD_UI)
+    return()
+endif()
+
 qt_add_library(
     trackknife_musicbrainz STATIC
     src/client.cpp

@@ -2,6 +2,8 @@
 
 #include "bench/replaygain_dialog.hpp"
 
+#include "trackknife/loudness/replaygain.hpp"
+
 #include "bench/metadata_dialog_helpers.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/write_plan.hpp"
@@ -419,35 +421,15 @@ void ReplayGainDialog::finishScan() {
                 apply->result = std::unexpected(std::move(error));
                 return apply;
             };
-            auto preview = metadata::metadata_proposal_preview(
-                *selection, metadata::StagedMetadataPatchSet{}, proposals, 0.0, token);
-            if (!preview) {
-                return fail(std::move(preview.error()));
-            }
             // The measured values become ordinary staged patches on a copy
             // of the selection whose vocabulary grows the loudness fields.
-            auto staged_selection = *selection;
-            metadata::StagedMetadataPatchSet patches;
-            for (const auto& cell : preview->cells) {
-                auto field_index = staged_selection.field_index(cell.canonical_field);
-                if (!field_index) {
-                    auto ensured = staged_selection.ensure_missing_field(cell.canonical_field,
-                                                                         cell.display_field);
-                    if (!ensured) {
-                        return fail(std::move(ensured.error()));
-                    }
-                    field_index = *ensured;
-                }
-                const auto staged =
-                    cell.after
-                        ? patches.replace_values(staged_selection, cell.item_index, *field_index,
-                                                 *cell.after)
-                        : patches.remove_field(staged_selection, cell.item_index, *field_index);
-                if (!staged) {
-                    return fail(core::Error{staged.error()});
-                }
-                ++apply->staged_fields;
+            auto staged = loudness::stage_replaygain(*selection, proposals, token);
+            if (!staged) {
+                return fail(std::move(staged.error()));
             }
+            auto& staged_selection = staged->selection;
+            auto& patches = staged->patches;
+            apply->staged_fields = staged->staged_fields;
             if (apply->staged_fields == 0U) {
                 return apply;
             }

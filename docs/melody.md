@@ -130,6 +130,7 @@ melody-cli output "Pixel 10 Pro"
 melody-cli rating 8                   # what plays, 1-10; 0 clears
 melody-cli albumrating 9              # its album
 melody-cli love                       # on Last.fm, with the engine's account
+melody-cli replaygain album doors 1967  # measured and written by the engine
 melody-cli --json watch               # a line each time something changes
 melody-cli watch --all                # the same, for whichever engine plays
 ```

@@ -4,6 +4,7 @@ add_library(
     trackknife_loudness STATIC
     src/analyzer.cpp
     src/grouping.cpp
+    src/replaygain.cpp
     src/scan.cpp
 )
 add_library(Trackknife::Loudness ALIAS trackknife_loudness)

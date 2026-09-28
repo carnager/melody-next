@@ -5,6 +5,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/formats/cue_sheet.hpp"
 #include "trackknife/formats/probe.hpp"
+#include "trackknife/loudness/replaygain.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/loudness_sidecar.hpp"
@@ -396,30 +397,8 @@ void apply_loudness_sidecar_projection(
     if (!sidecar || !*sidecar || !(*sidecar)->matches(*source_revision)) {
         return;
     }
-    const auto project = [&](LocalTrackRow& row) {
-        const auto start = row.segment ? std::optional{row.segment->start_sample} : std::nullopt;
-        const auto end = row.segment ? row.segment->end_sample : std::nullopt;
-        for (const auto& entry : (*sidecar)->entries) {
-            if (entry.stream_index != row.selection.stream_index ||
-                entry.subsong_index != row.selection.subsong_index || entry.start_sample != start ||
-                entry.end_sample != end) {
-                continue;
-            }
-            const auto add = [&row](const char* name, const std::optional<double>& value,
-                                    const bool gain) {
-                if (value) {
-                    append_metadata_value(row.metadata, name,
-                                          gain ? formats::replay_gain_decibel_text(*value)
-                                               : formats::replay_gain_peak_text(*value),
-                                          metadata::FieldProvenance::sidecar);
-                }
-            };
-            add("REPLAYGAIN_TRACK_GAIN", entry.track_gain_db, true);
-            add("REPLAYGAIN_TRACK_PEAK", entry.track_peak, false);
-            add("REPLAYGAIN_ALBUM_GAIN", entry.album_gain_db, true);
-            add("REPLAYGAIN_ALBUM_PEAK", entry.album_peak, false);
-            return;
-        }
+    const auto project = [&sidecar](LocalTrackRow& row) {
+        loudness::project_loudness_sidecar(row.metadata, **sidecar, row.selection, row.segment);
     };
     project(fallback);
     for (auto& row : rows) {

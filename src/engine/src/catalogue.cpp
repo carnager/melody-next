@@ -57,6 +57,32 @@ core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>
     return library->refresh(raw_paths, cancellation);
 }
 
+core::Result<std::vector<std::string>>
+LocalCatalogue::rated_paths(const std::string& track_hash) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->rated_paths(track_hash);
+}
+
+core::Result<std::size_t> LocalCatalogue::import_indexed_tag_ratings() {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->import_indexed_tag_ratings();
+}
+
+core::Result<std::vector<std::pair<std::string, unsigned>>>
+LocalCatalogue::rated_tracks(const core::CancellationToken& cancellation) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->rated_tracks(cancellation);
+}
+
 core::Result<std::vector<unsigned char>>
 LocalCatalogue::artwork(const std::string& raw_path,
                         const core::CancellationToken& cancellation) const {

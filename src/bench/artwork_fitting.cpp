@@ -40,17 +40,13 @@ namespace {
 
 } // namespace
 
-core::Result<metadata::ArtworkImageFile>
-fitArtworkImage(const metadata::ArtworkImageFile& image, const std::uint32_t max_edge,
-                const QString& directory, const core::CancellationToken& cancellation) {
+core::Result<std::optional<FittedArtwork>>
+fitArtworkBytes(const std::vector<unsigned char>& encoded, const std::uint32_t max_edge,
+                const core::CancellationToken& cancellation) {
     if (max_edge == 0U)
-        return image;
-    auto encoded = metadata::read_artwork_image_bytes(
-        image, operations::maximum_fittable_artwork_bytes, cancellation);
-    if (!encoded)
-        return std::unexpected(encoded.error());
-    QByteArray source(reinterpret_cast<const char*>(encoded->data()),
-                      static_cast<qsizetype>(encoded->size()));
+        return std::optional<FittedArtwork>{};
+    QByteArray source(reinterpret_cast<const char*>(encoded.data()),
+                      static_cast<qsizetype>(encoded.size()));
     QBuffer buffer(&source);
     buffer.open(QIODevice::ReadOnly);
     QImageReader reader(&buffer);
@@ -61,7 +57,7 @@ fitArtworkImage(const metadata::ArtworkImageFile& image, const std::uint32_t max
                                              "The cover cannot be decoded to resize it"));
     const auto edge = static_cast<int>(max_edge);
     if (std::max(size.width(), size.height()) <= edge)
-        return image;
+        return std::optional<FittedArtwork>{};
     reader.setAutoTransform(true);
     auto decoded = reader.read();
     if (decoded.isNull())
@@ -79,10 +75,28 @@ fitArtworkImage(const metadata::ArtworkImageFile& image, const std::uint32_t max
                      : scaled.convertToFormat(QImage::Format_RGB32).save(&output, "JPEG", 90));
     if (!saved)
         return std::unexpected(fitting_error(core::ErrorCode::io, "Could not convert the cover"));
+    return std::optional{FittedArtwork{.bytes = std::move(bytes), .png = transparent}};
+}
+
+core::Result<metadata::ArtworkImageFile>
+fitArtworkImage(const metadata::ArtworkImageFile& image, const std::uint32_t max_edge,
+                const QString& directory, const core::CancellationToken& cancellation) {
+    if (max_edge == 0U)
+        return image;
+    auto encoded = metadata::read_artwork_image_bytes(
+        image, operations::maximum_fittable_artwork_bytes, cancellation);
+    if (!encoded)
+        return std::unexpected(encoded.error());
+    auto fitted = fitArtworkBytes(*encoded, max_edge, cancellation);
+    if (!fitted)
+        return std::unexpected(fitted.error());
+    if (!*fitted)
+        return image;
+    const auto& bytes = (*fitted)->bytes;
     const auto path =
         directory + QLatin1Char('/') +
         QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) +
-        (transparent ? QStringLiteral(".png") : QStringLiteral(".jpg"));
+        ((*fitted)->png ? QStringLiteral(".png") : QStringLiteral(".jpg"));
     QSaveFile file(path);
     if (!QDir{}.mkpath(directory) || !file.open(QIODevice::WriteOnly) ||
         file.write(bytes) != bytes.size() || !file.commit())
@@ -90,6 +104,30 @@ fitArtworkImage(const metadata::ArtworkImageFile& image, const std::uint32_t max
             fitting_error(core::ErrorCode::io, "Could not save the converted cover"));
     return metadata::read_artwork_image_file(QFile::encodeName(path).toStdString(),
                                              16U * 1024U * 1024U, cancellation);
+}
+
+operations::ArtworkImageFitter engineArtworkFitter(
+    operations::ArtworkFileAccess access,
+    std::function<core::Result<metadata::ArtworkImageFile>(std::span<const unsigned char>)> stage) {
+    return [access = std::move(access), stage = std::move(stage)](
+               const metadata::ArtworkImageFile& image, const std::uint32_t max_edge,
+               const core::CancellationToken& cancellation)
+               -> core::Result<metadata::ArtworkImageFile> {
+        if (max_edge == 0U)
+            return image;
+        auto encoded =
+            access.image_bytes(image, operations::maximum_fittable_artwork_bytes, cancellation);
+        if (!encoded)
+            return std::unexpected(encoded.error());
+        auto fitted = fitArtworkBytes(*encoded, max_edge, cancellation);
+        if (!fitted)
+            return std::unexpected(fitted.error());
+        if (!*fitted)
+            return image;
+        const auto& bytes = (*fitted)->bytes;
+        return stage(std::span{reinterpret_cast<const unsigned char*>(bytes.constData()),
+                               static_cast<std::size_t>(bytes.size())});
+    };
 }
 
 QString coverDraftDirectory() {

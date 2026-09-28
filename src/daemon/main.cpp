@@ -12,19 +12,23 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/engine/catalogue_methods.hpp"
+#include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
+#include "trackknife/engine/lastfm.hpp"
+#include "trackknife/engine/list_methods.hpp"
+#include "trackknife/engine/media_streams.hpp"
+#include "trackknife/engine/metadata_services.hpp"
+#include "trackknife/engine/naming_methods.hpp"
+#include "trackknife/engine/now_playing_methods.hpp"
 #include "trackknife/engine/outputs.hpp"
 #include "trackknife/engine/playback_methods.hpp"
-#include "trackknife/engine/now_playing_methods.hpp"
 #include "trackknife/engine/playback_store.hpp"
+#include "trackknife/engine/rating_tags.hpp"
 #include "trackknife/engine/recorder.hpp"
 #include "trackknife/engine/server.hpp"
-#include "trackknife/engine/lastfm.hpp"
-#include "trackknife/engine/media_streams.hpp"
 #include "trackknife/engine/stream_server.hpp"
-#include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/token.hpp"
-#include "trackknife/engine/list_methods.hpp"
+#include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/client.hpp"
 
@@ -405,6 +409,9 @@ int main(int argc, char** argv) {
     // A cover is given for what this engine may stream -- what it holds to
     // play -- as well as for its library: a list of files it does not index
     // shows its covers too, as does an engine with no library at all.
+    // ADR-0237 stage 2: ratings copied into the files, when that is on.
+    trackknife::engine::RatingTags rating_tags{database, catalogue, *workspace};
+    trackknife::engine::register_rating_tag_methods(dispatcher, rating_tags);
     trackknife::engine::register_catalogue_methods(
         dispatcher, catalogue,
         [relay](const trackknife::protocol::Event& event) {
@@ -413,7 +420,10 @@ int main(int argc, char** argv) {
                 relay->sink(event);
             }
         },
-        [&player](const std::string& raw_path) { return player->holds(raw_path); });
+        [&player](const std::string& raw_path) { return player->holds(raw_path); },
+        [&rating_tags](const std::string& hash, const bool album, const unsigned rating) {
+            rating_tags.rated(hash, album, rating);
+        });
     trackknife::engine::register_playback_methods(dispatcher, *player);
     trackknife::engine::register_now_playing_methods(dispatcher, catalogue, *player);
     // Who this is, for a client to show rather than an address -- and its
@@ -496,9 +506,37 @@ int main(int argc, char** argv) {
     trackknife::engine::JobRegistry jobs{sink};
     trackknife::engine::JobCatalog job_catalogue;
     trackknife::engine::register_catalogue_jobs(job_catalogue, catalogue);
+    // ADR-0237: a file moved here is followed, in the same commit, by the
+    // workspace, the library, the lists and the queue.
+    const auto follow_moves =
+        trackknife::engine::follow_moves(*workspace, catalogue, player.get(), sink);
+    trackknife::engine::register_file_work_jobs(job_catalogue, database, catalogue, follow_moves);
+    // File work a crash interrupted is finished or rolled back before anyone
+    // connects (ADR-0237), and what could not be is kept for Trackknife to show.
+    auto file_work_recovery =
+        trackknife::engine::recover_file_work(database, catalogue, follow_moves);
+    if (file_work_recovery.error) {
+        std::cerr << "melodyd: could not recover interrupted file work: "
+                  << file_work_recovery.error->message << "\n";
+    } else if (file_work_recovery.recovered > 0U) {
+        std::cerr << "melodyd: recovered " << file_work_recovery.recovered
+                  << " interrupted file operation(s)\n";
+    }
+    // ADR-0237: artwork a client hands over is kept here until written.
+    trackknife::engine::clean_artwork_staging(state_directory / "artwork-staging");
+    trackknife::engine::register_artwork_methods(dispatcher, state_directory / "artwork-staging");
+    // ADR-0237: the tagger's online lookups, made here for this engine's files.
+    trackknife::engine::MetadataServices metadata_services{database, state_directory};
+    trackknife::engine::register_metadata_service_jobs(job_catalogue, metadata_services);
+    trackknife::engine::register_metadata_service_methods(dispatcher, metadata_services);
+    trackknife::engine::register_file_work_methods(dispatcher, database,
+                                                   std::move(file_work_recovery));
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
     trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);
+    // ADR-0237: naming layouts (Trackknife's, copied here) and this engine's
+    // move destinations.
+    trackknife::engine::register_naming_methods(dispatcher, *workspace, sink);
 
     // Pushed state, so a client learns a track changed without asking.
     std::optional<trackknife::engine::PlaybackWatcher> watcher;

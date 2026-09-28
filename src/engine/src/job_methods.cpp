@@ -2,6 +2,18 @@
 
 #include "trackknife/engine/job_methods.hpp"
 
+#include "trackknife/engine/file_work_wire.hpp"
+#include "trackknife/loudness/scan.hpp"
+#include "trackknife/operations/artwork_apply.hpp"
+#include "trackknife/operations/cue_replay_gain_apply.hpp"
+#include "trackknife/operations/file_publication_apply.hpp"
+#include "trackknife/operations/loudness_sidecar_apply.hpp"
+#include "trackknife/operations/metadata_apply.hpp"
+#include "trackknife/operations/metadata_commit.hpp"
+#include "trackknife/persistence/file_publication_journal.hpp"
+#include "trackknife/persistence/operation_journal.hpp"
+
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -118,6 +130,242 @@ void register_catalogue_jobs(JobCatalog& jobs, LocalCatalogue& catalogue) {
             return result;
         };
     });
+}
+
+void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
+                             LocalCatalogue& catalogue, MoveFollower follow) {
+    jobs.on("loudness.scan", [](const Json& params) -> core::Result<JobRegistry::Work> {
+        const auto listed = params.find("items");
+        if (listed == params.end() || !listed->is_array()) {
+            return std::unexpected(bad_params("items to measure are required", "items"));
+        }
+        std::vector<loudness::LoudnessScanItem> items;
+        items.reserve(listed->size());
+        for (const auto& value : *listed) {
+            auto item = wire::decode_scan_item(value);
+            if (!item) {
+                return std::unexpected(std::move(item.error()));
+            }
+            items.push_back(std::move(*item));
+        }
+        loudness::LoudnessScanOptions options;
+        if (const auto given = params.find("options"); given != params.end()) {
+            auto decoded = wire::decode_scan_options(*given);
+            if (!decoded) {
+                return std::unexpected(std::move(decoded.error()));
+            }
+            options = *decoded;
+        }
+        // The pool is the engine's own, sized by its hardware: the client's
+        // idea of how many workers suit its machine says nothing about this one.
+        const auto hardware = std::thread::hardware_concurrency();
+        options.maximum_parallelism =
+            std::min<std::size_t>(loudness::maximum_scan_parallelism,
+                                  std::max<std::size_t>(1U, hardware == 0U ? 2U : hardware / 2U));
+        return [items = std::move(items), options](const core::CancellationToken& token,
+                                                   const JobRegistry::Reporter& report) {
+            auto scanned = loudness::scan_loudness(
+                items, options,
+                [&report](const loudness::LoudnessScanProgress& progress) {
+                    report(Json{{"item_index", progress.item_index},
+                                {"completed_items", progress.completed_items},
+                                {"total_items", progress.total_items}});
+                },
+                token);
+            if (!scanned) {
+                return Json{{"error", wire::encode(scanned.error())}};
+            }
+            return Json{{"result", wire::encode(*scanned)}};
+        };
+    });
+
+    jobs.on(
+        "metadata.apply",
+        [database = database, &catalogue](const Json& params) -> core::Result<JobRegistry::Work> {
+            const auto given = params.find("plan");
+            if (given == params.end()) {
+                return std::unexpected(bad_params("a plan to write is required", "plan"));
+            }
+            auto plan = wire::decode_write_plan(*given);
+            if (!plan) {
+                return std::unexpected(std::move(plan.error()));
+            }
+            if (!plan->ready()) {
+                return std::unexpected(
+                    core::Error{.code = core::ErrorCode::conflict,
+                                .message = "the plan has blocking issues; nothing was written",
+                                .context = {{.key = "param", .value = "plan"}}});
+            }
+            return [plan = std::move(*plan), database, &catalogue](
+                       const core::CancellationToken& token, const JobRegistry::Reporter& report) {
+                auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+                if (!opened) {
+                    return Json{{"error", wire::encode(opened.error())}};
+                }
+                auto journal = std::move(*opened);
+                // Part of the commit: a file written is a file re-read into the
+                // library before the write counts, so nothing sees it half done.
+                const operations::MetadataDependentStateCommitter dependent =
+                    [&catalogue](
+                        const operations::MetadataCommitResult& result) -> core::Result<void> {
+                    auto refreshed = catalogue.refresh({result.source_raw_path});
+                    return refreshed ? core::Result<void>{}
+                                     : std::unexpected(std::move(refreshed.error()));
+                };
+                auto applied = operations::apply_metadata_write_plan(
+                    plan,
+                    [&journal, &dependent](const metadata::MetadataWritePlanSource& source,
+                                           const core::CancellationToken& source_token) {
+                        return operations::commit_flac_metadata_source(source, journal, dependent,
+                                                                       source_token);
+                    },
+                    [&journal, &dependent](const metadata::MetadataWritePlanCueSheet& sheet,
+                                           const core::CancellationToken& sheet_token) {
+                        return operations::commit_cue_replay_gain_sheet(sheet, journal, dependent,
+                                                                        sheet_token);
+                    },
+                    [&journal, &dependent](const metadata::MetadataWritePlanSidecar& sidecar,
+                                           const core::CancellationToken& sidecar_token) {
+                        return operations::commit_loudness_sidecar(sidecar, journal, dependent,
+                                                                   sidecar_token);
+                    },
+                    [&report](const operations::MetadataApplyProgress& progress) {
+                        report(wire::encode(progress));
+                    },
+                    token);
+                if (!applied) {
+                    return Json{{"error", wire::encode(applied.error())}};
+                }
+                return Json{{"result", wire::encode(*applied)}};
+            };
+        });
+
+    jobs.on(
+        "artwork.apply",
+        [database = database, &catalogue](const Json& params) -> core::Result<JobRegistry::Work> {
+            const auto given = params.find("plan");
+            if (given == params.end()) {
+                return std::unexpected(bad_params("an artwork plan to write is required", "plan"));
+            }
+            auto plan = wire::decode_artwork_plan(*given);
+            if (!plan) {
+                return std::unexpected(std::move(plan.error()));
+            }
+            if (!plan->ready()) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::conflict,
+                    .message = "the artwork plan has blocking issues; nothing was written",
+                    .context = {{.key = "param", .value = "plan"}}});
+            }
+            return [plan = std::move(*plan), database, &catalogue](
+                       const core::CancellationToken& token, const JobRegistry::Reporter& report) {
+                auto opened = persistence::SqliteMetadataOperationJournal::open(database);
+                if (!opened) {
+                    return Json{{"error", wire::encode(opened.error())}};
+                }
+                auto journal = std::move(*opened);
+                const operations::MetadataDependentStateCommitter dependent =
+                    [&catalogue](
+                        const operations::MetadataCommitResult& result) -> core::Result<void> {
+                    auto refreshed = catalogue.refresh({result.source_raw_path});
+                    return refreshed ? core::Result<void>{}
+                                     : std::unexpected(std::move(refreshed.error()));
+                };
+                auto applied = operations::apply_artwork_write_plan(
+                    plan,
+                    [&journal, &dependent](const metadata::ArtworkWritePlanSource& source,
+                                           const core::CancellationToken& source_token) {
+                        return operations::commit_artwork_source(source, journal, dependent,
+                                                                 source_token);
+                    },
+                    [&report](const operations::ArtworkApplyProgress& progress) {
+                        report(wire::encode(progress));
+                    },
+                    token, operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                if (!applied) {
+                    return Json{{"error", wire::encode(applied.error())}};
+                }
+                return Json{{"result", wire::encode(*applied)}};
+            };
+        });
+    jobs.on("paths.preflight", [](const Json& params) -> core::Result<JobRegistry::Work> {
+        const auto given = params.find("plan");
+        if (given == params.end()) {
+            return std::unexpected(bad_params("a path plan to check is required", "plan"));
+        }
+        auto plan = wire::decode_path_plan(*given);
+        if (!plan) {
+            return std::unexpected(std::move(plan.error()));
+        }
+        return [plan = std::move(*plan)](const core::CancellationToken& token,
+                                         const JobRegistry::Reporter&) {
+            auto checked = operations::preflight_output_paths(plan, token);
+            if (!checked) {
+                return Json{{"error", wire::encode(checked.error())}};
+            }
+            return Json{{"result", wire::encode(*checked)}};
+        };
+    });
+
+    jobs.on(
+        "preparation.apply",
+        [database = database, &catalogue,
+         follow = std::move(follow)](const Json& params) -> core::Result<JobRegistry::Work> {
+            const auto given = params.find("plan");
+            if (given == params.end()) {
+                return std::unexpected(bad_params("a reviewed plan is required", "plan"));
+            }
+            auto plan = wire::decode_preparation_plan(*given);
+            if (!plan) {
+                return std::unexpected(std::move(plan.error()));
+            }
+            if (!plan->ready() || !plan->has_path_operation()) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::conflict,
+                    .message = "the plan is not ready to move files; nothing was changed",
+                    .context = {{.key = "param", .value = "plan"}}});
+            }
+            return [plan = std::move(*plan), database, &catalogue, follow](
+                       const core::CancellationToken& token, const JobRegistry::Reporter& report) {
+                auto file_opened = persistence::SqliteFilePublicationJournal::open(database);
+                if (!file_opened) {
+                    return Json{{"error", wire::encode(file_opened.error())}};
+                }
+                auto metadata_opened = persistence::SqliteMetadataOperationJournal::open(database);
+                if (!metadata_opened) {
+                    return Json{{"error", wire::encode(metadata_opened.error())}};
+                }
+                auto file_journal = std::move(*file_opened);
+                auto metadata_journal = std::move(*metadata_opened);
+                const operations::MetadataDependentStateCommitter metadata_dependent =
+                    [&catalogue](
+                        const operations::MetadataCommitResult& result) -> core::Result<void> {
+                    auto refreshed = catalogue.refresh({result.source_raw_path});
+                    return refreshed ? core::Result<void>{}
+                                     : std::unexpected(std::move(refreshed.error()));
+                };
+                const operations::FilePublicationDependentStateCommitter file_dependent =
+                    [&follow](const operations::FilePublicationCommitResult& result) {
+                        return follow(result, nullptr);
+                    };
+                const operations::DestinationArtifactDependentStateCommitter artifact_dependent =
+                    [&follow](const operations::FilePublicationCommitResult& result,
+                              const metadata::MetadataDocument& document) {
+                        return follow(result, &document);
+                    };
+                auto applied = operations::apply_preparation_publications(
+                    plan, file_journal, metadata_journal, metadata_dependent, file_dependent,
+                    artifact_dependent,
+                    [&report](const operations::FilePublicationApplyProgress& progress) {
+                        report(wire::encode(progress));
+                    },
+                    token, operations::FilePublicationApplyOptions{.maximum_parallelism = 2U});
+                if (!applied) {
+                    return Json{{"error", wire::encode(applied.error())}};
+                }
+                return Json{{"result", wire::encode(*applied)}};
+            };
+        });
 }
 
 } // namespace trackknife::engine

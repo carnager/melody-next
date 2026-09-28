@@ -79,16 +79,20 @@ image_evidence(const metadata::ArtworkInventoryItem& item) {
 }
 
 [[nodiscard]] core::Result<void> export_one(const ArtworkExportRequest& request,
-                                            const std::uint64_t maximum_item_bytes,
+                                            const ArtworkExportOptions& options,
                                             const core::CancellationToken& cancellation) {
+    const auto maximum_item_bytes = options.maximum_item_bytes;
     if (request.destination_raw_path.empty() ||
         request.destination_raw_path.find('\0') != std::string::npos) {
         return std::unexpected(export_error(core::ErrorCode::invalid_argument,
                                             "artwork export destination is invalid",
                                             request.destination_raw_path));
     }
-    auto bytes = metadata::read_artwork_image_bytes(image_evidence(request.source),
-                                                    maximum_item_bytes, cancellation);
+    auto bytes =
+        options.image_bytes
+            ? options.image_bytes(image_evidence(request.source), maximum_item_bytes, cancellation)
+            : metadata::read_artwork_image_bytes(image_evidence(request.source), maximum_item_bytes,
+                                                 cancellation);
     if (!bytes) {
         return std::unexpected(std::move(bytes.error()));
     }
@@ -227,7 +231,7 @@ export_artwork_items(const std::vector<ArtworkExportRequest>& requests,
             auto& item = result.items[index];
             item.state = ArtworkExportItemState::running;
             report(index, item.state, completed_items.load(std::memory_order_relaxed));
-            auto exported = export_one(requests[index], options.maximum_item_bytes, cancellation);
+            auto exported = export_one(requests[index], options, cancellation);
             if (exported) {
                 item.state = ArtworkExportItemState::exported;
             } else {

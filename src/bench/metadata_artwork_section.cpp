@@ -757,7 +757,7 @@ void MetadataArtworkSection::startInventory() {
         }
     }
     watcher_.setFuture(QtConcurrent::run([scope = scope_, generation = job_generation_, token,
-                                          inventory_policy]() mutable {
+                                          inventory_policy, artwork = tools_.artwork]() mutable {
         auto batch = std::make_shared<BatchResult>();
         batch->generation = generation;
         batch->sources.reserve(scope.size());
@@ -766,8 +766,7 @@ void MetadataArtworkSection::startInventory() {
                 batch->cancelled = true;
                 break;
             }
-            auto read =
-                metadata::read_local_artwork_inventory(source.raw_path, inventory_policy, token);
+            auto read = artwork.inventory(source.raw_path, inventory_policy, token);
             if (!read && read.error().code == core::ErrorCode::cancelled) {
                 batch->cancelled = true;
                 break;
@@ -785,9 +784,9 @@ void MetadataArtworkSection::startInventory() {
                     QImage thumbnail;
                     if (item.duplicate_of && *item.duplicate_of < result.thumbnails.size()) {
                         thumbnail = result.thumbnails[*item.duplicate_of];
-                    } else if (auto bytes = metadata::read_artwork_image_bytes(
-                                   thumbnail_evidence(item), maximum_thumbnail_source_bytes,
-                                   token)) {
+                    } else if (auto bytes =
+                                   artwork.image_bytes(thumbnail_evidence(item),
+                                                       maximum_thumbnail_source_bytes, token)) {
                         QByteArray encoded{reinterpret_cast<const char*>(bytes->data()),
                                            static_cast<qsizetype>(bytes->size())};
                         QBuffer buffer{&encoded};
@@ -1494,14 +1493,20 @@ void MetadataArtworkSection::promptExport() {
     updateActionButtons();
     const auto cancellation = mutation_cancellation_.token();
     const auto completed = export_completed_items_;
+    operations::ArtworkExportOptions export_options;
+    if (tools_.stage) {
+        // Read through the engine; written here, where the user chose.
+        export_options.image_bytes = tools_.artwork.image_bytes;
+    }
     export_watcher_.setFuture(
-        QtConcurrent::run([requests = std::move(requests), cancellation, completed]() mutable {
+        QtConcurrent::run([requests = std::move(requests), cancellation, completed,
+                           export_options = std::move(export_options)]() mutable {
             const operations::ArtworkExportProgressCallback progress =
                 [completed](const operations::ArtworkExportProgress& update) {
                     completed->store(update.completed_items, std::memory_order_relaxed);
                 };
             return std::make_shared<core::Result<operations::ArtworkExportResult>>(
-                operations::export_artwork_items(requests, progress, cancellation));
+                operations::export_artwork_items(requests, progress, cancellation, export_options));
         }));
 }
 
@@ -1809,7 +1814,8 @@ void MetadataArtworkSection::startPendingPreviews() {
     preview_job_generation_ = preview_generation_;
     preview_cancellation_ = core::CancellationSource{};
     preview_watcher_.setFuture(QtConcurrent::run([rows = pending_rows_,
-                                                  token = preview_cancellation_.token()] {
+                                                  token = preview_cancellation_.token(),
+                                                  artwork = tools_.artwork] {
         std::vector<QImage> images(rows.size());
         std::unordered_map<std::string, QImage> cache;
         for (std::size_t index = 0; index < rows.size(); ++index) {
@@ -1837,8 +1843,13 @@ void MetadataArtworkSection::startPendingPreviews() {
                                                         maximum_thumbnail_source_bytes, token);
             QImage thumbnail;
             if (evidence) {
-                auto bytes = metadata::read_artwork_image_bytes(
-                    *evidence, maximum_thumbnail_source_bytes, token);
+                // A picture copied from another track is the engine's; one
+                // picked or downloaded is this computer's.
+                auto bytes =
+                    intent.replacement_embedded_source
+                        ? artwork.image_bytes(*evidence, maximum_thumbnail_source_bytes, token)
+                        : metadata::read_artwork_image_bytes(*evidence,
+                                                             maximum_thumbnail_source_bytes, token);
                 if (bytes && !token.is_cancellation_requested()) {
                     QByteArray encoded_image{reinterpret_cast<const char*>(bytes->data()),
                                              static_cast<qsizetype>(bytes->size())};
@@ -1907,10 +1918,18 @@ void MetadataArtworkSection::savePendingChanges() {
             .arg(change_count)
             .arg(change_count == 1 ? QStringLiteral("change") : QStringLiteral("changes")));
     updateActionButtons();
-    plan_watcher_.setFuture(
-        QtConcurrent::run([intents = std::move(intents), cancellation, policy]() mutable {
+    plan_watcher_.setFuture(QtConcurrent::run(
+        [intents = std::move(intents), cancellation, policy, tools = tools_]() mutable {
+            // ADR-0237: images of this computer handed over first, when the
+            // engine writes; then planned against the files where they are.
+            auto staged = stageReplacements(std::move(intents), tools, cancellation);
+            if (!staged) {
+                return std::make_shared<core::Result<metadata::ArtworkWritePlan>>(
+                    std::unexpected(std::move(staged.error())));
+            }
             return std::make_shared<core::Result<metadata::ArtworkWritePlan>>(
-                operations::plan_artwork_storage(intents, policy, cancellation, artworkFitter()));
+                operations::plan_artwork_storage(*staged, policy, cancellation,
+                                                 artworkFitterFor(tools), tools.artwork));
         }));
 }
 

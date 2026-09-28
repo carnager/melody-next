@@ -24,7 +24,11 @@ namespace trackknife::engine {
 //
 // The catalogue must outlive the dispatcher.
 using HeldPath = std::function<bool(const std::string& raw_path)>;
+// Told of each rating stored, after it is: what else follows one (ADR-0237
+// stage 2, ratings in tags).
+using RatingObserver = std::function<void(const std::string& hash, bool album, unsigned rating)>;
 void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
-                                 EventSink events = {}, HeldPath holds = {});
+                                EventSink events = {}, HeldPath holds = {},
+                                RatingObserver rated = {});
 
 } // namespace trackknife::engine

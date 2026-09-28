@@ -15,11 +15,16 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct sqlite3;
 
 namespace trackknife::persistence {
+
+// ADR-0237 stage 2: the engine_state key naming the scale plain RATING tags
+// are read on ("off", "5", "10", "100"), which indexing reads.
+inline constexpr std::string_view plain_rating_scale_state_key = "ratings.rating-scale";
 
 struct LibraryRoot {
     std::string raw_path;
@@ -170,6 +175,16 @@ class LocalLibrary final {
     core::Result<std::vector<unsigned>>
     ratings(const std::vector<std::string>& hashes,
             const core::CancellationToken& cancellation = {}) const;
+    // ADR-0237 stage 2: the files a track rating belongs to, and every rated
+    // track with its rating -- what writing ratings into tags visits.
+    core::Result<std::vector<std::string>> rated_paths(const std::string& track_hash) const;
+    core::Result<std::vector<std::pair<std::string, unsigned>>>
+    rated_tracks(const core::CancellationToken& cancellation = {}) const;
+    // For a library indexed before ratings were imported, and again when
+    // the plain RATING scale changes: each unrated track takes the rating
+    // its files' tags carry, from what was indexed. Returns how many were
+    // rated.
+    core::Result<std::size_t> import_indexed_tag_ratings();
     core::Result<LibraryScanResult> scan(const core::CancellationToken& cancellation,
                                          LibraryScanProgress& progress);
     // Re-reads the named files now, without a walk: after they were tagged

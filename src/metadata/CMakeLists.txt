@@ -20,6 +20,7 @@ add_library(
     src/text_writer_detail.hpp
     src/wavpack_writer.cpp
     src/local_reader.cpp
+    src/ratings.cpp
     src/loudness_sidecar.cpp
     src/proposal.cpp
     src/rule_script_import.cpp

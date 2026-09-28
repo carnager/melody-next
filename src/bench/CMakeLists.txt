@@ -15,6 +15,8 @@ qt_add_library(
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
     replaygain_scan.cpp
+    file_work_tools.cpp
+    file_work_tools.hpp
     search_dialog.cpp
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp
@@ -78,6 +80,7 @@ qt_add_library(
     metadata_rule_script_import_dialog.hpp
     metadata_scalar_delegate.cpp
     metadata_scalar_delegate.hpp
+    engine_folder_dialog.cpp
     output_profiles_widget.cpp
     output_profiles_widget.hpp
     shortcut_settings.cpp
@@ -87,8 +90,6 @@ qt_add_library(
     metadata_transformation_dialog.cpp
     metadata_transformation_dialog.hpp
     metadata_transformation_preview_model.cpp
-    musicbrainz_fetch_service.cpp
-    musicbrainz_fetch_service.hpp
     musicbrainz_identify_dialog.cpp
     musicbrainz_identify_dialog.hpp
     musicbrainz_track_match_widget.cpp

@@ -44,7 +44,7 @@ using protocol::Json;
 } // namespace
 
 void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& catalogue,
-                                EventSink events, HeldPath holds) {
+                                EventSink events, HeldPath holds, RatingObserver rated) {
     dispatcher.on("catalogue.roots", [&catalogue](const Json&) -> core::Result<Json> {
         auto roots = catalogue.roots();
         if (!roots) {
@@ -411,7 +411,8 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
 
     dispatcher.on(
         "catalogue.set_rating",
-        [&catalogue, events = std::move(events)](const Json& params) -> core::Result<Json> {
+        [&catalogue, events = std::move(events),
+         rated = std::move(rated)](const Json& params) -> core::Result<Json> {
             auto hash = required_string(params, "hash");
             if (!hash) {
                 return std::unexpected(std::move(hash.error()));
@@ -436,6 +437,9 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 events(protocol::Event{
                     .name = "catalogue.rating_changed",
                     .data = Json{{"hash", *hash}, {"album", album}, {"rating", value}}});
+            }
+            if (rated) {
+                rated(*hash, album, value);
             }
             // A void operation still answers, so the caller learns it completed.
             return Json{};

@@ -19,6 +19,7 @@
 #include "trackknife/audio/request_queue.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
 #include "trackknife/operations/file_publication.hpp"
 #include "trackknife/operations/loudness_sidecar_apply.hpp"
@@ -36,6 +37,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QStringList>
+#include <QThreadPool>
 
 #include <cstdint>
 #include <deque>
@@ -95,8 +97,6 @@ enum class QuickPickKind;
 class ListsPanel;
 struct ConvertDialogItem;
 
-struct MetadataOperationJobOutcome;
-class MusicBrainzFetchService;
 class LocalLibraryPanel;
 class MetadataPropertiesDialog;
 class SearchDialog;
@@ -255,7 +255,6 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
                           std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
-    [[nodiscard]] MetadataWritePlanApplierFactory metadataPlanApplierFactory();
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
@@ -327,17 +326,24 @@ class BenchMainWindow final : public QMainWindow {
     void revealFolderStep(const QPersistentModelIndex& parent_index, const std::string& raw_path);
     void playCurrentRow();
     void showMetadataProperties();
-    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader);
+    // ADR-0237: `work` is the engine that does the file work, or null for
+    // this process.
+    void openMetadataProperties(std::size_t count, MetadataPropertiesSourceReader reader,
+                                std::shared_ptr<engine::RemoteFileWork> work);
     void showConvertDialog();
     void showConvertForView(QTableView* view);
     void openConvertItems(std::vector<ConvertDialogItem> items);
     void showMetadataForView(QTableView* view);
     void showReplayGainForView(QTableView* view);
     SettingsDialog* showSettingsDialog(SettingsDialog::Page page = SettingsDialog::Page::general);
-    [[nodiscard]] OutputProfileStore buildOutputProfileStore();
-    void startMetadataOperationRecovery();
-    [[nodiscard]] MusicBrainzLookupService musicBrainzLookupService();
-    void finishMetadataOperationJob();
+    // Naming layouts, and the move destinations of `destinations_of`; with
+    // every engine's destinations as places for the manager (ADR-0237).
+    [[nodiscard]] OutputProfileStore
+    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    // ADR-0237: the naming layouts are global; every engine that does file
+    // work holds a copy, handed over whole after each change and when it
+    // connects.
+    void pushLayouts();
     void presentInterruptedOperations();
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
@@ -526,29 +532,6 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] ListTab* remoteQueueTab();
     // An engine's own tab: its first, or one made for it, named after it.
     [[nodiscard]] ListTab* engineTab(EngineLink& engine);
-    // True, having said why, when `view` lists the remote engine's files:
-    // work that reads or writes files cannot run here on those (ADR-0227).
-    // ADR-0227: the selected rows of a remote tab as this computer sees their
-    // files (RemoteMount), for the tools that read and write them here.
-    // Nothing when the view is not a remote tab's; what is not reachable
-    // here is left out and said. Remembers which local path is which remote
-    // one, so what the tools change reaches the remote's index.
-    [[nodiscard]] std::optional<std::vector<LocalTrackRow>> remoteFileWorkRows(QTableView* view);
-    // After a commit on a file a remote tab named: its rows follow, and the
-    // remote engine is asked to re-read it (batched).
-    void followRemoteRetag(const operations::MetadataCommitResult& result);
-    void followRemoteMove(const operations::FilePublicationCommitResult& result);
-    void queueRemoteRefresh(const EngineKey& engine, std::string remote_path);
-    void sendRemoteRefresh();
-    // A file of another engine that the tools work on here: whose, and by
-    // what path that engine knows it.
-    struct RemoteFile {
-        EngineKey engine;
-        std::string path;
-    };
-    std::unordered_map<std::string, RemoteFile> remote_file_work_;
-    std::map<EngineKey, std::vector<std::string>> pending_remote_refresh_;
-    QTimer* remote_refresh_timer_{nullptr};
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
     [[nodiscard]] bool playingOnEngine() const;
@@ -703,6 +686,11 @@ class BenchMainWindow final : public QMainWindow {
         // Its last list.all, for the lists pane; empty, not known.
         std::optional<std::vector<protocol::Json>> lists;
         QString lists_error;
+        // ADR-0237: the file tools' reads, scans and writes through it, and
+        // whether it does them -- asked each time it connects, off this
+        // thread. Until it has said so, the tools do the work themselves.
+        std::shared_ptr<engine::RemoteFileWork> file_work;
+        bool does_file_work{false};
     };
     // This computer's first.
     std::vector<std::unique_ptr<EngineLink>> engines_;
@@ -720,6 +708,36 @@ class BenchMainWindow final : public QMainWindow {
     }
     // The link a connection belongs to; null for none of this window's.
     [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
+    // ADR-0237: asks the link's engine whether it does file work, now and on
+    // every reconnection.
+    void watchFileWork(EngineLink& link);
+    // The engine that does the file work for a view's files, if one does.
+    [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
+    // That engine, or -- having said in the status bar why `what` cannot be
+    // done -- nothing.
+    [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> requireFileWork(QTableView* view,
+                                                                          const QString& what);
+    [[nodiscard]] MetadataWritePlanApplierFactory
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    [[nodiscard]] ArtworkWritePlanApplierFactory
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    // Stage 5: moves and renames the engine makes. For an engine elsewhere,
+    // `mounted` receives each move as this computer sees it through the
+    // engine's mount -- this computer's paths and revisions -- for its own
+    // lists to follow.
+    using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
+    [[nodiscard]] FilePublicationPlanApplierFactory
+    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                        bool elsewhere, RemoteMount mount,
+                                        std::shared_ptr<MountedMoves> mounted);
+    // An engine elsewhere moved a file: its own tabs follow at its paths,
+    // everything of this computer's at `here`, the move seen through the
+    // mount, when it is.
+    void applyEngineRelocation(const EngineKey& engine,
+                               const operations::FilePublicationCommitResult& result,
+                               const operations::FilePublicationCommitResult* here);
+    // The engine link whose file-work connection this is.
+    [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
     // Parts of an engine's link; null when it or the part is not there.
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
@@ -764,7 +782,6 @@ class BenchMainWindow final : public QMainWindow {
     // taken, an earlier one being out of date by the time it comes.
     quint64 engine_queue_asked_{0};
     quint64 engine_reattach_asked_{0};
-    MusicBrainzFetchService* musicbrainz_service_{nullptr};
     QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};
 
@@ -790,12 +807,21 @@ class BenchMainWindow final : public QMainWindow {
     bool artwork_running_{false};
     std::optional<CrossTabMoveEdit> cross_tab_move_edit_;
 
-    QFutureWatcher<std::shared_ptr<MetadataOperationJobOutcome>> metadata_operation_watcher_;
-    std::shared_ptr<MetadataOperationJobOutcome> metadata_operation_snapshot_;
-    core::CancellationSource metadata_operation_cancellation_;
+    // ADR-0237: file work engines could neither finish nor roll back after a
+    // crash, as each reports it -- shown with this window's own, once.
+    struct EngineInterruption {
+        core::StableId id;
+        std::string raw_path;
+        QString detail;
+        bool move{false};
+    };
+    std::vector<EngineInterruption> engine_interruptions_;
+    // This computer's move destinations as last loaded, for offering them to
+    // an engine elsewhere through its mount.
+    std::vector<persistence::SavedDestinationProfile> local_destinations_;
+    // Layout hand-overs to engines, one at a time and in order.
+    QThreadPool layout_pushes_;
     QPointer<QDialog> interrupted_operations_dialog_;
-    bool metadata_operation_running_{false};
-    bool metadata_recovery_started_{false};
 
     // Paths opened before the asynchronous list restore finishes are queued
     // and flushed into the initial tab once it exists.

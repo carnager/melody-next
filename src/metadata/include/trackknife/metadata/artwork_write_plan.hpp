@@ -17,6 +17,9 @@
 
 namespace trackknife::metadata {
 
+// The largest replacement image a plan takes as it is.
+inline constexpr std::uint64_t maximum_replacement_bytes = 16U * 1024U * 1024U;
+
 enum class ArtworkWritePlanIntentKind : std::uint8_t {
     replace = 0,
     remove = 1,

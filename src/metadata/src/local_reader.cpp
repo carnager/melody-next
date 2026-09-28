@@ -3,14 +3,17 @@
 #include "trackknife/metadata/local_reader.hpp"
 
 #include "trackknife/metadata/flac_mapping.hpp"
+#include "trackknife/metadata/ratings.hpp"
 
 #include <fileref.h>
-#include <tfilestream.h>
 #include <flacfile.h>
+#include <id3v2tag.h>
 #include <mp4file.h>
 #include <mpegfile.h>
 #include <opusfile.h>
+#include <popularimeterframe.h>
 #include <tfile.h>
+#include <tfilestream.h>
 #include <tpropertymap.h>
 #include <vorbisfile.h>
 #include <wavpackfile.h>
@@ -142,6 +145,26 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
                             dynamic_cast<TagLib::MP4::File*>(reference.file()) != nullptr &&
                             has_native_mp4_marker(raw_path);
     const auto properties = reference.file()->properties();
+    std::optional<std::uint8_t> popularimeter;
+    if (native_mpeg) {
+        auto* mpeg = dynamic_cast<TagLib::MPEG::File*>(reference.file());
+        if (mpeg != nullptr && mpeg->hasID3v2Tag()) {
+            for (auto* frame : mpeg->ID3v2Tag()->frameList("POPM")) {
+                const auto* popm = dynamic_cast<TagLib::ID3v2::PopularimeterFrame*>(frame);
+                if (popm == nullptr) {
+                    continue;
+                }
+                const auto byte = static_cast<std::uint8_t>(std::clamp(popm->rating(), 0, 255));
+                if (popm->email() == TagLib::String{std::string{popularimeter_owner}}) {
+                    popularimeter = byte;
+                    break;
+                }
+                if (!popularimeter) {
+                    popularimeter = byte;
+                }
+            }
+        }
+    }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(raw_path));
     }
@@ -257,11 +280,32 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
                 .pictures_writable = native_flac || native_mpeg || native_mp4,
                 .unknown_data_preserved_on_write = preservation_supported,
             },
+        .popularimeter = popularimeter,
     };
 }
 
 core::Result<std::vector<StagedMetadataSource>>
 capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const core::CancellationToken& cancellation) {
+    return capture_uncached_metadata_sources(std::move(sources), local_metadata_file_access(),
+                                             cancellation);
+}
+
+MetadataFileAccess local_metadata_file_access() {
+    return MetadataFileAccess{
+        .read =
+            [](const std::string& raw_path, const core::CancellationToken& cancellation) {
+                return read_local_metadata(raw_path, cancellation);
+            },
+        .revision =
+            [](const std::string& raw_path) {
+                return core::observe_local_source_revision(raw_path);
+            }};
+}
+
+core::Result<std::vector<StagedMetadataSource>>
+capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const MetadataFileAccess& access,
                                   const core::CancellationToken& cancellation) {
     std::map<std::string, LocalMetadataRead> captured;
     for (auto& source : sources) {
@@ -273,14 +317,14 @@ capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
         }
         auto found = captured.find(source.raw_path);
         if (found == captured.end()) {
-            auto read = read_local_metadata(source.raw_path, cancellation);
+            auto read = access.read(source.raw_path, cancellation);
             if (!read) {
                 // Tagless decodable formats can still store gains in a sidecar.
                 // No native metadata baseline is claimed for these sources.
                 if (read.error().code != core::ErrorCode::unsupported) {
                     return std::unexpected(read.error());
                 }
-                auto revision = core::observe_local_source_revision(source.raw_path);
+                auto revision = access.revision(source.raw_path);
                 if (!revision)
                     return std::unexpected(revision.error());
                 source.source_revision = *revision;

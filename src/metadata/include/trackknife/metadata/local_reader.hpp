@@ -2,6 +2,10 @@
 
 #pragma once
 
+#include <cstdint>
+#include <functional>
+#include <optional>
+
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/result.hpp"
@@ -28,6 +32,9 @@ struct LocalMetadataRead {
     MetadataDocument document;
     std::string adapter_name;
     MetadataCapabilities capabilities;
+    // ADR-0237 stage 2: an MP3's popularimeter (POPM) rating byte -- the
+    // Windows Media Player owner's, else the first -- which is no text tag.
+    std::optional<std::uint8_t> popularimeter;
 
     friend bool operator==(const LocalMetadataRead&, const LocalMetadataRead&) = default;
 };
@@ -38,11 +45,28 @@ struct LocalMetadataRead {
 [[nodiscard]] core::Result<LocalMetadataRead>
 read_local_metadata(const std::string& raw_path, const core::CancellationToken& cancellation = {});
 
+// Where files are read from: this process, or -- ADR-0237 -- the engine that
+// holds them. `read` is read_local_metadata; `revision` observes a file whose
+// format has no tags to read, which may still take gains in a sidecar.
+struct MetadataFileAccess {
+    std::function<core::Result<LocalMetadataRead>(const std::string&,
+                                                  const core::CancellationToken&)>
+        read;
+    std::function<core::Result<core::LocalSourceRevision>(const std::string&)> revision;
+};
+
+// This process's own file access.
+[[nodiscard]] MetadataFileAccess local_metadata_file_access();
+
 // Prepare revisionless physical cache rows for an explicit metadata operation.
 // Repeated paths share one fresh read; existing revisions and logical overlays
 // remain subject to the existing stale-source checks. Run on a worker.
 [[nodiscard]] core::Result<std::vector<StagedMetadataSource>>
 capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const core::CancellationToken& cancellation = {});
+[[nodiscard]] core::Result<std::vector<StagedMetadataSource>>
+capture_uncached_metadata_sources(std::vector<StagedMetadataSource> sources,
+                                  const MetadataFileAccess& access,
                                   const core::CancellationToken& cancellation = {});
 
 } // namespace trackknife::metadata

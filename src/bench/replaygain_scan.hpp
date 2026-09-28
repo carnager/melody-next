@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include "bench/file_work_tools.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/loudness/grouping.hpp"
+#include "trackknife/loudness/scan.hpp"
+#include "trackknife/metadata/local_reader.hpp"
 #include "trackknife/metadata/proposal.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
@@ -15,8 +18,10 @@
 
 #include <atomic>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace trackknife::bench {
@@ -51,6 +56,6 @@ struct ReplayGainScanSettings {
     const metadata::StagedMetadataPatchSet& draft, const std::vector<std::size_t>& items,
     const std::shared_ptr<const std::vector<MetadataPropertiesAudioSource>>& audio_sources,
     const ReplayGainScanSettings& settings, const std::shared_ptr<std::atomic_size_t>& completed,
-    const core::CancellationToken& cancellation);
+    const core::CancellationToken& cancellation, const LoudnessScanner& scanner = {});
 
 } // namespace trackknife::bench

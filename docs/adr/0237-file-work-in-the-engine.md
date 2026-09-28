@@ -1,6 +1,6 @@
 # ADR-0237: File work moves into the engine
 
-Status: Proposed (2026-09-27)
+Status: Accepted (2026-09-27)
 
 Reopens the 2026-09-23 decision that file work stays in Trackknife, by path
 over a mount. Continues ADR-0220 ("one engine owning catalogue, mutation and
@@ -71,6 +71,15 @@ window tests for these workflows keep passing unchanged, and are the check.
 The index, lists, ratings and history change in the same step as the write,
 on the engine that did it.
 
+**As built, stage 1:** the plan is built by the client, from what the
+engine reads (`metadata.read`), with the metadata library's own planner --
+the one the dialogs already use -- rather than by a `plan.create` on the
+engine. The engine holds it to the same contract: `metadata.apply` refuses
+a plan with blocking issues, and re-checks every file's revision before
+writing it. The dialogs keep their code; only where they read, measure and
+write moves (`FileWorkTools`, `MetadataFileAccess`). `plan.create` stays
+available if a client without the planner ever needs it.
+
 ## Stages
 
 Each leaves the application working and Trackknife's own path in place for
@@ -78,27 +87,125 @@ what has not moved yet, and each is held to the rule above: nothing a user
 sees changes.
 
 1. **ReplayGain scans** in the engine: a job with a result preview and little
-   UI; results written to tags, CUE sheets or sidecars as today.
+   UI; results written to tags, CUE sheets or sidecars as today. **Done for the
+   ReplayGain dialog** (the track menu's ReplayGain…): `metadata.read`,
+   the `loudness.scan` and `metadata.apply` jobs, startup recovery and
+   `metadata.interrupted`, and `RemoteFileWork` as the client's end. The
+   Properties window's scan button follows with stage 3, the tagger.
 2. **Ratings into tags**, as an engine job over a selection or the library
-   (the tag mapping is its own decision).
+   (the tag mapping is its own decision). **Done** (decided 2026-09-27:
+   ratings are for every client, tags are an option): ratings stay in each
+   engine's library, where every client reads and sets them. With the option
+   on (`ratings.set_tags`; Trackknife's Settings → Library hands it to every
+   engine it reaches), the engine also writes each track rating into its
+   files as `FMPS_RATING` (the rating over ten, 0.1-1.0; unrated removes it),
+   through the tagger's own plan and journal, on a thread of its own. Turning
+   it on writes every rated track once; turning it off leaves the files as
+   they are. Album ratings are not written: no player reads them from tags.
+   Where each format's players read it (decided 2026-09-28): `FMPS_RATING`
+   everywhere, spelled `FMPS_Rating` in ID3v2 `TXXX` and the MP4 freeform
+   atom as the FMPS specification has it; on MP3 also `POPM` as Windows
+   Media Player's owner, with its whole-star bytes and MediaMonkey's and
+   MusicBee's half stars between (13, 1, 54, 64, 118, 128, 186, 196, 242,
+   255 for 1-10), so all ten levels survive there and foobar2000 and
+   Windows show the nearest star.
+   **Import** (wanted, 2026-09-27): whenever the library reads a file, a
+   rating in it -- MP3 `POPM` (any owner; the ten bytes exactly, others by
+   the ranges players share), else `FMPS_RATING`, else a plain `RATING` on
+   the scale chosen in Settings (off by default; 1-5, 0-10 or 0-100: it has
+   no agreed one) -- becomes the track's when it differs from what the
+   library read there before, or the track is unrated. A rating the library has over a tag it already saw
+   stays, so a cleared rating is not brought back by an old tag. A library
+   read before this is caught up once, at the engine's start, from the tags
+   it indexed.
 3. **Tag edits** -- the spreadsheet tagger on the plan/commit protocol.
-4. **Artwork** -- bytes to and from the engine.
+   **Done:** Properties captures, probes (`media.probe`), scans, plans and
+   applies through the engine; MusicBrainz, the Cover Art Archive and
+   AcoustID are looked up by the engine (`musicbrainz.fetch`,
+   `acoustid.fingerprint`, `acoustid.lookup`), with the AcoustID key kept
+   there.
+4. **Artwork** -- bytes to and from the engine. **Done:** the artwork
+   section shows, reviews and writes pictures through the engine
+   (`artwork.inventory`, `.image_file`, `.image_bytes`, `.destination`, the
+   `artwork.apply` job), and tag plans carry artwork to `metadata.apply`.
+   An image of the client's -- picked on its disk, downloaded, or resized --
+   is handed over with `artwork.stage` into the engine's staging folder,
+   named by content, and the plan names that copy. Resizing stays the
+   client's Qt code, so a resized cover is the same bytes either way.
 5. **Moves and renames**, with lists, queue and history following in the
    engine's own transaction. Choosing a destination uses the folder chooser
    as it is today, listing the engine's folders instead of this computer's
-   -- not a new dialog.
-6. **Conversion**, with output to a destination on the engine's machine.
-7. Trackknife's own file-writing path goes.
+   -- not a new dialog. **Done:** Properties builds the path plan from the
+   saved layout and destination as before; the engine checks it against its
+   filesystem (the `paths.preflight` job) and publishes the reviewed
+   preparation -- tags, paths, or both at once (`preparation.apply`). Each
+   move is followed in the same commit: the workspace's record and library
+   row (so ratings and history stay with the file, even one no list holds),
+   the library index, every engine list (`list.changed`) and the player's
+   queue. Startup recovery covers interrupted moves, and
+   `metadata.interrupted` lists those it could not settle with their target.
+   A move made by an engine elsewhere is followed in this computer's lists
+   at its mount's path. Destinations are the engine's own (below), chosen
+   among its folders.
+6. **Conversion stays in Trackknife** (decided 2026-09-27). It makes new
+   files where the user wants them -- this computer's disk, a stick, a
+   phone -- and changes nothing in the library, so it belongs where the
+   user sits. For files of an engine elsewhere, Trackknife fetches the
+   originals from that engine, as the phone downloads albums (ADR-0230),
+   and converts them here: no mount needed. **Done:** a remote tab's files
+   reachable through the mount convert as before; the others are fetched
+   by `RemoteFileWork::download_original` (a `streams.ticket` for the file
+   as it is, then the stream port) into Trackknife's cache folder when
+   Convert starts, converted from there and deleted. The preview plans them
+   from what the engine knows, so it shows before anything is fetched.
+7. Trackknife's own path for writing library files goes; conversion, which
+   writes only its own new files, stays. **Done:** tags, ReplayGain,
+   artwork, moves and renames are written only by the engine holding the
+   files; with none that does file work, Properties and ReplayGain say so in
+   the status bar instead of opening. Trackknife no longer recovers a
+   journal of its own at startup: each engine recovers its own when it
+   starts (this computer's shares Trackknife's database) and reports what
+   it recovered and what it could not, which Trackknife shows as before.
+   Its own MusicBrainz fetching and the editing of a remote tab's files
+   through the mount went with it.
 
-## Open decisions
+## Naming layouts are global; move destinations are the engine's (decided 2026-09-28)
 
-- **Unknown: write access.** A client with the engine's password could now
-  change the music. Is that enough, or does each engine get a read-only
-  setting (or a second password for writing)?
-- **Unknown: where an engine may write.** Anywhere its process can, or only
-  within its library folders and configured destinations?
-- **Unknown: MusicBrainz and AcoustID lookups** -- in the engine (next to the
-  files, one place for the API keys) or in the client (as today)?
+A move destination is a folder on one machine. A naming layout is a rule
+that is the same everywhere -- and what any client that moves files must
+name them with, the CLI and the phone too, not only Trackknife.
+
+- **Naming layouts are global presets.** They are made and edited in
+  Trackknife, as today, and every engine holds a copy: Trackknife hands its
+  whole set to each engine when it connects and whenever one changes (as
+  the AcoustID key and rating options are handed over), replacing the
+  engine's. Clients that move files through an engine name them with the
+  engine's copy, so the CLI and phone have them with Trackknife closed;
+  they use them and do not edit them, so the copies never need merging.
+- **Move destinations are the engine's.** Each engine keeps its own, in its
+  workspace beside its lists (`destinations.*`); every client reads and
+  saves them there. This computer's engine shares Trackknife's database, so
+  the ones saved today are already its own.
+- Whatever shows or picks destinations names the engine. Properties offers
+  only those of the engine the selected tracks belong to -- never a mixed
+  list; the window that manages them is titled for it ("Move destinations
+  on gemenon"); choosing a destination folder browses that engine's folders
+  (this computer's with the usual file dialog, an engine elsewhere's
+  through `folders.list`).
+- Conversion runs here, so it uses this computer's destinations.
+- An engine elsewhere starts with no destinations; its window offers to
+  copy this computer's that lie under a configured mount, translated to
+  that engine's paths.
+
+## Decided with it (2026-09-27)
+
+- **Write access is the engine's password.** A client that may control an
+  engine may change its files; there is no read-only setting or second
+  password. Every TCP peer already needs the password (ADR-0223).
+- **An engine may write wherever its process can.** Not only inside its
+  library folders: it tags what it can reach, as Trackknife does today.
+- **MusicBrainz and AcoustID lookups run in the engine,** next to the files,
+  with the API keys kept there.
 - **Proposal:** the phone and the CLI get file operations only after stage 3,
   and read-only views of plans before that.
 
@@ -106,7 +213,10 @@ sees changes.
 
 - Any client can do file work on any engine it can reach, with no mount.
 - The per-engine mount settings ("music folder as it sees it", "reachable
-  here at") lose their purpose once stage 7 lands.
+  here at") no longer carry file work. They remain for what is done here
+  with an engine's files: converting ones reachable through the mount
+  without downloading them, following an engine's moves in this computer's
+  lists, and offering this computer's destinations to copy.
 - The protocol grows a plan/commit surface, which is the bulk of the work.
 - Choosing folders on an engine's machine needs the engine to list them; the
   chooser itself stays the one the user knows.

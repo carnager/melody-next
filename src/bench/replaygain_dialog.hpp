@@ -37,7 +37,8 @@ class ReplayGainDialog final : public QDialog {
   public:
     ReplayGainDialog(std::size_t item_count, MetadataPropertiesSourceReader source_reader,
                      MetadataWritePlanApplierFactory plan_applier_factory,
-                     MetadataApplyObserver apply_observer, QWidget* parent = nullptr);
+                     MetadataApplyObserver apply_observer, QWidget* parent = nullptr,
+                     FileWorkTools tools = {});
     ~ReplayGainDialog() override;
 
   private:
@@ -65,6 +66,7 @@ class ReplayGainDialog final : public QDialog {
     MetadataPropertiesSourceReader source_reader_;
     MetadataWritePlanApplierFactory plan_applier_factory_;
     MetadataApplyObserver apply_observer_;
+    FileWorkTools tools_;
 
     QComboBox* grouping_{nullptr};
     QLineEdit* expression_{nullptr};

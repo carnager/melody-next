@@ -9,6 +9,7 @@
 #include "bench/desktop_notifier.hpp"
 #include "bench/dynamic_playlist_dialog.hpp"
 #include "bench/dynamic_playlist_service.hpp"
+#include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
@@ -29,6 +30,7 @@
 #include "bench/up_next_delegate.hpp"
 #include "test_engine.hpp"
 #include "trackknife/discovery/mdns.hpp"
+#include "trackknife/engine/file_work_wire.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 
 #include <signal.h>
@@ -270,6 +272,8 @@ class BenchMainWindowTest final : public QObject {
     void statusBarSummarizesTrackSelection();
     void committedMetadataRefreshesDuplicatesAndPreservesCueOverlay();
     void metadataReadyPlanAppliesAndRefreshesHistory();
+    void metadataRenameMovesTheFileAndItsRow();
+    void fileWorkWithoutAnEngineSaysWhy();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
     void metadataFieldLayoutsLoadFilterAndPersist();
@@ -279,6 +283,9 @@ class BenchMainWindowTest final : public QObject {
     void metadataCapturePatternSavesReloadsAndStagesAllFields();
     void preparationSidePanelEditsReusableOutputProfiles();
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
+    void moveDestinationsArePerEngine();
+    void namingLayoutsReachEveryEngine();
+    void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
     void metadataSuggestionsStageSelectionConsistency();
     void musicBrainzMatchingHandlesUnequalCounts_data();
@@ -336,18 +343,21 @@ class BenchMainWindowTest final : public QObject {
     void replayGainScanPreservesLogicalSources();
     void convertDialogPlansAndConvertsSelection();
     void convertDialogAppliesPermanentReplayGain();
+    void convertDialogFetchesFilesItCannotReach();
     void propertiesFileListLivesInTheTaggerWindow();
     void selectionActionsFollowTheActiveTab();
     void closingATabReturnsToThePreviousOne();
     void localArtworkSurvivesInvalidation();
     void folderBookmarksRevealTreePaths();
     void folderBookmarksMigrateFromLibraryRoots();
+    void artworkFetchesCoverArtFromArchiveAndAddsFront_data();
     void artworkFetchesCoverArtFromArchiveAndAddsFront();
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
     void coverPolicyRoundTrip();
     void playbackSettingsApplyLiveAndCancel();
     void librarySettingsManageFoldersWithoutScanning();
+    void ratingsInTagsIsAnEngineOption();
     void metadataServiceSettingsAndCompactPages();
     void coverThumbnailAppliesPolicy_data();
     void coverThumbnailAppliesPolicy();
@@ -380,6 +390,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataPropertiesFileSelectionDrivesIndividualAndBulkEdits();
     void metadataFieldReviewPreservesDraftAndSelectionScope();
     void metadataPropertiesArtworkSectionShowsProvenanceAndCapabilities();
+    void metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes_data();
     void metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes();
     void cueSheetsExpandIntoPersistentSegmentRows();
     void containerChaptersExpandIntoPersistentSegmentRows();
@@ -3130,10 +3141,12 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     view->selectionModel()->select(list_model->index(0, 0),
                                    QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
     properties_action->trigger();
 
     auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
     QVERIFY(properties != nullptr);
+    QCOMPARE(properties->property("trackknife-file-work").toString(), QStringLiteral("engine"));
     // ADR-0221: a window, so the tab strip is untouched and the list the
     // selection came from stays current.
     QVERIFY(properties->isWindow());
@@ -3169,6 +3182,131 @@ void BenchMainWindowTest::metadataReadyPlanAppliesAndRefreshesHistory() {
     QTRY_COMPARE(tabs->count(), 1);
     QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
                              5'000);
+}
+
+void BenchMainWindowTest::metadataRenameMovesTheFileAndItsRow() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto source_path = media.filePath(QStringLiteral("rename-me.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), source_path));
+    const auto encoded = QFile::encodeName(source_path);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    bool layout_saved = false;
+    window.persistence_->saveOutputLayoutProfile(
+        persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::OutputLayoutProfile{
+                    .schema_version = 1U,
+                    .name = "By title",
+                    .dialect = {},
+                    .relative_directory_expression = {},
+                    .basename_expression = "%title%",
+                    .sanitization_policy = {"linux", 1U},
+                },
+        },
+        [&layout_saved](const QString& error) { layout_saved = error.isEmpty(); });
+    QTRY_VERIFY(layout_saved);
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    auto* properties_action = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(tabs != nullptr);
+    QVERIFY(properties_action != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    QTRY_VERIFY(!window.property("trackknife-metadata-operation-running").toBool());
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(list_model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    QTRY_VERIFY_WITH_TIMEOUT(list_model->rows().front().probed, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY(properties_action->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    properties_action->trigger();
+
+    auto* properties = window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties"));
+    QVERIFY(properties != nullptr);
+    QCOMPARE(properties->property("trackknife-file-work").toString(), QStringLiteral("engine"));
+    QTableView* fields = nullptr;
+    QTRY_VERIFY((fields = properties->findChild<QTableView*>(
+                     QStringLiteral("bench-metadata-fields"))) != nullptr);
+    auto* aggregate_model = qobject_cast<MetadataAggregateModel*>(fields->model());
+    auto* rename_files =
+        properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-rename-files"));
+    auto* preview =
+        properties->findChild<QPushButton*>(QStringLiteral("bench-metadata-apply-changes"));
+    QVERIFY(aggregate_model != nullptr);
+    QVERIFY(rename_files != nullptr);
+    QVERIFY(preview != nullptr);
+    QTRY_VERIFY(rename_files->isEnabled());
+    const auto title_row = aggregate_model->fieldRow(QStringLiteral("title"));
+    QVERIFY(title_row.has_value());
+    QVERIFY(aggregate_model->setData(aggregate_model->index(*title_row, 2),
+                                     QStringLiteral("Renamed by title"), Qt::EditRole));
+    rename_files->setChecked(true);
+    QTRY_VERIFY(preview->isEnabled());
+    QTest::mouseClick(preview, Qt::LeftButton);
+
+    // The row follows the file to its new name, which the new title made.
+    const auto target = media.filePath(QStringLiteral("Renamed by title.flac"));
+    const auto target_raw = QFile::encodeName(target).toStdString();
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rows().front().raw_path, target_raw, 10'000);
+    QCOMPARE(list_model->rows().front().title, std::string{"Renamed by title"});
+    QVERIFY(!QFile::exists(source_path));
+    const auto reread = metadata::read_local_metadata(target_raw);
+    QVERIFY(reread.has_value());
+    QCOMPARE(reread->document.effective_values("title"),
+             (std::vector<std::string>{"Renamed by title"}));
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-preparation-feedback")) == nullptr);
+    QTRY_VERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(!window.property("trackknife-metadata-operation-running").toBool(),
+                             5'000);
+}
+
+// ADR-0237: files are written only by the engine holding them. Without one
+// that does file work, the tools say so rather than open to an Apply that
+// cannot happen.
+void BenchMainWindowTest::fileWorkWithoutAnEngineSaysWhy() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("unwritable.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({QFile::encodeName(path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    window.localEngine().does_file_work = false;
+
+    auto* properties = window.findChild<QAction*>(QStringLiteral("action-track-properties"));
+    QVERIFY(properties != nullptr);
+    QTRY_VERIFY(properties->isEnabled());
+    properties->trigger();
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-metadata-properties")) == nullptr);
+    QCOMPARE(window.statusBar()->currentMessage(),
+             QStringLiteral("Editing tags is done by the engine on this computer, which is not "
+                            "available right now"));
+
+    auto* replaygain = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
+    QVERIFY(replaygain != nullptr);
+    replaygain->trigger();
+    QVERIFY(window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog")) == nullptr);
+    QVERIFY(window.statusBar()->currentMessage().startsWith(
+        QStringLiteral("Measuring ReplayGain is done by the engine on this computer")));
 }
 
 void BenchMainWindowTest::metadataApplyCancellationPreservesDraftForFreshPreview() {
@@ -3533,6 +3671,8 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
                 std::erase_if(destinations, [id](const auto& saved) { return saved.id == id; });
                 completion({});
             },
+        .destinations_on = {},
+        .places = {},
     };
 
     auto* properties = new MetadataPropertiesDialog(
@@ -3761,6 +3901,8 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
         .remove_layout = {},
         .save_destination = {},
         .remove_destination = {},
+        .destinations_on = {},
+        .places = {},
     };
     const std::vector automatic_chains{persistence::SavedMetadataTransformationChain{
         .id = core::StableId::random(),
@@ -3896,7 +4038,202 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
     QVERIFY(status.front().front().toString().contains(QStringLiteral("ownership was not preserved")));
 }
 
+// ADR-0237: a move destination is a folder on one engine's machine; the
+// manager shows whose, browses that machine's folders, and saves there.
+void BenchMainWindowTest::moveDestinationsArePerEngine() {
+    const auto destination = [](std::string name, std::string root) {
+        return persistence::SavedDestinationProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::DestinationProfile{.schema_version = 1U,
+                                               .name = std::move(name),
+                                               .root_raw_path = std::move(root),
+                                               .containment_policy = {"lexical-beneath-root", 1U}}};
+    };
+    std::vector here{destination("Library here", "/mnt/nas/music/library")};
+    std::vector there{destination("Library there", "/srv/music/library")};
+    std::vector<std::string> listed_paths;
+    const auto place = [](QString key, QString name,
+                          std::vector<persistence::SavedDestinationProfile>& held) {
+        return DestinationPlace{
+            .key = std::move(key),
+            .name = std::move(name),
+            .load = [&held](DestinationPlace::LoadCompletion done) { done(held, {}); },
+            .save =
+                [&held](persistence::SavedDestinationProfile saved,
+                        DestinationPlace::Completion done) {
+                    std::erase_if(held, [&saved](const auto& old) { return old.id == saved.id; });
+                    held.push_back(std::move(saved));
+                    done({});
+                },
+            .remove =
+                [&held](core::StableId id, DestinationPlace::Completion done) {
+                    std::erase_if(held, [id](const auto& old) { return old.id == id; });
+                    done({});
+                },
+            .folders = {},
+            .copyable = {},
+        };
+    };
+    auto local = place(QStringLiteral("local"), QStringLiteral("this computer"), here);
+    auto remote = place(QStringLiteral("gemenon-id"), QStringLiteral("gemenon"), there);
+    remote.folders = [&listed_paths](std::string path, EngineFolderDialog::ListingCompletion done) {
+        listed_paths.push_back(path);
+        const auto at = path.empty() ? std::string{"/srv/music"} : path;
+        done(EngineFolderDialog::Listing{
+            .path = at, .parent = std::string{"/srv"}, .folders = {"incoming", "sorted"}});
+    };
+    remote.copyable = [] {
+        return std::vector{
+            persistence::SavedDestinationProfile{
+                .id = core::StableId::random(),
+                .profile =
+                    operations::DestinationProfile{
+                        .schema_version = 1U,
+                        .name = "Library here",
+                        .root_raw_path = "/srv/music/sorted",
+                        .containment_policy = {"lexical-beneath-root", 1U}}},
+        };
+    };
+    const OutputProfileStore store{
+        .load = [&here](OutputProfileStore::LoadCompletion done) { done({}, here, {}); },
+        .save_layout = {},
+        .remove_layout = {},
+        .save_destination = local.save,
+        .remove_destination = local.remove,
+        .destinations_on = {},
+        .places = {local, remote},
+    };
+    SettingsDialog settings{nullptr, store};
+    settings.showDestinationsOf(QStringLiteral("gemenon-id"));
+    settings.show();
+    auto* engine = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-engine"));
+    auto* list = settings.findChild<QComboBox*>(QStringLiteral("bench-destination-list"));
+    auto* copy = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-copy"));
+    auto* browse = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-browse"));
+    auto* name = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-name"));
+    auto* root = settings.findChild<QLineEdit*>(QStringLiteral("bench-destination-root"));
+    auto* create = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-new"));
+    auto* save = settings.findChild<QPushButton*>(QStringLiteral("bench-destination-save"));
+    auto* sections =
+        settings.findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"));
+    QVERIFY(engine && list && copy && browse && name && root && create && save && sections);
+    // Opened for an engine: its destinations, and its name in sight.
+    QCOMPARE(sections->currentIndex(), 1);
+    QCOMPARE(engine->currentText(), QStringLiteral("gemenon"));
+    QTRY_COMPARE(list->count(), 1);
+    QCOMPARE(list->currentText(), QStringLiteral("Library there"));
+
+    // This computer's that lie under the engine's mount are offered.
+    QTRY_VERIFY(copy->isVisible());
+    QCOMPARE(copy->text(), QStringLiteral("Copy 1 from this computer"));
+    QTest::mouseClick(copy, Qt::LeftButton);
+    QTRY_COMPARE(there.size(), 2U);
+    QVERIFY(std::ranges::any_of(there, [](const auto& saved) {
+        return saved.profile.root_raw_path == "/srv/music/sorted";
+    }));
+    QTRY_VERIFY(!copy->isVisible());
+    QCOMPARE(here.size(), 1U);
+
+    // A new one, its folder chosen on that machine.
+    QTest::mouseClick(create, Qt::LeftButton);
+    name->setText(QStringLiteral("Incoming there"));
+    QTest::mouseClick(browse, Qt::LeftButton);
+    EngineFolderDialog* chooser = nullptr;
+    QTRY_VERIFY((chooser = settings.findChild<EngineFolderDialog*>()) != nullptr);
+    QCOMPARE(chooser->windowTitle(), QStringLiteral("Choose a folder on gemenon"));
+    auto* folders = chooser->findChild<QListWidget*>(QStringLiteral("bench-engine-folder-list"));
+    QVERIFY(folders != nullptr);
+    QTRY_COMPARE(folders->count(), 2);
+    folders->setCurrentRow(0);
+    chooser->findChild<QPushButton*>(QStringLiteral("bench-engine-folder-choose"))->click();
+    QCOMPARE(root->text(), QStringLiteral("/srv/music/incoming"));
+    QTRY_VERIFY(save->isEnabled());
+    QTest::mouseClick(save, Qt::LeftButton);
+    QTRY_COMPARE(there.size(), 3U);
+    QCOMPARE(here.size(), 1U);
+
+    // This computer's are its own.
+    engine->setCurrentIndex(0);
+    QTRY_COMPARE(list->count(), 1);
+    QCOMPARE(list->currentText(), QStringLiteral("Library here"));
+
+    // Properties for tracks on that engine says whose destinations it offers.
+    auto* properties = new MetadataPropertiesDialog(
+        0U, [](std::size_t) -> std::optional<MetadataPropertiesSource> { return std::nullopt; }, {},
+        {}, {}, {},
+        OutputProfileStore{
+            .load = [](OutputProfileStore::LoadCompletion done) { done({}, {}, {}); },
+            .save_layout = {},
+            .remove_layout = {},
+            .save_destination = {},
+            .remove_destination = {},
+            .destinations_on = QStringLiteral("gemenon"),
+            .places = {}});
+    auto* offered = properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QVERIFY(offered != nullptr);
+    QCOMPARE(offered->placeholderText(), QStringLiteral("None saved on gemenon yet"));
+    QCOMPARE(offered->toolTip(), QStringLiteral("Move destinations on gemenon"));
+    delete properties;
+}
+
+// ADR-0237: naming layouts are global -- made here, and a copy in every
+// engine, so whatever moves files through one can name them. This
+// computer's engine shares the workspace: what it holds is what was saved,
+// and a copy sent on connecting never lands on top of a newer one.
+void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    const auto names = [&client] {
+        std::vector<std::string> found;
+        auto answer = (*client)->call("layouts.list");
+        for (const auto& layout :
+             answer ? answer->value("layouts", protocol::Json::array()) : protocol::Json::array()) {
+            if (auto decoded = engine::wire::decode_saved_layout(layout)) {
+                found.push_back(decoded->profile.name);
+            }
+        }
+        return found;
+    };
+    const auto id = core::StableId::random();
+    bool saved = false;
+    window.buildOutputProfileStore().save_layout(
+        persistence::SavedOutputLayoutProfile{
+            .id = id,
+            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                       .name = "Everywhere",
+                                                       .dialect = {},
+                                                       .relative_directory_expression = "%artist%",
+                                                       .basename_expression = "%title%",
+                                                       .sanitization_policy = {"linux", 1U}},
+        },
+        [&saved](const QString& error) { saved = error.isEmpty(); });
+    QTRY_VERIFY(saved);
+    QTRY_VERIFY_WITH_TIMEOUT(std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
+    bool removed = false;
+    window.buildOutputProfileStore().remove_layout(
+        id, [&removed](const QString& error) { removed = error.isEmpty(); });
+    QTRY_VERIFY(removed);
+    QTRY_VERIFY_WITH_TIMEOUT(!std::ranges::contains(names(), std::string{"Everywhere"}), 5'000);
+    (*client)->close();
+}
+
+void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply_data() {
+    // ADR-0237 stage 5: the rename checked and published by the engine holding
+    // the file, or reaching this process's applier -- the same window, the
+    // same plan.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto path = media.filePath(QStringLiteral("combined-ui-before.flac"));
@@ -3933,6 +4270,8 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
         .remove_layout = {},
         .save_destination = {},
         .remove_destination = {},
+        .destinations_on = {},
+        .places = {},
     };
     const MetadataTransformationStore transformation_store{
         .load = [](MetadataTransformationStore::LoadCompletion completion) { completion({}, {}); },
@@ -3941,18 +4280,26 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
     };
     bool combined_applied = false;
     std::string reviewed_target;
+    std::optional<operations::FilePublicationApplyResult> published;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
         {}, {}, {}, transformation_store, output_store,
-        [&combined_applied, &reviewed_target] {
+        [&combined_applied, &reviewed_target, &published, work] {
             return FilePublicationPlanApplier{
-                [&combined_applied,
-                 &reviewed_target](const operations::PreparationPlan& plan,
-                                   const operations::FilePublicationApplyProgressCallback& progress,
-                                   const core::CancellationToken&)
+                [&combined_applied, &reviewed_target, &published,
+                 work](const operations::PreparationPlan& plan,
+                       const operations::FilePublicationApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation)
                     -> core::Result<operations::FilePublicationApplyResult> {
                     if (!plan.ready() || !plan.metadata || !plan.path_preflight ||
                         plan.metadata->sources.size() != 1U ||
@@ -3963,9 +4310,17 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
                             .context = {},
                         });
                     }
-                    combined_applied = true;
                     const auto& checked = plan.path_preflight->sources.front();
                     reviewed_target = checked.planned.target_raw_path;
+                    if (work) {
+                        auto applied = work->publish(plan, progress, cancellation);
+                        if (applied) {
+                            published = *applied;
+                        }
+                        combined_applied = true;
+                        return applied;
+                    }
+                    combined_applied = true;
                     if (progress) {
                         progress(operations::FilePublicationApplyProgress{
                             .source_index = 0U,
@@ -4005,7 +4360,7 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
                     };
                 }};
         },
-        {});
+        {}, nullptr, {}, {}, work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->show();
     // Success auto-closes the WA_DeleteOnClose dialog; only a pointer
     // guarded from the start may observe that.
@@ -4041,6 +4396,15 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
     QVERIFY(QString::fromStdString(reviewed_target)
                 .endsWith(QStringLiteral("/Combined UI title.flac")));
     QTRY_VERIFY(closed_guard.isNull() || !closed_guard->isVisible());
+    if (through_engine) {
+        // Written once, at its new place, by the engine.
+        QVERIFY(published && published->committed_source_count() == 1U);
+        QVERIFY(!QFile::exists(path));
+        const auto written = metadata::read_local_metadata(reviewed_target);
+        QVERIFY(written.has_value());
+        QCOMPARE(written->document.first_effective_value("title"),
+                 std::optional<std::string>{"Combined UI title"});
+    }
 }
 
 void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() {
@@ -5390,6 +5754,7 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
                     .unsupported_native_objects = {},
                 },
             .label = title,
+            .fetch = {},
         };
     };
     const auto saved_layouts = std::vector{persistence::SavedOutputLayoutProfile{
@@ -5631,6 +5996,81 @@ void BenchMainWindowTest::convertDialogPlansAndConvertsSelection() {
     delete dialog;
 }
 
+// ADR-0237 stage 6: a file of an engine elsewhere is fetched first and
+// converted from the copy; the preview and the output are as for any file.
+void BenchMainWindowTest::convertDialogFetchesFilesItCannotReach() {
+    QTemporaryDir media;
+    QTemporaryDir destination;
+    QVERIFY(media.isValid());
+    QVERIFY(destination.isValid());
+    const auto original = media.filePath(QStringLiteral("original.wav"));
+    write_sine_wav_fixture(original, 0.5);
+    std::vector<std::filesystem::path> fetched_to;
+    ConvertDialogItem item{
+        .raw_path = "/srv/elsewhere/Album/fetched.wav",
+        .selection = {},
+        .segment = {},
+        .source_revision = std::nullopt,
+        .metadata =
+            metadata::MetadataDocument{
+                .fields = {metadata::MetadataField{.canonical_name = "title",
+                                                   .native_name = "TITLE",
+                                                   .values = {"Fetched"},
+                                                   .qualifier = {},
+                                                   .provenance =
+                                                       metadata::FieldProvenance::embedded}},
+                .unsupported_native_objects = {},
+            },
+        .label = QStringLiteral("Fetched"),
+        .fetch = [&fetched_to, original](const std::filesystem::path& to,
+                                         const core::CancellationToken&) -> core::Result<void> {
+            fetched_to.push_back(to);
+            std::error_code copied;
+            std::filesystem::copy_file(QFile::encodeName(original).toStdString(), to, copied);
+            if (copied) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::io, .message = copied.message(), .context = {}});
+            }
+            return {};
+        }};
+    auto* dialog = new ConvertDialog({std::move(item)},
+                                     [](auto completion) { completion({}, {}, QString{}); }, {});
+    dialog->show();
+    auto* preset = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-preset"));
+    auto* root = dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-destination"));
+    auto* directories =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-directory-expression"));
+    auto* names =
+        dialog->findChild<QLineEdit*>(QStringLiteral("bench-convert-basename-expression"));
+    auto* mirror = dialog->findChild<QCheckBox*>(QStringLiteral("bench-convert-mirror"));
+    auto* gain_mode = dialog->findChild<QComboBox*>(QStringLiteral("bench-convert-gain"));
+    auto* preview = dialog->findChild<QListWidget*>(QStringLiteral("bench-convert-preview"));
+    auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-convert-run"));
+    auto* status = dialog->findChild<QLabel*>(QStringLiteral("bench-convert-status"));
+    QVERIFY(preset != nullptr && root != nullptr && directories != nullptr && names != nullptr &&
+            mirror != nullptr && gain_mode != nullptr && preview != nullptr && run != nullptr &&
+            status != nullptr);
+    mirror->setChecked(false);
+    gain_mode->setCurrentIndex(gain_mode->findData(0));
+    preset->setCurrentIndex(preset->findData(QStringLiteral("flac")));
+    root->setText(destination.path());
+    directories->setText({});
+    names->setText(QStringLiteral("%title%"));
+    // Planned from what the engine knows of it, before anything is fetched.
+    QTRY_VERIFY(preview->count() > 0 && preview->item(0)->text() == QStringLiteral("Fetched.flac"));
+    QVERIFY(fetched_to.empty());
+    QTRY_VERIFY(run->isEnabled());
+    QTest::mouseClick(run, Qt::LeftButton);
+    QTRY_VERIFY_WITH_TIMEOUT(status->text().startsWith(QStringLiteral("Converted 1 of 1 files.")),
+                             15'000);
+    QCOMPARE(fetched_to.size(), 1U);
+    QCOMPARE(fetched_to.front().filename().string(), std::string{"fetched.wav"});
+    QVERIFY(QFileInfo::exists(QDir{destination.path()}.filePath(QStringLiteral("Fetched.flac"))));
+    // The copy goes once converted.
+    QVERIFY(!std::filesystem::exists(fetched_to.front()));
+    delete dialog;
+}
+
 // ADR-0173: the dialog's Gain choice permanently applies the item's
 // ReplayGain metadata to the encoded PCM, exactly like the core path.
 void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
@@ -5666,6 +6106,7 @@ void BenchMainWindowTest::convertDialogAppliesPermanentReplayGain() {
                 .unsupported_native_objects = {},
             },
         .label = QStringLiteral("Gained"),
+        .fetch = {},
     };
     ConvertPresetStore preset_store{
         .load = [](ConvertPresetStore::LoadCompletion completion) { completion({}, QString{}); },
@@ -7208,39 +7649,6 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
             }));
         QCOMPARE(tab->model->rowCount(), rows_before);
     }
-
-    // Last, as it retags the fixture everything above searched for.
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), music);
-    QSettings{}.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), mounted);
-    // Tools on a remote tab work on the file where this computer sees it --
-    // the mount -- and what they change reaches the remote's library without
-    // waiting for a scan.
-    tab->view->selectionModel()->select(tab->model->index(0, 0),
-                                        QItemSelectionModel::ClearAndSelect |
-                                            QItemSelectionModel::Rows);
-    const auto tooled = window.remoteFileWorkRows(tab->view);
-    QVERIFY(tooled && tooled->size() == 1U);
-    const auto here = QFile::encodeName(mounted + QStringLiteral("/art.flac")).toStdString();
-    QCOMPARE(tooled->front().raw_path, here);
-    // Retagged, as the tag editor would write it, and reported as committed.
-    QVERIFY(QFile::remove(art));
-    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), art));
-    operations::MetadataCommitResult committed;
-    committed.source_raw_path = here;
-    committed.published_revision = *core::observe_local_source_revision(here);
-    committed.document.fields.push_back({.canonical_name = "title",
-                                         .native_name = "TITLE",
-                                         .values = {"Metadata Fixture"},
-                                         .qualifier = {},
-                                         .provenance = metadata::FieldProvenance::embedded});
-    window.applyCommittedMetadata(committed);
-    const auto remote_art = QFile::encodeName(art).toStdString();
-    QTRY_VERIFY([&] {
-        const auto indexed = window.remoteCatalogue()->open()->cached_tracks({remote_art});
-        return indexed && indexed->front().facts.title == "Metadata Fixture";
-    }());
-    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_folder_key));
-    QSettings{}.remove(QLatin1String(SettingsDialog::library_remote_mount_key));
 }
 
 // Lists are restored before the remote engine is connected, so a restored
@@ -8489,6 +8897,7 @@ void BenchMainWindowTest::musicBrainzStagesFromCachedSearchMetadata() {
 void BenchMainWindowTest::contextReplayGainScansAndApplies_data() {
     QTest::addColumn<bool>("cached");
     QTest::addColumn<bool>("embedded");
+    // ADR-0237: done by the engine holding the files.
     QTest::newRow("imported") << false << false;
     QTest::newRow("cached-sidecar") << true << false;
     QTest::newRow("cached-embedded") << true << true;
@@ -8563,12 +8972,16 @@ void BenchMainWindowTest::contextReplayGainScansAndApplies() {
         view->selectAll();
     }
 
+    // This build's engine does file work; once it has said so, the dialog
+    // goes through it -- unless it is taken as an older one.
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
     auto* action = window.findChild<QAction*>(QStringLiteral("action-replaygain-dialog"));
     QVERIFY(action != nullptr);
     action->trigger();
     QDialog* dialog = nullptr;
     QTRY_VERIFY((dialog = window.findChild<QDialog*>(QStringLiteral("bench-replaygain-dialog"))) !=
                 nullptr);
+    QCOMPARE(dialog->property("trackknife-file-work").toString(), QStringLiteral("engine"));
     auto* grouping =
         dialog->findChild<QComboBox*>(QStringLiteral("bench-replaygain-dialog-grouping"));
     auto* run = dialog->findChild<QPushButton*>(QStringLiteral("bench-replaygain-dialog-run"));
@@ -9067,6 +9480,68 @@ void BenchMainWindowTest::metadataServiceSettingsAndCompactPages() {
     dialog->reject();
 }
 
+// ADR-0237 stage 2: writing ratings into the files is an option in
+// Settings, off by default, handed to the engines that keep the ratings.
+void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    auto client = protocol::Client::connect(protocol::Endpoint{
+        .socket = engine_.socket().toStdString(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(client.has_value());
+    const auto writes_tags = [&client] {
+        auto answer = (*client)->call("ratings.tags");
+        return answer && answer->value("write_tags", false);
+    };
+    QVERIFY(!writes_tags());
+    const auto choose = [&window](const bool on) {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* option =
+            dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-ratings-in-tags"));
+        QVERIFY(option != nullptr);
+        option->setChecked(on);
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    };
+    const auto scale = [&client] {
+        auto answer = (*client)->call("ratings.tags");
+        return answer ? answer->value("rating_scale", std::string{}) : std::string{};
+    };
+    QCOMPARE(scale(), std::string{"off"});
+    choose(true);
+    QVERIFY(QSettings{}.value(QLatin1String(SettingsDialog::ratings_in_tags_key)).toBool());
+    QTRY_VERIFY_WITH_TIMEOUT(writes_tags(), 5'000);
+    choose(false);
+    QTRY_VERIFY_WITH_TIMEOUT(!writes_tags(), 5'000);
+
+    // Other players' plain RATING tags: read on the scale chosen.
+    const auto choose_scale = [&window](const QString& value) {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* combo =
+            dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-rating-tag-scale"));
+        QVERIFY(combo != nullptr);
+        combo->setCurrentIndex(combo->findData(value));
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    };
+    choose_scale(QStringLiteral("100"));
+    QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"100"}, 5'000);
+    choose_scale(QStringLiteral("off"));
+    QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"off"}, 5'000);
+    (*client)->close();
+}
+
 void BenchMainWindowTest::librarySettingsManageFoldersWithoutScanning() {
     QTemporaryDir music;
     QVERIFY(music.isValid());
@@ -9549,7 +10024,16 @@ void BenchMainWindowTest::metadataApplyCombinesTagsAndArtwork() {
     QCOMPARE(backups->size(), 1U);
 }
 
+void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront_data() {
+    // ADR-0237: a downloaded cover is handed to the engine and written by it,
+    // or written by this process -- the same section, the same result.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto media_path = media.filePath(QStringLiteral("cover-fetch.flac"));
@@ -9622,66 +10106,89 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
         std::filesystem::path{media.filePath(QStringLiteral("cover.sqlite3")).toStdString()};
     std::optional<operations::ArtworkApplyResult> observed;
     std::optional<operations::MetadataApplyResult> tags_observed;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
         {},
-        [database_path] {
+        work ? MetadataWritePlanApplierFactory{[work] {
             return MetadataWritePlanApplier{
-                [database_path](const metadata::MetadataWritePlan& plan,
-                                const operations::MetadataApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::MetadataApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_metadata_write_plan(
-                        plan,
-                        [&journal](const metadata::MetadataWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_flac_metadata_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        {}, {}, progress, cancellation);
+                [work](const metadata::MetadataWritePlan& plan,
+                       const operations::MetadataApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : MetadataWritePlanApplierFactory{[database_path] {
+                   return MetadataWritePlanApplier{
+                       [database_path](const metadata::MetadataWritePlan& plan,
+                                       const operations::MetadataApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::MetadataApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_metadata_write_plan(
+                               plan,
+                               [&journal](const metadata::MetadataWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_flac_metadata_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               {}, {}, progress, cancellation);
+                       }};
+               }},
         [&tags_observed](const operations::MetadataApplyResult& result) { tags_observed = result; },
-        {}, {}, {}, {}, nullptr, {}, service);
+        {}, {}, {}, {}, nullptr, {}, service, work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->setArtworkMutationServices(
-        [database_path] {
+        work ? ArtworkWritePlanApplierFactory{[work] {
             return ArtworkWritePlanApplier{
-                [database_path](const metadata::ArtworkWritePlan& plan,
-                                const operations::ArtworkApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::ArtworkApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_artwork_write_plan(
-                        plan,
-                        [&journal](const metadata::ArtworkWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_artwork_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                [work](const metadata::ArtworkWritePlan& plan,
+                       const operations::ArtworkApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->artwork_apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : ArtworkWritePlanApplierFactory{[database_path] {
+                   return ArtworkWritePlanApplier{
+                       [database_path](const metadata::ArtworkWritePlan& plan,
+                                       const operations::ArtworkApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::ArtworkApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_artwork_write_plan(
+                               plan,
+                               [&journal](const metadata::ArtworkWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_artwork_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               progress, cancellation,
+                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                       }};
+               }},
         [&observed](const operations::ArtworkApplyResult& result) { observed = result; });
     properties->show();
 
@@ -10494,6 +11001,10 @@ void BenchMainWindowTest::combinedPublicationStartupRecoversMetadataAndPath() {
                 .failure = std::nullopt,
             }));
     }
+    // ADR-0237: the engine recovers its journal when it starts, as after the
+    // crash this stands for.
+    engine_.stop();
+    QVERIFY2(engine_.start(), engine_.log().constData());
 
     BenchMainWindow window;
     window.show();
@@ -12598,7 +13109,16 @@ void BenchMainWindowTest::metadataPropertiesArtworkSectionShowsProvenanceAndCapa
     QTRY_VERIFY(guard.isNull());
 }
 
+void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes_data() {
+    // ADR-0237: the artwork shown, reviewed and written by the engine holding
+    // the file, or by this process -- the same section, the same result.
+    QTest::addColumn<bool>("through_engine");
+    QTest::newRow("engine") << true;
+    QTest::newRow("this-process") << false;
+}
+
 void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefreshes() {
+    QFETCH(bool, through_engine);
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto media_path = media.filePath(QStringLiteral("artwork-remove.flac"));
@@ -12643,39 +13163,55 @@ void BenchMainWindowTest::metadataPropertiesArtworkRemoveReviewsAppliesAndRefres
     const auto database_path =
         std::filesystem::path{media.filePath(QStringLiteral("artwork.sqlite3")).toStdString()};
     std::optional<operations::ArtworkApplyResult> observed;
+    const auto work = through_engine
+                          ? std::make_shared<engine::RemoteFileWork>(protocol::Endpoint{
+                                .socket = QFile::encodeName(engine_.socket()).toStdString(),
+                                .host = {},
+                                .port = 0,
+                                .token = {}})
+                          : nullptr;
     auto* properties = new MetadataPropertiesDialog(
         1U,
         [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
             return index == 0U ? std::optional{source} : std::nullopt;
         },
-        {}, {}, {});
+        {}, {}, {}, {}, {}, {}, {}, nullptr, {}, {},
+        work ? engineFileWorkTools(work) : FileWorkTools{});
     properties->setArtworkMutationServices(
-        [database_path] {
+        work ? ArtworkWritePlanApplierFactory{[work] {
             return ArtworkWritePlanApplier{
-                [database_path](const metadata::ArtworkWritePlan& plan,
-                                const operations::ArtworkApplyProgressCallback& progress,
-                                const core::CancellationToken& cancellation)
-                    -> core::Result<operations::ArtworkApplyResult> {
-                    auto opened = persistence::SqliteMetadataOperationJournal::open(database_path);
-                    if (!opened) {
-                        return std::unexpected(std::move(opened.error()));
-                    }
-                    auto journal = std::move(*opened);
-                    return operations::apply_artwork_write_plan(
-                        plan,
-                        [&journal](const metadata::ArtworkWritePlanSource& source_plan,
-                                   const core::CancellationToken& source_cancellation) {
-                            return operations::commit_artwork_source(
-                                source_plan, journal,
-                                [](const operations::MetadataCommitResult&) -> core::Result<void> {
-                                    return {};
-                                },
-                                source_cancellation);
-                        },
-                        progress, cancellation,
-                        operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                [work](const metadata::ArtworkWritePlan& plan,
+                       const operations::ArtworkApplyProgressCallback& progress,
+                       const core::CancellationToken& cancellation) {
+                    return work->artwork_apply(plan, progress, cancellation);
                 }};
-        },
+        }}
+             : ArtworkWritePlanApplierFactory{[database_path] {
+                   return ArtworkWritePlanApplier{
+                       [database_path](const metadata::ArtworkWritePlan& plan,
+                                       const operations::ArtworkApplyProgressCallback& progress,
+                                       const core::CancellationToken& cancellation)
+                           -> core::Result<operations::ArtworkApplyResult> {
+                           auto opened =
+                               persistence::SqliteMetadataOperationJournal::open(database_path);
+                           if (!opened) {
+                               return std::unexpected(std::move(opened.error()));
+                           }
+                           auto journal = std::move(*opened);
+                           return operations::apply_artwork_write_plan(
+                               plan,
+                               [&journal](const metadata::ArtworkWritePlanSource& source_plan,
+                                          const core::CancellationToken& source_cancellation) {
+                                   return operations::commit_artwork_source(
+                                       source_plan, journal,
+                                       [](const operations::MetadataCommitResult&)
+                                           -> core::Result<void> { return {}; },
+                                       source_cancellation);
+                               },
+                               progress, cancellation,
+                               operations::ArtworkApplyOptions{.maximum_parallelism = 2U});
+                       }};
+               }},
         [&observed](const operations::ArtworkApplyResult& result) { observed = result; });
     properties->show();
 

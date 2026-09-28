@@ -76,4 +76,12 @@ RemoteMount::to_remote(const std::string& local_path,
     return std::nullopt;
 }
 
+std::optional<std::string> RemoteMount::remote_path_of(const std::string& local_path) const {
+    return rebase(local_path, local_folder, remote_folder);
+}
+
+std::optional<std::string> RemoteMount::local_path_of(const std::string& remote_path) const {
+    return rebase(remote_path, remote_folder, local_folder);
+}
+
 } // namespace trackknife::bench

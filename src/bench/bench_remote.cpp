@@ -259,6 +259,7 @@ void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, co
     added->playback = new EnginePlayback(*added->catalogue, this);
     auto* link = added.get();
     engines_.push_back(std::move(added));
+    watchFileWork(*link);
     if (list_sync_ != nullptr) {
         list_sync_->setEngine(link->key, link->playback);
         connect(link->playback, &EnginePlayback::listChanged, this,

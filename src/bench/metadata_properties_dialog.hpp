@@ -145,7 +145,7 @@ class MetadataPropertiesDialog final : public QDialog {
                              FilePublicationPlanApplierFactory file_plan_applier_factory = {},
                              FilePublicationApplyObserver file_apply_observer = {},
                              QWidget* parent = nullptr, MetadataDialogLayoutStore layout_store = {},
-                             MusicBrainzLookupService musicbrainz = {});
+                             MusicBrainzLookupService musicbrainz = {}, FileWorkTools tools = {});
     ~MetadataPropertiesDialog() override;
 
     void setArtworkMutationServices(ArtworkWritePlanApplierFactory applier_factory,
@@ -271,6 +271,8 @@ class MetadataPropertiesDialog final : public QDialog {
     FilePublicationApplyObserver file_apply_observer_;
     MetadataDialogLayoutStore layout_store_;
     MusicBrainzLookupService musicbrainz_;
+    // ADR-0237: where this window reads, measures and probes.
+    FileWorkTools tools_;
     std::unique_ptr<QTemporaryDir> cover_art_directory_;
     std::vector<persistence::SavedMetadataTransformationChain> transformation_catalog_;
     std::vector<persistence::SavedOutputLayoutProfile> output_layout_catalog_;

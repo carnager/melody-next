@@ -102,6 +102,7 @@ read(std::string path, const trackknife::core::LocalSourceRevision source_revisi
                 .pictures_writable = false,
                 .unknown_data_preserved_on_write = preserves_unknown,
             },
+        .popularimeter = std::nullopt,
     };
 }
 

@@ -7,6 +7,8 @@
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/media_streams.hpp"
+#include "trackknife/engine/remote_file_work.hpp"
+#include "trackknife/engine/server.hpp"
 #include "trackknife/engine/stream_server.hpp"
 #include "trackknife/engine/transcode_cache.hpp"
 #include "trackknife/protocol/message.hpp"
@@ -157,6 +159,32 @@ int main(int argc, char** argv) {
                           "&start=0&end=1000&token=agent-token")
                     .first == "HTTP/1.1 400 Bad Request",
             "a part of the original is not something to send");
+
+    // ADR-0237 stage 6: a client that cannot reach the engine's files fetches
+    // the original through the same ticket, over its control connection.
+    {
+        const auto socket = directory / "control.sock";
+        auto control = engine::Server::listen(socket, dispatcher);
+        require(control.has_value(), "a control socket");
+        (*control)->start();
+        engine::RemoteFileWork remote{
+            protocol::Endpoint{.socket = socket, .host = {}, .port = 0, .token = {}}};
+        const auto fetched = directory / "fetched.flac";
+        require(remote.download_original(track, fetched, {}).has_value(),
+                "the original is downloaded");
+        std::ifstream left{track, std::ios::binary};
+        std::ifstream right{fetched, std::ios::binary};
+        require(std::string{std::istreambuf_iterator<char>(left), {}} ==
+                    std::string{std::istreambuf_iterator<char>(right), {}},
+                "byte for byte");
+        const auto refused = directory / "refused.flac";
+        require(!remote.download_original((directory / "elsewhere.flac").string(), refused, {}),
+                "a file outside the library is not");
+        require(!std::filesystem::exists(refused) &&
+                    !std::filesystem::exists(directory / "refused.flac.part"),
+                "and leaves nothing behind");
+        (*control)->stop();
+    }
 
     (*server)->stop();
     std::error_code ignored;

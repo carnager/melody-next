@@ -24,7 +24,7 @@ std::shared_ptr<ReplayGainScanOutcome> run_replaygain_scan(
     const metadata::StagedMetadataPatchSet& draft, const std::vector<std::size_t>& items,
     const std::shared_ptr<const std::vector<MetadataPropertiesAudioSource>>& audio_sources,
     const ReplayGainScanSettings& settings, const std::shared_ptr<std::atomic_size_t>& completed,
-    const core::CancellationToken& cancellation) {
+    const core::CancellationToken& cancellation, const LoudnessScanner& scanner) {
     auto outcome = std::make_shared<ReplayGainScanOutcome>();
     auto documents = metadata::materialize_metadata_draft(*selection, draft, items, cancellation);
     if (!documents) {
@@ -56,12 +56,14 @@ std::shared_ptr<ReplayGainScanOutcome> run_replaygain_scan(
     const auto parallelism =
         std::min<std::size_t>(loudness::maximum_scan_parallelism,
                               std::max<std::size_t>(1U, hardware == 0U ? 2U : hardware / 2U));
-    auto scan = loudness::scan_loudness(
-        scan_items, {.measure_true_peak = true, .maximum_parallelism = parallelism},
+    const loudness::LoudnessScanOptions options{.measure_true_peak = true,
+                                                .maximum_parallelism = parallelism};
+    const loudness::LoudnessScanProgressCallback report =
         [completed](const loudness::LoudnessScanProgress& update) {
             completed->store(update.completed_items);
-        },
-        cancellation);
+        };
+    auto scan = scanner ? scanner(scan_items, options, report, cancellation)
+                        : loudness::scan_loudness(scan_items, options, report, cancellation);
     if (!scan) {
         outcome->proposals = std::unexpected(std::move(scan.error()));
         return outcome;

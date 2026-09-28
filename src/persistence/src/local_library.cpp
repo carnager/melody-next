@@ -2,6 +2,8 @@
 
 #include "trackknife/persistence/local_library.hpp"
 
+#include "trackknife/metadata/ratings.hpp"
+
 #include "trackknife/core/sha256.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/core/unicode.hpp"
@@ -22,13 +24,16 @@
 #include <array>
 #include <cerrno>
 #include <charconv>
-#include <ctime>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
+#include <cstdlib>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -411,8 +416,122 @@ constexpr std::size_t maximum_field_names = 4'096U;
 constexpr std::size_t maximum_field_values = 16'384U;
 constexpr std::size_t maximum_field_text_bytes = 4U * 1024U * 1024U;
 
+// ADR-0237 stage 2: what a file says of its rating, and what the library
+// read of it last time. `popularimeter` is an MP3's POPM byte, kept as the
+// "~popm" field row: no tag of anyone's, only this library's memory of it.
+constexpr std::string_view popularimeter_field = "~popm";
+
+struct RatingEvidence {
+    std::string fmps;
+    std::string plain;
+    std::optional<std::uint8_t> popularimeter;
+
+    friend bool operator==(const RatingEvidence&, const RatingEvidence&) = default;
+};
+
+// The rating it amounts to: POPM first -- what other MP3 players change --
+// then FMPS_RATING, then a plain RATING on the scale the user named.
+[[nodiscard]] std::optional<unsigned> evidenced_rating(const RatingEvidence& evidence,
+                                                       const metadata::PlainRatingScale scale) {
+    if (evidence.popularimeter && *evidence.popularimeter > 0U) {
+        return metadata::rating_from_popularimeter(*evidence.popularimeter);
+    }
+    if (!evidence.fmps.empty()) {
+        return metadata::rating_from_fmps(evidence.fmps);
+    }
+    if (!evidence.plain.empty()) {
+        return metadata::rating_from_plain(evidence.plain, scale);
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] RatingEvidence file_evidence(const metadata::MetadataDocument& document,
+                                           const std::optional<std::uint8_t> popularimeter) {
+    const auto first = [&document](std::string_view name) {
+        const auto values = document.effective_values(name);
+        return values.empty() ? std::string{} : values.front();
+    };
+    return RatingEvidence{.fmps = first(metadata::fmps_rating_field),
+                          .plain = first("RATING"),
+                          .popularimeter = popularimeter};
+}
+
+[[nodiscard]] RatingEvidence indexed_evidence(sqlite3* db, const std::string& raw_path) {
+    Statement select{db, "SELECT canonical_name,value FROM local_library_fields "
+                         "WHERE raw_path=? AND canonical_name IN "
+                         "('fmps_rating','fmpsrating','rating','~popm') ORDER BY position"};
+    select.blob(1, raw_path);
+    RatingEvidence evidence;
+    while (select.next()) {
+        const auto name = select.bytes(0);
+        auto value = select.bytes(1);
+        if (name == popularimeter_field) {
+            if (!evidence.popularimeter) {
+                const auto byte = std::strtoul(value.c_str(), nullptr, 10);
+                evidence.popularimeter = static_cast<std::uint8_t>(std::min(byte, 255UL));
+            }
+            continue;
+        }
+        auto& slot = name == "rating" ? evidence.plain : evidence.fmps;
+        if (slot.empty()) {
+            slot = std::move(value);
+        }
+    }
+    return evidence;
+}
+
+// The scale plain RATING tags are on, as the engine was told (engine_state,
+// in the same database); off when it was never said.
+[[nodiscard]] metadata::PlainRatingScale plain_rating_scale(sqlite3* db) {
+    Statement table{db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='engine_state'"};
+    if (!table.next()) {
+        return metadata::PlainRatingScale::off;
+    }
+    Statement select{db, "SELECT value FROM engine_state WHERE key=?"};
+    select.text(1, std::string{plain_rating_scale_state_key});
+    if (!select.next()) {
+        return metadata::PlainRatingScale::off;
+    }
+    return metadata::plain_rating_scale_named(select.bytes(0))
+        .value_or(metadata::PlainRatingScale::off);
+}
+
+// A rating in the file becomes the library's when it differs from what the
+// library read there last time -- another player changed it -- or when the
+// track has none. One the library has, over what it already read, stays:
+// clearing a rating here is not undone by an old tag.
+void import_file_rating(sqlite3* db, const std::string& raw_path, const std::string& track_hash,
+                        const RatingEvidence& now, const bool seen_before) {
+    if (track_hash.empty()) {
+        return;
+    }
+    const auto scale = plain_rating_scale(db);
+    const auto in_file = evidenced_rating(now, scale);
+    if (!in_file || *in_file == 0U) {
+        return;
+    }
+    const auto before =
+        seen_before ? evidenced_rating(indexed_evidence(db, raw_path), scale) : std::nullopt;
+    if (before == in_file) {
+        return;
+    }
+    Statement stored{db, "SELECT rating FROM local_ratings WHERE hash=?"};
+    stored.text(1, track_hash);
+    const bool rated = stored.next();
+    if (rated && (!before || static_cast<unsigned>(stored.number(0)) == *in_file)) {
+        return;
+    }
+    Statement upsert{db, "INSERT INTO local_ratings(hash,type,rating,updated_at) "
+                         "VALUES(?,'track',?,datetime('now')) ON CONFLICT(hash) DO UPDATE SET "
+                         "rating=excluded.rating,updated_at=excluded.updated_at"};
+    upsert.text(1, track_hash);
+    upsert.number(2, static_cast<int>(*in_file));
+    upsert.next();
+}
+
 void write_field_rows(sqlite3* db, const std::string& raw_path,
-                      const metadata::MetadataDocument& document) {
+                      const metadata::MetadataDocument& document,
+                      const std::optional<std::uint8_t> popularimeter = std::nullopt) {
     {
         Statement remove{db, "DELETE FROM local_library_fields WHERE raw_path=?"};
         remove.blob(1, raw_path);
@@ -459,6 +578,15 @@ void write_field_rows(sqlite3* db, const std::string& raw_path,
             insert.next();
             ++position->second;
         }
+    }
+    if (popularimeter) {
+        insert.reset();
+        insert.blob(1, raw_path);
+        insert.text(2, std::string{popularimeter_field});
+        insert.number(3, 0);
+        insert.blob(4, std::to_string(*popularimeter));
+        insert.blob(5, std::to_string(*popularimeter));
+        insert.next();
     }
     Statement complete{db,
                        "UPDATE local_library_tracks SET field_index_complete=1 WHERE raw_path=?"};
@@ -1660,6 +1788,70 @@ LocalLibrary::ratings(const std::vector<std::string>& hashes,
     });
 }
 
+core::Result<std::vector<std::string>>
+LocalLibrary::rated_paths(const std::string& track_hash) const {
+    return checked([&] {
+        Statement select{implementation_->db,
+                         "SELECT raw_path FROM local_library_tracks WHERE rating_hash=? "
+                         "ORDER BY raw_path"};
+        select.text(1, track_hash);
+        std::vector<std::string> paths;
+        while (select.next()) {
+            paths.push_back(select.bytes(0));
+        }
+        return paths;
+    });
+}
+
+core::Result<std::size_t> LocalLibrary::import_indexed_tag_ratings() {
+    return checked([&] {
+        auto* db = implementation_->db;
+        Transaction transaction{db};
+        const auto scale = plain_rating_scale(db);
+        Statement select{db, "SELECT t.raw_path,t.rating_hash FROM local_library_tracks t "
+                             "WHERE t.rating_hash<>'' AND NOT EXISTS(SELECT 1 FROM local_ratings "
+                             "r WHERE r.hash=t.rating_hash) AND EXISTS(SELECT 1 FROM "
+                             "local_library_fields f WHERE f.raw_path=t.raw_path AND "
+                             "f.canonical_name IN ('fmps_rating','fmpsrating','rating','~popm'))"};
+        std::vector<std::pair<std::string, std::string>> candidates;
+        while (select.next()) {
+            candidates.emplace_back(select.bytes(0), select.bytes(1));
+        }
+        std::size_t imported = 0U;
+        Statement upsert{db, "INSERT INTO local_ratings(hash,type,rating,updated_at) "
+                             "VALUES(?,'track',?,datetime('now')) ON CONFLICT(hash) DO NOTHING"};
+        for (const auto& [path, hash] : candidates) {
+            const auto rating = evidenced_rating(indexed_evidence(db, path), scale);
+            if (!rating || *rating == 0U) {
+                continue;
+            }
+            upsert.reset();
+            upsert.text(1, hash);
+            upsert.number(2, static_cast<int>(*rating));
+            upsert.next();
+            ++imported;
+        }
+        transaction.commit();
+        return imported;
+    });
+}
+
+core::Result<std::vector<std::pair<std::string, unsigned>>>
+LocalLibrary::rated_tracks(const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        Statement select{db, "SELECT t.raw_path, r.rating FROM local_library_tracks t "
+                             "JOIN local_ratings r ON r.hash=t.rating_hash "
+                             "WHERE t.rating_hash<>'' ORDER BY t.raw_path"};
+        std::vector<std::pair<std::string, unsigned>> rated;
+        while (select.next()) {
+            rated.emplace_back(select.bytes(0), static_cast<unsigned>(select.number(1)));
+        }
+        return rated;
+    });
+}
+
 core::Result<std::optional<std::string>>
 LocalLibrary::artwork_source(const std::string& album_key,
                              const core::CancellationToken& cancellation) const {
@@ -1688,6 +1880,7 @@ struct PreparedFile {
     core::LocalSourceRevision before{};
     Tags tags;
     metadata::MetadataDocument document;
+    std::optional<std::uint8_t> popularimeter;
     Technicals technicals;
     bool failed{false};
 };
@@ -1716,6 +1909,7 @@ PreparedFile prepare_file(ScanRequest request, const core::CancellationToken& ca
         const auto read = metadata::read_local_metadata(prepared.raw_path, cancellation);
         if (read) {
             prepared.document = read->document;
+            prepared.popularimeter = read->popularimeter;
         } else if (read.error().code != core::ErrorCode::unsupported) {
             prepared.failed = true;
         }
@@ -1768,6 +1962,11 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
         return CommitOutcome::root_lost;
     }
     const auto identity = rating_identity(prepared.document, prepared.raw_path);
+    const bool known = [&] {
+        Statement row{db, "SELECT 1 FROM local_library_tracks WHERE raw_path=?"};
+        row.blob(1, prepared.raw_path);
+        return row.next();
+    }();
     Statement upsert{
         db, "INSERT INTO "
             "local_library_tracks(raw_path,root,revision,title,artist,album,album_key,"
@@ -1802,7 +2001,9 @@ CommitOutcome commit_prepared_file(sqlite3* db, const PreparedFile& prepared,
     upsert.number(22, first_scan ? prepared.before.modification_time_seconds
                                  : static_cast<std::int64_t>(std::time(nullptr)));
     upsert.next();
-    write_field_rows(db, prepared.raw_path, prepared.document);
+    import_file_rating(db, prepared.raw_path, identity.track_hash,
+                       file_evidence(prepared.document, prepared.popularimeter), known);
+    write_field_rows(db, prepared.raw_path, prepared.document, prepared.popularimeter);
     transaction.commit();
     return CommitOutcome::committed;
 }

@@ -5,8 +5,10 @@
 #include "container_preservation_detail.hpp"
 #include "text_writer_detail.hpp"
 #include "trackknife/metadata/local_reader.hpp"
+#include "trackknife/metadata/ratings.hpp"
 
 #include <mp4file.h>
+#include <mp4tag.h>
 
 #include <algorithm>
 #include <array>
@@ -193,20 +195,64 @@ preservation_detail::verify_mp4_box_preservation(const std::string& source_raw_p
 
 namespace {
 
-[[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,
-                                                    const std::string& prepared_raw_path,
-                                                    const core::CancellationToken& cancellation) {
+// ADR-0237 stage 2: the generic mapping names the rating's freeform atom
+// in capitals; it is named as the FMPS specification spells it, which is
+// what the players that read it look for.
+[[nodiscard]] core::Result<void> spell_rating_atom(const MetadataWritePlanSource& source_plan,
+                                                   const std::string& prepared_raw_path) {
+    const auto canonical = canonicalize_field_name(fmps_rating_field);
+    if (std::ranges::none_of(source_plan.changes, [&canonical](const auto& change) {
+            return change.canonical_name == canonical;
+        })) {
+        return {};
+    }
     TagLib::MP4::File file{prepared_raw_path.c_str(), false};
-    if (!file.isValid()) {
+    if (!file.isValid() || file.tag() == nullptr) {
         return std::unexpected(writer_error(core::ErrorCode::backend,
                                             "TagLib rejected the prepared MP4 copy",
                                             source_plan.raw_path, prepared_raw_path));
     }
-    // `trkn` carries number and total inside one atom (the combined
-    // TRACKNUMBER value), so the FLAC-style paired-totals expansion stays
-    // off exactly like MP3.
-    return text_writer_detail::apply_text_changes_to_properties(
-        mp4_label, source_plan, file, prepared_raw_path, cancellation, false);
+    const TagLib::String spelled{"----:com.apple.iTunes:" + std::string{fmps_rating_spelling}};
+    auto* tag = file.tag();
+    const auto items = tag->itemMap();
+    bool renamed = false;
+    for (const auto& [key, item] : items) {
+        if (key != spelled && key.upper() == spelled.upper()) {
+            tag->removeItem(key);
+            tag->setItem(spelled, item);
+            renamed = true;
+        }
+    }
+    if (renamed && !file.save()) {
+        return std::unexpected(writer_error(core::ErrorCode::backend,
+                                            "TagLib failed to save the prepared MP4 rating",
+                                            source_plan.raw_path, prepared_raw_path));
+    }
+    return {};
+}
+
+[[nodiscard]] core::Result<void> apply_text_changes(const MetadataWritePlanSource& source_plan,
+                                                    const std::string& prepared_raw_path,
+                                                    const core::CancellationToken& cancellation) {
+    {
+        // Closed before the rating atom is renamed: TagLib finishes its
+        // writes only when the file is closed.
+        TagLib::MP4::File file{prepared_raw_path.c_str(), false};
+        if (!file.isValid()) {
+            return std::unexpected(writer_error(core::ErrorCode::backend,
+                                                "TagLib rejected the prepared MP4 copy",
+                                                source_plan.raw_path, prepared_raw_path));
+        }
+        // `trkn` carries number and total inside one atom (the combined
+        // TRACKNUMBER value), so the FLAC-style paired-totals expansion stays
+        // off exactly like MP3.
+        auto applied = text_writer_detail::apply_text_changes_to_properties(
+            mp4_label, source_plan, file, prepared_raw_path, cancellation, false);
+        if (!applied) {
+            return applied;
+        }
+    }
+    return spell_rating_atom(source_plan, prepared_raw_path);
 }
 
 } // namespace

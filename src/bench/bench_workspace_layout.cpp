@@ -54,6 +54,7 @@
 #include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 #include <filesystem>
 #include <memory>
 
@@ -1126,9 +1127,35 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
     // ADR-0185: profile edits in Settings refresh every open tag editor's
     // selectors immediately.
     connect(dialog, &SettingsDialog::outputProfilesChanged, this, [this] {
-        for (int index = 0; index < tabs_->count(); ++index) {
-            if (auto* properties = qobject_cast<MetadataPropertiesDialog*>(tabs_->widget(index))) {
-                properties->reloadOutputProfiles();
+        // ADR-0221: tag editors are windows of this one, not tabs.
+        for (auto* properties : findChildren<MetadataPropertiesDialog*>()) {
+            properties->reloadOutputProfiles();
+        }
+    });
+    // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
+    // each engine that does file work (an emptied one makes them forget it).
+    connect(dialog, &QDialog::accepted, this, [this] {
+        const auto key = QSettings{}
+                             .value(QLatin1String(SettingsDialog::acoustid_client_key))
+                             .toString()
+                             .trimmed()
+                             .toStdString();
+        // Stage 2: so is whether ratings also go into the files.
+        const QSettings chosen;
+        const auto rating_tags =
+            chosen.value(QLatin1String(SettingsDialog::ratings_in_tags_key), false).toBool();
+        const auto rating_scale =
+            chosen.value(QLatin1String(SettingsDialog::rating_tag_scale_key), QStringLiteral("off"))
+                .toString()
+                .toStdString();
+        for (const auto& engine : engines_) {
+            if (engine->does_file_work && engine->file_work) {
+                static_cast<void>(
+                    QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale] {
+                        static_cast<void>(work->set_acoustid_key(key));
+                        static_cast<void>(work->set_rating_tags(rating_tags));
+                        static_cast<void>(work->set_rating_scale(rating_scale));
+                    }));
             }
         }
     });

@@ -186,20 +186,25 @@ using protocol::Json;
 
 } // namespace
 
+void announce_list_change(const EventSink& sink, const persistence::EngineListSummary* summary,
+                          const core::StableId& id) {
+    if (!sink) {
+        return;
+    }
+    Json data{{"id", id.to_string()}, {"deleted", summary == nullptr}};
+    if (summary != nullptr) {
+        data["revision"] = summary->revision;
+    }
+    sink(protocol::Event{.name = "list.changed", .data = std::move(data)});
+}
+
 void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspace, EventSink sink,
                            Player& player) {
     // Every client hears of every change, so a list open in two places is
     // refreshed -- or, with unsaved edits, flagged -- in both.
     const auto changed = [sink](const persistence::EngineListSummary* summary,
                                 const core::StableId& id) {
-        if (!sink) {
-            return;
-        }
-        Json data{{"id", id.to_string()}, {"deleted", summary == nullptr}};
-        if (summary != nullptr) {
-            data["revision"] = summary->revision;
-        }
-        sink(protocol::Event{.name = "list.changed", .data = std::move(data)});
+        announce_list_change(sink, summary, id);
     };
 
     dispatcher.on("list.all", [&workspace](const Json&) -> core::Result<Json> {

@@ -15,6 +15,7 @@
 #include "trackknife/engine/remote_file_work.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/workspace.hpp"
+#include "trackknife/loudness/replaygain.hpp"
 #include "trackknife/loudness/scan.hpp"
 #include "trackknife/metadata/artwork.hpp"
 #include "trackknife/metadata/artwork_write_plan.hpp"
@@ -1041,6 +1042,83 @@ void naming_and_destinations_are_the_engines(const std::filesystem::path& direct
     require(top.result && top.result->at("parent").is_null(), "the root has no parent");
 }
 
+// ADR-0237: the ReplayGain window's round as one engine job, for a client
+// with no tag library -- and the same gains the window would write.
+void the_engine_writes_replaygain_in_one_job(const std::filesystem::path& directory,
+                                             const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto folder = directory / "replaygain";
+    std::filesystem::create_directories(folder);
+    // Long enough for gated loudness (400 ms and more).
+    const auto first =
+        materialize(fixtures, "rich-metadata-long-flac", folder / "one.flac").string();
+    const auto second =
+        materialize(fixtures, "rich-metadata-long-flac", folder / "two.flac").string();
+
+    // What the shared pipeline proposes for them here, before anything is written.
+    std::vector<metadata::StagedMetadataSource> sources;
+    for (const auto& path : {first, second}) {
+        const auto read = metadata::read_local_metadata(path);
+        require(read.has_value(), "a file to measure is read");
+        sources.push_back(metadata::StagedMetadataSource{.raw_path = path,
+                                                         .source_revision = read->source_revision,
+                                                         .baseline = read->document});
+    }
+    const auto selection = metadata::StagedMetadataSelection::create(sources, {});
+    require(selection.has_value(), "a selection of them");
+    const std::vector<loudness::ReplayGainAudio> audio(2U);
+    const auto expected = loudness::measure_replaygain(
+        *selection, metadata::StagedMetadataPatchSet{}, {0U, 1U}, audio,
+        loudness::ReplayGainSettings{
+            .grouping = {.mode = loudness::LoudnessGroupingMode::selection_album, .expression = {}},
+            .true_peak = false,
+            .sidecar_only = false},
+        {}, {});
+    require(expected && expected->rows.size() == 2U, "measured here");
+
+    Jobs jobs{directory / "replaygain.sqlite3"};
+    require(jobs.run("replaygain.apply", protocol::Json::object()).contains("refused"),
+            "paths are required");
+    require(jobs.run("replaygain.apply",
+                     {{"paths", {protocol::encode_raw_path(first)}}, {"grouping", "loudest"}})
+                .contains("refused"),
+            "and a grouping it knows");
+    const auto outcome = jobs.run(
+        "replaygain.apply",
+        {{"paths", {protocol::encode_raw_path(first), protocol::encode_raw_path(second)}}});
+    require(outcome.contains("result"), "the engine measures and writes");
+    const auto& result = outcome.at("result");
+    require(result.at("written") == 2 && result.at("failed") == 0 && !result.contains("refused"),
+            "both files are written");
+    require(result.at("tracks").size() == 2U &&
+                result.at("tracks")[0].at("track_gain") == expected->rows[0].track_gain &&
+                result.at("tracks")[0].at("album_gain") == expected->rows[0].album_gain,
+            "with the gains measured here");
+    for (std::size_t index = 0U; index < 2U; ++index) {
+        const auto written = metadata::read_local_metadata(index == 0U ? first : second);
+        require(written &&
+                    written->document.first_effective_value("REPLAYGAIN_TRACK_GAIN") ==
+                        std::optional{expected->rows[index].track_gain} &&
+                    written->document.first_effective_value("REPLAYGAIN_ALBUM_GAIN") ==
+                        std::optional{expected->rows[index].album_gain},
+                "the files carry them, the album's the same for both");
+    }
+    {
+        const std::lock_guard guard{jobs.mutex};
+        const auto phases = std::ranges::count_if(jobs.events, [](const protocol::Event& event) {
+            return event.name == "job.progress" &&
+                   event.data.value("phase", std::string{}) == "writing";
+        });
+        require(phases > 0, "and says how far it got");
+    }
+    // Measured again, nothing has changed: nothing is written.
+    const auto again = jobs.run(
+        "replaygain.apply",
+        {{"paths", {protocol::encode_raw_path(first), protocol::encode_raw_path(second)}}});
+    require(again.contains("result") && again.at("result").at("written") == 0,
+            "the same gains again write nothing");
+}
+
 void a_client_does_file_work_through_the_engine(const std::filesystem::path& directory,
                                                 const std::filesystem::path& fixtures) {
     namespace metadata = trackknife::metadata;
@@ -1384,6 +1462,7 @@ int main(int argc, char** argv) {
     ratings_are_written_where_players_read_them(directory, argv[1]);
     other_players_ratings_are_imported(directory, argv[1]);
     naming_and_destinations_are_the_engines(directory);
+    the_engine_writes_replaygain_in_one_job(directory, argv[1]);
     a_client_does_file_work_through_the_engine(directory, argv[1]);
     the_engine_makes_the_taggers_lookups(directory);
     the_engine_measures_as_this_process_would(directory, argv[1]);

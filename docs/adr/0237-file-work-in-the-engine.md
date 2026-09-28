@@ -169,6 +169,16 @@ sees changes.
    Its own MusicBrainz fetching and the editing of a remote tab's files
    through the mount went with it.
 
+## ReplayGain from any client (2026-09-28)
+
+A client with no tag library of its own -- `melody-cli replaygain album
+WORDS...` -- has the engine do the ReplayGain window's whole round in one
+job, `replaygain.apply {paths, grouping, true_peak, sidecar}`: read, measure,
+propose, stage, plan and write. The measure-and-propose pipeline and its
+staging live in the loudness library (`loudness/replaygain.hpp`) for the
+window and the job alike, so a gain is the same whoever asked for it; so does
+laying a file's loudness sidecar over its tags.
+
 ## Naming layouts are global; move destinations are the engine's (decided 2026-09-28)
 
 A move destination is a folder on one machine. A naming layout is a rule

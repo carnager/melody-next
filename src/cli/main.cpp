@@ -4,9 +4,12 @@
 // library by words, outputs -- what a script, a key binding or a rofi menu
 // wants, over the same protocol Trackknife speaks.
 
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/protocol/client.hpp"
+
+#include <unistd.h>
 
 #include <algorithm>
 #include <charconv>
@@ -113,6 +116,14 @@ void usage(std::ostream& out) {
            "                              what an unrated track says (also: rate)\n"
            "  albumrating [0-10]          the same, for the playing track's album\n"
            "  love | unlove               the playing track, on Last.fm\n"
+           "\n"
+           "  replaygain album|track WORDS... [--track-gain] [--true-peak] [--sidecar]\n"
+           "                              measure its loudness and write ReplayGain, as\n"
+           "                              Trackknife does: an album gets track and album\n"
+           "                              gain, a track or --track-gain only track gain.\n"
+           "                              Found as play finds it (also --key KEY). The\n"
+           "                              engine holding the files measures and writes;\n"
+           "                              --sidecar keeps the values out of the files\n"
            "\n"
            "The engine: --server (or $MELODY_SERVER), else this machine's engine, else\n"
            "one found on the network -- by name with --engine when there are several.\n"
@@ -1180,6 +1191,115 @@ int run(const Options& options) {
                                       : "rated " + std::to_string(rating) + ": ")
                       << (what.empty() ? describe_track(track) : what) << "\n";
         }
+    } else if (command == "replaygain") {
+        // ADR-0237: measured and written by the engine that holds the files,
+        // exactly as Trackknife's ReplayGain window does it.
+        std::vector<std::string> rest;
+        bool true_peak = false;
+        bool sidecar = false;
+        bool track_gains = false;
+        for (std::size_t index = 1; index < words.size(); ++index) {
+            if (words[index] == "--true-peak") {
+                true_peak = true;
+            } else if (words[index] == "--sidecar") {
+                sidecar = true;
+            } else if (words[index] == "--track-gain") {
+                track_gains = true;
+            } else {
+                rest.push_back(words[index]);
+            }
+        }
+        if (rest.size() < 2U) {
+            fail("replaygain wants album or track, then the words to find it by");
+        }
+        std::string chosen;
+        const auto entries = entries_for(*client, rest[0], joined(rest, 1), chosen);
+        if (entries.empty()) {
+            fail("nothing to measure in " + chosen);
+        }
+        auto paths = Json::array();
+        for (const auto& entry : entries) {
+            paths.push_back(text_of(entry, "path"));
+        }
+        // An album is one programme; a track, or --track-gain, has none.
+        const auto* grouping = rest[0] == "track" || track_gains ? "track" : "album";
+        const bool interactive = !options.json && ::isatty(STDERR_FILENO) == 1;
+        if (!options.json) {
+            std::cerr << "melody-cli: " << chosen << "\n";
+        }
+        auto outcome = client->run_job("replaygain.apply",
+                                       Json{{"paths", std::move(paths)},
+                                            {"grouping", grouping},
+                                            {"true_peak", true_peak},
+                                            {"sidecar", sidecar}},
+                                       [interactive](const Json& progress) {
+                                           if (!interactive) {
+                                               return;
+                                           }
+                                           std::cerr << "\r\033[K" << text_of(progress, "phase")
+                                                     << ' ' << progress.value("completed", 0) << '/'
+                                                     << progress.value("total", 0) << std::flush;
+                                       });
+        if (interactive) {
+            std::cerr << "\r\033[K";
+        }
+        if (!outcome) {
+            fail(outcome.error().message);
+        }
+        if (const auto error = outcome->find("error"); error != outcome->end()) {
+            fail(error->value("message", std::string{"the engine could not do it"}));
+        }
+        const auto result = outcome->value("result", Json::object());
+        if (options.json) {
+            std::cout << result.dump() << "\n";
+            return result.contains("refused") ? EXIT_FAILURE : EXIT_SUCCESS;
+        }
+        // Tag text travels as a string, or as {"bytes"} when it is no UTF-8.
+        const auto text = [](const Json& value) -> std::string {
+            if (value.is_string()) {
+                return value.get<std::string>();
+            }
+            auto raw = trackknife::protocol::decode_raw_path(value.value("bytes", std::string{}));
+            return raw ? trackknife::core::display_raw_path(*raw) : std::string{};
+        };
+        const auto shown_path = [](const std::string& encoded) {
+            auto raw = trackknife::protocol::decode_raw_path(encoded);
+            return raw ? trackknife::core::display_raw_path(*raw) : std::string{"a file"};
+        };
+        std::string lines;
+        for (const auto& track : result.value("tracks", Json::array())) {
+            const auto gain = text_of(track, "track_gain");
+            auto title = text(track.value("title", Json{}));
+            if (title.empty()) {
+                title = shown_path(text_of(track, "path"));
+            }
+            lines += gain.empty() ? std::string{"-"} : gain;
+            if (const auto album_gain = text_of(track, "album_gain"); !album_gain.empty()) {
+                lines += "  album " + album_gain;
+            }
+            lines += "  " + title + "\n";
+        }
+        std::cout << lines;
+        for (const auto& problem : result.value("problems", Json::array())) {
+            const auto path = problem.find("path");
+            const auto where = path != problem.end() && path->is_string()
+                                   ? shown_path(path->get<std::string>())
+                                   : std::string{"the album"};
+            std::cerr << "melody-cli: " << where << ": " << text(problem.value("message", Json{}))
+                      << "\n";
+        }
+        if (result.contains("refused")) {
+            fail("nothing was written: not every file could take its gain");
+        }
+        const auto written = result.value("written", 0);
+        const auto not_written = result.value("failed", 0);
+        std::cerr << "melody-cli: wrote ReplayGain to " << written
+                  << (written == 1 ? " file" : " files");
+        if (not_written > 0) {
+            std::cerr << ", " << not_written << " failed";
+        }
+        std::cerr << "\n";
+        return not_written > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
     } else if (command == "love" || command == "unlove") {
         const auto track = now_playing(*client, state());
         if (track.is_null()) {

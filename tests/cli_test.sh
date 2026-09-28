@@ -427,4 +427,40 @@ kill "${second_pid}" 2>/dev/null || true
 wait "${second_pid}" 2>/dev/null || true
 second_pid=""
 
+# ReplayGain, measured and written by the engine: an album found by its
+# words, as play finds it. WAV has no tags, so the gains go to sidecars.
+mkdir -p "${work}/music/tones"
+python3 - "${work}/music/tones" <<'PY'
+import math, struct, sys, wave
+for name, level in (("one.wav", 0.5), ("two.wav", 0.25)):
+    with wave.open(f"{sys.argv[1]}/{name}", "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(44100)
+        out.writeframes(b"".join(struct.pack("<h", int(level * 32767 * math.sin(2 * math.pi * 440 * i / 44100)))
+                                 for i in range(44100 * 3)))
+PY
+engine '{"id":20,"method":"job.submit","params":{"job":"catalogue.scan"}}' job.finished > /dev/null
+# Untagged, the album is found by its key, which names its folder.
+tones="$(cli --json albums | python3 -c '
+import base64, json, sys
+print(next(album["key"] for album in json.load(sys.stdin)
+           if base64.b64decode(album["key"]).endswith(b"/tones")))')"
+cli replaygain album --key "${tones}" >"${work}/replaygain.txt" 2>"${work}/replaygain.err" \
+    || { cat "${work}/replaygain.err" >&2; fail "replaygain measures and writes an album"; }
+[ "$(grep -c " album " "${work}/replaygain.txt")" = "2" ] \
+    || { cat "${work}/replaygain.txt" >&2; fail "each track has its gain and the album's"; }
+grep -q "wrote ReplayGain to 2 files" "${work}/replaygain.err" || fail "and says it wrote them"
+[ -f "${work}/music/tones/one.wav.tkmeta" ] && [ -f "${work}/music/tones/two.wav.tkmeta" ] \
+    || fail "into their sidecars"
+cli --json replaygain track one | python3 -c '
+import json, sys
+result = json.load(sys.stdin)
+assert result["written"] == 0 and len(result["tracks"]) == 1, result
+assert result["tracks"][0]["album_gain"] == "", result' \
+    || fail "a track alone has no album gain, and unchanged it is not written again"
+if cli replaygain album nothing-like-this 2>/dev/null; then
+    fail "replaygain of nothing found fails"
+fi
+
 echo "melody-cli: ok"

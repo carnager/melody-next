@@ -199,11 +199,7 @@ void BenchMainWindow::buildTransport() {
 
     previous_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipBackward),
                                    QStringLiteral("Previous"), this);
-    connect(previous_action_, &QAction::triggered, this, [this] {
-        if (playingOnEngine()) {
-            transport_->previous();
-        }
-    });
+    connect(previous_action_, &QAction::triggered, &workspace_, &Workspace::previous);
     play_pause_action_ =
         new QAction(style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("Play"), this);
     play_pause_action_->setShortcut(Qt::Key_Space);
@@ -211,18 +207,10 @@ void BenchMainWindow::buildTransport() {
     connect(play_pause_action_, &QAction::triggered, this, &BenchMainWindow::togglePlayPause);
     stop_action_ =
         new QAction(style()->standardIcon(QStyle::SP_MediaStop), QStringLiteral("Stop"), this);
-    connect(stop_action_, &QAction::triggered, this, [this] {
-        if (playingOnEngine()) {
-            transport_->stop();
-        }
-    });
+    connect(stop_action_, &QAction::triggered, &workspace_, &Workspace::stop);
     next_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipForward),
                                QStringLiteral("Next"), this);
-    connect(next_action_, &QAction::triggered, this, [this] {
-        if (playingOnEngine()) {
-            transport_->next();
-        }
-    });
+    connect(next_action_, &QAction::triggered, &workspace_, &Workspace::next);
 
     // One row, as players read: what is playing on the left, the controls
     // and the position in the middle, where the sound goes on the right.
@@ -367,12 +355,7 @@ void BenchMainWindow::buildTransport() {
     connect(volume_, &QSlider::sliderPressed, this, [this] { changing_volume_ = true; });
     connect(volume_, &QSlider::sliderReleased, this, [this] { changing_volume_ = false; });
     connect(volume_, &QSlider::valueChanged, this, [this](const int value) {
-        if (playingOnEngine()) {
-            // The engine owns the output, so the volume lives there: another
-            // client watching the same engine sees the same number, and it
-            // survives this window closing.
-            transport_->setVolume(value);
-        }
+        workspace_.setVolume(value);
         refreshMuteButton();
     });
     volumeLayout->addWidget(volume_);
@@ -617,11 +600,8 @@ void BenchMainWindow::rebuildDeviceMenu() {
                 action->setToolTip(speaker.tooltip);
             }
             outputs->addAction(action);
-            connect(action, &QAction::triggered, this, [this, id = speaker.id] {
-                if (playingOnEngine()) {
-                    transport_->selectOutput(id);
-                }
-            });
+            connect(action, &QAction::triggered, this,
+                    [this, id = speaker.id] { workspace_.selectOutput(id); });
         }
         device_menu_->addSeparator();
         add_heading(menu.devices_heading);
@@ -632,20 +612,13 @@ void BenchMainWindow::rebuildDeviceMenu() {
         action->setChecked(device.checked);
         action->setEnabled(device.enabled);
         device_group_->addAction(action);
-        connect(action, &QAction::triggered, this, [this, target = device.target] {
-            if (playingOnEngine()) {
-                transport_->setOutput(target);
-            }
-        });
+        connect(action, &QAction::triggered, this,
+                [this, target = device.target] { workspace_.setOutputDevice(target); });
     }
     device_menu_->addSeparator();
     auto* refresh = device_menu_->addAction(QStringLiteral("Refresh audio devices"));
     refresh->setObjectName(QStringLiteral("action-refresh-audio-devices"));
-    connect(refresh, &QAction::triggered, this, [this] {
-        if (playingOnEngine()) {
-            transport_->refreshOutputs();
-        }
-    });
+    connect(refresh, &QAction::triggered, &workspace_, &Workspace::refreshOutputs);
 }
 
 QIcon BenchMainWindow::oneShotIcon(const QIcon& plain) const {
@@ -724,36 +697,18 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     local_album_random_action_ = add_mode(QStringLiteral("album-random"), tr("Album shuffle"),
                                           QStringLiteral("media-playlist-shuffle"));
     local_album_random_action_->setIcon(albumShuffleIcon(palette()));
-    connect(local_album_random_action_, &QAction::triggered, this, [this](bool on) {
-        playback_.modes.album_random = on;
-        if (on)
-            playback_.modes.random = false;
-        applyLocalPlaybackModes();
-    });
+    connect(local_album_random_action_, &QAction::triggered, &workspace_,
+            &Workspace::setAlbumRandom);
     local_consume_action_ = add_mode(QStringLiteral("consume"), QStringLiteral("Consume"),
                                      QStringLiteral("edit-clear-list"));
     // Their plain icons, so one-shot can be drawn as a mark on them.
     for (auto* action : {local_single_action_, local_consume_action_}) {
         action->setProperty("bench-plain-icon", QVariant::fromValue(action->icon()));
     }
-    connect(local_repeat_action_, &QAction::triggered, this, [this](bool on) {
-        playback_.modes.repeat = on;
-        applyLocalPlaybackModes();
-    });
-    connect(local_random_action_, &QAction::triggered, this, [this](bool on) {
-        playback_.modes.random = on;
-        if (on)
-            playback_.modes.album_random = false;
-        applyLocalPlaybackModes();
-    });
-    connect(local_single_action_, &QAction::triggered, this, [this] {
-        playback_.modes.single = audio::next_mode_state(playback_.modes.single);
-        applyLocalPlaybackModes();
-    });
-    connect(local_consume_action_, &QAction::triggered, this, [this] {
-        playback_.modes.consume = audio::next_mode_state(playback_.modes.consume);
-        applyLocalPlaybackModes();
-    });
+    connect(local_repeat_action_, &QAction::triggered, &workspace_, &Workspace::setRepeat);
+    connect(local_random_action_, &QAction::triggered, &workspace_, &Workspace::setRandom);
+    connect(local_single_action_, &QAction::triggered, &workspace_, &Workspace::cycleSingle);
+    connect(local_consume_action_, &QAction::triggered, &workspace_, &Workspace::cycleConsume);
     local_replaygain_button_ = new QToolButton(statusBar());
     local_replaygain_button_->setObjectName(QStringLiteral("bench-local-replaygain"));
     local_replaygain_button_->setAccessibleName(QStringLiteral("ReplayGain mode"));
@@ -772,10 +727,8 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
         action->setCheckable(true);
         action->setData(value);
         local_replaygain_group_->addAction(action);
-        connect(action, &QAction::triggered, this, [this, value] {
-            local_replaygain_ = value;
-            applyLocalPlaybackModes();
-        });
+        connect(action, &QAction::triggered, this,
+                [this, value] { workspace_.setReplayGain(value); });
     }
     menu->addSeparator();
     auto* preamp_action = menu->addAction(QStringLiteral("Preamp…"));

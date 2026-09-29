@@ -481,6 +481,22 @@ class Workspace final : public QObject {
     // ReplayGain's modes, by label and the value saved and sent.
     [[nodiscard]] static std::vector<std::pair<QString, QString>> replayGainModes();
 
+    // The transport and the modes, as the controls ask for them; nothing
+    // when no engine is followed.
+    void previous();
+    void next();
+    void stop();
+    void setVolume(int percent);
+    void selectOutput(const std::string& id);
+    void setOutputDevice(const std::optional<std::string>& target);
+    void refreshOutputs();
+    void setRepeat(bool on);
+    void setRandom(bool on);
+    void setAlbumRandom(bool on);
+    void cycleSingle();
+    void cycleConsume();
+    void setReplayGain(const QString& mode);
+
     // What the engine followed reports, taken in: modes it changed, rows it
     // consumed, the Up Next ask it started, a queue changed elsewhere.
     void followEngineState(const EnginePlayback::State& state);

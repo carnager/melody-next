@@ -138,6 +138,88 @@ void Workspace::reloadPlaybackPreferences() {
     }
 }
 
+void Workspace::previous() {
+    if (playingOnEngine()) {
+        transport_->previous();
+    }
+}
+
+void Workspace::next() {
+    if (playingOnEngine()) {
+        transport_->next();
+    }
+}
+
+void Workspace::stop() {
+    if (playingOnEngine()) {
+        transport_->stop();
+    }
+}
+
+void Workspace::setVolume(const int percent) {
+    if (playingOnEngine()) {
+        // The engine owns the output, so the volume lives there: another
+        // client watching the same engine sees the same number, and it
+        // survives this window closing.
+        transport_->setVolume(percent);
+    }
+}
+
+void Workspace::selectOutput(const std::string& id) {
+    if (playingOnEngine()) {
+        transport_->selectOutput(id);
+    }
+}
+
+void Workspace::setOutputDevice(const std::optional<std::string>& target) {
+    if (playingOnEngine()) {
+        transport_->setOutput(target);
+    }
+}
+
+void Workspace::refreshOutputs() {
+    if (playingOnEngine()) {
+        transport_->refreshOutputs();
+    }
+}
+
+void Workspace::setRepeat(const bool on) {
+    playback_.modes.repeat = on;
+    applyLocalPlaybackModes();
+}
+
+// Random and album shuffle exclude each other.
+void Workspace::setRandom(const bool on) {
+    playback_.modes.random = on;
+    if (on) {
+        playback_.modes.album_random = false;
+    }
+    applyLocalPlaybackModes();
+}
+
+void Workspace::setAlbumRandom(const bool on) {
+    playback_.modes.album_random = on;
+    if (on) {
+        playback_.modes.random = false;
+    }
+    applyLocalPlaybackModes();
+}
+
+void Workspace::cycleSingle() {
+    playback_.modes.single = audio::next_mode_state(playback_.modes.single);
+    applyLocalPlaybackModes();
+}
+
+void Workspace::cycleConsume() {
+    playback_.modes.consume = audio::next_mode_state(playback_.modes.consume);
+    applyLocalPlaybackModes();
+}
+
+void Workspace::setReplayGain(const QString& mode) {
+    local_replaygain_ = mode;
+    applyLocalPlaybackModes();
+}
+
 void Workspace::followEngineState(const EnginePlayback::State& state) {
     if (state.modes != playback_.modes) {
         // The engine owns the modes while it owns playback: a one-shot

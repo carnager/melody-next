@@ -244,6 +244,7 @@ class BenchMainWindowTest final : public QObject {
     void activePlaybackTabRemainsMarkedWhileBrowsing();
     void doubleClickOnEmptyTabBarMakesAList();
     void activeTabAccentSurvivesThemeTextColor();
+    void listTabsMeasureTheSameUnderEveryStyle();
     void followPlaybackAndJumpRespectBrowsing();
     void commandPaletteFindsAndRunsRegisteredActions();
     void commandPaletteTracksAvailabilityAndLifetime();
@@ -2747,6 +2748,47 @@ void BenchMainWindowTest::activeTabAccentSurvivesThemeTextColor() {
     bar.setTabData(0, false);
     bar.setTabIcon(0, QIcon{});
     QCOMPARE(colored_pixels(), 0);
+}
+
+// The list tabs are sized and their close buttons placed by the bar, not the
+// style: the same under any, each tab with room for its whole text and the
+// button on its right, after it.
+void BenchMainWindowTest::listTabsMeasureTheSameUnderEveryStyle() {
+    const auto previous = QApplication::style()->name();
+    const auto measure = [](const QString& style) {
+        QApplication::setStyle(QStyleFactory::create(style));
+        PlaybackTabWidget tabs;
+        tabs.setDocumentMode(true);
+        tabs.addTab(new QWidget, QStringLiteral("Local *"));
+        const auto playing = tabs.addTab(new QWidget, playbackSpeakerIcon(tabs.palette()),
+                                         QStringLiteral("gemenon *"));
+        tabs.tabBar()->setTabData(playing, true);
+        tabs.setTabText(playing, tabs.tabText(playing));
+        tabs.resize(700, 60);
+        tabs.show();
+        auto* bar = tabs.tabBar();
+        std::vector<std::pair<QRect, QRect>> found;
+        for (int index = 0; index < bar->count(); ++index) {
+            auto* close = bar->tabButton(index, QTabBar::RightSide);
+            const auto tab = bar->tabRect(index);
+            if (close == nullptr || bar->tabButton(index, QTabBar::LeftSide) != nullptr) {
+                return std::vector<std::pair<QRect, QRect>>{};
+            }
+            // Room for the text, and the button after it.
+            const auto text = bar->fontMetrics().horizontalAdvance(bar->tabText(index));
+            if (close->geometry().left() < tab.left() + text + 12 ||
+                close->geometry().right() > tab.right()) {
+                return std::vector<std::pair<QRect, QRect>>{};
+            }
+            found.emplace_back(tab, close->geometry());
+        }
+        return found;
+    };
+    const auto fusion = measure(QStringLiteral("Fusion"));
+    const auto windows = measure(QStringLiteral("Windows"));
+    QApplication::setStyle(QStyleFactory::create(previous));
+    QCOMPARE(fusion.size(), std::size_t{2});
+    QVERIFY(fusion == windows);
 }
 
 void BenchMainWindowTest::doubleClickOnEmptyTabBarMakesAList() {

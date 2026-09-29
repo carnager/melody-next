@@ -26,6 +26,7 @@ qt_add_library(
     queue_item_delegate.hpp
     debug_log.cpp
     debug_log.hpp
+    delegate_selection_style.hpp
     queue_table_view.cpp
     queue_table_view.hpp
     rating_stars.cpp

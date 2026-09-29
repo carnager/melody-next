@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "uicommon/library_tree_view.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/queue_table_view.hpp"
@@ -17,6 +18,8 @@
 #include <QMimeData>
 #include <QScrollBar>
 #include <QStandardItemModel>
+#include <QStyleFactory>
+#include <QStyledItemDelegate>
 #include <QUrl>
 #include <QtTest>
 
@@ -115,6 +118,7 @@ class QueueTableViewTest final : public QObject {
     Q_OBJECT
 
   private slots:
+    void theDelegateAlonePaintsSelectionUnderEveryStyle();
     void preGroupedBatchReservesHeaderAboveFirstTrack();
     void eachDiscOfAnAlbumGetsItsName();
     void aDiscLearnedLaterNamesTheFirstToo();
@@ -283,6 +287,69 @@ void QueueTableViewTest::largeGroupedResultsScrollToLastRow() {
     // Removing header heights must also shrink the scroll range.
     view.setAlbumGroupingEnabled(false);
     QTRY_VERIFY(view.verticalScrollBar()->maximum() <= 2000 * 22);
+}
+
+// A cell the delegate keeps clear of the selection -- the cover gutter, a
+// tree's indent -- stays clear under a style that fills a selected row's
+// panel with the highlight, as Fusion and macOS do.
+void QueueTableViewTest::theDelegateAlonePaintsSelectionUnderEveryStyle() {
+    class KeepFirstClear final : public QStyledItemDelegate {
+      public:
+        using QStyledItemDelegate::QStyledItemDelegate;
+        void paint(QPainter* painter, const QStyleOptionViewItem& option,
+                   const QModelIndex& index) const override {
+            auto item = option;
+            if (index.column() == 0) {
+                item.state &= ~QStyle::State_Selected;
+            }
+            QStyledItemDelegate::paint(painter, item, index);
+        }
+    };
+    const auto previous = QApplication::style()->name();
+    QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    {
+        QStandardItemModel model(3, 3);
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                model.setItem(row, column, new QStandardItem(QStringLiteral("cell")));
+            }
+        }
+        QueueTableView view{nullptr};
+        view.setModel(&model);
+        view.setItemDelegate(new KeepFirstClear(&view));
+        view.setSelectionBehavior(QAbstractItemView::SelectRows);
+        view.resize(400, 200);
+        view.show();
+        view.selectRow(1);
+        const auto image = view.viewport()->grab().toImage();
+        // The kept cell looks as in a row not selected; the next one does not.
+        const auto at = [&image, &view, &model](const int row, const int column) {
+            const auto cell = view.visualRect(model.index(row, column));
+            return image.pixelColor(cell.left() + 3, cell.center().y());
+        };
+        QCOMPARE(at(1, 0), at(2, 0));
+        QVERIFY(at(1, 1) != at(2, 1));
+    }
+    {
+        QStandardItemModel model;
+        auto* parent = new QStandardItem(QStringLiteral("Artist"));
+        parent->appendRow(new QStandardItem(QStringLiteral("Album")));
+        model.appendRow(parent);
+        LibraryTreeView view;
+        view.setModel(&model);
+        view.setItemDelegate(new KeepFirstClear(&view));
+        view.setHeaderHidden(true);
+        view.resize(400, 200);
+        view.show();
+        view.expandAll();
+        const auto album = model.index(0, 0, model.index(0, 0));
+        view.selectionModel()->select(album, QItemSelectionModel::ClearAndSelect);
+        const auto image = view.viewport()->grab().toImage();
+        // The indent before it.
+        QCOMPARE(image.pixelColor(4, view.visualRect(album).center().y()),
+                 view.palette().color(QPalette::Base));
+    }
+    QApplication::setStyle(QStyleFactory::create(previous));
 }
 
 void QueueTableViewTest::preGroupedBatchReservesHeaderAboveFirstTrack() {

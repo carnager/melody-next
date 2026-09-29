@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "uicommon/library_tree_view.hpp"
+#include "uicommon/delegate_selection_style.hpp"
 
 #include "uicommon/rating_stars.hpp"
 
@@ -26,6 +27,9 @@ LibraryTreeView::LibraryTreeView(QWidget* parent) : QTreeView(parent) {
     setIconSize(QSize{32, 32});
     setIndentation(18);
     setAnimated(true);
+    // A selected row is tinted by the delegate alone, its indent left clear,
+    // under every style.
+    DelegateSelectionStyle::install(this);
 }
 
 void LibraryTreeView::setActionCallback(std::function<void(const QModelIndex&, int)> callback) {

@@ -129,6 +129,19 @@ class Catalogue {
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const = 0;
 
+    // A folder as the library holds it: the folders below it holding
+    // music, and the tracks in it (persistence::LibraryFolder). From the
+    // index, so a client browses a NAS's folders without reaching its files.
+    // A catalogue that cannot say answers unsupported.
+    [[nodiscard]] virtual core::Result<persistence::LibraryFolder>
+    folder(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const {
+        static_cast<void>(raw_path);
+        static_cast<void>(cancellation);
+        return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                           .message = "this catalogue has no folders",
+                                           .context = {}});
+    }
+
     // ADR-0232: what is indexed under a folder, a page at a time after the
     // path `after`, as it was when indexed. A catalogue that cannot say
     // answers unsupported.
@@ -201,6 +214,9 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<persistence::LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const override;
+    [[nodiscard]] core::Result<persistence::LibraryFolder>
+    folder(const std::string& raw_path,
+           const core::CancellationToken& cancellation = {}) const override;
     [[nodiscard]] core::Result<persistence::LibraryInventoryPage>
     inventory(const std::string& folder, const std::string& after,
               std::size_t limit) const override;

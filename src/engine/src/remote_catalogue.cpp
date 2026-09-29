@@ -348,6 +348,32 @@ RemoteCatalogue::query(const persistence::LibraryQuery& request,
     return decode_page(*answer);
 }
 
+core::Result<persistence::LibraryFolder>
+RemoteCatalogue::folder(const std::string& raw_path, const core::CancellationToken&) const {
+    auto answer = client_->call("catalogue.folder", Json{{"path", protocol::encode_raw_path(raw_path)}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    persistence::LibraryFolder folder;
+    const auto folders = answer->find("folders");
+    if (folders == answer->end() || !folders->is_array()) {
+        return std::unexpected(malformed("folders"));
+    }
+    for (const auto& value : *folders) {
+        auto path = protocol::decode_raw_path(value.value("path", std::string{}));
+        if (!path) {
+            return std::unexpected(malformed("folders"));
+        }
+        folder.folders.push_back(std::filesystem::path{*path}.filename().native());
+    }
+    auto tracks = decode_page(Json{{"entries", answer->value("tracks", Json::array())}});
+    if (!tracks) {
+        return std::unexpected(std::move(tracks.error()));
+    }
+    folder.tracks = std::move(tracks->entries);
+    return folder;
+}
+
 core::Result<persistence::LibraryPage>
 RemoteCatalogue::filter(const query::CompiledTkq& compiled, const std::size_t offset,
                         const std::size_t limit, const core::CancellationToken&) const {

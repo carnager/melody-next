@@ -119,6 +119,15 @@ struct LibraryInventoryPage {
     bool more{false};
 };
 
+// A folder as the library holds it: the names of the folders below it that
+// hold indexed tracks, in byte order, and the tracks directly in it, in disc
+// and track order. Read from the index only, so it is the same answer for a
+// client with no access to the files.
+struct LibraryFolder {
+    std::vector<std::string> folders;
+    std::vector<LibraryEntry> tracks;
+};
+
 struct LibraryScanResult {
     bool cancelled{false};
     bool incomplete{false};
@@ -199,6 +208,9 @@ class LocalLibrary final {
     // library that was deleted.
     core::Result<std::size_t> refresh(const std::vector<std::string>& raw_paths,
                                       const core::CancellationToken& cancellation = {});
+    // See LibraryFolder. A trailing slash names the same folder.
+    [[nodiscard]] core::Result<LibraryFolder>
+    folder(const std::string& raw_path, const core::CancellationToken& cancellation = {}) const;
     // ADR-0232: what is indexed under `folder`, in path order, the page after
     // the path `after` (empty for the first). No filesystem access.
     core::Result<LibraryInventoryPage> inventory(const std::string& folder,

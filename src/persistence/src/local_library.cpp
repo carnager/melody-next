@@ -2225,6 +2225,44 @@ core::Result<std::size_t> LocalLibrary::refresh(const std::vector<std::string>& 
     });
 }
 
+core::Result<LibraryFolder> LocalLibrary::folder(const std::string& raw_path,
+                                                 const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        Transaction snapshot{db, true};
+        const auto [from, to] = subtree_range(raw_path);
+        // What follows the folder's own path and its slash, 1-based: a
+        // track in it has no further slash there; one below it does, and
+        // what comes before that slash is the folder it is in.
+        const auto rest = static_cast<sqlite3_int64>(from.size() + 1U);
+        LibraryFolder folder;
+        Statement below{db, "SELECT DISTINCT substr(raw_path,?1,instr(substr(raw_path,?1),x'2f')-1) "
+                            "FROM local_library_tracks WHERE raw_path>=?2 AND raw_path<?3 "
+                            "AND instr(substr(raw_path,?1),x'2f')>0"};
+        below.number(1, rest);
+        below.blob(2, from);
+        below.blob(3, to);
+        while (below.next()) {
+            folder.folders.push_back(below.bytes(0));
+        }
+        std::ranges::sort(folder.folders);
+        Statement in{db, std::string{"SELECT "} + filter_columns +
+                             " FROM local_library_tracks t WHERE t.raw_path>=?2 AND t.raw_path<?3 "
+                             "AND instr(substr(t.raw_path,?1),x'2f')=0 ORDER BY t.disc,t.track,t.raw_path"};
+        in.number(1, rest);
+        in.blob(2, from);
+        in.blob(3, to);
+        while (in.next()) {
+            FilterRow row;
+            read_filter_row(in, row);
+            folder.tracks.push_back(filter_entry(row));
+        }
+        snapshot.commit();
+        return folder;
+    });
+}
+
 core::Result<LibraryInventoryPage> LocalLibrary::inventory(const std::string& folder,
                                                           const std::string& after,
                                                           const std::size_t limit) const {

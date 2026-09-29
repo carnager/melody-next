@@ -206,6 +206,8 @@ core::Result<UpnpRenderer> parse_upnp_renderer(const std::string& xml, const std
         UpnpRenderer renderer;
         renderer.udn = field(node, "UDN");
         renderer.name = field(node, "friendlyName");
+        renderer.manufacturer = field(node, "manufacturer");
+        renderer.model = field(node, "modelName");
         renderer.address = address;
         auto* services = child_named(node, "serviceList");
         for (auto* service = ixmlNode_getFirstChild(services); service;

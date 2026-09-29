@@ -26,6 +26,11 @@ renderer_stream_format(const std::string& sink, const std::string& mime, bool pa
                                         const std::string& artist, const std::string& album,
                                         const std::string& artwork);
 [[nodiscard]] std::optional<std::int64_t> renderer_time_ms(const std::string& text);
+// Apply limits that a renderer's generic MIME list cannot express. The source
+// rate is the selected audio stream's decoded rate; zero means unknown.
+[[nodiscard]] StreamRequest renderer_compatible_request(StreamRequest request,
+                                                        const discovery::UpnpRenderer& renderer,
+                                                        int source_sample_rate);
 
 class UpnpAudition final : public audio::Audition {
   public:
@@ -101,6 +106,8 @@ class UpnpAudition final : public audio::Audition {
     bool gapless_supported_{true};
     bool playing_requested_{false};
     bool saw_playing_{false};
+    unsigned stopped_while_starting_{0};
+    bool startup_rejected_{false};
     bool stopping_{false};
     std::thread worker_;
 };

@@ -730,12 +730,26 @@ int main(int argc, char** argv) {
                 }
                 std::int64_t duration = probe->duration_ms.value_or(0);
                 auto mime = output::stream_content_type(request.raw_path);
-                if (request.format) {
+                int source_sample_rate = 0;
+                const auto selected_stream = request.selection.stream_index
+                                                 ? request.selection.stream_index
+                                                 : probe->best_audio_stream;
+                if (selected_stream && *selected_stream >= 0) {
+                    const auto found =
+                        std::ranges::find(probe->audio_streams, *selected_stream,
+                                          &formats::AudioStreamInfo::stream_index);
+                    if (found != probe->audio_streams.end()) {
+                        source_sample_rate = found->sample_rate;
+                    }
+                }
+                const auto delivery =
+                    output::renderer_compatible_request(request, renderer, source_sample_rate);
+                if (delivery.format) {
                     auto converted =
-                        transcodes->ensure(engine::TranscodeSource{.raw_path = request.raw_path,
-                                                                   .selection = request.selection,
-                                                                   .segment = request.segment},
-                                           *request.format);
+                        transcodes->ensure(engine::TranscodeSource{.raw_path = delivery.raw_path,
+                                                                   .selection = delivery.selection,
+                                                                   .segment = delivery.segment},
+                                           *delivery.format);
                     if (!converted) {
                         return std::unexpected(converted.error());
                     }
@@ -747,7 +761,7 @@ int main(int argc, char** argv) {
                 const auto base = "http://" + renderer.address + ":" +
                                   std::to_string(streams->port()) + "/stream?";
                 // Distinct URLs also distinguish two consecutive occurrences of the same song.
-                const auto url = base + media->ticket(request, std::chrono::hours{1}) +
+                const auto url = base + media->ticket(delivery, std::chrono::hours{1}) +
                                  "&occurrence=" + core::StableId::random().to_string();
                 std::string title = std::filesystem::path{request.raw_path}.stem().string(), artist,
                             album, artwork;

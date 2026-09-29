@@ -18,7 +18,7 @@ class Renderer final : public discovery::UpnpControl {
   public:
     std::string state{"STOPPED"}, uri, next, position{"0:00:00"};
     std::string sink{"http-get:*:audio/flac:*,http-get:*:audio/wav:*"};
-    bool reject_next{false}, reject_seek_while_stopped{false}, fail{false};
+    bool reject_next{false}, reject_seek_while_stopped{false}, ignore_play{false}, fail{false};
     int volume{100};
     std::vector<std::string> actions;
     discovery::UpnpValues report;
@@ -46,7 +46,9 @@ class Renderer final : public discovery::UpnpControl {
             next = args.at("NextURI");
         }
         if (name == "Play") {
-            state = "PLAYING";
+            if (!ignore_play) {
+                state = "PLAYING";
+            }
         }
         if (name == "Pause") {
             state = "PAUSED_PLAYBACK";
@@ -84,7 +86,8 @@ class Renderer final : public discovery::UpnpControl {
 int main() {
     const std::string description = R"(<root xmlns="urn:schemas-upnp-org:device-1-0"><device>
       <deviceType>urn:schemas-upnp-org:device:MediaRenderer:2</deviceType><UDN>uuid:speaker</UDN>
-      <friendlyName>Kitchen &amp; dining</friendlyName><serviceList>
+      <friendlyName>Kitchen &amp; dining</friendlyName><manufacturer>Sonos, Inc.</manufacturer>
+      <modelName>Era 100</modelName><serviceList>
       <service><serviceType>urn:schemas-upnp-org:service:AVTransport:2</serviceType>
       <controlURL>/av/control</controlURL><eventSubURL>events</eventSubURL></service>
       <service><serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>
@@ -93,6 +96,8 @@ int main() {
         discovery::parse_upnp_renderer(description, "http://192.0.2.2/device.xml", "192.0.2.1");
     require(parsed && parsed->udn == "uuid:speaker" && parsed->name == "Kitchen & dining",
             "description preserves UDN and decodes XML");
+    require(parsed->manufacturer == "Sonos, Inc." && parsed->model == "Era 100",
+            "description keeps renderer identity needed for compatibility limits");
     require(parsed->transport.control_url == "http://192.0.2.2/av/control" &&
                 parsed->transport.event_url == "http://192.0.2.2/events",
             "service URLs resolve against description location");
@@ -128,6 +133,20 @@ int main() {
             "wildcards do not invent codec support");
     require(!output::renderer_stream_format("rtsp-rtp-udp:*:audio/flac:*", "audio/flac", false),
             "only HTTP sinks qualify");
+    output::StreamRequest high_rate{
+        .raw_path = "/track.flac", .format = {}, .selection = {}, .segment = {}, .artwork = false};
+    high_rate = output::renderer_compatible_request(std::move(high_rate), *parsed, 192'000);
+    require(high_rate.format && high_rate.format->codec == output::StreamCodec::flac &&
+                high_rate.format->sample_rate_cap == 48'000,
+            "high-rate Sonos sources become 48 kHz lossless streams");
+    const auto capped_query = output::stream_query(high_rate);
+    const auto decoded_cap = output::parse_stream_query(capped_query);
+    require(decoded_cap && *decoded_cap == high_rate,
+            "the signed stream query carries the renderer sample-rate cap");
+    output::StreamRequest ordinary_rate{
+        .raw_path = "/track.flac", .format = {}, .selection = {}, .segment = {}, .artwork = false};
+    ordinary_rate = output::renderer_compatible_request(std::move(ordinary_rate), *parsed, 48'000);
+    require(!ordinary_rate.format, "Sonos-compatible source rates stay original");
     const auto didl = output::renderer_didl("http://host/stream?a=1&b=2", "audio/flac", 180000,
                                             "A < B", "Artist", "Album", "http://host/cover");
     require(didl.find("duration=\"0:03:00\"") != std::string::npos &&
@@ -225,6 +244,19 @@ int main() {
     require(audition.snapshot().state == audio::LocalAuditionState::playing &&
                 audition.snapshot().position_sample == 42000,
             "output switching resumes at the saved position");
+    renderer->ignore_play = true;
+    renderer->state = "STOPPED";
+    require(audition.load_selected_and_play("/unsupported.flac", {}, {}).has_value(),
+            "renderer may acknowledge a stream it cannot decode");
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        audition.poll();
+    }
+    require(audition.snapshot().state == audio::LocalAuditionState::paused &&
+                audition.snapshot().error && !audition.wants_playing(),
+            "renderer that stays stopped reports an error instead of buffering forever");
+    audition.poll();
+    require(audition.snapshot().error.has_value(),
+            "silent renderer failure remains visible until retry");
     parsed->online = false;
     audition.update(*parsed);
     require(!audition.online(), "byebye marks output offline");

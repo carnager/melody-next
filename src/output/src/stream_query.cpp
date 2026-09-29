@@ -143,6 +143,9 @@ std::string stream_query(const StreamRequest& request) {
         } else {
             query += request.format->codec == StreamCodec::flac ? "&format=flac" : "&format=wav";
         }
+        if (request.format->sample_rate_cap) {
+            query += "&rate_cap=" + std::to_string(*request.format->sample_rate_cap);
+        }
     }
     if (request.selection.stream_index) {
         query += "&stream=" + std::to_string(*request.selection.stream_index);
@@ -176,15 +179,23 @@ core::Result<StreamRequest> parse_stream_query(const std::string_view query) {
     if (const auto format = query_value(query, "format")) {
         if (*format == "flac" || *format == "wav") {
             request.format =
-                StreamFormat{.codec = *format == "flac" ? StreamCodec::flac : StreamCodec::wav};
+                StreamFormat{.codec = *format == "flac" ? StreamCodec::flac : StreamCodec::wav,
+                             .sample_rate_cap = {}};
         } else if (*format == "opus") {
             const auto bitrate = number<int>(query_value(query, "bitrate"));
             if (!bitrate || *bitrate < 16 || *bitrate > 512) {
                 return std::unexpected(malformed("no bit rate between 16 and 512 kbps"));
             }
-            request.format = StreamFormat{.bitrate_kbps = *bitrate};
+            request.format = StreamFormat{
+                .bitrate_kbps = *bitrate, .codec = StreamCodec::opus, .sample_rate_cap = {}};
         } else {
             return std::unexpected(malformed("an unsupported stream format"));
+        }
+        if (const auto rate_cap = number<int>(query_value(query, "rate_cap"))) {
+            if (*rate_cap < 8'000 || *rate_cap > 384'000) {
+                return std::unexpected(malformed("no sample-rate cap between 8000 and 384000 Hz"));
+            }
+            request.format->sample_rate_cap = *rate_cap;
         }
     }
     request.selection.stream_index = number<int>(query_value(query, "stream"));

@@ -120,7 +120,9 @@ std::optional<output::StreamFormat> format_for_kbps(const int kbps) {
     if (kbps <= 0) {
         return std::nullopt;
     }
-    return output::StreamFormat{.bitrate_kbps = std::clamp(kbps, 16, 512)};
+    return output::StreamFormat{.bitrate_kbps = std::clamp(kbps, 16, 512),
+                                .codec = output::StreamCodec::opus,
+                                .sample_rate_cap = {}};
 }
 
 std::string describe(const std::optional<output::StreamFormat>& format) {

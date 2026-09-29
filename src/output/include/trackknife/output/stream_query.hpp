@@ -17,6 +17,7 @@ enum class StreamCodec { opus, flac, wav };
 struct StreamFormat final {
     int bitrate_kbps{128};
     StreamCodec codec{StreamCodec::opus};
+    std::optional<int> sample_rate_cap;
 
     friend bool operator==(const StreamFormat&, const StreamFormat&) = default;
 };

@@ -65,6 +65,11 @@ renderers without FLAC. It uses the same transcode cache, keyed by format.
 Each file is sent with its duration in the DIDL-Lite metadata, and with
 title, artist, album and cover art for renderers that have a display.
 
+Protocol-info MIME declarations do not express every decoder limit. Sonos
+advertises FLAC without its documented 48 kHz ceiling, so higher-rate sources
+are delivered as lossless FLAC capped at 48 kHz. Sources already within that
+limit and renderers without that identified constraint keep the original.
+
 **ReplayGain is unsupported.** UPnP outputs play at unity gain and report
 `replay_gain: false` in their output capability. Originals therefore remain
 originals when the renderer supports their format, and conversion is limited

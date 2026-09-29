@@ -20,6 +20,8 @@ struct UpnpService final {
 struct UpnpRenderer final {
     std::string udn;
     std::string name;
+    std::string manufacturer;
+    std::string model;
     std::string address; // Engine address on the discovery interface, never loopback.
     UpnpService transport;
     UpnpService rendering;

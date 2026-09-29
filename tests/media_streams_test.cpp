@@ -162,7 +162,10 @@ int main(int argc, char** argv) {
     // The agents' token opens what plays, converted when asked.
     const auto agent = output::stream_query(
                            output::StreamRequest{.raw_path = track,
-                                                 .format = output::StreamFormat{.bitrate_kbps = 64},
+                                                 .format = output::StreamFormat{
+                                                     .bitrate_kbps = 64,
+                                                     .codec = output::StreamCodec::opus,
+                                                     .sample_rate_cap = {}},
                                                  .selection = {},
                                                  .segment = {}}) +
                        "&token=agent-token";

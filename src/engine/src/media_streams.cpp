@@ -151,7 +151,9 @@ void register_stream_methods(protocol::Dispatcher& dispatcher, const MediaStream
                 .raw_path = std::move(*raw_path), .format = {}, .selection = {}, .segment = {}};
             if (params.value("format", std::string{"original"}) == "opus") {
                 request.format = output::StreamFormat{
-                    .bitrate_kbps = std::clamp(params.value("bitrate", 128), 16, 512)};
+                    .bitrate_kbps = std::clamp(params.value("bitrate", 128), 16, 512),
+                    .codec = output::StreamCodec::opus,
+                    .sample_rate_cap = {}};
             }
             return protocol::Json{{"port", port},
                                   {"query", streams.ticket(request, std::chrono::hours{1})}};

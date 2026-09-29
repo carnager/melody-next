@@ -50,10 +50,10 @@ renderer_stream_format(const std::string& sink, const std::string& mime, bool pa
         return std::nullopt;
     }
     if (accepts(sink, "audio/flac") || accepts(sink, "audio/x-flac")) {
-        return StreamFormat{.codec = StreamCodec::flac};
+        return StreamFormat{.codec = StreamCodec::flac, .sample_rate_cap = {}};
     }
     if (accepts(sink, "audio/wav") || accepts(sink, "audio/x-wav") || accepts(sink, "audio/wave")) {
-        return StreamFormat{.codec = StreamCodec::wav};
+        return StreamFormat{.codec = StreamCodec::wav, .sample_rate_cap = {}};
     }
     return std::unexpected(
         unsupported("renderer advertises no compatible original, FLAC or WAV format"));
@@ -108,6 +108,18 @@ std::optional<std::int64_t> renderer_time_ms(const std::string& text) {
         fraction = *n;
     }
     return ((*h * 60 + *m) * 60 + *s) * 1000 + fraction;
+}
+StreamRequest renderer_compatible_request(StreamRequest request,
+                                          const discovery::UpnpRenderer& renderer,
+                                          const int source_sample_rate) {
+    constexpr int sonos_maximum_sample_rate = 48'000;
+    if (renderer.manufacturer == "Sonos, Inc." && source_sample_rate > sonos_maximum_sample_rate) {
+        if (!request.format) {
+            request.format = StreamFormat{.codec = StreamCodec::flac, .sample_rate_cap = {}};
+        }
+        request.format->sample_rate_cap = sonos_maximum_sample_rate;
+    }
+    return request;
 }
 UpnpAudition::UpnpAudition(std::string udn, std::shared_ptr<discovery::UpnpControl> control,
                            Prepare prepare, bool background)
@@ -231,6 +243,8 @@ core::Result<void> UpnpAudition::load(StreamRequest request, bool playing,
         state_.state = playing ? State::buffering : State::paused;
         playing_requested_ = playing;
         saw_playing_ = false;
+        stopped_while_starting_ = 0;
+        startup_rejected_ = false;
         pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
     }
     if (playing) {
@@ -325,8 +339,10 @@ void UpnpAudition::poll() {
     if (status == "PLAYING") {
         state_.state = State::playing;
         saw_playing_ = true;
+        stopped_while_starting_ = 0;
     } else if (status == "TRANSITIONING") {
         state_.state = State::buffering;
+        stopped_while_starting_ = 0;
     } else if (status == "PAUSED_PLAYBACK") {
         state_.state = State::paused;
     } else if ((status == "STOPPED" || status == "NO_MEDIA_PRESENT") && playing_requested_ &&
@@ -334,6 +350,16 @@ void UpnpAudition::poll() {
         // Also handles devices accepting SetNext but silently ignoring it.
         state_.state = State::ended;
         playing_requested_ = false;
+    } else if ((status == "STOPPED" || status == "NO_MEDIA_PRESENT") && playing_requested_ &&
+               !saw_playing_ && ++stopped_while_starting_ >= 10) {
+        // A few renderers acknowledge Play even when they cannot decode the
+        // resource. Do not leave the engine buffering forever in that case.
+        state_.state = State::paused;
+        state_.error = core::Error{.code = core::ErrorCode::backend,
+                                   .message = "UPnP renderer accepted Play but did not start",
+                                   .context = {}};
+        playing_requested_ = false;
+        startup_rejected_ = true;
     }
     if (completed_seek) {
         state_.position_sample = *completed_seek;
@@ -351,7 +377,11 @@ void UpnpAudition::poll() {
     if (ec == std::errc{} && end == volume.data() + volume.size()) {
         state_.volume_percent = std::clamp(percent, 0, 100);
     }
-    state_.error = std::move(pending_seek_error);
+    if (pending_seek_error) {
+        state_.error = std::move(pending_seek_error);
+    } else if (!startup_rejected_) {
+        state_.error.reset();
+    }
 }
 void UpnpAudition::run() {
     for (;;) {
@@ -429,6 +459,10 @@ core::Result<void> UpnpAudition::play() {
     }
     const std::lock_guard lock{state_mutex_};
     playing_requested_ = true;
+    saw_playing_ = false;
+    stopped_while_starting_ = 0;
+    startup_rejected_ = false;
+    state_.error.reset();
     state_.state = State::buffering;
     return {};
 }

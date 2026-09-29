@@ -60,7 +60,8 @@ core::Result<std::filesystem::path> TranscodeCache::ensure(const TranscodeSource
              << source.selection.subsong_index.value_or(-1) << '\0'
              << (source.segment ? source.segment->start_sample : -1) << ':'
              << (source.segment ? source.segment->end_sample.value_or(-1) : -1) << '\0' << extension
-             << ":" << (format.codec == output::StreamCodec::opus ? format.bitrate_kbps : 0);
+             << ":" << (format.codec == output::StreamCodec::opus ? format.bitrate_kbps : 0) << ':'
+             << format.sample_rate_cap.value_or(0);
     const auto key = hex_digest(identity.str());
     const auto target = directory_ / (key + "." + extension);
 
@@ -122,6 +123,7 @@ core::Result<std::filesystem::path> TranscodeCache::convert(const TranscodeSourc
     request.source_range = source.segment;
     request.destination_raw_path = target.native();
     request.preset = *preset;
+    request.sample_rate_cap = format.sample_rate_cap;
     // Stereo at most: a phone has two ears' worth of output, and a 5.1
     // master at 128 kbps would spend its bits on channels folded away.
     request.channel_policy = convert::ConversionChannelPolicy::stereo;

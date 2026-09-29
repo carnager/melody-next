@@ -163,6 +163,7 @@ local_replay_gain_override(const LocalTrackRow& row) {
 } // namespace
 
 BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
+    workspace_.setView(this);
     layout_pushes_.setMaxThreadCount(1);
     // ADR-0234: this computer's engine is always the first link, connected
     // or not; remotes follow when configured.
@@ -192,6 +193,16 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 BenchMainWindow::~BenchMainWindow() { stopBackgroundWork(); }
+
+void BenchMainWindow::showMessage(const QString& text, const int timeout_ms) {
+    statusBar()->showMessage(text, timeout_ms);
+}
+
+void BenchMainWindow::artworkLoaded(const QString& key) {
+    if (key == header_cover_wanted_) {
+        refreshHeaderCover(header_cover_entry_);
+    }
+}
 
 void BenchMainWindow::refreshMuteButton() {
     if (!mute_button_ || !volume_)

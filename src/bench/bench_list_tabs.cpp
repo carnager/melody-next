@@ -351,12 +351,6 @@ void BenchMainWindow::restoreLists(std::vector<persistence::ListDocument> docume
     flushEngineRelocations();
 }
 
-void BenchMainWindow::schedulePersist() {
-    if (persistence_timer_ != nullptr) {
-        persistence_timer_->start();
-    }
-}
-
 std::vector<persistence::ListDocument> BenchMainWindow::collectDocuments() {
     std::vector<persistence::ListDocument> documents;
     documents.reserve(static_cast<std::size_t>(tabs_->count()));
@@ -1293,26 +1287,6 @@ void BenchMainWindow::refreshActiveContext() {
     if (seek_ != nullptr) {
         refreshTransport();
     }
-}
-
-BenchMainWindow::ListTab* BenchMainWindow::tabForDocument(const core::StableId& document_id) {
-    if (document_id.is_nil()) {
-        return nullptr;
-    }
-    return tabForDocument(QString::fromStdString(document_id.to_string()));
-}
-
-BenchMainWindow::ListTab* BenchMainWindow::tabForDocument(const QString& document_id) {
-    for (int index = 0; index < tabs_->count(); ++index) {
-        auto* view = qobject_cast<QTableView*>(tabs_->widget(index));
-        if (view != nullptr && view->property("bench-document-id").toString() == document_id) {
-            return static_cast<ListTab*>(view->property("bench-tab-pointer").value<void*>());
-        }
-    }
-    if (detached_playback_ &&
-        QString::fromStdString(detached_playback_->document.id.to_string()) == document_id)
-        return &*detached_playback_;
-    return nullptr;
 }
 
 bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,

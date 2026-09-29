@@ -13,6 +13,8 @@ qt_add_library(
     trackknife_workspace STATIC
     workspace.cpp
     workspace.hpp
+    workspace_ingest.cpp
+    workspace_view.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp
     ../bench/bench_main_window_helpers.cpp

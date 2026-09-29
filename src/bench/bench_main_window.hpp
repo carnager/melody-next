@@ -4,6 +4,7 @@
 
 #include "bench/catalogue_source.hpp"
 #include "workspace/workspace.hpp"
+#include "workspace/workspace_view.hpp"
 #include "bench/engine_key.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
@@ -122,7 +123,7 @@ class PlaylistTransferBar;
     return parsed ? *parsed : core::StableId{};
 }
 
-class BenchMainWindow final : public QMainWindow {
+class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     Q_OBJECT
     // ADR-0220: the workspace's state and behaviour live in Workspace, which
     // both windows are drawn over; this window reaches them through these
@@ -208,6 +209,10 @@ class BenchMainWindow final : public QMainWindow {
     void importM3u8Path(std::string raw_path);
     void openLocalPaths(std::vector<std::string> raw_paths);
 
+    // WorkspaceView
+    void showMessage(const QString& text, int timeout_ms) override;
+    void artworkLoaded(const QString& key) override;
+
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
@@ -255,7 +260,7 @@ class BenchMainWindow final : public QMainWindow {
     void refreshPanelLayoutActions();
     void initializePersistence();
     void restoreLists(std::vector<persistence::ListDocument> documents);
-    void schedulePersist();
+    void schedulePersist() { workspace_.schedulePersist(); }
     void persistNow(bool wait);
     // ADR-0233: another client's version of a list open here, and a save of
     // one that someone else saved first.
@@ -321,11 +326,15 @@ class BenchMainWindow final : public QMainWindow {
                           std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
     [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
     void showReplayGainDialog();
-    [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
+    [[nodiscard]] ListTab* tabForDocument(const QString& document_id) {
+        return workspace_.tabForDocument(document_id);
+    }
     // ADR-0220 Phase 0: playback state names its document by identity, not
     // by a rendered QString. Widget properties still carry the text form, so
     // both spellings resolve to the same tab.
-    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id);
+    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id) {
+        return workspace_.tabForDocument(document_id);
+    }
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
@@ -352,7 +361,7 @@ class BenchMainWindow final : public QMainWindow {
     void replayListEdit(bool undo);
     // An edit made here: saved, and -- to the list playing -- told to its
     // engine, whose queue it is.
-    void markTabDirty(ListTab& tab);
+    void markTabDirty(ListTab& tab) override;
     // A change the engine made -- its queue adopted, a consumed row dropped:
     // saved, never sent back. Sent back, it is this window's copy of the
     // engine's queue replacing the queue itself, tags another client gave it
@@ -437,12 +446,13 @@ class BenchMainWindow final : public QMainWindow {
     void openFolderDialog();
     void addFolderRoot();
     void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
-                        int insertion_row, bool replace_and_play = false);
-    void finishDiscovery();
+                        int insertion_row, bool replace_and_play = false) {
+        workspace_.startDiscovery(std::move(raw_paths), std::move(target_document_id), insertion_row,
+                                  replace_and_play);
+    }
 
 
-    void enqueueUnprobedRows(ListTab& tab);
-    void enrichRemoteRows(ListTab& tab);
+    void enqueueUnprobedRows(ListTab& tab) { workspace_.enqueueUnprobedRows(tab); }
     // ADR-0226: this computer's engine outlives the window, so a rebuilt or
     // updated one keeps running the old program until it is restarted --
     // done here, at once when nothing plays, else when playback stops.
@@ -479,14 +489,12 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const;
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
-    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);
-    void pumpProbeQueue();
-    void finishProbeBatch();
+    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row) {
+        workspace_.insertRemotePaths(tab, std::move(raw_paths), insertion_row);
+    }
 
-    void syncArtwork(ListTab& tab);
-    void invalidateArtwork(const std::string& raw_path);
-    void pumpArtworkQueue();
-    void finishArtworkLoad();
+    void syncArtwork(ListTab& tab) { workspace_.syncArtwork(tab); }
+    void invalidateArtwork(const std::string& raw_path) { workspace_.invalidateArtwork(raw_path); }
 
     void buildLocalPlaybackControls(QMenu* playback_menu);
     void refreshLocalPlaybackControls();
@@ -558,9 +566,11 @@ class BenchMainWindow final : public QMainWindow {
     void refreshHeaderCover(const QString& entry);
     // An album's cover from the lists or the cache; fetched when neither has
     // it, arriving later through the same path as a tab's.
-    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine);
+    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine) {
+        return workspace_.coverFor(track, engine);
+    }
     void setUpNextCount(int count);
-    void playRow(ListTab& tab, int row);
+    void playRow(ListTab& tab, int row) override;
     void refreshTransport();
     void buildMprisService();
     void publishMprisState();
@@ -670,7 +680,7 @@ class BenchMainWindow final : public QMainWindow {
     bool applying_track_view_layout_{false};
 
     QAction* notifications_action_{nullptr};
-    [[nodiscard]] EngineLink* link(const EngineKey& key) const;
+    [[nodiscard]] EngineLink* link(const EngineKey& key) const { return workspace_.link(key); }
     [[nodiscard]] EngineLink& localEngine() const { return *engines_.front(); }
     // The remote configured in Settings -- by its id once it has said it,
     // "remote" until then. Null when none is configured.
@@ -715,8 +725,12 @@ class BenchMainWindow final : public QMainWindow {
     // The engine link whose file-work connection this is.
     [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
     // Parts of an engine's link; null when it or the part is not there.
-    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
-    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
+    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const {
+        return workspace_.playbackOf(key);
+    }
+    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const {
+        return workspace_.catalogueOf(key);
+    }
     [[nodiscard]] LocalLibraryPanel* libraryOf(const EngineKey& key) const;
     [[nodiscard]] EnginePlayback* localPlayback() const { return localEngine().playback; }
     [[nodiscard]] EnginePlayback* remotePlayback() const {

@@ -46,6 +46,7 @@ class QTableView;
 namespace trackknife::bench {
 
 class LocalLibraryPanel;
+class WorkspaceView;
 
 // ADR-0220: the workspace a window shows -- the engines it reaches, the lists
 // open from them, what plays and waits to, and the work under way -- without
@@ -62,6 +63,10 @@ class Workspace final : public QObject {
     Workspace(const Workspace&) = delete;
     Workspace& operator=(const Workspace&) = delete;
     ~Workspace() override;
+
+    // The window drawing it; set once, before anything is asked.
+    void setView(WorkspaceView* view) { view_ = view; }
+
 
     struct ListTab {
         persistence::ListDocument document;
@@ -248,6 +253,44 @@ class Workspace final : public QObject {
     QString lastfm_user_;
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
+  public:
+    // The engines, by key; the parts of one, null when absent.
+    [[nodiscard]] EngineLink* link(const EngineKey& key) const;
+    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
+    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
+    // An open list, by its document's identity -- or the list that goes on
+    // playing after its tab was closed.
+    [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
+    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id);
+    // Saves the lists a moment from now.
+    void schedulePersist();
+
+    // Files into lists: discovered from paths and folders (CUE sheets
+    // expanded), probed for their tags a batch at a time, and -- for a list
+    // on an engine elsewhere -- filled in from that engine's index.
+    void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
+                        int insertion_row, bool replace_and_play = false);
+    void enqueueUnprobedRows(ListTab& tab);
+    void enrichRemoteRows(ListTab& tab);
+    // Rows from paths a remote engine gave -- a drag from its library --
+    // without looking for them on this computer, where they need not be.
+    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);
+    // Covers: asked for each album of a list, once, and cached.
+    void syncArtwork(ListTab& tab);
+    // An album's cover from the lists or the cache; fetched when neither has
+    // it, arriving later through the same path as a list's.
+    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine);
+    void invalidateArtwork(const std::string& raw_path);
+
+  private:
+    void finishDiscovery();
+    void pumpProbeQueue();
+    void finishProbeBatch();
+    void pumpArtworkQueue();
+    void finishArtworkLoad();
+
+    WorkspaceView* view_{nullptr};
+
 };
 
 } // namespace trackknife::bench

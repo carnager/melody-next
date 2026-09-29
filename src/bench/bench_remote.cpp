@@ -24,11 +24,6 @@
 
 namespace trackknife::bench {
 
-BenchMainWindow::EngineLink* BenchMainWindow::link(const EngineKey& key) const {
-    const auto found = std::ranges::find(engines_, key, [](const auto& each) { return each->key; });
-    return found != engines_.end() ? found->get() : nullptr;
-}
-
 // ADR-0234: an engine elsewhere has said who it is. Known until now by a
 // placeholder -- the remote of an older release, or its address -- its
 // lists and everything kept for it take its id. Known by another id, the
@@ -102,16 +97,6 @@ BenchMainWindow::EngineLink* BenchMainWindow::linkOf(const EnginePlayback* playb
     const auto found =
         std::ranges::find(engines_, playback, [](const auto& each) { return each->playback; });
     return found != engines_.end() ? found->get() : nullptr;
-}
-
-EnginePlayback* BenchMainWindow::playbackOf(const EngineKey& key) const {
-    const auto* engine = link(key);
-    return engine != nullptr ? engine->playback : nullptr;
-}
-
-CatalogueSource* BenchMainWindow::catalogueOf(const EngineKey& key) const {
-    const auto* engine = link(key);
-    return engine != nullptr ? engine->catalogue.get() : nullptr;
 }
 
 LocalLibraryPanel* BenchMainWindow::libraryOf(const EngineKey& key) const {

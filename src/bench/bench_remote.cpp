@@ -154,7 +154,7 @@ void BenchMainWindow::syncRemoteEngines() {
     const auto listed = [&wanted](const EngineLink& engine) {
         return std::ranges::any_of(wanted, [&engine](const RemoteEngineSetting& setting) {
             return setting.address == engine.setting.address &&
-                   setting.effectivePassword() == engine.setting.effectivePassword();
+                   setting.effectivePassword() == engine.password;
         });
     };
     std::vector<EngineKey> gone;
@@ -251,8 +251,9 @@ void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, co
                  : first ? EngineKey::remote()
                          : EngineKey::fromText(QStringLiteral("address:") + setting.address);
     added->setting = setting;
-    added->catalogue = std::make_unique<CatalogueSource>(database_path_, setting.address,
-                                                         setting.effectivePassword());
+    added->password = setting.effectivePassword();
+    added->catalogue =
+        std::make_unique<CatalogueSource>(database_path_, setting.address, added->password);
     if (!added->catalogue->configured()) {
         return;
     }

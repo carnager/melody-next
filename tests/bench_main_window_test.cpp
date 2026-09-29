@@ -73,6 +73,7 @@
 #include <QProxyStyle>
 #include <QStyleFactory>
 #include <QSysInfo>
+#include <QProcess>
 #include <QTcpServer>
 
 #include <QAbstractItemModelTester>
@@ -263,6 +264,7 @@ class BenchMainWindowTest final : public QObject {
     void twoEnginesElsewhereSideBySide();
     void settingsListTheEnginesElsewhere();
     void enginesAddedOrRemovedApplyAtOnce();
+    void aPasswordGivenLaterReachesTheEngine();
     void anotherEngineAtTheSameAddressLeavesTheOldOnesLists();
     void theListsPanelShowsEveryListAndTakesDrops();
     void aWorkingListClosedAfterAReconnectLeavesItsEngine();
@@ -2579,6 +2581,71 @@ void BenchMainWindowTest::enginesAddedOrRemovedApplyAtOnce() {
     QVERIFY(window.engines_[1]->playback->active());
     QCOMPARE(window.engines_[1]->setting.address, second.socket());
     saveRemoteEngines({});
+}
+
+// An engine on the network added without its password, and "the password
+// above" filled in afterwards: pressing OK again connects with it, rather
+// than keeping the connection made with none until Trackknife restarts.
+void BenchMainWindowTest::aPasswordGivenLaterReachesTheEngine() {
+    QTemporaryDir state;
+    QTemporaryDir music;
+    QVERIFY(state.isValid() && music.isValid());
+    const auto port = [] {
+        QTcpServer probe;
+        probe.listen(QHostAddress::LocalHost, 0);
+        return probe.serverPort();
+    }();
+    const auto password = QStringLiteral("correct horse");
+    QProcess engine;
+    engine.setProgram(QStringLiteral(TRACKKNIFE_ENGINE_BINARY));
+    engine.setArguments({QStringLiteral("--socket"), state.filePath(QStringLiteral("melodyd.sock")),
+                         QStringLiteral("--state"), state.path(), QStringLiteral("--listen"),
+                         QStringLiteral("127.0.0.1:%1").arg(port), QStringLiteral("--password"),
+                         password});
+    engine.setProcessChannelMode(QProcess::MergedChannels);
+    engine.start();
+    QVERIFY(engine.waitForStarted());
+    const auto address = QStringLiteral("127.0.0.1:%1").arg(port);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        protocol::Client::connect(
+            *protocol::Endpoint::parse(address.toStdString(), password.toStdString()))
+            .has_value(),
+        10'000);
+    saveRemoteEngines({});
+    QSettings{}.remove(QLatin1String(SettingsDialog::engine_password_key));
+    BenchMainWindow window;
+    window.show();
+    QTRY_VERIFY(window.lists_restored_);
+    const RemoteEngineSetting setting{
+        .address = address, .password = {}, .music_folder = {}, .reachable_at = {}, .id = {}};
+    saveRemoteEngines({setting});
+    window.syncRemoteEngines();
+    QCOMPARE(window.engines_.size(), std::size_t{2});
+    // Refused: no password yet.
+    QVERIFY(!window.engines_[1]->catalogue->open()->roots().has_value());
+    QSettings{}.setValue(QLatin1String(SettingsDialog::engine_password_key), password);
+    window.syncRemoteEngines();
+    QCOMPARE(window.engines_.size(), std::size_t{2});
+    auto& link = *window.engines_[1];
+    const auto folder = QFile::encodeName(music.path()).toStdString();
+    link.library->addRoot(folder);
+    const auto roots = [&link] {
+        std::vector<std::string> found;
+        if (auto listed = link.catalogue->open()->roots()) {
+            for (const auto& root : *listed) {
+                found.push_back(root.raw_path);
+            }
+        }
+        return found;
+    };
+    QTRY_VERIFY2_WITH_TIMEOUT(
+        std::ranges::contains(roots(), folder),
+        qPrintable(link.library->findChild<QLabel*>(QStringLiteral("local-library-status"))->text()),
+        5'000);
+    saveRemoteEngines({});
+    QSettings{}.remove(QLatin1String(SettingsDialog::engine_password_key));
+    engine.terminate();
+    QVERIFY(engine.waitForFinished(5'000));
 }
 
 void BenchMainWindowTest::followPlaybackAndJumpRespectBrowsing() {

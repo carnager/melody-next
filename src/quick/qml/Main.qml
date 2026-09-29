@@ -35,12 +35,20 @@ ApplicationWindow {
         location: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/trackknife/quick-window.conf"
         category: "QuickWindow"
         property alias upNextOpen: window.upNextOpen
+        property alias appearance: window.appearance
         property alias x: window.x
         property alias y: window.y
         property alias width: window.width
         property alias height: window.height
     }
     property bool upNextOpen: true
+    // As Theme.mode: 0 the system's, 1 light, 2 dark.
+    property int appearance: 0
+    Binding {
+        target: Theme
+        property: "mode"
+        value: window.appearance
+    }
 
     Shortcut {
         sequence: "Space"
@@ -66,6 +74,27 @@ ApplicationWindow {
                 checkable: true
                 checked: window.upNextOpen
                 onTriggered: window.upNextOpen = !window.upNextOpen
+            }
+            Menu {
+                title: "Appearance"
+                MenuItem {
+                    text: "As the system"
+                    checkable: true
+                    checked: window.appearance === 0
+                    onTriggered: window.appearance = 0
+                }
+                MenuItem {
+                    text: "Light"
+                    checkable: true
+                    checked: window.appearance === 1
+                    onTriggered: window.appearance = 1
+                }
+                MenuItem {
+                    text: "Dark"
+                    checkable: true
+                    checked: window.appearance === 2
+                    onTriggered: window.appearance = 2
+                }
             }
         }
         MenuSeparator {}
@@ -181,7 +210,7 @@ ApplicationWindow {
         visible: opacity > 0
         opacity: Engine.current.connected ? 0 : 1
         Behavior on opacity { NumberAnimation { duration: 200 } }
-        color: Qt.rgba(0.08, 0.09, 0.11, 0.85)
+        color: Theme.scrim
 
         MouseArea { anchors.fill: parent }
 

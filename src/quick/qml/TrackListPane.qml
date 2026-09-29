@@ -88,19 +88,29 @@ Rectangle {
             if (isTab(session, listId))
                 Engine.show(session, listId);
         } else if (Engine.tracks.session === null && remembered.open.length > 0) {
+            // Something to look at until the remembered list's engine
+            // answers -- shown, not remembered, so it does not replace it.
             const first = remembered.open[0];
             if (first.startsWith(prefix))
-                show(session, first.slice(prefix.length));
+                Engine.show(session, first.slice(prefix.length));
         }
     }
 
     Instantiator {
         model: Engine.sessions
-        delegate: Connections {
+        delegate: Item {
             required property var modelData
-            target: modelData.lists
-            function onLoaded() {
-                pane.adoptLists(modelData);
+            Connections {
+                target: modelData.lists
+                function onLoaded() {
+                    pane.adoptLists(modelData);
+                }
+            }
+            Connections {
+                target: modelData
+                function onListCreated(listId) {
+                    pane.open(modelData, listId);
+                }
             }
         }
     }
@@ -193,6 +203,18 @@ Rectangle {
         id: savedMenu
         Instantiator {
             model: Engine.sessions
+            delegate: MenuItem {
+                required property var modelData
+                text: Engine.sessions.length > 1 ? "New list on " + modelData.name : "New list"
+                enabled: modelData.connected
+                onTriggered: pane.newList(modelData)
+            }
+            onObjectAdded: (index, object) => savedMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => savedMenu.removeItem(object)
+        }
+        MenuSeparator {}
+        Instantiator {
+            model: Engine.sessions
             delegate: Menu {
                 id: engineMenu
                 required property var modelData
@@ -214,8 +236,58 @@ Rectangle {
                     onObjectRemoved: (index, object) => engineMenu.removeItem(object)
                 }
             }
-            onObjectAdded: (index, object) => savedMenu.insertMenu(index, object)
+            onObjectAdded: (index, object) => savedMenu.insertMenu(index + Engine.sessions.length + 1, object)
             onObjectRemoved: (index, object) => savedMenu.removeMenu(object)
+        }
+    }
+
+    NameDialog { id: nameDialog }
+    ConfirmDialog { id: confirmDialog }
+
+    function newList(session) {
+        nameDialog.ask("New list", "A working list on " + session.name + ":", "New list",
+                       name => session.createList(name));
+    }
+
+    // What the tab menu acts on.
+    property var menuSession: null
+    property string menuList: ""
+    property string menuName: ""
+    property bool menuSaved: false
+
+    Menu {
+        id: tabMenu
+        MenuItem {
+            text: "Rename…"
+            onTriggered: {
+                const session = pane.menuSession, id = pane.menuList;
+                nameDialog.ask("Rename list", "New name:", pane.menuName, name => session.renameList(id, name));
+            }
+        }
+        MenuItem {
+            text: "Save as playlist…"
+            visible: !pane.menuSaved
+            height: visible ? implicitHeight : 0
+            onTriggered: {
+                const session = pane.menuSession, id = pane.menuList;
+                nameDialog.ask("Save as playlist", "Kept on " + session.name + " as:", pane.menuName,
+                               name => session.saveList(id, name));
+            }
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Close tab"
+            onTriggered: pane.close(pane.menuSession, pane.menuList)
+        }
+        MenuItem {
+            text: "Delete…"
+            onTriggered: {
+                const session = pane.menuSession, id = pane.menuList;
+                confirmDialog.ask("Delete list",
+                                  "Delete “" + pane.menuName + "” from " + session.name
+                                  + "? Every window loses it, and it cannot be undone.",
+                                  () => session.deleteList(id));
+            }
         }
     }
 
@@ -328,12 +400,26 @@ Rectangle {
                                     }
                                     MouseArea {
                                         anchors.fill: parent
-                                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                                        acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                                         onClicked: mouse => {
-                                            if (mouse.button === Qt.MiddleButton)
+                                            if (mouse.button === Qt.MiddleButton) {
                                                 pane.close(group.session, tab.listId);
-                                            else
+                                            } else if (mouse.button === Qt.RightButton) {
+                                                pane.menuSession = group.session;
+                                                pane.menuList = tab.listId;
+                                                pane.menuName = tab.name;
+                                                pane.menuSaved = tab.saved;
+                                                tabMenu.popup();
+                                            } else {
                                                 pane.show(group.session, tab.listId);
+                                            }
+                                        }
+                                        onDoubleClicked: mouse => {
+                                            if (mouse.button !== Qt.LeftButton)
+                                                return;
+                                            const session = group.session, id = tab.listId;
+                                            nameDialog.ask("Rename list", "New name:", tab.name,
+                                                           name => session.renameList(id, name));
                                         }
                                     }
                                     // Whose list, when there is more than one engine.
@@ -384,7 +470,7 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         icon: "plus"
                         iconSize: 13
-                        tip: "Open a list"
+                        tip: "New or open a list"
                         onClicked: savedMenu.popup(openButton, 0, openButton.height)
                     }
                 }
@@ -632,7 +718,7 @@ Rectangle {
                         height: parent.height
                         verticalAlignment: Text.AlignVCenter
                         text: row.title
-                        color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.text
+                        color: row.isPlaying || row.isSelected ? Theme.accentText : Theme.text
                         font.pixelSize: Theme.fontSize
                         elide: Text.ElideRight
                     }
@@ -644,7 +730,7 @@ Rectangle {
                         horizontalAlignment: Text.AlignRight
                         verticalAlignment: Text.AlignVCenter
                         text: row.duration > 0 ? Engine.formatDuration(row.duration) : ""
-                        color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.dim
+                        color: row.isPlaying || row.isSelected ? Theme.accentText : Theme.dim
                         font.pixelSize: Theme.fontSize
                         font.features: { "tnum": 1 }
                     }

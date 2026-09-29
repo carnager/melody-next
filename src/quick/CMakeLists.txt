@@ -43,6 +43,8 @@ qt_add_qml_module(
     qml/IconButton.qml
     qml/Cover.qml
     qml/DragGhost.qml
+    qml/NameDialog.qml
+    qml/ConfirmDialog.qml
     qml/TkSlider.qml
     qml/PlayerBar.qml
     qml/LibraryPane.qml

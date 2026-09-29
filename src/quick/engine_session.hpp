@@ -78,9 +78,19 @@ class EngineSession final : public QObject {
     // identity.
     [[nodiscard]] static EngineClient::Json copiedItem(const EngineClient::Json& item);
 
+    // The engine's lists as a whole (ADR-0233).
+    // A new, empty working list; listCreated says which.
+    Q_INVOKABLE void createList(const QString& name);
+    Q_INVOKABLE void renameList(const QString& id, const QString& name);
+    // Keeps a working list: it becomes a saved list of that name, the same
+    // list -- as the widgets window saves one.
+    Q_INVOKABLE void saveList(const QString& id, const QString& name);
+    Q_INVOKABLE void deleteList(const QString& id);
+
     void start() { client_.start(); }
 
   signals:
+    void listCreated(const QString& id);
     void connectedChanged();
     // Something asked of the engine was refused; for the window to say.
     void failed(const QString& message);

@@ -99,6 +99,57 @@ void EngineSession::editList(const QString& id, ListEdit edit, const std::option
                  });
 }
 
+void EngineSession::createList(const QString& name) {
+    client_.command(QStringLiteral("list.save"),
+                    Json{{"name", name.trimmed().toStdString()}, {"kind", "working"}, {"items", Json::array()}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                            return;
+                        }
+                        emit listCreated(QString::fromStdString(answer->value("id", std::string{})));
+                    });
+}
+
+void EngineSession::renameList(const QString& id, const QString& name) {
+    client_.command(QStringLiteral("list.rename"),
+                    Json{{"id", id.toStdString()}, {"name", name.trimmed().toStdString()}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                        }
+                    });
+}
+
+void EngineSession::saveList(const QString& id, const QString& name) {
+    client_.call(QStringLiteral("list.get"), Json{{"id", id.toStdString()}},
+                 [this, id, name](const auto& answer) {
+                     if (!answer) {
+                         emit failed(QString::fromStdString(answer.error().message));
+                         return;
+                     }
+                     client_.command(QStringLiteral("list.save"),
+                                     Json{{"id", id.toStdString()},
+                                          {"name", name.trimmed().toStdString()},
+                                          {"kind", "saved"},
+                                          {"items", answer->value("items", Json::array())},
+                                          {"revision", answer->value("revision", std::uint64_t{0})}},
+                                     [this](const auto& saved) {
+                                         if (!saved) {
+                                             emit failed(QString::fromStdString(saved.error().message));
+                                         }
+                                     });
+                 });
+}
+
+void EngineSession::deleteList(const QString& id) {
+    client_.command(QStringLiteral("list.delete"), Json{{"id", id.toStdString()}}, [this](const auto& answer) {
+        if (!answer) {
+            emit failed(QString::fromStdString(answer.error().message));
+        }
+    });
+}
+
 // A list edited while it plays is an edit to what plays: the engine's queue
 // is replaced by the list as it now is, without starting anything.
 void EngineSession::followPlaying(const Json& before, const Json& after) {

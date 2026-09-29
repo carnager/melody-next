@@ -55,7 +55,7 @@ Rectangle {
                         line += " (" + bar.player.date + ")";
                     return line;
                 }
-                color: bar.player.error !== "" ? "#e08a7a" : Theme.dim
+                color: bar.player.error !== "" ? Theme.error : Theme.dim
                 font.pixelSize: Theme.fontSize
                 elide: Text.ElideRight
             }

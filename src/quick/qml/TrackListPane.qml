@@ -16,24 +16,28 @@ Rectangle {
     readonly property int numberWidth: 26
     readonly property int lengthWidth: 56
 
-    // Which lists show as tabs: every engine's working lists, and the saved
-    // ones opened here. Remembered for next time, like the list on show.
-    // Lists are named "<engine key>|<list id>" there.
+    // Tabs are the lists this window has open, of any engine, working or
+    // saved. Another window's working lists are its tabs, not this one's:
+    // they are one choice away under +. Lists are named "<engine>|<list>".
     Settings {
         id: remembered
         // Its own file: the widgets window's settings are not this one's to write.
         location: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/trackknife/quick-window.conf"
         category: "QuickWindow"
         property string currentList: ""
-        property var openSaved: []
+        property var open: []
+        // Engines met before: one whose tabs were all closed stays so.
+        property var engines: []
     }
+
+    readonly property var engineColors: ["#6cc28b", Theme.accent, "#d6a04c", "#c07bd6", "#5fb8c9"]
 
     function tabKey(session, listId) {
         return session.key + "|" + listId;
     }
 
-    function isTab(session, listId, saved) {
-        return !saved || remembered.openSaved.indexOf(tabKey(session, listId)) >= 0;
+    function isTab(session, listId) {
+        return remembered.open.indexOf(tabKey(session, listId)) >= 0;
     }
 
     function show(session, listId) {
@@ -41,36 +45,52 @@ Rectangle {
         Engine.show(session, listId);
     }
 
-    function openSaved(session, listId) {
+    function open(session, listId) {
         const key = tabKey(session, listId);
-        if (remembered.openSaved.indexOf(key) < 0)
-            remembered.openSaved = remembered.openSaved.concat([key]);
+        if (remembered.open.indexOf(key) < 0)
+            remembered.open = remembered.open.concat([key]);
         show(session, listId);
     }
 
-    function closeSaved(session, listId) {
+    function close(session, listId) {
         const key = tabKey(session, listId);
-        remembered.openSaved = remembered.openSaved.filter(k => k !== key);
-        if (Engine.tracks.session === session && Engine.tracks.listId === listId)
-            show(session, session.lists.firstWorking());
-    }
-
-    // When an engine's lists arrive: the remembered list if it is this
-    // engine's (its first working list if that one is gone), else this
-    // engine's first working list if nothing better shows yet.
-    function adoptLists(session) {
-        const shown = Engine.tracks.session;
-        const separator = remembered.currentList.indexOf("|");
-        const rememberedEngine = remembered.currentList.slice(0, separator);
-        const rememberedList = remembered.currentList.slice(separator + 1);
-        if (rememberedEngine === session.key) {
-            Engine.show(session, session.lists.indexOf(rememberedList) >= 0 ? rememberedList
-                                                                            : session.lists.firstWorking());
+        const at = remembered.open.indexOf(key);
+        remembered.open = remembered.open.filter(k => k !== key);
+        if (Engine.tracks.session !== session || Engine.tracks.listId !== listId)
+            return;
+        // The tab beside it, as a browser does; nothing when it was the last.
+        const next = remembered.open[Math.min(at, remembered.open.length - 1)];
+        if (next === undefined) {
+            remembered.currentList = "";
+            Engine.show(null, "");
             return;
         }
-        const stale = shown === session && session.lists.indexOf(Engine.tracks.listId) < 0;
-        if (shown === null || stale)
-            Engine.show(session, session.lists.firstWorking());
+        const separator = next.indexOf("|");
+        show(Engine.sessionByKey(next.slice(0, separator)), next.slice(separator + 1));
+    }
+
+    // When an engine's lists arrive: tabs of lists that are gone close; an
+    // engine met for the first time opens the list it changed last; and
+    // the list on show is put back.
+    function adoptLists(session) {
+        const prefix = session.key + "|";
+        remembered.open = remembered.open.filter(
+            k => !k.startsWith(prefix) || session.lists.indexOf(k.slice(prefix.length)) >= 0);
+        if (remembered.engines.indexOf(session.key) < 0) {
+            remembered.engines = remembered.engines.concat([session.key]);
+            const newest = session.lists.newest();
+            if (newest !== "")
+                open(session, newest);
+        }
+        if (remembered.currentList.startsWith(prefix)) {
+            const listId = remembered.currentList.slice(prefix.length);
+            if (isTab(session, listId))
+                Engine.show(session, listId);
+        } else if (Engine.tracks.session === null && remembered.open.length > 0) {
+            const first = remembered.open[0];
+            if (first.startsWith(prefix))
+                show(session, first.slice(prefix.length));
+        }
     }
 
     Instantiator {
@@ -168,10 +188,11 @@ Rectangle {
                         required property string name
                         required property bool saved
                         required property int tracks
-                        text: name + "  ·  " + tracks
-                        visible: saved
-                        height: visible ? implicitHeight : 0
-                        onTriggered: pane.openSaved(engineMenu.modelData, listId)
+                        text: name + "  ·  " + tracks + (tracks === 1 ? " track" : " tracks")
+                        font.italic: !saved
+                        checkable: true
+                        checked: pane.isTab(engineMenu.modelData, listId)
+                        onTriggered: pane.open(engineMenu.modelData, listId)
                     }
                     onObjectAdded: (index, object) => engineMenu.insertItem(index, object)
                     onObjectRemoved: (index, object) => engineMenu.removeItem(object)
@@ -230,19 +251,6 @@ Rectangle {
                             height: 30
                             spacing: 2
 
-                            // The engine's name, where there is more than one.
-                            Text {
-                                visible: Engine.sessions.length > 1
-                                anchors.verticalCenter: parent.verticalCenter
-                                leftPadding: 8
-                                rightPadding: 4
-                                text: group.session.name
-                                color: group.session.connected ? Theme.faint : Qt.darker(Theme.faint, 1.4)
-                                font.pixelSize: Theme.smallFontSize
-                                font.capitalization: Font.AllUppercase
-                                font.letterSpacing: 0.5
-                            }
-
                             Repeater {
                                 model: group.session.lists
                                 delegate: Rectangle {
@@ -253,7 +261,7 @@ Rectangle {
                                     readonly property bool current: Engine.tracks.session === group.session
                                                                     && Engine.tracks.listId === listId
 
-                                    visible: pane.isTab(group.session, listId, saved)
+                                    visible: pane.isTab(group.session, listId)
                                     width: visible ? Math.min(220, tabLabel.implicitWidth + 50) : 0
                                     height: 30
                                     radius: 5
@@ -273,25 +281,27 @@ Rectangle {
                                         anchors.fill: parent
                                         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
                                         onClicked: mouse => {
-                                            if (mouse.button === Qt.MiddleButton && tab.saved)
-                                                pane.closeSaved(group.session, tab.listId);
+                                            if (mouse.button === Qt.MiddleButton)
+                                                pane.close(group.session, tab.listId);
                                             else
                                                 pane.show(group.session, tab.listId);
                                         }
                                     }
+                                    // Whose list, when there is more than one engine.
                                     Rectangle {
-                                        id: kindDot
+                                        id: engineDot
                                         x: 10
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 7
+                                        width: Engine.sessions.length > 1 ? 7 : 0
                                         height: 7
                                         radius: 3.5
-                                        color: tab.saved ? Theme.accent : "#6cc28b"
+                                        color: pane.engineColors[group.session.index % pane.engineColors.length]
+                                        opacity: group.session.connected ? 1 : 0.35
                                     }
                                     Text {
                                         id: tabLabel
-                                        anchors.left: kindDot.right
-                                        anchors.leftMargin: 7
+                                        anchors.left: engineDot.right
+                                        anchors.leftMargin: Engine.sessions.length > 1 ? 7 : 2
                                         anchors.right: parent.right
                                         anchors.rightMargin: 26
                                         anchors.verticalCenter: parent.verticalCenter
@@ -302,7 +312,6 @@ Rectangle {
                                         font.italic: !tab.saved
                                     }
                                     IconButton {
-                                        visible: tab.saved
                                         anchors.right: parent.right
                                         anchors.rightMargin: 4
                                         anchors.verticalCenter: parent.verticalCenter
@@ -310,8 +319,12 @@ Rectangle {
                                         iconSize: 11
                                         tip: "Close"
                                         opacity: tab.current || tabHover.hovered ? 1 : 0
-                                        onClicked: pane.closeSaved(group.session, tab.listId)
+                                        onClicked: pane.close(group.session, tab.listId)
                                     }
+
+                                    ToolTip.visible: tabHover.hovered && Engine.sessions.length > 1
+                                    ToolTip.delay: 600
+                                    ToolTip.text: group.session.name + (tab.saved ? "" : " · working list")
                                 }
                             }
                         }
@@ -322,7 +335,7 @@ Rectangle {
                         anchors.verticalCenter: parent.verticalCenter
                         icon: "plus"
                         iconSize: 13
-                        tip: "Open a saved list"
+                        tip: "Open a list"
                         onClicked: savedMenu.popup(openButton, 0, openButton.height)
                     }
                 }

@@ -38,6 +38,7 @@ void ListsModel::refresh() {
                 .name = QString::fromStdString(summary.value("name", std::string{})),
                 .saved = summary.value("kind", std::string{}) == "saved",
                 .tracks = summary.value("tracks", 0),
+                .modified_ms = summary.value("modified_ms", qint64{0}),
             });
         }
         beginResetModel();
@@ -67,13 +68,16 @@ QVariant ListsModel::data(const QModelIndex& index, const int role) const {
         return list.saved;
     case TracksRole:
         return list.tracks;
+    case ModifiedRole:
+        return list.modified_ms;
     default:
         return {};
     }
 }
 
 QHash<int, QByteArray> ListsModel::roleNames() const {
-    return {{IdRole, "listId"}, {NameRole, "name"}, {KindRole, "kind"}, {TracksRole, "tracks"}, {SavedRole, "saved"}};
+    return {{IdRole, "listId"}, {NameRole, "name"}, {KindRole, "kind"}, {TracksRole, "tracks"}, {SavedRole, "saved"},
+            {ModifiedRole, "modified"}};
 }
 
 int ListsModel::indexOf(const QString& id) const {
@@ -93,13 +97,16 @@ QString ListsModel::nameAt(const int row) const {
     return row >= 0 && row < rowCount() ? lists_[static_cast<std::size_t>(row)].name : QString{};
 }
 
-QString ListsModel::firstWorking() const {
+QString ListsModel::newest() const {
+    const Summary* best = nullptr;
     for (const auto& list : lists_) {
-        if (!list.saved) {
-            return list.id;
+        const auto better = best == nullptr || (best->saved && !list.saved) ||
+                            (best->saved == list.saved && list.modified_ms > best->modified_ms);
+        if (better) {
+            best = &list;
         }
     }
-    return lists_.empty() ? QString{} : lists_.front().id;
+    return best != nullptr ? best->id : QString{};
 }
 
 } // namespace trackknife::quick

@@ -19,7 +19,7 @@ class ListsModel final : public QAbstractListModel {
     QML_UNCREATABLE("Reached through Engine.lists")
 
   public:
-    enum Role : int { IdRole = Qt::UserRole + 1, NameRole, KindRole, TracksRole, SavedRole };
+    enum Role : int { IdRole = Qt::UserRole + 1, NameRole, KindRole, TracksRole, SavedRole, ModifiedRole };
 
     explicit ListsModel(EngineClient& client, QObject* parent = nullptr);
 
@@ -30,9 +30,9 @@ class ListsModel final : public QAbstractListModel {
     Q_INVOKABLE [[nodiscard]] int indexOf(const QString& id) const;
     Q_INVOKABLE [[nodiscard]] QString idAt(int row) const;
     Q_INVOKABLE [[nodiscard]] QString nameAt(int row) const;
-    // The list to show when none is chosen: the first working one, else the
-    // first of any kind.
-    Q_INVOKABLE [[nodiscard]] QString firstWorking() const;
+    // The list to open when this window has none of the engine's: the one
+    // changed last, working lists first.
+    Q_INVOKABLE [[nodiscard]] QString newest() const;
 
   signals:
     // Written or deleted by any client, this one included.
@@ -47,6 +47,7 @@ class ListsModel final : public QAbstractListModel {
         QString name;
         bool saved{false};
         int tracks{0};
+        qint64 modified_ms{0};
     };
     EngineClient& client_;
     std::vector<Summary> lists_;

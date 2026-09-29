@@ -98,16 +98,20 @@ cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
 
-For a development checkout, this helper fast-forwards the current tracked
-branch, configures the `dev` preset, and builds it with eight jobs. On macOS it
-also selects the Homebrew Qt and `pkg-config` dependencies:
+For this fork's two-machine setup, the helper fetches and merges the original
+repository's `main`, builds Trackknife and Melody on the desktop, pushes the
+fork branch, then connects to `192.168.1.111`, fast-forwards its checkout, and
+builds only Melody there. Both machines use eight build jobs by default; on
+macOS the helper selects the Homebrew dependencies:
 
 ```sh
 ./scripts/build-latest.sh
 ```
 
-Use `--preset macos`, `--jobs N`, or `--no-update` to select another preset,
-change the parallelism, or build the checkout without pulling it first.
+Use `--jobs N`, `--desktop-only`, or `--no-update` to change the parallelism,
+skip the server, or build both existing checkouts without changing Git. The
+server and its checkout can be overridden with `--server`, `--server-path`,
+`MELODY_SERVER_HOST`, and `MELODY_SERVER_PATH`.
 
 Relevant build switches are:
 

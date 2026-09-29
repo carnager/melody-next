@@ -193,8 +193,7 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     // Any engine found on the network may play here -- and the configured
     // remote by name as well, for one multicast does not reach (WireGuard).
     if (sharing.play_for_found) {
-        arguments << QStringLiteral("--agent")
-                  << QStringLiteral("--agent-bitrate-nearby")
+        arguments << QStringLiteral("--agent") << QStringLiteral("--agent-bitrate-nearby")
                   << QString::number(sharing.found_nearby_kbps)
                   << QStringLiteral("--agent-bitrate-away")
                   << QString::number(sharing.found_away_kbps);

@@ -77,8 +77,8 @@ void require(const bool condition, const std::string_view message) {
 int main(int argc, char** argv) {
     require(argc == 2, "usage: media_streams_test <fixture-dir>");
     const auto directory =
-        std::filesystem::temp_directory_path() /
-        ("trackknife-streams-" + trackknife::core::StableId::random().to_string());
+        std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
+        ("tk-stream-" + trackknife::core::StableId::random().to_string().substr(0, 8));
     const auto music = directory / "music";
     std::filesystem::create_directories(music);
     {

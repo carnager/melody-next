@@ -3,41 +3,77 @@
 
 set -euo pipefail
 
-preset=dev
+desktop_preset=macos
+server_preset=server
+server_host=${MELODY_SERVER_HOST:-192.168.1.111}
+server_path=${MELODY_SERVER_PATH:-/Users/zeltak/dev/melody-next}
 jobs=${TRACKKNIFE_BUILD_JOBS:-8}
 update=true
+build_server=true
 
 usage() {
     cat <<'EOF'
 Usage: scripts/build-latest.sh [options]
 
-Fast-forward the current branch from its configured upstream, configure its
-CMake preset, and build it.
+Merge the latest original melody-next main branch into this fork branch,
+build Trackknife and Melody on this desktop, push the branch, then update and
+build Melody only on the server.
 
 Options:
-  --preset NAME  CMake configure/build preset (default: dev)
-  --jobs N       Parallel build jobs (default: 8)
-  --no-update    Build the checkout as-is without fetching or pulling
-  -h, --help     Show this help
+  --desktop-preset NAME  Desktop CMake preset (default: macos)
+  --server-preset NAME   Server CMake preset (default: server)
+  --server HOST          SSH server (default: 192.168.1.111)
+  --server-path PATH     Repository on the server
+  --jobs N               Parallel build jobs (default: 8)
+  --no-update            Do not fetch, merge, or push repository changes
+  --desktop-only         Do not update or build the server
+  -h, --help             Show this help
 
-TRACKKNIFE_BUILD_JOBS may also set the default job count.
+Environment overrides: MELODY_SERVER_HOST, MELODY_SERVER_PATH, and
+TRACKKNIFE_BUILD_JOBS.
 EOF
+}
+
+need_value() {
+    [[ $# -ge 2 ]] || {
+        printf 'missing value for %s\n' "$1" >&2
+        exit 2
+    }
 }
 
 while (($# > 0)); do
     case $1 in
-    --preset)
-        [[ $# -ge 2 ]] || { printf '%s\n' 'missing value for --preset' >&2; exit 2; }
-        preset=$2
+    --desktop-preset)
+        need_value "$@"
+        desktop_preset=$2
+        shift 2
+        ;;
+    --server-preset)
+        need_value "$@"
+        server_preset=$2
+        shift 2
+        ;;
+    --server)
+        need_value "$@"
+        server_host=$2
+        shift 2
+        ;;
+    --server-path)
+        need_value "$@"
+        server_path=$2
         shift 2
         ;;
     --jobs)
-        [[ $# -ge 2 ]] || { printf '%s\n' 'missing value for --jobs' >&2; exit 2; }
+        need_value "$@"
         jobs=$2
         shift 2
         ;;
     --no-update)
         update=false
+        shift
+        ;;
+    --desktop-only)
+        build_server=false
         shift
         ;;
     -h|--help)
@@ -64,14 +100,13 @@ cd "$project_root"
 if [[ $update == true ]]; then
     if [[ -n $(git status --porcelain) ]]; then
         printf '%s\n' \
-            'The checkout has local changes. Commit or stash them, or use --no-update.' >&2
+            'The desktop checkout has local changes. Commit or stash them, or use --no-update.' >&2
         exit 1
     fi
-    if ! git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
-        printf '%s\n' 'The current branch has no configured upstream.' >&2
-        exit 1
+    git fetch origin main
+    if ! git merge-base --is-ancestor origin/main HEAD; then
+        git merge --no-edit origin/main
     fi
-    git pull --ff-only
 fi
 
 configure_arguments=()
@@ -85,12 +120,50 @@ if [[ $(uname -s) == Darwin ]] && command -v brew >/dev/null 2>&1; then
     configure_arguments+=("-DPKG_CONFIG_EXECUTABLE=$homebrew_prefix/bin/pkg-config")
 fi
 
-cmake --preset "$preset" "${configure_arguments[@]}"
-cmake --build --preset "$preset" --parallel "$jobs"
+cmake --preset "$desktop_preset" "${configure_arguments[@]}"
+cmake --build --preset "$desktop_preset" --target trackknife melodyd --parallel "$jobs"
+printf 'Built desktop Trackknife and Melody in %s/build/%s\n' "$project_root" "$desktop_preset"
 
-application="$project_root/build/$preset/src/bench/trackknife"
-if [[ -x $application ]]; then
-    printf 'Built %s\n' "$application"
-else
-    printf 'Build preset %s completed.\n' "$preset"
+if [[ $update == true ]]; then
+    if ! git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
+        printf '%s\n' 'The current branch has no configured fork upstream to push.' >&2
+        exit 1
+    fi
+    git push
 fi
+
+if [[ $build_server == false ]]; then
+    exit 0
+fi
+
+ssh "$server_host" bash -s -- "$server_path" "$server_preset" "$jobs" "$update" <<'REMOTE'
+set -euo pipefail
+
+project_root=$1
+preset=$2
+jobs=$3
+update=$4
+cd "$project_root"
+
+if [[ $update == true ]]; then
+    if [[ -n $(git status --porcelain) ]]; then
+        printf '%s\n' 'The server checkout has local changes; refusing to overwrite them.' >&2
+        exit 1
+    fi
+    git pull --ff-only
+fi
+
+configure_arguments=()
+if [[ $(uname -s) == Darwin ]] && [[ -x /opt/homebrew/bin/brew ]]; then
+    homebrew_prefix=$(/opt/homebrew/bin/brew --prefix)
+    openssl_prefix=$(/opt/homebrew/bin/brew --prefix openssl@3)
+    curl_prefix=$(/opt/homebrew/bin/brew --prefix curl)
+    export PATH="$homebrew_prefix/bin:$PATH"
+    export PKG_CONFIG_PATH="$homebrew_prefix/lib/pkgconfig:$homebrew_prefix/share/pkgconfig:$openssl_prefix/lib/pkgconfig:$curl_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    configure_arguments+=("-DPKG_CONFIG_EXECUTABLE=$homebrew_prefix/bin/pkg-config")
+fi
+
+cmake --preset "$preset" "${configure_arguments[@]}"
+cmake --build --preset "$preset" --target melodyd --parallel "$jobs"
+printf 'Built server Melody at %s/build/%s/src/daemon/melodyd\n' "$project_root" "$preset"
+REMOTE

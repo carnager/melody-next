@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/metadata_services.hpp"
 
+#include "trackknife/core/posix.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/musicbrainz/acoustid.hpp"
 #include "trackknife/musicbrainz/web_service.hpp"
@@ -168,7 +169,7 @@ core::Result<MetadataServices::Fingerprint>
 MetadataServices::fingerprint(const std::string& raw_path,
                               const core::CancellationToken& cancellation) {
     std::array<int, 2> output{-1, -1};
-    if (::pipe2(output.data(), O_CLOEXEC) != 0) {
+    if (core::pipe_cloexec(output.data()) != 0) {
         return std::unexpected(service_error(core::ErrorCode::backend, "could not run fpcalc"));
     }
     posix_spawn_file_actions_t actions;

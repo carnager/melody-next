@@ -96,6 +96,22 @@
         "lhs": "${hostSystemName}",
         "rhs": "Darwin"
       }
+    },
+    {
+      "name": "server",
+      "displayName": "Headless Melody engine",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "OFF",
+        "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
+        "TRACKKNIFE_BUILD_UI": "OFF",
+        "TRACKKNIFE_BUILD_WATCH": "OFF",
+        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "OFF",
+        "TRACKKNIFE_ENABLE_UPNP": "ON",
+        "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -126,6 +142,10 @@
     {
       "name": "macos",
       "configurePreset": "macos"
+    },
+    {
+      "name": "server",
+      "configurePreset": "server"
     }
   ],
   "testPresets": [

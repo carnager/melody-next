@@ -102,14 +102,15 @@ For this fork's two-machine setup, the helper fast-forwards the desktop checkout
 from the fork's `main`, fetches and merges the original repository's `main`,
 builds Trackknife and Melody on the desktop, and pushes the updated fork
 `main`. It then connects to `192.168.1.111`, switches that checkout to the
-fork's `main`, fast-forwards it, and copies the locally built Release `melodyd`
-to `~/melody/melodyd` with SCP. The upload is installed only after its SHA-256
-checksum matches, and a successful deployment prints its host, path, commit,
-size, and checksum. Both local builds use eight jobs by default; on macOS the
-helper selects the Homebrew dependencies. If the server's old `main` has
-diverged, the helper preserves it under a timestamped
-`backup/server-main-before-sync-*` branch before aligning the deployment
-checkout with the fork:
+fork's `main`, fast-forwards it, and builds the Release `melodyd` natively on
+that machine so its macOS deployment target and Homebrew libraries match. The
+binary is installed atomically at `~/melody/melodyd` after its SHA-256 checksum
+matches, then exercised with `melodyd --help`. A successful deployment prints
+its host, path, commit, size, checksum, and launch-test result. Both builds use
+eight jobs by default; on macOS the helper selects the Homebrew dependencies.
+If the server's old `main` has diverged, the helper preserves it under a
+timestamped `backup/server-main-before-sync-*` branch before aligning the
+deployment checkout with the fork:
 
 ```sh
 ./scripts/build-latest.sh

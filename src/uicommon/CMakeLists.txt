@@ -7,6 +7,7 @@ qt_add_library(
     eliding_label.cpp
     eliding_label.hpp
     engine_key.hpp
+    flat_header_style.hpp
     line_slider.cpp
     line_slider.hpp
     library_tree_view.cpp

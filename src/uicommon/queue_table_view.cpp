@@ -4,6 +4,7 @@
 #include "uicommon/local_files_mime_data.hpp"
 
 #include "uicommon/delegate_selection_style.hpp"
+#include "uicommon/flat_header_style.hpp"
 #include "uicommon/queue_item_delegate.hpp"
 #include "uicommon/rating_stars.hpp"
 #include "uicommon/track_row_roles.hpp"
@@ -327,6 +328,7 @@ QueueTableView::QueueTableView(QWidget* parent) : QTableView(parent) {
     setFrameShape(QFrame::NoFrame);
     // The cover gutter stays clear of the selection under every style.
     DelegateSelectionStyle::install(this);
+    FlatHeaderStyle::install(horizontalHeader());
     setProperty("trackknife-drop-insertion-row", -1);
     setProperty("trackknife-drop-target-label", QString{});
     // QVariant::toInt() maps an absent property to zero, which otherwise makes

@@ -119,6 +119,7 @@ class QueueTableViewTest final : public QObject {
 
   private slots:
     void theDelegateAlonePaintsSelectionUnderEveryStyle();
+    void theHeaderIsFlatUnderEveryStyle();
     void preGroupedBatchReservesHeaderAboveFirstTrack();
     void eachDiscOfAnAlbumGetsItsName();
     void aDiscLearnedLaterNamesTheFirstToo();
@@ -350,6 +351,37 @@ void QueueTableViewTest::theDelegateAlonePaintsSelectionUnderEveryStyle() {
                  view.palette().color(QPalette::Base));
     }
     QApplication::setStyle(QStyleFactory::create(previous));
+}
+
+// The column header lies flat on the list's ground, as tall under any style,
+// with no rule along its lower edge.
+void QueueTableViewTest::theHeaderIsFlatUnderEveryStyle() {
+    const auto previous = QApplication::style()->name();
+    const auto measure = [](const QString& style) {
+        QApplication::setStyle(QStyleFactory::create(style));
+        QStandardItemModel model(1, 3);
+        model.setHorizontalHeaderLabels(
+            {QStringLiteral("#"), QStringLiteral("Title"), QStringLiteral("Length")});
+        QueueTableView view{nullptr};
+        view.setModel(&model);
+        view.resize(400, 120);
+        view.show();
+        auto* header = view.horizontalHeader();
+        const auto image = header->grab().toImage();
+        const auto ground = header->palette().color(QPalette::Base);
+        // Along the lower edge, away from the labels: the ground throughout.
+        for (int x = 0; x < image.width(); x += 7) {
+            if (image.pixelColor(x, image.height() - 1) != ground) {
+                return -1;
+            }
+        }
+        return header->height();
+    };
+    const auto fusion = measure(QStringLiteral("Fusion"));
+    const auto windows = measure(QStringLiteral("Windows"));
+    QApplication::setStyle(QStyleFactory::create(previous));
+    QVERIFY(fusion > 0);
+    QCOMPARE(windows, fusion);
 }
 
 void QueueTableViewTest::preGroupedBatchReservesHeaderAboveFirstTrack() {

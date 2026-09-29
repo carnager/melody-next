@@ -105,6 +105,7 @@ endif()
 # (ADR-0237); its Qt client comes with the UI.
 add_subdirectory(src/musicbrainz)
 if(TRACKKNIFE_BUILD_UI)
+    add_subdirectory(src/workspace)
     add_subdirectory(src/uicommon)
     add_subdirectory(src/bench)
 endif()

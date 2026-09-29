@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "bench/preparation_feedback.hpp"
+
 #include <QString>
 
 #include <vector>
@@ -10,13 +12,6 @@ class QDialog;
 class QWidget;
 
 namespace trackknife::bench {
-
-// One row of preparation feedback: the affected file and a short problem or
-// outcome description. Full texts stay reachable through tooltips.
-struct PreparationFeedbackRow {
-    QString file;
-    QString detail;
-};
 
 // Compact window used only when an Apply cannot finish silently: a blocked
 // preparation, a stopped run, or per-file failures. Success never opens it.

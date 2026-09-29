@@ -3,7 +3,7 @@
 #include "bench/engine_launcher.hpp"
 
 #include "bench/remote_engines.hpp"
-#include "bench/settings_dialog.hpp"
+#include "bench/settings_keys.hpp"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -112,13 +112,13 @@ namespace {
 }
 
 [[nodiscard]] int streamNearbyKbps(const QSettings& settings) {
-    return kbps_setting(settings, SettingsDialog::engine_stream_nearby_key,
-                        SettingsDialog::engine_stream_nearby_default);
+    return kbps_setting(settings, SettingsKeys::engine_stream_nearby_key,
+                        SettingsKeys::engine_stream_nearby_default);
 }
 
 [[nodiscard]] int streamAwayKbps(const QSettings& settings) {
-    return kbps_setting(settings, SettingsDialog::engine_stream_away_key,
-                        SettingsDialog::engine_stream_away_default);
+    return kbps_setting(settings, SettingsKeys::engine_stream_away_key,
+                        SettingsKeys::engine_stream_away_default);
 }
 
 } // namespace
@@ -126,26 +126,26 @@ namespace {
 LocalEngineSharing localEngineSharing() {
     const QSettings settings;
     return LocalEngineSharing{
-        .share = settings.value(QLatin1String(SettingsDialog::engine_share_key), false).toBool(),
+        .share = settings.value(QLatin1String(SettingsKeys::engine_share_key), false).toBool(),
         .listen = settings
-                      .value(QLatin1String(SettingsDialog::engine_listen_key),
-                             QString::fromLatin1(SettingsDialog::engine_listen_default))
+                      .value(QLatin1String(SettingsKeys::engine_listen_key),
+                             QString::fromLatin1(SettingsKeys::engine_listen_default))
                       .toString()
                       .trimmed(),
         .stream_port = settings
-                           .value(QLatin1String(SettingsDialog::engine_stream_port_key),
-                                  SettingsDialog::engine_stream_port_default)
+                           .value(QLatin1String(SettingsKeys::engine_stream_port_key),
+                                  SettingsKeys::engine_stream_port_default)
                            .toInt(),
-        .password = settings.value(QLatin1String(SettingsDialog::engine_password_key), QString{})
+        .password = settings.value(QLatin1String(SettingsKeys::engine_password_key), QString{})
                         .toString(),
         .music_root =
-            settings.value(QLatin1String(SettingsDialog::engine_music_root_key), QString{})
+            settings.value(QLatin1String(SettingsKeys::engine_music_root_key), QString{})
                 .toString()
                 .trimmed(),
         .play_for =
             [&settings] {
                 std::vector<LocalEngineSharing::PlayFor> targets;
-                if (!settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
+                if (!settings.value(QLatin1String(SettingsKeys::engine_play_for_remote_key), true)
                          .toBool()) {
                     return targets;
                 }
@@ -164,7 +164,7 @@ LocalEngineSharing localEngineSharing() {
                 return targets;
             }(),
         .play_for_found =
-            settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
+            settings.value(QLatin1String(SettingsKeys::engine_play_for_remote_key), true)
                 .toBool(),
         .found_nearby_kbps = streamNearbyKbps(settings),
         .found_away_kbps = streamAwayKbps(settings),

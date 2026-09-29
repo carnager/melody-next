@@ -2,7 +2,7 @@
 
 #include "bench/remote_engines.hpp"
 
-#include "bench/settings_dialog.hpp"
+#include "bench/settings_keys.hpp"
 
 #include <QSettings>
 
@@ -18,7 +18,7 @@ constexpr auto array_key = "engines/remote";
 } // namespace
 
 QString RemoteEngineSetting::effectivePassword() const {
-    return password.isEmpty() ? text(QSettings{}, SettingsDialog::engine_password_key) : password;
+    return password.isEmpty() ? text(QSettings{}, SettingsKeys::engine_password_key) : password;
 }
 
 RemoteMount RemoteEngineSetting::mount() const {
@@ -31,14 +31,14 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
     std::vector<RemoteEngineSetting> engines;
     if (!settings.contains(QLatin1String(array_key) + QStringLiteral("/size"))) {
         // An older release's one remote, taken over once.
-        const auto address = text(settings, SettingsDialog::library_engine_socket_key);
+        const auto address = text(settings, SettingsKeys::library_engine_socket_key);
         if (!address.isEmpty()) {
             engines.push_back(
                 {.address = address,
-                 .password = text(settings, SettingsDialog::library_engine_token_key),
-                 .music_folder = text(settings, SettingsDialog::library_remote_folder_key),
-                 .reachable_at = text(settings, SettingsDialog::library_remote_mount_key),
-                 .id = text(settings, SettingsDialog::library_engine_id_key),
+                 .password = text(settings, SettingsKeys::library_engine_token_key),
+                 .music_folder = text(settings, SettingsKeys::library_remote_folder_key),
+                 .reachable_at = text(settings, SettingsKeys::library_remote_mount_key),
+                 .id = text(settings, SettingsKeys::library_engine_id_key),
                  .stream_kbps = -1});
         }
         saveRemoteEngines(engines);
@@ -64,13 +64,13 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
     // before this one, the Settings page before it lists engines -- is the
     // newer word on it. The same address keeps its id; another may be
     // another engine, and its id is learned anew.
-    const auto address = text(settings, SettingsDialog::library_engine_socket_key);
+    const auto address = text(settings, SettingsKeys::library_engine_socket_key);
     if (!address.isEmpty()) {
         RemoteEngineSetting first{
             .address = address,
-            .password = text(settings, SettingsDialog::library_engine_token_key),
-            .music_folder = text(settings, SettingsDialog::library_remote_folder_key),
-            .reachable_at = text(settings, SettingsDialog::library_remote_mount_key),
+            .password = text(settings, SettingsKeys::library_engine_token_key),
+            .music_folder = text(settings, SettingsKeys::library_remote_folder_key),
+            .reachable_at = text(settings, SettingsKeys::library_remote_mount_key),
             .id = {},
             .stream_kbps = -1};
         if (engines.empty()) {
@@ -106,11 +106,11 @@ void saveRemoteEngines(const std::vector<RemoteEngineSetting>& engines) {
     settings.endArray();
     // What an older release reads, kept to the first: the one it knows of.
     const auto first = engines.empty() ? RemoteEngineSetting{} : engines.front();
-    settings.setValue(QLatin1String(SettingsDialog::library_engine_socket_key), first.address);
-    settings.setValue(QLatin1String(SettingsDialog::library_engine_token_key), first.password);
-    settings.setValue(QLatin1String(SettingsDialog::library_remote_folder_key), first.music_folder);
-    settings.setValue(QLatin1String(SettingsDialog::library_remote_mount_key), first.reachable_at);
-    settings.setValue(QLatin1String(SettingsDialog::library_engine_id_key), first.id);
+    settings.setValue(QLatin1String(SettingsKeys::library_engine_socket_key), first.address);
+    settings.setValue(QLatin1String(SettingsKeys::library_engine_token_key), first.password);
+    settings.setValue(QLatin1String(SettingsKeys::library_remote_folder_key), first.music_folder);
+    settings.setValue(QLatin1String(SettingsKeys::library_remote_mount_key), first.reachable_at);
+    settings.setValue(QLatin1String(SettingsKeys::library_engine_id_key), first.id);
 }
 
 void rememberEngineId(const QString& address, const QString& id) {

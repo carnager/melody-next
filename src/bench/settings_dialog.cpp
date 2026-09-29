@@ -950,14 +950,6 @@ metadata::ArtworkStoragePolicy SettingsDialog::artworkPolicy() {
                 0, settings.value(QLatin1String(artwork_max_folder_edge_key), 0).toInt()))};
 }
 
-QString SettingsDialog::remoteEnginePassword() {
-    const QSettings settings;
-    const auto own =
-        settings.value(QLatin1String(library_engine_token_key), QString{}).toString().trimmed();
-    return own.isEmpty() ? settings.value(QLatin1String(engine_password_key), QString{}).toString()
-                         : own;
-}
-
 QString SettingsDialog::engineLabel(const RemoteEngineSetting& engine) {
     return engine.address.isEmpty() ? QStringLiteral("New engine") : engine.address;
 }

@@ -2,7 +2,7 @@
 
 #include "bench/remote_mount.hpp"
 
-#include "bench/settings_dialog.hpp"
+#include "bench/settings_keys.hpp"
 
 #include <QFile>
 #include <QSettings>
@@ -48,8 +48,8 @@ bool path_within(const std::string_view path, const std::string_view folder) {
 }
 
 RemoteMount RemoteMount::configured() {
-    return RemoteMount{.remote_folder = setting(SettingsDialog::library_remote_folder_key),
-                       .local_folder = setting(SettingsDialog::library_remote_mount_key)};
+    return RemoteMount{.remote_folder = setting(SettingsKeys::library_remote_folder_key),
+                       .local_folder = setting(SettingsKeys::library_remote_mount_key)};
 }
 
 std::optional<std::string> RemoteMount::to_local(const std::string& remote_path) const {

@@ -3,7 +3,7 @@
 #pragma once
 
 #include "bench/file_work_tools.hpp"
-#include "bench/preparation_feedback_dialog.hpp"
+#include "bench/preparation_feedback.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/formats/decoder.hpp"

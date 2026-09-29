@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "uicommon/rating_color.hpp"
+
 #include <QColor>
 #include <QRect>
 #include <QString>
@@ -10,9 +12,6 @@
 class QPainter;
 
 namespace trackknife::ui {
-
-// The one star color used everywhere ratings render (ADR-0179).
-[[nodiscard]] inline QColor ratingStarColor() { return QColor{245, 197, 24}; }
 
 // Paints a 0-10 rating as filled star shapes (half-star steps) on a
 // translucent band along the bottom edge of an album cover. Does nothing for

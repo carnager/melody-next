@@ -43,9 +43,11 @@ class WorkspaceView {
     virtual void refreshListHistoryActions() = 0;
     // What is selected changed, or what it is.
     virtual void refreshSelectionStatus() = 0;
-    // The list playing was edited: the engine's queue follows.
-    virtual void syncEngineQueue() = 0;
-    virtual void playRow(Workspace::ListTab& tab, int row) = 0;
+    // What plays, or how, changed: the transport, the cursor on the playing
+    // row (brought into view when `jump`), and the mode controls.
+    virtual void refreshTransport() = 0;
+    virtual void refreshPlaybackCursor(bool jump) = 0;
+    virtual void refreshLocalPlaybackControls() = 0;
     // Hands the engines the file moves they have not taken yet.
     virtual void flushEngineRelocations() = 0;
     // An album's cover arrived: whatever shows it outside the lists -- the

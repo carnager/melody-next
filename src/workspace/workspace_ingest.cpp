@@ -918,7 +918,7 @@ void Workspace::finishDiscovery() {
     if (!result.rows.empty() && (!discovery_replace_and_play_ || !result.cancelled)) {
         if (discovery_replace_and_play_) {
             tab->model->replaceRows(std::move(result.rows), true);
-            view_->playRow(*tab, 0);
+            playRow(*tab, 0);
         } else {
             tab->model->appendRows(std::move(result.rows), discovery_anchored_
                                                                ? discovery_insertion_anchor_.row()

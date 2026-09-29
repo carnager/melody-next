@@ -331,6 +331,52 @@ class Workspace final : public QObject {
     bool engine_renewal_pending_{false};
     // Quitting: no engine is to be started again, and this computer's stops.
     void retireEngines();
+    // The link a connection belongs to; null for none of the workspace's.
+    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
+    // An engine's own list: its first, or one made for it, named after it.
+    [[nodiscard]] ListTab* engineTab(EngineLink& engine);
+    [[nodiscard]] ListTab* remoteQueueTab();
+    [[nodiscard]] EngineLink* remoteEngine() const {
+        for (const auto& engine : engines_) {
+            if (!engine->key.isLocal()) {
+                return engine.get();
+            }
+        }
+        return nullptr;
+    }
+
+    // Playback (ADR-0220, ADR-0226): the engine owns the queue, the modes,
+    // the order and up-next; the workspace says what to play and follows
+    // what it does.
+    // True while the engine followed is connected; nothing plays otherwise.
+    [[nodiscard]] bool playingOnEngine() const;
+    void playRow(ListTab& tab, int row);
+    void togglePlayPause();
+    void seekToMs(qint64 position_ms);
+    // The modes and ReplayGain, saved, and told to the engine.
+    void saveLocalPlaybackModes();
+    void applyLocalPlaybackModes();
+    // Makes `playback` the one followed, stopping the other when
+    // `stop_other`: one engine plays at a time.
+    void followPlayback(EnginePlayback* playback, bool stop_other = true);
+    // Another client started the engine not followed: followed now.
+    void followIfStartedElsewhere(EnginePlayback* playback);
+    void rememberEngineState(EnginePlayback* playback);
+    // Adopts whatever the engine is already playing -- after a restart of
+    // the window, the music is still going.
+    void reattachToEngine();
+    void reattachToQueue(std::vector<LocalTrackRow> rows);
+    void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
+    // The engine's queue and the playing list kept in step, both ways; and
+    // Up Next stated to it.
+    void syncEngineQueue();
+    void syncEngineRequests();
+    void adoptEngineQueue();
+    void adoptEngineQueue(std::vector<LocalTrackRow> held);
+    // The playing entry's row in `tab`, or -1.
+    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    // The row for an entry the engine plays, wherever it is held.
+    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

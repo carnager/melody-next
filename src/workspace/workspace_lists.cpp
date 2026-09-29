@@ -487,7 +487,7 @@ void Workspace::markTabDirty(ListTab& tab) {
     // Without this the engine keeps playing the list as it was when play was
     // pressed, and a track removed here still plays.
     if (tab.document.id == playback_.anchors.document) {
-        view_->syncEngineQueue();
+        syncEngineQueue();
     }
 }
 

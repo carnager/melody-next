@@ -90,48 +90,9 @@ void BenchMainWindow::adoptEngineIdentity(EngineLink& engine) {
     schedulePersist();
 }
 
-BenchMainWindow::EngineLink* BenchMainWindow::linkOf(const EnginePlayback* playback) const {
-    if (playback == nullptr) {
-        return nullptr;
-    }
-    const auto found =
-        std::ranges::find(engines_, playback, [](const auto& each) { return each->playback; });
-    return found != engines_.end() ? found->get() : nullptr;
-}
-
 LocalLibraryPanel* BenchMainWindow::libraryOf(const EngineKey& key) const {
     const auto* engine = link(key);
     return engine != nullptr ? engine->library : nullptr;
-}
-
-BenchMainWindow::ListTab* BenchMainWindow::remoteQueueTab() {
-    auto* remote = remoteEngine();
-    return remote != nullptr ? engineTab(*remote) : nullptr;
-}
-
-BenchMainWindow::ListTab* BenchMainWindow::engineTab(EngineLink& engine) {
-    // Its own, by its key: a list of an engine the address led to before
-    // is not its tab.
-    for (const auto& tab : list_tabs_) {
-        if (EngineKey::of(tab->document) == engine.key) {
-            return tab.get();
-        }
-    }
-    if (engine.catalogue == nullptr) {
-        return nullptr;
-    }
-    // Opened on first connection, named after the engine so it reads as a
-    // place rather than a list.
-    auto* tab = addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                     .kind = persistence::ListKind::scratch,
-                                                     .name = utf8Bytes(engine.catalogue->name()),
-                                                     .pinned = false,
-                                                     .dirty = false,
-                                                     .items = {},
-                                                     .engine = engine.key.stored()},
-                           false);
-    schedulePersist();
-    return tab;
 }
 
 void BenchMainWindow::syncRemoteEngines() {

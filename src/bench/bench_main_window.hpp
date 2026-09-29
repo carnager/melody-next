@@ -354,7 +354,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     bool replayCrossTabMove(bool undo) { return workspace_.replayCrossTabMove(undo); }
     void refreshTabChrome(ListTab& tab) override;
     void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
-    void refreshPlaybackCursor(bool jump = false);
+    void refreshPlaybackCursor(bool jump = false) override;
     void buildShortcuts();
     void showCommandPalette();
     // Ctrl+L: the search field of the library showing -- or, from Folders,
@@ -509,46 +509,45 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void invalidateArtwork(const std::string& raw_path) { workspace_.invalidateArtwork(raw_path); }
 
     void buildLocalPlaybackControls(QMenu* playback_menu);
-    void refreshLocalPlaybackControls();
-    void saveLocalPlaybackModes();
+    void refreshLocalPlaybackControls() override;
+    void saveLocalPlaybackModes() { workspace_.saveLocalPlaybackModes(); }
     void styleStatusBar();
-    void applyLocalPlaybackModes();
+    void applyLocalPlaybackModes() { workspace_.applyLocalPlaybackModes(); }
     void showReplayGainPreampDialog();
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
-    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const { return workspace_.resolvePlaybackRow(tab); }
     // Adopts whatever the engine is already playing. An engine outlives the
     // window, so a window that only learns about playback by having started it
     // shows nothing after a restart while the music is still going.
-    void reattachToEngine();
+    void reattachToEngine() { workspace_.reattachToEngine(); }
     // Mirrors the up-next panel onto the engine, which is what makes Next
     // play a requested track rather than the next row of the list. Cheap when
     // nothing changed.
-    void syncEngineRequests();
+    void syncEngineRequests() { workspace_.syncEngineRequests(); }
     // Keeps the engine's queue and the playing list in step, in both
     // directions: an edit here is pushed, and a change the engine made that
     // this window did not cause is read back.
-    void syncEngineQueue() override;
-    void adoptEngineQueue();
-    void adoptEngineQueue(std::vector<LocalTrackRow> held);
-    void reattachToQueue(std::vector<LocalTrackRow> rows);
+    void syncEngineQueue() { workspace_.syncEngineQueue(); }
+    void adoptEngineQueue() { workspace_.adoptEngineQueue(); }
     // Credits listening to Last.fm from the engine's state rather than from a
     // local player that is not running.
     void sampleLastFmFromEngine(const EnginePlayback::State& state);
     // Points the workspace at an entry the engine is playing.
-    void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
     // Makes `playback` the one the transport follows, stopping the other if it
     // was playing: one engine plays at a time.
     // `stop_other`: the engine followed until now is stopped -- as when this
     // window starts playing elsewhere. Not when another client did it: then
     // the window only looks where the music started.
-    void followPlayback(EnginePlayback* playback, bool stop_other = true);
+    void followPlayback(EnginePlayback* playback, bool stop_other = true) {
+        workspace_.followPlayback(playback, stop_other);
+    }
     // Another client -- a script, the phone, a picker -- started the engine
     // this window does not follow: the window follows the music there.
-    void followIfStartedElsewhere(EnginePlayback* playback);
+    void followIfStartedElsewhere(EnginePlayback* playback) { workspace_.followIfStartedElsewhere(playback); }
     // What each engine was last seen doing, so a start is told from a state
     // the window already knew of.
-    void rememberEngineState(EnginePlayback* playback);
+    void rememberEngineState(EnginePlayback* playback) { workspace_.rememberEngineState(playback); }
     // Builds the remote connection, its library panel and its default tab.
     // ADR-0234: one engine elsewhere, as Settings name it; the first is the
     // one an older release's remote lists belong to.
@@ -561,19 +560,19 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // Lets go of an engine elsewhere: its connection, library panel and tab.
     // Its lists stay, as those of an engine that is not reached.
     void disconnectEngine(const EngineKey& key);
-    [[nodiscard]] ListTab* remoteQueueTab();
+    [[nodiscard]] ListTab* remoteQueueTab() { return workspace_.remoteQueueTab(); }
     // An engine's own tab: its first, or one made for it, named after it.
-    [[nodiscard]] ListTab* engineTab(EngineLink& engine);
+    [[nodiscard]] ListTab* engineTab(EngineLink& engine) { return workspace_.engineTab(engine); }
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
-    [[nodiscard]] bool playingOnEngine() const;
+    [[nodiscard]] bool playingOnEngine() const { return workspace_.playingOnEngine(); }
     // The transport view: controls, cursor, output and buffer, all from the
     // engine's state. Resume, listening and gapless are the engine's own.
     void refreshEngineTransport();
     void refreshOutputControls(const EnginePlayback::State& state);
     // The row for the entry the engine is playing, wherever this window holds
     // it: the list it was played from, Up Next, or another open list.
-    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
+    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry) { return workspace_.playingRow(entry); }
     // The cover of the playing entry's album, from a tab that has it.
     void refreshHeaderCover(const QString& entry);
     // An album's cover from the lists or the cache; fetched when neither has
@@ -582,8 +581,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         return workspace_.coverFor(track, engine);
     }
     void setUpNextCount(int count);
-    void playRow(ListTab& tab, int row) override;
-    void refreshTransport();
+    void playRow(ListTab& tab, int row) { workspace_.playRow(tab, row); }
+    void refreshTransport() override;
     void buildMprisService();
     void publishMprisState();
     void rebuildDeviceMenu();
@@ -593,8 +592,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showCustomPlaybackBufferDialog();
     void refreshPlaybackBufferChecks();
     void reloadPlaybackPreferences();
-    void togglePlayPause();
-    void seekToMs(qint64 position_ms);
+    void togglePlayPause() { workspace_.togglePlayPause(); }
+    void seekToMs(qint64 position_ms) { workspace_.seekToMs(position_ms); }
 
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
@@ -705,7 +704,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         return nullptr;
     }
     // The link a connection belongs to; null for none of this window's.
-    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
+    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const { return workspace_.linkOf(playback); }
     // ADR-0237: asks the link's engine whether it does file work, now and on
     // every reconnection.
     void watchFileWork(EngineLink& link);

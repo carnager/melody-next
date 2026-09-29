@@ -248,6 +248,43 @@ int main(const int argc, char** argv) {
         CHECK(page && page->entries.front().key == rock);
     }
 
+    // A result is a whole track row on both paths, as a query row is: its
+    // title, date, length and rating keys, not only a label.
+    {
+        const auto jazz_entry = [&](const std::string& source) -> std::optional<persistence::LibraryEntry> {
+            auto compiled = query::compile_tkq(source);
+            CHECK(compiled.has_value());
+            if (!compiled) {
+                return std::nullopt;
+            }
+            const auto page = library->filter(*compiled, 0U, 200U);
+            CHECK(page.has_value());
+            if (!page) {
+                return std::nullopt;
+            }
+            for (const auto& entry : page->entries) {
+                if (entry.key == jazz) {
+                    return entry;
+                }
+            }
+            return std::nullopt;
+        };
+        const auto fast = jazz_entry("ALL");
+        const auto sorted = jazz_entry("ALL SORT BY %title%");
+        CHECK(fast.has_value() && sorted.has_value());
+        for (const auto& entry : {fast, sorted}) {
+            CHECK(entry && entry->title == "Alpha");
+            CHECK(entry && entry->artist == "Miles Davis");
+            CHECK(entry && entry->album == "Kind of Blue");
+            CHECK(entry && entry->date == "1959");
+            CHECK(entry && entry->duration_ms > 0);
+            CHECK(entry && !entry->rating_hash.empty());
+            CHECK(entry && !entry->album_rating_hash.empty());
+        }
+        CHECK(fast && sorted && fast->rating_hash == sorted->rating_hash);
+        CHECK(fast && sorted && fast->duration_ms == sorted->duration_ms);
+    }
+
     // Cancellation fails closed.
     {
         auto compiled = query::compile_tkq("ALL");

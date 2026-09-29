@@ -1275,7 +1275,8 @@ constexpr auto filter_columns =
     "t.codec_name,t.sample_rate,t.bits,t.channels,t.duration_ms,"
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.rating_hash),-1),"
     "coalesce((SELECT r.rating FROM local_ratings r WHERE r.hash=t.album_rating_hash),-1),"
-    "t.added,(SELECT max(a.added) FROM local_library_tracks a WHERE a.album_key=t.album_key)";
+    "t.added,(SELECT max(a.added) FROM local_library_tracks a WHERE a.album_key=t.album_key),"
+    "t.rating_hash,t.album_rating_hash";
 const auto filter_from = " FROM local_library_tracks t" + with_album_years("t");
 constexpr auto filter_order = " ORDER BY t.artist COLLATE NOCASE,years.album_year,t.album_key,"
                               "t.disc,t.track,t.title COLLATE NOCASE,t.raw_path";
@@ -1347,8 +1348,36 @@ struct FilterRow {
     std::string album_key;
     int disc{0};
     int track{0};
+    // ADR-0179 content keys, so a result can be rated where it is shown.
+    std::string rating_hash;
+    std::string album_rating_hash;
     TkqRowFacts facts;
 };
+
+// One row of filter_columns. Every reader of those columns goes through
+// here, so a path that shows results cannot hold less of a row than another.
+void read_filter_row(Statement& select, FilterRow& row) {
+    row.raw_path = select.bytes(0);
+    row.facts.title = select.bytes(1);
+    row.facts.artist = select.bytes(2);
+    row.facts.album = select.bytes(3);
+    row.album_key = select.bytes(4);
+    row.facts.date = select.bytes(5);
+    row.facts.search_text = select.bytes(6);
+    row.disc = static_cast<int>(select.number(7));
+    row.track = static_cast<int>(select.number(8));
+    row.facts.codec = select.bytes(9);
+    row.facts.sample_rate = select.number(10);
+    row.facts.bits = select.number(11);
+    row.facts.channels = select.number(12);
+    row.facts.duration_ms = select.number(13);
+    row.facts.rating = select.number(14);
+    row.facts.album_rating = select.number(15);
+    row.facts.added = select.number(16);
+    row.facts.album_added = select.number(17);
+    row.rating_hash = select.bytes(18);
+    row.album_rating_hash = select.bytes(19);
+}
 
 void load_field_rows(Statement& statement, const std::string& raw_path, FilterRow& row) {
     statement.reset();
@@ -1491,26 +1520,9 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
             fail("Library query cancelled", core::ErrorCode::cancelled);
         }
         FilterRow row;
-        row.raw_path = select.bytes(0);
+        read_filter_row(select, row);
         if (const auto found = history.find(row.raw_path); found != history.end())
             row.facts.history = found->second;
-        row.facts.title = select.bytes(1);
-        row.facts.artist = select.bytes(2);
-        row.facts.album = select.bytes(3);
-        row.album_key = select.bytes(4);
-        row.facts.date = select.bytes(5);
-        row.facts.search_text = select.bytes(6);
-        row.disc = static_cast<int>(select.number(7));
-        row.track = static_cast<int>(select.number(8));
-        row.facts.codec = select.bytes(9);
-        row.facts.sample_rate = select.number(10);
-        row.facts.bits = select.number(11);
-        row.facts.channels = select.number(12);
-        row.facts.duration_ms = select.number(13);
-        row.facts.rating = select.number(14);
-        row.facts.album_rating = select.number(15);
-        row.facts.added = select.number(16);
-        row.facts.album_added = select.number(17);
         if (need_rows) {
             load_field_rows(fields, row.raw_path, row);
         }
@@ -1566,6 +1578,14 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
                        row.track};
     entry.duration_ms = row.facts.duration_ms;
     entry.label = format_label(entry, true);
+    // `label` is how the tree shows it; the rest is the track as it is,
+    // what a client shows, queues and rates.
+    entry.title = row.facts.title;
+    entry.date = row.facts.date;
+    entry.rating_hash = row.rating_hash;
+    entry.rating = static_cast<unsigned>(std::max<std::int64_t>(0, row.facts.rating));
+    entry.album_rating_hash = row.album_rating_hash;
+    entry.album_rating = static_cast<unsigned>(std::max<std::int64_t>(0, row.facts.album_rating));
     return entry;
 }
 
@@ -1614,11 +1634,7 @@ core::Result<LibraryPage> LocalLibrary::filter(const query::CompiledTkq& compile
                     break;
                 }
                 FilterRow row;
-                row.raw_path = statement.bytes(0);
-                row.facts.title = statement.bytes(1);
-                row.facts.artist = statement.bytes(2);
-                row.facts.album = statement.bytes(3);
-                row.track = static_cast<int>(statement.number(8));
+                read_filter_row(statement, row);
                 page.entries.push_back(filter_entry(row));
             }
             return page;
@@ -1696,22 +1712,7 @@ LocalLibrary::cached_tracks(const std::vector<std::string>& raw_paths,
                      core::ErrorCode::conflict);
             }
             FilterRow row;
-            row.facts.title = select.bytes(1);
-            row.facts.artist = select.bytes(2);
-            row.facts.album = select.bytes(3);
-            row.facts.date = select.bytes(5);
-            row.facts.search_text = select.bytes(6);
-            row.facts.codec = select.bytes(9);
-            row.facts.sample_rate = select.number(10);
-            row.facts.bits = select.number(11);
-            row.facts.channels = select.number(12);
-            row.facts.duration_ms = select.number(13);
-            row.facts.rating = select.number(14);
-            row.facts.album_rating = select.number(15);
-            row.facts.added = select.number(16);
-            row.facts.album_added = select.number(17);
-        row.facts.added = select.number(16);
-        row.facts.album_added = select.number(17);
+            read_filter_row(select, row);
             load_field_rows(fields, path, row);
             result.push_back({path, std::move(row.facts)});
         }

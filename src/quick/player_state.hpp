@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QString>
 #include <QTimer>
+#include <QVariantList>
 #include <QtQmlIntegration>
 
 namespace trackknife::quick {
@@ -38,6 +39,17 @@ class PlayerState final : public QObject {
     Q_PROPERTY(QString replayGain READ replayGain NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(int requests READ requests NOTIFY changed)
+    // ADR-0228: what the engine can play on, and which it plays on now --
+    // [{id, name, local, online, selected, files}].
+    Q_PROPERTY(QVariantList outputs READ outputs NOTIFY outputsChanged)
+    // The sound devices of the machine that plays -- [{name, description}] --
+    // and the one chosen; empty is the system default.
+    Q_PROPERTY(QVariantList devices READ devices NOTIFY changed)
+    Q_PROPERTY(QString device READ device NOTIFY changed)
+    Q_PROPERTY(QString defaultDevice READ defaultDevice NOTIFY changed)
+    Q_PROPERTY(bool outputAvailable READ outputAvailable NOTIFY changed)
+    // Another engine took these speakers (newest wins): its name.
+    Q_PROPERTY(QString speakersTakenBy READ speakersTakenBy NOTIFY changed)
 
   public:
     explicit PlayerState(EngineClient& client, QObject* parent = nullptr);
@@ -64,6 +76,12 @@ class PlayerState final : public QObject {
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] int requests() const { return requests_; }
     [[nodiscard]] quint64 queueRevision() const { return queue_revision_; }
+    [[nodiscard]] QVariantList outputs() const { return outputs_; }
+    [[nodiscard]] QVariantList devices() const { return devices_; }
+    [[nodiscard]] QString device() const { return device_; }
+    [[nodiscard]] QString defaultDevice() const { return default_device_; }
+    [[nodiscard]] bool outputAvailable() const { return output_available_; }
+    [[nodiscard]] QString speakersTakenBy() const { return speakers_taken_by_; }
 
     Q_INVOKABLE void toggle();
     Q_INVOKABLE void next();
@@ -76,6 +94,10 @@ class PlayerState final : public QObject {
     Q_INVOKABLE void setSingle(int state);
     Q_INVOKABLE void setConsume(int state);
     Q_INVOKABLE void cycleReplayGain();
+    // Plays on another of the engine's outputs; the music goes along.
+    Q_INVOKABLE void selectOutput(const QString& id);
+    // A sound device by name; empty for the system default.
+    Q_INVOKABLE void setDevice(const QString& name);
 
   signals:
     void changed();
@@ -83,12 +105,14 @@ class PlayerState final : public QObject {
     void positionChanged();
     // The engine's queue or up-next changed, by any client.
     void queueChanged();
+    void outputsChanged();
 
   private:
     void refresh();
     void adopt(const EngineClient::Json& state);
     void send(const QString& method, EngineClient::Json params = EngineClient::Json::object());
     void fetchMetadata();
+    void adoptOutputs(const EngineClient::Json& payload);
 
     EngineClient& client_;
     QString status_{QStringLiteral("stopped")};
@@ -111,6 +135,12 @@ class PlayerState final : public QObject {
     int requests_{0};
     quint64 queue_revision_{0};
     std::uint64_t sequence_{0};
+    QVariantList outputs_;
+    QVariantList devices_;
+    QString device_;
+    QString default_device_;
+    bool output_available_{true};
+    QString speakers_taken_by_;
     QTimer tick_;
     QTimer poll_;
 };

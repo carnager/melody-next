@@ -31,6 +31,8 @@ PlayerState::PlayerState(EngineClient& client, QObject* parent) : QObject(parent
     client_.onEvent([this](const std::string& name, const Json& data) {
         if (name == "playback.changed") {
             adopt(data);
+        } else if (name == "outputs.changed") {
+            adoptOutputs(data);
         }
     });
     connect(&client_, &EngineClient::connectedChanged, this, [this] {
@@ -38,6 +40,13 @@ PlayerState::PlayerState(EngineClient& client, QObject* parent) : QObject(parent
             // A new connection counts its sequence from the start.
             sequence_ = 0;
             refresh();
+            // An engine from before output agents has no list: it plays on
+            // its own audio, which is what an empty list means here.
+            client_.call(QStringLiteral("outputs.list"), Json::object(), [this](const auto& answer) {
+                if (answer) {
+                    adoptOutputs(*answer);
+                }
+            });
         }
     });
 }
@@ -94,6 +103,18 @@ void PlayerState::adopt(const Json& state) {
         replay_gain_ = text(*gain, "mode");
     }
     error_ = text(state, "error");
+    if (const auto output = state.find("output"); output != state.end() && output->is_object()) {
+        device_ = text(*output, "target");
+        default_device_ = text(*output, "default");
+        output_available_ = output->value("available", true);
+        speakers_taken_by_ = text(*output, "taken_by");
+        QVariantList devices;
+        for (const auto& device : output->value("devices", Json::array())) {
+            devices.push_back(QVariantMap{{QStringLiteral("name"), text(device, "name")},
+                                          {QStringLiteral("description"), text(device, "description")}});
+        }
+        devices_ = std::move(devices);
+    }
 
     if (playing()) {
         tick_.start();
@@ -142,6 +163,33 @@ void PlayerState::fetchMetadata() {
                          emit metadataChanged();
                      });
     }
+}
+
+void PlayerState::adoptOutputs(const Json& payload) {
+    QVariantList outputs;
+    for (const auto& output : payload.value("outputs", Json::array())) {
+        if (!output.is_object()) {
+            continue;
+        }
+        outputs.push_back(QVariantMap{
+            {QStringLiteral("id"), text(output, "id")},
+            {QStringLiteral("name"), QString::fromStdString(protocol::displayable_text(output.value("name", std::string{})))},
+            {QStringLiteral("local"), output.value("local", false)},
+            {QStringLiteral("online"), output.value("online", false)},
+            {QStringLiteral("selected"), output.value("selected", false)},
+            {QStringLiteral("files"), output.value("files", true)}});
+    }
+    outputs_ = std::move(outputs);
+    emit outputsChanged();
+}
+
+void PlayerState::selectOutput(const QString& id) {
+    client_.command(QStringLiteral("outputs.select"), Json{{"id", id.toStdString()}});
+}
+
+void PlayerState::setDevice(const QString& name) {
+    send(QStringLiteral("playback.set_output"),
+         Json{{"target", name.isEmpty() ? Json(nullptr) : Json(name.toStdString())}});
 }
 
 void PlayerState::send(const QString& method, Json params) {

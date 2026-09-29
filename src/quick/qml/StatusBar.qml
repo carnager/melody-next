@@ -35,6 +35,10 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        OutputButton {
+            Layout.rightMargin: 6
+        }
+
         IconButton {
             icon: "queue"
             iconSize: 14

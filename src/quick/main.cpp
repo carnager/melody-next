@@ -23,21 +23,12 @@
 
 namespace {
 
-// The desktop's style, drawn by the desktop's own theme engine (KDE's
-// qqc2-desktop-style, through Kvantum or Breeze), so the window looks like
-// the widgets one beside it; Fusion where that is not installed.
-void chooseStyle(const QQmlApplicationEngine& qml) {
-    if (!qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
-        return;
+// Fusion on every system (ADR-0240): the same controls on Linux, macOS and
+// Windows, in the system's colours.
+void chooseStyle() {
+    if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
+        QQuickStyle::setStyle(QStringLiteral("Fusion"));
     }
-    for (const auto& path : qml.importPathList()) {
-        if (QFile::exists(path + QStringLiteral("/org/kde/desktop/qmldir"))) {
-            QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
-            QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
-            return;
-        }
-    }
-    QQuickStyle::setStyle(QStringLiteral("Fusion"));
 }
 
 } // namespace
@@ -79,7 +70,7 @@ int main(int argc, char* argv[]) {
     trackknife::quick::QuickWorkspace::setInstance(&workspace);
 
     QQmlApplicationEngine qml;
-    chooseStyle(qml);
+    chooseStyle();
     qml.addImageProvider(QStringLiteral("cover"), new trackknife::quick::CoverProvider(workspace));
     qml.addImageProvider(QStringLiteral("icon"), new trackknife::quick::IconProvider());
     QObject::connect(

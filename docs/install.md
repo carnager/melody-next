@@ -98,6 +98,17 @@ cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
 
+For a development checkout, this helper fast-forwards the current tracked
+branch, configures the `dev` preset, and builds it with eight jobs. On macOS it
+also selects the Homebrew Qt and `pkg-config` dependencies:
+
+```sh
+./scripts/build-latest.sh
+```
+
+Use `--preset macos`, `--jobs N`, or `--no-update` to select another preset,
+change the parallelism, or build the checkout without pulling it first.
+
 Relevant build switches are:
 
 | Switch | Default | Effect |

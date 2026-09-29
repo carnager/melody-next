@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "quick/desktop_bridge.hpp"
 #include "quick/engine_session.hpp"
 #include "quick/track_list_model.hpp"
 
@@ -31,6 +32,7 @@ class Engine final : public QObject {
     Q_PROPERTY(QList<trackknife::quick::EngineSession*> sessions READ sessions CONSTANT)
     Q_PROPERTY(trackknife::quick::EngineSession* current READ current NOTIFY currentChanged)
     Q_PROPERTY(trackknife::quick::TrackListModel* tracks READ tracks CONSTANT)
+    Q_PROPERTY(trackknife::quick::DesktopBridge* desktop READ desktop CONSTANT)
 
   public:
     explicit Engine(QObject* parent = nullptr);
@@ -46,6 +48,7 @@ class Engine final : public QObject {
     [[nodiscard]] QList<EngineSession*> sessions() const;
     [[nodiscard]] EngineSession* current() const { return current_; }
     [[nodiscard]] TrackListModel* tracks() { return &tracks_; }
+    [[nodiscard]] DesktopBridge* desktop() { return desktop_.get(); }
     // For the cover provider, on its workers: sessions never change once
     // made, so reading them there needs no lock.
     [[nodiscard]] const EngineClient* clientAt(int index) const;
@@ -62,6 +65,8 @@ class Engine final : public QObject {
     std::vector<std::unique_ptr<EngineSession>> sessions_;
     EngineSession* current_{nullptr};
     TrackListModel tracks_{this};
+    // Made once the sessions are: it follows the current one.
+    std::unique_ptr<DesktopBridge> desktop_;
 };
 
 } // namespace trackknife::quick

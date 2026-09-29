@@ -21,6 +21,8 @@ qt_add_qml_module(
     engine_client.hpp
     engine.cpp
     engine.hpp
+    desktop_bridge.cpp
+    desktop_bridge.hpp
     engine_session.cpp
     engine_session.hpp
     player_state.cpp

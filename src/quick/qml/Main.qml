@@ -36,12 +36,36 @@ ApplicationWindow {
         category: "QuickWindow"
         property alias upNextOpen: window.upNextOpen
         property alias appearance: window.appearance
+        property alias notifications: window.notifications
+        property alias notifyInBackgroundOnly: window.notifyInBackgroundOnly
         property alias x: window.x
         property alias y: window.y
         property alias width: window.width
         property alias height: window.height
     }
     property bool upNextOpen: true
+    // A quiet notification on each new track (ADR-0144); off unless asked.
+    property bool notifications: false
+    property bool notifyInBackgroundOnly: true
+    Binding {
+        target: Engine.desktop
+        property: "notifications"
+        value: window.notifications
+    }
+    Binding {
+        target: Engine.desktop
+        property: "backgroundOnly"
+        value: window.notifyInBackgroundOnly
+    }
+    Connections {
+        target: Engine.desktop
+        function onRaiseRequested() {
+            window.show();
+            window.raise();
+            window.requestActivate();
+        }
+    }
+
     // As Theme.mode: 0 the system's, 1 light, 2 dark.
     property int appearance: 0
     Binding {
@@ -139,6 +163,19 @@ ApplicationWindow {
                 checkable: true
                 checked: window.upNextOpen
                 onTriggered: window.upNextOpen = !window.upNextOpen
+            }
+            MenuItem {
+                text: "Notify on each new track"
+                checkable: true
+                checked: window.notifications
+                onTriggered: window.notifications = !window.notifications
+            }
+            MenuItem {
+                text: "Only while the window is in the background"
+                checkable: true
+                enabled: window.notifications
+                checked: window.notifyInBackgroundOnly
+                onTriggered: window.notifyInBackgroundOnly = !window.notifyInBackgroundOnly
             }
             Menu {
                 title: "Appearance"

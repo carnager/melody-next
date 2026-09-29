@@ -67,9 +67,11 @@ Engine::Engine(QObject* parent) : QObject(parent) {
         session->start();
     }
     current_ = sessions_.front().get();
+    desktop_ = std::make_unique<DesktopBridge>(*this);
 }
 
 Engine::~Engine() {
+    desktop_.reset();
     if (the_instance == this) {
         the_instance = nullptr;
     }

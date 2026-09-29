@@ -92,6 +92,7 @@ void PlayerState::adopt(const Json& state) {
     duration_ms_ = std::max<std::int64_t>(0, state.value("duration_ms", std::int64_t{0}));
     volume_ = state.value("volume_percent", 100);
     requests_ = static_cast<int>(state.value("requests", std::size_t{0}));
+    queue_size_ = static_cast<int>(state.value("queue_size", std::size_t{0}));
     queue_revision_ = state.value("queue_revision", std::uint64_t{0});
     if (const auto modes = state.find("modes"); modes != state.end() && modes->is_object()) {
         repeat_ = modes->value("repeat", false);
@@ -203,6 +204,8 @@ void PlayerState::send(const QString& method, Json params) {
 void PlayerState::toggle() {
     send(playing() ? QStringLiteral("playback.pause") : QStringLiteral("playback.resume"));
 }
+
+void PlayerState::stop() { send(QStringLiteral("playback.stop")); }
 
 void PlayerState::next() { send(QStringLiteral("playback.next")); }
 

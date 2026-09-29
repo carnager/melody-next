@@ -39,6 +39,7 @@ class PlayerState final : public QObject {
     Q_PROPERTY(QString replayGain READ replayGain NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(int requests READ requests NOTIFY changed)
+    Q_PROPERTY(int queueSize READ queueSize NOTIFY changed)
     // ADR-0228: what the engine can play on, and which it plays on now --
     // [{id, name, local, online, selected, files}].
     Q_PROPERTY(QVariantList outputs READ outputs NOTIFY outputsChanged)
@@ -75,6 +76,7 @@ class PlayerState final : public QObject {
     [[nodiscard]] QString replayGain() const { return replay_gain_; }
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] int requests() const { return requests_; }
+    [[nodiscard]] int queueSize() const { return queue_size_; }
     [[nodiscard]] quint64 queueRevision() const { return queue_revision_; }
     [[nodiscard]] QVariantList outputs() const { return outputs_; }
     [[nodiscard]] QVariantList devices() const { return devices_; }
@@ -84,6 +86,7 @@ class PlayerState final : public QObject {
     [[nodiscard]] QString speakersTakenBy() const { return speakers_taken_by_; }
 
     Q_INVOKABLE void toggle();
+    Q_INVOKABLE void stop();
     Q_INVOKABLE void next();
     Q_INVOKABLE void previous();
     Q_INVOKABLE void seek(qreal seconds);
@@ -133,6 +136,7 @@ class PlayerState final : public QObject {
     QString replay_gain_{QStringLiteral("off")};
     QString error_;
     int requests_{0};
+    int queue_size_{0};
     quint64 queue_revision_{0};
     std::uint64_t sequence_{0};
     QVariantList outputs_;

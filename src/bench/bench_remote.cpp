@@ -46,9 +46,6 @@ void BenchMainWindow::engineRekeyed(EngineLink& engine, const EngineKey& from,
             markViewEngine(tab->view, to);
         }
     }
-    if (output_choices_engine_ == from) {
-        output_choices_engine_ = to;
-    }
     if (auto* dialog = findChild<DynamicPlaylistDialog*>()) {
         dialog->close();
     }

@@ -597,9 +597,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void rebuildDeviceMenu();
     // A mode's icon marked as one-shot: on for one track, then off.
     [[nodiscard]] QIcon oneShotIcon(const QIcon& plain) const;
-    void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms);
+    void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms) {
+        workspace_.configurePlaybackBuffer(profile, capacity_ms, start_threshold_ms);
+    }
     void showCustomPlaybackBufferDialog();
-    void refreshPlaybackBufferChecks();
+    void refreshPlaybackBufferChecks() override;
     void reloadPlaybackPreferences();
     void togglePlayPause() { workspace_.togglePlayPause(); }
     void seekToMs(qint64 position_ms) { workspace_.seekToMs(position_ms); }
@@ -798,20 +800,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QHash<QString, int> unmuted_volumes_;
     void refreshMuteButton();
     bool changing_volume_{false};
-    QString selected_buffer_profile_{QStringLiteral("balanced")};
-    std::vector<std::pair<std::string, std::string>> device_choices_;
-    std::optional<std::string> selected_device_;
-    std::optional<std::string> default_device_;
-    bool selected_device_available_{true};
-    // ADR-0228: the engine's outputs, as last shown in the device menu.
-    std::vector<EnginePlayback::State::Output> output_choices_;
-    // Whether the menu's outputs are the remote engine's, which names its
-    // own audio differently.
-    EngineKey output_choices_engine_{EngineKey::local()};
-    [[nodiscard]] QString outputLabel(const EnginePlayback::State::Output& output) const;
-    // Whether an engine state has been seen, so the first one does not read
-    // as the output changing.
-    bool engine_output_seen_{false};
+    QString& selected_buffer_profile_{workspace_.selected_buffer_profile_};
 };
 
 } // namespace trackknife::bench

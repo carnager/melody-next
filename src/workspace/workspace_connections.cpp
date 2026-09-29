@@ -140,6 +140,9 @@ void Workspace::adoptEngineIdentity(EngineLink& engine) {
         up_next_engine_ = to;
         persistUpNext();
     }
+    if (output_choices_engine_ == from) {
+        output_choices_engine_ = to;
+    }
     view_->engineRekeyed(*remote, from, true);
     schedulePersist();
 }

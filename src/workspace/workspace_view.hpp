@@ -50,6 +50,8 @@ class WorkspaceView {
     virtual void refreshTransport() = 0;
     virtual void refreshPlaybackCursor(bool jump) = 0;
     virtual void refreshLocalPlaybackControls() = 0;
+    // The playback buffer profile chosen changed.
+    virtual void refreshPlaybackBufferChecks() = 0;
     // Up Next changed.
     virtual void refreshUpNext() = 0;
     // The engines. One connected is shown -- its library among the sources

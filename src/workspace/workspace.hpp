@@ -12,6 +12,7 @@
 #include "bench/local_playback_service.hpp"
 #include "bench/mpris_service.hpp"
 #include "bench/remote_engines.hpp"
+#include "trackknife/audio/local_playback.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_file_work.hpp"
@@ -431,6 +432,75 @@ class Workspace final : public QObject {
     bool syncUpNextModel();
     void persistUpNext();
     void restoreUpNext();
+
+    // What the engine followed reports, taken in: modes it changed, rows it
+    // consumed, the Up Next ask it started, a queue changed elsewhere.
+    void followEngineState(const EnginePlayback::State& state);
+    // What plays, as the header says it. No title for the window means the
+    // plain one; no cover entry, no cover.
+    struct NowPlaying {
+        QString title;
+        QString context;
+        QString tooltip;
+        QString window_title{QStringLiteral("Trackknife")};
+        QString cover_entry;
+    };
+    [[nodiscard]] NowPlaying nowPlaying(const EnginePlayback::State& state);
+    // ADR-0226, ADR-0228: where it sounds. Taken from each state -- saying
+    // what changed since the last -- and offered as a menu of the engine's
+    // speakers and the chosen one's devices.
+    struct OutputSummary {
+        // Empty when there is no choice to show: the engine's own default.
+        QString shown;
+        QString tooltip;
+        QString description;
+        QString selected_output;
+        bool menu_changed{false};
+    };
+    struct OutputMenu {
+        struct Speaker {
+            std::string id;
+            QString label;
+            QString tooltip;
+            bool checked{false};
+        };
+        struct Device {
+            std::optional<std::string> target;
+            QString label;
+            bool checked{false};
+            bool enabled{true};
+        };
+        bool speakers_shown{false};
+        std::vector<Speaker> speakers;
+        QString devices_heading;
+        std::vector<Device> devices;
+    };
+    [[nodiscard]] OutputSummary takeOutputs(const EnginePlayback::State& state);
+    [[nodiscard]] OutputMenu outputMenu() const;
+    [[nodiscard]] QString outputLabel(const EnginePlayback::State::Output& output) const;
+    // The engine's playback buffer, by profile; Settings mirror it.
+    struct PlaybackBufferPreference {
+        QString profile;
+        audio::PlaybackBufferDurationConfig config;
+    };
+    [[nodiscard]] static QString bufferProfileLabel(const QString& profile);
+    [[nodiscard]] static PlaybackBufferPreference loadPlaybackBufferPreference();
+    void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms);
+    // Settings changed: the buffer and ReplayGain preamps told to the engine.
+    void reloadPlaybackPreferences();
+    QString selected_buffer_profile_{QStringLiteral("balanced")};
+    std::vector<std::pair<std::string, std::string>> device_choices_;
+    std::optional<std::string> selected_device_;
+    std::optional<std::string> default_device_;
+    bool selected_device_available_{true};
+    // ADR-0228: the engine's outputs, as last reported.
+    std::vector<EnginePlayback::State::Output> output_choices_;
+    // Whether those are an engine elsewhere's, which names its own audio
+    // differently.
+    EngineKey output_choices_engine_{EngineKey::local()};
+    // Whether an engine state has been seen, so the first one does not read
+    // as the output changing.
+    bool engine_output_seen_{false};
 
     // Last.fm, signed in as this window's account: listens credited from
     // what the engine followed reports, unless it scrobbles itself.

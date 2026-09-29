@@ -57,60 +57,6 @@ namespace trackknife::bench {
 namespace {
 
 constexpr int transport_refresh_ms = 33;
-constexpr int minimum_custom_buffer_ms = 10;
-constexpr int maximum_custom_buffer_ms = 10'000;
-constexpr auto buffer_profile_settings_key = "playback/buffer-profile";
-constexpr auto buffer_capacity_settings_key = "playback/buffer-capacity-ms";
-constexpr auto buffer_threshold_settings_key = "playback/buffer-start-threshold-ms";
-
-struct PlaybackBufferPreference {
-    QString profile;
-    audio::PlaybackBufferDurationConfig config;
-};
-
-[[nodiscard]] QString bufferProfileLabel(const QString& profile) {
-    if (profile == QStringLiteral("responsive")) {
-        return QStringLiteral("Responsive");
-    }
-    if (profile == QStringLiteral("resilient")) {
-        return QStringLiteral("Resilient");
-    }
-    if (profile == QStringLiteral("custom")) {
-        return QStringLiteral("Custom");
-    }
-    return QStringLiteral("Balanced");
-}
-
-[[nodiscard]] PlaybackBufferPreference loadPlaybackBufferPreference() {
-    QSettings settings;
-    const auto profile =
-        settings.value(QString::fromLatin1(buffer_profile_settings_key), QStringLiteral("balanced"))
-            .toString();
-    const auto profile_bytes = utf8Bytes(profile);
-    if (const auto preset = audio::playback_buffer_preset_from_id(profile_bytes)) {
-        return {.profile = profile, .config = audio::playback_buffer_preset_config(*preset)};
-    }
-    if (profile == QStringLiteral("custom")) {
-        bool capacity_ok = false;
-        bool threshold_ok = false;
-        const auto capacity =
-            settings.value(QString::fromLatin1(buffer_capacity_settings_key)).toInt(&capacity_ok);
-        const auto threshold =
-            settings.value(QString::fromLatin1(buffer_threshold_settings_key)).toInt(&threshold_ok);
-        const audio::PlaybackBufferDurationConfig config{
-            .capacity = std::chrono::milliseconds{capacity},
-            .start_threshold = std::chrono::milliseconds{threshold},
-        };
-        if (capacity_ok && threshold_ok && capacity >= minimum_custom_buffer_ms &&
-            capacity <= maximum_custom_buffer_ms &&
-            audio::valid_local_audition_buffer_config(config)) {
-            return {.profile = profile, .config = config};
-        }
-    }
-    return {.profile = QStringLiteral("balanced"),
-            .config = audio::playback_buffer_preset_config(audio::PlaybackBufferPreset::balanced)};
-}
-
 } // namespace
 
 BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -126,7 +72,7 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // ADR-0226: this window plays nothing itself. The engine owns playback,
     // and the buffer shown here is the one it reports.
-    selected_buffer_profile_ = loadPlaybackBufferPreference().profile;
+    selected_buffer_profile_ = Workspace::loadPlaybackBufferPreference().profile;
 
     buildWorkspace();
     buildTransport();
@@ -599,57 +545,9 @@ void BenchMainWindow::buildTransport() {
     });
 }
 
-void BenchMainWindow::configurePlaybackBuffer(const QString& profile, const int capacity_ms,
-                                              const int start_threshold_ms) {
-    const audio::PlaybackBufferDurationConfig config{
-        .capacity = std::chrono::milliseconds{capacity_ms},
-        .start_threshold = std::chrono::milliseconds{start_threshold_ms},
-    };
-    if (!audio::valid_local_audition_buffer_config(config)) {
-        statusBar()->showMessage(QStringLiteral("Invalid playback buffer values"), 5'000);
-        refreshPlaybackBufferChecks();
-        return;
-    }
-
-    if (!playingOnEngine()) {
-        statusBar()->showMessage(QStringLiteral("Playback buffer unchanged: no engine"), 5'000);
-        refreshPlaybackBufferChecks();
-        return;
-    }
-    // ADR-0226: the engine's buffer, which it keeps. Settings mirror it so
-    // the dialog shows the engine's value.
-    transport_->setBuffer(capacity_ms, start_threshold_ms);
-
-    selected_buffer_profile_ = profile;
-    QSettings settings;
-    settings.setValue(QString::fromLatin1(buffer_profile_settings_key), profile);
-    settings.setValue(QString::fromLatin1(buffer_capacity_settings_key), capacity_ms);
-    settings.setValue(QString::fromLatin1(buffer_threshold_settings_key), start_threshold_ms);
-    settings.sync();
-    refreshPlaybackBufferChecks();
-
-    const bool pending = transport_->state().status != QStringLiteral("stopped");
-    statusBar()->showMessage(
-        QStringLiteral("%1 buffer · %2 ms capacity · %3 ms start%4")
-            .arg(bufferProfileLabel(profile))
-            .arg(capacity_ms)
-            .arg(start_threshold_ms)
-            .arg(pending ? QStringLiteral(" · applies next track") : QString{}),
-        5'000);
-}
-
 void BenchMainWindow::reloadPlaybackPreferences() {
     const QSettings settings;
-    const auto preference = loadPlaybackBufferPreference();
-    const auto engine = playingOnEngine() ? std::optional{transport_->state()} : std::nullopt;
-    if (selected_buffer_profile_ != preference.profile ||
-        (engine &&
-         (engine->buffer_capacity_ms != preference.config.capacity.count() ||
-          engine->buffer_start_threshold_ms != preference.config.start_threshold.count()))) {
-        configurePlaybackBuffer(preference.profile,
-                                static_cast<int>(preference.config.capacity.count()),
-                                static_cast<int>(preference.config.start_threshold.count()));
-    }
+    workspace_.reloadPlaybackPreferences();
     if (notifier_)
         notifier_->setBackgroundOnly(
             settings.value(QStringLiteral("desktop/notifications-background-only"), false)
@@ -657,15 +555,6 @@ void BenchMainWindow::reloadPlaybackPreferences() {
     if (notifications_action_)
         notifications_action_->setChecked(
             settings.value(QStringLiteral("desktop/notifications"), false).toBool());
-    const auto with_gain =
-        settings.value(QStringLiteral("playback/rg-preamp-with"), 0.0).toDouble();
-    const auto without_gain =
-        settings.value(QStringLiteral("playback/rg-preamp-without"), 0.0).toDouble();
-    if (local_rg_preamp_with_ != with_gain || local_rg_preamp_without_ != without_gain) {
-        local_rg_preamp_with_ = with_gain;
-        local_rg_preamp_without_ = without_gain;
-        applyLocalPlaybackModes();
-    }
 }
 
 void BenchMainWindow::showCustomPlaybackBufferDialog() {
@@ -682,17 +571,6 @@ void BenchMainWindow::refreshPlaybackBufferChecks() {
     }
 }
 
-QString BenchMainWindow::outputLabel(const EnginePlayback::State::Output& output) const {
-    // A machine has one name wherever it is listed: this computer is
-    // "caprica" in its own engine's speakers as in the server's, where it
-    // plays as an agent. Only an engine that gives no name is described.
-    if (output.local && (output.name.empty() || output.name == "this machine")) {
-        return output_choices_engine_.isLocal() ? QStringLiteral("This computer")
-                                                : QStringLiteral("The server");
-    }
-    return displayText(output.name);
-}
-
 void BenchMainWindow::rebuildDeviceMenu() {
     device_menu_->clear();
     // The previous rebuild's output group, whose actions clear() just took.
@@ -705,21 +583,6 @@ void BenchMainWindow::rebuildDeviceMenu() {
 
     device_group_->setExclusive(true);
     device_button_->setAccessibleName(QStringLiteral("Audio output device"));
-
-    const auto add_choice = [this](const QString& label, std::optional<std::string> target,
-                                   const bool enabled = true) {
-        auto* action = device_menu_->addAction(label);
-        action->setCheckable(true);
-        action->setChecked(target == selected_device_);
-        action->setEnabled(enabled);
-        device_group_->addAction(action);
-        connect(action, &QAction::triggered, this, [this, target = std::move(target)] {
-            if (playingOnEngine()) {
-                transport_->setOutput(target);
-            }
-        });
-        return action;
-    };
 
     // Headings as labels: QMenu::addSection draws its text only in some
     // styles, and in others the two groups ran together unlabelled -- the
@@ -739,56 +602,41 @@ void BenchMainWindow::rebuildDeviceMenu() {
         device_menu_->addAction(heading);
     };
 
-    // ADR-0228: which of the engine's outputs plays -- shown once there is a
-    // choice, which is when an agent has ever registered.
-    const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
-        return !output.local;
-    });
-    if (agents) {
+    const auto menu = workspace_.outputMenu();
+    if (menu.speakers_shown) {
         add_heading(QStringLiteral("Speakers"));
         auto* outputs = new QActionGroup(device_menu_);
         outputs->setExclusive(true);
-        for (const auto& output : output_choices_) {
-            auto label = outputLabel(output);
-            if (!output.online) {
-                label += QStringLiteral(" (offline)");
-            }
-            auto* action = device_menu_->addAction(label);
+        for (const auto& speaker : menu.speakers) {
+            auto* action = device_menu_->addAction(speaker.label);
             action->setObjectName(
-                QStringLiteral("action-output-%1").arg(QString::fromStdString(output.id)));
+                QStringLiteral("action-output-%1").arg(QString::fromStdString(speaker.id)));
             action->setCheckable(true);
-            action->setChecked(output.selected);
-            // An offline agent can still be chosen: the music waits there
-            // and starts when it is back.
-            if (!output.online) {
-                action->setToolTip(
-                    QStringLiteral("Not connected. Chosen, it plays as soon as it is back."));
-            } else if (!output.local && !output.files) {
-                action->setToolTip(QStringLiteral("Streams the music from the engine"));
+            action->setChecked(speaker.checked);
+            if (!speaker.tooltip.isEmpty()) {
+                action->setToolTip(speaker.tooltip);
             }
             outputs->addAction(action);
-            connect(action, &QAction::triggered, this, [this, id = output.id] {
+            connect(action, &QAction::triggered, this, [this, id = speaker.id] {
                 if (playingOnEngine()) {
                     transport_->selectOutput(id);
                 }
             });
         }
-        const auto chosen = std::ranges::find_if(output_choices_, &EnginePlayback::State::Output::selected);
         device_menu_->addSeparator();
-        add_heading(chosen != output_choices_.end()
-                        ? QStringLiteral("Sound device on %1").arg(outputLabel(*chosen))
-                        : QStringLiteral("Sound device"));
+        add_heading(menu.devices_heading);
     }
-
-    add_choice(QStringLiteral("System default"), std::nullopt);
-    for (const auto& [name, description] : device_choices_) {
-        add_choice(displayText(description.empty() ? name : description), name);
-    }
-    if (selected_device_ && std::ranges::none_of(device_choices_, [this](const auto& choice) {
-            return choice.first == *selected_device_;
-        })) {
-        add_choice(QStringLiteral("%1 (unavailable)").arg(displayText(*selected_device_)),
-                   selected_device_, false);
+    for (const auto& device : menu.devices) {
+        auto* action = device_menu_->addAction(device.label);
+        action->setCheckable(true);
+        action->setChecked(device.checked);
+        action->setEnabled(device.enabled);
+        device_group_->addAction(action);
+        connect(action, &QAction::triggered, this, [this, target = device.target] {
+            if (playingOnEngine()) {
+                transport_->setOutput(target);
+            }
+        });
     }
     device_menu_->addSeparator();
     auto* refresh = device_menu_->addAction(QStringLiteral("Refresh audio devices"));
@@ -1199,155 +1047,14 @@ void BenchMainWindow::refreshEngineTransport() {
     }
     refreshMuteButton();
 
-    if (stopped && !state.error.isEmpty()) {
-        // Asked to play and could not: said where the track would be, or
-        // the engine reads as idle and the ask as lost.
-        now_playing_->setText(tr("Could not play"));
-        setWindowTitle(QStringLiteral("Trackknife"));
-        now_playing_context_->setText(state.error);
-        refreshHeaderCover({});
-        now_playing_->setToolTip(state.error);
-        now_playing_context_->setToolTip(state.error);
-    } else if (stopped || state.path.isEmpty()) {
-        now_playing_->setText(QStringLiteral("Nothing playing"));
-        setWindowTitle(QStringLiteral("Trackknife"));
-        now_playing_context_->clear();
-        refreshHeaderCover({});
-        now_playing_->setToolTip({});
-        now_playing_context_->setToolTip({});
-    } else {
-        // Named from the list the entry came from when it is still open, so
-        // the header reads the same as the row; the file name is the fallback
-        // for an entry whose tab has been closed.
-        auto label = QFileInfo{state.path}.fileName();
-        QString context;
-        const auto* row = playingRow(state.entry);
-        if (row != nullptr && !row->title.empty()) {
-            label = QString::fromStdString(row->title);
-            // "Artist — Album (Year)", as much of it as the tags have.
-            QStringList parts;
-            if (!row->artist.empty()) {
-                parts << QString::fromStdString(row->artist);
-            }
-            if (!row->album.empty()) {
-                auto album = QString::fromStdString(row->album);
-                if (row->date.size() >= 4U) {
-                    album += QStringLiteral(" (%1)").arg(QString::fromStdString(row->date.substr(0, 4)));
-                }
-                parts << album;
-            }
-            context = parts.join(QStringLiteral(" — "));
-        }
-        if (auto* tab = tabForDocument(playback_.anchors.document);
-            tab != nullptr && context.isEmpty()) {
-            context = QString::fromStdString(tab->document.name);
-        }
-        // Paused because another engine is playing on these speakers: said
-        // where the album would be, so the silence has a reason.
-        if (!state.speakers_taken_by.isEmpty() && state.status != QStringLiteral("playing")) {
-            // Named as the engine at that address is, when it is one of ours.
-            auto taker = state.speakers_taken_by;
-            for (const auto& engine : engines_) {
-                if (!engine->key.isLocal() && engine->setting.address == state.speakers_taken_by) {
-                    taker = engineName(engine->key);
-                }
-            }
-            context = tr("Paused · %1 is playing on these speakers").arg(taker);
-        }
-        now_playing_->setText(label);
-        // In the title too, which is what a taskbar or window switcher shows.
-        const auto artist = row != nullptr ? QString::fromStdString(row->artist) : QString{};
-        setWindowTitle((artist.isEmpty() ? label : artist + QStringLiteral(" – ") + label) +
-                       QStringLiteral(" — Trackknife"));
-        now_playing_context_->setText(context);
-        refreshHeaderCover(state.entry);
-        now_playing_->setToolTip(state.path);
-        now_playing_context_->setToolTip(state.path);
-    }
-    if (state.modes != playback_.modes) {
-        // The engine owns the modes while it owns playback: a one-shot
-        // expires where the track actually ended. Adopted rather than pushed
-        // back, or the two would argue.
-        playback_.modes = state.modes;
-        saveLocalPlaybackModes();
-        refreshLocalPlaybackControls();
-    }
-    if (!state.consumed.isEmpty() && state.consumed != engine_consumed_) {
-        engine_consumed_ = state.consumed;
-        // The engine dropped it from its queue; the list it came from drops it
-        // too. Told rather than deduced, so the two cannot disagree.
-        if (const auto dropped = core::StableId::parse(state.consumed.toStdString())) {
-            for (const auto& tab : list_tabs_) {
-                const auto row = tab->model->rowOfEntry(*dropped, -1);
-                if (row < 0) {
-                    continue;
-                }
-                consuming_row_ = true;
-                tab->model->removeRowIndexes({row}, false);
-                consuming_row_ = false;
-                takeEngineChange(*tab);
-                // Nor is it in the engine's queue any more, as this window
-                // knows it.
-                engine_queue_.remove(state.consumed);
-                schedulePersist();
-                break;
-            }
-        }
-    }
-    if (state.entry != engine_entry_) {
-        engine_entry_ = state.entry;
-        // The engine consumes a request by playing it, so the panel has to let
-        // go of it too or it would be re-stated on the next sync and play
-        // twice. The return-point the local path keeps is the engine's
-        // business now: it continues from the row it played, which is a
-        // difference worth knowing rather than papering over.
-        const auto started = core::StableId::parse(state.entry.toStdString());
-        if (started) {
-            const auto& pending = playback_.requests.pending();
-            const auto match = std::ranges::find_if(pending, [&started](const auto& entry) {
-                return entry.source.entry_id == *started;
-            });
-            if (match != pending.end()) {
-                playback_.requests.started(*match);
-                engine_requests_.clear();
-                persistUpNext();
-                refreshUpNext();
-            } else if (playback_.requests.active()) {
-                playback_.requests.finished();
-                persistUpNext();
-                refreshUpNext();
-            }
-        }
-        if (auto* tab = tabForDocument(playback_.anchors.document); tab != nullptr) {
-            const auto& rows = tab->model->rows();
-            const auto match = std::find_if(rows.begin(), rows.end(), [&state](const auto& row) {
-                return QString::fromStdString(row.entry_id.to_string()) == state.entry;
-            });
-            if (match != rows.end()) {
-                const auto row = static_cast<int>(std::distance(rows.begin(), match));
-                playback_.anchors.current = match->entry_id;
-                playback_.row = row;
-                tab->model->setCurrentSource(tab->model->source(row), row);
-            }
-        }
-    }
-
-    // Has the engine's queue drifted from what this window is showing? Only
-    // a new revision says it might have, so the queue is fetched then and not
-    // on every sample -- and whatever its size: another client replacing the
-    // list with one as long must show too. Its own edits come back unchanged
-    // and are dropped by the comparison inside.
-    // Not while this window's own commands are on their way: until they are
-    // answered, the engine may report a queue from before them, and adopting
-    // it would trade the rows just added for the engine's older list -- and
-    // then, once the engine caught up, bring them back as bare paths. The
-    // revision is left unread so the check runs once they are answered.
-    if (state.queue_revision != engine_queue_revision_ && !transport_->settling()) {
-        engine_queue_revision_ = state.queue_revision;
-        if (tabForDocument(playback_.anchors.document) != nullptr) {
-            adoptEngineQueue();
-        }
-    }
+    const auto shown = workspace_.nowPlaying(state);
+    now_playing_->setText(shown.title);
+    setWindowTitle(shown.window_title);
+    now_playing_context_->setText(shown.context);
+    refreshHeaderCover(shown.cover_entry);
+    now_playing_->setToolTip(shown.tooltip);
+    now_playing_context_->setToolTip(shown.tooltip);
+    workspace_.followEngineState(state);
 
     refreshOutputControls(state);
     // Observable for offscreen tests and diagnostics.
@@ -1387,126 +1094,12 @@ void BenchMainWindow::refreshTransport() {
 // The engine's sink and buffer (ADR-0226). The devices are the engine
 // machine's: for an engine on a NAS they are the NAS's, which is the point.
 void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) {
-    std::vector<std::pair<std::string, std::string>> choices;
-    choices.reserve(state.devices.size());
-    for (const auto& device : state.devices) {
-        choices.emplace_back(device.name, device.description);
-    }
-    if (engine_output_seen_) {
-        if (selected_device_available_ && !state.output_available) {
-            statusBar()->showMessage(QStringLiteral("Audio output unavailable · playback paused"),
-                                     5'000);
-        } else if (!selected_device_available_ && state.output_available &&
-                   !state.output_suspended) {
-            statusBar()->showMessage(
-                QStringLiteral("Audio output available again · press Play to resume"), 5'000);
-        } else if (!state.output_target && default_device_ &&
-                   state.default_output != default_device_) {
-            statusBar()->showMessage(QStringLiteral("System audio output changed"), 5'000);
-        }
-    }
-    // ADR-0228: the chosen agent going away and coming back is worth saying;
-    // the music waits for it either way.
-    const auto chosen = [](const std::vector<EnginePlayback::State::Output>& outputs) {
-        const auto found = std::ranges::find_if(outputs, &EnginePlayback::State::Output::selected);
-        return found == outputs.end() ? std::optional<EnginePlayback::State::Output>{}
-                                      : std::optional{*found};
-    };
-    const auto was = chosen(output_choices_);
-    const auto now = chosen(state.outputs);
-    if (engine_output_seen_ && was && now && was->id == now->id && !now->local &&
-        was->online != now->online) {
-        statusBar()->showMessage(now->online
-                                     ? QStringLiteral("%1 is back").arg(outputLabel(*now))
-                                     : QStringLiteral("%1 went away · playback waits for it")
-                                           .arg(outputLabel(*now)),
-                                 5'000);
-    }
-    const auto* playing = linkOf(transport_);
-    const auto engine = playing != nullptr ? playing->key : EngineKey::local();
-    const bool outputs_changed =
-        state.outputs != output_choices_ || engine != output_choices_engine_;
-    output_choices_ = state.outputs;
-    output_choices_engine_ = engine;
-    engine_output_seen_ = true;
-    const bool menu_changed = outputs_changed || choices != device_choices_ ||
-                              state.output_target != selected_device_ ||
-                              state.output_available != selected_device_available_ ||
-                              state.default_output != default_device_;
-    device_choices_ = std::move(choices);
-    selected_device_ = state.output_target;
-    default_device_ = state.default_output;
-    selected_device_available_ = state.output_available;
-    if (menu_changed) {
+    const auto outputs = workspace_.takeOutputs(state);
+    if (outputs.menu_changed) {
         rebuildDeviceMenu();
     }
-
-    const auto label_of = [this](const std::string& name) {
-        const auto found =
-            std::ranges::find(device_choices_, name, &std::pair<std::string, std::string>::first);
-        return found == device_choices_.end()
-                   ? displayText(name)
-                   : displayText(found->second.empty() ? found->first : found->second);
-    };
-    QString device_label = QStringLiteral("System default");
-    if (selected_device_) {
-        device_label = label_of(*selected_device_);
-    } else if (default_device_) {
-        device_label += QStringLiteral(" — %1").arg(label_of(*default_device_));
-    }
-    if (!state.output_available) {
-        device_label += QStringLiteral(" (unavailable)");
-    }
-
-    // The profile is a name for a pair of numbers, and the engine keeps only
-    // the numbers; a match against the presets recovers the name.
-    auto profile = QStringLiteral("custom");
-    for (const auto preset :
-         {audio::PlaybackBufferPreset::responsive, audio::PlaybackBufferPreset::balanced,
-          audio::PlaybackBufferPreset::resilient}) {
-        const auto config = audio::playback_buffer_preset_config(preset);
-        if (config.capacity.count() == state.buffer_capacity_ms &&
-            config.start_threshold.count() == state.buffer_start_threshold_ms) {
-            const auto id = audio::playback_buffer_preset_id(preset);
-            profile = QString::fromLatin1(id.data(), static_cast<qsizetype>(id.size()));
-        }
-    }
-    if (state.buffer_capacity_ms > 0 && profile != selected_buffer_profile_) {
-        selected_buffer_profile_ = profile;
-        QSettings settings;
-        settings.setValue(QString::fromLatin1(buffer_profile_settings_key), profile);
-        settings.setValue(QString::fromLatin1(buffer_capacity_settings_key),
-                          static_cast<int>(state.buffer_capacity_ms));
-        settings.setValue(QString::fromLatin1(buffer_threshold_settings_key),
-                          static_cast<int>(state.buffer_start_threshold_ms));
-        refreshPlaybackBufferChecks();
-    }
-
     device_button_->setEnabled(true);
-    // Where the sound goes, on the button itself: music coming out of another
-    // room is not something to have to hover to find out. Named when there is
-    // a choice to have made -- an agent, or a device other than the default.
-    const bool agents = std::ranges::any_of(output_choices_, [](const auto& output) {
-        return !output.local;
-    });
-    // Nothing chosen yet: the engine's own speakers, by the same name.
-    const auto own = std::ranges::find_if(output_choices_,
-                                          [](const auto& output) { return output.local; });
-    const auto engine_name =
-        own != output_choices_.end()
-            ? outputLabel(*own)
-            : (engine.isLocal() ? QStringLiteral("This computer") : engineName(engine));
-    const auto speaker = now ? outputLabel(*now) : engine_name;
-    const auto device = selected_device_ ? label_of(*selected_device_) : QString{};
-    QString shown;
-    if (agents) {
-        shown = device.isEmpty() ? speaker : QStringLiteral("%1 · %2").arg(speaker, device);
-    } else if (!device.isEmpty()) {
-        shown = device;
-    }
-    if (now && !now->online) {
-        shown += QStringLiteral(" (offline)");
-    }
+    const auto& shown = outputs.shown;
     const bool named = !shown.isEmpty();
     if (device_button_->property("chevron").toBool() != named) {
         device_button_->setProperty("chevron", named);
@@ -1525,27 +1118,9 @@ void BenchMainWindow::refreshOutputControls(const EnginePlayback::State& state) 
         device_button_->setMinimumSize(26, 26);
         device_button_->setMaximumSize(QWIDGETSIZE_MAX, 26);
     }
-    device_label = QStringLiteral("%1 → %2 → %3%4")
-                       .arg(engine_name, speaker, device_label,
-                            now && !now->online ? QStringLiteral(" (offline)") : QString{});
-    setProperty("trackknife-player-output",
-                now ? QString::fromStdString(now->id) : QString{});
-    auto tooltip =
-        QStringLiteral("Audio output: %1\nBuffer: %2 · %3 ms capacity · %4 ms start%5\n"
-                       "Underruns: %6")
-            .arg(device_label)
-            .arg(bufferProfileLabel(selected_buffer_profile_))
-            .arg(state.buffer_capacity_ms)
-            .arg(state.buffer_start_threshold_ms)
-            .arg(state.buffer_pending ? QStringLiteral(" · applies next track") : QString{})
-            .arg(state.underruns);
-    if (!state.output_available) {
-        tooltip += QStringLiteral("\nPlayback is paused until an output is available");
-    } else if (state.output_suspended) {
-        tooltip += QStringLiteral("\nReconnecting the audio output");
-    }
-    device_button_->setToolTip(tooltip);
-    device_button_->setAccessibleDescription(device_label);
+    setProperty("trackknife-player-output", outputs.selected_output);
+    device_button_->setToolTip(outputs.tooltip);
+    device_button_->setAccessibleDescription(outputs.description);
 
     // Observable for offscreen tests and diagnostics.
     setProperty("trackknife-player-output-available", state.output_available);

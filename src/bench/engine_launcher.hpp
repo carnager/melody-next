@@ -57,11 +57,17 @@ struct LocalEngineSharing final {
         QString address;
         QString password; // empty: open
         QString music_root;
+        // ADR-0239: kbps of Opus it streams here nearby and away; 0 the
+        // original files.
+        int nearby_kbps{0};
+        int away_kbps{128};
         friend bool operator==(const PlayFor&, const PlayFor&) = default;
     };
     std::vector<PlayFor> play_for;
-    // Plays for every engine found on the network, too.
+    // Plays for every engine found on the network, too, streamed as these.
     bool play_for_found{false};
+    int found_nearby_kbps{0};
+    int found_away_kbps{128};
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
 };
 [[nodiscard]] LocalEngineSharing localEngineSharing();

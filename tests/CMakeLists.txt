@@ -376,6 +376,14 @@ add_test(
 )
 set_tests_properties(output-agent PROPERTIES TIMEOUT 90)
 
+# ADR-0239: the original nearby, Opus from afar.
+add_executable(trackknife_stream_route_tests stream_route_test.cpp)
+target_link_libraries(
+    trackknife_stream_route_tests
+    PRIVATE Trackknife::Agent trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME stream-route COMMAND trackknife_stream_route_tests)
+
 # ADR-0220: melodyd as a process, exercised the way an init system would.
 add_test(
     NAME engine-daemon

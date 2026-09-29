@@ -117,7 +117,8 @@ void Guests::update(const std::vector<discovery::Found>& found) {
                                                                              : std::string{}},
                         .name = config_.name,
                         .music_root = config_.music_root,
-                        .stream_only = !config_.music_root.has_value()},
+                        .stream_only = !config_.music_root.has_value(),
+                        .stream = config_.stream},
             std::move(*audition));
         if (!agent) {
             std::cerr << "melody: cannot play for " << engine.instance << ": "

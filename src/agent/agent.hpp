@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "agent/stream_route.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/engine/interruptible_pause.hpp"
@@ -26,6 +27,8 @@ struct AgentConfig final {
     std::optional<std::filesystem::path> music_root;
     // Asks for streams rather than files: this machine cannot open them.
     bool stream_only{false};
+    // ADR-0239: what a streaming agent asks for, by how it reaches the engine.
+    StreamChoice stream{};
 };
 
 // ADR-0228: an output agent. Connects to an engine, registers, and then plays
@@ -55,6 +58,9 @@ class Agent final {
     [[nodiscard]] core::Result<int> register_with_engine();
 
     AgentConfig config_;
+    // How the last registration reached the engine, and what it asked for:
+    // said in the log. The connecting thread's alone.
+    std::string stream_note_;
     std::string instance_;
     std::unique_ptr<audio::LocalAuditionService> audition_;
     protocol::Dispatcher dispatcher_;

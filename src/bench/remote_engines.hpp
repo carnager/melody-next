@@ -26,6 +26,9 @@ struct RemoteEngineSetting final {
     QString reachable_at;
     // The id the engine gave when last reached; empty until then.
     QString id;
+    // ADR-0239: what it streams to this computer's speakers, whatever the
+    // route: kbps of Opus, 0 the original files, -1 by the route.
+    int stream_kbps{-1};
 
     // The password to use: its own, or this computer's engine's.
     [[nodiscard]] QString effectivePassword() const;

@@ -324,8 +324,11 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
                            .password = QStringLiteral("another"),
                            .music_folder = {},
                            .reachable_at = QStringLiteral("/media/other"),
-                           .id = {}});
+                           .id = {},
+                           .stream_kbps = 64});
         saveRemoteEngines(engines);
+        settings.setValue(QLatin1String(SettingsDialog::engine_stream_away_key), 96);
+        settings.sync();
         const auto arguments = localEngineArguments(scratch.engine, localEngineSharing());
         QCOMPARE(arguments.count(QStringLiteral("--play-for")), 2);
         const auto second = arguments.lastIndexOf(QStringLiteral("--play-for"));
@@ -336,6 +339,20 @@ void EngineLauncherTest::theEnginePlaysForTheRemoteWithoutAnAgent() {
         QFile password{arguments.at(second + 5)};
         QVERIFY(password.open(QIODevice::ReadOnly));
         QCOMPARE(password.readAll().trimmed(), QByteArrayLiteral("another"));
+        // ADR-0239: one fixed for this engine, whatever the route; the first
+        // by the route, as Settings have it; the engines found likewise.
+        QCOMPARE(arguments.at(second + 6), QStringLiteral("--play-for-bitrate-nearby"));
+        QCOMPARE(arguments.at(second + 7), QStringLiteral("64"));
+        QCOMPARE(arguments.at(second + 8), QStringLiteral("--play-for-bitrate-away"));
+        QCOMPARE(arguments.at(second + 9), QStringLiteral("64"));
+        const auto first = arguments.indexOf(QStringLiteral("--play-for-bitrate-nearby"));
+        QVERIFY(first < second);
+        QCOMPARE(arguments.at(first + 1), QStringLiteral("0"));
+        QCOMPARE(arguments.at(first + 3), QStringLiteral("96"));
+        const auto found = arguments.indexOf(QStringLiteral("--agent-bitrate-away"));
+        QVERIFY(found >= 0);
+        QCOMPARE(arguments.at(found + 1), QStringLiteral("96"));
+        settings.remove(QLatin1String(SettingsDialog::engine_stream_away_key));
         engines.pop_back();
         saveRemoteEngines(engines);
     }

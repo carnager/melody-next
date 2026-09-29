@@ -38,7 +38,8 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
                  .password = text(settings, SettingsDialog::library_engine_token_key),
                  .music_folder = text(settings, SettingsDialog::library_remote_folder_key),
                  .reachable_at = text(settings, SettingsDialog::library_remote_mount_key),
-                 .id = text(settings, SettingsDialog::library_engine_id_key)});
+                 .id = text(settings, SettingsDialog::library_engine_id_key),
+                 .stream_kbps = -1});
         }
         saveRemoteEngines(engines);
         return engines;
@@ -52,7 +53,8 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
             .password = settings.value("password").toString().trimmed(),
             .music_folder = settings.value("music-folder").toString().trimmed(),
             .reachable_at = settings.value("reachable-at").toString().trimmed(),
-            .id = settings.value("id").toString().trimmed()};
+            .id = settings.value("id").toString().trimmed(),
+            .stream_kbps = settings.value("stream-kbps", -1).toInt()};
         if (!engine.address.isEmpty()) {
             engines.push_back(std::move(engine));
         }
@@ -69,11 +71,14 @@ std::vector<RemoteEngineSetting> loadRemoteEngines() {
             .password = text(settings, SettingsDialog::library_engine_token_key),
             .music_folder = text(settings, SettingsDialog::library_remote_folder_key),
             .reachable_at = text(settings, SettingsDialog::library_remote_mount_key),
-            .id = {}};
+            .id = {},
+            .stream_kbps = -1};
         if (engines.empty()) {
             engines.push_back(first);
         } else if (engines.front().address == address) {
+            // The old keys know nothing of streams: what it streams stays.
             first.id = engines.front().id;
+            first.stream_kbps = engines.front().stream_kbps;
             engines.front() = first;
         } else {
             engines.front() = first;
@@ -96,6 +101,7 @@ void saveRemoteEngines(const std::vector<RemoteEngineSetting>& engines) {
         settings.setValue("music-folder", engine.music_folder);
         settings.setValue("reachable-at", engine.reachable_at);
         settings.setValue("id", engine.id);
+        settings.setValue("stream-kbps", engine.stream_kbps);
     }
     settings.endArray();
     // What an older release reads, kept to the first: the one it knows of.

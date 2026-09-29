@@ -120,6 +120,13 @@ class SettingsDialog final : public QDialog {
     // ADR-0228: the remote engine may play on this computer's speakers
     // through this computer's engine -- no melody-agent needed here.
     static constexpr auto engine_play_for_remote_key = "engine/play-for-remote";
+    // ADR-0239: what engines elsewhere stream to those speakers, in kbps of
+    // Opus, 0 the original files: when nearby, and when reached through a
+    // VPN or a router.
+    static constexpr auto engine_stream_nearby_key = "engine/stream-nearby-kbps";
+    static constexpr int engine_stream_nearby_default = 0;
+    static constexpr auto engine_stream_away_key = "engine/stream-away-kbps";
+    static constexpr int engine_stream_away_default = 128;
     static constexpr auto replaygain_sidecar_only_key = "replaygain/sidecar-only";
     static constexpr auto replaygain_true_peak_key = "replaygain/true-peak";
     static constexpr auto artwork_embed_key = "artwork/embed";
@@ -149,6 +156,7 @@ class SettingsDialog final : public QDialog {
     QLineEdit* engine_token_{nullptr};
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
+    QComboBox* remote_stream_{nullptr};
     // ADR-0234: the engines elsewhere, as edited; the form shows one.
     std::vector<RemoteEngineSetting> engines_list_;
     int engine_current_{-1};
@@ -160,6 +168,8 @@ class SettingsDialog final : public QDialog {
     void chooseFoundEngine(const QString& address);
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
+    QComboBox* stream_nearby_{nullptr};
+    QComboBox* stream_away_{nullptr};
     // Looks for engines while the dialog is open.
     std::unique_ptr<discovery::Browser> engine_browser_;
     QCheckBox* show_local_library_{nullptr};

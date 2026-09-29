@@ -31,6 +31,8 @@ class Guests final {
         std::string own_id;
         // Engines already played for another way (host:port), not twice.
         std::vector<std::string> already;
+        // ADR-0239: what is asked streamed, when there is no music root.
+        StreamChoice stream{};
     };
 
     Guests(Config config, SpeakerArbiter& arbiter);

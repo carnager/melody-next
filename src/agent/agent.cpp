@@ -195,11 +195,21 @@ core::Result<int> Agent::register_with_engine() {
             return fail(std::move(admitted.error()));
         }
     }
-    auto registered = ask(descriptor, 2, "agent.register",
-                          Json{{"name", config_.name},
-                               {"instance", instance_},
-                               {"files", !config_.stream_only},
-                               {"protocol", 1}});
+    Json registration{{"name", config_.name},
+                      {"instance", instance_},
+                      {"files", !config_.stream_only},
+                      {"protocol", 1}};
+    stream_note_.clear();
+    // ADR-0239: the original nearby, Opus when the engine is far away --
+    // decided from this connection, so again on every reconnect.
+    if (config_.stream_only) {
+        const auto route = route_of(descriptor);
+        const auto& format = config_.stream.on(route.route);
+        registration["stream"] = format ? Json{{"format", "opus"}, {"bitrate", format->bitrate_kbps}}
+                                        : Json{{"format", "original"}};
+        stream_note_ = " (" + route.why + ": " + describe(format) + ")";
+    }
+    auto registered = ask(descriptor, 2, "agent.register", registration);
     if (!registered) {
         return fail(std::move(registered.error()));
     }
@@ -225,7 +235,8 @@ void Agent::connect_loop() {
             continue;
         }
         last_problem.clear();
-        std::cerr << "melody-agent: " << engine << ": registered as \"" << config_.name << "\"\n";
+        std::cerr << "melody-agent: " << engine << ": registered as \"" << config_.name << "\""
+                  << stream_note_ << "\n";
         // The connection turns round: from here the engine asks.
         server_->attach(*descriptor);
         registered_.store(true);

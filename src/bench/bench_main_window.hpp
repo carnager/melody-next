@@ -111,18 +111,6 @@ class PlaylistTransferBar;
 // Trackknife main window: composed Folders/Track Lists panels, configurable
 // local working-list views, and one transport over the serialized playback worker
 // (ADR-0021/0023/0024, promoted to first-class playback by ADR-0025).
-// Widget properties, persisted UI state and JSON all carry a document identity
-// as text. ADR-0220 Phase 0 makes the playback anchor hold the identity itself,
-// so these two are the only places the two spellings meet.
-[[nodiscard]] inline QString document_text(const core::StableId& id) {
-    return id.is_nil() ? QString{} : QString::fromStdString(id.to_string());
-}
-
-[[nodiscard]] inline core::StableId document_identity(const QString& text) {
-    auto parsed = core::StableId::parse(text.toStdString());
-    return parsed ? *parsed : core::StableId{};
-}
-
 class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     Q_OBJECT
     // ADR-0220: the workspace's state and behaviour live in Workspace, which
@@ -240,19 +228,23 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void buildWorkspace();
     void buildTransport();
     void buildUpNext();
-    void refreshUpNext();
+    void refreshUpNext() override;
     // Queues what was dragged out of a library, with its tags.
     bool enqueueLibraryDrop(const ui::LocalFilesMimeData& files, int position);
     void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
     // `engine`: whose files these are (ADR-0227). Up Next holds one engine's
     // asks at a time.
     void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1,
-                              const EngineKey& engine = EngineKey::local());
+                              const EngineKey& engine = EngineKey::local()) {
+        workspace_.enqueueLocalRequests(std::move(rows), position, engine);
+    }
     void addUpNextActions(QMenu* menu, QTableView* source);
-    void editUpNext(int operation, int row = -1, int destination = -1);
+    void editUpNext(int operation, int row = -1, int destination = -1) {
+        workspace_.editUpNext(operation, row, destination);
+    }
     void editUpNextSelection(int operation, int destination = -1);
-    void persistUpNext();
-    void restoreUpNext();
+    void persistUpNext() { workspace_.persistUpNext(); }
+    void restoreUpNext() { workspace_.restoreUpNext(); }
 
     [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
     void loadPanelLayout();

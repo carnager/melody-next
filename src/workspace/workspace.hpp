@@ -49,6 +49,19 @@ namespace trackknife::bench {
 class LocalLibraryPanel;
 class WorkspaceView;
 
+// Widget properties, persisted UI state and JSON all carry a document identity
+// as text. ADR-0220 Phase 0 makes the playback anchor hold the identity itself,
+// so these two are the only places the two spellings meet.
+[[nodiscard]] inline QString document_text(const core::StableId& id) {
+    return id.is_nil() ? QString{} : QString::fromStdString(id.to_string());
+}
+
+[[nodiscard]] inline core::StableId document_identity(const QString& text) {
+    auto parsed = core::StableId::parse(text.toStdString());
+    return parsed ? *parsed : core::StableId{};
+}
+
+
 // ADR-0220: the workspace a window shows -- the engines it reaches, the lists
 // open from them, what plays and waits to, and the work under way -- without
 // any of the window. Both the widgets window and the Qt Quick one are drawn
@@ -377,6 +390,21 @@ class Workspace final : public QObject {
     [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
     // The row for an entry the engine plays, wherever it is held.
     [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
+
+    // Up Next: asks, played before the list goes on. They are one engine's
+    // files at a time (ADR-0227), each an occurrence of its own (ADR-0221).
+    void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1,
+                              const EngineKey& engine = EngineKey::local());
+    // 0 clears, 1 removes `row`, otherwise moves it to `destination`.
+    void editUpNext(int operation, int row = -1, int destination = -1);
+    // The rows `selected` removed (1), moved up (2), moved down (3), or to
+    // an insertion `destination`.
+    void editUpNextRows(std::vector<bool> selected, int operation, int destination = -1);
+    // Its rows, covers and the engine's requests brought up to date; true
+    // when the rows were replaced.
+    bool syncUpNextModel();
+    void persistUpNext();
+    void restoreUpNext();
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

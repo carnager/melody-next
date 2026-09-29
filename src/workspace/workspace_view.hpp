@@ -48,6 +48,8 @@ class WorkspaceView {
     virtual void refreshTransport() = 0;
     virtual void refreshPlaybackCursor(bool jump) = 0;
     virtual void refreshLocalPlaybackControls() = 0;
+    // Up Next changed.
+    virtual void refreshUpNext() = 0;
     // Hands the engines the file moves they have not taken yet.
     virtual void flushEngineRelocations() = 0;
     // An album's cover arrived: whatever shows it outside the lists -- the

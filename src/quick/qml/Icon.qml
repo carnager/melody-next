@@ -30,7 +30,11 @@ Item {
         consume: { f: "M12 12L20.5 7.5A9.5 9.5 0 1 0 20.5 16.5Z" },
         queue: { s: "M4 6h13 M4 11h13 M4 16h8 M15.5 14v6l4.5-3z" },
         folder: { s: "M3.5 6.5a1 1 0 0 1 1-1h4.5l2 2h8.5a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z" },
-        history: { s: "M4 12a8 8 0 1 0 2.5-5.8 M4 4v4h4 M12 8v4.5l3 2" }
+        history: { s: "M4 12a8 8 0 1 0 2.5-5.8 M4 4v4h4 M12 8v4.5l3 2" },
+        query: { s: "M4 6h16 M7 12h10 M10 18h4" },
+        sort: { s: "M7 4v16 M4 17l3 3l3-3 M13 6h7 M13 12h5 M13 18h3" },
+        speaker: { f: "M4 9h4l5-4v14l-5-4H4z" },
+        check: { s: "M5 12.5l4.5 4.5L19 7" }
     })
     readonly property var shape: shapes[name] || ({})
 

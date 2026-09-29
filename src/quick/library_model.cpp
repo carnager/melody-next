@@ -6,6 +6,8 @@
 #include "quick/engine_session.hpp"
 #include "trackknife/core/stable_id.hpp"
 
+#include <algorithm>
+
 namespace trackknife::quick {
 
 using Json = EngineClient::Json;
@@ -13,6 +15,8 @@ using Json = EngineClient::Json;
 namespace {
 
 constexpr std::size_t page_size = 200;
+constexpr std::size_t search_albums = 100;
+constexpr std::size_t search_tracks = 300;
 constexpr int album_kind = 1;
 constexpr int track_kind = 2;
 
@@ -39,74 +43,176 @@ void LibraryModel::setSearch(const QString& text) {
     debounce_.start();
 }
 
+void LibraryModel::setQueryMode(const bool on) {
+    if (on == query_mode_) {
+        return;
+    }
+    query_mode_ = on;
+    emit searchChanged();
+    if (!search_.trimmed().isEmpty()) {
+        restart();
+    }
+}
+
+void LibraryModel::setOrder(const int order) {
+    const auto clamped = std::clamp(order, 0, 2);
+    if (clamped == order_) {
+        return;
+    }
+    order_ = clamped;
+    emit searchChanged();
+    if (search_.trimmed().isEmpty()) {
+        restart();
+    }
+}
+
+void LibraryModel::refresh() { restart(); }
+
+void LibraryModel::setLoading(const bool loading, const QString& error) {
+    loading_ = loading;
+    error_ = error;
+    emit loadingChanged();
+}
+
 void LibraryModel::restart() {
     ++generation_;
-    albums_loaded_ = 0;
+    loaded_ = 0;
     more_ = true;
     loading_ = false;
+    error_.clear();
     // Before the reset: a view told of it asks for more at once, and that
     // request must be the only one.
     beginResetModel();
     rows_.clear();
     endResetModel();
-    requestPage();
+    if (search_.trimmed().isEmpty() || query_mode_) {
+        requestPage();
+    } else {
+        more_ = false;
+        requestSearch();
+    }
 }
 
-LibraryModel::Row LibraryModel::rowFrom(const Json& entry) {
+LibraryModel::Row LibraryModel::rowFrom(const Json& entry, const Kind kind) {
     const auto text = [&entry](const char* key) { return QString::fromStdString(entry.value(key, std::string{})); };
     Row row;
-    row.track = entry.value("kind", 0) == track_kind;
+    row.kind = kind;
     row.key = text("key");
-    row.title = row.track ? text("title") : text("label");
+    row.title = kind == Kind::album ? text("label") : text("title");
     if (row.title.isEmpty()) {
         row.title = text("label");
     }
     row.artist = text("artist");
+    row.album = text("album");
     row.date = text("date");
     row.tracks = entry.value("tracks", 0);
     row.number = entry.value("track_number", 0);
-    row.duration_ms = entry.value("duration_ms", std::int64_t{0});
+    // -1 when unknown -- as an engine from before its query results were
+    // whole rows says of every result.
+    row.duration_ms = std::max<std::int64_t>(0, entry.value("duration_ms", std::int64_t{0}));
+    row.rating = static_cast<int>(entry.value("rating", 0U));
     return row;
 }
 
+void LibraryModel::append(std::vector<Row> rows) {
+    if (rows.empty()) {
+        return;
+    }
+    const auto first = rowCount();
+    beginInsertRows({}, first, first + static_cast<int>(rows.size()) - 1);
+    std::ranges::move(rows, std::back_inserter(rows_));
+    endInsertRows();
+}
+
+// Browsing albums, or a query's tracks: a page at a time.
 void LibraryModel::requestPage() {
     if (loading_ || !more_ || !client_.connected()) {
         return;
     }
-    loading_ = true;
-    emit loadingChanged();
+    setLoading(true);
     const auto generation = generation_;
-    Json params{{"kind", album_kind}, {"offset", albums_loaded_}, {"limit", page_size}};
-    if (!search_.trimmed().isEmpty()) {
-        params["text"] = search_.trimmed().toStdString();
+    const auto query = query_mode_ && !search_.trimmed().isEmpty();
+    Json params{{"offset", loaded_}, {"limit", page_size}};
+    QString method;
+    if (query) {
+        method = QStringLiteral("catalogue.filter");
+        params["query"] = search_.trimmed().toStdString();
+    } else {
+        method = QStringLiteral("catalogue.query");
+        params["kind"] = album_kind;
+        if (order_ == newestFirst) {
+            params["newest_first"] = true;
+        } else if (order_ == atRandom) {
+            params["random"] = true;
+        }
     }
-    client_.call(QStringLiteral("catalogue.query"), std::move(params), [this, generation](const auto& answer) {
+    client_.call(method, std::move(params), [this, generation, query](const auto& answer) {
         if (generation != generation_) {
             return;
         }
-        loading_ = false;
-        emit loadingChanged();
         if (!answer) {
             more_ = false;
+            // A query that does not compile says why, and shows nothing else.
+            setLoading(false, QString::fromStdString(answer.error().message));
             return;
         }
         const auto entries = answer->value("entries", Json::array());
-        more_ = answer->value("more", false);
-        if (entries.empty()) {
-            return;
-        }
-        const auto first = rowCount();
-        beginInsertRows({}, first, first + static_cast<int>(entries.size()) - 1);
+        // A random pick is one pick; asking again would pick again.
+        more_ = answer->value("more", false) && order_ != atRandom;
+        std::vector<Row> rows;
         for (const auto& entry : entries) {
-            rows_.push_back(rowFrom(entry));
+            rows.push_back(rowFrom(entry, query ? Kind::track : Kind::album));
         }
-        endInsertRows();
-        albums_loaded_ += entries.size();
+        loaded_ += entries.size();
+        append(std::move(rows));
+        setLoading(false);
     });
 }
 
+// Words: the albums they find, then the tracks.
+void LibraryModel::requestSearch() {
+    if (!client_.connected()) {
+        return;
+    }
+    setLoading(true);
+    const auto generation = generation_;
+    const auto words = search_.trimmed().toStdString();
+    client_.call(
+        QStringLiteral("catalogue.query"), Json{{"kind", album_kind}, {"text", words}, {"limit", search_albums}},
+        [this, generation, words](const auto& albums) {
+            if (generation != generation_) {
+                return;
+            }
+            std::vector<Row> rows;
+            if (albums && !albums->value("entries", Json::array()).empty()) {
+                rows.push_back(Row{.kind = Kind::section, .title = tr("Albums")});
+                for (const auto& entry : albums->value("entries", Json::array())) {
+                    rows.push_back(rowFrom(entry, Kind::album));
+                }
+            }
+            append(std::move(rows));
+            client_.call(QStringLiteral("catalogue.query"),
+                         Json{{"kind", track_kind}, {"text", words}, {"limit", search_tracks}},
+                         [this, generation](const auto& tracks) {
+                             if (generation != generation_) {
+                                 return;
+                             }
+                             std::vector<Row> rows;
+                             if (tracks && !tracks->value("entries", Json::array()).empty()) {
+                                 rows.push_back(Row{.kind = Kind::section, .title = tr("Tracks")});
+                                 for (const auto& entry : tracks->value("entries", Json::array())) {
+                                     rows.push_back(rowFrom(entry, Kind::track));
+                                 }
+                             }
+                             append(std::move(rows));
+                             setLoading(false, tracks ? QString{}
+                                                      : QString::fromStdString(tracks.error().message));
+                         });
+        });
+}
+
 bool LibraryModel::canFetchMore(const QModelIndex& parent) const {
-    return !parent.isValid() && more_ && !loading_;
+    return !parent.isValid() && more_ && !loading_ && (search_.trimmed().isEmpty() || query_mode_);
 }
 
 void LibraryModel::fetchMore(const QModelIndex& parent) {
@@ -117,7 +223,7 @@ void LibraryModel::fetchMore(const QModelIndex& parent) {
 
 int LibraryModel::rowOfAlbum(const QString& key) const {
     for (std::size_t row = 0; row < rows_.size(); ++row) {
-        if (!rows_[row].track && rows_[row].key == key) {
+        if (rows_[row].kind == Kind::album && rows_[row].key == key) {
             return static_cast<int>(row);
         }
     }
@@ -125,14 +231,14 @@ int LibraryModel::rowOfAlbum(const QString& key) const {
 }
 
 void LibraryModel::toggle(const int row) {
-    if (row < 0 || row >= rowCount() || rows_[static_cast<std::size_t>(row)].track) {
+    if (row < 0 || row >= rowCount() || rows_[static_cast<std::size_t>(row)].kind != Kind::album) {
         return;
     }
     auto& album = rows_[static_cast<std::size_t>(row)];
     if (album.expanded) {
         album.expanded = false;
         auto end = row + 1;
-        while (end < rowCount() && rows_[static_cast<std::size_t>(end)].track) {
+        while (end < rowCount() && rows_[static_cast<std::size_t>(end)].kind == Kind::child) {
             ++end;
         }
         if (end > row + 1) {
@@ -146,10 +252,11 @@ void LibraryModel::toggle(const int row) {
     album.expanded = true;
     emit dataChanged(index(row), index(row));
     const auto key = album.key;
+    const auto album_title = album.title;
     const auto generation = generation_;
     client_.call(QStringLiteral("catalogue.query"),
                  Json{{"kind", track_kind}, {"album_key", key.toStdString()}, {"limit", 1000}},
-                 [this, key, generation](const auto& answer) {
+                 [this, key, album_title, generation](const auto& answer) {
                      if (generation != generation_ || !answer) {
                          return;
                      }
@@ -158,15 +265,18 @@ void LibraryModel::toggle(const int row) {
                      if (at < 0 || !rows_[static_cast<std::size_t>(at)].expanded) {
                          return;
                      }
-                     const auto entries = answer->value("entries", Json::array());
-                     if (entries.empty()) {
+                     std::vector<Row> tracks;
+                     for (const auto& entry : answer->value("entries", Json::array())) {
+                         auto track = rowFrom(entry, Kind::child);
+                         if (track.album.isEmpty()) {
+                             track.album = album_title;
+                         }
+                         tracks.push_back(std::move(track));
+                     }
+                     if (tracks.empty()) {
                          return;
                      }
-                     beginInsertRows({}, at + 1, at + static_cast<int>(entries.size()));
-                     std::vector<Row> tracks;
-                     for (const auto& entry : entries) {
-                         tracks.push_back(rowFrom(entry));
-                     }
+                     beginInsertRows({}, at + 1, at + static_cast<int>(tracks.size()));
                      rows_.insert(rows_.begin() + at + 1, tracks.begin(), tracks.end());
                      endInsertRows();
                  });
@@ -177,24 +287,20 @@ void LibraryModel::resolve(const int row, std::function<void(std::vector<QueuedT
         return;
     }
     const auto& picked = rows_[static_cast<std::size_t>(row)];
-    const auto toQueued = [](const Row& track, const QString& album) {
+    const auto toQueued = [](const Row& track) {
         return QueuedTrack{.entry = QString::fromStdString(core::StableId::random().to_string()),
                            .path = track.key,
                            .title = track.title,
                            .artist = track.artist,
-                           .album = album,
+                           .album = track.album,
                            .date = track.date,
                            .duration_ms = track.duration_ms};
     };
-    if (picked.track) {
-        QString album;
-        for (auto at = row; at >= 0; --at) {
-            if (!rows_[static_cast<std::size_t>(at)].track) {
-                album = rows_[static_cast<std::size_t>(at)].title;
-                break;
-            }
-        }
-        done({toQueued(picked, album)});
+    if (picked.kind == Kind::section) {
+        return;
+    }
+    if (picked.kind != Kind::album) {
+        done({toQueued(picked)});
         return;
     }
     const auto album = picked.title;
@@ -206,7 +312,11 @@ void LibraryModel::resolve(const int row, std::function<void(std::vector<QueuedT
                      }
                      std::vector<QueuedTrack> tracks;
                      for (const auto& entry : answer->value("entries", Json::array())) {
-                         tracks.push_back(toQueued(rowFrom(entry), album));
+                         auto track = rowFrom(entry, Kind::child);
+                         if (track.album.isEmpty()) {
+                             track.album = album;
+                         }
+                         tracks.push_back(toQueued(track));
                      }
                      done(std::move(tracks));
                  });
@@ -250,14 +360,26 @@ QVariant LibraryModel::data(const QModelIndex& index, const int role) const {
     }
     const auto& row = rows_[static_cast<std::size_t>(index.row())];
     switch (role) {
-    case TrackRole:
-        return row.track;
+    case KindRole:
+        switch (row.kind) {
+        case Kind::album:
+            return QStringLiteral("album");
+        case Kind::child:
+            return QStringLiteral("child");
+        case Kind::track:
+            return QStringLiteral("track");
+        case Kind::section:
+            return QStringLiteral("section");
+        }
+        return {};
     case KeyRole:
         return row.key;
     case TitleRole:
         return row.title;
     case ArtistRole:
         return row.artist;
+    case AlbumRole:
+        return row.album;
     case DateRole:
         return row.date;
     case TracksRole:
@@ -269,17 +391,21 @@ QVariant LibraryModel::data(const QModelIndex& index, const int role) const {
     case ExpandedRole:
         return row.expanded;
     case CoverRole:
-        return row.track ? QString{} : CoverProvider::forAlbum(session_.index(), row.key);
+        return row.kind == Kind::album   ? CoverProvider::forAlbum(session_.index(), row.key)
+               : row.kind == Kind::track ? CoverProvider::forPath(session_.index(), row.key)
+                                         : QString{};
+    case RatingRole:
+        return row.rating;
     default:
         return {};
     }
 }
 
 QHash<int, QByteArray> LibraryModel::roleNames() const {
-    return {{TrackRole, "track"},   {KeyRole, "key"},         {TitleRole, "title"},
-            {ArtistRole, "artist"}, {DateRole, "date"},       {TracksRole, "tracks"},
-            {NumberRole, "number"}, {DurationRole, "duration"}, {ExpandedRole, "expanded"},
-            {CoverRole, "cover"}};
+    return {{KindRole, "kind"},         {KeyRole, "key"},           {TitleRole, "title"},
+            {ArtistRole, "artist"},     {AlbumRole, "album"},       {DateRole, "date"},
+            {TracksRole, "tracks"},     {NumberRole, "number"},     {DurationRole, "duration"},
+            {ExpandedRole, "expanded"}, {CoverRole, "cover"},       {RatingRole, "rating"}};
 }
 
 } // namespace trackknife::quick

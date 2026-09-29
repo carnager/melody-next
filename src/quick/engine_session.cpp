@@ -3,6 +3,7 @@
 #include "quick/engine_session.hpp"
 
 #include "quick/cover_provider.hpp"
+#include "trackknife/core/stable_id.hpp"
 
 namespace trackknife::quick {
 
@@ -51,6 +52,73 @@ void EngineSession::enqueue(const std::vector<QueuedTrack>& tracks) {
     for (const auto& track : tracks) {
         client_.command(QStringLiteral("playback.request"), Json{{"entry", track.entry.toStdString()}});
     }
+}
+
+Json EngineSession::newItem(const QueuedTrack& track) {
+    return Json{{"entry", core::StableId::random().to_string()},
+                {"path", track.path.toStdString()},
+                {"duration_ms", track.duration_ms > 0 ? Json(track.duration_ms) : Json(nullptr)},
+                {"title", track.title.toStdString()},
+                {"artist", track.artist.toStdString()},
+                {"album", track.album.toStdString()}};
+}
+
+Json EngineSession::copiedItem(const Json& item) {
+    auto copy = item;
+    copy["entry"] = core::StableId::random().to_string();
+    return copy;
+}
+
+void EngineSession::editList(const QString& id, ListEdit edit, const std::optional<std::uint64_t> expected) {
+    client_.call(QStringLiteral("list.get"), Json{{"id", id.toStdString()}},
+                 [this, id, edit = std::move(edit), expected](const auto& answer) {
+                     if (!answer) {
+                         emit failed(QString::fromStdString(answer.error().message));
+                         return;
+                     }
+                     const auto revision = answer->value("revision", std::uint64_t{0});
+                     if (expected && *expected != revision) {
+                         emit failed(tr("The list changed elsewhere; nothing was changed. Try again."));
+                         return;
+                     }
+                     const auto before = answer->value("items", Json::array());
+                     auto after = edit(before);
+                     Json params{{"id", id.toStdString()},
+                                 {"name", answer->value("name", std::string{})},
+                                 {"kind", answer->value("kind", std::string{"working"})},
+                                 {"items", after},
+                                 {"revision", revision}};
+                     client_.command(QStringLiteral("list.save"), std::move(params),
+                                     [this, before, after](const auto& saved) {
+                                         if (!saved) {
+                                             emit failed(QString::fromStdString(saved.error().message));
+                                             return;
+                                         }
+                                         followPlaying(before, after);
+                                     });
+                 });
+}
+
+// A list edited while it plays is an edit to what plays: the engine's queue
+// is replaced by the list as it now is, without starting anything.
+void EngineSession::followPlaying(const Json& before, const Json& after) {
+    const auto playing = player_.entry().toStdString();
+    if (playing.empty()) {
+        return;
+    }
+    const auto held = std::ranges::any_of(
+        before, [&playing](const Json& item) { return item.value("entry", std::string{}) == playing; });
+    if (!held) {
+        return;
+    }
+    Json entries = Json::array();
+    for (const auto& item : after) {
+        auto entry = item;
+        entry["group"] = Json{{"artist", item.value("artist", std::string{})},
+                              {"album", item.value("album", std::string{})}};
+        entries.push_back(std::move(entry));
+    }
+    client_.command(QStringLiteral("playback.replace_queue"), Json{{"entries", std::move(entries)}});
 }
 
 } // namespace trackknife::quick

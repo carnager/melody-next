@@ -3,11 +3,13 @@
 #pragma once
 
 #include "quick/engine_client.hpp"
+#include "quick/up_next_model.hpp"
 
 #include <QAbstractListModel>
 #include <QTimer>
 #include <QtQmlIntegration>
 
+#include <functional>
 #include <vector>
 
 namespace trackknife::quick {
@@ -54,6 +56,9 @@ class LibraryModel final : public QAbstractListModel {
     Q_INVOKABLE void toggle(int row);
     // An album's tracks, or one track, onto up-next.
     Q_INVOKABLE void enqueue(int row);
+    // An album's tracks, or one track, into one of this engine's lists:
+    // before item `position`, or at the end when it is negative.
+    Q_INVOKABLE void addToList(int row, const QString& listId, int position);
 
   signals:
     void searchChanged();
@@ -72,6 +77,8 @@ class LibraryModel final : public QAbstractListModel {
         bool expanded{false};
     };
 
+    // The tracks a row stands for, in order; an album's are asked for.
+    void resolve(int row, std::function<void(std::vector<QueuedTrack>)> done);
     void restart();
     void requestPage();
     [[nodiscard]] static Row rowFrom(const EngineClient::Json& entry);

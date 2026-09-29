@@ -172,7 +172,7 @@ void LibraryModel::toggle(const int row) {
                  });
 }
 
-void LibraryModel::enqueue(const int row) {
+void LibraryModel::resolve(const int row, std::function<void(std::vector<QueuedTrack>)> done) {
     if (row < 0 || row >= rowCount()) {
         return;
     }
@@ -194,13 +194,13 @@ void LibraryModel::enqueue(const int row) {
                 break;
             }
         }
-        session_.enqueue(std::vector<QueuedTrack>{toQueued(picked, album)});
+        done({toQueued(picked, album)});
         return;
     }
     const auto album = picked.title;
     client_.call(QStringLiteral("catalogue.query"),
                  Json{{"kind", track_kind}, {"album_key", picked.key.toStdString()}, {"limit", 1000}},
-                 [this, album, toQueued](const auto& answer) {
+                 [album, toQueued, done = std::move(done)](const auto& answer) {
                      if (!answer) {
                          return;
                      }
@@ -208,8 +208,36 @@ void LibraryModel::enqueue(const int row) {
                      for (const auto& entry : answer->value("entries", Json::array())) {
                          tracks.push_back(toQueued(rowFrom(entry), album));
                      }
-                     session_.enqueue(tracks);
+                     done(std::move(tracks));
                  });
+}
+
+void LibraryModel::enqueue(const int row) {
+    resolve(row, [this](const std::vector<QueuedTrack>& tracks) { session_.enqueue(tracks); });
+}
+
+void LibraryModel::addToList(const int row, const QString& listId, const int position) {
+    resolve(row, [this, listId, position](const std::vector<QueuedTrack>& tracks) {
+        Json added = Json::array();
+        for (const auto& track : tracks) {
+            added.push_back(EngineSession::newItem(track));
+        }
+        session_.editList(listId, [added, position](const Json& items) {
+            Json result = Json::array();
+            const auto at = position < 0 ? items.size() : std::min<std::size_t>(position, items.size());
+            for (std::size_t index = 0; index <= items.size(); ++index) {
+                if (index == at) {
+                    for (const auto& item : added) {
+                        result.push_back(item);
+                    }
+                }
+                if (index < items.size()) {
+                    result.push_back(items[index]);
+                }
+            }
+            return result;
+        });
+    });
 }
 
 int LibraryModel::rowCount(const QModelIndex& parent) const {

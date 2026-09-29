@@ -7,6 +7,7 @@ import QtQuick.Controls.Basic
 Rectangle {
     id: pane
 
+    property var dragGhost
     readonly property var tracks: Engine.tracks
     property var selected: ({})
     property int selectionRevision: 0
@@ -104,11 +105,26 @@ Rectangle {
         }
     }
 
+    // The list shown again after an edit keeps its place.
+    property real keptY: NaN
     Connections {
         target: Engine.tracks
+        function onRefreshing() {
+            pane.keptY = view.contentY;
+        }
         function onLoaded() {
             pane.clearSelection();
+            if (!isNaN(pane.keptY)) {
+                view.contentY = pane.keptY;
+                pane.keptY = NaN;
+            }
         }
+    }
+
+    function removeSelected() {
+        const rows = selectedRows();
+        if (rows.length > 0)
+            Engine.tracks.removeRows(rows);
     }
 
     function selectedRows() {
@@ -217,6 +233,11 @@ Rectangle {
             text: "Add to Up Next"
             onTriggered: Engine.tracks.enqueue(pane.selectedRows())
         }
+        MenuSeparator {}
+        MenuItem {
+            text: "Remove from list"
+            onTriggered: pane.removeSelected()
+        }
     }
 
     ColumnLayout {
@@ -277,6 +298,34 @@ Rectangle {
                                         color: Theme.base
                                     }
                                     HoverHandler { id: tabHover }
+                                    // Dropped on a tab: added at the end of that list.
+                                    DropArea {
+                                        id: tabDrop
+                                        anchors.fill: parent
+                                        keys: ["trackknife"]
+                                        onEntered: drag => {
+                                            const payload = drag.source.payload;
+                                            drag.accepted = payload !== null && payload.session === group.session
+                                                && (payload.kind === "library"
+                                                    || (payload.kind === "tracks" && payload.listId !== tab.listId));
+                                        }
+                                        onDropped: drop => {
+                                            const payload = drop.source.payload;
+                                            if (payload.kind === "library")
+                                                payload.session.library.addToList(payload.row, tab.listId, -1);
+                                            else
+                                                Engine.tracks.copyToList(payload.rows, tab.listId);
+                                            drop.accept();
+                                        }
+                                    }
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: parent.radius
+                                        color: "transparent"
+                                        border.color: Theme.accent
+                                        border.width: 2
+                                        visible: tabDrop.containsDrag
+                                    }
                                     MouseArea {
                                         anchors.fill: parent
                                         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
@@ -380,209 +429,327 @@ Rectangle {
             }
         }
 
-        ListView {
-            id: view
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
-            focus: true
-            model: Engine.tracks
-            reuseItems: true
-            cacheBuffer: 400
-            boundsBehavior: Flickable.StopAtBounds
-            topMargin: 6
-            bottomMargin: 12
-            ScrollBar.vertical: ScrollBar {}
 
-            Keys.onUpPressed: event => pane.step(-1, event.modifiers)
-            Keys.onDownPressed: event => pane.step(1, event.modifiers)
-            Keys.onReturnPressed: {
-                const rows = pane.selectedRows();
-                if (rows.length > 0)
-                    Engine.tracks.play(rows[0]);
-            }
-            Keys.onPressed: event => {
-                if (event.key === Qt.Key_Q) {
-                    Engine.tracks.enqueue(pane.selectedRows());
-                    event.accepted = true;
-                } else if (event.key === Qt.Key_Escape) {
-                    pane.clearSelection();
-                    event.accepted = true;
+            ListView {
+                id: view
+                anchors.fill: parent
+                clip: true
+                focus: true
+                model: Engine.tracks
+                reuseItems: true
+                cacheBuffer: 400
+                boundsBehavior: Flickable.StopAtBounds
+                // A mouse drag drags rows; the wheel and touch still scroll.
+                acceptedButtons: Qt.NoButton
+                topMargin: 6
+                bottomMargin: 12
+                ScrollBar.vertical: ScrollBar {}
+
+                Keys.onUpPressed: event => pane.step(-1, event.modifiers)
+                Keys.onDownPressed: event => pane.step(1, event.modifiers)
+                Keys.onReturnPressed: {
+                    const rows = pane.selectedRows();
+                    if (rows.length > 0)
+                        Engine.tracks.play(rows[0]);
                 }
-            }
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Q) {
+                        Engine.tracks.enqueue(pane.selectedRows());
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Delete) {
+                        pane.removeSelected();
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Escape) {
+                        pane.clearSelection();
+                        event.accepted = true;
+                    }
+                }
 
-            delegate: Item {
-                id: row
-                required property int index
-                required property bool header
-                required property string entry
-                required property string title
-                required property string artist
-                required property string album
-                required property string date
-                required property int number
-                required property real duration
-                required property string cover
-                required property int groupTracks
-                required property real groupDuration
+                delegate: Item {
+                    id: row
+                    required property int index
+                    required property bool header
+                    required property string entry
+                    required property string title
+                    required property string artist
+                    required property string album
+                    required property string date
+                    required property int number
+                    required property real duration
+                    required property string cover
+                    required property int groupTracks
+                    required property real groupDuration
 
-                readonly property bool isSelected: pane.selectionRevision >= 0 && !!pane.selected[index]
-                readonly property bool isPlaying: !header && entry !== "" && entry === Engine.current.player.entry
+                    readonly property bool isSelected: pane.selectionRevision >= 0 && !!pane.selected[index]
+                    readonly property bool isPlaying: !header && entry !== "" && entry === Engine.current.player.entry
 
-                width: ListView.view.width
-                height: header ? 30 : Theme.rowHeight
-                // The album cover hangs into the rows below its header.
-                z: header ? 2 : 1
+                    width: ListView.view.width
+                    height: header ? 30 : Theme.rowHeight
+                    // The album cover hangs into the rows below its header.
+                    z: header ? 2 : 1
 
-                HoverHandler { id: rowHover }
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: mouse => {
-                        view.forceActiveFocus();
-                        if (mouse.button === Qt.RightButton) {
+                    HoverHandler { id: rowHover }
+                    DragHandler {
+                        target: null
+                        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                        onActiveChanged: {
+                            if (!active) {
+                                pane.dragGhost.end();
+                                return;
+                            }
                             if (!row.isSelected) {
                                 if (row.header)
                                     pane.selectAlbum(row.index);
                                 else
                                     pane.select(row.index, Qt.NoModifier);
                             }
-                            rowMenu.popup();
-                            return;
+                            const rows = pane.selectedRows();
+                            pane.dragGhost.begin({ kind: "tracks", session: Engine.tracks.session,
+                                                   listId: Engine.tracks.listId, rows: rows },
+                                                 rows.length === 1 ? row.title : rows.length + " tracks",
+                                                 centroid.scenePosition);
                         }
-                        if (row.header)
-                            pane.selectAlbum(row.index);
-                        else
-                            pane.select(row.index, mouse.modifiers);
-                    }
-                    onDoubleClicked: mouse => {
-                        if (mouse.button !== Qt.LeftButton)
-                            return;
-                        if (row.header) {
-                            const rows = Engine.tracks.groupRows(row.index);
-                            if (rows.length > 0)
-                                Engine.tracks.play(rows[0]);
-                        } else {
-                            Engine.tracks.play(row.index);
+                        onCentroidChanged: {
+                            if (active)
+                                pane.dragGhost.moveTo(centroid.scenePosition);
                         }
                     }
-                }
-
-                Rectangle {
-                    visible: !row.header
-                    x: pane.gutter - 6
-                    width: parent.width - x - 6
-                    height: parent.height
-                    radius: 3
-                    color: row.isSelected ? Theme.selection : row.isPlaying ? Theme.playingTint
-                         : rowHover.hovered ? Theme.hover : "transparent"
-                    border.color: row.isSelected || row.isPlaying ? Theme.playingLine : "transparent"
-                }
-
-                // Album header
-                Cover {
-                    visible: row.header
-                    x: 12
-                    y: 6
-                    width: 44
-                    height: 44
-                    source: row.header ? row.cover : ""
-                    name: row.album
-                }
-                Row {
-                    visible: row.header
-                    x: pane.gutter
-                    width: parent.width - x - 12
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 4
-                    spacing: 10
-                    Text {
-                        id: albumTitle
-                        width: Math.min(implicitWidth, parent.width * 0.6)
-                        text: row.album !== "" ? row.album : "Unknown album"
-                        color: Theme.text
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        anchors.baseline: albumTitle.baseline
-                        width: parent.width - albumTitle.width - 10
-                        text: row.artist + (row.date !== "" ? " · " + row.date : "") + " · " + row.groupTracks
-                              + (row.groupTracks === 1 ? " track · " : " tracks · ")
-                              + Engine.formatDuration(row.groupDuration)
-                        color: Theme.dim
-                        font.pixelSize: Theme.smallFontSize + 1
-                        elide: Text.ElideRight
-                    }
-                }
-
-                // Track row
-                Item {
-                    visible: !row.header
-                    x: pane.gutter
-                    width: pane.numberWidth
-                    height: parent.height
-                    Text {
+                    MouseArea {
                         anchors.fill: parent
-                        visible: !row.isPlaying
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: mouse => {
+                            view.forceActiveFocus();
+                            if (mouse.button === Qt.RightButton) {
+                                if (!row.isSelected) {
+                                    if (row.header)
+                                        pane.selectAlbum(row.index);
+                                    else
+                                        pane.select(row.index, Qt.NoModifier);
+                                }
+                                rowMenu.popup();
+                                return;
+                            }
+                            if (row.header)
+                                pane.selectAlbum(row.index);
+                            else
+                                pane.select(row.index, mouse.modifiers);
+                        }
+                        onDoubleClicked: mouse => {
+                            if (mouse.button !== Qt.LeftButton)
+                                return;
+                            if (row.header) {
+                                const rows = Engine.tracks.groupRows(row.index);
+                                if (rows.length > 0)
+                                    Engine.tracks.play(rows[0]);
+                            } else {
+                                Engine.tracks.play(row.index);
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        visible: !row.header
+                        x: pane.gutter - 6
+                        width: parent.width - x - 6
+                        height: parent.height
+                        radius: 3
+                        color: row.isSelected ? Theme.selection : row.isPlaying ? Theme.playingTint
+                             : rowHover.hovered ? Theme.hover : "transparent"
+                        border.color: row.isSelected || row.isPlaying ? Theme.playingLine : "transparent"
+                    }
+
+                    // Album header
+                    Cover {
+                        visible: row.header
+                        x: 12
+                        y: 6
+                        width: 44
+                        height: 44
+                        source: row.header ? row.cover : ""
+                        name: row.album
+                    }
+                    Row {
+                        visible: row.header
+                        x: pane.gutter
+                        width: parent.width - x - 12
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 4
+                        spacing: 10
+                        Text {
+                            id: albumTitle
+                            width: Math.min(implicitWidth, parent.width * 0.6)
+                            text: row.album !== "" ? row.album : "Unknown album"
+                            color: Theme.text
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            anchors.baseline: albumTitle.baseline
+                            width: parent.width - albumTitle.width - 10
+                            text: row.artist + (row.date !== "" ? " · " + row.date : "") + " · " + row.groupTracks
+                                  + (row.groupTracks === 1 ? " track · " : " tracks · ")
+                                  + Engine.formatDuration(row.groupDuration)
+                            color: Theme.dim
+                            font.pixelSize: Theme.smallFontSize + 1
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    // Track row
+                    Item {
+                        visible: !row.header
+                        x: pane.gutter
+                        width: pane.numberWidth
+                        height: parent.height
+                        Text {
+                            anchors.fill: parent
+                            visible: !row.isPlaying
+                            horizontalAlignment: Text.AlignRight
+                            verticalAlignment: Text.AlignVCenter
+                            text: row.number > 0 ? row.number : ""
+                            color: Theme.faint
+                            font.pixelSize: Theme.fontSize
+                            font.features: { "tnum": 1 }
+                        }
+                        Icon {
+                            visible: row.isPlaying
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 12
+                            height: 12
+                            name: Engine.current.player.playing ? "play" : "pause"
+                            color: Theme.accent
+                        }
+                    }
+                    Text {
+                        visible: !row.header
+                        x: pane.gutter + pane.numberWidth + 10
+                        width: parent.width - x - pane.lengthWidth - 24
+                        height: parent.height
+                        verticalAlignment: Text.AlignVCenter
+                        text: row.title
+                        color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.text
+                        font.pixelSize: Theme.fontSize
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        visible: !row.header
+                        x: parent.width - pane.lengthWidth - 12
+                        width: pane.lengthWidth
+                        height: parent.height
                         horizontalAlignment: Text.AlignRight
                         verticalAlignment: Text.AlignVCenter
-                        text: row.number > 0 ? row.number : ""
-                        color: Theme.faint
+                        text: row.duration > 0 ? Engine.formatDuration(row.duration) : ""
+                        color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.dim
                         font.pixelSize: Theme.fontSize
                         font.features: { "tnum": 1 }
                     }
-                    Icon {
-                        visible: row.isPlaying
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 12
-                        height: 12
-                        name: Engine.current.player.playing ? "play" : "pause"
-                        color: Theme.accent
+                }
+
+                Column {
+                    anchors.centerIn: parent
+                    visible: view.count === 0 && !Engine.tracks.loading && Engine.current.connected
+                    spacing: 6
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: Engine.tracks.listId === "" ? "No list open" : "This list is empty"
+                        color: Theme.text
+                        font.pixelSize: 15
                     }
-                }
-                Text {
-                    visible: !row.header
-                    x: pane.gutter + pane.numberWidth + 10
-                    width: parent.width - x - pane.lengthWidth - 24
-                    height: parent.height
-                    verticalAlignment: Text.AlignVCenter
-                    text: row.title
-                    color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.text
-                    font.pixelSize: Theme.fontSize
-                    elide: Text.ElideRight
-                }
-                Text {
-                    visible: !row.header
-                    x: parent.width - pane.lengthWidth - 12
-                    width: pane.lengthWidth
-                    height: parent.height
-                    horizontalAlignment: Text.AlignRight
-                    verticalAlignment: Text.AlignVCenter
-                    text: row.duration > 0 ? Engine.formatDuration(row.duration) : ""
-                    color: row.isPlaying || row.isSelected ? Qt.lighter(Theme.accent, 1.25) : Theme.dim
-                    font.pixelSize: Theme.fontSize
-                    font.features: { "tnum": 1 }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "Add albums from the library to Up Next with the queue button."
+                        color: Theme.dim
+                        font.pixelSize: Theme.fontSize
+                    }
                 }
             }
 
-            Column {
-                anchors.centerIn: parent
-                visible: view.count === 0 && !Engine.tracks.loading && Engine.current.connected
-                spacing: 6
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: Engine.tracks.listId === "" ? "No list open" : "This list is empty"
-                    color: Theme.text
-                    font.pixelSize: 15
+            // Dropped tracks go where the line shows: library rows are added
+            // there, the list's own rows move there.
+            DropArea {
+                id: listDrop
+                anchors.fill: parent
+                keys: ["trackknife"]
+
+                // The view row the drop goes before; count for the end.
+                property int insertRow: -1
+
+                function accepts(payload) {
+                    return payload !== null && Engine.tracks.session !== null
+                        && payload.session === Engine.tracks.session && Engine.tracks.listId !== ""
+                        && (payload.kind === "library"
+                            || (payload.kind === "tracks" && payload.listId === Engine.tracks.listId));
                 }
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Add albums from the library to Up Next with the queue button."
-                    color: Theme.dim
-                    font.pixelSize: Theme.fontSize
+
+                function place(y) {
+                    const contentY = y + view.contentY;
+                    const row = view.indexAt(view.width / 2, contentY);
+                    if (row < 0) {
+                        insertRow = contentY < 0 ? 0 : view.count;
+                        return;
+                    }
+                    const item = view.itemAtIndex(row);
+                    // A header takes the drop before its album's first track.
+                    if (item === null || Engine.tracks.groupRows(row).length > 0)
+                        insertRow = row;
+                    else
+                        insertRow = contentY - item.y > item.height / 2 ? row + 1 : row;
+                }
+
+                onEntered: drag => {
+                    drag.accepted = accepts(drag.source.payload);
+                    if (drag.accepted)
+                        place(drag.y);
+                }
+                onPositionChanged: drag => place(drag.y)
+                onExited: insertRow = -1
+                onDropped: drop => {
+                    const payload = drop.source.payload;
+                    const before = Engine.tracks.itemIndexAt(insertRow);
+                    if (payload.kind === "tracks")
+                        Engine.tracks.moveRows(payload.rows, before);
+                    else if (payload.kind === "library")
+                        payload.session.library.addToList(payload.row, Engine.tracks.listId, before);
+                    insertRow = -1;
+                    drop.accept();
+                }
+
+                // Scrolls while a drag rests near an edge.
+                Timer {
+                    interval: 30
+                    repeat: true
+                    running: listDrop.containsDrag
+                    onTriggered: {
+                        const y = listDrop.drag.y;
+                        if (y < 30)
+                            view.contentY = Math.max(view.originY - view.topMargin, view.contentY - 12);
+                        else if (y > listDrop.height - 30)
+                            view.contentY = Math.min(view.contentHeight + view.originY + view.bottomMargin - view.height,
+                                                     view.contentY + 12);
+                        listDrop.place(y);
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: listDrop.containsDrag && listDrop.insertRow >= 0
+                x: pane.gutter - 6
+                width: parent.width - x - 6
+                height: 2
+                radius: 1
+                color: Theme.accent
+                y: {
+                    const row = listDrop.insertRow;
+                    const item = view.itemAtIndex(Math.min(row, view.count - 1));
+                    if (item === null)
+                        return view.topMargin;
+                    const top = row >= view.count ? item.y + item.height : item.y;
+                    return top - view.contentY - 1;
                 }
             }
         }

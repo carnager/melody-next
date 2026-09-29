@@ -71,9 +71,22 @@ class TrackListModel final : public QAbstractListModel {
     // The track rows of the album whose header this is.
     Q_INVOKABLE [[nodiscard]] QList<int> groupRows(int headerRow) const;
 
+    // Where in the list's items a view row is: the number of tracks before
+    // it. rowCount() gives the end.
+    Q_INVOKABLE [[nodiscard]] int itemIndexAt(int row) const;
+    // Edits, by view rows, saved to the engine at the revision shown.
+    // `before` is an item position (itemIndexAt).
+    Q_INVOKABLE void moveRows(const QList<int>& rows, int before);
+    Q_INVOKABLE void removeRows(const QList<int>& rows);
+    // Copies into another list of the same engine, at its end.
+    Q_INVOKABLE void copyToList(const QList<int>& rows, const QString& listId);
+
   signals:
     void listIdChanged();
     void loadingChanged();
+    // The same list is about to be shown again, changed: a view keeps its
+    // place rather than jumping to the top.
+    void refreshing();
     void loaded();
 
   private:
@@ -89,16 +102,22 @@ class TrackListModel final : public QAbstractListModel {
         qint64 duration_ms{0};
         int group_tracks{0};
         qint64 group_duration_ms{0};
+        // The engine's item as it came, written back as it came.
+        EngineClient::Json item;
     };
 
-    void adoptItems(const EngineClient::Json& items);
+    void adoptItems(const EngineClient::Json& items, bool same_list);
+    [[nodiscard]] std::vector<std::size_t> itemIndices(const QList<int>& rows) const;
     void adoptFacts(const EngineClient::Json& tracks, std::uint64_t generation);
     [[nodiscard]] const Row* track(int row) const;
 
     EngineSession* session_{nullptr};
     QMetaObject::Connection reconnected_;
     QString list_id_;
+    // The list whose rows are held, to tell a refresh from a new list.
+    QString shown_;
     bool loading_{false};
+    std::uint64_t revision_{0};
     std::vector<Row> rows_;
     // Answers for a list no longer shown are dropped by this.
     std::uint64_t generation_{0};

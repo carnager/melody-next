@@ -96,17 +96,20 @@ ApplicationWindow {
 
                 LibraryPane {
                     id: library
+                    dragGhost: ghost
                     SplitView.preferredWidth: 340
                     SplitView.minimumWidth: 220
                 }
                 TrackListPane {
                     id: trackList
+                    dragGhost: ghost
                     SplitView.fillWidth: true
                     SplitView.minimumWidth: 400
                 }
             }
 
             UpNextPane {
+                dragGhost: ghost
                 Layout.fillHeight: true
                 Layout.preferredWidth: window.upNextOpen ? 300 : 0
                 Behavior on Layout.preferredWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -119,6 +122,56 @@ ApplicationWindow {
             text: trackList.summary
             upNextOpen: window.upNextOpen
             onUpNextToggled: window.upNextOpen = !window.upNextOpen
+        }
+    }
+
+    DragGhost {
+        id: ghost
+    }
+
+    // What an engine refused, said briefly and without a dialog.
+    Instantiator {
+        model: Engine.sessions
+        delegate: Connections {
+            required property var modelData
+            target: modelData
+            function onFailed(message) {
+                toast.show(message);
+            }
+        }
+    }
+
+    Rectangle {
+        id: toast
+        function show(message) {
+            toastText.text = message;
+            opacity = 1;
+            toastTimer.restart();
+        }
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 44
+        width: Math.min(parent.width - 40, toastText.implicitWidth + 32)
+        height: 34
+        radius: 8
+        color: Theme.raised
+        border.color: Theme.line
+        opacity: 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            width: parent.width - 32
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+            color: Theme.text
+            font.pixelSize: Theme.fontSize
+        }
+        Timer {
+            id: toastTimer
+            interval: 4000
+            onTriggered: toast.opacity = 0
         }
     }
 

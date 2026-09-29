@@ -11,6 +11,9 @@
 #include <QObject>
 #include <QtQmlIntegration>
 
+#include <functional>
+#include <optional>
+
 namespace trackknife::quick {
 
 // One engine this window is connected to -- this computer's, or one
@@ -59,12 +62,32 @@ class EngineSession final : public QObject {
     // to its queue first: it can only be asked for what it has.
     void enqueue(const std::vector<QueuedTrack>& tracks);
 
+    // Edits one of this engine's lists as the engine has it now: `edit` is
+    // given its items and returns the new ones. With `expected`, the edit is
+    // made only if the list is still at that revision -- what the window
+    // showed is what was edited -- and the save carries the revision it
+    // read, so a change made elsewhere in between is refused, not lost.
+    // When the list is the one playing, the engine's queue follows.
+    using ListEdit = std::function<EngineClient::Json(const EngineClient::Json& items)>;
+    void editList(const QString& id, ListEdit edit, std::optional<std::uint64_t> expected = {});
+
+    // A new list item for a track: a fresh identity, so the same file can
+    // be in a list twice and each is its own entry.
+    [[nodiscard]] static EngineClient::Json newItem(const QueuedTrack& track);
+    // An existing item, copied into another list: the same track, a new
+    // identity.
+    [[nodiscard]] static EngineClient::Json copiedItem(const EngineClient::Json& item);
+
     void start() { client_.start(); }
 
   signals:
     void connectedChanged();
+    // Something asked of the engine was refused; for the window to say.
+    void failed(const QString& message);
 
   private:
+    void followPlaying(const EngineClient::Json& before, const EngineClient::Json& after);
+
     int index_;
     QString key_;
     bool local_;

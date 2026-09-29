@@ -7,6 +7,7 @@ import QtQuick.Controls.Basic
 Rectangle {
     id: pane
 
+    property var dragGhost
     readonly property alias searchField: search
     // Whose library shows: any engine's, whichever tab is open.
     readonly property var session: Engine.sessionByKey(remembered.engine) ?? Engine.sessions[0]
@@ -109,6 +110,8 @@ Rectangle {
             model: pane.library
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
+            // A mouse drag drags a row out; the wheel and touch still scroll.
+            acceptedButtons: Qt.NoButton
             ScrollBar.vertical: ScrollBar {}
 
             delegate: Rectangle {
@@ -130,6 +133,22 @@ Rectangle {
                 color: hover.hovered ? Theme.hover : "transparent"
 
                 HoverHandler { id: hover }
+                DragHandler {
+                    target: null
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onActiveChanged: {
+                        if (active)
+                            pane.dragGhost.begin({ kind: "library", session: pane.session, row: entry.index },
+                                                 entry.track ? entry.title : entry.title + " — " + entry.artist,
+                                                 centroid.scenePosition);
+                        else
+                            pane.dragGhost.end();
+                    }
+                    onCentroidChanged: {
+                        if (active)
+                            pane.dragGhost.moveTo(centroid.scenePosition);
+                    }
+                }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {

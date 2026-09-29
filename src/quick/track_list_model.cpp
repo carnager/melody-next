@@ -8,6 +8,8 @@
 
 #include <QSet>
 
+#include <algorithm>
+
 #include <filesystem>
 
 namespace trackknife::quick {
@@ -72,6 +74,7 @@ void TrackListModel::show(EngineSession* session, const QString& id) {
 
 void TrackListModel::reload() {
     const auto generation = ++generation_;
+    const auto shown_list = list_id_;
     if (session_ == nullptr || list_id_.isEmpty()) {
         beginResetModel();
         rows_.clear();
@@ -88,11 +91,14 @@ void TrackListModel::reload() {
                      }
                      loading_ = false;
                      emit loadingChanged();
-                     adoptItems(answer ? answer->value("items", Json::array()) : Json::array());
+                     revision_ = answer ? answer->value("revision", std::uint64_t{0}) : 0;
+                     adoptItems(answer ? answer->value("items", Json::array()) : Json::array(),
+                                !rows_.empty() && shown_ == list_id_);
+                     shown_ = list_id_;
                  });
 }
 
-void TrackListModel::adoptItems(const Json& items) {
+void TrackListModel::adoptItems(const Json& items, const bool same_list) {
     std::vector<Row> rows;
     rows.reserve(items.size() + items.size() / 8);
     std::string group_key;
@@ -126,7 +132,11 @@ void TrackListModel::adoptItems(const Json& items) {
         ++head.group_tracks;
         head.group_duration_ms += row.duration_ms;
         row.number = head.group_tracks;
+        row.item = item;
         rows.push_back(std::move(row));
+    }
+    if (same_list) {
+        emit refreshing();
     }
     beginResetModel();
     rows_ = std::move(rows);
@@ -340,6 +350,107 @@ QString TrackListModel::describe(const QList<int>& rows) const {
     return QStringLiteral("%1 tracks selected · %2")
         .arg(picked.size())
         .arg(formatDuration(static_cast<qreal>(total) / 1000.0));
+}
+
+int TrackListModel::itemIndexAt(const int row) const {
+    int index = 0;
+    for (int at = 0; at < std::min(row, rowCount()); ++at) {
+        if (!rows_[static_cast<std::size_t>(at)].header) {
+            ++index;
+        }
+    }
+    return index;
+}
+
+std::vector<std::size_t> TrackListModel::itemIndices(const QList<int>& rows) const {
+    std::vector<std::size_t> indices;
+    for (const auto row : rows) {
+        if (track(row) != nullptr) {
+            indices.push_back(static_cast<std::size_t>(itemIndexAt(row)));
+        }
+    }
+    std::ranges::sort(indices);
+    const auto [first, last] = std::ranges::unique(indices);
+    indices.erase(first, last);
+    return indices;
+}
+
+void TrackListModel::moveRows(const QList<int>& rows, const int before) {
+    const auto picked = itemIndices(rows);
+    if (session_ == nullptr || picked.empty()) {
+        return;
+    }
+    session_->editList(
+        list_id_,
+        [picked, before](const Json& items) {
+            Json moving = Json::array();
+            Json staying = Json::array();
+            std::size_t insert_at = 0;
+            for (std::size_t index = 0; index < items.size(); ++index) {
+                if (std::ranges::binary_search(picked, index)) {
+                    moving.push_back(items[index]);
+                } else {
+                    if (static_cast<int>(index) < before) {
+                        ++insert_at;
+                    }
+                    staying.push_back(items[index]);
+                }
+            }
+            Json result = Json::array();
+            for (std::size_t index = 0; index <= staying.size(); ++index) {
+                if (index == insert_at) {
+                    for (const auto& item : moving) {
+                        result.push_back(item);
+                    }
+                }
+                if (index < staying.size()) {
+                    result.push_back(staying[index]);
+                }
+            }
+            return result;
+        },
+        revision_);
+}
+
+void TrackListModel::removeRows(const QList<int>& rows) {
+    const auto picked = itemIndices(rows);
+    if (session_ == nullptr || picked.empty()) {
+        return;
+    }
+    session_->editList(
+        list_id_,
+        [picked](const Json& items) {
+            Json kept = Json::array();
+            for (std::size_t index = 0; index < items.size(); ++index) {
+                if (!std::ranges::binary_search(picked, index)) {
+                    kept.push_back(items[index]);
+                }
+            }
+            return kept;
+        },
+        revision_);
+}
+
+void TrackListModel::copyToList(const QList<int>& rows, const QString& listId) {
+    if (session_ == nullptr || listId == list_id_) {
+        return;
+    }
+    Json copies = Json::array();
+    for (const auto row : rows) {
+        if (const auto* found = track(row)) {
+            copies.push_back(EngineSession::copiedItem(found->item));
+        }
+    }
+    if (copies.empty()) {
+        return;
+    }
+    session_->editList(listId, [copies](const Json& items) {
+        auto result = items;
+        for (const auto& item : copies) {
+            result.push_back(item);
+        }
+        return result;
+    });
 }
 
 QList<int> TrackListModel::groupRows(const int headerRow) const {

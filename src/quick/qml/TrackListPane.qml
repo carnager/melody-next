@@ -35,12 +35,26 @@ Rectangle {
 
     readonly property var engineColors: ["#6cc28b", Theme.accent, "#d6a04c", "#c07bd6", "#5fb8c9"]
 
+    // Settings keep an empty list as nothing and a one-element list as a
+    // bare string; read back, either is a list again.
+    function listOf(value) {
+        if (Array.isArray(value))
+            return value;
+        if (typeof value === "string" && value !== "")
+            return [value];
+        if (value && typeof value.length === "number")
+            return Array.from(value);
+        return [];
+    }
+    readonly property var openTabs: listOf(remembered.open)
+    readonly property var knownEngines: listOf(remembered.engines)
+
     function tabKey(session, listId) {
         return session.key + "|" + listId;
     }
 
     function isTab(session, listId) {
-        return remembered.open.indexOf(tabKey(session, listId)) >= 0;
+        return pane.openTabs.indexOf(tabKey(session, listId)) >= 0;
     }
 
     function show(session, listId) {
@@ -50,19 +64,19 @@ Rectangle {
 
     function open(session, listId) {
         const key = tabKey(session, listId);
-        if (remembered.open.indexOf(key) < 0)
-            remembered.open = remembered.open.concat([key]);
+        if (pane.openTabs.indexOf(key) < 0)
+            remembered.open = pane.openTabs.concat([key]);
         show(session, listId);
     }
 
     function close(session, listId) {
         const key = tabKey(session, listId);
-        const at = remembered.open.indexOf(key);
-        remembered.open = remembered.open.filter(k => k !== key);
+        const at = pane.openTabs.indexOf(key);
+        remembered.open = pane.openTabs.filter(k => k !== key);
         if (Engine.tracks.session !== session || Engine.tracks.listId !== listId)
             return;
         // The tab beside it, as a browser does; nothing when it was the last.
-        const next = remembered.open[Math.min(at, remembered.open.length - 1)];
+        const next = pane.openTabs[Math.min(at, pane.openTabs.length - 1)];
         if (next === undefined) {
             remembered.currentList = "";
             Engine.show(null, "");
@@ -77,10 +91,10 @@ Rectangle {
     // the list on show is put back.
     function adoptLists(session) {
         const prefix = session.key + "|";
-        remembered.open = remembered.open.filter(
+        remembered.open = pane.openTabs.filter(
             k => !k.startsWith(prefix) || session.lists.indexOf(k.slice(prefix.length)) >= 0);
-        if (remembered.engines.indexOf(session.key) < 0) {
-            remembered.engines = remembered.engines.concat([session.key]);
+        if (pane.knownEngines.indexOf(session.key) < 0) {
+            remembered.engines = pane.knownEngines.concat([session.key]);
             const newest = session.lists.newest();
             if (newest !== "")
                 open(session, newest);
@@ -89,10 +103,10 @@ Rectangle {
             const listId = remembered.currentList.slice(prefix.length);
             if (isTab(session, listId))
                 Engine.show(session, listId);
-        } else if (Engine.tracks.session === null && remembered.open.length > 0) {
+        } else if (Engine.tracks.session === null && pane.openTabs.length > 0) {
             // Something to look at until the remembered list's engine
             // answers -- shown, not remembered, so it does not replace it.
-            const first = remembered.open[0];
+            const first = pane.openTabs[0];
             if (first.startsWith(prefix))
                 Engine.show(session, first.slice(prefix.length));
         }
@@ -469,7 +483,7 @@ Rectangle {
                                         onDropped: drop => {
                                             const payload = drop.source.payload;
                                             if (payload.kind === "library")
-                                                payload.session.library.addToList(payload.row, tab.listId, -1);
+                                                payload.source.addToList(payload.row, tab.listId, -1);
                                             else
                                                 Engine.tracks.copyToList(payload.rows, tab.listId);
                                             drop.accept();
@@ -963,7 +977,7 @@ Rectangle {
                     if (payload.kind === "tracks")
                         Engine.tracks.moveRows(payload.rows, before);
                     else if (payload.kind === "library")
-                        payload.session.library.addToList(payload.row, Engine.tracks.listId, before);
+                        payload.source.addToList(payload.row, Engine.tracks.listId, before);
                     insertRow = -1;
                     drop.accept();
                 }

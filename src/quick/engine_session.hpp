@@ -3,6 +3,7 @@
 #pragma once
 
 #include "quick/engine_client.hpp"
+#include "quick/folder_model.hpp"
 #include "quick/library_model.hpp"
 #include "quick/lists_model.hpp"
 #include "quick/player_state.hpp"
@@ -37,6 +38,7 @@ class EngineSession final : public QObject {
     Q_PROPERTY(trackknife::quick::ListsModel* lists READ lists CONSTANT)
     Q_PROPERTY(trackknife::quick::LibraryModel* library READ library CONSTANT)
     Q_PROPERTY(trackknife::quick::UpNextModel* upNext READ upNext CONSTANT)
+    Q_PROPERTY(trackknife::quick::FolderModel* folders READ folders CONSTANT)
     // The library's folders on the engine's machine -- [{path, name,
     // available, error}] -- and a scan of them.
     Q_PROPERTY(QVariantList roots READ roots NOTIFY rootsChanged)
@@ -61,6 +63,7 @@ class EngineSession final : public QObject {
     [[nodiscard]] ListsModel* lists() { return &lists_; }
     [[nodiscard]] LibraryModel* library() { return &library_; }
     [[nodiscard]] UpNextModel* upNext() { return &up_next_; }
+    [[nodiscard]] FolderModel* folders() { return &folders_; }
 
     // A cover on this engine, by the track's encoded path.
     Q_INVOKABLE [[nodiscard]] QString coverForPath(const QString& encoded_path) const;
@@ -144,6 +147,7 @@ class EngineSession final : public QObject {
     ListsModel lists_;
     LibraryModel library_;
     UpNextModel up_next_;
+    FolderModel folders_;
 };
 
 } // namespace trackknife::quick

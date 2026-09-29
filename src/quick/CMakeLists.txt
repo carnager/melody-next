@@ -23,6 +23,8 @@ qt_add_qml_module(
     engine.hpp
     desktop_bridge.cpp
     desktop_bridge.hpp
+    folder_model.cpp
+    folder_model.hpp
     engine_session.cpp
     engine_session.hpp
     player_state.cpp

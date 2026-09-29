@@ -50,7 +50,7 @@ Rectangle {
         onDropped: drop => {
             const payload = drop.source.payload;
             if (payload.kind === "library")
-                payload.session.library.enqueue(payload.row);
+                payload.source.enqueue(payload.row);
             else if (payload.kind === "tracks")
                 Engine.tracks.enqueue(payload.rows);
             else if (payload.kind === "upnext") {

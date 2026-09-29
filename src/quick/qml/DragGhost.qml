@@ -3,7 +3,8 @@ import QtQuick
 
 // What follows the pointer while something is dragged inside the window.
 // One for the whole window, so every drop target reads the same payload:
-//   {kind: "library", session, row}
+//   {kind: "library", session, source, row} -- source is the library or
+//     folder model the row is in; both enqueue and addToList alike
 //   {kind: "tracks", session, listId, rows}
 //   {kind: "upnext", session, row}
 // Tracks only ever go to lists of the engine they came from: a path means

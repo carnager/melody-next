@@ -15,7 +15,7 @@ EngineSession::EngineSession(const int index, QString key, const bool local, QSt
                              EngineClient::Connector connector, QObject* parent)
     : QObject(parent), index_(index), key_(std::move(key)), local_(local), fallback_(std::move(fallback)),
       client_(std::move(connector)), player_(client_), lists_(client_), library_(client_, *this),
-      up_next_(client_, index) {
+      up_next_(client_, index), folders_(client_, *this) {
     connect(&client_, &EngineClient::connectedChanged, this, &EngineSession::connectedChanged);
     connect(&player_, &PlayerState::queueChanged, &up_next_, &UpNextModel::refresh);
     client_.onEvent([this](const std::string& name, const Json& data) {

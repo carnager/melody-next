@@ -12,6 +12,8 @@ Rectangle {
     // Whose library shows: any engine's, whichever tab is open.
     readonly property var session: Engine.sessionByKey(remembered.engine) ?? Engine.sessions[0]
     readonly property var library: session.library
+    readonly property var folders: session.folders
+    readonly property bool byFolder: remembered.view === "folders"
 
     Settings {
         id: remembered
@@ -21,6 +23,8 @@ Rectangle {
         property string engine: "local"
         property bool queryMode: false
         property int order: 0
+        // "albums" or "folders".
+        property string view: "albums"
     }
 
     // Every engine's library searches and sorts alike.
@@ -61,6 +65,20 @@ Rectangle {
         MenuItem {
             text: remembered.order === 2 ? "Pick again" : "Reload"
             onTriggered: pane.library.refresh()
+        }
+    }
+
+    Menu {
+        id: folderMenu
+        property int row: -1
+        MenuItem {
+            text: "Add to Up Next"
+            onTriggered: pane.folders.enqueue(folderMenu.row)
+        }
+        MenuItem {
+            text: "Add to the list on show"
+            enabled: Engine.tracks.session === pane.session && Engine.tracks.listId !== ""
+            onTriggered: pane.folders.addToList(folderMenu.row, Engine.tracks.listId, -1)
         }
     }
 
@@ -139,6 +157,8 @@ Rectangle {
             TextField {
                 id: search
                 Layout.fillWidth: true
+                enabled: !pane.byFolder
+                opacity: enabled ? 1 : 0.5
                 placeholderText: remembered.queryMode ? "Query, e.g. artist HAS wilson AND rating GREATER 6"
                                                       : "Search albums and tracks"
                 color: Theme.text
@@ -173,7 +193,18 @@ Rectangle {
                 id: orderButton
                 icon: "sort"
                 tip: "Order"
+                visible: !pane.byFolder
                 onClicked: orderMenu.popup(orderButton, 0, orderButton.height)
+            }
+            IconButton {
+                icon: "folder"
+                checked: pane.byFolder
+                tip: pane.byFolder ? "Browsing by folder; click for albums" : "Browse by folder"
+                onClicked: {
+                    remembered.view = pane.byFolder ? "albums" : "folders";
+                    if (pane.byFolder && pane.folders.atTop)
+                        pane.folders.refresh();
+                }
             }
         }
 
@@ -190,6 +221,7 @@ Rectangle {
             id: albums
             Layout.fillWidth: true
             Layout.fillHeight: true
+            visible: !pane.byFolder
             clip: true
             model: pane.library
             reuseItems: true
@@ -227,7 +259,8 @@ Rectangle {
                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                     onActiveChanged: {
                         if (active)
-                            pane.dragGhost.begin({ kind: "library", session: pane.session, row: entry.index },
+                            pane.dragGhost.begin({ kind: "library", session: pane.session, source: pane.library,
+                                                   row: entry.index },
                                                  entry.isAlbum ? entry.title + " — " + entry.artist : entry.title,
                                                  centroid.scenePosition);
                         else
@@ -359,6 +392,167 @@ Rectangle {
                 text: !pane.session.connected ? "Connecting to " + pane.session.name + "…\n" + pane.session.failure
                     : search.text !== "" ? "Nothing matches “" + search.text + "”"
                     : "The library of " + pane.session.name + " is empty"
+                color: Theme.dim
+                font.pixelSize: Theme.fontSize
+            }
+        }
+
+        // By folder
+        Rectangle {
+            Layout.fillWidth: true
+            visible: pane.byFolder
+            implicitHeight: 30
+            radius: 4
+            color: Theme.window
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 2
+                anchors.rightMargin: 8
+                IconButton {
+                    icon: "chevron"
+                    rotation: 180
+                    iconSize: 12
+                    tip: "Up"
+                    enabled: !pane.folders.atTop
+                    opacity: enabled ? 1 : 0.35
+                    onClicked: pane.folders.up()
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: pane.folders.atTop ? "Library folders" : pane.folders.name
+                    elide: Text.ElideMiddle
+                    color: Theme.text
+                    font.pixelSize: Theme.fontSize
+                }
+            }
+        }
+        Text {
+            Layout.fillWidth: true
+            visible: pane.byFolder && pane.folders.error !== ""
+            text: pane.folders.error
+            wrapMode: Text.WordWrap
+            color: Theme.error
+            font.pixelSize: Theme.smallFontSize
+        }
+        ListView {
+            id: folderView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: pane.byFolder
+            clip: true
+            model: pane.folders
+            reuseItems: true
+            boundsBehavior: Flickable.StopAtBounds
+            acceptedButtons: Qt.NoButton
+            ScrollBar.vertical: ScrollBar {}
+
+            delegate: Rectangle {
+                id: node
+                required property int index
+                required property string kind
+                required property string title
+                required property string artist
+                required property string album
+                required property int number
+                required property real duration
+                required property string cover
+                readonly property bool isFolder: kind === "folder"
+
+                width: ListView.view.width
+                height: isFolder ? 28 : 36
+                radius: 4
+                color: nodeHover.hovered ? Theme.hover : "transparent"
+
+                HoverHandler { id: nodeHover }
+                DragHandler {
+                    target: null
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onActiveChanged: {
+                        if (active)
+                            pane.dragGhost.begin({ kind: "library", session: pane.session, source: pane.folders,
+                                                   row: node.index },
+                                                 node.title, centroid.scenePosition);
+                        else
+                            pane.dragGhost.end();
+                    }
+                    onCentroidChanged: {
+                        if (active)
+                            pane.dragGhost.moveTo(centroid.scenePosition);
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: mouse => {
+                        if (mouse.button === Qt.RightButton) {
+                            folderMenu.row = node.index;
+                            folderMenu.popup();
+                        } else if (node.isFolder) {
+                            pane.folders.open(node.index);
+                        }
+                    }
+                    onDoubleClicked: mouse => {
+                        if (mouse.button === Qt.LeftButton && !node.isFolder)
+                            pane.folders.enqueue(node.index);
+                    }
+                }
+                Icon {
+                    visible: node.isFolder
+                    x: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 15
+                    height: 15
+                    name: "folder"
+                    color: Theme.dim
+                }
+                Cover {
+                    visible: !node.isFolder
+                    x: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 26
+                    height: 26
+                    source: visible ? node.cover : ""
+                    name: node.album
+                }
+                Column {
+                    x: node.isFolder ? 32 : 40
+                    width: parent.width - x - 36
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        width: parent.width
+                        text: (!node.isFolder && node.number > 0 ? node.number + "  " : "") + node.title
+                        elide: node.isFolder ? Text.ElideMiddle : Text.ElideRight
+                        color: Theme.text
+                        font.pixelSize: Theme.fontSize
+                    }
+                    Text {
+                        visible: !node.isFolder
+                        width: parent.width
+                        text: node.artist + (node.duration > 0 ? " · " + Engine.formatDuration(node.duration) : "")
+                        elide: Text.ElideRight
+                        color: Theme.dim
+                        font.pixelSize: Theme.smallFontSize
+                    }
+                }
+                IconButton {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    icon: "queue"
+                    iconSize: 14
+                    tip: node.isFolder ? "Add everything in it to Up Next" : "Add to Up Next"
+                    opacity: nodeHover.hovered ? 1 : 0
+                    onClicked: pane.folders.enqueue(node.index)
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                width: parent.width - 20
+                visible: folderView.count === 0 && !pane.folders.loading && pane.folders.error === ""
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: pane.folders.atTop ? "No library folders on " + pane.session.name : "Nothing indexed here"
                 color: Theme.dim
                 font.pixelSize: Theme.fontSize
             }

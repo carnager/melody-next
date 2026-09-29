@@ -9,18 +9,18 @@ import Trackknife.Quick
 Menu {
     id: menu
 
+    // Entries are taken out of the menu, not removed: removing destroys an
+    // item, and the Instantiator destroys its own again.
     Instantiator {
         model: Tk.outputMenu
-        delegate: Component {
-            Loader {
-                required property var modelData
-                sourceComponent: modelData.kind === "separator" ? separator
-                               : modelData.kind === "heading" ? heading : choice
-                property var entry: modelData
-            }
+        delegate: Loader {
+            required property var modelData
+            sourceComponent: modelData.kind === "separator" ? separator
+                           : modelData.kind === "heading" ? heading : choice
+            onLoaded: item.entry = modelData
         }
         onObjectAdded: (index, object) => menu.insertItem(index, object.item)
-        onObjectRemoved: (index, object) => menu.removeItem(object.item)
+        onObjectRemoved: (index, object) => menu.takeItem(index)
     }
     MenuSeparator {}
     MenuItem {
@@ -31,14 +31,17 @@ Menu {
 
     Component {
         id: separator
-        MenuSeparator {}
+        MenuSeparator {
+            property var entry
+        }
     }
-    // Headings as labels, bold at 0.9x in the quiet colour.
+    // Headings as labels, bold at 0.9x.
     Component {
         id: heading
         MenuItem {
+            property var entry: ({})
             enabled: false
-            text: parent ? parent.entry.label : ""
+            text: entry.label ?? ""
             font.bold: true
             font.pointSize: Qt.application.font.pointSize * 0.9
         }
@@ -46,7 +49,7 @@ Menu {
     Component {
         id: choice
         MenuItem {
-            readonly property var entry: parent ? parent.entry : ({})
+            property var entry: ({})
             text: entry.label ?? ""
             checkable: true
             checked: entry.checked ?? false

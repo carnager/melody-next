@@ -34,7 +34,7 @@ ToolBar {
             Accessible.name: "Cover of the current album"
             Rectangle {
                 anchors.fill: parent
-                visible: cover.status !== Image.Ready
+                visible: cover.status !== Image.Ready || cover.implicitWidth <= 1
                 radius: 3
                 color: Shade.mix(bar.ground, bar.ink, 0.10)
                 Text {
@@ -53,7 +53,7 @@ ToolBar {
                 source: (bar.transport.coverKey ?? "") === "" ? ""
                         : "image://cover/" + encodeURIComponent(bar.transport.coverKey) + "#"
                           + Tk.coverRevision
-                visible: status === Image.Ready
+                visible: status === Image.Ready && implicitWidth > 1
             }
         }
 

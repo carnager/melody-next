@@ -419,7 +419,7 @@ ApplicationWindow {
                         onTriggered: Tk.setBufferProfile(modelData.value)
                     }
                     onObjectAdded: (index, object) => bufferMenu.insertItem(index, object)
-                    onObjectRemoved: (index, object) => bufferMenu.removeItem(object)
+                    onObjectRemoved: (index, object) => bufferMenu.takeItem(index)
                 }
                 MenuSeparator {}
                 MenuItem {

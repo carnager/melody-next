@@ -23,7 +23,7 @@ Menu {
             onTriggered: Tk.setReplayGain(modelData.value)
         }
         onObjectAdded: (index, object) => menu.insertItem(index, object)
-        onObjectRemoved: (index, object) => menu.removeItem(object)
+        onObjectRemoved: (index, object) => menu.takeItem(index)
     }
     MenuSeparator {}
     MenuItem {

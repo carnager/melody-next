@@ -339,7 +339,7 @@ FocusScope {
                     height: 44
                     Rectangle {
                         anchors.fill: parent
-                        visible: art.status !== Image.Ready
+                        visible: art.status !== Image.Ready || art.implicitWidth <= 1
                         radius: 3
                         color: row.palette.mid
                         Image {

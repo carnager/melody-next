@@ -74,38 +74,7 @@ void BenchMainWindow::initializePersistence() {
     const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(base);
     database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
-    // Built once, before anything that needs a catalogue: the panel, the
-    // search dialog and dynamic playlists all take this rather than a path.
-    localEngine().catalogue =
-        std::make_unique<CatalogueSource>(database_path_, CatalogueSource::Role::local);
-    // Its own connection: the engine serves one connection in order, so a
-    // transport command behind a library query would wait for it.
-    localEngine().playback = new EnginePlayback(*localEngine().catalogue, this);
-    watchFileWork(localEngine());
-    transport_ = localPlayback();
-    connect(localPlayback(), &EnginePlayback::changed, this, [this] {
-        followIfStartedElsewhere(localPlayback());
-        if (transport_ == localPlayback()) {
-            refreshTransport();
-        }
-        // An outdated engine left alone while it played is renewed once it
-        // has stopped.
-        if (engine_renewal_pending_ &&
-            localPlayback()->state().status != QStringLiteral("playing")) {
-            QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
-        }
-    });
-    connect(localPlayback(), &EnginePlayback::ratingChanged, this,
-            [this](const QString& hash, const unsigned rating) {
-                adoptEngineRating(EngineKey::local(), hash, rating);
-            });
-    connect(localPlayback(), &EnginePlayback::failed, this, [this](const QString& message) {
-        statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
-    });
-    list_sync_ = new EngineListSync(this);
-    list_sync_->setEngine(EngineKey::local(), localPlayback());
-    connect(list_sync_, &EngineListSync::adopted, &workspace_, &Workspace::adoptEngineList);
-    connect(list_sync_, &EngineListSync::wantsSave, this, &BenchMainWindow::schedulePersist);
+    workspace_.connectLocalEngine();
     connect(list_sync_, &EngineListSync::conflicted, this, &BenchMainWindow::settleListConflict);
     connect(list_sync_, &EngineListSync::removedElsewhere, this, [this](const QString& id) {
         // Deleted by another client: closed here too, with nothing to ask.
@@ -115,38 +84,6 @@ void BenchMainWindow::initializePersistence() {
             closeTabAt(tabs_->indexOf(tab->view));
         }
     });
-    connect(localPlayback(), &EnginePlayback::listChanged, this,
-            [this](const QString& id, const quint64 revision, const bool deleted) {
-                list_sync_->listChanged(localPlayback(), id, revision, deleted);
-                fetchEngineLists();
-            });
-    loadPendingRelocations();
-    connect(localPlayback(), &EnginePlayback::connected, this, [this] {
-        // A new engine, or this one restarted: compared again, and given its
-        // lists -- and any moves it missed.
-        list_sync_->reconnected(localPlayback());
-        flushEngineRelocations();
-        fetchEngineLists();
-        QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
-        // What it is doing now is not news; a start after this is.
-        rememberEngineState(localPlayback());
-        if (transport_ != localPlayback()) {
-            return;
-        }
-        // A reconnection is a new engine as far as it is concerned: it knows
-        // none of this window's settings, and it may already be playing.
-        applyLocalPlaybackModes();
-        reattachToEngine();
-    });
-    if (localPlayback()->active()) {
-        QTimer::singleShot(0, this, [this] { renewOutdatedLocalEngine(); });
-        // An engine starts with its own defaults and has never heard of this
-        // window's settings, so they are handed over the moment the connection
-        // exists. This runs after the transport is built, which is why sending
-        // them there reached nothing and the first track played with no gain
-        // applied until a mode was toggled.
-        applyLocalPlaybackModes();
-    }
     persistence_ = new ui::ListPersistenceService(database_path_, this);
     persistence_timer_ = new QTimer(this);
     persistence_timer_->setSingleShot(true);
@@ -1526,16 +1463,10 @@ void BenchMainWindow::showTrackContextMenu(QTableView* view, const QPoint& posit
     track_context_menu_->popup(view->viewport()->mapToGlobal(position));
 }
 
-void BenchMainWindow::adoptEngineRating(const EngineKey& engine, const QString& hash,
-                                        const unsigned rating) {
-    const QHash<QString, unsigned> ratings{{hash, rating}};
-    for (const auto& tab : list_tabs_) {
-        if (EngineKey::of(tab->document) == engine) {
-            tab->model->applyRatings(ratings);
-        }
-    }
-    // Dynamic results from that library show it, and rules on ratings
-    // look again.
+// Dynamic results from an engine's library show a rating it stored, and
+// rules on ratings look again.
+void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
+                                           const QHash<QString, unsigned>& ratings) {
     if (auto* dialog = findChild<DynamicPlaylistDialog*>(); dialog && dialog->engine() == engine) {
         if (auto* results = qobject_cast<LocalListModel*>(dialog->view()->model())) {
             results->applyRatings(ratings);

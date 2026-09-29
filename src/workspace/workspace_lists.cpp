@@ -332,7 +332,7 @@ void Workspace::restoreLists(std::vector<persistence::ListDocument> documents) {
     // which, the first time, is moving them there. And moves an engine missed
     // while this window was closed are handed to it.
     schedulePersist();
-    view_->flushEngineRelocations();
+    flushEngineRelocations();
 }
 
 

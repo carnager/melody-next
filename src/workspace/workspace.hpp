@@ -358,6 +358,29 @@ class Workspace final : public QObject {
         return nullptr;
     }
 
+    // The engines connected: this computer's first, as the workspace
+    // starts; then each remote in Settings -- the `first` of them owning the
+    // lists an older release made for "the remote".
+    void connectLocalEngine();
+    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
+    // Settings changed: engines no longer listed let go, new ones connected.
+    void syncRemoteEngines();
+    void disconnectEngine(const EngineKey& key);
+    // ADR-0234: a remote's placeholder key replaced by the id it gave.
+    void adoptEngineIdentity(EngineLink& engine);
+    // A rating an engine stored, shown in its lists.
+    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
+    // ADR-0237: whether an engine does the file tools' work, asked each time
+    // it connects; one that does is handed this workspace's naming layouts.
+    void watchFileWork(EngineLink& link);
+    void pushLayouts(std::vector<core::StableId> removed = {});
+    // ADR-0233: a file moved here, told to every engine's lists; kept in
+    // Settings until each has taken it.
+    void queueEngineRelocation(const std::string& from, const std::string& to);
+    void storePendingRelocations() const;
+    void loadPendingRelocations();
+    void flushEngineRelocations();
+
     // Playback (ADR-0220, ADR-0226): the engine owns the queue, the modes,
     // the order and up-next; the workspace says what to play and follows
     // what it does.

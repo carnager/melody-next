@@ -50,8 +50,27 @@ class WorkspaceView {
     virtual void refreshLocalPlaybackControls() = 0;
     // Up Next changed.
     virtual void refreshUpNext() = 0;
-    // Hands the engines the file moves they have not taken yet.
-    virtual void flushEngineRelocations() = 0;
+    // The engines. One connected is shown -- its library among the sources
+    // -- and one attached, now answering, is named as it says; one about to
+    // be let go of is no longer shown, and when it is gone what was chosen
+    // among them is chosen again. Settings' engines were connected again.
+    virtual void engineConnected(Workspace::EngineLink& engine, bool first) = 0;
+    virtual void engineAttached(Workspace::EngineLink& engine) = 0;
+    // ADR-0234: it took the id it gave in place of `from`, and its lists
+    // with it when `lists_follow`.
+    virtual void engineRekeyed(Workspace::EngineLink& engine, const EngineKey& from,
+                               bool lists_follow) = 0;
+    virtual void engineRemoving(Workspace::EngineLink& engine) = 0;
+    virtual void engineRemoved() = 0;
+    virtual void enginesSynced() = 0;
+    // An engine's lists changed, or who has which.
+    virtual void engineListsChanged() = 0;
+    // Stored ratings are to be read again; one engine's changed.
+    virtual void refreshRatings() = 0;
+    virtual void engineRatingsChanged(const EngineKey& engine,
+                                      const QHash<QString, unsigned>& ratings) = 0;
+    // File work the engines could not settle; `reported_now` when some is new.
+    virtual void engineInterruptionsChanged(bool reported_now) = 0;
     // An album's cover arrived: whatever shows it outside the lists -- the
     // player's header -- may now.
     virtual void artworkLoaded(const QString& key) = 0;

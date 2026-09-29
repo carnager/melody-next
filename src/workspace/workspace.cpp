@@ -8,7 +8,14 @@ namespace trackknife::bench {
 
 Workspace::Workspace(QObject* parent) : QObject(parent) {}
 
-Workspace::~Workspace() = default;
+Workspace::~Workspace() {
+    // The connections before the catalogues they were made from: one waits
+    // for its work in hand, which may revive its engine through them.
+    for (const auto& engine : engines_) {
+        delete engine->playback;
+        engine->playback = nullptr;
+    }
+}
 
 Workspace::EngineLink* Workspace::link(const EngineKey& key) const {
     const auto found = std::ranges::find(engines_, key, [](const auto& each) { return each->key; });

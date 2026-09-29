@@ -127,7 +127,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     using SeenEngine = Workspace::SeenEngine;
     using EngineLink = Workspace::EngineLink;
     using EngineInterruption = Workspace::EngineInterruption;
-    Workspace workspace_;
+    // In the window's object tree, so what it holds is found through it.
+    Workspace workspace_{this};
     std::vector<std::unique_ptr<ListTab>>& list_tabs_{workspace_.list_tabs_};
     QHash<QString, QByteArray>& restored_track_view_layouts_{workspace_.restored_track_view_layouts_};
     MprisService*& mpris_{workspace_.mpris_};
@@ -207,6 +208,17 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
     [[nodiscard]] QObject* modelParent() override;
     void artworkLoaded(const QString& key) override;
+    void engineConnected(EngineLink& engine, bool first) override;
+    void engineAttached(EngineLink& engine) override;
+    void engineRekeyed(EngineLink& engine, const EngineKey& from, bool lists_follow) override;
+    void engineRemoving(EngineLink& engine) override;
+    void engineRemoved() override;
+    void enginesSynced() override;
+    void engineListsChanged() override { fetchEngineLists(); }
+    void refreshRatings() override { refreshLocalRatings(); }
+    void engineRatingsChanged(const EngineKey& engine,
+                              const QHash<QString, unsigned>& ratings) override;
+    void engineInterruptionsChanged(bool reported_now) override;
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -310,7 +322,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void refreshLocalRatings();
     // A rating an engine says was set -- here, on the phone, from a script:
     // shown in the tabs whose tracks are that engine's.
-    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
+    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating) {
+        workspace_.adoptEngineRating(engine, hash, rating);
+    }
 
     void showDynamicPlaylists();
 
@@ -411,16 +425,18 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // work holds a copy, handed over after each change and when it connects.
     // Only `removed` is taken away there: nothing an engine holds is lost to
     // a set it was sent.
-    void pushLayouts(std::vector<core::StableId> removed = {});
+    void pushLayouts(std::vector<core::StableId> removed = {}) {
+        workspace_.pushLayouts(std::move(removed));
+    }
     void presentInterruptedOperations();
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
     void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
     void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
-    void queueEngineRelocation(const std::string& from, const std::string& to);
-    void flushEngineRelocations() override;
-    void storePendingRelocations() const;
-    void loadPendingRelocations();
+    void queueEngineRelocation(const std::string& from, const std::string& to) {
+        workspace_.queueEngineRelocation(from, to);
+    }
+    void flushEngineRelocations() { workspace_.flushEngineRelocations(); }
     void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
                                            const metadata::MetadataDocument& document);
     void removeSelectedRows();
@@ -543,15 +559,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // Builds the remote connection, its library panel and its default tab.
     // ADR-0234: one engine elsewhere, as Settings name it; the first is the
     // one an older release's remote lists belong to.
-    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
-    void adoptEngineIdentity(EngineLink& engine);
+    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first) {
+        workspace_.connectRemoteEngine(setting, first);
+    }
     // Settings changed: engines listed and not connected are connected,
     // those connected and no longer listed -- or now at another address or
     // with another password -- are let go, and connected again if listed.
-    void syncRemoteEngines();
-    // Lets go of an engine elsewhere: its connection, library panel and tab.
-    // Its lists stay, as those of an engine that is not reached.
-    void disconnectEngine(const EngineKey& key);
+    void syncRemoteEngines() { workspace_.syncRemoteEngines(); }
     [[nodiscard]] ListTab* remoteQueueTab() { return workspace_.remoteQueueTab(); }
     // An engine's own tab: its first, or one made for it, named after it.
     [[nodiscard]] ListTab* engineTab(EngineLink& engine) { return workspace_.engineTab(engine); }
@@ -697,9 +711,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     }
     // The link a connection belongs to; null for none of this window's.
     [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const { return workspace_.linkOf(playback); }
-    // ADR-0237: asks the link's engine whether it does file work, now and on
-    // every reconnection.
-    void watchFileWork(EngineLink& link);
     // The engine that does the file work for a view's files, if one does.
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
     // That engine, or -- having said in the status bar why `what` cannot be

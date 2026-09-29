@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-// ADR-0227: the remote engine beside this computer's. Its tabs list files on
-// its machine and play there; its library sits beside this computer's in the
-// source switch. Nothing here reads the remote files: what they are comes
-// from the engine that has them.
+// ADR-0227: the remote engines beside this computer's, as this window shows
+// them. The workspace connects them and follows them; here each one's
+// library sits beside this computer's in the source switch.
 
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
@@ -24,29 +23,14 @@
 
 namespace trackknife::bench {
 
-// ADR-0234: an engine elsewhere has said who it is. Known until now by a
-// placeholder -- the remote of an older release, or its address -- its
-// lists and everything kept for it take its id. Known by another id, the
-// address now leads to another engine: its link takes the new id, and the
-// lists of the one it led to before stay that engine's.
-void BenchMainWindow::adoptEngineIdentity(EngineLink& engine) {
-    auto* remote = &engine;
-    if (remote->catalogue == nullptr) {
-        return;
-    }
-    const auto id = remote->catalogue->engineId();
-    if (id.isEmpty() || id == remote->key.text()) {
-        return;
-    }
-    const auto from = remote->key;
-    const auto to = EngineKey::fromText(id);
-    const bool lists_follow =
-        from == EngineKey::remote() || from.text().startsWith(QStringLiteral("address:"));
-    remote->key = to;
-    remote->setting.id = id;
-    rememberEngineId(remote->setting.address, id);
-    if (remote->library != nullptr) {
-        remote->library->setEngine(to);
+// ADR-0234: an engine elsewhere took the id it gave. Its library and its
+// source tab follow; with its lists, so do their views, and dialogs that
+// offer the libraries by key are made again when next opened.
+void BenchMainWindow::engineRekeyed(EngineLink& engine, const EngineKey& from,
+                                    const bool lists_follow) {
+    const auto to = engine.key;
+    if (engine.library != nullptr) {
+        engine.library->setEngine(to);
     }
     for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
          ++index) {
@@ -55,39 +39,22 @@ void BenchMainWindow::adoptEngineIdentity(EngineLink& engine) {
         }
     }
     if (!lists_follow) {
-        if (list_sync_ != nullptr) {
-            list_sync_->setEngine(from, nullptr);
-            list_sync_->setEngine(to, remote->playback);
-        }
         return;
     }
     for (auto& tab : list_tabs_) {
-        if (EngineKey::of(tab->document) == from) {
-            tab->document.engine = to.stored();
+        if (EngineKey::of(tab->document) == to) {
             markViewEngine(tab->view, to);
         }
-    }
-    if (detached_playback_ && EngineKey::of(detached_playback_->document) == from) {
-        detached_playback_->document.engine = to.stored();
-    }
-    if (list_sync_ != nullptr) {
-        list_sync_->rekey(from, to);
-    }
-    if (up_next_engine_ == from) {
-        up_next_engine_ = to;
-        persistUpNext();
     }
     if (output_choices_engine_ == from) {
         output_choices_engine_ = to;
     }
-    // Dialogs that offer the libraries by key are made again when next opened.
     if (auto* dialog = findChild<DynamicPlaylistDialog*>()) {
         dialog->close();
     }
     if (search_dialog_ != nullptr) {
         search_dialog_->close();
     }
-    schedulePersist();
 }
 
 LocalLibraryPanel* BenchMainWindow::libraryOf(const EngineKey& key) const {
@@ -95,66 +62,14 @@ LocalLibraryPanel* BenchMainWindow::libraryOf(const EngineKey& key) const {
     return engine != nullptr ? engine->library : nullptr;
 }
 
-void BenchMainWindow::syncRemoteEngines() {
-    const auto wanted = loadRemoteEngines();
-    const auto listed = [&wanted](const EngineLink& engine) {
-        return std::ranges::any_of(wanted, [&engine](const RemoteEngineSetting& setting) {
-            return setting.address == engine.setting.address &&
-                   setting.effectivePassword() == engine.password;
-        });
-    };
-    std::vector<EngineKey> gone;
-    for (const auto& engine : engines_) {
-        if (!engine->key.isLocal() && !listed(*engine)) {
-            gone.push_back(engine->key);
-        }
-    }
-    for (const auto& key : gone) {
-        disconnectEngine(key);
-    }
-    for (const auto& setting : wanted) {
-        const bool connected = std::ranges::any_of(engines_, [&setting](const auto& engine) {
-            return !engine->key.isLocal() && engine->setting.address == setting.address;
-        });
-        if (!connected) {
-            // An engine added now is new to this window: it has no lists of
-            // an older release to be the owner of.
-            connectRemoteEngine(setting, false);
-        }
-    }
-    // What mounts and names say now.
-    for (auto& engine : engines_) {
-        for (const auto& setting : wanted) {
-            if (!engine->key.isLocal() && setting.address == engine->setting.address) {
-                engine->setting.music_folder = setting.music_folder;
-                engine->setting.reachable_at = setting.reachable_at;
-            }
-        }
-    }
+void BenchMainWindow::enginesSynced() {
     keepTabGroupsTogether();
-    fetchEngineLists();
     refreshListsPanel();
 }
 
-void BenchMainWindow::disconnectEngine(const EngineKey& key) {
-    const auto found =
-        std::ranges::find(engines_, key, [](const auto& engine) { return engine->key; });
-    if (found == engines_.end() || key.isLocal()) {
-        return;
-    }
-    auto& engine = **found;
-    // Nothing is to follow or play it any more.
-    if (transport_ == engine.playback) {
-        transport_ = localPlayback();
-        playback_.anchors = {};
-        playback_.row = -1;
-        refreshTransport();
-    }
-    if (list_sync_ != nullptr) {
-        list_sync_->setEngine(key, nullptr);
-    }
-    // Dialogs that offer the libraries by engine are made again when next
-    // opened.
+// An engine elsewhere let go of: dialogs that offer the libraries by engine
+// are made again when next opened, and its source tab and library go.
+void BenchMainWindow::engineRemoving(EngineLink& engine) {
     if (auto* dialog = findChild<DynamicPlaylistDialog*>()) {
         dialog->close();
     }
@@ -163,18 +78,10 @@ void BenchMainWindow::disconnectEngine(const EngineKey& key) {
     }
     for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
          ++index) {
-        if (local_source_tabs_->tabData(index).toString() == key.text()) {
+        if (local_source_tabs_->tabData(index).toString() == engine.key.text()) {
             local_source_tabs_->removeTab(index);
             break;
         }
-    }
-    // The connection first -- it waits for what it has in hand -- then the
-    // panel, then the catalogue both of them read through.
-    if (engine.playback != nullptr) {
-        engine.playback->retire();
-        disconnect(engine.playback, nullptr, this, nullptr);
-        delete engine.playback;
-        engine.playback = nullptr;
     }
     if (engine.library != nullptr) {
         disconnect(engine.library, nullptr, this, nullptr);
@@ -182,121 +89,34 @@ void BenchMainWindow::disconnectEngine(const EngineKey& key) {
         delete engine.library;
         engine.library = nullptr;
     }
-    engines_.erase(found);
-    selectPreferredSource();
-    refreshActiveContext();
-    refreshTransport();
 }
 
-void BenchMainWindow::connectRemoteEngine(const RemoteEngineSetting& setting, const bool first) {
-    auto added = std::make_unique<EngineLink>();
-    // ADR-0234: by the id it gave when last reached. Until it has been, a
-    // placeholder: "remote" for the one remote of an older release, whose
-    // lists say so, or its address for one added since.
-    added->key = !setting.id.isEmpty() ? EngineKey::fromText(setting.id)
-                 : first ? EngineKey::remote()
-                         : EngineKey::fromText(QStringLiteral("address:") + setting.address);
-    added->setting = setting;
-    added->password = setting.effectivePassword();
-    added->catalogue =
-        std::make_unique<CatalogueSource>(database_path_, setting.address, added->password);
-    if (!added->catalogue->configured()) {
-        return;
-    }
-    added->playback = new EnginePlayback(*added->catalogue, this);
-    auto* link = added.get();
-    engines_.push_back(std::move(added));
-    watchFileWork(*link);
-    if (list_sync_ != nullptr) {
-        list_sync_->setEngine(link->key, link->playback);
-        connect(link->playback, &EnginePlayback::listChanged, this,
-                [this, link](const QString& id, const quint64 revision, const bool deleted) {
-                    list_sync_->listChanged(link->playback, id, revision, deleted);
-                    fetchEngineLists();
-                });
-        connect(link->playback, &EnginePlayback::connected, this, [this, link] {
-            list_sync_->reconnected(link->playback);
-            flushEngineRelocations();
-            fetchEngineLists();
-        });
-    }
-    connect(link->playback, &EnginePlayback::changed, this, [this, link] {
-        followIfStartedElsewhere(link->playback);
-        if (transport_ == link->playback) {
-            refreshTransport();
-        }
-    });
-    connect(link->playback, &EnginePlayback::ratingChanged, this,
-            [this, link](const QString& hash, const unsigned rating) {
-                adoptEngineRating(link->key, hash, rating);
-            });
-    connect(link->playback, &EnginePlayback::failed, this, [this, link](const QString& message) {
-        statusBar()->showMessage(QStringLiteral("Engine: %1").arg(message), 8'000);
-    });
-    const auto attached = [this, link] {
-        // What it is doing now is not news; a start after this is.
-        rememberEngineState(link->playback);
-        // Connected, the remote says what it is called: the library tab shows
-        // that rather than its address (an engine too old to say keeps it).
-        static_cast<void>(link->catalogue->open());
-        adoptEngineIdentity(*link);
-        for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
-             ++index) {
-            if (local_source_tabs_->tabData(index).toString() == link->key.text()) {
-                local_source_tabs_->setTabText(index, link->catalogue->name());
-            }
-        }
-        // The remote tabs were restored before there was a remote to ask for
-        // their covers and missing tags -- or while it was away: they ask now.
-        for (auto& tab : list_tabs_) {
-            if (EngineKey::of(tab->document) == link->key) {
-                // Named now that the remote has said its name.
-                static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(
-                    emptyListTitle(EngineKey::of(tab->document)),
-                    emptyListHint(EngineKey::of(tab->document)));
-                enqueueUnprobedRows(*tab);
-                syncArtwork(*tab);
-            }
-        }
-        refreshLocalRatings();
-        // A remote that restarted holds the Up Next it saved; this window's
-        // is the one the user sees, so it is stated again.
-        engine_requests_.clear();
-        syncEngineRequests();
-        // Its tab, named after it -- by address if it was made while the
-        // remote was away, which is renamed now that it has said its name.
-        // A name someone chose is theirs, and kept.
-        if (auto* tab = engineTab(*link); tab != nullptr) {
-            const auto address = link->catalogue->addressName();
-            const auto announced = link->catalogue->name();
-            if (displayText(tab->document.name) == address && announced != address) {
-                tab->document.name = utf8Bytes(announced);
-                refreshTabChrome(*tab);
-                schedulePersist();
-            }
-        }
-        // Music the remote was already playing is followed, unless this
-        // computer is playing: then that is what the transport shows, and
-        // the remote waits until one of its tabs is played.
-        const auto remote = link->playback->state();
-        const bool local_idle = localPlayback() == nullptr ||
-                                localPlayback()->state().status == QStringLiteral("stopped");
-        if (!remote.entry.isEmpty() && local_idle && transport_ != link->playback) {
-            followPlayback(link->playback);
-        }
-        if (transport_ == link->playback) {
-            reattachToEngine();
-        }
-    };
-    connect(link->playback, &EnginePlayback::connected, this, attached);
-    if (link->playback->active()) {
-        attached();
-    } else {
-        // Still offered, so a remote that is down now has its tab to come
-        // back to.
-        static_cast<void>(engineTab(*link));
-    }
+void BenchMainWindow::engineRemoved() {
+    selectPreferredSource();
+    refreshActiveContext();
+}
 
+// Connected, the remote says what it is called: the library tab shows that
+// rather than its address, and its lists' empty messages name it.
+void BenchMainWindow::engineAttached(EngineLink& engine) {
+    for (int index = 0; local_source_tabs_ != nullptr && index < local_source_tabs_->count();
+         ++index) {
+        if (local_source_tabs_->tabData(index).toString() == engine.key.text()) {
+            local_source_tabs_->setTabText(index, engine.catalogue->name());
+        }
+    }
+    for (auto& tab : list_tabs_) {
+        if (EngineKey::of(tab->document) == engine.key) {
+            static_cast<ui::QueueTableView*>(tab->view)->setEmptyMessage(
+                emptyListTitle(EngineKey::of(tab->document)),
+                emptyListHint(EngineKey::of(tab->document)));
+        }
+    }
+}
+
+// An engine elsewhere connected: its library beside this computer's.
+void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
+    auto* link = &engine;
     link->library = new LocalLibraryPanel(*link->catalogue, link->key, source_stack_);
     link->library->setObjectName(
         first ? QStringLiteral("bench-remote-library")

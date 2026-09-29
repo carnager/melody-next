@@ -7,6 +7,7 @@ desktop_preset=macos
 server_preset=server
 server_host=${MELODY_SERVER_HOST:-192.168.1.111}
 server_path=${MELODY_SERVER_PATH:-/Users/zeltak/dev/melody-next}
+server_install_dir=${MELODY_SERVER_INSTALL_DIR:-meolody}
 jobs=${TRACKKNIFE_BUILD_JOBS:-8}
 update=true
 build_server=true
@@ -20,20 +21,23 @@ Usage: scripts/build-latest.sh [options]
 
 Fast-forward this checkout from the fork's main branch, merge the latest
 original melody-next main branch, build Trackknife and Melody on this desktop,
-push the fork's main branch, then update and build Melody only on the server.
+push the fork's main branch, then copy the Release Melody binary to the server.
 
 Options:
   --desktop-preset NAME  Desktop CMake preset (default: macos)
   --server-preset NAME   Server CMake preset (default: server)
   --server HOST          SSH server (default: 192.168.1.111)
   --server-path PATH     Repository on the server
+  --server-install-dir PATH
+                         Install directory relative to the server home
+                         (default: meolody, meaning ~/meolody)
   --jobs N               Parallel build jobs (default: 8)
   --no-update            Do not fetch, merge, or push repository changes
   --desktop-only         Do not update or build the server
   -h, --help             Show this help
 
-Environment overrides: MELODY_SERVER_HOST, MELODY_SERVER_PATH, and
-TRACKKNIFE_BUILD_JOBS.
+Environment overrides: MELODY_SERVER_HOST, MELODY_SERVER_PATH,
+MELODY_SERVER_INSTALL_DIR, and TRACKKNIFE_BUILD_JOBS.
 EOF
 }
 
@@ -64,6 +68,11 @@ while (($# > 0)); do
     --server-path)
         need_value "$@"
         server_path=$2
+        shift 2
+        ;;
+    --server-install-dir)
+        need_value "$@"
+        server_install_dir=$2
         shift 2
         ;;
     --jobs)
@@ -134,6 +143,17 @@ cmake --preset "$desktop_preset" "${configure_arguments[@]}"
 cmake --build --preset "$desktop_preset" --target trackknife melodyd --parallel "$jobs"
 printf 'Built desktop Trackknife and Melody in %s/build/%s\n' "$project_root" "$desktop_preset"
 
+if [[ $build_server == true ]]; then
+    cmake --preset "$server_preset" "${configure_arguments[@]}"
+    cmake --build --preset "$server_preset" --target melodyd --parallel "$jobs"
+    server_binary="$project_root/build/$server_preset/src/daemon/melodyd"
+    [[ -x $server_binary ]] || {
+        printf 'Server binary was not produced at %s\n' "$server_binary" >&2
+        exit 1
+    }
+    printf 'Built server Melody binary at %s\n' "$server_binary"
+fi
+
 if [[ $update == true ]]; then
     git push "$fork_remote" "$deployment_branch"
 fi
@@ -143,14 +163,13 @@ if [[ $build_server == false ]]; then
 fi
 
 ssh "$server_host" bash -s -- \
-    "$server_path" "$server_preset" "$jobs" "$update" "$deployment_branch" <<'REMOTE'
+    "$server_path" "$update" "$deployment_branch" "$server_install_dir" <<'REMOTE'
 set -euo pipefail
 
 project_root=$1
-preset=$2
-jobs=$3
-update=$4
-deployment_branch=$5
+update=$2
+deployment_branch=$3
+install_dir=$4
 cd "$project_root"
 
 if [[ $update == true ]]; then
@@ -175,17 +194,49 @@ if [[ $update == true ]]; then
     fi
 fi
 
-configure_arguments=()
-if [[ $(uname -s) == Darwin ]] && [[ -x /opt/homebrew/bin/brew ]]; then
-    homebrew_prefix=$(/opt/homebrew/bin/brew --prefix)
-    openssl_prefix=$(/opt/homebrew/bin/brew --prefix openssl@3)
-    curl_prefix=$(/opt/homebrew/bin/brew --prefix curl)
-    export PATH="$homebrew_prefix/bin:$PATH"
-    export PKG_CONFIG_PATH="$homebrew_prefix/lib/pkgconfig:$homebrew_prefix/share/pkgconfig:$openssl_prefix/lib/pkgconfig:$curl_prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    configure_arguments+=("-DPKG_CONFIG_EXECUTABLE=$homebrew_prefix/bin/pkg-config")
+case $install_dir in
+/*) install_path=$install_dir ;;
+*) install_path="$HOME/$install_dir" ;;
+esac
+/bin/mkdir -p "$install_path"
+REMOTE
+
+deployment_commit=$(git rev-parse HEAD)
+server_checksum=$(/usr/bin/shasum -a 256 "$server_binary" | /usr/bin/awk '{print $1}')
+upload_name=".melodyd-upload-$$"
+scp -p "$server_binary" "$server_host:$server_install_dir/$upload_name"
+
+ssh "$server_host" bash -s -- \
+    "$server_install_dir" "$upload_name" "$server_checksum" "$deployment_commit" <<'REMOTE'
+set -euo pipefail
+
+install_dir=$1
+upload_name=$2
+expected_checksum=$3
+deployment_commit=$4
+case $install_dir in
+/*) install_path=$install_dir ;;
+*) install_path="$HOME/$install_dir" ;;
+esac
+uploaded_binary="$install_path/$upload_name"
+installed_binary="$install_path/melodyd"
+actual_checksum=$(/usr/bin/shasum -a 256 "$uploaded_binary" | /usr/bin/awk '{print $1}')
+if [[ $actual_checksum != "$expected_checksum" ]]; then
+    printf 'Checksum mismatch after SCP: expected %s, got %s\n' \
+        "$expected_checksum" "$actual_checksum" >&2
+    exit 1
 fi
 
-cmake --preset "$preset" "${configure_arguments[@]}"
-cmake --build --preset "$preset" --target melodyd --parallel "$jobs"
-printf 'Built server Melody at %s/build/%s/src/daemon/melodyd\n' "$project_root" "$preset"
+/bin/chmod 755 "$uploaded_binary"
+/bin/mv -f "$uploaded_binary" "$installed_binary"
+installed_size=$(/usr/bin/stat -f '%z' "$installed_binary")
+
+printf '\n'
+printf '%s\n' '========== SERVER DEPLOYMENT SUCCESS =========='
+printf 'Host:       %s\n' "$(/bin/hostname)"
+printf 'Binary:     %s\n' "$installed_binary"
+printf 'Commit:     %s\n' "$deployment_commit"
+printf 'Size:       %s bytes\n' "$installed_size"
+printf 'SHA-256:    %s\n' "$actual_checksum"
+printf '%s\n' '================================================'
 REMOTE

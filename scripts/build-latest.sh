@@ -161,10 +161,18 @@ if [[ $update == true ]]; then
     git fetch origin "$deployment_branch"
     if git show-ref --verify --quiet "refs/heads/$deployment_branch"; then
         git switch "$deployment_branch"
+        if ! git merge-base --is-ancestor \
+            "$deployment_branch" "origin/$deployment_branch"; then
+            backup_branch="backup/server-${deployment_branch}-before-sync-$(date +%Y%m%d-%H%M%S)"
+            git branch "$backup_branch" "$deployment_branch"
+            printf 'Preserved diverged server branch as %s\n' "$backup_branch"
+            git reset --hard "origin/$deployment_branch"
+        else
+            git merge --ff-only "origin/$deployment_branch"
+        fi
     else
         git switch --track -c "$deployment_branch" "origin/$deployment_branch"
     fi
-    git merge --ff-only "origin/$deployment_branch"
 fi
 
 configure_arguments=()

@@ -104,7 +104,9 @@ builds Trackknife and Melody on the desktop, and pushes the updated fork
 `main`. It then connects to `192.168.1.111`, switches that checkout to the
 fork's `main`, fast-forwards it, and builds only Melody there. Both machines use
 eight build jobs by default; on macOS the helper selects the Homebrew
-dependencies:
+dependencies. If the server's old `main` has diverged, the helper preserves it
+under a timestamped `backup/server-main-before-sync-*` branch before aligning
+the deployment checkout with the fork:
 
 ```sh
 ./scripts/build-latest.sh

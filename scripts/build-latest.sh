@@ -10,14 +10,17 @@ server_path=${MELODY_SERVER_PATH:-/Users/zeltak/dev/melody-next}
 jobs=${TRACKKNIFE_BUILD_JOBS:-8}
 update=true
 build_server=true
+deployment_branch=main
+upstream_remote=origin
+fork_remote=fork
 
 usage() {
     cat <<'EOF'
 Usage: scripts/build-latest.sh [options]
 
-Merge the latest original melody-next main branch into this fork branch,
-build Trackknife and Melody on this desktop, push the branch, then update and
-build Melody only on the server.
+Fast-forward this checkout from the fork's main branch, merge the latest
+original melody-next main branch, build Trackknife and Melody on this desktop,
+push the fork's main branch, then update and build Melody only on the server.
 
 Options:
   --desktop-preset NAME  Desktop CMake preset (default: macos)
@@ -103,9 +106,16 @@ if [[ $update == true ]]; then
             'The desktop checkout has local changes. Commit or stash them, or use --no-update.' >&2
         exit 1
     fi
-    git fetch origin main
-    if ! git merge-base --is-ancestor origin/main HEAD; then
-        git merge --no-edit origin/main
+
+    git fetch "$upstream_remote" "$deployment_branch"
+    git fetch "$fork_remote" "$deployment_branch"
+    if [[ $(git branch --show-current) != "$deployment_branch" ]]; then
+        git switch "$deployment_branch"
+    fi
+    git merge --ff-only "$fork_remote/$deployment_branch"
+    if ! git merge-base --is-ancestor \
+        "$upstream_remote/$deployment_branch" HEAD; then
+        git merge --no-edit "$upstream_remote/$deployment_branch"
     fi
 fi
 
@@ -125,24 +135,22 @@ cmake --build --preset "$desktop_preset" --target trackknife melodyd --parallel 
 printf 'Built desktop Trackknife and Melody in %s/build/%s\n' "$project_root" "$desktop_preset"
 
 if [[ $update == true ]]; then
-    if ! git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' >/dev/null 2>&1; then
-        printf '%s\n' 'The current branch has no configured fork upstream to push.' >&2
-        exit 1
-    fi
-    git push
+    git push "$fork_remote" "$deployment_branch"
 fi
 
 if [[ $build_server == false ]]; then
     exit 0
 fi
 
-ssh "$server_host" bash -s -- "$server_path" "$server_preset" "$jobs" "$update" <<'REMOTE'
+ssh "$server_host" bash -s -- \
+    "$server_path" "$server_preset" "$jobs" "$update" "$deployment_branch" <<'REMOTE'
 set -euo pipefail
 
 project_root=$1
 preset=$2
 jobs=$3
 update=$4
+deployment_branch=$5
 cd "$project_root"
 
 if [[ $update == true ]]; then
@@ -150,7 +158,13 @@ if [[ $update == true ]]; then
         printf '%s\n' 'The server checkout has local changes; refusing to overwrite them.' >&2
         exit 1
     fi
-    git pull --ff-only
+    git fetch origin "$deployment_branch"
+    if git show-ref --verify --quiet "refs/heads/$deployment_branch"; then
+        git switch "$deployment_branch"
+    else
+        git switch --track -c "$deployment_branch" "origin/$deployment_branch"
+    fi
+    git merge --ff-only "origin/$deployment_branch"
 fi
 
 configure_arguments=()

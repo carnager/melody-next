@@ -98,11 +98,13 @@ cmake --build --preset release
 ./build/release/src/bench/trackknife
 ```
 
-For this fork's two-machine setup, the helper fetches and merges the original
-repository's `main`, builds Trackknife and Melody on the desktop, pushes the
-fork branch, then connects to `192.168.1.111`, fast-forwards its checkout, and
-builds only Melody there. Both machines use eight build jobs by default; on
-macOS the helper selects the Homebrew dependencies:
+For this fork's two-machine setup, the helper fast-forwards the desktop checkout
+from the fork's `main`, fetches and merges the original repository's `main`,
+builds Trackknife and Melody on the desktop, and pushes the updated fork
+`main`. It then connects to `192.168.1.111`, switches that checkout to the
+fork's `main`, fast-forwards it, and builds only Melody there. Both machines use
+eight build jobs by default; on macOS the helper selects the Homebrew
+dependencies:
 
 ```sh
 ./scripts/build-latest.sh

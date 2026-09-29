@@ -41,6 +41,31 @@
 
 namespace trackknife::bench {
 namespace {
+
+// ADR-0239: what is streamed to this computer's speakers, as kbps of Opus;
+// 0 the original files, -1 (where offered) by the route.
+[[nodiscard]] QString rateLabel(const int kbps) {
+    if (kbps < 0) {
+        return QStringLiteral("Automatic");
+    }
+    return kbps == 0 ? QStringLiteral("Original files") : QStringLiteral("Opus %1 kbps").arg(kbps);
+}
+
+void selectRate(QComboBox* box, const int kbps) {
+    auto index = box->findData(kbps);
+    // Set by hand to a rate not offered: kept, and shown as it is.
+    if (index < 0) {
+        box->addItem(rateLabel(kbps), kbps);
+        index = box->count() - 1;
+    }
+    box->setCurrentIndex(index);
+}
+
+void fillRates(QComboBox* box, const std::initializer_list<int> rates) {
+    for (const auto kbps : rates) {
+        box->addItem(rateLabel(kbps), kbps);
+    }
+}
 class SettingsPageDelegate final : public QStyledItemDelegate {
   public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -552,6 +577,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         "Where that folder is on this computer, if you have mounted it (NFS, SMB, …). "
         "Trackknife mounts nothing itself."));
     engine_form->addRow(QStringLiteral("Also reachable here at:"), remote_mount_);
+    remote_stream_ = new QComboBox(remote);
+    remote_stream_->setObjectName(QStringLiteral("bench-settings-remote-stream"));
+    fillRates(remote_stream_, {-1, 0, 192, 160, 128, 96, 64});
+    remote_stream_->setToolTip(QStringLiteral(
+        "What it streams to this computer's speakers when its music is not reachable here. "
+        "Automatic: the rates below, by whether it is on this network or reached through a "
+        "VPN or a router."));
+    engine_form->addRow(QStringLiteral("Streamed here:"), remote_stream_);
     // The form edits the engine chosen in the list.
     const auto edited = [this] {
         if (loading_engine_ || engine_current_ < 0 ||
@@ -568,6 +601,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         chosen.password = engine_token_->text().trimmed();
         chosen.music_folder = remote_folder_->text().trimmed();
         chosen.reachable_at = remote_mount_->text().trimmed();
+        chosen.stream_kbps = remote_stream_->currentData().toInt();
         if (auto* item = engines_view_->item(engine_current_)) {
             item->setText(engineLabel(chosen));
         }
@@ -575,6 +609,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     for (auto* field : {engine_socket_, engine_token_, remote_folder_, remote_mount_}) {
         connect(field, &QLineEdit::textChanged, this, edited);
     }
+    connect(remote_stream_, &QComboBox::currentIndexChanged, this, edited);
     connect(engines_view_, &QListWidget::currentRowChanged, this,
             [this](const int row) { showEngine(row); });
     connect(add_engine, &QPushButton::clicked, this, [this] {
@@ -603,6 +638,32 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     play_for_remote_->setChecked(
         settings.value(QLatin1String(engine_play_for_remote_key), true).toBool());
     engine_form->addRow(QString{}, play_for_remote_);
+    // ADR-0239: streamed, when the music is not reachable here, by route.
+    stream_nearby_ = new QComboBox(remote);
+    stream_nearby_->setObjectName(QStringLiteral("bench-settings-stream-nearby"));
+    fillRates(stream_nearby_, {0, 192, 160, 128});
+    selectRate(stream_nearby_, settings.value(QLatin1String(engine_stream_nearby_key),
+                                              engine_stream_nearby_default)
+                                   .toInt());
+    stream_nearby_->setToolTip(
+        QStringLiteral("From an engine on this computer's own network"));
+    engine_form->addRow(QStringLiteral("Streamed on this network:"), stream_nearby_);
+    stream_away_ = new QComboBox(remote);
+    stream_away_->setObjectName(QStringLiteral("bench-settings-stream-away"));
+    fillRates(stream_away_, {192, 160, 128, 96, 64, 0});
+    selectRate(stream_away_,
+               settings.value(QLatin1String(engine_stream_away_key), engine_stream_away_default)
+                   .toInt());
+    stream_away_->setToolTip(QStringLiteral(
+        "From an engine reached through WireGuard or another VPN, or through a router"));
+    engine_form->addRow(QStringLiteral("Through a VPN or router:"), stream_away_);
+    const auto sharing_speakers = [this](const bool on) {
+        stream_nearby_->setEnabled(on);
+        stream_away_->setEnabled(on);
+        remote_stream_->setEnabled(on);
+    };
+    connect(play_for_remote_, &QCheckBox::toggled, this, sharing_speakers);
+    sharing_speakers(play_for_remote_->isChecked());
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
@@ -922,6 +983,7 @@ void SettingsDialog::showEngine(const int row) {
     engine_token_->setText(engine.password);
     remote_folder_->setText(engine.music_folder);
     remote_mount_->setText(engine.reachable_at);
+    selectRate(remote_stream_, engine.stream_kbps < 0 ? -1 : engine.stream_kbps);
     loading_engine_ = false;
 }
 
@@ -979,6 +1041,8 @@ void SettingsDialog::save() {
     settings.setValue(QLatin1String(engine_password_key), engine_password_->text());
     settings.setValue(QLatin1String(engine_music_root_key), engine_music_root_->text().trimmed());
     settings.setValue(QLatin1String(engine_play_for_remote_key), play_for_remote_->isChecked());
+    settings.setValue(QLatin1String(engine_stream_nearby_key), stream_nearby_->currentData());
+    settings.setValue(QLatin1String(engine_stream_away_key), stream_away_->currentData());
     settings.setValue(QLatin1String(replaygain_sidecar_only_key),
                       replaygain_sidecar_only_->isChecked());
     settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());

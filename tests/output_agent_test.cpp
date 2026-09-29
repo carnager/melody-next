@@ -42,6 +42,7 @@ namespace engine = trackknife::engine;
 namespace core = trackknife::core;
 namespace audio = trackknife::audio;
 namespace protocol = trackknife::protocol;
+namespace output = trackknife::output;
 
 void require(const bool condition, const std::string_view message) {
     if (!condition) {
@@ -183,13 +184,15 @@ void require(const bool condition, const std::string_view message) {
 // Over TCP with the engine's token, as an agent on another machine connects.
 [[nodiscard]] std::unique_ptr<trackknife::agent::Agent>
 start_agent(const std::uint16_t port, const std::optional<std::filesystem::path>& root,
-            const std::string& token = "agent-test-token", const std::string& name = "bedside") {
+            const std::string& token = "agent-test-token", const std::string& name = "bedside",
+            trackknife::agent::StreamChoice stream = {}) {
     auto agent = trackknife::agent::Agent::create(trackknife::agent::AgentConfig{
         .server =
             protocol::Endpoint{.socket = {}, .host = "127.0.0.1", .port = port, .token = token},
         .name = name,
         .music_root = root,
-        .stream_only = !root.has_value()});
+        .stream_only = !root.has_value(),
+        .stream = std::move(stream)});
     if (!agent) {
         return nullptr;
     }
@@ -439,6 +442,30 @@ int main(int argc, char** argv) {
                            (engine_root / "two.wav").string()))) != std::string::npos;
             }),
             "streamed as well");
+    // ADR-0239: the engine is on this machine, so nearby: the original,
+    // though the agent would take Opus from afar.
+    require(kitchen->audition().snapshot().raw_path.find("format=opus") == std::string::npos,
+            "a nearby engine streams the original files");
+    {
+        // One that wants Opus even nearby gets it, at its rate.
+        auto porch = start_agent(port, std::nullopt, "agent-test-token", "porch",
+                                 trackknife::agent::StreamChoice{
+                                     .nearby = output::StreamFormat{.bitrate_kbps = 96},
+                                     .away = std::nullopt});
+        require(porch != nullptr && eventually([&] { return porch->registered(); }),
+                "an agent wanting Opus registers");
+        require(outputs.select("agent:porch").has_value(), "and can be chosen");
+        player->replace_queue(entries);
+        require(player->play_entry(entries[0].entry_id).has_value(), "playing on it starts");
+        require(eventually([&] {
+                    const auto path = porch->audition().snapshot().raw_path;
+                    return path.starts_with(stream_prefix) &&
+                           path.find("format=opus&bitrate=96") != std::string::npos;
+                }),
+                "and the engine streams it Opus at the rate asked");
+        require(outputs.select("agent:kitchen").has_value(), "the first streaming agent again");
+        porch->stop();
+    }
 
     // A file's own gain tags, no gain from the client: taken up partway
     // through by a restarted agent, the stream starts past the tags, so the

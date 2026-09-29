@@ -133,6 +133,19 @@ constexpr std::string_view database_filename{"lists.sqlite"};
 constexpr const char* default_listen = "0.0.0.0:6603";
 constexpr const char* default_http = "0.0.0.0:6604";
 
+// ADR-0239: the rates given, each else its default.
+[[nodiscard]] trackknife::agent::StreamChoice stream_choice(const std::optional<int> nearby_kbps,
+                                                            const std::optional<int> away_kbps) {
+    trackknife::agent::StreamChoice choice;
+    if (nearby_kbps) {
+        choice.nearby = trackknife::agent::format_for_kbps(*nearby_kbps);
+    }
+    if (away_kbps) {
+        choice.away = trackknife::agent::format_for_kbps(*away_kbps);
+    }
+    return choice;
+}
+
 void usage() {
     std::cerr
         << "usage: melodyd [--socket PATH] [--state DIR] [--listen HOST:PORT | --local-only]\n"
@@ -140,8 +153,10 @@ void usage() {
         << "               [--http HOST:PORT] [--music-root DIR]\n"
         << "               [--play-for HOST:PORT [--play-for-name NAME]\n"
         << "                [--play-for-password PASS | --play-for-password-file FILE]\n"
-        << "                [--play-for-music-root DIR]]\n"
-        << "               [--agent [--agent-password PASS] [--agent-music-root DIR]]\n"
+        << "                [--play-for-music-root DIR]\n"
+        << "                [--play-for-bitrate-nearby KBPS] [--play-for-bitrate-away KBPS]]\n"
+        << "               [--agent [--agent-password PASS] [--agent-music-root DIR]\n"
+        << "                [--agent-bitrate-nearby KBPS] [--agent-bitrate-away KBPS]]\n"
         << "\n"
         << "  --socket PATH  where to listen (default $XDG_RUNTIME_DIR/melodyd.sock)\n"
         << "  --state DIR    where the database lives (default\n"
@@ -184,6 +199,11 @@ void usage() {
         << "                 its password (default: this engine's own)\n"
         << "  --play-for-music-root DIR\n"
         << "                 where its music is mounted here; without one it streams\n"
+        << "  --play-for-bitrate-nearby KBPS, --play-for-bitrate-away KBPS\n"
+        << "                 what it streams here when it is on this machine's own\n"
+        << "                 network, and when it is reached through a VPN or a router:\n"
+        << "                 0 for the original files, else Opus at 16 to 512 kbps\n"
+        << "                 (default: 0 nearby, 128 away; ADR-0239)\n"
         << "  --agent        play for every other engine found on the network, on this\n"
         << "                 machine's speakers: no melody-agent needed. Engines listening\n"
         << "                 on the network (--listen) announce themselves to be found.\n"
@@ -192,6 +212,8 @@ void usage() {
         << "                 this engine's own)\n"
         << "  --agent-music-root DIR\n"
         << "                 where their music is mounted here; without one it streams\n"
+        << "  --agent-bitrate-nearby KBPS, --agent-bitrate-away KBPS\n"
+        << "                 as --play-for-bitrate-*, for the engines found\n"
         << "\n"
         << "Speaks protocol v1: one JSON object per line. Try:\n"
         << "  echo '{\"id\":1,\"method\":\"catalogue.roots\"}' | nc -UN -w2 "
@@ -225,6 +247,9 @@ int main(int argc, char** argv) {
         std::string password;
         std::string password_file;
         std::optional<std::filesystem::path> music_root;
+        // ADR-0239: kbps asked streamed nearby and away; 0 the original.
+        std::optional<int> nearby_kbps;
+        std::optional<int> away_kbps;
     };
     std::vector<PlayFor> play_fors;
     PlayFor play_for_defaults;
@@ -235,6 +260,8 @@ int main(int argc, char** argv) {
     std::string agent_password;
     std::string agent_password_file;
     std::optional<std::filesystem::path> agent_music_root;
+    std::optional<int> agent_nearby_kbps;
+    std::optional<int> agent_away_kbps;
 
     for (int index = 1; index < argc; ++index) {
         const std::string_view argument{argv[index]};
@@ -272,7 +299,9 @@ int main(int argc, char** argv) {
                                         .name = {},
                                         .password = {},
                                         .password_file = {},
-                                        .music_root = {}});
+                                        .music_root = {},
+                                        .nearby_kbps = {},
+                                        .away_kbps = {}});
         } else if (argument == "--play-for-name") {
             play_for_option().name = value();
         } else if (argument == "--play-for-password") {
@@ -289,6 +318,24 @@ int main(int argc, char** argv) {
             agent_music_root = std::filesystem::path{value()};
         } else if (argument == "--play-for-music-root") {
             play_for_option().music_root = std::filesystem::path{value()};
+        } else if (argument == "--play-for-bitrate-nearby" || argument == "--play-for-bitrate-away" ||
+                   argument == "--agent-bitrate-nearby" || argument == "--agent-bitrate-away") {
+            const auto text = value();
+            const auto kbps = trackknife::agent::parse_kbps(text);
+            if (!kbps) {
+                std::cerr << "melodyd: " << argument
+                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text << "\n";
+                return EXIT_FAILURE;
+            }
+            if (argument == "--play-for-bitrate-nearby") {
+                play_for_option().nearby_kbps = *kbps;
+            } else if (argument == "--play-for-bitrate-away") {
+                play_for_option().away_kbps = *kbps;
+            } else if (argument == "--agent-bitrate-nearby") {
+                agent_nearby_kbps = *kbps;
+            } else {
+                agent_away_kbps = *kbps;
+            }
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -338,6 +385,12 @@ int main(int argc, char** argv) {
         }
         if (!target.music_root) {
             target.music_root = play_for_defaults.music_root;
+        }
+        if (!target.nearby_kbps) {
+            target.nearby_kbps = play_for_defaults.nearby_kbps;
+        }
+        if (!target.away_kbps) {
+            target.away_kbps = play_for_defaults.away_kbps;
         }
         auto endpoint = trackknife::protocol::Endpoint::parse(target.address, target.password);
         if (!endpoint) {
@@ -645,7 +698,9 @@ int main(int argc, char** argv) {
             trackknife::agent::AgentConfig{.server = endpoint,
                                            .name = engine_name,
                                            .music_root = target.music_root,
-                                           .stream_only = !target.music_root.has_value()},
+                                           .stream_only = !target.music_root.has_value(),
+                                           .stream = stream_choice(target.nearby_kbps,
+                                                                   target.away_kbps)},
             std::move(*audition));
         if (!made) {
             std::cerr << "melodyd: cannot play for " << target.address << ": "
@@ -683,7 +738,8 @@ int main(int argc, char** argv) {
                             addresses.push_back(target.address);
                         }
                         return addresses;
-                    }()},
+                    }(),
+                .stream = stream_choice(agent_nearby_kbps, agent_away_kbps)},
             *arbiter);
     }
     // Listening on the network, it says so there: agents and clients find it

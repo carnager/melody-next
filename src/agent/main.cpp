@@ -30,6 +30,7 @@ void usage() {
     std::cerr
         << "usage: melody-agent [--server HOST:PORT] [--password PASS | --password-file FILE]\n"
         << "                    [--name NAME] [--music-root DIR] [--stream]\n"
+        << "                    [--bitrate-nearby KBPS] [--bitrate-away KBPS]\n"
         << "\n"
         << "  --server        the engine: HOST:PORT (melodyd --listen), or a unix socket path.\n"
         << "                  Without one, every engine on the network that announces itself\n"
@@ -40,7 +41,12 @@ void usage() {
         << "  --music-root    where the engine's music is on this machine: files it names\n"
         << "                  relative to its own root are opened under this one\n"
         << "  --stream        this machine cannot open the files; the engine streams them\n"
-        << "                  (it needs --http for that)\n";
+        << "                  (it needs --http for that)\n"
+        << "  --bitrate-nearby, --bitrate-away\n"
+        << "                  what is streamed when the engine is on this machine's own\n"
+        << "                  network, and when it is reached through a VPN or a router:\n"
+        << "                  0 for the original files, else Opus at 16 to 512 kbps\n"
+        << "                  (default: 0 nearby, 128 away)\n";
 }
 
 [[nodiscard]] std::string host_name() {
@@ -78,6 +84,16 @@ int main(int argc, char** argv) {
             config.music_root = std::filesystem::path{value()};
         } else if (argument == "--stream") {
             config.stream_only = true;
+        } else if (argument == "--bitrate-nearby" || argument == "--bitrate-away") {
+            const auto text = value();
+            const auto kbps = trackknife::agent::parse_kbps(text);
+            if (!kbps) {
+                std::cerr << "melody-agent: " << argument
+                          << " wants 0 (the original files) or 16 to 512 kbps, got " << text << "\n";
+                return EXIT_FAILURE;
+            }
+            (argument == "--bitrate-nearby" ? config.stream.nearby : config.stream.away) =
+                trackknife::agent::format_for_kbps(*kbps);
         } else if (argument == "--help" || argument == "-h") {
             usage();
             return EXIT_SUCCESS;
@@ -107,7 +123,8 @@ int main(int argc, char** argv) {
                                               .password = token,
                                               .music_root = config.music_root,
                                               .own_id = {},
-                                              .already = {}},
+                                              .already = {},
+                                              .stream = config.stream},
             arbiter};
         if (!guests.start()) {
             std::cerr << "melody-agent: name an engine with --server\n";

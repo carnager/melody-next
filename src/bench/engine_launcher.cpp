@@ -102,6 +102,27 @@ QString engineProgram() {
     return {};
 }
 
+namespace {
+
+// ADR-0239: a rate melodyd takes -- 0, or Opus at 16 to 512 kbps -- else
+// the default.
+[[nodiscard]] int kbps_setting(const QSettings& settings, const char* key, const int fallback) {
+    const auto kbps = settings.value(QLatin1String(key), fallback).toInt();
+    return kbps == 0 || (kbps >= 16 && kbps <= 512) ? kbps : fallback;
+}
+
+[[nodiscard]] int streamNearbyKbps(const QSettings& settings) {
+    return kbps_setting(settings, SettingsDialog::engine_stream_nearby_key,
+                        SettingsDialog::engine_stream_nearby_default);
+}
+
+[[nodiscard]] int streamAwayKbps(const QSettings& settings) {
+    return kbps_setting(settings, SettingsDialog::engine_stream_away_key,
+                        SettingsDialog::engine_stream_away_default);
+}
+
+} // namespace
+
 LocalEngineSharing localEngineSharing() {
     const QSettings settings;
     return LocalEngineSharing{
@@ -128,16 +149,25 @@ LocalEngineSharing localEngineSharing() {
                          .toBool()) {
                     return targets;
                 }
+                const auto nearby = streamNearbyKbps(settings);
+                const auto away = streamAwayKbps(settings);
                 for (const auto& engine : loadRemoteEngines()) {
+                    // ADR-0239: one choice for this engine, or the two by route.
+                    const bool fixed = engine.stream_kbps == 0 ||
+                                       (engine.stream_kbps >= 16 && engine.stream_kbps <= 512);
                     targets.push_back({.address = engine.address,
                                        .password = engine.effectivePassword(),
-                                       .music_root = engine.reachable_at});
+                                       .music_root = engine.reachable_at,
+                                       .nearby_kbps = fixed ? engine.stream_kbps : nearby,
+                                       .away_kbps = fixed ? engine.stream_kbps : away});
                 }
                 return targets;
             }(),
         .play_for_found =
             settings.value(QLatin1String(SettingsDialog::engine_play_for_remote_key), true)
                 .toBool(),
+        .found_nearby_kbps = streamNearbyKbps(settings),
+        .found_away_kbps = streamAwayKbps(settings),
     };
 }
 
@@ -151,7 +181,11 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
     // Any engine found on the network may play here -- and the configured
     // remote by name as well, for one multicast does not reach (WireGuard).
     if (sharing.play_for_found) {
-        arguments << QStringLiteral("--agent");
+        arguments << QStringLiteral("--agent")
+                  << QStringLiteral("--agent-bitrate-nearby")
+                  << QString::number(sharing.found_nearby_kbps)
+                  << QStringLiteral("--agent-bitrate-away")
+                  << QString::number(sharing.found_away_kbps);
     }
     // Each engine elsewhere on the network, by name -- for one multicast does
     // not reach (WireGuard). One on this computer's own socket plays here
@@ -181,6 +215,9 @@ QStringList localEngineArguments(const LocalEngine& engine, const LocalEngineSha
                 arguments << QStringLiteral("--play-for-password-file") << path_text(guest_password);
             }
         }
+        arguments << QStringLiteral("--play-for-bitrate-nearby")
+                  << QString::number(target.nearby_kbps)
+                  << QStringLiteral("--play-for-bitrate-away") << QString::number(target.away_kbps);
         ++index;
     }
     // Not shared: this computer only, not melodyd's default network ports.

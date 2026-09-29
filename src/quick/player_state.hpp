@@ -37,6 +37,9 @@ class PlayerState final : public QObject {
     Q_PROPERTY(int single READ single NOTIFY changed)
     Q_PROPERTY(int consume READ consume NOTIFY changed)
     Q_PROPERTY(QString replayGain READ replayGain NOTIFY changed)
+    // dB added to tracks with ReplayGain, and to those without.
+    Q_PROPERTY(qreal preampWithGain READ preampWithGain NOTIFY changed)
+    Q_PROPERTY(qreal preampWithoutGain READ preampWithoutGain NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
     Q_PROPERTY(int requests READ requests NOTIFY changed)
     Q_PROPERTY(int queueSize READ queueSize NOTIFY changed)
@@ -74,6 +77,8 @@ class PlayerState final : public QObject {
     [[nodiscard]] int single() const { return single_; }
     [[nodiscard]] int consume() const { return consume_; }
     [[nodiscard]] QString replayGain() const { return replay_gain_; }
+    [[nodiscard]] qreal preampWithGain() const { return preamp_with_; }
+    [[nodiscard]] qreal preampWithoutGain() const { return preamp_without_; }
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] int requests() const { return requests_; }
     [[nodiscard]] int queueSize() const { return queue_size_; }
@@ -97,6 +102,8 @@ class PlayerState final : public QObject {
     Q_INVOKABLE void setSingle(int state);
     Q_INVOKABLE void setConsume(int state);
     Q_INVOKABLE void cycleReplayGain();
+    Q_INVOKABLE void setReplayGainMode(const QString& mode);
+    Q_INVOKABLE void setPreamps(qreal with_gain, qreal without_gain);
     // Plays on another of the engine's outputs; the music goes along.
     Q_INVOKABLE void selectOutput(const QString& id);
     // A sound device by name; empty for the system default.
@@ -134,6 +141,8 @@ class PlayerState final : public QObject {
     int single_{0};
     int consume_{0};
     QString replay_gain_{QStringLiteral("off")};
+    qreal preamp_with_{0};
+    qreal preamp_without_{0};
     QString error_;
     int requests_{0};
     int queue_size_{0};

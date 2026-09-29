@@ -8,7 +8,9 @@
 #include "quick/player_state.hpp"
 #include "quick/up_next_model.hpp"
 
+#include <QVariantMap>
 #include <QObject>
+#include <QVariantList>
 #include <QtQmlIntegration>
 
 #include <functional>
@@ -35,6 +37,11 @@ class EngineSession final : public QObject {
     Q_PROPERTY(trackknife::quick::ListsModel* lists READ lists CONSTANT)
     Q_PROPERTY(trackknife::quick::LibraryModel* library READ library CONSTANT)
     Q_PROPERTY(trackknife::quick::UpNextModel* upNext READ upNext CONSTANT)
+    // The library's folders on the engine's machine -- [{path, name,
+    // available, error}] -- and a scan of them.
+    Q_PROPERTY(QVariantList roots READ roots NOTIFY rootsChanged)
+    Q_PROPERTY(bool scanning READ scanning NOTIFY scanChanged)
+    Q_PROPERTY(QString scanProgress READ scanProgress NOTIFY scanChanged)
 
   public:
     // `key` names it in settings: "local", or its address. `fallback` is
@@ -94,10 +101,28 @@ class EngineSession final : public QObject {
     // clears it. Every client is told (catalogue.rating_changed).
     Q_INVOKABLE void setRating(const QString& hash, bool album, int rating);
 
+    [[nodiscard]] QVariantList roots() const { return roots_; }
+    [[nodiscard]] bool scanning() const { return !scan_job_.isEmpty(); }
+    [[nodiscard]] QString scanProgress() const { return scan_progress_; }
+    Q_INVOKABLE void refreshRoots();
+    // By encoded path. Adding does not scan: that is scan().
+    Q_INVOKABLE void addRoot(const QString& path);
+    Q_INVOKABLE void removeRoot(const QString& path);
+    // Walks the folders and brings the library up to date, as a job.
+    Q_INVOKABLE void scan();
+    Q_INVOKABLE void cancelScan();
+    // The folders in a folder on the engine's machine, for choosing one:
+    // foldersListed answers with {path, name, parent, folders: [{path,
+    // name}]}, or {error}. An empty path is the engine's home.
+    Q_INVOKABLE void listFolders(const QString& path);
+
     void start() { client_.start(); }
 
   signals:
     void listCreated(const QString& id);
+    void rootsChanged();
+    void foldersListed(const QVariantMap& listing);
+    void scanChanged();
     // A rating was set on this engine, by any client.
     void ratingChanged(const QString& hash, int rating);
     void connectedChanged();
@@ -107,6 +132,9 @@ class EngineSession final : public QObject {
   private:
     void followPlaying(const EngineClient::Json& before, const EngineClient::Json& after);
 
+    QVariantList roots_;
+    QString scan_job_;
+    QString scan_progress_;
     int index_;
     QString key_;
     bool local_;

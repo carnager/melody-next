@@ -127,6 +127,10 @@ ApplicationWindow {
         onActivated: window.upNextOpen = !window.upNextOpen
     }
     Shortcut {
+        sequence: "Ctrl+,"
+        onActivated: settingsDialog.open()
+    }
+    Shortcut {
         sequence: StandardKey.Quit
         onActivated: Qt.quit()
     }
@@ -200,6 +204,7 @@ ApplicationWindow {
             }
         }
         MenuSeparator {}
+        MenuItem { text: "Settings…"; onTriggered: settingsDialog.open() }
         MenuItem { text: "Quit"; onTriggered: Qt.quit() }
     }
 
@@ -259,6 +264,13 @@ ApplicationWindow {
     DragGhost {
         id: ghost
     }
+
+    SettingsDialog {
+        id: settingsDialog
+        appWindow: window
+    }
+    // Remembered by the list pane; offered here so settings can reach it.
+    property alias followPlayback: trackList.followPlayback
 
     // What an engine refused, said briefly and without a dialog.
     Instantiator {

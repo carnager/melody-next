@@ -3,6 +3,8 @@
 #include "quick/engine_session.hpp"
 
 #include "quick/cover_provider.hpp"
+
+#include <QVariantMap>
 #include "trackknife/core/stable_id.hpp"
 
 namespace trackknife::quick {
@@ -19,6 +21,42 @@ EngineSession::EngineSession(const int index, QString key, const bool local, QSt
     client_.onEvent([this](const std::string& name, const Json& data) {
         if (name == "catalogue.rating_changed") {
             emit ratingChanged(QString::fromStdString(data.value("hash", std::string{})), data.value("rating", 0));
+            return;
+        }
+        // Only this window's scan: another client's jobs are its own.
+        if (scan_job_.isEmpty() || QString::fromStdString(data.value("job_id", std::string{})) != scan_job_) {
+            return;
+        }
+        if (name == "job.progress") {
+            scan_progress_ = tr("%1 files looked at, %2 indexed, %3 failed")
+                                 .arg(data.value("visited", 0))
+                                 .arg(data.value("indexed", 0))
+                                 .arg(data.value("failed", 0));
+            emit scanChanged();
+        } else if (name == "job.finished") {
+            const auto outcome = data.value("outcome", Json::object());
+            scan_job_.clear();
+            if (outcome.contains("error")) {
+                scan_progress_ = QString::fromStdString(outcome.value("error", std::string{}));
+            } else {
+                scan_progress_ = (outcome.value("cancelled", false) ? tr("Stopped: %1 indexed, %2 failed")
+                                                                    : tr("Done: %1 indexed, %2 failed"))
+                                     .arg(outcome.value("indexed", 0))
+                                     .arg(outcome.value("failed", 0));
+            }
+            emit scanChanged();
+            refreshRoots();
+            library_.refresh();
+        }
+    });
+    connect(&client_, &EngineClient::connectedChanged, this, [this] {
+        if (client_.connected()) {
+            refreshRoots();
+        } else if (!scan_job_.isEmpty()) {
+            // Its events went with the connection.
+            scan_job_.clear();
+            scan_progress_.clear();
+            emit scanChanged();
         }
     });
 }
@@ -184,6 +222,112 @@ void EngineSession::deleteList(const QString& id) {
         if (!answer) {
             emit failed(QString::fromStdString(answer.error().message));
         }
+    });
+}
+
+namespace {
+
+// A raw path from the wire, as text a person reads.
+[[nodiscard]] QString shownPath(const std::string& encoded) {
+    const auto raw = protocol::decode_raw_path(encoded);
+    return raw ? QString::fromStdString(protocol::displayable_text(*raw)) : QString{};
+}
+
+} // namespace
+
+void EngineSession::refreshRoots() {
+    client_.call(QStringLiteral("catalogue.roots"), Json::object(), [this](const auto& answer) {
+        if (!answer) {
+            return;
+        }
+        QVariantList roots;
+        for (const auto& root : answer->value("roots", Json::array())) {
+            const auto path = root.value("path", std::string{});
+            roots.push_back(QVariantMap{{QStringLiteral("path"), QString::fromStdString(path)},
+                                        {QStringLiteral("name"), shownPath(path)},
+                                        {QStringLiteral("available"), root.value("available", true)},
+                                        {QStringLiteral("error"), QString::fromStdString(root.value("error", std::string{}))}});
+        }
+        roots_ = std::move(roots);
+        emit rootsChanged();
+    });
+}
+
+void EngineSession::addRoot(const QString& path) {
+    client_.command(QStringLiteral("catalogue.add_root"), Json{{"path", path.toStdString()}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                        }
+                        refreshRoots();
+                    });
+}
+
+void EngineSession::removeRoot(const QString& path) {
+    client_.command(QStringLiteral("catalogue.remove_root"), Json{{"path", path.toStdString()}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                        }
+                        refreshRoots();
+                        library_.refresh();
+                    });
+}
+
+void EngineSession::scan() {
+    if (scanning()) {
+        return;
+    }
+    client_.command(QStringLiteral("job.submit"), Json{{"job", "catalogue.scan"}, {"params", Json::object()}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                            return;
+                        }
+                        scan_job_ = QString::fromStdString(answer->value("job_id", std::string{}));
+                        scan_progress_ = tr("Starting…");
+                        emit scanChanged();
+                    });
+}
+
+void EngineSession::cancelScan() {
+    if (scanning()) {
+        client_.command(QStringLiteral("job.cancel"), Json{{"job_id", scan_job_.toStdString()}});
+    }
+}
+
+void EngineSession::listFolders(const QString& path) {
+    Json params = Json::object();
+    if (!path.isEmpty()) {
+        params["path"] = path.toStdString();
+    }
+    client_.call(QStringLiteral("folders.list"), std::move(params), [this](const auto& listed) {
+        QVariantMap result;
+        if (!listed) {
+            result[QStringLiteral("error")] = QString::fromStdString(listed.error().message);
+        } else {
+            const auto here = listed->value("path", std::string{});
+            const auto raw_here = protocol::decode_raw_path(here);
+            result[QStringLiteral("path")] = QString::fromStdString(here);
+            result[QStringLiteral("name")] = shownPath(here);
+            const auto parent = listed->find("parent");
+            result[QStringLiteral("parent")] = parent != listed->end() && parent->is_string()
+                                                   ? QString::fromStdString(parent->template get<std::string>())
+                                                   : QString{};
+            QVariantList folders;
+            for (const auto& name : listed->value("folders", Json::array())) {
+                const auto raw_name = protocol::decode_raw_path(name.template get<std::string>());
+                if (!raw_name || !raw_here) {
+                    continue;
+                }
+                const auto child = *raw_here == "/" ? "/" + *raw_name : *raw_here + "/" + *raw_name;
+                folders.push_back(QVariantMap{
+                    {QStringLiteral("path"), QString::fromStdString(protocol::encode_raw_path(child))},
+                    {QStringLiteral("name"), QString::fromStdString(protocol::displayable_text(*raw_name))}});
+            }
+            result[QStringLiteral("folders")] = folders;
+        }
+        emit foldersListed(result);
     });
 }
 

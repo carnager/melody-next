@@ -49,6 +49,8 @@ qt_add_qml_module(
     qml/ConfirmDialog.qml
     qml/Stars.qml
     qml/OutputButton.qml
+    qml/FolderPicker.qml
+    qml/SettingsDialog.qml
     qml/TkSlider.qml
     qml/PlayerBar.qml
     qml/LibraryPane.qml

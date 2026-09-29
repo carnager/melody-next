@@ -102,6 +102,8 @@ void PlayerState::adopt(const Json& state) {
     }
     if (const auto gain = state.find("replay_gain"); gain != state.end() && gain->is_object()) {
         replay_gain_ = text(*gain, "mode");
+        preamp_with_ = gain->value("preamp_with_gain_db", 0.0);
+        preamp_without_ = gain->value("preamp_without_gain_db", 0.0);
     }
     error_ = text(state, "error");
     if (const auto output = state.find("output"); output != state.end() && output->is_object()) {
@@ -182,6 +184,17 @@ void PlayerState::adoptOutputs(const Json& payload) {
     }
     outputs_ = std::move(outputs);
     emit outputsChanged();
+}
+
+void PlayerState::setReplayGainMode(const QString& mode) {
+    send(QStringLiteral("playback.set_replay_gain"), Json{{"mode", mode.toStdString()}});
+}
+
+void PlayerState::setPreamps(const qreal with_gain, const qreal without_gain) {
+    send(QStringLiteral("playback.set_replay_gain"),
+         Json{{"mode", replay_gain_.toStdString()},
+              {"preamp_with_gain_db", with_gain},
+              {"preamp_without_gain_db", without_gain}});
 }
 
 void PlayerState::selectOutput(const QString& id) {

@@ -433,6 +433,54 @@ class Workspace final : public QObject {
     void persistUpNext();
     void restoreUpNext();
 
+    // What things are called, as every window says it (workspace_texts.cpp).
+    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const;
+    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const;
+    struct TabChrome {
+        QString text;
+        QString tooltip;
+        QString accessible_name;
+        // The list playback was last started from: a dot on its tab.
+        bool playing{false};
+        // Its files are an engine elsewhere's: an icon says so.
+        bool remote{false};
+    };
+    [[nodiscard]] TabChrome tabChrome(const ListTab& tab) const;
+    struct Summary {
+        QString text;
+        QString tooltip;
+    };
+    // The selected `rows` of a list, as the status bar says them.
+    [[nodiscard]] Summary selectionSummary(const ListTab* tab, const std::vector<int>& rows) const;
+    struct UpNextHeading {
+        QString status;
+        QString status_tooltip;
+        QString back;
+        QString back_tooltip;
+        bool back_enabled{false};
+        bool can_undo{false};
+    };
+    [[nodiscard]] UpNextHeading upNextHeading() const;
+    struct ModeText {
+        QString text;
+        QString tooltip;
+        bool checked{false};
+        bool oneshot{false};
+    };
+    struct ModeTexts {
+        ModeText repeat;
+        ModeText random;
+        ModeText album_random;
+        ModeText single;
+        ModeText consume;
+        QString replaygain;
+        QString replaygain_tooltip;
+        bool replaygain_active{false};
+    };
+    [[nodiscard]] ModeTexts modeTexts() const;
+    // ReplayGain's modes, by label and the value saved and sent.
+    [[nodiscard]] static std::vector<std::pair<QString, QString>> replayGainModes();
+
     // What the engine followed reports, taken in: modes it changed, rows it
     // consumed, the Up Next ask it started, a queue changed elsewhere.
     void followEngineState(const EnginePlayback::State& state);

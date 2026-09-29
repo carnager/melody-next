@@ -943,18 +943,6 @@ bool BenchMainWindow::localLibraryShown() const {
     return QSettings{}.value(QLatin1String(SettingsDialog::library_show_local_key), true).toBool();
 }
 
-QString BenchMainWindow::emptyListTitle(const EngineKey& engine) const {
-    return !engine.isLocal() ? tr("Nothing from %1 here yet").arg(engineName(engine))
-                             : tr("This list is empty");
-}
-
-QString BenchMainWindow::emptyListHint(const EngineKey& engine) const {
-    return !engine.isLocal()
-               ? tr("Add albums from %1's library on the left, or drag them here.")
-                     .arg(engineName(engine))
-               : tr("Drop files or folders here, or add albums from the library on the left.");
-}
-
 void BenchMainWindow::applyLocalLibraryVisibility() {
     if (local_source_tabs_ == nullptr) {
         return;
@@ -1037,27 +1025,15 @@ void BenchMainWindow::refreshTabChrome(ListTab& tab) {
         return;
     }
     refreshListsPanel();
-    const auto name = displayText(tab.document.name);
-    const auto active =
-        QString::fromStdString(tab.document.id.to_string()) == active_local_list_id_;
-    tab.view->setProperty("bench-playback-active", active);
+    const auto chrome = workspace_.tabChrome(tab);
+    tab.view->setProperty("bench-playback-active", chrome.playing);
     tabs_->tabBar()->setTabTextColor(index, QColor{});
-    tabs_->tabBar()->setTabData(index, active);
-    tabs_->setTabText(index, name + (tab.document.dirty ? QStringLiteral(" *") : QString{}));
-    // The playing dot is the tab bar's own; the icon says where it plays.
-    tabs_->setTabIcon(index, !EngineKey::of(tab.document).isLocal()
-                                 ? QIcon::fromTheme(QStringLiteral("network-server"))
-                                 : QIcon{});
-    const auto kind = tab.document.kind == persistence::ListKind::scratch
-                          ? QStringLiteral("Persistent scratch list")
-                          : QStringLiteral("Named Trackknife working list");
-    tabs_->setTabToolTip(index,
-                         QStringLiteral("%1%2%3").arg(
-                             kind, tab.document.pinned ? QStringLiteral(" · pinned") : QString{},
-                             tab.document.dirty ? QStringLiteral(" · modified") : QString{}));
-    if (active)
-        tabs_->setTabToolTip(index, tabs_->tabToolTip(index) + tr(" · Active playback queue"));
-    tab.view->setAccessibleName(QStringLiteral("%1 track list").arg(name));
+    tabs_->tabBar()->setTabData(index, chrome.playing);
+    tabs_->setTabText(index, chrome.text);
+    tabs_->setTabIcon(index, chrome.remote ? QIcon::fromTheme(QStringLiteral("network-server"))
+                                           : QIcon{});
+    tabs_->setTabToolTip(index, chrome.tooltip);
+    tab.view->setAccessibleName(chrome.accessible_name);
     if (auto* close = tabs_->tabBar()->tabButton(index, QTabBar::RightSide)) {
         close->setVisible(!tab.document.pinned);
     }

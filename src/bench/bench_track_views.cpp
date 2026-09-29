@@ -330,85 +330,22 @@ void BenchMainWindow::refreshSelectionStatus() {
         return;
     }
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
-        if (properties_action_ != nullptr) {
-            properties_action_->setEnabled(false);
+    const bool viewed = tab != nullptr && tab->view->selectionModel() != nullptr;
+    std::vector<int> rows;
+    if (viewed) {
+        for (const auto& index : tab->view->selectionModel()->selectedRows()) {
+            rows.push_back(index.row());
         }
-        if (convert_action_ != nullptr) {
-            convert_action_->setEnabled(false);
-        }
-        selection_status_->setText(QStringLiteral("No tracks selected"));
-        selection_status_->setToolTip({});
-        return;
     }
-
-    const auto selected = tab->view->selectionModel()->selectedRows();
     if (properties_action_ != nullptr) {
-        properties_action_->setEnabled(!selected.empty());
+        properties_action_->setEnabled(!rows.empty());
     }
     if (convert_action_ != nullptr) {
-        convert_action_->setEnabled(!selected.empty());
+        convert_action_->setEnabled(!rows.empty());
     }
-    if (selected.empty()) {
-        selection_status_->setText(QStringLiteral("No tracks selected"));
-        selection_status_->setToolTip({});
-        return;
-    }
-
-    if (selected.size() == 1) {
-        const auto row_index = selected.front().row();
-        if (row_index < 0 || row_index >= static_cast<int>(tab->model->rows().size())) {
-            selection_status_->setText(QStringLiteral("No tracks selected"));
-            selection_status_->setToolTip({});
-            return;
-        }
-        const auto& track = tab->model->rows()[static_cast<std::size_t>(row_index)];
-        const auto fallback = tab->model->index(row_index, local_title_column).data().toString();
-        const auto title = track.title.empty() ? fallback : displayText(track.title);
-        QStringList details;
-        details.push_back(track.artist.empty()
-                              ? title
-                              : QStringLiteral("%1 — %2").arg(displayText(track.artist), title));
-        if (!track.album.empty() || !track.date.empty()) {
-            auto release = displayText(track.album);
-            if (!track.date.empty()) {
-                release += release.isEmpty() ? displayText(track.date)
-                                             : QStringLiteral(" (%1)").arg(displayText(track.date));
-            }
-            details.push_back(release);
-        }
-        if (track.duration_ms) {
-            details.push_back(formatTime(*track.duration_ms));
-        }
-        const auto summary = details.join(QStringLiteral(" · "));
-        selection_status_->setText(summary);
-        selection_status_->setToolTip(
-            QString::fromStdString(core::display_raw_path(track.raw_path)));
-        return;
-    }
-
-    qint64 total_duration_ms = 0;
-    int unknown_durations = 0;
-    for (const auto& index : selected) {
-        if (index.row() < 0 || index.row() >= static_cast<int>(tab->model->rows().size())) {
-            continue;
-        }
-        const auto& duration =
-            tab->model->rows()[static_cast<std::size_t>(index.row())].duration_ms;
-        if (duration) {
-            total_duration_ms += *duration;
-        } else {
-            ++unknown_durations;
-        }
-    }
-    auto summary = QStringLiteral("%1 tracks selected · %2 total")
-                       .arg(selected.size())
-                       .arg(formatTime(total_duration_ms));
-    if (unknown_durations > 0) {
-        summary += QStringLiteral(" · %1 duration unknown").arg(unknown_durations);
-    }
-    selection_status_->setText(summary);
-    selection_status_->setToolTip(summary);
+    const auto summary = workspace_.selectionSummary(viewed ? tab : nullptr, rows);
+    selection_status_->setText(summary.text);
+    selection_status_->setToolTip(summary.tooltip);
 }
 
 } // namespace trackknife::bench

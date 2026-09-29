@@ -766,13 +766,7 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     menu->setObjectName(QStringLiteral("bench-local-replaygain-menu"));
     local_replaygain_group_ = new QActionGroup(menu);
     local_replaygain_group_->setExclusive(true);
-    const std::array modes{
-        std::pair{QStringLiteral("Off"), QStringLiteral("off")},
-        std::pair{QStringLiteral("Track"), QStringLiteral("track")},
-        std::pair{QStringLiteral("Album"), QStringLiteral("album")},
-        std::pair{QStringLiteral("Automatic"), QStringLiteral("auto")},
-    };
-    for (const auto& [label, value] : modes) {
+    for (const auto& [label, value] : Workspace::replayGainModes()) {
         auto* action = menu->addAction(label);
         action->setObjectName(QStringLiteral("action-local-replaygain-%1").arg(value));
         action->setCheckable(true);
@@ -858,61 +852,37 @@ void BenchMainWindow::refreshLocalPlaybackControls() {
         // device of its own, which is the whole point of it owning playback.
         button->defaultAction()->setEnabled(playingOnEngine());
     }
-    local_repeat_action_->setChecked(playback_.modes.repeat);
-    local_random_action_->setChecked(playback_.modes.random);
-    local_album_random_action_->setChecked(playback_.modes.album_random);
-    local_album_random_action_->setToolTip(
-        tr("Shuffle albums during playback without rearranging the list. Tracks within each album "
-           "keep their list order."));
-    local_repeat_action_->setToolTip(
-        QStringLiteral("Repeat: %1")
-            .arg(playback_.modes.repeat ? QStringLiteral("On") : QStringLiteral("Off")));
-    local_random_action_->setToolTip(
-        QStringLiteral("Random: %1")
-            .arg(playback_.modes.random ? QStringLiteral("On") : QStringLiteral("Off")));
-    const auto cycle = [this](QAction* action, const audio::ModeState mode, const QString& name,
-                              const QString& symbol, const QString& help) {
-        const auto state = mode == audio::ModeState::off  ? QStringLiteral("Off")
-                           : mode == audio::ModeState::on ? QStringLiteral("On")
-                                                          : QStringLiteral("One-shot");
-        action->setChecked(mode != audio::ModeState::off);
-        action->setIconText(mode == audio::ModeState::oneshot ? symbol + QStringLiteral("×")
-                                                              : symbol);
+    const auto texts = workspace_.modeTexts();
+    local_repeat_action_->setChecked(texts.repeat.checked);
+    local_random_action_->setChecked(texts.random.checked);
+    local_album_random_action_->setChecked(texts.album_random.checked);
+    local_album_random_action_->setToolTip(texts.album_random.tooltip);
+    local_repeat_action_->setToolTip(texts.repeat.tooltip);
+    local_random_action_->setToolTip(texts.random.tooltip);
+    const auto cycle = [this](QAction* action, const ModeText& mode, const QString& symbol) {
+        action->setChecked(mode.checked);
+        action->setIconText(mode.oneshot ? symbol + QStringLiteral("×") : symbol);
         // One-shot is marked on the icon: a dot, where the letters once had
         // an "×" -- an icon cannot carry a letter.
         const auto plain = action->property("bench-plain-icon").value<QIcon>();
-        action->setIcon(mode == audio::ModeState::oneshot ? oneShotIcon(plain) : plain);
-        action->setText(QStringLiteral("%1: %2").arg(name, state));
-        action->setToolTip(QStringLiteral("%1: %2\n%3").arg(name, state, help));
+        action->setIcon(mode.oneshot ? oneShotIcon(plain) : plain);
+        action->setText(mode.text);
+        action->setToolTip(mode.tooltip);
     };
-    cycle(local_single_action_, playback_.modes.single, QStringLiteral("Single"),
-          QStringLiteral("1"),
-          QStringLiteral("Stop after this track; with Repeat, repeat this track. Click to cycle "
-                         "Off / On / One-shot."));
-    cycle(local_consume_action_, playback_.modes.consume, QStringLiteral("Consume"),
-          QStringLiteral("C"),
-          QStringLiteral("Remove finished or skipped entries from the local list. Files stay on "
-                         "disk. Click to cycle Off / On / One-shot."));
+    cycle(local_single_action_, texts.single, QStringLiteral("1"));
+    cycle(local_consume_action_, texts.consume, QStringLiteral("C"));
     const bool can_play = playingOnEngine();
     local_replaygain_button_->setEnabled(can_play);
     for (auto* action : local_replaygain_group_->actions()) {
         action->setEnabled(can_play);
         action->setChecked(action->data().toString() == local_replaygain_);
-        if (action->isChecked()) {
-            local_replaygain_button_->setText(
-                QStringLiteral("ReplayGain: %1").arg(action->text()));
-            // Off reads as quiet; a gain in use is marked like a mode that is on.
-            local_replaygain_button_->setProperty("active", local_replaygain_ != QStringLiteral("off"));
-            local_replaygain_button_->style()->unpolish(local_replaygain_button_);
-            local_replaygain_button_->style()->polish(local_replaygain_button_);
-        }
     }
-    local_replaygain_button_->setToolTip(
-        QStringLiteral(
-            "ReplayGain: %1\nAutomatic: track gain with Random, album gain otherwise.\nUses "
-            "embedded gain with peak-based clipping prevention when a matching peak is "
-            "present.\nChanges apply as buffered audio drains; missing gain plays unchanged.")
-            .arg(local_replaygain_button_->text().section(QStringLiteral(": "), 1)));
+    local_replaygain_button_->setText(texts.replaygain);
+    // Off reads as quiet; a gain in use is marked like a mode that is on.
+    local_replaygain_button_->setProperty("active", texts.replaygain_active);
+    local_replaygain_button_->style()->unpolish(local_replaygain_button_);
+    local_replaygain_button_->style()->polish(local_replaygain_button_);
+    local_replaygain_button_->setToolTip(texts.replaygain_tooltip);
 }
 
 

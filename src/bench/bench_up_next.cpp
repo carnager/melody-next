@@ -253,44 +253,24 @@ void BenchMainWindow::refreshUpNext() {
     for (const auto& index : up_next_view_->selectionModel()->selectedRows())
         if (index.row() >= 0 && index.row() < static_cast<int>(up_next_display_ids_.size()))
             selectedIds.push_back(up_next_display_ids_[static_cast<std::size_t>(index.row())]);
-    bool replaced = false;
+    const auto heading = workspace_.upNextHeading();
     if (auto* undo = up_next_dock_->findChild<QAction*>(QStringLiteral("up-next-undo")))
-        undo->setEnabled(playback_.requests.canUndo());
+        undo->setEnabled(heading.can_undo);
     auto* resume = up_next_dock_->findChild<QToolButton*>(QStringLiteral("up-next-return"));
     auto* model = up_next_local_model_;
-    {
-        up_next_view_->setEnabled(true);
-        replaced = workspace_.syncUpNextModel();
-        auto* tab = tabForDocument(playback_.anchors.document);
-        QString playing;
-        if (playback_.requests.active())
-            playing = QString::fromStdString(playback_.requests.active()->source.artist + " — " +
-                                             playback_.requests.active()->source.title);
-        // Up Next belongs to the engine that is playing (ADR-0227), so it is
-        // named by it -- "Local" was the MPD era's word for this computer.
-        const auto* playing_engine = linkOf(transport_);
-        const auto engine = playing_engine == nullptr || playing_engine->key.isLocal()
-                                ? QStringLiteral("This computer")
-                                : engineName(playing_engine->key);
-        up_next_status_->setText(QStringLiteral("%1 · %2 waiting")
-                                     .arg(engine)
-                                     .arg(playback_.requests.pending().size()));
-        up_next_status_->setToolTip(playing.isEmpty() ? QString{}
-                                                      : QStringLiteral("Playing: ") + playing);
-        // Where playback goes once these are done, and a way there now.
-        if (resume != nullptr) {
-            const auto back = tab ? QString::fromStdString(tab->document.name) : QString{};
-            const auto label = back.isEmpty() ? tr("Back to the list") : tr("Back to %1").arg(back);
-            // Elided to what is left beside the edit buttons.
-            const auto* toolbar = up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
-            const auto room = std::max(48, up_next_dock_->width() -
-                                               (toolbar ? toolbar->sizeHint().width() : 0) -
-                                               resume->iconSize().width() - 36);
-            resume->setText(resume->fontMetrics().elidedText(label, Qt::ElideRight, room));
-            resume->setToolTip(tr("Skip what is waiting and return to the list now"));
-            resume->setEnabled(playback_.requests.active().has_value() ||
-                               !playback_.requests.pending().empty());
-        }
+    up_next_view_->setEnabled(true);
+    const bool replaced = workspace_.syncUpNextModel();
+    up_next_status_->setText(heading.status);
+    up_next_status_->setToolTip(heading.status_tooltip);
+    if (resume != nullptr) {
+        // Elided to what is left beside the edit buttons.
+        const auto* toolbar = up_next_dock_->findChild<QToolBar*>(QStringLiteral("up-next-toolbar"));
+        const auto room = std::max(48, up_next_dock_->width() -
+                                           (toolbar ? toolbar->sizeHint().width() : 0) -
+                                           resume->iconSize().width() - 36);
+        resume->setText(resume->fontMetrics().elidedText(heading.back, Qt::ElideRight, room));
+        resume->setToolTip(heading.back_tooltip);
+        resume->setEnabled(heading.back_enabled);
     }
     if (replaced) {
         auto* selection = up_next_view_->selectionModel();

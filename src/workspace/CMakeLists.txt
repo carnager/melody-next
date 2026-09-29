@@ -19,6 +19,7 @@ qt_add_library(
     workspace_ingest.cpp
     workspace_lists.cpp
     workspace_playback.cpp
+    workspace_texts.cpp
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp

@@ -127,6 +127,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     using SeenEngine = Workspace::SeenEngine;
     using EngineLink = Workspace::EngineLink;
     using EngineInterruption = Workspace::EngineInterruption;
+    using ModeText = Workspace::ModeText;
     // In the window's object tree, so what it holds is found through it.
     Workspace workspace_{this};
     std::vector<std::unique_ptr<ListTab>>& list_tabs_{workspace_.list_tabs_};
@@ -480,8 +481,12 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
     // What an empty list tab says, and how to fill it.
-    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const;
-    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const;
+    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const {
+        return workspace_.emptyListTitle(engine);
+    }
+    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const {
+        return workspace_.emptyListHint(engine);
+    }
     // How an engine is named to the user: "this computer", or its name.
     [[nodiscard]] QString engineName(const EngineKey& engine) const { return workspace_.engineName(engine); }
     // Shows the source the user last chose, or a library by default.

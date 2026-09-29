@@ -677,6 +677,9 @@ class BenchMainWindow final : public QMainWindow {
         EngineKey key;
         // How Settings name it; empty for this computer's.
         RemoteEngineSetting setting;
+        // The password it was connected with. An empty one in `setting`
+        // means this computer's, which Settings may have changed since.
+        QString password;
         std::unique_ptr<CatalogueSource> catalogue;
         EnginePlayback* playback{nullptr};
         LocalLibraryPanel* library{nullptr};

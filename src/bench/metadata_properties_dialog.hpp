@@ -131,6 +131,9 @@ class MetadataPropertiesDialog final : public QDialog {
     // ADR-0185/0186: the Actions menu and Edit buttons ask the bench
     // window to open Settings on a specific page.
     void openSettingsRequested(SettingsDialog::Page page);
+    // The move destinations of the engine these tracks are on -- not the
+    // naming layouts, which openSettingsRequested(naming) shows.
+    void openDestinationsRequested();
     // Something worth a line in the window's status bar once this closes:
     // an update that went through but could not keep everything.
     void statusMessage(const QString& message);

@@ -371,7 +371,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     connect(manage_layouts_button, &QPushButton::clicked, this,
             [this] { emit openSettingsRequested(SettingsDialog::Page::naming); });
     connect(manage_destinations_button, &QPushButton::clicked, this,
-            [this] { emit openSettingsRequested(SettingsDialog::Page::naming); });
+            [this] { emit openDestinationsRequested(); });
 
     loading_ = new QLabel(QStringLiteral("Preparing metadata grid…"), this);
     loading_->setObjectName(QStringLiteral("bench-metadata-loading"));
@@ -1915,7 +1915,7 @@ void MetadataPropertiesDialog::showActionsPopover() {
                            [this] { emit openSettingsRequested(SettingsDialog::Page::naming); }));
     manage->addWidget(link(QStringLiteral("Manage move destinations…"),
                            QStringLiteral("bench-actions-manage-destinations"),
-                           [this] { emit openSettingsRequested(SettingsDialog::Page::naming); }));
+                           [this] { emit openDestinationsRequested(); }));
     manage->addStretch(1);
     grid->addLayout(manage, row++, 1);
 

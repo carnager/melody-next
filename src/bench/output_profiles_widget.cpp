@@ -350,6 +350,8 @@ void OutputProfilesManagerWidget::selectPlace(const int index) {
     reloadDestinations();
 }
 
+void OutputProfilesManagerWidget::showNamingLayouts() { sections_->setCurrentIndex(0); }
+
 void OutputProfilesManagerWidget::showDestinationsOf(const QString& key) {
     const auto found = std::ranges::find(places_, key, &DestinationPlace::key);
     if (found != places_.end()) {

@@ -23,6 +23,9 @@ bool inTrackGroup(const QAbstractItemModel& model, const int row, const TrackGro
     if (row < 0 || row >= model.rowCount()) {
         return false;
     }
+    if (columns.lone_tracks_grouped) {
+        return true;
+    }
     const auto key = trackGroupKey(model, row, columns);
     return (row > 0 && key == trackGroupKey(model, row - 1, columns)) ||
            (row + 1 < model.rowCount() && key == trackGroupKey(model, row + 1, columns));
@@ -32,6 +35,10 @@ bool beginsTrackGroup(const QAbstractItemModel& model, const int row,
                       const TrackGroupColumns columns) {
     if (row < 0 || row >= model.rowCount()) {
         return false;
+    }
+    if (columns.lone_tracks_grouped) {
+        return row == 0 || trackGroupKey(model, row, columns) !=
+                               trackGroupKey(model, row - 1, columns);
     }
     const auto cached = model.index(row, 0).data(track_album_group_start_role);
     if (cached.isValid()) {

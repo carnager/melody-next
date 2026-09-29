@@ -10,6 +10,7 @@
 #include "workspace/workspace_view.hpp"
 
 #include <algorithm>
+#include <ranges>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -618,6 +619,97 @@ Workspace::HistoryTexts Workspace::historyTexts(const ListTab* tab) {
     // Sorting, reversing, shuffling and removing duplicates need two rows.
     texts.editable = model != nullptr && model->rowCount() > 1;
     return texts;
+}
+
+Workspace::ListTab* Workspace::createList(const QString& name) {
+    if (name.trimmed().isEmpty()) {
+        return nullptr;
+    }
+    auto* tab = addList(
+        persistence::ListDocument{
+            .id = core::StableId::random(),
+            .kind = persistence::ListKind::saved,
+            .name = utf8Bytes(name.trimmed()),
+            .pinned = false,
+            .dirty = false,
+            .items = {},
+        },
+        true);
+    schedulePersist();
+    return tab;
+}
+
+Workspace::ListTab* Workspace::duplicateList(const ListTab& tab) {
+    auto documents = collectDocuments();
+    const auto found =
+        std::ranges::find(documents, tab.document.id, &persistence::ListDocument::id);
+    if (found == documents.end()) {
+        return nullptr;
+    }
+    auto duplicate = *found;
+    duplicate.id = core::StableId::random();
+    duplicate.name = utf8Bytes(QStringLiteral("%1 copy").arg(displayText(found->name)));
+    duplicate.pinned = false;
+    duplicate.dirty = true;
+    const auto layout = view_->captureTrackViewLayout(tab);
+    auto* duplicated = addList(std::move(duplicate), true);
+    schedulePersist();
+    if (duplicated != nullptr) {
+        duplicated->view_layout = layout;
+    }
+    return duplicated;
+}
+
+void Workspace::togglePinned(ListTab& tab) {
+    tab.document.pinned = !tab.document.pinned;
+    view_->refreshTabChrome(tab);
+    schedulePersist();
+}
+
+void Workspace::saveList(ListTab& tab, const QString& name) {
+    if (tab.document.kind == persistence::ListKind::scratch) {
+        if (name.trimmed().isEmpty()) {
+            return;
+        }
+        tab.document.name = utf8Bytes(name.trimmed());
+        tab.document.kind = persistence::ListKind::saved;
+    }
+    tab.document.dirty = false;
+    view_->refreshTabChrome(tab);
+    schedulePersist();
+}
+
+void Workspace::renameList(ListTab& tab, const QString& name) {
+    const auto trimmed = name.trimmed();
+    if (trimmed.isEmpty() || trimmed == displayText(tab.document.name)) {
+        return;
+    }
+    tab.document.name = utf8Bytes(trimmed);
+    markTabDirty(tab);
+}
+
+bool Workspace::setColumnVisible(ListTab& tab, ui::TrackViewLayout layout, const QString& id,
+                                 const bool visible) {
+    // The last column shown stays.
+    const auto visible_count =
+        std::ranges::count(layout.columns, true, &ui::TrackViewColumnLayout::visible);
+    const auto found = std::ranges::find(layout.columns, id, &ui::TrackViewColumnLayout::id);
+    if (found == layout.columns.end() || (!visible && found->visible && visible_count == 1)) {
+        return false;
+    }
+    found->visible = visible;
+    if (visible && (id == QStringLiteral("play-count") || id == QStringLiteral("last-played"))) {
+        tab.model->invalidateListeningHistory();
+    }
+    setTrackViewLayout(tab, std::move(layout));
+    return true;
+}
+
+void Workspace::setTrackViewLayout(ListTab& tab, ui::TrackViewLayout layout) {
+    tab.view_layout = std::move(layout);
+    tab.view_layout_persistence_protected = false;
+    tab.preserved_view_layout.clear();
+    schedulePersist();
 }
 
 } // namespace trackknife::bench

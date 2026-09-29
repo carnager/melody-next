@@ -1,56 +1,108 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-#include "bench/engine_launcher.hpp"
-#include "quick/cover_provider.hpp"
-#include "quick/engine.hpp"
+// The Trackknife window in Qt Quick (ADR-0220): the same workspace as the
+// widgets window, drawn by QML, in the desktop's own style.
 
-#include <QCommandLineParser>
-#include <QGuiApplication>
+#include "bench/engine_launcher.hpp"
+#include "quick/image_providers.hpp"
+#include "quick/quick_workspace.hpp"
+#include "uicommon/debug_log.hpp"
+#include "workspace/startup.hpp"
+
+#include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QTimer>
 
+#include <string>
+#include <vector>
+
+namespace {
+
+// The desktop's style, drawn by the desktop's own theme engine (KDE's
+// qqc2-desktop-style, through Kvantum or Breeze), so the window looks like
+// the widgets one beside it; Fusion where that is not installed.
+void chooseStyle(const QQmlApplicationEngine& qml) {
+    if (!qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
+        return;
+    }
+    for (const auto& path : qml.importPathList()) {
+        if (QFile::exists(path + QStringLiteral("/org/kde/desktop/qmldir"))) {
+            QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
+            QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
+            return;
+        }
+    }
+    QQuickStyle::setStyle(QStringLiteral("Fusion"));
+}
+
+} // namespace
+
 int main(int argc, char* argv[]) {
-    QGuiApplication application(argc, argv);
-    // The widgets window's names: they decide where this computer's engine
-    // keeps its state and socket, and this window must find the same one.
-    QGuiApplication::setOrganizationName(QStringLiteral("trackknife"));
-    QGuiApplication::setApplicationName(QStringLiteral("trackknife"));
-    QGuiApplication::setApplicationDisplayName(QStringLiteral("Trackknife"));
+    QApplication application(argc, argv);
+    // QA hook: --screenshot renders against test data only, decided before
+    // anything reads settings or the workspace.
+    const bool screenshot_run = QApplication::arguments().contains(QStringLiteral("--screenshot"));
+    if (screenshot_run) {
+        QStandardPaths::setTestModeEnabled(true);
+    }
+    QApplication::setOrganizationName(QStringLiteral("trackknife"));
+    QApplication::setApplicationName(QStringLiteral("trackknife"));
+    QApplication::setApplicationDisplayName(QStringLiteral("Trackknife"));
+    trackknife::bench::adoptInterimIdentity();
+    const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
 
-    QCommandLineParser parser;
-    parser.addHelpOption();
-    const QCommandLineOption screenshot(QStringLiteral("screenshot"),
-                                        QStringLiteral("Save the window to <file> after <delay> ms, then quit."),
-                                        QStringLiteral("file"));
-    const QCommandLineOption delay(QStringLiteral("delay"), QStringLiteral("Milliseconds before --screenshot."),
-                                   QStringLiteral("ms"), QStringLiteral("4000"));
-    parser.addOption(screenshot);
-    parser.addOption(delay);
-    parser.process(application);
+    QString screenshot_path;
+    std::vector<std::string> raw_paths;
+    const auto arguments = QApplication::arguments();
+    for (qsizetype index = 1; index < arguments.size(); ++index) {
+        if (arguments.at(index) == QStringLiteral("--screenshot") && index + 1 < arguments.size()) {
+            screenshot_path = arguments.at(++index);
+            continue;
+        }
+        if (arguments.at(index) == QStringLiteral("--debug")) {
+            trackknife::ui::enableDebugLogging();
+            continue;
+        }
+        const auto encoded = QFile::encodeName(arguments.at(index));
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+    // ADR-0226: only the application starts an engine, and not when it is
+    // taking screenshots against test data.
+    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty());
 
-    // Crisper at the small sizes a track list uses than the default
-    // distance-field text, and closer to how the rest of the desktop draws.
-    QQuickWindow::setTextRenderType(QQuickWindow::NativeTextRendering);
-
-    trackknife::bench::allowLocalEngine(true);
-    trackknife::quick::Engine engine;
+    trackknife::quick::QuickWorkspace workspace(&application);
+    trackknife::quick::QuickWorkspace::setInstance(&workspace);
 
     QQmlApplicationEngine qml;
-    qml.addImageProvider(QStringLiteral("cover"), new trackknife::quick::CoverProvider(
-                                                      [&engine](const int index) { return engine.clientAt(index); }));
+    chooseStyle(qml);
+    qml.addImageProvider(QStringLiteral("cover"), new trackknife::quick::CoverProvider(workspace));
+    qml.addImageProvider(QStringLiteral("icon"), new trackknife::quick::IconProvider());
     QObject::connect(
-        &qml, &QQmlApplicationEngine::objectCreationFailed, &application, [] { QCoreApplication::exit(1); },
-        Qt::QueuedConnection);
+        &qml, &QQmlApplicationEngine::objectCreationFailed, &application,
+        [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+    QObject::connect(&workspace, &trackknife::quick::QuickWorkspace::quitRequested, &application,
+                     &QCoreApplication::quit, Qt::QueuedConnection);
     qml.loadFromModule("Trackknife.Quick", "Main");
-
-    if (parser.isSet(screenshot)) {
-        const auto path = parser.value(screenshot);
-        QTimer::singleShot(parser.value(delay).toInt(), &application, [&qml, path] {
-            auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
-            const bool saved = window != nullptr && window->grabWindow().save(path);
-            QCoreApplication::exit(saved ? 0 : 1);
+    workspace.start();
+    if (!restore_notice.isEmpty()) {
+        QTimer::singleShot(0, &workspace, [&workspace, restore_notice] {
+            emit workspace.information(QStringLiteral("Workspace restore"), restore_notice);
         });
     }
-    return QGuiApplication::exec();
+    if (!raw_paths.empty()) {
+        workspace.workspace().openLocalPaths(std::move(raw_paths));
+    }
+    if (!screenshot_path.isEmpty()) {
+        QTimer::singleShot(3'000, &application, [&qml, screenshot_path] {
+            auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
+            const bool saved = window != nullptr && window->grabWindow().save(screenshot_path);
+            QApplication::exit(saved ? 0 : 1);
+        });
+    }
+    return QApplication::exec();
 }

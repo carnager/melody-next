@@ -420,4 +420,10 @@ void Workspace::enqueueRows(const ListTab& tab, std::vector<int> rows, const int
     view_->refreshUpNext();
 }
 
+void Workspace::undoUpNext() {
+    playback_.requests.undo();
+    persistUpNext();
+    view_->refreshUpNext();
+}
+
 } // namespace trackknife::bench

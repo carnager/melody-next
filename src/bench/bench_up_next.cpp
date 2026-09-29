@@ -68,7 +68,6 @@ void BenchMainWindow::buildUpNext() {
     layout->addLayout(heading);
     up_next_view_ = new ui::QueueTableView(content);
     up_next_view_->setObjectName(QStringLiteral("up-next-tracks"));
-    up_next_local_model_ = new LocalListModel(this);
     up_next_view_->setModel(up_next_local_model_);
     auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(up_next_view_, flat, flat);
@@ -160,11 +159,8 @@ void BenchMainWindow::buildUpNext() {
     auto* clearAction = button(QStringLiteral("Clear pending tracks"), QStringLiteral("edit-clear"),
                                [this] { editUpNext(0); });
     clearAction->setObjectName(QStringLiteral("up-next-clear"));
-    auto* undo = button(QStringLiteral("Undo"), QStringLiteral("edit-undo"), [this] {
-        playback_.requests.undo();
-        persistUpNext();
-        refreshUpNext();
-    });
+    auto* undo = button(QStringLiteral("Undo"), QStringLiteral("edit-undo"),
+                        [this] { workspace_.undoUpNext(); });
     undo->setObjectName(QStringLiteral("up-next-undo"));
     // Its buttons always shown: the way back gives up width first.
     actions->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);

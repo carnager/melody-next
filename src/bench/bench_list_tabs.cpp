@@ -1141,22 +1141,10 @@ void BenchMainWindow::createList() {
     bool accepted = false;
     const auto name =
         QInputDialog::getText(this, QStringLiteral("New list"), QStringLiteral("Name:"),
-                              QLineEdit::Normal, QString{}, &accepted)
-            .trimmed();
-    if (!accepted || name.isEmpty()) {
-        return;
+                              QLineEdit::Normal, QString{}, &accepted);
+    if (accepted) {
+        workspace_.createList(name);
     }
-    addListTab(
-        persistence::ListDocument{
-            .id = core::StableId::random(),
-            .kind = persistence::ListKind::saved,
-            .name = utf8Bytes(name),
-            .pinned = false,
-            .dirty = false,
-            .items = {},
-        },
-        true);
-    schedulePersist();
 }
 
 void BenchMainWindow::duplicateCurrentTab() {
@@ -1164,33 +1152,16 @@ void BenchMainWindow::duplicateCurrentTab() {
     if (tab == nullptr) {
         return;
     }
-    auto documents = collectDocuments();
-    const auto found =
-        std::ranges::find(documents, tab->document.id, &persistence::ListDocument::id);
-    if (found == documents.end()) {
-        return;
+    if (auto* duplicated = workspace_.duplicateList(*tab); duplicated != nullptr) {
+        applyTrackViewLayout(*duplicated, duplicated->view_layout);
     }
-    auto duplicate = *found;
-    duplicate.id = core::StableId::random();
-    duplicate.name = utf8Bytes(QStringLiteral("%1 copy").arg(displayText(found->name)));
-    duplicate.pinned = false;
-    duplicate.dirty = true;
-    auto* duplicated_tab = addListTab(std::move(duplicate), true);
-    if (duplicated_tab != nullptr) {
-        applyTrackViewLayout(*duplicated_tab, captureTrackViewLayout(*tab));
-    }
-    schedulePersist();
 }
 
 void BenchMainWindow::toggleCurrentTabPinned() {
-    auto* tab = currentListTab();
-    if (tab == nullptr) {
-        return;
+    if (auto* tab = currentListTab(); tab != nullptr) {
+        workspace_.togglePinned(*tab);
+        refreshTabActions();
     }
-    tab->document.pinned = !tab->document.pinned;
-    refreshTabChrome(*tab);
-    refreshTabActions();
-    schedulePersist();
 }
 
 void BenchMainWindow::saveCurrentList() {
@@ -1198,21 +1169,17 @@ void BenchMainWindow::saveCurrentList() {
     if (tab == nullptr) {
         return;
     }
+    QString name;
     if (tab->document.kind == persistence::ListKind::scratch) {
         bool accepted = false;
-        const auto name = QInputDialog::getText(this, QStringLiteral("Save working list"),
-                                                QStringLiteral("Name:"), QLineEdit::Normal,
-                                                displayText(tab->document.name), &accepted)
-                              .trimmed();
-        if (!accepted || name.isEmpty()) {
+        name = QInputDialog::getText(this, QStringLiteral("Save working list"),
+                                     QStringLiteral("Name:"), QLineEdit::Normal,
+                                     displayText(tab->document.name), &accepted);
+        if (!accepted) {
             return;
         }
-        tab->document.name = utf8Bytes(name);
-        tab->document.kind = persistence::ListKind::saved;
     }
-    tab->document.dirty = false;
-    refreshTabChrome(*tab);
-    schedulePersist();
+    workspace_.saveList(*tab, name);
 }
 
 void BenchMainWindow::renameCurrentList() {
@@ -1220,17 +1187,13 @@ void BenchMainWindow::renameCurrentList() {
     if (tab == nullptr) {
         return;
     }
-    const auto current_name = displayText(tab->document.name);
     bool accepted = false;
     const auto name =
         QInputDialog::getText(this, QStringLiteral("Rename list"), QStringLiteral("Name:"),
-                              QLineEdit::Normal, current_name, &accepted)
-            .trimmed();
-    if (!accepted || name.isEmpty() || name == current_name) {
-        return;
+                              QLineEdit::Normal, displayText(tab->document.name), &accepted);
+    if (accepted) {
+        workspace_.renameList(*tab, name);
     }
-    tab->document.name = utf8Bytes(name);
-    markTabDirty(*tab);
 }
 
 void BenchMainWindow::showTabContextMenu(const QPoint& position) {

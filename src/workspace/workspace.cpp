@@ -24,6 +24,8 @@ Workspace::Workspace(QObject* parent) : QObject(parent) {
     // or not; remotes follow when configured.
     engines_.push_back(std::make_unique<EngineLink>());
     engines_.front()->key = EngineKey::local();
+    // Up Next's rows, as every window shows them.
+    up_next_local_model_ = new LocalListModel(this);
 }
 
 Workspace::~Workspace() {

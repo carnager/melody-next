@@ -300,6 +300,11 @@ class Workspace final : public QObject {
     // -- or they cannot be read, when what was saved is kept and not
     // overwritten.
     [[nodiscard]] ui::TrackViewLayout restoredTrackViewLayout(ListTab& tab);
+    // A list's columns as chosen now -- what was saved is replaced -- and
+    // one of them shown or hidden; the last shown is not hidden (false).
+    void setTrackViewLayout(ListTab& tab, ui::TrackViewLayout layout);
+    bool setColumnVisible(ListTab& tab, ui::TrackViewLayout layout, const QString& id,
+                          bool visible);
     // ADR-0233: another client's version of a list open here. A row that is
     // the same entry of the same file keeps what is already known of it.
     void adoptEngineList(const persistence::ListDocument& document);
@@ -314,6 +319,15 @@ class Workspace final : public QObject {
     // A list closed: gone, unless it is the one playing with Up Next still
     // waiting, which plays on detached; never none at all.
     void closeList(ListTab& tab);
+
+    // A named list made, shown and saved; none without a name.
+    ListTab* createList(const QString& name);
+    // A copy of a list: "<name> copy", unpinned, modified, laid out alike.
+    ListTab* duplicateList(const ListTab& tab);
+    void togglePinned(ListTab& tab);
+    // Saved: a working list takes `name` and becomes a named one.
+    void saveList(ListTab& tab, const QString& name);
+    void renameList(ListTab& tab, const QString& name);
 
     // Edits. An edit made here is saved, and -- to the list playing -- told
     // to its engine, whose queue it is. A change the engine made is saved and
@@ -450,6 +464,8 @@ class Workspace final : public QObject {
     // An ask played now, before the others; all of them dropped and the
     // list gone back to.
     void playUpNextRow(int row);
+    // Up Next's last edit taken back.
+    void undoUpNext();
     void returnToList();
     // A list's `rows` asked for: at the front (0), the end (-1) or `position`.
     void enqueueRows(const ListTab& tab, std::vector<int> rows, int position);

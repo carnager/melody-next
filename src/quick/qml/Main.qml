@@ -1,358 +1,635 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import QtCore
 import QtQuick
+import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
-import QtQuick.Controls.Basic
+import Trackknife.Quick
 
+// The Trackknife window (BenchMainWindow), in Qt Quick: the transport on
+// top, the sources and the track lists side by side, Up Next on the right,
+// the status bar below; the menus File, Edit, Workspace and Playback.
 ApplicationWindow {
     id: window
 
-    width: 1600
-    height: 950
+    width: 1100
+    height: 720
     visible: true
-    title: Engine.current.player.entry !== "" ? Engine.current.player.title + " — Trackknife" : "Trackknife"
-    color: Theme.window
-
-    palette.window: Theme.window
-    palette.windowText: Theme.text
-    palette.base: Theme.base
-    palette.alternateBase: Theme.panel
-    palette.text: Theme.text
-    palette.button: Theme.raised
-    palette.buttonText: Theme.text
-    palette.highlight: Theme.accent
-    palette.highlightedText: "white"
-    palette.toolTipBase: Theme.raised
-    palette.toolTipText: Theme.text
-    palette.placeholderText: Theme.faint
-    palette.mid: Theme.line
-    palette.dark: Theme.window
-    palette.light: Theme.raised
-    font.pixelSize: Theme.fontSize
+    title: Tk.transport.windowTitle ?? "Trackknife"
 
     Settings {
-        // Its own file: the widgets window's settings are not this one's to write.
-        location: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/trackknife/quick-window.conf"
-        category: "QuickWindow"
-        property alias upNextOpen: window.upNextOpen
-        property alias appearance: window.appearance
-        property alias notifications: window.notifications
-        property alias notifyInBackgroundOnly: window.notifyInBackgroundOnly
-        property alias x: window.x
-        property alias y: window.y
-        property alias width: window.width
-        property alias height: window.height
+        id: upNextSettings
+        category: "up-next"
+        property bool visible: false
+        property int width: 300
     }
-    property bool upNextOpen: true
-    // A quiet notification on each new track (ADR-0144); off unless asked.
-    property bool notifications: false
-    property bool notifyInBackgroundOnly: true
-    Binding {
-        target: Engine.desktop
-        property: "notifications"
-        value: window.notifications
+
+    // What a menu or a shortcut has not been ported to yet says so, rather
+    // than doing nothing.
+    function notYet(what) {
+        status.showMessage(what + " is not in the Qt Quick window yet", 3000);
     }
-    Binding {
-        target: Engine.desktop
-        property: "backgroundOnly"
-        value: window.notifyInBackgroundOnly
+    function closeTab(index) {
+        const tab = Tk.tabAt(index);
+        if (tab.dirty === true && tab.pinned !== true) {
+            discardDialog.index = index;
+            discardDialog.text = "Discard the unsaved contents of “%1”?".arg(tab.name);
+            discardDialog.open();
+            return;
+        }
+        Tk.closeTab(index);
     }
-    Connections {
-        target: Engine.desktop
-        function onRaiseRequested() {
-            window.show();
-            window.raise();
-            window.requestActivate();
+
+    menuBar: MenuBar {
+        Menu {
+            title: "&File"
+            Action {
+                objectName: "action-new-list"
+                text: "New list…"
+                shortcut: "Ctrl+N"
+                onTriggered: nameDialog.ask("New list", "", name => Tk.newList(name))
+            }
+            Action {
+                objectName: "action-open-files"
+                text: "Open files…"
+                shortcut: "Ctrl+O"
+                onTriggered: filesDialog.open()
+            }
+            Action {
+                objectName: "action-open-folder"
+                text: "Open folder…"
+                shortcut: "Ctrl+Shift+O"
+                onTriggered: folderDialog.open()
+            }
+            Action {
+                objectName: "action-import-m3u8"
+                text: qsTr("Import M3U8 playlist…")
+                onTriggered: window.notYet("Importing a playlist")
+            }
+            Action {
+                objectName: "action-export-m3u8"
+                text: qsTr("Export list as M3U8…")
+                enabled: Tk.currentTab >= 0
+                onTriggered: window.notYet("Exporting a playlist")
+            }
+            Action {
+                objectName: "action-open-list"
+                text: "Open list…"
+                shortcut: "Ctrl+Alt+O"
+                onTriggered: window.notYet("Open list")
+            }
+            Action {
+                objectName: "action-dynamic-playlists"
+                text: "Dynamic playlists…"
+                onTriggered: window.notYet("Dynamic playlists")
+            }
+            Action {
+                objectName: "action-backup-workspace"
+                text: "Back up workspace database…"
+                onTriggered: window.notYet("Backing up the workspace")
+            }
+            Action {
+                objectName: "action-restore-workspace"
+                text: "Restore workspace database…"
+                onTriggered: window.notYet("Restoring the workspace")
+            }
+            Action {
+                text: "Bookmark folder…"
+                onTriggered: window.notYet("Bookmarks")
+            }
+            MenuSeparator {}
+            Action {
+                text: "Close window"
+                onTriggered: window.close()
+            }
+            Action {
+                objectName: "action-quit-stop-engine"
+                text: "Quit and stop playback"
+                shortcut: "Ctrl+Q"
+                onTriggered: Tk.quitAndStopEngine()
+            }
+        }
+        Menu {
+            title: "&Edit"
+            Action {
+                text: qsTr("Find in current list…")
+                shortcut: "Ctrl+F"
+                enabled: Tk.currentTab >= 0
+                onTriggered: window.notYet("Find in list")
+            }
+            Action {
+                text: qsTr("Find next in list")
+                shortcut: "F3"
+                onTriggered: window.notYet("Find in list")
+            }
+            Action {
+                text: qsTr("Find previous in list")
+                shortcut: "Shift+F3"
+                onTriggered: window.notYet("Find in list")
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-undo-list-edit"
+                text: Tk.history.undoText ?? "Undo list edit"
+                shortcut: "Ctrl+Z"
+                enabled: Tk.history.canUndo ?? false
+                onTriggered: Tk.undoListEdit()
+            }
+            Action {
+                objectName: "action-redo-list-edit"
+                text: Tk.history.redoText ?? "Redo list edit"
+                shortcut: "Ctrl+Shift+Z"
+                enabled: Tk.history.canRedo ?? false
+                onTriggered: Tk.redoListEdit()
+            }
+            MenuSeparator {}
+            Menu {
+                title: qsTr("Sort list")
+                enabled: Tk.history.editable ?? false
+                Action { text: qsTr("Title"); onTriggered: window.notYet("Sorting") }
+                Action { text: qsTr("Artist / album / track"); onTriggered: window.notYet("Sorting") }
+                Action { text: qsTr("Album / track"); onTriggered: window.notYet("Sorting") }
+                Action { text: qsTr("Track number"); onTriggered: window.notYet("Sorting") }
+                Action { text: qsTr("Path"); onTriggered: window.notYet("Sorting") }
+                MenuSeparator {}
+                Action { text: qsTr("Custom expression…"); onTriggered: window.notYet("Sorting") }
+            }
+            Action {
+                text: qsTr("Reverse list")
+                enabled: Tk.history.editable ?? false
+                onTriggered: window.notYet("Reversing")
+            }
+            Action {
+                text: qsTr("Shuffle albums")
+                enabled: Tk.history.editable ?? false
+                onTriggered: window.notYet("Shuffling albums")
+            }
+            Action {
+                text: qsTr("Remove duplicate entries")
+                enabled: Tk.history.editable ?? false
+                onTriggered: window.notYet("Removing duplicates")
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-edit-tags"
+                text: "Edit tags…"
+                shortcut: "Alt+Return"
+                enabled: (Tk.selection.count ?? 0) > 0
+                onTriggered: window.notYet("The tagger")
+            }
+            Action {
+                objectName: "action-replaygain"
+                text: "ReplayGain…"
+                onTriggered: window.notYet("ReplayGain scanning")
+            }
+            Action {
+                objectName: "action-convert"
+                text: "Convert files…"
+                enabled: (Tk.selection.count ?? 0) > 0
+                onTriggered: window.notYet("Converting")
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-settings"
+                text: "Settings…"
+                shortcut: "Ctrl+,"
+                onTriggered: window.notYet("Settings")
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-remove-selected"
+                text: "Remove selected"
+                shortcut: "Delete"
+                enabled: (Tk.selection.count ?? 0) > 0
+                onTriggered: Tk.removeSelectedRows()
+            }
+        }
+        Menu {
+            title: "&Workspace"
+            Action {
+                text: qsTr("Commands…")
+                shortcut: "Ctrl+Shift+P"
+                onTriggered: window.notYet("The command palette")
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-jump-to-playing"
+                text: qsTr("Jump to playing")
+                shortcut: "Ctrl+J"
+                onTriggered: Tk.jumpToPlaying()
+            }
+            Action {
+                objectName: "action-follow-playback"
+                text: qsTr("Cursor follows playback")
+                shortcut: "Ctrl+Shift+J"
+                checkable: true
+                checked: Tk.followPlayback
+                onTriggered: Tk.followPlayback = checked
+            }
+            MenuSeparator {}
+            Action {
+                text: "Search…"
+                shortcut: "Ctrl+Shift+F"
+                onTriggered: window.notYet("Search")
+            }
+            Action {
+                text: qsTr("Quick album…")
+                shortcut: "Ctrl+Shift+A"
+                onTriggered: window.notYet("Quick album")
+            }
+            Action {
+                text: qsTr("Quick track…")
+                shortcut: "Ctrl+Shift+T"
+                onTriggered: window.notYet("Quick track")
+            }
+            Action {
+                objectName: "action-lists-panel"
+                text: qsTr("Lists in a side panel")
+                checkable: true
+                onTriggered: {
+                    checked = false;
+                    window.notYet("The lists panel");
+                }
+            }
+            MenuSeparator {}
+            Action {
+                id: duplicateAction
+                text: "Duplicate tab"
+                shortcut: "Ctrl+Shift+D"
+                enabled: Tk.currentTab >= 0
+                onTriggered: Tk.duplicateTab()
+            }
+            Action {
+                id: pinAction
+                text: "Pin tab"
+                shortcut: "Ctrl+Alt+P"
+                checkable: true
+                checked: Tk.list.pinned ?? false
+                enabled: Tk.currentTab >= 0
+                onTriggered: Tk.togglePinned()
+            }
+            Action {
+                id: saveAction
+                text: "Save list"
+                shortcut: "Ctrl+S"
+                enabled: Tk.currentTab >= 0
+                onTriggered: {
+                    if (Tk.list.scratch)
+                        nameDialog.ask("Save working list", Tk.list.name, name => Tk.saveTab(name));
+                    else
+                        Tk.saveTab("");
+                }
+            }
+            Action {
+                id: renameAction
+                text: "Rename tab…"
+                shortcut: "F2"
+                enabled: Tk.currentTab >= 0
+                onTriggered: nameDialog.ask("Rename list", Tk.list.name, name => Tk.renameTab(name))
+            }
+            MenuSeparator {}
+            Action {
+                id: closeAction
+                text: "Close tab"
+                shortcut: "Ctrl+W"
+                enabled: Tk.currentTab >= 0
+                onTriggered: window.closeTab(Tk.currentTab)
+            }
+            MenuSeparator {}
+            TrackLayoutMenu {}
+            MenuSeparator {}
+            Action {
+                text: "Edit panel layout"
+                shortcut: "Ctrl+Alt+L"
+                checkable: true
+                onTriggered: {
+                    checked = false;
+                    window.notYet("Editing the panel layout");
+                }
+            }
+            Menu {
+                title: "Panel arrangement"
+                enabled: false
+                Action { text: "Side by side" }
+                Action { text: "Top and bottom" }
+                Action { text: "Tabbed stack" }
+            }
+            Action {
+                text: "Swap panels"
+                enabled: false
+            }
+            Action {
+                text: "Reset panel layout"
+                onTriggered: window.notYet("Panel layouts")
+            }
+        }
+        Menu {
+            title: "&Playback"
+            Action {
+                objectName: "action-play-pause"
+                text: Tk.transport.playLabel ?? "Play"
+                shortcut: "Space"
+                enabled: Tk.transport.canPlayPause ?? false
+                onTriggered: Tk.playPause()
+            }
+            Action {
+                objectName: "action-stop"
+                text: "Stop"
+                shortcut: "Ctrl+."
+                enabled: Tk.transport.canStop ?? false
+                onTriggered: Tk.stop()
+            }
+            Action {
+                objectName: "action-previous-track"
+                text: "Previous"
+                shortcut: "Alt+Left"
+                enabled: Tk.transport.canPrevious ?? false
+                onTriggered: Tk.previous()
+            }
+            Action {
+                objectName: "action-next-track"
+                text: "Next"
+                shortcut: "Alt+Right"
+                enabled: Tk.transport.canNext ?? false
+                onTriggered: Tk.next()
+            }
+            MenuSeparator {}
+            Action {
+                objectName: "action-local-repeat"
+                text: "Repeat"
+                checkable: true
+                checked: Tk.modes.repeat?.checked ?? false
+                enabled: Tk.modes.enabled ?? false
+                onTriggered: Tk.setRepeat(checked)
+            }
+            Action {
+                objectName: "action-local-random"
+                text: "Random"
+                checkable: true
+                checked: Tk.modes.random?.checked ?? false
+                enabled: Tk.modes.enabled ?? false
+                onTriggered: Tk.setRandom(checked)
+            }
+            Action {
+                objectName: "action-local-single"
+                text: Tk.modes.single?.text ?? "Single"
+                checkable: true
+                checked: Tk.modes.single?.checked ?? false
+                enabled: Tk.modes.enabled ?? false
+                onTriggered: Tk.cycleSingle()
+            }
+            Action {
+                objectName: "action-local-album-random"
+                text: qsTr("Album shuffle")
+                checkable: true
+                checked: Tk.modes.albumRandom?.checked ?? false
+                enabled: Tk.modes.enabled ?? false
+                onTriggered: Tk.setAlbumRandom(checked)
+            }
+            Action {
+                objectName: "action-local-consume"
+                text: Tk.modes.consume?.text ?? "Consume"
+                checkable: true
+                checked: Tk.modes.consume?.checked ?? false
+                enabled: Tk.modes.enabled ?? false
+                onTriggered: Tk.cycleConsume()
+            }
+            ReplayGainMenu {
+                onPreampRequested: window.notYet("The preamp settings")
+            }
+            MenuSeparator {}
+            Action {
+                text: "Desktop notifications"
+                checkable: true
+                checked: Tk.notifications
+                onTriggered: Tk.notifications = checked
+            }
+            Menu {
+                id: bufferMenu
+                title: "Playback buffer"
+                Instantiator {
+                    model: Tk.bufferProfiles()
+                    delegate: MenuItem {
+                        required property var modelData
+                        text: modelData.label
+                        checkable: true
+                        checked: Tk.bufferProfile === modelData.value
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.tooltip
+                        onTriggered: Tk.setBufferProfile(modelData.value)
+                    }
+                    onObjectAdded: (index, object) => bufferMenu.insertItem(index, object)
+                    onObjectRemoved: (index, object) => bufferMenu.removeItem(object)
+                }
+                MenuSeparator {}
+                MenuItem {
+                    text: "Custom…"
+                    checkable: true
+                    checked: Tk.bufferProfile === "custom"
+                    onTriggered: window.notYet("A custom buffer")
+                }
+            }
+            Action {
+                objectName: "action-refresh-audio-devices"
+                text: "Refresh audio devices"
+                onTriggered: Tk.refreshOutputs()
+            }
         }
     }
 
-    // As Theme.mode: 0 the system's, 1 light, 2 dark.
-    property int appearance: 0
-    Binding {
-        target: Theme
-        property: "mode"
-        value: window.appearance
+    header: TransportBar {
+        upNextShown: upNextSettings.visible
+        onToggleUpNext: upNextSettings.visible = !upNextSettings.visible
+    }
+
+    footer: StatusRow {
+        id: status
     }
 
     Shortcut {
-        sequence: "Space"
-        onActivated: Engine.current.player.toggle()
+        sequences: ["Ctrl+Y"]
+        onActivated: Tk.redoListEdit()
     }
     Shortcut {
-        sequence: "Ctrl+L"
-        onActivated: library.searchField.forceActiveFocus()
+        sequence: "Ctrl+Return"
+        onActivated: Tk.queueSelection(true)
     }
     Shortcut {
-        sequence: StandardKey.Find
-        onActivated: trackList.openFind()
-    }
-    Shortcut {
-        sequences: ["F3"]
-        onActivated: trackList.finding ? trackList.findStep(1, true) : trackList.openFind()
-    }
-    Shortcut {
-        sequences: ["Shift+F3"]
-        onActivated: trackList.finding ? trackList.findStep(-1, true) : trackList.openFind()
-    }
-    Shortcut {
-        sequence: "Ctrl+J"
-        onActivated: trackList.jumpToPlaying()
-    }
-    Shortcut {
-        sequence: "Ctrl+Shift+J"
-        onActivated: trackList.followPlayback = !trackList.followPlayback
-    }
-    Shortcut {
-        sequence: StandardKey.New
-        onActivated: trackList.newList(Engine.current)
-    }
-    Shortcut {
-        sequence: StandardKey.Save
-        onActivated: trackList.saveShown()
-    }
-    Shortcut {
-        sequence: "F2"
-        onActivated: trackList.renameShown()
-    }
-    Shortcut {
-        sequence: "Ctrl+W"
-        onActivated: trackList.closeShown()
-    }
-    Shortcut {
-        sequence: "Ctrl+Shift+D"
-        onActivated: trackList.duplicateShown()
+        sequence: "Ctrl+Shift+Return"
+        onActivated: Tk.queueSelection(false)
     }
     Shortcut {
         sequence: "Ctrl+Shift+U"
-        onActivated: window.upNextOpen = !window.upNextOpen
+        onActivated: upNextSettings.visible = !upNextSettings.visible
     }
-    Shortcut {
-        sequence: "Alt+Return"
-        onActivated: trackList.editTags()
+
+    SplitView {
+        anchors.fill: parent
+        orientation: Qt.Horizontal
+
+        // bench-panel-folders: Sources.
+        Pane {
+            SplitView.minimumWidth: 160
+            SplitView.preferredWidth: (window.width - (upNextSettings.visible ? upNextSettings.width : 0)) / 4
+            padding: 0
+            Label {
+                anchors.centerIn: parent
+                width: parent.width - 24
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: "Folders and the library come next in the Qt Quick window."
+                color: palette.placeholderText
+            }
+        }
+
+        // bench-track-area: the tabs over the list on show.
+        ColumnLayout {
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 200
+            spacing: 0
+            TrackTabBar {
+                Layout.fillWidth: true
+                onContextMenuRequested: (index, position) => tabMenu.popup()
+                onNewListRequested: nameDialog.ask("New list", "", name => Tk.newList(name))
+            }
+            TrackTable {
+                id: trackTable
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onContextMenuRequested: (row, position) => trackMenu.popup()
+                onHeaderMenuRequested: position => headerMenu.popup()
+            }
+        }
+
+        UpNextPanel {
+            visible: upNextSettings.visible
+            SplitView.minimumWidth: 260
+            SplitView.maximumWidth: Math.max(260, window.width / 2)
+            SplitView.preferredWidth: upNextSettings.width
+            onWidthChanged: if (visible && width >= 260)
+                upNextSettings.width = width
+            onCloseRequested: upNextSettings.visible = false
+        }
     }
-    Shortcut {
-        sequence: "Ctrl+,"
-        onActivated: settingsDialog.open()
-    }
-    Shortcut {
-        sequence: StandardKey.Quit
-        onActivated: Qt.quit()
+
+    // Tab context: Rename, Save, Pin, Duplicate, then Close.
+    Menu {
+        id: tabMenu
+        MenuItem { action: renameAction }
+        MenuItem { action: saveAction }
+        MenuItem { action: pinAction }
+        MenuItem { action: duplicateAction }
+        MenuSeparator {}
+        MenuItem { action: closeAction }
     }
 
     Menu {
-        id: appMenu
-        Menu {
-            title: "Playback"
-            MenuItem { text: Engine.current.player.playing ? "Pause" : "Play"; onTriggered: Engine.current.player.toggle() }
-            MenuItem { text: "Next"; onTriggered: Engine.current.player.next() }
-            MenuItem { text: "Previous"; onTriggered: Engine.current.player.previous() }
+        id: trackMenu
+        MenuItem {
+            text: "Play"
+            onTriggered: Tk.activateRow(Tk.rows.currentRow)
         }
-        Menu {
-            title: "List"
-            MenuItem { text: "New list"; onTriggered: trackList.newList(Engine.current) }
-            MenuItem { text: "Rename…"; onTriggered: trackList.renameShown() }
-            MenuItem { text: "Save as playlist…"; onTriggered: trackList.saveShown() }
-            MenuItem { text: "Duplicate"; onTriggered: trackList.duplicateShown() }
-            MenuItem { text: "Close tab"; onTriggered: trackList.closeShown() }
-            MenuSeparator {}
-            MenuItem { text: "Find in list"; onTriggered: trackList.openFind() }
-            MenuItem { text: "Jump to what plays"; onTriggered: trackList.jumpToPlaying() }
-            MenuItem {
-                text: "Follow playback"
-                checkable: true
-                checked: trackList.followPlayback
-                onTriggered: trackList.followPlayback = !trackList.followPlayback
-            }
+        MenuItem {
+            text: qsTr("Queue next")
+            onTriggered: Tk.queueSelection(true)
         }
-        Menu {
-            title: "Workspace"
-            MenuItem {
-                text: "Up Next"
-                checkable: true
-                checked: window.upNextOpen
-                onTriggered: window.upNextOpen = !window.upNextOpen
-            }
-            MenuItem {
-                text: "Notify on each new track"
-                checkable: true
-                checked: window.notifications
-                onTriggered: window.notifications = !window.notifications
-            }
-            MenuItem {
-                text: "Only while the window is in the background"
-                checkable: true
-                enabled: window.notifications
-                checked: window.notifyInBackgroundOnly
-                onTriggered: window.notifyInBackgroundOnly = !window.notifyInBackgroundOnly
-            }
-            Menu {
-                title: "Appearance"
-                MenuItem {
-                    text: "As the system"
-                    checkable: true
-                    checked: window.appearance === 0
-                    onTriggered: window.appearance = 0
-                }
-                MenuItem {
-                    text: "Light"
-                    checkable: true
-                    checked: window.appearance === 1
-                    onTriggered: window.appearance = 1
-                }
-                MenuItem {
-                    text: "Dark"
-                    checkable: true
-                    checked: window.appearance === 2
-                    onTriggered: window.appearance = 2
-                }
-            }
+        MenuItem {
+            text: qsTr("Queue at end")
+            onTriggered: Tk.queueSelection(false)
         }
         MenuSeparator {}
-        MenuItem { text: "Settings…"; onTriggered: settingsDialog.open() }
-        MenuItem { text: "Quit"; onTriggered: Qt.quit() }
+        MenuItem {
+            text: "Remove selected"
+            onTriggered: Tk.removeSelectedRows()
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: Tk.history.undoText ?? "Undo list edit"
+            enabled: Tk.history.canUndo ?? false
+            onTriggered: Tk.undoListEdit()
+        }
+        MenuItem {
+            text: Tk.history.redoText ?? "Redo list edit"
+            enabled: Tk.history.canRedo ?? false
+            onTriggered: Tk.redoListEdit()
+        }
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
+    TrackLayoutMenu {
+        id: headerMenu
+        headerMenu: true
+    }
 
-        PlayerBar {
-            Layout.fillWidth: true
-            onMenuRequested: anchor => appMenu.popup(anchor, 0, anchor.height)
+    Dialog {
+        id: nameDialog
+        property var accept: null
+        function ask(title, current, then) {
+            nameDialog.title = title;
+            nameField.text = current;
+            accept = then;
+            open();
+            nameField.selectAll();
+            nameField.forceActiveFocus();
         }
-
+        anchors.centerIn: parent
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
         RowLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
-
-            SplitView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                handle: Rectangle {
-                    implicitWidth: 1
-                    color: SplitHandle.hovered || SplitHandle.pressed ? Theme.accent : Theme.line
-                }
-
-                LibraryPane {
-                    id: library
-                    dragGhost: ghost
-                    tagger: tagEditor
-                    SplitView.preferredWidth: 340
-                    SplitView.minimumWidth: 220
-                }
-                TrackListPane {
-                    id: trackList
-                    dragGhost: ghost
-                    tagger: tagEditor
-                    SplitView.fillWidth: true
-                    SplitView.minimumWidth: 400
-                }
+            Label {
+                text: "Name:"
             }
-
-            UpNextPane {
-                dragGhost: ghost
-                Layout.fillHeight: true
-                Layout.preferredWidth: window.upNextOpen ? 300 : 0
-                Behavior on Layout.preferredWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                onCloseRequested: window.upNextOpen = false
+            TextField {
+                id: nameField
+                Layout.preferredWidth: 280
+                onAccepted: nameDialog.accept()
             }
         }
-
-        StatusBar {
-            Layout.fillWidth: true
-            text: trackList.summary
-            upNextOpen: window.upNextOpen
-            onUpNextToggled: window.upNextOpen = !window.upNextOpen
+        onAccepted: {
+            if (accept && nameField.text.trim() !== "")
+                accept(nameField.text);
         }
     }
 
-    DragGhost {
-        id: ghost
-    }
-
-    TagEditorWindow {
-        id: tagEditor
-    }
-
-    SettingsDialog {
-        id: settingsDialog
-        appWindow: window
-    }
-    // Remembered by the list pane; offered here so settings can reach it.
-    property alias followPlayback: trackList.followPlayback
-
-    // What an engine refused, said briefly and without a dialog.
-    Instantiator {
-        model: Engine.sessions
-        delegate: Connections {
-            required property var modelData
-            target: modelData
-            function onFailed(message) {
-                toast.show(message);
-            }
+    MessageDialog {
+        id: discardDialog
+        property int index: -1
+        title: "Close unsaved list"
+        buttons: MessageDialog.Yes | MessageDialog.No
+        onButtonClicked: (button, role) => {
+            if (button === MessageDialog.Yes)
+                Tk.closeTab(index);
         }
     }
 
-    Rectangle {
-        id: toast
-        function show(message) {
-            toastText.text = message;
-            opacity = 1;
-            toastTimer.restart();
+    MessageDialog {
+        id: informationDialog
+        buttons: MessageDialog.Ok
+    }
+
+    FileDialog {
+        id: filesDialog
+        title: "Open files"
+        fileMode: FileDialog.OpenFiles
+        onAccepted: Tk.openUrls(selectedFiles)
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: "Open folder"
+        onAccepted: Tk.openUrls([selectedFolder])
+    }
+
+    Connections {
+        target: Tk
+        function onMessage(text, timeoutMs) {
+            status.showMessage(text, timeoutMs);
         }
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 44
-        width: Math.min(parent.width - 40, toastText.implicitWidth + 32)
-        height: 34
-        radius: 8
-        color: Theme.raised
-        border.color: Theme.line
-        opacity: 0
-        visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 180 } }
-        Text {
-            id: toastText
-            anchors.centerIn: parent
-            width: parent.width - 32
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
-            color: Theme.text
-            font.pixelSize: Theme.fontSize
-        }
-        Timer {
-            id: toastTimer
-            interval: 4000
-            onTriggered: toast.opacity = 0
+        function onInformation(title, text) {
+            informationDialog.title = title;
+            informationDialog.text = text;
+            informationDialog.open();
         }
     }
 
-    // Until the engine answers.
-    Rectangle {
-        anchors.fill: parent
-        visible: opacity > 0
-        opacity: Engine.current.connected ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: 200 } }
-        color: Theme.scrim
-
-        MouseArea { anchors.fill: parent }
-
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Connecting to " + Engine.current.name + "…"
-                color: Theme.text
-                font.pixelSize: 16
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: Engine.current.failure
-                color: Theme.dim
-                font.pixelSize: Theme.fontSize
-            }
-        }
-    }
+    onClosing: Tk.closeWindow()
 }

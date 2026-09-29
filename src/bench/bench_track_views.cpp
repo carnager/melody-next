@@ -152,22 +152,11 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
     if (tab == nullptr || applying_track_view_layout_) {
         return;
     }
-    auto layout = captureTrackViewLayout(*tab);
-    const auto visible_count =
-        std::ranges::count(layout.columns, true, &ui::TrackViewColumnLayout::visible);
-    const auto found = std::ranges::find(layout.columns, column_id, &ui::TrackViewColumnLayout::id);
-    if (found == layout.columns.end() || (!visible && found->visible && visible_count == 1)) {
+    if (workspace_.setColumnVisible(*tab, captureTrackViewLayout(*tab), column_id, visible)) {
+        applyTrackViewLayout(*tab, tab->view_layout);
+    } else {
         refreshTrackViewActions();
-        return;
     }
-    found->visible = visible;
-    if (visible &&
-        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
-        tab->model->invalidateListeningHistory();
-    tab->view_layout_persistence_protected = false;
-    tab->preserved_view_layout.clear();
-    applyTrackViewLayout(*tab, layout);
-    schedulePersist();
 }
 
 void BenchMainWindow::resetTrackViewLayout() {

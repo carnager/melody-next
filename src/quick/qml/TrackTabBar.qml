@@ -1,0 +1,218 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import QtQuick
+import QtQuick.Controls
+import Trackknife.Quick
+
+// PlaybackTabBar: tabs drawn by the bar itself, the same under every style.
+// The current tab is filled with the list's own ground so it reads as the
+// top of the list below it; the others are plain, quieter text. The playing
+// tab carries an accent dot; a remote tab its engine's icon.
+Item {
+    id: bar
+
+    signal contextMenuRequested(int index, point position)
+    signal newListRequested()
+
+    // Room either side of what a tab shows, and for its close button --
+    // kept when a pinned tab hides it, so pinning does not resize the tab.
+    readonly property int lead: 12
+    readonly property int trail: 10
+    readonly property int closeRoom: 13
+    readonly property int slack: 12
+    readonly property int dotWidth: 11
+    readonly property int iconGap: 5
+    readonly property int closeInset: 14
+    readonly property int heightPadding: 16
+
+    implicitHeight: metrics.height + heightPadding
+
+    FontMetrics {
+        id: metrics
+    }
+
+    ToolTip.visible: emptyHover.hovered && !tabs.hoveredTab
+    ToolTip.delay: Qt.styleHints.mousePressAndHoldInterval
+    ToolTip.text: qsTr("Drop local tracks on a tab to transfer, or on empty tab-bar space to create a tab. Hold Ctrl to copy.")
+    HoverHandler {
+        id: emptyHover
+    }
+    // Double-clicking empty tab-bar space makes a new list.
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onDoubleTapped: bar.newListRequested()
+    }
+
+    ListView {
+        id: tabs
+
+        property bool hoveredTab: false
+
+        anchors.fill: parent
+        orientation: ListView.Horizontal
+        interactive: contentWidth > width
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
+        model: Tk.tabs
+        currentIndex: Tk.currentTab
+        highlightFollowsCurrentItem: false
+        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+
+        delegate: Item {
+            id: tab
+
+            required property int index
+            required property string text
+            required property string tooltip
+            required property bool playing
+            required property bool remote
+            required property bool pinned
+
+            readonly property bool current: index === Tk.currentTab
+            readonly property int iconWidth: remote ? 14 + bar.iconGap : 0
+            readonly property int dot: playing ? bar.dotWidth : 0
+
+            width: bar.lead + label.implicitWidth + dot + iconWidth + bar.slack + bar.closeRoom
+                   + bar.trail
+            height: tabs.height
+            z: current ? 1 : 0
+
+            HoverHandler {
+                id: hover
+                onHoveredChanged: tabs.hoveredTab = hovered
+            }
+            ToolTip.visible: hover.hovered && !closeHover.hovered
+            ToolTip.delay: Qt.styleHints.mousePressAndHoldInterval
+            ToolTip.text: tab.tooltip
+
+            // The fill: Base, rounded at the top only; a hovered tab at
+            // alpha 110.
+            Item {
+                x: 1
+                y: 3
+                width: parent.width - 2
+                height: parent.height - 3
+                clip: true
+                visible: tab.current || hover.hovered
+                Rectangle {
+                    width: parent.width
+                    height: parent.height + 6
+                    radius: 5
+                    color: tab.current ? bar.palette.base : Shade.alpha(bar.palette.base, 110 / 255)
+                }
+            }
+
+            // What it shows, centred in the room left of the close button.
+            Row {
+                x: bar.lead + Math.max(0, (tab.width - bar.lead - bar.trail - bar.closeRoom
+                                           - width) / 2)
+                y: 3
+                height: parent.height - 3
+                Item {
+                    visible: tab.playing
+                    width: bar.dotWidth
+                    height: parent.height
+                    Rectangle {
+                        x: 0
+                        y: parent.height / 2 + 1 - 3.5
+                        width: 7
+                        height: 7
+                        radius: 3.5
+                        color: bar.palette.highlight
+                    }
+                }
+                Item {
+                    visible: tab.remote
+                    width: tab.iconWidth
+                    height: parent.height
+                    Image {
+                        y: parent.height / 2 - 7 + 1
+                        width: 14
+                        height: 14
+                        sourceSize: Qt.size(14, 14)
+                        source: "image://icon/network-server" + (tab.current ? "" : "?disabled")
+                    }
+                }
+                Label {
+                    id: label
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                    text: tab.text
+                    color: tab.current ? bar.palette.text : bar.palette.placeholderText
+                }
+            }
+
+            // TabCloseButton: a small cross, brighter when pointed at; hidden,
+            // but its room kept, for a pinned tab.
+            Item {
+                id: close
+                visible: !tab.pinned
+                width: 16
+                height: 16
+                x: tab.width - bar.closeInset - width / 2
+                y: (tab.height - height) / 2
+                Accessible.role: Accessible.Button
+                Accessible.name: "Close tab"
+                HoverHandler {
+                    id: closeHover
+                }
+                ToolTip.visible: closeHover.hovered
+                ToolTip.text: "Close tab"
+                Canvas {
+                    anchors.fill: parent
+                    property color ink: closeHover.hovered ? bar.palette.text
+                                                           : bar.palette.placeholderText
+                    onInkChanged: requestPaint()
+                    onPaint: {
+                        const context = getContext("2d");
+                        context.reset();
+                        context.strokeStyle = ink;
+                        context.lineWidth = 1.8;
+                        context.lineCap = "round";
+                        const cx = width / 2, cy = height / 2, arm = 3;
+                        context.beginPath();
+                        context.moveTo(cx - arm, cy - arm);
+                        context.lineTo(cx + arm, cy + arm);
+                        context.moveTo(cx - arm, cy + arm);
+                        context.lineTo(cx + arm, cy - arm);
+                        context.stroke();
+                    }
+                }
+                TapHandler {
+                    onTapped: Tk.closeTab(tab.index)
+                }
+            }
+
+            TapHandler {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                onPressedChanged: {
+                    if (pressed)
+                        Tk.currentTab = tab.index;
+                }
+                onTapped: (eventPoint, button) => {
+                    if (button === Qt.RightButton)
+                        bar.contextMenuRequested(tab.index, tab.mapToItem(bar, eventPoint.position));
+                }
+            }
+            TapHandler {
+                acceptedButtons: Qt.MiddleButton
+                onTapped: Tk.closeTab(tab.index)
+            }
+            // Dragged along the bar, a tab moves; it stays among its
+            // engine's tabs (ADR-0234).
+            DragHandler {
+                id: drag
+                target: null
+                yAxis.enabled: false
+                onActiveTranslationChanged: {
+                    if (!active)
+                        return;
+                    const point = tab.mapToItem(tabs.contentItem, tab.width / 2
+                                                + activeTranslation.x, tab.height / 2);
+                    const over = tabs.indexAt(point.x, point.y);
+                    if (over >= 0 && over !== tab.index)
+                        Tk.moveTab(tab.index, over);
+                }
+            }
+        }
+    }
+}

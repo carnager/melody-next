@@ -38,9 +38,13 @@ inline constexpr int maximum_side_artwork_extent = 160;
 inline constexpr int side_artwork_padding = 6;
 
 // Which of a model's columns hold the album and date its groups are made of.
+// And whether a lone track is an album of its own -- its header and cover
+// as any album's -- rather than a loose track with its cover in place of
+// its number (the Qt Quick window's choice).
 struct TrackGroupColumns {
     int album{track_album_column};
     int date{track_date_column};
+    bool lone_tracks_grouped{false};
 };
 
 [[nodiscard]] QString trackGroupKey(const QAbstractItemModel& model, int row,

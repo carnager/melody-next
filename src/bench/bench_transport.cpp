@@ -1020,15 +1020,16 @@ void BenchMainWindow::styleStatusBar() {
     divider->setFixedSize(1, 16);
     divider->setStyleSheet(QStringLiteral("background: %1;").arg(mix(ground, ink, 18)));
     statusBar()->addPermanentWidget(divider);
+    // ReplayGain as quiet as the modes beside it: text, no frame, a gain in
+    // use told by the text's colour rather than a filled pill.
     local_replaygain_button_->setAutoRaise(false);
     local_replaygain_button_->setStyleSheet(
-        QStringLiteral("QToolButton { border: 1px solid %1; border-radius: 11px; padding: 1px 10px;"
+        QStringLiteral("QToolButton { border: none; border-radius: 4px; padding: 3px 6px;"
                        " color: palette(placeholder-text); }"
-                       "QToolButton[active=\"true\"] { background: %2; border-color: %2;"
-                       " color: palette(text); }"
-                       "QToolButton:hover { border-color: palette(highlight); }"
+                       "QToolButton[active=\"true\"] { color: palette(text); }"
+                       "QToolButton:hover { background: %1; }"
                        "QToolButton::menu-indicator { image: none; width: 0; }")
-            .arg(mix(ground, ink, 16), mix(ground, accent, 35)));
+            .arg(mix(ground, ink, 8)));
     local_replaygain_button_->setToolButtonStyle(Qt::ToolButtonTextOnly);
 }
 

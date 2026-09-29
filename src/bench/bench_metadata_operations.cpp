@@ -1147,9 +1147,9 @@ OutputProfileStore BenchMainWindow::buildOutputProfileStore(const EngineKey& des
                 }
                 const QPointer window{this};
                 persistence_service->removeOutputLayoutProfile(
-                    id, [window, completion = std::move(completion)](QString error) {
+                    id, [window, id, completion = std::move(completion)](QString error) {
                         if (window && error.isEmpty()) {
-                            window->pushLayouts();
+                            window->pushLayouts({id});
                         }
                         completion(error);
                     });
@@ -1157,17 +1157,19 @@ OutputProfileStore BenchMainWindow::buildOutputProfileStore(const EngineKey& des
         .save_destination = destinations.save,
         .remove_destination = destinations.remove,
         .destinations_on = elsewhere ? destinations.name : QString{},
+        .destinations_key = destinations.key,
         .places = std::move(places),
     };
 }
 
-void BenchMainWindow::pushLayouts() {
+void BenchMainWindow::pushLayouts(std::vector<core::StableId> removed) {
     if (persistence_ == nullptr) {
         return;
     }
     const QPointer window{this};
     persistence_->loadOutputProfiles(
-        [window](std::vector<persistence::SavedOutputLayoutProfile> layouts, auto, QString error) {
+        [window, removed = std::move(removed)](
+            std::vector<persistence::SavedOutputLayoutProfile> layouts, auto, QString error) {
             if (!window || !error.isEmpty()) {
                 return;
             }
@@ -1179,9 +1181,9 @@ void BenchMainWindow::pushLayouts() {
                 }
                 // In the order they were made: one thread, so an older set
                 // never lands after a newer one.
-                static_cast<void>(
-                    QtConcurrent::run(&window->layout_pushes_, [work = engine->file_work, layouts] {
-                        static_cast<void>(work->set_layouts(layouts));
+                static_cast<void>(QtConcurrent::run(
+                    &window->layout_pushes_, [work = engine->file_work, layouts, removed] {
+                        static_cast<void>(work->put_layouts(layouts, removed));
                     }));
             }
         });

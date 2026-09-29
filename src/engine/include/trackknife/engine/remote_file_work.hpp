@@ -122,10 +122,12 @@ class RemoteFileWork final {
     [[nodiscard]] core::Result<void> set_rating_tags(bool write_tags);
     [[nodiscard]] core::Result<void> set_rating_scale(const std::string& scale);
 
-    // Naming layouts, handed over whole (layouts.set), and this engine's own
-    // move destinations; folders.list for choosing one on its machine.
+    // Naming layouts handed over (layouts.put): each added or updated, and
+    // only `removed` taken away. This engine's own move destinations, and
+    // folders.list for choosing one on its machine.
     [[nodiscard]] core::Result<void>
-    set_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts);
+    put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
+                const std::vector<core::StableId>& removed = {});
     [[nodiscard]] core::Result<std::vector<persistence::SavedDestinationProfile>> destinations();
     [[nodiscard]] core::Result<void>
     save_destination(const persistence::SavedDestinationProfile& destination);

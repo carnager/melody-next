@@ -192,6 +192,11 @@ name them with, the CLI and the phone too, not only Trackknife.
   engine's. Clients that move files through an engine name them with the
   engine's copy, so the CLI and phone have them with Trackknife closed;
   they use them and do not edit them, so the copies never need merging.
+  **Amended 2026-09-29:** a hand-over only adds or updates layouts
+  (`layouts.put`); a layout is taken from an engine only when it is
+  deleted in Trackknife. Replacing the whole set let an older, empty or
+  foreign set wipe an engine's layouts -- and this computer's engine shares
+  Trackknife's workspace, so that wiped Trackknife's own.
 - **Move destinations are the engine's.** Each engine keeps its own, in its
   workspace beside its lists (`destinations.*`); every client reads and
   saves them there. This computer's engine shares Trackknife's database, so

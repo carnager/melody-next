@@ -639,7 +639,8 @@ core::Result<void> RemoteFileWork::set_rating_scale(const std::string& scale) {
 }
 
 core::Result<void>
-RemoteFileWork::set_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts) {
+RemoteFileWork::put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
+                            const std::vector<core::StableId>& removed) {
     auto connection = client();
     if (!connection) {
         return std::unexpected(std::move(connection.error()));
@@ -648,7 +649,13 @@ RemoteFileWork::set_layouts(const std::vector<persistence::SavedOutputLayoutProf
     for (const auto& layout : layouts) {
         list.push_back(wire::encode(layout));
     }
-    auto answer = (*connection)->call("layouts.set", Json{{"layouts", std::move(list)}});
+    auto gone = Json::array();
+    for (const auto& id : removed) {
+        gone.push_back(id.to_string());
+    }
+    auto answer =
+        (*connection)
+            ->call("layouts.put", Json{{"layouts", std::move(list)}, {"removed", std::move(gone)}});
     if (!answer) {
         return std::unexpected(std::move(answer.error()));
     }

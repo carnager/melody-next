@@ -997,14 +997,25 @@ void naming_and_destinations_are_the_engines(const std::filesystem::path& direct
     };
     auto first = layout("By title", "%title%");
     auto second = layout("Numbered", "$num(%tracknumber%,2) %title%");
-    auto set = call("layouts.set", {{"layouts", {wire::encode(first), wire::encode(second)}}});
-    require(set.result && set.result->at("layouts").size() == 2U, "the layouts are copied in");
-    // Replaced whole: one gone, one renamed to the other's old name.
+    auto put = call("layouts.put", {{"layouts", {wire::encode(first), wire::encode(second)}}});
+    require(put.result && put.result->at("layouts").size() == 2U, "the layouts are copied in");
+    // A smaller set -- another client's, or one sent late -- takes nothing away.
+    put = call("layouts.put", {{"layouts", {wire::encode(first)}}});
+    require(put.result && put.result->at("layouts").size() == 2U, "a smaller set removes nothing");
+    put = call("layouts.put", {{"layouts", protocol::Json::array()}});
+    require(put.result && put.result->at("layouts").size() == 2U, "nor does an empty one");
+    // A layout renamed to another's name is that layout now: the other gives way.
     second.profile.name = "By title";
-    set = call("layouts.set", {{"layouts", {wire::encode(second)}}});
-    require(set.result && set.result->at("layouts").size() == 1U, "and replaced whole");
-    const auto held = wire::decode_saved_layout(set.result->at("layouts").front());
-    require(held && *held == second, "exactly");
+    put = call("layouts.put", {{"layouts", {wire::encode(second)}}});
+    require(put.result && put.result->at("layouts").size() == 1U, "a name is one layout's");
+    const auto held = wire::decode_saved_layout(put.result->at("layouts").front());
+    require(held && *held == second, "the renamed one, exactly");
+    // Only what it is told to remove goes.
+    put = call("layouts.put",
+               {{"layouts", protocol::Json::array()}, {"removed", {second.id.to_string()}}});
+    require(put.result && put.result->at("layouts").empty(), "a removed layout goes");
+    require(call("layouts.set", {{"layouts", protocol::Json::array()}}).error.has_value(),
+            "and the old replace-everything call is no more");
 
     const trackknife::persistence::SavedDestinationProfile destination{
         .id = core::StableId::random(),

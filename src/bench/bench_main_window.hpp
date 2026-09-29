@@ -341,9 +341,10 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] OutputProfileStore
     buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
     // ADR-0237: the naming layouts are global; every engine that does file
-    // work holds a copy, handed over whole after each change and when it
-    // connects.
-    void pushLayouts();
+    // work holds a copy, handed over after each change and when it connects.
+    // Only `removed` is taken away there: nothing an engine holds is lost to
+    // a set it was sent.
+    void pushLayouts(std::vector<core::StableId> removed = {});
     void presentInterruptedOperations();
     void applyCommittedMetadata(const operations::MetadataCommitResult& result);
     void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);

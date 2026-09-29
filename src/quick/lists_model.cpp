@@ -97,6 +97,13 @@ QString ListsModel::nameAt(const int row) const {
     return row >= 0 && row < rowCount() ? lists_[static_cast<std::size_t>(row)].name : QString{};
 }
 
+QString ListsModel::nameOf(const QString& id) const { return nameAt(indexOf(id)); }
+
+bool ListsModel::isSaved(const QString& id) const {
+    const auto row = indexOf(id);
+    return row >= 0 && lists_[static_cast<std::size_t>(row)].saved;
+}
+
 QString ListsModel::newest() const {
     const Summary* best = nullptr;
     for (const auto& list : lists_) {

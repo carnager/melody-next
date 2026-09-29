@@ -86,6 +86,9 @@ class EngineSession final : public QObject {
     // list -- as the widgets window saves one.
     Q_INVOKABLE void saveList(const QString& id, const QString& name);
     Q_INVOKABLE void deleteList(const QString& id);
+    // A new working list holding what another holds, as new entries;
+    // listCreated says which.
+    Q_INVOKABLE void duplicateList(const QString& id, const QString& name);
 
     // ADR-0179: a track's or an album's rating, 0-10 by its content key; 0
     // clears it. Every client is told (catalogue.rating_changed).

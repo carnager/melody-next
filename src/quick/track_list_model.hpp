@@ -82,6 +82,10 @@ class TrackListModel final : public QAbstractListModel {
     Q_INVOKABLE void removeRows(const QList<int>& rows);
     // Copies into another list of the same engine, at its end.
     Q_INVOKABLE void copyToList(const QList<int>& rows, const QString& listId);
+    // The next track row after `from` (before it, with `step` -1) whose
+    // title, artist or album holds `text`, ignoring case, wrapping round;
+    // -1 when none does. Finding never filters or changes anything.
+    Q_INVOKABLE [[nodiscard]] int find(const QString& text, int from, int step) const;
     // A track's rating, or on a header row its album's; 0 clears it.
     Q_INVOKABLE void rate(int row, int rating);
 

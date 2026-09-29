@@ -28,6 +28,7 @@ Rectangle {
         category: "QuickWindow"
         property string currentList: ""
         property var open: []
+        property bool followPlayback: false
         // Engines met before: one whose tabs were all closed stays so.
         property var engines: []
     }
@@ -129,6 +130,89 @@ Rectangle {
                 view.contentY = pane.keptY;
                 pane.keptY = NaN;
             }
+        }
+    }
+
+    // Find in list (ADR-0125): selects matches, never filters or plays.
+    property bool finding: false
+    property bool findMissed: false
+
+    function openFind() {
+        finding = true;
+        findField.forceActiveFocus();
+        findField.selectAll();
+    }
+
+    function closeFind() {
+        finding = false;
+        findMissed = false;
+        view.forceActiveFocus();
+    }
+
+    // From the selection; `again` moves past it, otherwise it may match.
+    function findStep(step, again) {
+        let from = anchorRow;
+        if (from < 0)
+            from = step > 0 ? -1 : view.count;
+        else if (!again)
+            from -= step;
+        const row = Engine.tracks.find(findField.text, from, step);
+        findMissed = row < 0 && findField.text.trim() !== "";
+        if (row >= 0) {
+            select(row, Qt.NoModifier);
+            view.positionViewAtIndex(row, ListView.Center);
+        }
+    }
+
+    function jumpToPlaying() {
+        const row = Engine.tracks.rowOfEntry(Engine.current.player.entry);
+        if (row < 0)
+            return;
+        select(row, Qt.NoModifier);
+        view.positionViewAtIndex(row, ListView.Center);
+    }
+
+    // Keeps what plays in view as it changes.
+    readonly property string playingEntry: Engine.current.player.entry
+    onPlayingEntryChanged: {
+        if (remembered.followPlayback)
+            jumpToPlaying();
+    }
+    property alias followPlayback: remembered.followPlayback
+
+    // The tab on show, for the shortcuts.
+    function renameShown() {
+        const session = Engine.tracks.session, id = Engine.tracks.listId;
+        if (session === null || id === "")
+            return;
+        nameDialog.ask("Rename list", "New name:", session.lists.nameOf(id), name => session.renameList(id, name));
+    }
+
+    function saveShown() {
+        const session = Engine.tracks.session, id = Engine.tracks.listId;
+        if (session === null || id === "" || session.lists.isSaved(id))
+            return;
+        nameDialog.ask("Save as playlist", "Kept on " + session.name + " as:", session.lists.nameOf(id),
+                       name => session.saveList(id, name));
+    }
+
+    function closeShown() {
+        if (Engine.tracks.session !== null && Engine.tracks.listId !== "")
+            close(Engine.tracks.session, Engine.tracks.listId);
+    }
+
+    function duplicateShown() {
+        const session = Engine.tracks.session, id = Engine.tracks.listId;
+        if (session !== null && id !== "")
+            session.duplicateList(id, session.lists.nameOf(id) + " (copy)");
+    }
+
+    Connections {
+        target: Engine.tracks
+        function onListIdChanged() {
+            // Another tab: what was being found was found in the last one.
+            if (pane.finding)
+                pane.closeFind();
         }
     }
 
@@ -474,6 +558,67 @@ Rectangle {
                         tip: "New or open a list"
                         onClicked: savedMenu.popup(openButton, 0, openButton.height)
                     }
+                }
+            }
+        }
+
+        // Find in list
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: pane.finding ? 38 : 0
+            visible: implicitHeight > 0
+            clip: true
+            color: Theme.panel
+            Behavior on implicitHeight { NumberAnimation { duration: 120 } }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 4
+                TextField {
+                    id: findField
+                    Layout.preferredWidth: 320
+                    placeholderText: "Find in list"
+                    color: Theme.text
+                    placeholderTextColor: Theme.faint
+                    font.pixelSize: Theme.fontSize
+                    onTextChanged: pane.findStep(1, false)
+                    Keys.onReturnPressed: event => pane.findStep(event.modifiers & Qt.ShiftModifier ? -1 : 1, true)
+                    Keys.onEnterPressed: event => pane.findStep(event.modifiers & Qt.ShiftModifier ? -1 : 1, true)
+                    Keys.onEscapePressed: pane.closeFind()
+                    background: Rectangle {
+                        radius: 5
+                        color: Theme.window
+                        border.color: pane.findMissed ? Theme.error : findField.activeFocus ? Theme.accent : Theme.line
+                    }
+                }
+                IconButton {
+                    icon: "chevron"
+                    rotation: -90
+                    iconSize: 12
+                    tip: "Previous (Shift+Enter)"
+                    onClicked: pane.findStep(-1, true)
+                }
+                IconButton {
+                    icon: "chevron"
+                    rotation: 90
+                    iconSize: 12
+                    tip: "Next (Enter)"
+                    onClicked: pane.findStep(1, true)
+                }
+                Text {
+                    visible: pane.findMissed
+                    text: "Not in this list"
+                    color: Theme.error
+                    font.pixelSize: Theme.smallFontSize
+                }
+                Item { Layout.fillWidth: true }
+                IconButton {
+                    icon: "close"
+                    iconSize: 11
+                    tip: "Close (Escape)"
+                    onClicked: pane.closeFind()
                 }
             }
         }

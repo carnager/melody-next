@@ -484,6 +484,28 @@ void TrackListModel::copyToList(const QList<int>& rows, const QString& listId) {
     });
 }
 
+int TrackListModel::find(const QString& text, const int from, const int step) const {
+    const auto needle = text.trimmed();
+    const auto count = rowCount();
+    if (needle.isEmpty() || count == 0) {
+        return -1;
+    }
+    const auto direction = step < 0 ? -1 : 1;
+    auto at = from;
+    for (int visited = 0; visited < count; ++visited) {
+        at = ((at + direction) % count + count) % count;
+        const auto& row = rows_[static_cast<std::size_t>(at)];
+        if (row.header) {
+            continue;
+        }
+        if (row.title.contains(needle, Qt::CaseInsensitive) || row.artist.contains(needle, Qt::CaseInsensitive) ||
+            row.album.contains(needle, Qt::CaseInsensitive)) {
+            return at;
+        }
+    }
+    return -1;
+}
+
 void TrackListModel::rate(const int row, const int rating) {
     if (session_ == nullptr || row < 0 || row >= rowCount()) {
         return;

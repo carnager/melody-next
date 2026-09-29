@@ -30,6 +30,8 @@ class ListsModel final : public QAbstractListModel {
     Q_INVOKABLE [[nodiscard]] int indexOf(const QString& id) const;
     Q_INVOKABLE [[nodiscard]] QString idAt(int row) const;
     Q_INVOKABLE [[nodiscard]] QString nameAt(int row) const;
+    Q_INVOKABLE [[nodiscard]] QString nameOf(const QString& id) const;
+    Q_INVOKABLE [[nodiscard]] bool isSaved(const QString& id) const;
     // The list to open when this window has none of the engine's: the one
     // changed last, working lists first.
     Q_INVOKABLE [[nodiscard]] QString newest() const;

@@ -157,6 +157,28 @@ void EngineSession::setRating(const QString& hash, const bool album, const int r
                     });
 }
 
+void EngineSession::duplicateList(const QString& id, const QString& name) {
+    client_.call(QStringLiteral("list.get"), Json{{"id", id.toStdString()}}, [this, name](const auto& answer) {
+        if (!answer) {
+            emit failed(QString::fromStdString(answer.error().message));
+            return;
+        }
+        Json items = Json::array();
+        for (const auto& item : answer->value("items", Json::array())) {
+            items.push_back(copiedItem(item));
+        }
+        client_.command(QStringLiteral("list.save"),
+                        Json{{"name", name.trimmed().toStdString()}, {"kind", "working"}, {"items", std::move(items)}},
+                        [this](const auto& saved) {
+                            if (!saved) {
+                                emit failed(QString::fromStdString(saved.error().message));
+                                return;
+                            }
+                            emit listCreated(QString::fromStdString(saved->value("id", std::string{})));
+                        });
+    });
+}
+
 void EngineSession::deleteList(const QString& id) {
     client_.command(QStringLiteral("list.delete"), Json{{"id", id.toStdString()}}, [this](const auto& answer) {
         if (!answer) {

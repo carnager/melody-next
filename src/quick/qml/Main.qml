@@ -58,6 +58,54 @@ ApplicationWindow {
         sequence: "Ctrl+L"
         onActivated: library.searchField.forceActiveFocus()
     }
+    Shortcut {
+        sequence: StandardKey.Find
+        onActivated: trackList.openFind()
+    }
+    Shortcut {
+        sequences: ["F3"]
+        onActivated: trackList.finding ? trackList.findStep(1, true) : trackList.openFind()
+    }
+    Shortcut {
+        sequences: ["Shift+F3"]
+        onActivated: trackList.finding ? trackList.findStep(-1, true) : trackList.openFind()
+    }
+    Shortcut {
+        sequence: "Ctrl+J"
+        onActivated: trackList.jumpToPlaying()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+J"
+        onActivated: trackList.followPlayback = !trackList.followPlayback
+    }
+    Shortcut {
+        sequence: StandardKey.New
+        onActivated: trackList.newList(Engine.current)
+    }
+    Shortcut {
+        sequence: StandardKey.Save
+        onActivated: trackList.saveShown()
+    }
+    Shortcut {
+        sequence: "F2"
+        onActivated: trackList.renameShown()
+    }
+    Shortcut {
+        sequence: "Ctrl+W"
+        onActivated: trackList.closeShown()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+D"
+        onActivated: trackList.duplicateShown()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+U"
+        onActivated: window.upNextOpen = !window.upNextOpen
+    }
+    Shortcut {
+        sequence: StandardKey.Quit
+        onActivated: Qt.quit()
+    }
 
     Menu {
         id: appMenu
@@ -66,6 +114,23 @@ ApplicationWindow {
             MenuItem { text: Engine.current.player.playing ? "Pause" : "Play"; onTriggered: Engine.current.player.toggle() }
             MenuItem { text: "Next"; onTriggered: Engine.current.player.next() }
             MenuItem { text: "Previous"; onTriggered: Engine.current.player.previous() }
+        }
+        Menu {
+            title: "List"
+            MenuItem { text: "New list"; onTriggered: trackList.newList(Engine.current) }
+            MenuItem { text: "Rename…"; onTriggered: trackList.renameShown() }
+            MenuItem { text: "Save as playlist…"; onTriggered: trackList.saveShown() }
+            MenuItem { text: "Duplicate"; onTriggered: trackList.duplicateShown() }
+            MenuItem { text: "Close tab"; onTriggered: trackList.closeShown() }
+            MenuSeparator {}
+            MenuItem { text: "Find in list"; onTriggered: trackList.openFind() }
+            MenuItem { text: "Jump to what plays"; onTriggered: trackList.jumpToPlaying() }
+            MenuItem {
+                text: "Follow playback"
+                checkable: true
+                checked: trackList.followPlayback
+                onTriggered: trackList.followPlayback = !trackList.followPlayback
+            }
         }
         Menu {
             title: "Workspace"

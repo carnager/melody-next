@@ -14,6 +14,13 @@
 namespace trackknife::quick {
 namespace {
 
+// This window's albums (kept from the first Qt Quick window, at the user's
+// asking): every cover the same size at the album's top left, the header
+// beside it, where the titles start.
+constexpr int album_header_height = 30;
+constexpr int cover_gutter = 66;
+constexpr int number_width = 36;
+
 // Qt::KeyboardModifiers as QML hands them over.
 [[nodiscard]] bool has(const int modifiers, const Qt::KeyboardModifier modifier) {
     return (modifiers & modifier) != 0;
@@ -134,8 +141,12 @@ void TrackRowsModel::refit() {
             continue;
         }
         visible.push_back(logical);
-        preferred.insert(logical, column.width);
-        minimum.insert(logical, spec->minimum_width);
+        // The cover gutter, and the numbers just before the titles.
+        const bool gutter = sideArtwork() && logical == bench::local_artwork_column;
+        const bool number = sideArtwork() && logical == bench::local_track_number_column;
+        const auto fixed = gutter ? cover_gutter : number ? number_width : 0;
+        preferred.insert(logical, fixed > 0 ? fixed : column.width);
+        minimum.insert(logical, fixed > 0 ? fixed : spec->minimum_width);
     }
     // Header sections are never narrower than 24.
     const auto minimum_of = [&minimum](const int column) {
@@ -221,14 +232,22 @@ QVariantList TrackRowsModel::cellsOf(const int row) const {
     return cells;
 }
 
-int TrackRowsModel::rowHeight(const int row) const {
-    if (source_ == nullptr || row < 0 || row >= rowCount()) {
-        return ui::track_row_height;
+int TrackRowsModel::spacingOf(const int row) const {
+    if (source_ == nullptr || !grouped()) {
+        return 0;
     }
     const ui::TrackGroupColumns columns{.album = bench::local_album_column,
                                         .date = bench::local_date_column,
                                         .lone_tracks_grouped = true};
-    return ui::track_row_height + (grouped() ? ui::trackGroupSpacing(*source_, row, columns) : 0);
+    const auto disc = ui::trackDiscStart(*source_, row).isEmpty() ? 0 : ui::disc_header_height;
+    return (ui::beginsTrackGroup(*source_, row, columns) ? album_header_height : 0) + disc;
+}
+
+int TrackRowsModel::rowHeight(const int row) const {
+    if (source_ == nullptr || row < 0 || row >= rowCount()) {
+        return ui::track_row_height;
+    }
+    return ui::track_row_height + spacingOf(row);
 }
 
 QVariant TrackRowsModel::data(const QModelIndex& index, const int role) const {
@@ -244,7 +263,7 @@ QVariant TrackRowsModel::data(const QModelIndex& index, const int role) const {
     case cells_role:
         return cellsOf(row);
     case spacing_role:
-        return grouped() ? ui::trackGroupSpacing(*source_, row, columns) : 0;
+        return spacingOf(row);
     case group_start_role:
         return grouped() && ui::beginsTrackGroup(*source_, row, columns);
     case loose_run_role:

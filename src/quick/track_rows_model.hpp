@@ -86,6 +86,7 @@ class TrackRowsModel final : public QAbstractListModel {
     void selectionChanged();
 
   private:
+    [[nodiscard]] int spacingOf(int row) const;
     [[nodiscard]] QString entryOf(int row) const;
     [[nodiscard]] int rowOfEntry(const QString& entry) const;
     [[nodiscard]] ui::TrackCellContext cellContext() const;

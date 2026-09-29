@@ -156,7 +156,7 @@ FocusScope {
             required property string rowTooltip
 
             readonly property int discHeight: disc !== "" ? 26 : 0
-            readonly property int headerHeight: groupStart ? 34 : looseRun ? 10 : 0
+            readonly property int headerHeight: groupStart ? 30 : looseRun ? 10 : 0
 
             width: list.width
             height: 22 + spacing
@@ -171,23 +171,16 @@ FocusScope {
             }
 
             // An album's header: its name, then "artist · year · N tracks ·
-            // length", quieter; a hairline above it, but for the first.
+            // length", quieter, beside its cover.
             Item {
                 visible: row.groupStart
                 width: parent.width
-                height: 34
-                Rectangle {
-                    visible: row.index > 0
-                    y: 5
-                    width: parent.width
-                    height: 1
-                    color: Shade.alpha(table.ink, 38 / 255)
-                }
+                height: 30
                 // In the header strip, when covers are not beside the rows.
                 Image {
                     visible: !table.side && table.columnX(0) >= 0
                     x: table.columnX(0) + 6
-                    y: 17 - 11
+                    y: 15 - 11
                     width: 22
                     height: 22
                     asynchronous: false
@@ -206,8 +199,8 @@ FocusScope {
                                                            : table.columnWidth(3)
                     x: start + 6
                     width: Math.max(0, room - 14)
-                    y: 34 - 8 - albumName.baselineOffset
-                    spacing: 12
+                    y: 30 - 6 - albumName.baselineOffset
+                    spacing: 10
                     clip: true
                     Label {
                         id: albumName
@@ -328,26 +321,22 @@ FocusScope {
                 }
             }
 
-            // A cover beside its album's rows, drawn by each row clipped to
-            // itself, so it is whole however the list is scrolled.
+            // The album's cover at its top left, the same size for every
+            // album, drawn by each row it reaches, clipped to that row.
             Item {
                 id: sideCover
                 readonly property int columnLeft: table.columnX(0)
-                readonly property int coverTop: table.coverLeads ? 0 : 34
-                readonly property int coverBottom: Math.min(row.groupHeight, coverTop + 160 + 12)
-                readonly property int extent: Math.max(0, Math.min(table.columnWidth(0) - 12,
-                                                                    coverBottom - coverTop - 8 - 6,
-                                                                    160))
-                visible: table.side && columnLeft >= 0 && row.groupHeight > 0 && extent > 0
+                visible: table.side && columnLeft >= 0 && row.groupHeight > 0
+                         && row.coverOffset < 6 + 44
                 x: columnLeft
                 width: table.columnWidth(0)
                 height: row.height
                 clip: true
                 Item {
-                    x: 6
-                    y: sideCover.coverTop - row.coverOffset + 6 + 2
-                    width: sideCover.extent
-                    height: sideCover.extent
+                    x: 12
+                    y: 6 - row.coverOffset
+                    width: 44
+                    height: 44
                     Rectangle {
                         anchors.fill: parent
                         visible: art.status !== Image.Ready
@@ -355,10 +344,9 @@ FocusScope {
                         color: row.palette.mid
                         Image {
                             anchors.centerIn: parent
-                            readonly property int glyph: Math.max(16, sideCover.extent / 3)
-                            width: glyph
-                            height: glyph
-                            sourceSize: Qt.size(glyph, glyph)
+                            width: 16
+                            height: 16
+                            sourceSize: Qt.size(16, 16)
                             source: "image://icon/media-optical-audio|sp:SP_FileIcon?disabled"
                         }
                     }
@@ -366,10 +354,8 @@ FocusScope {
                         id: art
                         anchors.fill: parent
                         asynchronous: false
-                        fillMode: Image.PreserveAspectFit
-                        horizontalAlignment: Image.AlignLeft
-                        verticalAlignment: Image.AlignTop
-                        sourceSize: Qt.size(320, 320)
+                        fillMode: Image.PreserveAspectCrop
+                        sourceSize: Qt.size(88, 88)
                         source: sideCover.visible && row.coverKey !== ""
                                 ? "image://cover/" + encodeURIComponent(row.coverKey) + "#"
                                   + Tk.coverRevision : ""
@@ -405,7 +391,7 @@ FocusScope {
                 onTapped: eventPoint => {
                     list.forceActiveFocus();
                     // Right-clicking an album's header selects the album.
-                    if (row.groupStart && eventPoint.position.y < 34)
+                    if (row.groupStart && eventPoint.position.y < 30)
                         table.rows.selectGroup(row.index);
                     else if (!row.selected)
                         table.rows.press(row.index, 0);

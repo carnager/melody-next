@@ -79,6 +79,8 @@ class OutputProfilesManagerWidget final : public QWidget {
 
     // The move destinations of the engine `key` names, shown.
     void showDestinationsOf(const QString& key);
+    // The naming layouts shown.
+    void showNamingLayouts();
 
   private:
     void reload();

@@ -851,6 +851,13 @@ void SettingsDialog::focusReplayGainPreamp() {
     preamp_with_->setFocus();
 }
 
+void SettingsDialog::showNamingLayouts() {
+    showPage(Page::naming);
+    if (output_profiles_ != nullptr) {
+        output_profiles_->showNamingLayouts();
+    }
+}
+
 void SettingsDialog::showDestinationsOf(const QString& key) {
     showPage(Page::naming);
     if (output_profiles_ != nullptr) {

@@ -1345,11 +1345,17 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
                                            });
     connect(properties, &MetadataPropertiesDialog::statusMessage, this,
             [this](const QString& message) { statusBar()->showMessage(message, 12'000); });
-    // Its "Edit…" opens the destinations of the engine its tracks are on.
     connect(properties, &MetadataPropertiesDialog::openSettingsRequested, this,
-            [this, work_engine](const SettingsDialog::Page page) {
+            [this](const SettingsDialog::Page page) {
                 auto* settings = showSettingsDialog(page);
                 if (settings != nullptr && page == SettingsDialog::Page::naming) {
+                    settings->showNamingLayouts();
+                }
+            });
+    // Managing destinations opens those of the engine its tracks are on.
+    connect(properties, &MetadataPropertiesDialog::openDestinationsRequested, this,
+            [this, work_engine] {
+                if (auto* settings = showSettingsDialog(SettingsDialog::Page::naming)) {
                     settings->showDestinationsOf(work_engine.text());
                 }
             });

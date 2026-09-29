@@ -285,6 +285,7 @@ class BenchMainWindowTest final : public QObject {
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
     void moveDestinationsArePerEngine();
     void actionChoicesAreRemembered();
+    void actionsLinksOpenTheirOwnSettings();
     void namingLayoutsReachEveryEngine();
     void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
@@ -4332,6 +4333,60 @@ void BenchMainWindowTest::actionChoicesAreRemembered() {
     delete elsewhere;
     // Left as other tests expect to find it.
     QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
+// Each Manage link opens what it names: the naming layouts, or the move
+// destinations of the tracks' engine -- also when Settings is already open.
+void BenchMainWindowTest::actionsLinksOpenTheirOwnSettings() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("linked.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({QFile::encodeName(path).toStdString()});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    auto* list_model = qobject_cast<LocalListModel*>(view->model());
+    QTRY_COMPARE_WITH_TIMEOUT(list_model->rowCount(), 1, 5'000);
+    view->selectionModel()->select(list_model->index(0, 0),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    QTRY_VERIFY_WITH_TIMEOUT(window.localEngine().does_file_work, 10'000);
+    window.findChild<QAction*>(QStringLiteral("action-track-properties"))->trigger();
+    auto* properties = window.findChild<MetadataPropertiesDialog*>();
+    QVERIFY(properties != nullptr);
+    const auto follow = [&](const char* link) {
+        QTest::mouseClick(
+            properties->findChild<QToolButton*>(QStringLiteral("bench-metadata-actions")),
+            Qt::LeftButton);
+        QFrame* popover = nullptr;
+        QTRY_VERIFY((popover = properties->findChild<QFrame*>(
+                         QStringLiteral("bench-metadata-actions-popover"))) != nullptr);
+        auto* label = popover->findChild<QLabel*>(QString::fromLatin1(link));
+        QVERIFY(label != nullptr);
+        emit label->linkActivated(QStringLiteral("#"));
+    };
+    const auto shown_tab = [&window] {
+        auto* settings = window.findChild<SettingsDialog*>();
+        auto* sections =
+            settings
+                ? settings->findChild<QTabWidget*>(QStringLiteral("bench-output-profile-sections"))
+                : nullptr;
+        return sections != nullptr && settings->isVisible() ? sections->currentIndex() : -1;
+    };
+    follow("bench-actions-manage-destinations");
+    QTRY_COMPARE(shown_tab(), 1);
+    QCOMPARE(window.findChild<SettingsDialog*>()
+                 ->findChild<QComboBox*>(QStringLiteral("bench-destination-engine"))
+                 ->currentText(),
+             QStringLiteral("this computer"));
+    // Settings still open: the other link switches it to the layouts.
+    follow("bench-actions-manage-layouts");
+    QTRY_COMPARE(shown_tab(), 0);
+    follow("bench-actions-manage-destinations");
+    QTRY_COMPARE(shown_tab(), 1);
+    window.findChild<SettingsDialog*>()->reject();
 }
 
 void BenchMainWindowTest::namingLayoutsReachEveryEngine() {

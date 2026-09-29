@@ -68,6 +68,8 @@ class SettingsDialog final : public QDialog {
     // ADR-0237: the Naming page, with the move destinations of the engine
     // `key` names.
     void showDestinationsOf(const QString& key);
+    // The Naming page, on its naming layouts.
+    void showNamingLayouts();
     void editCustomBuffer();
     void focusReplayGainPreamp();
     [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();

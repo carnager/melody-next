@@ -103,7 +103,7 @@ from the fork's `main`, fetches and merges the original repository's `main`,
 builds Trackknife and Melody on the desktop, and pushes the updated fork
 `main`. It then connects to `192.168.1.111`, switches that checkout to the
 fork's `main`, fast-forwards it, and copies the locally built Release `melodyd`
-to `~/meolody/melodyd` with SCP. The upload is installed only after its SHA-256
+to `~/melody/melodyd` with SCP. The upload is installed only after its SHA-256
 checksum matches, and a successful deployment prints its host, path, commit,
 size, and checksum. Both local builds use eight jobs by default; on macOS the
 helper selects the Homebrew dependencies. If the server's old `main` has

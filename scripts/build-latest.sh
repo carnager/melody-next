@@ -7,7 +7,7 @@ desktop_preset=macos
 server_preset=server
 server_host=${MELODY_SERVER_HOST:-192.168.1.111}
 server_path=${MELODY_SERVER_PATH:-/Users/zeltak/dev/melody-next}
-server_install_dir=${MELODY_SERVER_INSTALL_DIR:-meolody}
+server_install_dir=${MELODY_SERVER_INSTALL_DIR:-melody}
 jobs=${TRACKKNIFE_BUILD_JOBS:-8}
 update=true
 build_server=true
@@ -30,7 +30,7 @@ Options:
   --server-path PATH     Repository on the server
   --server-install-dir PATH
                          Install directory relative to the server home
-                         (default: meolody, meaning ~/meolody)
+                         (default: melody, meaning ~/melody)
   --jobs N               Parallel build jobs (default: 8)
   --no-update            Do not fetch, merge, or push repository changes
   --desktop-only         Do not update or build the server

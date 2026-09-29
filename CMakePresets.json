@@ -87,7 +87,7 @@
         "TRACKKNIFE_BUILD_BENCHMARKS": "OFF",
         "TRACKKNIFE_BUILD_UI": "ON",
         "TRACKKNIFE_BUILD_WATCH": "OFF",
-        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "OFF",
+        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "ON",
         "TRACKKNIFE_ENABLE_UPNP": "ON",
         "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
       },
@@ -111,6 +111,20 @@
         "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "OFF",
         "TRACKKNIFE_ENABLE_UPNP": "ON",
         "TRACKKNIFE_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "macos-server",
+      "displayName": "Headless Melody engine with CoreAudio",
+      "inherits": "server",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "TRACKKNIFE_ENABLE_LOCAL_AUDIO": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
       }
     }
   ],
@@ -146,6 +160,10 @@
     {
       "name": "server",
       "configurePreset": "server"
+    },
+    {
+      "name": "macos-server",
+      "configurePreset": "macos-server"
     }
   ],
   "testPresets": [

@@ -57,9 +57,9 @@ browser or file manager first.
 
 ## macOS
 
-The macOS build runs the Trackknife desktop client and its engine, with UPnP
-speakers as the audio outputs. Install the build tools and libraries with
-Homebrew:
+The macOS build runs the Trackknife desktop client and its engine with native
+CoreAudio outputs and optional UPnP speakers. Install the build tools and
+libraries with Homebrew:
 
 ```sh
 brew install cmake ninja pkgconf qt ffmpeg libopenmpt taglib libebur128 \
@@ -76,10 +76,19 @@ cmake --build --preset macos
 ./build/macos/src/bench/trackknife
 ```
 
-Open **Settings → Engine**, enable **Discover UPnP speakers**, and choose a
-stream port. The Mac and renderer must be on the same LAN, and macOS may ask
-for permission to find devices on the local network. UPnP streams play at
-unity gain; the output reports ReplayGain as unavailable.
+The output menu beside the volume control lists the system default and the
+Mac's CoreAudio devices. Open **Settings → Engine** to enable **Discover UPnP
+speakers** and choose a stream port. The Mac and renderer must be on the same
+LAN, and macOS may ask for permission to find devices on the local network.
+UPnP streams play at unity gain; the output reports ReplayGain as unavailable.
+
+For a headless Mac that lends its speakers with `melodyd --agent`, use the
+`macos-server` preset. The generic `server` preset excludes local audio:
+
+```sh
+cmake --preset macos-server -DPKG_CONFIG_EXECUTABLE="$(brew --prefix)/bin/pkg-config"
+cmake --build --preset macos-server --target melodyd
+```
 
 ## From source
 
@@ -127,7 +136,7 @@ Relevant build switches are:
 | Switch | Default | Effect |
 | --- | --- | --- |
 | `TRACKKNIFE_ENABLE_UPNP` | On | Builds SSDP discovery and UPnP playback and requires libupnp. Set it to `OFF` for a build with no UPnP code or dependency. |
-| `TRACKKNIFE_ENABLE_LOCAL_AUDIO` | On on Linux; off elsewhere | Builds the PipeWire local-speaker backend. |
+| `TRACKKNIFE_ENABLE_LOCAL_AUDIO` | On on Linux and macOS | Builds PipeWire on Linux or CoreAudio on macOS. |
 | `TRACKKNIFE_BUILD_WATCH` | On on Linux; off elsewhere | Builds the inotify-based `melody-watch` utility. |
 
 UPnP also has a runtime switch: the desktop setting is off initially, and a

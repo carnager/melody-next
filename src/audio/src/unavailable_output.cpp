@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// The macOS port currently plays through network outputs. Keep the local
-// backend explicitly unavailable rather than advertising silent speakers.
+// Builds that explicitly disable local audio keep the adapter unavailable.
 #include "trackknife/audio/pipewire_output.hpp"
 #include <utility>
 namespace trackknife::audio {

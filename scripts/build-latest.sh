@@ -4,7 +4,7 @@
 set -euo pipefail
 
 desktop_preset=macos
-server_preset=server
+server_preset=macos-server
 server_host=${MELODY_SERVER_HOST:-192.168.1.111}
 server_path=${MELODY_SERVER_PATH:-/Users/zeltak/dev/melody-next}
 server_install_dir=${MELODY_SERVER_INSTALL_DIR:-melody}
@@ -25,7 +25,7 @@ push the fork's main branch, then build and install Melody on the server.
 
 Options:
   --desktop-preset NAME  Desktop CMake preset (default: macos)
-  --server-preset NAME   Server CMake preset (default: server)
+  --server-preset NAME   Server CMake preset (default: macos-server)
   --server HOST          SSH server (default: 192.168.1.111)
   --server-path PATH     Repository on the server
   --server-install-dir PATH

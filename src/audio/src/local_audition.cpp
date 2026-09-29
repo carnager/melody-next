@@ -1273,10 +1273,10 @@ core::Result<std::unique_ptr<LocalAuditionService>>
 LocalAuditionService::create(LocalAuditionConfig config) {
 #if !TRACKKNIFE_ENABLE_LOCAL_AUDIO
     static_cast<void>(config);
-    return std::unexpected(core::Error{
-        .code = core::ErrorCode::unsupported,
-        .message = "local audio is not available on macOS; select a UPnP renderer or remote agent",
-        .context = {}});
+    return std::unexpected(
+        core::Error{.code = core::ErrorCode::unsupported,
+                    .message = "local audio was disabled at build time; select a network output",
+                    .context = {}});
 #else
     if (!valid_local_audition_buffer_config(config.buffer)) {
         return std::unexpected(invalid_config(

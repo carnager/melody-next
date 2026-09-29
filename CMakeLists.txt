@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.28)
 project(
     Trackknife
     VERSION 0.0.1
-    DESCRIPTION "A fast native Linux audio player and library multitool"
+    DESCRIPTION "A fast native Linux and macOS audio player and library multitool"
     LANGUAGES CXX
 )
 
@@ -21,14 +21,14 @@ option(TRACKKNIFE_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
 option(TRACKKNIFE_WARNINGS_AS_ERRORS "Treat project warnings as errors" ON)
 option(TRACKKNIFE_ENABLE_CLANG_TIDY "Run clang-tidy during compilation" OFF)
 option(TRACKKNIFE_ENABLE_UPNP "Build UPnP renderer discovery and playback" ON)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
     set(TRACKKNIFE_LOCAL_AUDIO_DEFAULT ON)
     set(TRACKKNIFE_WATCH_DEFAULT ON)
 else()
     set(TRACKKNIFE_LOCAL_AUDIO_DEFAULT OFF)
     set(TRACKKNIFE_WATCH_DEFAULT OFF)
 endif()
-option(TRACKKNIFE_ENABLE_LOCAL_AUDIO "Build the PipeWire local-output backend"
+option(TRACKKNIFE_ENABLE_LOCAL_AUDIO "Build the platform local-output backend"
        ${TRACKKNIFE_LOCAL_AUDIO_DEFAULT})
 option(TRACKKNIFE_BUILD_WATCH "Build the Linux inotify melody-watch utility"
        ${TRACKKNIFE_WATCH_DEFAULT})
@@ -53,7 +53,7 @@ if(NOT TRACKKNIFE_CLI_ONLY)
     pkg_check_modules(SWSCALE REQUIRED IMPORTED_TARGET "libswscale>=7")
     pkg_check_modules(OPENMPT REQUIRED IMPORTED_TARGET "libopenmpt>=0.7")
     pkg_check_modules(TAGLIB REQUIRED IMPORTED_TARGET "taglib>=2.0")
-    if(TRACKKNIFE_ENABLE_LOCAL_AUDIO)
+    if(TRACKKNIFE_ENABLE_LOCAL_AUDIO AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
         pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET "libpipewire-0.3>=0.3.50")
     endif()
     if(TRACKKNIFE_ENABLE_UPNP)

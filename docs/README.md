@@ -21,7 +21,7 @@ their limits are.
 
 ## Current state
 
-Updated on 2026-09-27, through ADR-0236 and database schema 47.
+Updated on 2026-09-29, through ADR-0240 and database schema 47.
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
@@ -33,6 +33,7 @@ two-authority model in older ADRs and in `architecture.md`.
 [melody.md](melody.md) says how to run it.
 
 - [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md) — the UI and workflow stay exactly as they are.
+- [ADR-0240: CoreAudio output on macOS](adr/0240-coreaudio-output-on-macos.md).
 - [ADR-0236: Playback states are numbered, and say what the output was told](adr/0236-playback-states-are-numbered.md).
 - [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — implemented and optional.
 - [ADR-0234: Engines are connections, not a switch](adr/0234-engines-are-connections.md).

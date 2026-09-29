@@ -4,7 +4,12 @@
 
 #include "workspace/workspace.hpp"
 
+#include "uicommon/track_view_layout.hpp"
+
+#include <QObject>
 #include <QString>
+
+#include <vector>
 
 namespace trackknife::bench {
 
@@ -20,9 +25,25 @@ class WorkspaceView {
 
     // A passing message, gone after `timeout_ms`.
     virtual void showMessage(const QString& text, int timeout_ms) = 0;
+
+    // The lists as the window shows them. A list added is drawn, and shown
+    // at once when `select`; the list on show is the current one.
+    virtual void listAdded(Workspace::ListTab& tab, bool select) = 0;
+    virtual void showList(Workspace::ListTab& tab) = 0;
+    [[nodiscard]] virtual Workspace::ListTab* currentList() = 0;
+    [[nodiscard]] virtual std::vector<Workspace::ListTab*> listsInOrder() = 0;
+    // How a list's columns are arranged now, to be saved with it.
+    [[nodiscard]] virtual ui::TrackViewLayout
+    captureTrackViewLayout(const Workspace::ListTab& tab) const = 0;
+    // Who owns a list's model: it has to outlive what shows it.
+    [[nodiscard]] virtual QObject* modelParent() = 0;
+    // A list's name, kind or state changed.
+    virtual void refreshTabChrome(Workspace::ListTab& tab) = 0;
     // A list was edited: saved, and told to its engine when it plays.
     virtual void markTabDirty(Workspace::ListTab& tab) = 0;
     virtual void playRow(Workspace::ListTab& tab, int row) = 0;
+    // Hands the engines the file moves they have not taken yet.
+    virtual void flushEngineRelocations() = 0;
     // An album's cover arrived: whatever shows it outside the lists -- the
     // player's header -- may now.
     virtual void artworkLoaded(const QString& key) = 0;

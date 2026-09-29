@@ -645,7 +645,7 @@ BenchMainWindow::engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteF
     auto* const persistence_service = persistence_;
     return [this, persistence_service, work = std::move(work)] {
         auto documents = collectDocuments();
-        auto view_layouts = collectTrackViewLayouts();
+        auto view_layouts = workspace_.collectTrackViewLayouts();
         return ArtworkWritePlanApplier{[persistence_service, work, documents = std::move(documents),
                                         view_layouts = std::move(view_layouts)](
                                            const metadata::ArtworkWritePlan& plan,
@@ -689,7 +689,7 @@ BenchMainWindow::engineMetadataPlanApplierFactory(std::shared_ptr<engine::Remote
     auto* const persistence_service = persistence_;
     return [this, persistence_service, work = std::move(work)] {
         auto documents = collectDocuments();
-        auto view_layouts = collectTrackViewLayouts();
+        auto view_layouts = workspace_.collectTrackViewLayouts();
         return MetadataWritePlanApplier{
             [persistence_service, work, documents = std::move(documents),
              view_layouts =
@@ -753,7 +753,7 @@ BenchMainWindow::enginePublicationPlanApplierFactory(std::shared_ptr<engine::Rem
     return [this, persistence_service, work = std::move(work), elsewhere, mount = std::move(mount),
             mounted = std::move(mounted)] {
         auto documents = collectDocuments();
-        auto view_layouts = collectTrackViewLayouts();
+        auto view_layouts = workspace_.collectTrackViewLayouts();
         return FilePublicationPlanApplier{
             [persistence_service, work, elsewhere, mount, mounted, documents = std::move(documents),
              view_layouts = std::move(view_layouts)](

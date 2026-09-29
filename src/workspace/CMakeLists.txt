@@ -14,6 +14,7 @@ qt_add_library(
     workspace.cpp
     workspace.hpp
     workspace_ingest.cpp
+    workspace_lists.cpp
     workspace_view.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp

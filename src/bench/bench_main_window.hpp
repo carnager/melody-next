@@ -207,10 +207,17 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     BenchMainWindow& operator=(const BenchMainWindow&) = delete;
 
     void importM3u8Path(std::string raw_path);
-    void openLocalPaths(std::vector<std::string> raw_paths);
+    void openLocalPaths(std::vector<std::string> raw_paths) {
+        workspace_.openLocalPaths(std::move(raw_paths));
+    }
 
     // WorkspaceView
     void showMessage(const QString& text, int timeout_ms) override;
+    void listAdded(ListTab& tab, bool select) override;
+    void showList(ListTab& tab) override;
+    [[nodiscard]] ListTab* currentList() override;
+    [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
+    [[nodiscard]] QObject* modelParent() override;
     void artworkLoaded(const QString& key) override;
 
   protected:
@@ -259,12 +266,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void resetPanelLayout();
     void refreshPanelLayoutActions();
     void initializePersistence();
-    void restoreLists(std::vector<persistence::ListDocument> documents);
     void schedulePersist() { workspace_.schedulePersist(); }
-    void persistNow(bool wait);
+    void persistNow(bool wait) { workspace_.persistNow(wait); }
     // ADR-0233: another client's version of a list open here, and a save of
     // one that someone else saved first.
-    void adoptEngineList(const persistence::ListDocument& document);
     void settleListConflict(const QString& id);
     // The lists of every engine this window reaches, to open one as a tab.
     void showOpenListDialog();
@@ -274,10 +279,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] int engineRank(const QWidget* view) const;
     bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
-    [[nodiscard]] std::vector<std::pair<QString, QString>>
-    listTargets(const EngineKey& engine) const;
+    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(const EngineKey& engine) const {
+        return workspace_.listTargets(engine);
+    }
     // Then, whatever is to be done with it once it is open.
-    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {});
+    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {}) {
+        workspace_.openEngineList(key, id, std::move(then));
+    }
     // ADR-0233: the lists as a pane beside the tracks instead of as a tab
     // bar, by the setting below.
     static constexpr auto lists_display_key = "appearance/lists-display";
@@ -301,8 +309,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QTimer* lists_present_timer_{nullptr};
     void backupWorkspace();
     void scheduleWorkspaceRestore();
-    [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
-    [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
+    [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments() {
+        return workspace_.collectDocuments();
+    }
     void refreshActiveContext();
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
     void addLocalRateMenus(QMenu* menu, QTableView* view);
@@ -313,7 +322,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
 
     void showDynamicPlaylists();
 
-    ListTab* addListTab(persistence::ListDocument document, bool select);
+    ListTab* addListTab(persistence::ListDocument document, bool select) {
+        return workspace_.addList(std::move(document), select);
+    }
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
@@ -341,7 +352,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
                               const QString& name);
     [[nodiscard]] bool canReplayCrossTabMove(bool undo);
     bool replayCrossTabMove(bool undo);
-    void refreshTabChrome(ListTab& tab);
+    void refreshTabChrome(ListTab& tab) override;
     void setActiveLocalList(const QString& id);
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
@@ -415,7 +426,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
     void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
     void queueEngineRelocation(const std::string& from, const std::string& to);
-    void flushEngineRelocations();
+    void flushEngineRelocations() override;
     void storePendingRelocations() const;
     void loadPendingRelocations();
     void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
@@ -426,7 +437,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     defaultTrackViewLayout(ui::TrackViewPresentation presentation =
                                ui::TrackViewPresentation::albums_side_artwork) const;
     void applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout);
-    [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const;
+    [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const override;
     void applyTrackViewLayout(QTableView* view, ui::TrackViewLayout& state,
                               const ui::TrackViewLayout& layout);
     [[nodiscard]] ui::TrackViewLayout

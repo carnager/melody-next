@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -264,6 +265,28 @@ class Workspace final : public QObject {
     [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id);
     // Saves the lists a moment from now.
     void schedulePersist();
+    // Saves them now; `wait` until it is done, as at quitting.
+    void persistNow(bool wait);
+
+    // The lists. One is added with its rows as its document holds them, and
+    // the window is asked to show it; its tags and covers are looked for.
+    ListTab* addList(persistence::ListDocument document, bool select);
+    // The lists as the workspace starts: those saved, or one to begin with.
+    void restoreLists(std::vector<persistence::ListDocument> documents);
+    // What is saved of each open list, in the order they are shown.
+    [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
+    [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
+    // ADR-0233: another client's version of a list open here. A row that is
+    // the same entry of the same file keeps what is already known of it.
+    void adoptEngineList(const persistence::ListDocument& document);
+    // The open lists of one engine, in the order shown, by id and name.
+    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(const EngineKey& engine) const;
+    // An engine's list opened here -- or shown, when it already is -- and
+    // then whatever is to be done with it.
+    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {});
+    // Files on this computer into a local list: the one shown when it is
+    // one, else the first there is, else a new one.
+    void openLocalPaths(std::vector<std::string> raw_paths);
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

@@ -18,7 +18,7 @@ class Renderer final : public discovery::UpnpControl {
   public:
     std::string state{"STOPPED"}, uri, next, position{"0:00:00"};
     std::string sink{"http-get:*:audio/flac:*,http-get:*:audio/wav:*"};
-    bool reject_next{false}, fail{false};
+    bool reject_next{false}, reject_seek_while_stopped{false}, fail{false};
     int volume{100};
     std::vector<std::string> actions;
     discovery::UpnpValues report;
@@ -55,6 +55,11 @@ class Renderer final : public discovery::UpnpControl {
             state = "STOPPED";
         }
         if (name == "Seek") {
+            if (reject_seek_while_stopped && state != "PLAYING") {
+                return std::unexpected(core::Error{.code = core::ErrorCode::unsupported,
+                                                   .message = "seek needs PLAYING",
+                                                   .context = {}});
+            }
             position = args.at("Target");
         }
         if (name == "SetVolume") {
@@ -207,6 +212,19 @@ int main() {
     audition.poll();
     require(audition.snapshot().state == audio::LocalAuditionState::paused,
             "restored stopped transport does not advance queue");
+    renderer->position = "0:00:00";
+    renderer->reject_seek_while_stopped = true;
+    require(audition.restore_paused("/track.flac", {}, {}, {}, 42000, {}).has_value(),
+            "restore defers a seek rejected while stopped");
+    require(audition.snapshot().state == audio::LocalAuditionState::paused &&
+                audition.snapshot().position_sample == 42000,
+            "deferred restore keeps its requested position");
+    require(audition.play().has_value() && renderer->position == "0:00:42",
+            "play makes the renderer seekable before restoring its position");
+    audition.poll();
+    require(audition.snapshot().state == audio::LocalAuditionState::playing &&
+                audition.snapshot().position_sample == 42000,
+            "output switching resumes at the saved position");
     parsed->online = false;
     audition.update(*parsed);
     require(!audition.online(), "byebye marks output offline");

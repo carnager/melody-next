@@ -221,26 +221,35 @@ core::Result<void> UpnpAudition::load(StreamRequest request, bool playing,
     if (!set) {
         return std::unexpected(set.error());
     }
-    if (position_ms > 0) {
-        auto seek = call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(position_ms)}});
-        if (!seek) {
-            return std::unexpected(seek.error());
-        }
+
+    {
+        const std::lock_guard lock{state_mutex_};
+        current_ = std::move(*track);
+        next_.reset();
+        adopt(*current_, 0, false);
+        state_.position_sample = position_ms;
+        state_.state = playing ? State::buffering : State::paused;
+        playing_requested_ = playing;
+        saw_playing_ = false;
+        pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
     }
     if (playing) {
         auto started = call("Play", {{"Speed", "1"}});
         if (!started) {
+            const std::lock_guard lock{state_mutex_};
+            state_.state = State::paused;
+            state_.error = started.error();
+            playing_requested_ = false;
             return std::unexpected(started.error());
         }
+        if (pending_seek_ms_) {
+            auto sought =
+                call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
+            if (sought) {
+                pending_seek_ms_.reset();
+            }
+        }
     }
-    const std::lock_guard lock{state_mutex_};
-    current_ = std::move(*track);
-    next_.reset();
-    adopt(*current_, 0, false);
-    state_.position_sample = position_ms;
-    state_.state = playing ? State::buffering : State::paused;
-    playing_requested_ = playing;
-    saw_playing_ = false;
     return {};
 }
 core::Result<void> UpnpAudition::arm(StreamRequest request, std::uint64_t token) {
@@ -277,9 +286,9 @@ void UpnpAudition::poll() {
     auto transport = call("GetTransportInfo");
     auto position = call("GetPositionInfo");
     const auto event = control_->take_events(renderer_.udn);
-    const std::lock_guard lock{state_mutex_};
     if (!transport || !position) {
         // A network fault never looks like end-of-track.
+        const std::lock_guard lock{state_mutex_};
         state_.state = State::paused;
         state_.error = !transport ? transport.error() : position.error();
         return;
@@ -299,6 +308,20 @@ void UpnpAudition::poll() {
     const auto event_status = value(event, "TransportState");
     const auto status =
         event_status.empty() ? value(*transport, "CurrentTransportState") : event_status;
+    std::optional<core::Error> pending_seek_error;
+    std::optional<std::int64_t> completed_seek;
+    if (status == "PLAYING" && pending_seek_ms_) {
+        auto sought =
+            call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
+        if (sought) {
+            completed_seek = pending_seek_ms_;
+            pending_seek_ms_.reset();
+        } else {
+            pending_seek_error = std::move(sought.error());
+        }
+    }
+
+    const std::lock_guard lock{state_mutex_};
     if (status == "PLAYING") {
         state_.state = State::playing;
         saw_playing_ = true;
@@ -312,7 +335,10 @@ void UpnpAudition::poll() {
         state_.state = State::ended;
         playing_requested_ = false;
     }
-    if (auto position_ms = renderer_time_ms(value(*position, "RelTime"))) {
+    if (completed_seek) {
+        state_.position_sample = *completed_seek;
+    } else if (auto position_ms = renderer_time_ms(value(*position, "RelTime"));
+               !pending_seek_ms_ && position_ms) {
         state_.position_sample = *position_ms;
     }
     if (auto duration = renderer_time_ms(value(*position, "TrackDuration"));
@@ -325,7 +351,7 @@ void UpnpAudition::poll() {
     if (ec == std::errc{} && end == volume.data() + volume.size()) {
         state_.volume_percent = std::clamp(percent, 0, 100);
     }
-    state_.error.reset();
+    state_.error = std::move(pending_seek_error);
 }
 void UpnpAudition::run() {
     for (;;) {
@@ -392,6 +418,15 @@ core::Result<void> UpnpAudition::play() {
     if (!played) {
         return std::unexpected(played.error());
     }
+    if (pending_seek_ms_) {
+        auto sought =
+            call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
+        if (sought) {
+            pending_seek_ms_.reset();
+        }
+        // PLAYING can lag behind the Play response. poll() retries the seek
+        // while keeping the requested position visible.
+    }
     const std::lock_guard lock{state_mutex_};
     playing_requested_ = true;
     state_.state = State::buffering;
@@ -414,6 +449,7 @@ core::Result<void> UpnpAudition::stop() {
     const std::lock_guard lock{state_mutex_};
     current_.reset();
     next_.reset();
+    pending_seek_ms_.reset();
     state_.raw_path.clear();
     state_.next_raw_path.clear();
     state_.state = State::empty;

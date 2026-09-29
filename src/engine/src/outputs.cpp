@@ -12,6 +12,7 @@
 #include <array>
 
 #include <chrono>
+#include <iostream>
 #include <utility>
 
 namespace trackknife::engine {
@@ -198,7 +199,10 @@ core::Result<void> Outputs::select(const std::string& id) {
     // An agent chosen while it is away is where playback waits; switching
     // reports that it could not take the music up yet, which is not a
     // refusal of the choice.
-    static_cast<void>(player_->set_output(chosen));
+    if (auto moved = player_->set_output(chosen); !moved) {
+        std::cerr << "melodyd: selected output " << id
+                  << " but could not move playback yet: " << moved.error().message << '\n';
+    }
     announce();
     return {};
 }

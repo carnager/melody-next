@@ -93,6 +93,9 @@ class UpnpAudition final : public audio::Audition {
     audio::LocalAuditionSnapshot state_;
     std::optional<RendererTrack> current_;
     std::optional<RendererTrack> next_;
+    // Some renderers reject Seek while STOPPED. A restored position waits
+    // here until Play has put the transport into a seekable state.
+    std::optional<std::int64_t> pending_seek_ms_;
     std::uint64_t next_token_{0};
     std::string sink_;
     bool gapless_supported_{true};

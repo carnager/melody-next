@@ -38,6 +38,11 @@ renderer from an agent:
 that a renderer that changes its IP address is still the same output. They
 are selected, restored and persisted like agents.
 
+When playback moves between renderers, the new renderer receives the current
+track and position. Position restoration is deferred until after `Play` because
+some otherwise conforming renderers reject `Seek` while their transport is
+stopped. Polling retries that seek while the device enters `PLAYING`.
+
 **Found by SSDP.** Engines find each other by mDNS (ADR-0229). Renderers
 announce themselves over SSDP (`urn:schemas-upnp-org:device:MediaRenderer:1`),
 so that needs a small listener in `src/discovery`. It could be switched off,
@@ -76,8 +81,8 @@ headless engine with `--upnp`. `--upnp-interface` restricts discovery to one
 network interface. UPnP requires the HTTP stream listener on a LAN-reachable
 address.
 
-The `macos` CMake preset enables UPnP and disables the Linux-only PipeWire
-local output and inotify watcher. Those capabilities have independent
+The `macos` CMake preset enables UPnP and the CoreAudio local output while
+disabling the Linux-only inotify watcher. Those capabilities have independent
 `TRACKKNIFE_ENABLE_LOCAL_AUDIO` and `TRACKKNIFE_BUILD_WATCH` switches, so the
 same source tree can produce a smaller build without UPnP or platform-specific
 helpers.

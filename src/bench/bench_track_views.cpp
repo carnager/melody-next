@@ -24,41 +24,6 @@
 
 namespace trackknife::bench {
 
-ui::TrackViewLayout
-BenchMainWindow::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) const {
-    std::vector<ui::TrackViewColumnLayout> columns;
-    columns.reserve(track_column_specs.size());
-    for (const auto& spec : track_column_specs) {
-        auto width = spec.default_width;
-        // Ratings stay one click away in the Columns menu rather than
-        // claiming space in every default view.
-        bool visible = spec.logical < local_rating_column;
-        if (presentation == ui::TrackViewPresentation::albums_side_artwork &&
-            (spec.logical == local_artist_column || spec.logical == local_album_column ||
-             spec.logical == local_date_column)) {
-            // The album's header says these; a track whose artist differs
-            // says so after its title.
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
-                   spec.logical == local_artwork_column) {
-            width = 42;
-        } else if (presentation == ui::TrackViewPresentation::plain_columns &&
-                   spec.logical == local_artwork_column) {
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::compact_queue) {
-            visible = spec.logical == local_artist_column ||
-                      spec.logical == local_track_number_column ||
-                      spec.logical == local_title_column || spec.logical == local_album_column ||
-                      spec.logical == local_length_column;
-        }
-        columns.push_back(ui::TrackViewColumnLayout{
-            .id = QString::fromLatin1(spec.id), .width = width, .visible = visible});
-    }
-    return ui::TrackViewLayout{.schema_version = ui::track_view_layout_schema_version,
-                               .presentation = presentation,
-                               .columns = std::move(columns)};
-}
-
 void BenchMainWindow::applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout) {
     applyTrackViewLayout(tab.view, tab.view_layout, layout);
 }

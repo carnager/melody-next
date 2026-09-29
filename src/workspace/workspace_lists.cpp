@@ -5,6 +5,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 #include "uicommon/list_persistence_service.hpp"
+#include "uicommon/track_view_layout.hpp"
 #include "uicommon/debug_log.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -524,6 +525,99 @@ void Workspace::closeList(ListTab& tab) {
             true));
     }
     schedulePersist();
+}
+
+ui::TrackViewLayout Workspace::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) {
+    std::vector<ui::TrackViewColumnLayout> columns;
+    columns.reserve(track_column_specs.size());
+    for (const auto& spec : track_column_specs) {
+        auto width = spec.default_width;
+        // Ratings stay one click away in the Columns menu rather than
+        // claiming space in every default view.
+        bool visible = spec.logical < local_rating_column;
+        if (presentation == ui::TrackViewPresentation::albums_side_artwork &&
+            (spec.logical == local_artist_column || spec.logical == local_album_column ||
+             spec.logical == local_date_column)) {
+            // The album's header says these; a track whose artist differs
+            // says so after its title.
+            visible = false;
+        } else if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
+                   spec.logical == local_artwork_column) {
+            width = 42;
+        } else if (presentation == ui::TrackViewPresentation::plain_columns &&
+                   spec.logical == local_artwork_column) {
+            visible = false;
+        } else if (presentation == ui::TrackViewPresentation::compact_queue) {
+            visible = spec.logical == local_artist_column ||
+                      spec.logical == local_track_number_column ||
+                      spec.logical == local_title_column || spec.logical == local_album_column ||
+                      spec.logical == local_length_column;
+        }
+        columns.push_back(ui::TrackViewColumnLayout{
+            .id = QString::fromLatin1(spec.id), .width = width, .visible = visible});
+    }
+    return ui::TrackViewLayout{.schema_version = ui::track_view_layout_schema_version,
+                               .presentation = presentation,
+                               .columns = std::move(columns)};
+}
+
+ui::TrackViewLayout Workspace::restoredTrackViewLayout(ListTab& tab) {
+    auto layout = defaultTrackViewLayout();
+    const auto binding = QStringLiteral("local:%1").arg(document_text(tab.document.id));
+    if (const auto stored = restored_track_view_layouts_.value(binding); !stored.isEmpty()) {
+        QString layout_error;
+        if (auto decoded = ui::deserializeTrackViewLayout(stored, trackColumnIds(), &layout_error);
+            decoded) {
+            layout = std::move(*decoded);
+        } else {
+            tab.view_layout_persistence_protected = true;
+            tab.preserved_view_layout = stored;
+            view_->showMessage(
+                QStringLiteral("Track layout was not loaded (%1); the saved value was preserved")
+                    .arg(layout_error),
+                7'000);
+        }
+    }
+    return layout;
+}
+
+void Workspace::removeRows(ListTab& tab, std::vector<int> rows) {
+    if (rows.empty()) {
+        return;
+    }
+    tab.model->removeRowIndexes(std::move(rows));
+    markTabDirty(tab);
+}
+
+bool Workspace::replayListEdit(ListTab* tab, const bool undo) {
+    if (tab == nullptr) {
+        return false;
+    }
+    if (!replayCrossTabMove(undo) && !(undo ? tab->model->undo() : tab->model->redo())) {
+        return false;
+    }
+    markTabDirty(*tab);
+    enqueueUnprobedRows(*tab);
+    syncArtwork(*tab);
+    return true;
+}
+
+Workspace::HistoryTexts Workspace::historyTexts(const ListTab* tab) {
+    const auto* model = tab == nullptr ? nullptr : tab->model;
+    const auto cross_tab_undo = canReplayCrossTabMove(true);
+    const auto cross_tab_redo = canReplayCrossTabMove(false);
+    HistoryTexts texts;
+    texts.can_undo = cross_tab_undo || (model != nullptr && model->canUndo());
+    texts.can_redo = cross_tab_redo || (model != nullptr && model->canRedo());
+    texts.undo = cross_tab_undo                        ? tr("Undo Move tracks between tabs")
+                 : model != nullptr && model->canUndo() ? tr("Undo %1").arg(model->undoLabel())
+                                                        : tr("Undo list edit");
+    texts.redo = cross_tab_redo                        ? tr("Redo Move tracks between tabs")
+                 : model != nullptr && model->canRedo() ? tr("Redo %1").arg(model->redoLabel())
+                                                        : tr("Redo list edit");
+    // Sorting, reversing, shuffling and removing duplicates need two rows.
+    texts.editable = model != nullptr && model->rowCount() > 1;
+    return texts;
 }
 
 } // namespace trackknife::bench

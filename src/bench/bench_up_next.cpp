@@ -116,16 +116,8 @@ void BenchMainWindow::buildUpNext() {
             return enqueueLibraryDrop(files, position);
         });
     const auto playRequest = [this](const QModelIndex& index) {
-        if (!index.isValid())
-            return;
-        if (index.row() < static_cast<int>(playback_.requests.pending().size())) {
-            playback_.requests.move(
-                playback_.requests.pending()[static_cast<std::size_t>(index.row())].id, 0);
-            refreshUpNext();
-            // The engine plays asks before the list, so Next is this one.
-            if (playingOnEngine())
-                transport_->next();
-        }
+        if (index.isValid())
+            workspace_.playUpNextRow(index.row());
     };
     up_next_view_->setActivateCallback(playRequest);
     layout->addWidget(up_next_view_, 1);
@@ -187,15 +179,7 @@ void BenchMainWindow::buildUpNext() {
     resume->setAutoRaise(true);
     footer_layout->addWidget(resume);
     layout->addWidget(footer);
-    connect(resume, &QToolButton::clicked, this, [this] {
-        const bool asking = playback_.requests.active().has_value();
-        playback_.requests.clear();
-        persistUpNext();
-        refreshUpNext();
-        // With no asks left, the engine's Next returns to where it left off.
-        if (asking && playingOnEngine())
-            transport_->next();
-    });
+    connect(resume, &QToolButton::clicked, &workspace_, &Workspace::returnToList);
     auto* remove = removeAction;
     remove->setShortcut(Qt::Key_Delete);
     remove->setShortcutContext(Qt::WidgetWithChildrenShortcut);

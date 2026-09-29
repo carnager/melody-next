@@ -18,7 +18,13 @@ constexpr int persist_debounce_ms = 1'000;
 
 } // namespace
 
-Workspace::Workspace(QObject* parent) : QObject(parent) {}
+Workspace::Workspace(QObject* parent) : QObject(parent) {
+    layout_pushes_.setMaxThreadCount(1);
+    // ADR-0234: this computer's engine is always the first link, connected
+    // or not; remotes follow when configured.
+    engines_.push_back(std::make_unique<EngineLink>());
+    engines_.front()->key = EngineKey::local();
+}
 
 Workspace::~Workspace() {
     // The connections before the catalogues they were made from: one waits

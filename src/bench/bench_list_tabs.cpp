@@ -667,22 +667,7 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
     added.view = view;
     auto* raw_tab = &added;
     view->setProperty("bench-tab-pointer", QVariant::fromValue<void*>(raw_tab));
-    auto layout = defaultTrackViewLayout();
-    const auto binding = QStringLiteral("local:%1").arg(id);
-    if (const auto stored = restored_track_view_layouts_.value(binding); !stored.isEmpty()) {
-        QString layout_error;
-        if (auto decoded = ui::deserializeTrackViewLayout(stored, trackColumnIds(), &layout_error);
-            decoded) {
-            layout = std::move(*decoded);
-        } else {
-            raw_tab->view_layout_persistence_protected = true;
-            raw_tab->preserved_view_layout = stored;
-            statusBar()->showMessage(
-                QStringLiteral("Track layout was not loaded (%1); the saved value was preserved")
-                    .arg(layout_error),
-                7'000);
-        }
-    }
+    const auto layout = workspace_.restoredTrackViewLayout(*raw_tab);
     applyTrackViewLayout(*raw_tab, layout);
     connect(view->horizontalHeader(), &QHeaderView::sectionMoved, this,
             [this, id](const int, const int, const int) {
@@ -1614,28 +1599,15 @@ void BenchMainWindow::refreshListHistoryActions() {
         reverse_list_action_->setEnabled(editable);
         deduplicate_list_action_->setEnabled(editable);
     }
-    const auto cross_tab_undo = canReplayCrossTabMove(true);
-    const auto cross_tab_redo = canReplayCrossTabMove(false);
-    undo_list_action_->setEnabled(cross_tab_undo || (model != nullptr && model->canUndo()));
-    redo_list_action_->setEnabled(cross_tab_redo || (model != nullptr && model->canRedo()));
-    undo_list_action_->setText(cross_tab_undo ? tr("Undo Move tracks between tabs")
-                               : model != nullptr && model->canUndo()
-                                   ? tr("Undo %1").arg(model->undoLabel())
-                                   : tr("Undo list edit"));
-    redo_list_action_->setText(cross_tab_redo ? tr("Redo Move tracks between tabs")
-                               : model != nullptr && model->canRedo()
-                                   ? tr("Redo %1").arg(model->redoLabel())
-                                   : tr("Redo list edit"));
+    const auto texts = workspace_.historyTexts(tab);
+    undo_list_action_->setEnabled(texts.can_undo);
+    redo_list_action_->setEnabled(texts.can_redo);
+    undo_list_action_->setText(texts.undo);
+    redo_list_action_->setText(texts.redo);
 }
 
 void BenchMainWindow::replayListEdit(const bool undo) {
-    auto* tab = currentListTab();
-    if (tab == nullptr)
-        return;
-    if (replayCrossTabMove(undo) || (undo ? tab->model->undo() : tab->model->redo())) {
-        markTabDirty(*tab);
-        enqueueUnprobedRows(*tab);
-        syncArtwork(*tab);
+    if (workspace_.replayListEdit(currentListTab(), undo)) {
         refreshSelectionStatus();
     }
     refreshListHistoryActions();
@@ -1652,11 +1624,7 @@ void BenchMainWindow::removeSelectedRows() {
     for (const auto& index : selection) {
         rows.push_back(index.row());
     }
-    if (rows.empty()) {
-        return;
-    }
-    tab->model->removeRowIndexes(std::move(rows));
-    markTabDirty(*tab);
+    workspace_.removeRows(*tab, std::move(rows));
 }
 
 void BenchMainWindow::transferSelectedRows(QTableView* source, const QString& target_id,

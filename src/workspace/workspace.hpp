@@ -293,6 +293,13 @@ class Workspace final : public QObject {
     // What is saved of each open list, in the order they are shown.
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
     [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
+    // A presentation's columns as a new list shows them.
+    [[nodiscard]] static ui::TrackViewLayout defaultTrackViewLayout(
+        ui::TrackViewPresentation presentation = ui::TrackViewPresentation::albums_side_artwork);
+    // The columns a list was saved with, or the default when there are none
+    // -- or they cannot be read, when what was saved is kept and not
+    // overwritten.
+    [[nodiscard]] ui::TrackViewLayout restoredTrackViewLayout(ListTab& tab);
     // ADR-0233: another client's version of a list open here. A row that is
     // the same entry of the same file keeps what is already known of it.
     void adoptEngineList(const persistence::ListDocument& document);
@@ -312,6 +319,8 @@ class Workspace final : public QObject {
     // to its engine, whose queue it is. A change the engine made is saved and
     // never sent back.
     void markTabDirty(ListTab& tab);
+    // Rows taken out of a list, as one step to undo.
+    void removeRows(ListTab& tab, std::vector<int> rows);
     void takeEngineChange(ListTab& tab);
     // The list playback was last started from.
     void setActiveLocalList(const QString& id);
@@ -321,6 +330,17 @@ class Workspace final : public QObject {
                       bool dynamic, std::vector<int> rows, const QString& target_id, bool move,
                       int insertion_row);
     [[nodiscard]] bool canReplayCrossTabMove(bool undo);
+    // A list's last edit undone, or redone -- a move between two lists as
+    // one step. False when there was none.
+    bool replayListEdit(ListTab* tab, bool undo);
+    struct HistoryTexts {
+        QString undo;
+        QString redo;
+        bool can_undo{false};
+        bool can_redo{false};
+        bool editable{false};
+    };
+    [[nodiscard]] HistoryTexts historyTexts(const ListTab* tab);
     bool replayCrossTabMove(bool undo);
 
     // ADR-0227, ADR-0234: paths moving from one engine's list to another's,
@@ -427,6 +447,12 @@ class Workspace final : public QObject {
     // The rows `selected` removed (1), moved up (2), moved down (3), or to
     // an insertion `destination`.
     void editUpNextRows(std::vector<bool> selected, int operation, int destination = -1);
+    // An ask played now, before the others; all of them dropped and the
+    // list gone back to.
+    void playUpNextRow(int row);
+    void returnToList();
+    // A list's `rows` asked for: at the front (0), the end (-1) or `position`.
+    void enqueueRows(const ListTab& tab, std::vector<int> rows, int position);
     // Its rows, covers and the engine's requests brought up to date; true
     // when the rows were replaced.
     bool syncUpNextModel();

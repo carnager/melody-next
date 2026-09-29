@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "uicommon/track_grouping.hpp"
+
 #include <QStyledItemDelegate>
 
 #include <utility>
@@ -9,17 +11,6 @@
 class QAbstractItemModel;
 
 namespace trackknife::ui {
-
-// What an album group's header says: the album, and a quieter line of
-// "artist · year · N tracks · length" beside it.
-struct AlbumHeaderText {
-    QString album;
-    QString details;
-};
-
-// The header text of the group starting at `first_row`, read from its rows.
-[[nodiscard]] AlbumHeaderText albumHeaderText(const QAbstractItemModel& model, int first_row,
-                                              int album_column, int date_column);
 
 // Draws a group header into `rect`: the album bold, the details muted, and a
 // hairline above it that separates it from the group before (`separated`).
@@ -34,15 +25,11 @@ class QueueItemDelegate final : public QStyledItemDelegate {
     Q_OBJECT
 
   public:
-    static constexpr int album_header_height = 34;
-    // Space above a run of lone tracks that follows an album, where its
-    // hairline goes.
-    static constexpr int loose_run_gap = 10;
-    // Where a group's hairline is drawn, below the top of its header or gap,
-    // so it does not touch the row above.
-    static constexpr int hairline_offset = 5;
-    // Above the first track of each disc, in an album of several.
-    static constexpr int disc_header_height = 26;
+    // The shared measures (track_grouping.hpp), by their older names.
+    static constexpr int album_header_height = ui::album_header_height;
+    static constexpr int loose_run_gap = ui::loose_run_gap;
+    static constexpr int hairline_offset = ui::hairline_offset;
+    static constexpr int disc_header_height = ui::disc_header_height;
 
     explicit QueueItemDelegate(QObject* parent = nullptr);
 

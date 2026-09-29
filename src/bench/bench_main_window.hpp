@@ -443,9 +443,11 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
                                            const metadata::MetadataDocument& document);
     void removeSelectedRows();
     void transferSelectedRows(QTableView* source, const QString& target_id, bool move);
-    [[nodiscard]] ui::TrackViewLayout
+    [[nodiscard]] static ui::TrackViewLayout
     defaultTrackViewLayout(ui::TrackViewPresentation presentation =
-                               ui::TrackViewPresentation::albums_side_artwork) const;
+                               ui::TrackViewPresentation::albums_side_artwork) {
+        return Workspace::defaultTrackViewLayout(presentation);
+    }
     void applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout);
     [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const override;
     void applyTrackViewLayout(QTableView* view, ui::TrackViewLayout& state,

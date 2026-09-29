@@ -23,6 +23,8 @@ qt_add_library(
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp
+    startup.cpp
+    startup.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp
     ../bench/bench_main_window_helpers.cpp
@@ -80,6 +82,8 @@ qt_add_library(
     ../uicommon/panel_layout.cpp
     ../uicommon/panel_layout.hpp
     ../uicommon/rating_color.hpp
+    ../uicommon/track_grouping.cpp
+    ../uicommon/track_grouping.hpp
     ../uicommon/track_row_roles.hpp
     ../uicommon/track_view_layout.cpp
     ../uicommon/track_view_layout.hpp

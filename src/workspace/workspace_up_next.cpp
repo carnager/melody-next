@@ -385,4 +385,39 @@ bool Workspace::syncUpNextModel() {
     return replaced;
 }
 
+void Workspace::playUpNextRow(const int row) {
+    if (row < 0 || row >= static_cast<int>(playback_.requests.pending().size())) {
+        return;
+    }
+    playback_.requests.move(playback_.requests.pending()[static_cast<std::size_t>(row)].id, 0);
+    view_->refreshUpNext();
+    // The engine plays asks before the list, so Next is this one.
+    if (playingOnEngine()) {
+        transport_->next();
+    }
+}
+
+void Workspace::returnToList() {
+    const bool asking = playback_.requests.active().has_value();
+    playback_.requests.clear();
+    persistUpNext();
+    view_->refreshUpNext();
+    // With no asks left, the engine's Next returns to where it left off.
+    if (asking && playingOnEngine()) {
+        transport_->next();
+    }
+}
+
+void Workspace::enqueueRows(const ListTab& tab, std::vector<int> rows, const int position) {
+    std::ranges::sort(rows);
+    std::vector<LocalTrackRow> tracks;
+    for (const auto row : rows) {
+        if (row >= 0 && row < static_cast<int>(tab.model->rows().size())) {
+            tracks.push_back(tab.model->rows()[static_cast<std::size_t>(row)]);
+        }
+    }
+    enqueueLocalRequests(std::move(tracks), position, EngineKey::of(tab.document));
+    view_->refreshUpNext();
+}
+
 } // namespace trackknife::bench

@@ -22,6 +22,10 @@ enum class TrackViewPresentation {
     compact_queue,
 };
 
+// A presentation as it is saved: "albums-side-artwork" and so on.
+[[nodiscard]] QString trackViewPresentationId(TrackViewPresentation presentation);
+[[nodiscard]] std::optional<TrackViewPresentation> trackViewPresentationFromId(const QString& id);
+
 struct TrackViewColumnLayout {
     QString id;
     int width{100};

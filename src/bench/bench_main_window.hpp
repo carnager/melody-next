@@ -350,10 +350,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
                               const QString& name);
-    [[nodiscard]] bool canReplayCrossTabMove(bool undo);
-    bool replayCrossTabMove(bool undo);
+    [[nodiscard]] bool canReplayCrossTabMove(bool undo) { return workspace_.canReplayCrossTabMove(undo); }
+    bool replayCrossTabMove(bool undo) { return workspace_.replayCrossTabMove(undo); }
     void refreshTabChrome(ListTab& tab) override;
-    void setActiveLocalList(const QString& id);
+    void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
     void refreshPlaybackCursor(bool jump = false);
     void buildShortcuts();
     void showCommandPalette();
@@ -368,16 +368,16 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QPointer<QTableView> followed_playback_view_;
     QPersistentModelIndex followed_playback_index_;
     void refreshTabActions();
-    void refreshListHistoryActions();
+    void refreshListHistoryActions() override;
     void replayListEdit(bool undo);
     // An edit made here: saved, and -- to the list playing -- told to its
     // engine, whose queue it is.
-    void markTabDirty(ListTab& tab) override;
+    void markTabDirty(ListTab& tab) { workspace_.markTabDirty(tab); }
     // A change the engine made -- its queue adopted, a consumed row dropped:
     // saved, never sent back. Sent back, it is this window's copy of the
     // engine's queue replacing the queue itself, tags another client gave it
     // and all.
-    void takeEngineChange(ListTab& tab);
+    void takeEngineChange(ListTab& tab) { workspace_.takeEngineChange(tab); }
     void closeTabAt(int index);
     // Most-recently-visited tabs, newest first, so closing one returns to
     // where you came from rather than to its neighbour.
@@ -448,7 +448,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void copyTrackViewLayoutToAllTabs();
     void refreshTrackViewActions();
     void stopBackgroundWork();
-    void refreshSelectionStatus();
+    void refreshSelectionStatus() override;
     void refreshSelectionActions();
     [[nodiscard]] QTableView* activeTrackView();
     void showTrackViewHeaderMenu(QTableView* view, const QPoint& position);
@@ -467,18 +467,18 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // ADR-0226: this computer's engine outlives the window, so a rebuilt or
     // updated one keeps running the old program until it is restarted --
     // done here, at once when nothing plays, else when playback stops.
-    void renewOutdatedLocalEngine();
+    void renewOutdatedLocalEngine() { workspace_.renewOutdatedLocalEngine(); }
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
     // What an empty list tab says, and how to fill it.
     [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const;
     [[nodiscard]] QString emptyListHint(const EngineKey& engine) const;
     // How an engine is named to the user: "this computer", or its name.
-    [[nodiscard]] QString engineName(const EngineKey& engine) const;
+    [[nodiscard]] QString engineName(const EngineKey& engine) const { return workspace_.engineName(engine); }
     // Shows the source the user last chose, or a library by default.
     void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;
-    bool engine_renewal_pending_{false};
+    bool& engine_renewal_pending_{workspace_.engine_renewal_pending_};
     // Quit, as opposed to closing the window: this computer's engine stops
     // too, instead of playing on.
     void quitAndStopEngine();
@@ -486,18 +486,19 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // as the other engine sees them (RemoteMount). What cannot be -- not
     // reachable here, or not in the remote's library -- is left out, and the
     // status bar says how much and why.
-    [[nodiscard]] std::optional<std::string>
-    crossEnginePath(const std::string& path, const EngineKey& from, const EngineKey& to) const;
-    [[nodiscard]] std::vector<std::string>
-    crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to);
-    [[nodiscard]] std::vector<LocalTrackRow>
-    crossEngineRows(std::vector<LocalTrackRow> rows, const EngineKey& from, const EngineKey& to);
+    [[nodiscard]] std::optional<std::string> crossEnginePath(const std::string& path, const EngineKey& from,
+                                                           const EngineKey& to) const {
+        return workspace_.crossEnginePath(path, from, to);
+    }
+    [[nodiscard]] std::vector<std::string> crossEnginePaths(std::vector<std::string> paths,
+                                                          const EngineKey& from, const EngineKey& to) {
+        return workspace_.crossEnginePaths(std::move(paths), from, to);
+    }
     // An engine's library folders, asked of it; empty when it is not
     // reachable, and then nothing is known to cross to it.
-    [[nodiscard]] std::vector<std::string> rootsOf(const EngineLink& engine) const;
     // Where an engine's music is reachable here, as Settings say now: a change
     // there applies at once, as the one remote's always did.
-    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const;
+    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const { return workspace_.mountOf(engine); }
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
     void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row) {
@@ -527,7 +528,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // Keeps the engine's queue and the playing list in step, in both
     // directions: an edit here is pushed, and a change the engine made that
     // this window did not cause is read back.
-    void syncEngineQueue();
+    void syncEngineQueue() override;
     void adoptEngineQueue();
     void adoptEngineQueue(std::vector<LocalTrackRow> held);
     void reattachToQueue(std::vector<LocalTrackRow> rows);

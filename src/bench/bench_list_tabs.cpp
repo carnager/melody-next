@@ -994,107 +994,19 @@ void BenchMainWindow::refreshActiveContext() {
 bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
                                    const QString& target_id, const bool move,
                                    const int insertion_row) {
-    auto* target = tabForDocument(target_id);
-    if (target == nullptr || source == nullptr) {
+    if (source == nullptr) {
         return false;
     }
     auto* source_tab = static_cast<ListTab*>(source->property("bench-tab-pointer").value<void*>());
     auto* source_model = qobject_cast<LocalListModel*>(source->model());
-    const bool dynamic = source->property("definition-owned").toBool();
-    if (!source_model || source_tab == target || (!source_tab && !dynamic) || (dynamic && move)) {
-        return false;
-    }
-    const auto from = engineOfView(source);
-    const auto into = EngineKey::of(target->document);
-    const bool crossing = from != into;
-    std::vector<LocalTrackRow> transferred;
-    std::vector<int> source_rows;
-    transferred.reserve(static_cast<std::size_t>(rows.size()));
-    source_rows.reserve(static_cast<std::size_t>(rows.size()));
+    std::vector<int> row_indexes;
+    row_indexes.reserve(static_cast<std::size_t>(rows.size()));
     for (const auto& row : rows) {
-        const auto row_index = row.toInt();
-        if (row_index < 0 || row_index >= static_cast<int>(source_model->rows().size())) {
-            continue;
-        }
-        transferred.push_back(source_model->rows()[static_cast<std::size_t>(row_index)]);
-        source_rows.push_back(row_index);
+        row_indexes.push_back(row.toInt());
     }
-    if (crossing) {
-        // Between engines: each row as the target's engine sees the file.
-        // A move leaves behind what could not cross.
-        std::vector<LocalTrackRow> crossed;
-        std::vector<int> crossed_rows;
-        for (std::size_t index = 0; index < transferred.size(); ++index) {
-            if (crossEnginePath(transferred[index].raw_path, from, into)) {
-                crossed_rows.push_back(source_rows[index]);
-            }
-        }
-        crossed = crossEngineRows(std::move(transferred), from, into);
-        transferred = std::move(crossed);
-        source_rows = std::move(crossed_rows);
-    }
-    if (transferred.empty()) {
-        return false;
-    }
-    CrossTabMoveEdit coordinated;
-    if (move) {
-        coordinated.source_id = source->property("bench-document-id").toString();
-        coordinated.target_id = target_id;
-        coordinated.source_before = source_tab->model->rows();
-        coordinated.target_before = target->model->rows();
-    }
-    target->model->appendRows(std::move(transferred), insertion_row, !move);
-    enqueueUnprobedRows(*target);
-    markTabDirty(*target);
-    syncArtwork(*target);
-    if (move) {
-        source_tab->model->removeRowIndexes(std::move(source_rows), false);
-        markTabDirty(*source_tab);
-        coordinated.source_after = source_tab->model->rows();
-        coordinated.target_after = target->model->rows();
-        cross_tab_move_edit_ = std::move(coordinated);
-    }
-    refreshListHistoryActions();
-    return true;
-}
-
-bool BenchMainWindow::canReplayCrossTabMove(const bool undo) {
-    if (!cross_tab_move_edit_ || cross_tab_move_edit_->applied != undo) {
-        return false;
-    }
-    const auto* source = tabForDocument(cross_tab_move_edit_->source_id);
-    const auto* target = tabForDocument(cross_tab_move_edit_->target_id);
-    if (source == nullptr || target == nullptr) {
-        return false;
-    }
-    const auto* current = currentListTab();
-    if (current != source && current != target) {
-        return false;
-    }
-    return source->model->rows() ==
-               (undo ? cross_tab_move_edit_->source_after : cross_tab_move_edit_->source_before) &&
-           target->model->rows() ==
-               (undo ? cross_tab_move_edit_->target_after : cross_tab_move_edit_->target_before);
-}
-
-bool BenchMainWindow::replayCrossTabMove(const bool undo) {
-    if (!canReplayCrossTabMove(undo)) {
-        return false;
-    }
-    auto* source = tabForDocument(cross_tab_move_edit_->source_id);
-    auto* target = tabForDocument(cross_tab_move_edit_->target_id);
-    source->model->replaceRows(undo ? cross_tab_move_edit_->source_before
-                                    : cross_tab_move_edit_->source_after);
-    target->model->replaceRows(undo ? cross_tab_move_edit_->target_before
-                                    : cross_tab_move_edit_->target_after);
-    cross_tab_move_edit_->applied = !undo;
-    for (auto* tab : {source, target}) {
-        markTabDirty(*tab);
-        enqueueUnprobedRows(*tab);
-        syncArtwork(*tab);
-    }
-    refreshSelectionStatus();
-    return true;
+    return workspace_.transferRows(source_tab, source_model, engineOfView(source),
+                                   source->property("definition-owned").toBool(),
+                                   std::move(row_indexes), target_id, move, insertion_row);
 }
 
 bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantList& rows,
@@ -1130,33 +1042,6 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
     return transferred;
 }
 
-void BenchMainWindow::renewOutdatedLocalEngine() {
-    if (!localCatalogue() || !localCatalogue()->localEngineOutdated()) {
-        engine_renewal_pending_ = false;
-        return;
-    }
-    // Restarting it stops the music, so not while it plays: once it stops.
-    if (localPlayback() != nullptr &&
-        localPlayback()->state().status == QStringLiteral("playing")) {
-        if (!engine_renewal_pending_) {
-            statusBar()->showMessage(QStringLiteral("This computer's engine is out of date; it "
-                                                    "restarts when playback stops"),
-                                     10'000);
-        }
-        engine_renewal_pending_ = true;
-        return;
-    }
-    engine_renewal_pending_ = false;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool renewed = localCatalogue()->restartLocalEngine();
-    QApplication::restoreOverrideCursor();
-    statusBar()->showMessage(renewed ? QStringLiteral("This computer's engine was out of date and "
-                                                      "has been restarted")
-                                     : QStringLiteral("This computer's engine is out of date and "
-                                                      "did not restart; see its log"),
-                             8'000);
-}
-
 bool BenchMainWindow::localLibraryShown() const {
     return QSettings{}.value(QLatin1String(SettingsDialog::library_show_local_key), true).toBool();
 }
@@ -1171,14 +1056,6 @@ QString BenchMainWindow::emptyListHint(const EngineKey& engine) const {
                ? tr("Add albums from %1's library on the left, or drag them here.")
                      .arg(engineName(engine))
                : tr("Drop files or folders here, or add albums from the library on the left.");
-}
-
-QString BenchMainWindow::engineName(const EngineKey& engine) const {
-    if (engine.isLocal()) {
-        return tr("this computer");
-    }
-    const auto* catalogue = catalogueOf(engine);
-    return catalogue != nullptr ? catalogue->name() : tr("the remote");
 }
 
 void BenchMainWindow::applyLocalLibraryVisibility() {
@@ -1250,150 +1127,11 @@ void BenchMainWindow::quitAndStopEngine() {
     // Nothing may start it again. The event loop runs on after this until
     // the process ends, and an engine connection's reconnect timer revives
     // an engine that stopped: it did, and quitting left it running.
-    for (const auto& engine : engines_) {
-        if (engine->playback != nullptr) {
-            engine->playback->retire();
-        }
-    }
-    if (localCatalogue()) {
-        static_cast<void>(localCatalogue()->stopLocalEngine());
-    }
+    workspace_.retireEngines();
     // Rather than waiting for the last window to be seen closing: a window
     // still open elsewhere -- a tag editor, say -- kept the process, and
     // with it anything that might start an engine.
     QCoreApplication::quit();
-}
-
-RemoteMount BenchMainWindow::mountOf(const EngineLink& engine) const {
-    for (const auto& setting : loadRemoteEngines()) {
-        if (setting.address == engine.setting.address) {
-            return setting.mount();
-        }
-    }
-    return engine.setting.mount();
-}
-
-std::vector<std::string> BenchMainWindow::rootsOf(const EngineLink& engine) const {
-    // Asked now, not remembered: a folder added to its library since it was
-    // last asked is part of it.
-    std::vector<std::string> roots;
-    if (engine.catalogue == nullptr) {
-        return roots;
-    }
-    if (auto known = engine.catalogue->open()->roots()) {
-        for (auto& root : *known) {
-            roots.push_back(std::move(root.raw_path));
-        }
-    }
-    return roots;
-}
-
-// ADR-0234: a path as one engine has it, as another has it. This computer
-// reaches a remote's music through its mount (RemoteMount); between two
-// remotes the way is through this computer's view of both. Empty when the
-// file is not reachable there.
-std::optional<std::string> BenchMainWindow::crossEnginePath(const std::string& path,
-                                                            const EngineKey& from,
-                                                            const EngineKey& to) const {
-    if (from == to) {
-        return path;
-    }
-    // Each engine elsewhere reaches this computer through its own mount.
-    std::optional<std::string> here;
-    if (from.isLocal()) {
-        here = path;
-    } else if (const auto* source = link(from); source != nullptr) {
-        here = mountOf(*source).to_local(path);
-    }
-    if (!here || to.isLocal()) {
-        return here;
-    }
-    const auto* target = link(to);
-    if (target == nullptr) {
-        return std::nullopt;
-    }
-    return mountOf(*target).to_remote(*here, rootsOf(*target));
-}
-
-std::vector<std::string> BenchMainWindow::crossEnginePaths(std::vector<std::string> paths,
-                                                           const EngineKey& from,
-                                                           const EngineKey& to) {
-    std::vector<std::string> crossed;
-    crossed.reserve(paths.size());
-    for (const auto& path : paths) {
-        if (auto translated = crossEnginePath(path, from, to)) {
-            crossed.push_back(std::move(*translated));
-        }
-    }
-    if (const auto left = paths.size() - crossed.size(); left > 0U) {
-        statusBar()->showMessage(
-            !to.isLocal()
-                ? QStringLiteral("%1 of %2 tracks are not in %3's library, so it cannot play "
-                                 "them; they were left out")
-                      .arg(left)
-                      .arg(paths.size())
-                      .arg(engineName(to))
-                : QStringLiteral("%1 of %2 tracks are not reachable on this computer; they were "
-                                 "left out. Where the remote's music is mounted here is set in "
-                                 "Settings → Engine.")
-                      .arg(left)
-                      .arg(paths.size()),
-            10'000);
-    }
-    return crossed;
-}
-
-std::vector<LocalTrackRow> BenchMainWindow::crossEngineRows(std::vector<LocalTrackRow> rows,
-                                                            const EngineKey& from,
-                                                            const EngineKey& to) {
-    std::vector<std::string> paths;
-    paths.reserve(rows.size());
-    for (const auto& row : rows) {
-        paths.push_back(row.raw_path);
-    }
-    // One message for the whole move, from the path translation; rows are
-    // then matched back to their translated paths in order.
-    static_cast<void>(crossEnginePaths(paths, from, to));
-    std::vector<LocalTrackRow> moved;
-    moved.reserve(rows.size());
-    for (auto& row : rows) {
-        auto translated = crossEnginePath(row.raw_path, from, to);
-        if (!translated) {
-            continue;
-        }
-        if (from != to) {
-            // What was known of the file on one machine says nothing of its
-            // revision on the other.
-            row.source_revision.reset();
-        }
-        row.raw_path = std::move(*translated);
-        moved.push_back(std::move(row));
-    }
-    return moved;
-}
-
-void BenchMainWindow::takeEngineChange(ListTab& tab) {
-    tab.document.dirty = true;
-    refreshTabChrome(tab);
-    schedulePersist();
-}
-
-void BenchMainWindow::markTabDirty(ListTab& tab) {
-    takeEngineChange(tab);
-    // An edit to the list that is playing is an edit to the engine's queue.
-    // Without this the engine keeps playing the list as it was when play was
-    // pressed, and a track removed here still plays.
-    if (tab.document.id == playback_.anchors.document) {
-        syncEngineQueue();
-    }
-}
-
-void BenchMainWindow::setActiveLocalList(const QString& id) {
-    if (active_local_list_id_ == id)
-        return;
-    active_local_list_id_ = id;
-    for (const auto& tab : list_tabs_)
-        refreshTabChrome(*tab);
 }
 
 void BenchMainWindow::refreshTabChrome(ListTab& tab) {
@@ -1535,28 +1273,7 @@ void BenchMainWindow::closeTabAt(const int index) {
     }
     tabs_->removeTab(index);
     view->deleteLater();
-    if (playback_.requests.active() && tab->document.id == playback_.anchors.document) {
-        if (detached_playback_)
-            detached_playback_->model->deleteLater();
-        detached_playback_ = *tab;
-        detached_playback_->view = nullptr;
-    } else
-        tab->model->deleteLater();
-    std::erase_if(list_tabs_,
-                  [tab](const std::unique_ptr<ListTab>& owned) { return owned.get() == tab; });
-    if (list_tabs_.empty()) {
-        addListTab(
-            persistence::ListDocument{
-                .id = core::StableId::random(),
-                .kind = persistence::ListKind::scratch,
-                .name = untitled_list_name,
-                .pinned = false,
-                .dirty = false,
-                .items = {},
-            },
-            true);
-    }
-    schedulePersist();
+    workspace_.closeList(*tab);
     refreshTabActions();
 }
 

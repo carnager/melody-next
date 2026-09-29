@@ -518,7 +518,7 @@ void Workspace::insertRemotePaths(ListTab& tab, std::vector<std::string> raw_pat
         return;
     }
     tab.model->appendRows(std::move(rows), insertion_row);
-    view_->markTabDirty(tab);
+    markTabDirty(tab);
     enqueueUnprobedRows(tab);
 }
 
@@ -924,7 +924,7 @@ void Workspace::finishDiscovery() {
                                                                ? discovery_insertion_anchor_.row()
                                                                : discovery_insertion_row_);
         }
-        view_->markTabDirty(*tab);
+        markTabDirty(*tab);
         enqueueUnprobedRows(*tab);
         syncArtwork(*tab);
     }

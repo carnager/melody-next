@@ -39,8 +39,12 @@ class WorkspaceView {
     [[nodiscard]] virtual QObject* modelParent() = 0;
     // A list's name, kind or state changed.
     virtual void refreshTabChrome(Workspace::ListTab& tab) = 0;
-    // A list was edited: saved, and told to its engine when it plays.
-    virtual void markTabDirty(Workspace::ListTab& tab) = 0;
+    // The list edits that can be undone or redone changed.
+    virtual void refreshListHistoryActions() = 0;
+    // What is selected changed, or what it is.
+    virtual void refreshSelectionStatus() = 0;
+    // The list playing was edited: the engine's queue follows.
+    virtual void syncEngineQueue() = 0;
     virtual void playRow(Workspace::ListTab& tab, int row) = 0;
     // Hands the engines the file moves they have not taken yet.
     virtual void flushEngineRelocations() = 0;

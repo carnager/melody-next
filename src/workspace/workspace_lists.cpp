@@ -370,4 +370,160 @@ void Workspace::openLocalPaths(std::vector<std::string> raw_paths) {
 }
 
 
+bool Workspace::transferRows(ListTab* source_tab, LocalListModel* source_model,
+                             const EngineKey& from, const bool dynamic, std::vector<int> rows,
+                             const QString& target_id, const bool move, const int insertion_row) {
+    auto* target = tabForDocument(target_id);
+    if (target == nullptr) {
+        return false;
+    }
+    if (!source_model || source_tab == target || (!source_tab && !dynamic) || (dynamic && move)) {
+        return false;
+    }
+    const auto into = EngineKey::of(target->document);
+    const bool crossing = from != into;
+    std::vector<LocalTrackRow> transferred;
+    std::vector<int> source_rows;
+    transferred.reserve(static_cast<std::size_t>(rows.size()));
+    source_rows.reserve(static_cast<std::size_t>(rows.size()));
+    for (const auto row_index : rows) {
+        if (row_index < 0 || row_index >= static_cast<int>(source_model->rows().size())) {
+            continue;
+        }
+        transferred.push_back(source_model->rows()[static_cast<std::size_t>(row_index)]);
+        source_rows.push_back(row_index);
+    }
+    if (crossing) {
+        // Between engines: each row as the target's engine sees the file.
+        // A move leaves behind what could not cross.
+        std::vector<LocalTrackRow> crossed;
+        std::vector<int> crossed_rows;
+        for (std::size_t index = 0; index < transferred.size(); ++index) {
+            if (crossEnginePath(transferred[index].raw_path, from, into)) {
+                crossed_rows.push_back(source_rows[index]);
+            }
+        }
+        crossed = crossEngineRows(std::move(transferred), from, into);
+        transferred = std::move(crossed);
+        source_rows = std::move(crossed_rows);
+    }
+    if (transferred.empty()) {
+        return false;
+    }
+    CrossTabMoveEdit coordinated;
+    if (move) {
+        coordinated.source_id = QString::fromStdString(source_tab->document.id.to_string());
+        coordinated.target_id = target_id;
+        coordinated.source_before = source_tab->model->rows();
+        coordinated.target_before = target->model->rows();
+    }
+    target->model->appendRows(std::move(transferred), insertion_row, !move);
+    enqueueUnprobedRows(*target);
+    markTabDirty(*target);
+    syncArtwork(*target);
+    if (move) {
+        source_tab->model->removeRowIndexes(std::move(source_rows), false);
+        markTabDirty(*source_tab);
+        coordinated.source_after = source_tab->model->rows();
+        coordinated.target_after = target->model->rows();
+        cross_tab_move_edit_ = std::move(coordinated);
+    }
+    view_->refreshListHistoryActions();
+    return true;
+}
+
+
+bool Workspace::canReplayCrossTabMove(const bool undo) {
+    if (!cross_tab_move_edit_ || cross_tab_move_edit_->applied != undo) {
+        return false;
+    }
+    const auto* source = tabForDocument(cross_tab_move_edit_->source_id);
+    const auto* target = tabForDocument(cross_tab_move_edit_->target_id);
+    if (source == nullptr || target == nullptr) {
+        return false;
+    }
+    const auto* current = view_->currentList();
+    if (current != source && current != target) {
+        return false;
+    }
+    return source->model->rows() ==
+               (undo ? cross_tab_move_edit_->source_after : cross_tab_move_edit_->source_before) &&
+           target->model->rows() ==
+               (undo ? cross_tab_move_edit_->target_after : cross_tab_move_edit_->target_before);
+}
+
+
+bool Workspace::replayCrossTabMove(const bool undo) {
+    if (!canReplayCrossTabMove(undo)) {
+        return false;
+    }
+    auto* source = tabForDocument(cross_tab_move_edit_->source_id);
+    auto* target = tabForDocument(cross_tab_move_edit_->target_id);
+    source->model->replaceRows(undo ? cross_tab_move_edit_->source_before
+                                    : cross_tab_move_edit_->source_after);
+    target->model->replaceRows(undo ? cross_tab_move_edit_->target_before
+                                    : cross_tab_move_edit_->target_after);
+    cross_tab_move_edit_->applied = !undo;
+    for (auto* tab : {source, target}) {
+        markTabDirty(*tab);
+        enqueueUnprobedRows(*tab);
+        syncArtwork(*tab);
+    }
+    view_->refreshSelectionStatus();
+    return true;
+}
+
+
+void Workspace::takeEngineChange(ListTab& tab) {
+    tab.document.dirty = true;
+    view_->refreshTabChrome(tab);
+    schedulePersist();
+}
+
+
+void Workspace::markTabDirty(ListTab& tab) {
+    takeEngineChange(tab);
+    // An edit to the list that is playing is an edit to the engine's queue.
+    // Without this the engine keeps playing the list as it was when play was
+    // pressed, and a track removed here still plays.
+    if (tab.document.id == playback_.anchors.document) {
+        view_->syncEngineQueue();
+    }
+}
+
+
+void Workspace::setActiveLocalList(const QString& id) {
+    if (active_local_list_id_ == id)
+        return;
+    active_local_list_id_ = id;
+    for (const auto& tab : list_tabs_)
+        view_->refreshTabChrome(*tab);
+}
+
+
+void Workspace::closeList(ListTab& tab) {
+    if (playback_.requests.active() && tab.document.id == playback_.anchors.document) {
+        if (detached_playback_)
+            detached_playback_->model->deleteLater();
+        detached_playback_ = tab;
+        detached_playback_->view = nullptr;
+    } else
+        tab.model->deleteLater();
+    std::erase_if(list_tabs_,
+                  [&tab](const std::unique_ptr<ListTab>& owned) { return owned.get() == &tab; });
+    if (list_tabs_.empty()) {
+        static_cast<void>(addList(
+            persistence::ListDocument{
+                .id = core::StableId::random(),
+                .kind = persistence::ListKind::scratch,
+                .name = untitled_list_name,
+                .pinned = false,
+                .dirty = false,
+                .items = {},
+            },
+            true));
+    }
+    schedulePersist();
+}
+
 } // namespace trackknife::bench

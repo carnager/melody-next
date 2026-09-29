@@ -287,6 +287,50 @@ class Workspace final : public QObject {
     // Files on this computer into a local list: the one shown when it is
     // one, else the first there is, else a new one.
     void openLocalPaths(std::vector<std::string> raw_paths);
+    // A list closed: gone, unless it is the one playing with Up Next still
+    // waiting, which plays on detached; never none at all.
+    void closeList(ListTab& tab);
+
+    // Edits. An edit made here is saved, and -- to the list playing -- told
+    // to its engine, whose queue it is. A change the engine made is saved and
+    // never sent back.
+    void markTabDirty(ListTab& tab);
+    void takeEngineChange(ListTab& tab);
+    // The list playback was last started from.
+    void setActiveLocalList(const QString& id);
+    // Rows of one list into another -- moved or copied -- as the target's
+    // engine sees their files; a move between two lists undoes as one step.
+    bool transferRows(ListTab* source_tab, LocalListModel* source_model, const EngineKey& from,
+                      bool dynamic, std::vector<int> rows, const QString& target_id, bool move,
+                      int insertion_row);
+    [[nodiscard]] bool canReplayCrossTabMove(bool undo);
+    bool replayCrossTabMove(bool undo);
+
+    // ADR-0227, ADR-0234: paths moving from one engine's list to another's,
+    // as the other engine sees them (RemoteMount). What cannot be -- not
+    // reachable here, or not in the remote's library -- is left out, and a
+    // message says how much and why.
+    [[nodiscard]] std::optional<std::string>
+    crossEnginePath(const std::string& path, const EngineKey& from, const EngineKey& to) const;
+    [[nodiscard]] std::vector<std::string>
+    crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to);
+    [[nodiscard]] std::vector<LocalTrackRow>
+    crossEngineRows(std::vector<LocalTrackRow> rows, const EngineKey& from, const EngineKey& to);
+    [[nodiscard]] std::vector<std::string> rootsOf(const EngineLink& engine) const;
+    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const;
+    // How an engine is named to the user: "this computer", or its name.
+    [[nodiscard]] QString engineName(const EngineKey& engine) const;
+    // This computer's engine and its parts.
+    [[nodiscard]] EngineLink& localEngine() const { return *engines_.front(); }
+    [[nodiscard]] CatalogueSource* localCatalogue() const { return localEngine().catalogue.get(); }
+    [[nodiscard]] EnginePlayback* localPlayback() const { return localEngine().playback; }
+    // ADR-0226: this computer's engine outlives the window, so a rebuilt or
+    // updated one keeps running the old program until it is restarted --
+    // done here, at once when nothing plays, else when playback stops.
+    void renewOutdatedLocalEngine();
+    bool engine_renewal_pending_{false};
+    // Quitting: no engine is to be started again, and this computer's stops.
+    void retireEngines();
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

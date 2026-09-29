@@ -82,7 +82,6 @@ void BenchMainWindow::buildWorkspace() {
     tabs_->setObjectName(QStringLiteral("bench-tabs"));
     tabs_->setDocumentMode(true);
     tabs_->setMovable(true);
-    tabs_->setTabsClosable(true);
     tabs_->setAcceptDrops(true);
     tabs_->installEventFilter(this);
     tabs_->tabBar()->setAcceptDrops(true);

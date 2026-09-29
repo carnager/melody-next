@@ -7,6 +7,7 @@ qt_add_library(
     eliding_label.cpp
     eliding_label.hpp
     engine_key.hpp
+    flat_header_style.hpp
     line_slider.cpp
     line_slider.hpp
     library_tree_view.cpp
@@ -26,6 +27,7 @@ qt_add_library(
     queue_item_delegate.hpp
     debug_log.cpp
     debug_log.hpp
+    delegate_selection_style.hpp
     queue_table_view.cpp
     queue_table_view.hpp
     rating_stars.cpp

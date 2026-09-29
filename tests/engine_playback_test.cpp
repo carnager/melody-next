@@ -827,7 +827,7 @@ void EnginePlaybackTest::listeningIsCreditedWhileTheEnginePlays() {
     // The tags travel with the sample, not just the path: a scrobble without
     // an artist and a title is not a scrobble.
     const auto credited = [&window, &title] {
-        const auto sample = window.property("trackknife-lastfm-sample").toString();
+        const auto sample = window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString();
         return sample.contains(title) && !sample.startsWith(QLatin1Char('|'));
     };
     QTRY_VERIFY2_WITH_TIMEOUT(credited(), "nothing was credited while the engine played", 5'000);

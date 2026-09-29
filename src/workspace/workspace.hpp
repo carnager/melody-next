@@ -268,6 +268,9 @@ class Workspace final : public QObject {
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
   public:
+    // Opens the workspace: this computer's engine connected, the saved lists
+    // restored and the remote engines connected; then the window is told.
+    void start();
     // The engines, by key; the parts of one, null when absent.
     [[nodiscard]] EngineLink* link(const EngineKey& key) const;
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
@@ -428,6 +431,13 @@ class Workspace final : public QObject {
     bool syncUpNextModel();
     void persistUpNext();
     void restoreUpNext();
+
+    // Last.fm, signed in as this window's account: listens credited from
+    // what the engine followed reports, unless it scrobbles itself.
+    void startLastFm();
+    void sampleLastFm(const EnginePlayback::State& state);
+    // What plays, as MPRIS and the track-change notification show it.
+    void publishDesktopState();
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

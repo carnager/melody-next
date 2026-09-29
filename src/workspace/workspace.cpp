@@ -2,9 +2,21 @@
 
 #include "workspace/workspace.hpp"
 
+#include "bench/bench_main_window_helpers.hpp"
+#include "bench/remote_engines.hpp"
+#include "workspace/workspace_view.hpp"
+
+#include <QDir>
+#include <QStandardPaths>
+
 #include <algorithm>
 
 namespace trackknife::bench {
+namespace {
+
+constexpr int persist_debounce_ms = 1'000;
+
+} // namespace
 
 Workspace::Workspace(QObject* parent) : QObject(parent) {}
 
@@ -15,6 +27,46 @@ Workspace::~Workspace() {
         delete engine->playback;
         engine->playback = nullptr;
     }
+}
+
+void Workspace::start() {
+    const auto base = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(base);
+    database_path_ = std::filesystem::path{utf8Bytes(base + QStringLiteral("/lists.sqlite"))};
+    connectLocalEngine();
+    persistence_ = new ui::ListPersistenceService(database_path_, this);
+    persistence_timer_ = new QTimer(this);
+    persistence_timer_->setSingleShot(true);
+    persistence_timer_->setInterval(persist_debounce_ms);
+    connect(persistence_timer_, &QTimer::timeout, this, [this] {
+        persistNow(false);
+        view_->refreshRatings();
+    });
+    persistence_->initialize([this](ui::PersistedWorkspace workspace, QString error) {
+        if (!error.isEmpty()) {
+            view_->showMessage(QStringLiteral("List restore failed: %1").arg(error), 5'000);
+        }
+        restored_track_view_layouts_.clear();
+        for (const auto& preset : workspace.view_presets) {
+            restored_track_view_layouts_.insert(
+                displayText(preset.binding),
+                QByteArray{preset.header_state.data(),
+                           static_cast<qsizetype>(preset.header_state.size())});
+        }
+        restoreLists(std::move(workspace.lists));
+        restoreUpNext();
+        // After the lists, because the entry the engine names is looked for in
+        // them before a tab is invented for it.
+        reattachToEngine();
+        // ADR-0227: the remote engines too, after the lists for the same
+        // reason -- their tabs may already be among them.
+        bool first = true;
+        for (const auto& setting : loadRemoteEngines()) {
+            connectRemoteEngine(setting, first);
+            first = false;
+        }
+        view_->workspaceRestored(error.isEmpty());
+    });
 }
 
 Workspace::EngineLink* Workspace::link(const EngineKey& key) const {

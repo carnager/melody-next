@@ -208,6 +208,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
     [[nodiscard]] QObject* modelParent() override;
     void artworkLoaded(const QString& key) override;
+    void workspaceRestored(bool restored) override;
     void engineConnected(EngineLink& engine, bool first) override;
     void engineAttached(EngineLink& engine) override;
     void engineRekeyed(EngineLink& engine, const EngineKey& from, bool lists_follow) override;
@@ -540,7 +541,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void adoptEngineQueue() { workspace_.adoptEngineQueue(); }
     // Credits listening to Last.fm from the engine's state rather than from a
     // local player that is not running.
-    void sampleLastFmFromEngine(const EnginePlayback::State& state);
+    void sampleLastFmFromEngine(const EnginePlayback::State& state) {
+        workspace_.sampleLastFm(state);
+    }
     // Points the workspace at an entry the engine is playing.
     // Makes `playback` the one the transport follows, stopping the other if it
     // was playing: one engine plays at a time.
@@ -590,7 +593,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void playRow(ListTab& tab, int row) { workspace_.playRow(tab, row); }
     void refreshTransport() override;
     void buildMprisService();
-    void publishMprisState();
+    void publishMprisState() { workspace_.publishDesktopState(); }
     void rebuildDeviceMenu();
     // A mode's icon marked as one-shot: on for one track, then off.
     [[nodiscard]] QIcon oneShotIcon(const QIcon& plain) const;
@@ -781,7 +784,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     ui::QueueTableView* up_next_view_{nullptr};
     QLabel* up_next_status_{nullptr};
 
-    void buildLastFm();
+    void buildLastFm() { workspace_.startLastFm(); }
     QWidget* buildLastFmSettings(QWidget* parent);
     // ADR-0220: an engine's own Last.fm state, into `state`; and this
     // window's session handed to it, so it scrobbles what it plays.

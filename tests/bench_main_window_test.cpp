@@ -8070,7 +8070,7 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     playing.duration_ms = 200'000;
     window.lastfm_sample_time_ = -1'000'000;
     window.sampleLastFmFromEngine(playing);
-    QCOMPARE(window.property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
+    QCOMPARE(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
     QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
                   QStringLiteral("/lastfm-v1.json"));
 }
@@ -8118,7 +8118,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QVERIFY(now_playing != nullptr);
     QTRY_COMPARE(now_playing->text(), QStringLiteral("X"));
     // And it is credited as what it is.
-    QTRY_VERIFY(window.property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
+    QTRY_VERIFY(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == second,

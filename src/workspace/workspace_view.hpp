@@ -23,6 +23,8 @@ class WorkspaceView {
     WorkspaceView& operator=(const WorkspaceView&) = delete;
     virtual ~WorkspaceView() = default;
 
+    // The saved workspace is restored -- `restored`, or it could not be read.
+    virtual void workspaceRestored(bool restored) = 0;
     // A passing message, gone after `timeout_ms`.
     virtual void showMessage(const QString& text, int timeout_ms) = 0;
 

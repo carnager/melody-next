@@ -383,6 +383,16 @@ QString TrackListModel::describe(const QList<int>& rows) const {
         .arg(formatDuration(static_cast<qreal>(total) / 1000.0));
 }
 
+QStringList TrackListModel::pathsOf(const QList<int>& rows) const {
+    QStringList paths;
+    for (const auto row : rows) {
+        if (const auto* found = track(row); found != nullptr && !paths.contains(found->path)) {
+            paths.push_back(found->path);
+        }
+    }
+    return paths;
+}
+
 int TrackListModel::itemIndexAt(const int row) const {
     int index = 0;
     for (int at = 0; at < std::min(row, rowCount()); ++at) {

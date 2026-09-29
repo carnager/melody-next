@@ -127,6 +127,10 @@ ApplicationWindow {
         onActivated: window.upNextOpen = !window.upNextOpen
     }
     Shortcut {
+        sequence: "Alt+Return"
+        onActivated: trackList.editTags()
+    }
+    Shortcut {
         sequence: "Ctrl+,"
         onActivated: settingsDialog.open()
     }
@@ -233,12 +237,14 @@ ApplicationWindow {
                 LibraryPane {
                     id: library
                     dragGhost: ghost
+                    tagger: tagEditor
                     SplitView.preferredWidth: 340
                     SplitView.minimumWidth: 220
                 }
                 TrackListPane {
                     id: trackList
                     dragGhost: ghost
+                    tagger: tagEditor
                     SplitView.fillWidth: true
                     SplitView.minimumWidth: 400
                 }
@@ -263,6 +269,10 @@ ApplicationWindow {
 
     DragGhost {
         id: ghost
+    }
+
+    TagEditorWindow {
+        id: tagEditor
     }
 
     SettingsDialog {

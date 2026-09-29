@@ -30,8 +30,13 @@ Engine::Engine(QObject* parent) : QObject(parent) {
     the_instance = this;
 
     // This computer's engine, started if nothing answers (ADR-0226).
+    const auto local_engine = bench::localEngine();
     sessions_.push_back(std::make_unique<EngineSession>(
         0, QStringLiteral("local"), true, tr("This computer"),
+        protocol::Endpoint{.socket = local_engine ? local_engine->socket : std::filesystem::path{},
+                           .host = {},
+                           .port = 0,
+                           .token = {}},
         []() -> core::Result<std::unique_ptr<protocol::Client>> {
             const auto engine = bench::localEngine();
             if (!engine) {
@@ -53,7 +58,7 @@ Engine::Engine(QObject* parent) : QObject(parent) {
         }
         const auto index = static_cast<int>(sessions_.size());
         sessions_.push_back(std::make_unique<EngineSession>(
-            index, address, false, hostOf(address),
+            index, address, false, hostOf(address), *endpoint,
             [endpoint = *endpoint]() { return protocol::Client::connect(endpoint); }));
     }
 
@@ -68,6 +73,14 @@ Engine::Engine(QObject* parent) : QObject(parent) {
     }
     current_ = sessions_.front().get();
     desktop_ = std::make_unique<DesktopBridge>(*this);
+    // Written tags show at once: the engine refreshed its library in the
+    // same commit, and the list on show asks for its facts again.
+    connect(&tag_editor_, &TagEditor::written, this, [this](EngineSession* session) {
+        if (tracks_.session() == session) {
+            tracks_.reload();
+        }
+        session->library()->refresh();
+    });
 }
 
 Engine::~Engine() {

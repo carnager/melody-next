@@ -73,6 +73,8 @@ class TrackListModel final : public QAbstractListModel {
     // The track rows of the album whose header this is.
     Q_INVOKABLE [[nodiscard]] QList<int> groupRows(int headerRow) const;
 
+    // The encoded paths of some track rows, in order, each once.
+    Q_INVOKABLE [[nodiscard]] QStringList pathsOf(const QList<int>& rows) const;
     // Where in the list's items a view row is: the number of tracks before
     // it. rowCount() gives the end.
     Q_INVOKABLE [[nodiscard]] int itemIndexAt(int row) const;

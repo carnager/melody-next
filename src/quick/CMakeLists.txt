@@ -31,6 +31,8 @@ qt_add_qml_module(
     player_state.hpp
     lists_model.cpp
     lists_model.hpp
+    tag_editor.cpp
+    tag_editor.hpp
     track_list_model.cpp
     track_list_model.hpp
     library_model.cpp
@@ -53,6 +55,7 @@ qt_add_qml_module(
     qml/OutputButton.qml
     qml/FolderPicker.qml
     qml/SettingsDialog.qml
+    qml/TagEditorWindow.qml
     qml/TkSlider.qml
     qml/PlayerBar.qml
     qml/LibraryPane.qml

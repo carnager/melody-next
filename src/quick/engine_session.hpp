@@ -48,8 +48,10 @@ class EngineSession final : public QObject {
   public:
     // `key` names it in settings: "local", or its address. `fallback` is
     // what to call it before it has said its name.
-    EngineSession(int index, QString key, bool local, QString fallback, EngineClient::Connector connector,
-                  QObject* parent = nullptr);
+    // `endpoint` is where it is, for the file tools' own connection
+    // (ADR-0237); `connector` makes the window's.
+    EngineSession(int index, QString key, bool local, QString fallback, protocol::Endpoint endpoint,
+                  EngineClient::Connector connector, QObject* parent = nullptr);
 
     [[nodiscard]] int index() const { return index_; }
     [[nodiscard]] QString key() const { return key_; }
@@ -58,6 +60,7 @@ class EngineSession final : public QObject {
     [[nodiscard]] bool connected() const { return client_.connected(); }
     [[nodiscard]] QString failure() const { return client_.failure(); }
     [[nodiscard]] EngineClient& client() { return client_; }
+    [[nodiscard]] const protocol::Endpoint& endpoint() const { return endpoint_; }
     [[nodiscard]] const EngineClient& client() const { return client_; }
     [[nodiscard]] PlayerState* player() { return &player_; }
     [[nodiscard]] ListsModel* lists() { return &lists_; }
@@ -142,6 +145,7 @@ class EngineSession final : public QObject {
     QString key_;
     bool local_;
     QString fallback_;
+    protocol::Endpoint endpoint_;
     EngineClient client_;
     PlayerState player_;
     ListsModel lists_;

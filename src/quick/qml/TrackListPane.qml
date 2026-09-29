@@ -8,7 +8,15 @@ Rectangle {
     id: pane
 
     property var dragGhost
+    // The tagger window, to hand the selection to.
+    property var tagger
     readonly property var tracks: Engine.tracks
+
+    function editTags() {
+        const paths = Engine.tracks.pathsOf(selectedRows());
+        if (paths.length > 0 && tagger)
+            tagger.edit(Engine.tracks.session, paths);
+    }
     property var selected: ({})
     property int selectionRevision: 0
     property int anchorRow: -1
@@ -403,6 +411,10 @@ Rectangle {
         MenuItem {
             text: "Add to Up Next"
             onTriggered: Engine.tracks.enqueue(pane.selectedRows())
+        }
+        MenuItem {
+            text: "Edit tags…"
+            onTriggered: pane.editTags()
         }
         MenuSeparator {}
         MenuItem {

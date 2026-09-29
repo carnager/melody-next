@@ -322,6 +322,16 @@ void LibraryModel::resolve(const int row, std::function<void(std::vector<QueuedT
                  });
 }
 
+void LibraryModel::askPaths(const int row) {
+    resolve(row, [this](const std::vector<QueuedTrack>& tracks) {
+        QStringList paths;
+        for (const auto& track : tracks) {
+            paths.push_back(track.path);
+        }
+        emit pathsReady(paths);
+    });
+}
+
 void LibraryModel::enqueue(const int row) {
     resolve(row, [this](const std::vector<QueuedTrack>& tracks) { session_.enqueue(tracks); });
 }

@@ -8,6 +8,8 @@ Rectangle {
     id: pane
 
     property var dragGhost
+    // The tagger window, to hand rows to.
+    property var tagger
     readonly property alias searchField: search
     // Whose library shows: any engine's, whichever tab is open.
     readonly property var session: Engine.sessionByKey(remembered.engine) ?? Engine.sessions[0]
@@ -93,6 +95,18 @@ Rectangle {
             text: "Add to the list on show"
             enabled: Engine.tracks.session === pane.session && Engine.tracks.listId !== ""
             onTriggered: pane.library.addToList(rowMenu.row, Engine.tracks.listId, -1)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Edit tags…"
+            onTriggered: pane.library.askPaths(rowMenu.row)
+        }
+    }
+    Connections {
+        target: pane.library
+        function onPathsReady(paths) {
+            if (paths.length > 0 && pane.tagger)
+                pane.tagger.edit(pane.session, paths);
         }
     }
 

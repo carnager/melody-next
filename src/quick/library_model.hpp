@@ -78,8 +78,12 @@ class LibraryModel final : public QAbstractListModel {
     // An album's tracks, or one track, into one of this engine's lists:
     // before item `position`, or at the end when it is negative.
     Q_INVOKABLE void addToList(int row, const QString& listId, int position);
+    // The paths a row stands for -- an album's tracks, or one -- for the
+    // tagger; pathsReady answers.
+    Q_INVOKABLE void askPaths(int row);
 
   signals:
+    void pathsReady(const QStringList& paths);
     void searchChanged();
     void loadingChanged();
 

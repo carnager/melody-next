@@ -45,6 +45,7 @@ qt_add_qml_module(
     qml/DragGhost.qml
     qml/NameDialog.qml
     qml/ConfirmDialog.qml
+    qml/Stars.qml
     qml/TkSlider.qml
     qml/PlayerBar.qml
     qml/LibraryPane.qml

@@ -16,6 +16,11 @@ EngineSession::EngineSession(const int index, QString key, const bool local, QSt
       up_next_(client_, index) {
     connect(&client_, &EngineClient::connectedChanged, this, &EngineSession::connectedChanged);
     connect(&player_, &PlayerState::queueChanged, &up_next_, &UpNextModel::refresh);
+    client_.onEvent([this](const std::string& name, const Json& data) {
+        if (name == "catalogue.rating_changed") {
+            emit ratingChanged(QString::fromStdString(data.value("hash", std::string{})), data.value("rating", 0));
+        }
+    });
 }
 
 QString EngineSession::name() const {
@@ -140,6 +145,16 @@ void EngineSession::saveList(const QString& id, const QString& name) {
                                          }
                                      });
                  });
+}
+
+void EngineSession::setRating(const QString& hash, const bool album, const int rating) {
+    client_.command(QStringLiteral("catalogue.set_rating"),
+                    Json{{"hash", hash.toStdString()}, {"album", album}, {"rating", std::clamp(rating, 0, 10)}},
+                    [this](const auto& answer) {
+                        if (!answer) {
+                            emit failed(QString::fromStdString(answer.error().message));
+                        }
+                    });
 }
 
 void EngineSession::deleteList(const QString& id) {

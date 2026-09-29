@@ -87,10 +87,16 @@ class EngineSession final : public QObject {
     Q_INVOKABLE void saveList(const QString& id, const QString& name);
     Q_INVOKABLE void deleteList(const QString& id);
 
+    // ADR-0179: a track's or an album's rating, 0-10 by its content key; 0
+    // clears it. Every client is told (catalogue.rating_changed).
+    Q_INVOKABLE void setRating(const QString& hash, bool album, int rating);
+
     void start() { client_.start(); }
 
   signals:
     void listCreated(const QString& id);
+    // A rating was set on this engine, by any client.
+    void ratingChanged(const QString& hash, int rating);
     void connectedChanged();
     // Something asked of the engine was refused; for the window to say.
     void failed(const QString& message);

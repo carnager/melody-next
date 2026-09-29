@@ -16,6 +16,7 @@ Rectangle {
     readonly property int gutter: 66
     readonly property int numberWidth: 26
     readonly property int lengthWidth: 56
+    readonly property int ratingWidth: 76
 
     // Tabs are the lists this window has open, of any engine, working or
     // saved. Another window's working lists are its tabs, not this one's:
@@ -499,6 +500,13 @@ Rectangle {
                 font.pixelSize: Theme.smallFontSize
             }
             Text {
+                x: parent.width - pane.lengthWidth - pane.ratingWidth - 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Rating"
+                color: Theme.faint
+                font.pixelSize: Theme.smallFontSize
+            }
+            Text {
                 x: parent.width - pane.lengthWidth - 12
                 width: pane.lengthWidth
                 anchors.verticalCenter: parent.verticalCenter
@@ -568,6 +576,7 @@ Rectangle {
                     required property string cover
                     required property int groupTracks
                     required property real groupDuration
+                    required property int rating
 
                     readonly property bool isSelected: pane.selectionRevision >= 0 && !!pane.selected[index]
                     readonly property bool isPlaying: !header && entry !== "" && entry === Engine.current.player.entry
@@ -660,7 +669,7 @@ Rectangle {
                     Row {
                         visible: row.header
                         x: pane.gutter
-                        width: parent.width - x - 12
+                        width: parent.width - x - pane.lengthWidth - pane.ratingWidth - 24
                         anchors.bottom: parent.bottom
                         anchors.bottomMargin: 4
                         spacing: 10
@@ -714,13 +723,22 @@ Rectangle {
                     Text {
                         visible: !row.header
                         x: pane.gutter + pane.numberWidth + 10
-                        width: parent.width - x - pane.lengthWidth - 24
+                        width: parent.width - x - pane.lengthWidth - pane.ratingWidth - 24
                         height: parent.height
                         verticalAlignment: Text.AlignVCenter
                         text: row.title
                         color: row.isPlaying || row.isSelected ? Theme.accentText : Theme.text
                         font.pixelSize: Theme.fontSize
                         elide: Text.ElideRight
+                    }
+                    // A track's rating, or on a header its album's. Unrated
+                    // shows only under the pointer; unknown not at all.
+                    Stars {
+                        visible: row.rating >= 0 && (row.rating > 0 || rowHover.hovered)
+                        x: parent.width - pane.lengthWidth - pane.ratingWidth - 12
+                        y: row.header ? parent.height - height - 3 : (parent.height - height) / 2
+                        rating: Math.max(0, row.rating)
+                        onRated: value => Engine.tracks.rate(row.index, value)
                     }
                     Text {
                         visible: !row.header

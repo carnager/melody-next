@@ -42,6 +42,8 @@ class TrackListModel final : public QAbstractListModel {
         CoverRole,
         GroupTracksRole,
         GroupDurationRole,
+        // 0-10, half stars; a header row's is its album's.
+        RatingRole,
     };
 
     explicit TrackListModel(QObject* parent);
@@ -80,6 +82,8 @@ class TrackListModel final : public QAbstractListModel {
     Q_INVOKABLE void removeRows(const QList<int>& rows);
     // Copies into another list of the same engine, at its end.
     Q_INVOKABLE void copyToList(const QList<int>& rows, const QString& listId);
+    // A track's rating, or on a header row its album's; 0 clears it.
+    Q_INVOKABLE void rate(int row, int rating);
 
   signals:
     void listIdChanged();
@@ -104,15 +108,21 @@ class TrackListModel final : public QAbstractListModel {
         qint64 group_duration_ms{0};
         // The engine's item as it came, written back as it came.
         EngineClient::Json item;
+        // ADR-0179 content identity: this track's, or a header's album's.
+        std::string rating_hash;
+        int rating{0};
     };
 
     void adoptItems(const EngineClient::Json& items, bool same_list);
     [[nodiscard]] std::vector<std::size_t> itemIndices(const QList<int>& rows) const;
+    // A rating set anywhere, by any client, shown wherever its key is.
+    void adoptRating(const std::string& hash, int rating);
     void adoptFacts(const EngineClient::Json& tracks, std::uint64_t generation);
     [[nodiscard]] const Row* track(int row) const;
 
     EngineSession* session_{nullptr};
     QMetaObject::Connection reconnected_;
+    QMetaObject::Connection rated_;
     QString list_id_;
     // The list whose rows are held, to tell a refresh from a new list.
     QString shown_;

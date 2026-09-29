@@ -5,6 +5,8 @@
 #include "quick/cover_provider.hpp"
 #include "quick/engine_session.hpp"
 #include "quick/format.hpp"
+#include "trackknife/metadata/document.hpp"
+#include "trackknife/persistence/rating_identity.hpp"
 
 #include <QSet>
 
@@ -58,6 +60,7 @@ void TrackListModel::show(EngineSession* session, const QString& id) {
         return;
     }
     disconnect(reconnected_);
+    disconnect(rated_);
     session_ = session;
     list_id_ = id;
     if (session_ != nullptr) {
@@ -67,6 +70,8 @@ void TrackListModel::show(EngineSession* session, const QString& id) {
                 reload();
             }
         });
+        rated_ = connect(session_, &EngineSession::ratingChanged, this,
+                         [this](const QString& hash, const int rating) { adoptRating(hash.toStdString(), rating); });
     }
     emit listIdChanged();
     reload();
@@ -197,10 +202,34 @@ void TrackListModel::adoptFacts(const Json& tracks, const std::uint64_t generati
             row.number = number;
         }
         row.date = QString::fromStdString(facts.value("date", std::string{}));
+        // The keys ratings are stored by follow the tags, not the file
+        // (ADR-0179); worked out as the engine does, from the tags it sent.
+        metadata::MetadataDocument document;
+        for (const auto& [name, values] : fields.items()) {
+            metadata::MetadataField field{.canonical_name = name,
+                                          .native_name = name,
+                                          .values = {},
+                                          .qualifier = {},
+                                          .provenance = metadata::FieldProvenance::cached_snapshot};
+            for (const auto& pair : values) {
+                if (pair.is_array() && !pair.empty() && pair.front().is_string()) {
+                    field.values.push_back(pair.front().get<std::string>());
+                }
+            }
+            document.fields.push_back(std::move(field));
+        }
+        const auto raw_path = protocol::decode_raw_path(row.path.toStdString());
+        auto identity = persistence::rating_identity(document, raw_path ? *raw_path : std::string{});
+        row.rating_hash = std::move(identity.track_hash);
+        row.rating = std::max(0, facts.value("rating", -1));
         if (header >= 0) {
             auto& head = rows_[static_cast<std::size_t>(header)];
             if (head.date.isEmpty()) {
                 head.date = row.date;
+            }
+            if (head.rating_hash.empty()) {
+                head.rating_hash = std::move(identity.album_hash);
+                head.rating = std::max(0, facts.value("album_rating", -1));
             }
             if (const auto album_artist = firstField(fields, "albumartist"); !album_artist.empty()) {
                 head.artist = QString::fromStdString(album_artist);
@@ -246,6 +275,8 @@ QVariant TrackListModel::data(const QModelIndex& index, const int role) const {
         return row.group_tracks;
     case GroupDurationRole:
         return static_cast<qreal>(row.group_duration_ms) / 1000.0;
+    case RatingRole:
+        return row.rating_hash.empty() ? -1 : row.rating;
     default:
         return {};
     }
@@ -256,7 +287,7 @@ QHash<int, QByteArray> TrackListModel::roleNames() const {
             {TitleRole, "title"},             {ArtistRole, "artist"},     {AlbumRole, "album"},
             {DateRole, "date"},               {NumberRole, "number"},     {DurationRole, "duration"},
             {CoverRole, "cover"},             {GroupTracksRole, "groupTracks"},
-            {GroupDurationRole, "groupDuration"}};
+            {GroupDurationRole, "groupDuration"}, {RatingRole, "rating"}};
 }
 
 int TrackListModel::trackCount() const {
@@ -451,6 +482,27 @@ void TrackListModel::copyToList(const QList<int>& rows, const QString& listId) {
         }
         return result;
     });
+}
+
+void TrackListModel::rate(const int row, const int rating) {
+    if (session_ == nullptr || row < 0 || row >= rowCount()) {
+        return;
+    }
+    const auto& found = rows_[static_cast<std::size_t>(row)];
+    if (found.rating_hash.empty()) {
+        return;
+    }
+    session_->setRating(QString::fromStdString(found.rating_hash), found.header, std::clamp(rating, 0, 10));
+}
+
+void TrackListModel::adoptRating(const std::string& hash, const int rating) {
+    for (int at = 0; at < rowCount(); ++at) {
+        auto& row = rows_[static_cast<std::size_t>(at)];
+        if (row.rating_hash == hash && row.rating != rating) {
+            row.rating = rating;
+            emit dataChanged(index(at), index(at), {RatingRole});
+        }
+    }
 }
 
 QList<int> TrackListModel::groupRows(const int headerRow) const {

@@ -284,6 +284,7 @@ class BenchMainWindowTest final : public QObject {
     void preparationSidePanelEditsReusableOutputProfiles();
     void pathOnlyPreparationUsesActualTagsAndAppliesReviewedPlan();
     void moveDestinationsArePerEngine();
+    void actionChoicesAreRemembered();
     void namingLayoutsReachEveryEngine();
     void combinedTagAndRenameReviewReachesPreparationApply_data();
     void combinedTagAndRenameReviewReachesPreparationApply();
@@ -3672,6 +3673,7 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
                 completion({});
             },
         .destinations_on = {},
+        .destinations_key = {},
         .places = {},
     };
 
@@ -3695,33 +3697,48 @@ void BenchMainWindowTest::preparationSidePanelEditsReusableOutputProfiles() {
     QVERIFY(properties->findChild<QLabel*>(QStringLiteral("bench-metadata-apply-summary")) !=
             nullptr);
 
-    // ADR-0186: the footer Actions menu is the apply-options surface,
-    // proxying the hidden state controls and the preset selectors.
+    // ADR-0238: the footer Actions button opens a popover with every
+    // apply option in view, driving the hidden state controls.
     auto* actions_button =
         properties->findChild<QToolButton*>(QStringLiteral("bench-metadata-actions"));
     QVERIFY(actions_button != nullptr);
-    auto* actions_menu = actions_button->menu();
-    QVERIFY(actions_menu != nullptr);
-    emit actions_menu->aboutToShow();
-    auto* save_tags_action =
-        properties->findChild<QAction*>(QStringLiteral("action-metadata-save-tags"));
-    auto* rename_action =
-        properties->findChild<QAction*>(QStringLiteral("action-metadata-rename-files"));
-    auto* manage_layouts_action =
-        properties->findChild<QAction*>(QStringLiteral("action-metadata-manage-layouts"));
-    QVERIFY(save_tags_action != nullptr && rename_action != nullptr &&
-            manage_layouts_action != nullptr);
-    QVERIFY(save_tags_action->isChecked());
-    QVERIFY(!rename_action->isEnabled());
+    const auto open_actions = [&]() -> QFrame* {
+        QTest::mouseClick(actions_button, Qt::LeftButton);
+        QFrame* popover = nullptr;
+        [&] {
+            QTRY_VERIFY((popover = properties->findChild<QFrame*>(
+                             QStringLiteral("bench-metadata-actions-popover"))) != nullptr &&
+                        popover->isVisible());
+        }();
+        return popover;
+    };
+    auto* popover = open_actions();
+    QVERIFY(popover != nullptr);
+    auto* save_tags_choice =
+        popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-save-tags"));
+    auto* rename_choice =
+        popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-rename-files"));
+    auto* manage_layouts_link =
+        popover->findChild<QLabel*>(QStringLiteral("bench-actions-manage-layouts"));
+    QVERIFY(save_tags_choice != nullptr && rename_choice != nullptr &&
+            manage_layouts_link != nullptr);
+    QVERIFY(save_tags_choice->isChecked());
+    QVERIFY(!rename_choice->isEnabled());
     QSignalSpy settings_requests{properties, &MetadataPropertiesDialog::openSettingsRequested};
-    manage_layouts_action->trigger();
+    emit manage_layouts_link->linkActivated(QStringLiteral("#"));
     QCOMPARE(settings_requests.count(), 1);
-    save_tags_action->setChecked(false);
+    QTRY_VERIFY(!popover->isVisible() || properties->findChild<QFrame*>(QStringLiteral(
+                                             "bench-metadata-actions-popover")) != popover);
+    popover = open_actions();
+    save_tags_choice = popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-save-tags"));
+    save_tags_choice->click();
     auto* save_tags =
         properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-save-tags"));
     QVERIFY(save_tags != nullptr);
     QVERIFY(!save_tags->isChecked());
-    save_tags_action->setChecked(true);
+    save_tags_choice->click();
+    QVERIFY(save_tags->isChecked());
+    popover->close();
     auto* rename_files =
         properties->findChild<QCheckBox*>(QStringLiteral("bench-preparation-rename-files"));
     auto* move_files =
@@ -3902,6 +3919,7 @@ void BenchMainWindowTest::pathOnlyPreparationUsesActualTagsAndAppliesReviewedPla
         .save_destination = {},
         .remove_destination = {},
         .destinations_on = {},
+        .destinations_key = {},
         .places = {},
     };
     const std::vector automatic_chains{persistence::SavedMetadataTransformationChain{
@@ -4102,6 +4120,7 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
         .save_destination = local.save,
         .remove_destination = local.remove,
         .destinations_on = {},
+        .destinations_key = {},
         .places = {local, remote},
     };
     SettingsDialog settings{nullptr, store};
@@ -4169,6 +4188,7 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
             .save_destination = {},
             .remove_destination = {},
             .destinations_on = QStringLiteral("gemenon"),
+            .destinations_key = QStringLiteral("gemenon-id"),
             .places = {}});
     auto* offered = properties->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
     QVERIFY(offered != nullptr);
@@ -4181,6 +4201,139 @@ void BenchMainWindowTest::moveDestinationsArePerEngine() {
 // engine, so whatever moves files through one can name them. This
 // computer's engine shares the workspace: what it holds is what was saved,
 // and a copy sent on connecting never lands on top of a newer one.
+// ADR-0238: what the Actions popover was set to is how the next Properties
+// window starts: toggles, layout, and each engine's destination.
+void BenchMainWindowTest::actionChoicesAreRemembered() {
+    QTemporaryDir media;
+    QVERIFY(media.isValid());
+    const auto path = media.filePath(QStringLiteral("remembered.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), path));
+    const auto raw_path = QFile::encodeName(path).toStdString();
+    const auto read = metadata::read_local_metadata(raw_path);
+    QVERIFY(read.has_value());
+    const MetadataPropertiesSource source{
+        .source = metadata::StagedMetadataSource{.raw_path = raw_path,
+                                                 .source_revision = read->source_revision,
+                                                 .baseline = read->document},
+        .track_label = QStringLiteral("Remembered"),
+    };
+    const auto layout = [](std::string name) {
+        return persistence::SavedOutputLayoutProfile{
+            .id = core::StableId::random(),
+            .profile = operations::OutputLayoutProfile{.schema_version = 1U,
+                                                       .name = std::move(name),
+                                                       .dialect = {},
+                                                       .relative_directory_expression = {},
+                                                       .basename_expression = "%title%",
+                                                       .sanitization_policy = {"linux", 1U}}};
+    };
+    const auto destination = [](std::string name) {
+        return persistence::SavedDestinationProfile{
+            .id = core::StableId::random(),
+            .profile =
+                operations::DestinationProfile{.schema_version = 1U,
+                                               .name = std::move(name),
+                                               .root_raw_path = "/srv/music",
+                                               .containment_policy = {"lexical-beneath-root", 1U}}};
+    };
+    const std::vector layouts{layout("Plain"), layout("Albumartist/Date Album")};
+    const std::vector destinations{destination("Incoming"), destination("Library")};
+    const auto store_for = [&](const QString& engine) {
+        return OutputProfileStore{
+            .load =
+                [&](OutputProfileStore::LoadCompletion done) { done(layouts, destinations, {}); },
+            .save_layout = {},
+            .remove_layout = {},
+            .save_destination = {},
+            .remove_destination = {},
+            .destinations_on = {},
+            .destinations_key = engine,
+            .places = {}};
+    };
+    const auto open = [&](const QString& engine) {
+        auto* properties = new MetadataPropertiesDialog(
+            1U,
+            [source](const std::size_t index) -> std::optional<MetadataPropertiesSource> {
+                return index == 0U ? std::optional{source} : std::nullopt;
+            },
+            {}, {}, {}, {}, store_for(engine),
+            [] {
+                return FilePublicationPlanApplier{
+                    [](const operations::PreparationPlan&,
+                       const operations::FilePublicationApplyProgressCallback&,
+                       const core::CancellationToken&)
+                        -> core::Result<operations::FilePublicationApplyResult> {
+                        return std::unexpected(core::Error{.code = core::ErrorCode::cancelled,
+                                                           .message = "not here",
+                                                           .context = {}});
+                    }};
+            },
+            {});
+        properties->show();
+        return properties;
+    };
+    const auto hidden = [](MetadataPropertiesDialog* properties, const char* name) {
+        return properties->findChild<QCheckBox*>(QString::fromLatin1(name));
+    };
+    const auto popover_of = [](MetadataPropertiesDialog* properties) -> QFrame* {
+        QTest::mouseClick(
+            properties->findChild<QToolButton*>(QStringLiteral("bench-metadata-actions")),
+            Qt::LeftButton);
+        return properties->findChild<QFrame*>(QStringLiteral("bench-metadata-actions-popover"));
+    };
+
+    auto* first = open(QStringLiteral("gemenon-id"));
+    auto* layout_combo =
+        first->findChild<QComboBox*>(QStringLiteral("bench-output-layout-profile"));
+    QTRY_COMPARE(layout_combo->count(), 2);
+    auto* popover = popover_of(first);
+    QVERIFY(popover != nullptr);
+    popover->findChild<QComboBox*>(QStringLiteral("bench-actions-layout"))->setCurrentIndex(1);
+    emit popover->findChild<QComboBox*>(QStringLiteral("bench-actions-layout"))->activated(1);
+    popover->findChild<QComboBox*>(QStringLiteral("bench-actions-destination"))->setCurrentIndex(1);
+    emit popover->findChild<QComboBox*>(QStringLiteral("bench-actions-destination"))->activated(1);
+    QTRY_VERIFY(
+        popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-rename-files"))->isEnabled());
+    popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-rename-files"))->click();
+    popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-move-files"))->click();
+    QVERIFY(hidden(first, "bench-preparation-rename-files")->isChecked());
+    QVERIFY(hidden(first, "bench-preparation-move-files")->isChecked());
+    if (const auto directory = qEnvironmentVariable("TRACKKNIFE_TEST_SCREENSHOT_DIR");
+        !directory.isEmpty()) {
+        QVERIFY(popover->grab().save(directory + QStringLiteral("/actions-popover.png")));
+    }
+    popover->close();
+    delete first;
+
+    // The next window starts as this one was left.
+    auto* second = open(QStringLiteral("gemenon-id"));
+    layout_combo = second->findChild<QComboBox*>(QStringLiteral("bench-output-layout-profile"));
+    auto* destination_combo =
+        second->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QTRY_COMPARE(layout_combo->currentText(), QStringLiteral("Albumartist/Date Album"));
+    QCOMPARE(destination_combo->currentText(), QStringLiteral("Library"));
+    QTRY_VERIFY(hidden(second, "bench-preparation-rename-files")->isChecked());
+    QTRY_VERIFY(hidden(second, "bench-preparation-move-files")->isChecked());
+    // Unticked is remembered too.
+    popover = popover_of(second);
+    popover->findChild<QCheckBox*>(QStringLiteral("bench-actions-move-files"))->click();
+    QVERIFY(!hidden(second, "bench-preparation-move-files")->isChecked());
+    popover->close();
+    delete second;
+
+    // Another engine's destination is its own: nothing chosen there yet.
+    auto* elsewhere = open(QStringLiteral("other-engine"));
+    destination_combo =
+        elsewhere->findChild<QComboBox*>(QStringLiteral("bench-destination-profile"));
+    QTRY_COMPARE(destination_combo->count(), 2);
+    QCOMPARE(destination_combo->currentText(), QStringLiteral("Incoming"));
+    QTRY_VERIFY(hidden(elsewhere, "bench-preparation-rename-files")->isChecked());
+    QVERIFY(!hidden(elsewhere, "bench-preparation-move-files")->isChecked());
+    delete elsewhere;
+    // Left as other tests expect to find it.
+    QSettings{}.remove(QStringLiteral("properties/actions"));
+}
+
 void BenchMainWindowTest::namingLayoutsReachEveryEngine() {
     BenchMainWindow window;
     window.show();
@@ -4271,6 +4424,7 @@ void BenchMainWindowTest::combinedTagAndRenameReviewReachesPreparationApply() {
         .save_destination = {},
         .remove_destination = {},
         .destinations_on = {},
+        .destinations_key = {},
         .places = {},
     };
     const MetadataTransformationStore transformation_store{

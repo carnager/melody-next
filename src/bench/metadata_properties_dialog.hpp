@@ -39,6 +39,7 @@
 class QModelIndex;
 class QCloseEvent;
 class QCheckBox;
+class QFrame;
 class QComboBox;
 class QDialogButtonBox;
 class QEvent;
@@ -182,7 +183,13 @@ class MetadataPropertiesDialog final : public QDialog {
     void updateOutputProfileButtons();
     void updateWritePlanButton();
     void updateApplySummary();
-    void rebuildActionsMenu();
+    // ADR-0238: the Actions popover -- what Apply does, and with which
+    // layout, destination, grouping and scripts -- all in view at once.
+    void showActionsPopover();
+    void syncActionsPopover();
+    // Choices made there are remembered for the next window: the toggles,
+    // the naming layout, and the move destination of each engine.
+    void rememberActionChoices() const;
 
   public:
     // ADR-0183 addendum: sidebar hosting of the file list by the bench
@@ -298,7 +305,19 @@ class MetadataPropertiesDialog final : public QDialog {
     QLabel* read_only_{nullptr};
     QLabel* apply_summary_{nullptr};
     QToolButton* actions_button_{nullptr};
-    QMenu* actions_menu_{nullptr};
+    // Deletes itself when it closes.
+    QPointer<QFrame> actions_popover_;
+    QCheckBox* actions_save_tags_{nullptr};
+    QCheckBox* actions_rename_{nullptr};
+    QCheckBox* actions_move_{nullptr};
+    QComboBox* actions_layout_{nullptr};
+    QComboBox* actions_destination_{nullptr};
+    QComboBox* actions_grouping_{nullptr};
+    QPushButton* actions_scan_{nullptr};
+    // Rename and Move as last chosen: set again once a layout (and a
+    // destination) make them possible.
+    bool wants_rename_{false};
+    bool wants_move_{false};
     QLabel* loading_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* undo_button_{nullptr};

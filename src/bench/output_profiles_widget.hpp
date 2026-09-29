@@ -57,6 +57,9 @@ struct OutputProfileStore {
     std::function<void(persistence::SavedDestinationProfile, Completion)> save_destination;
     std::function<void(core::StableId, Completion)> remove_destination;
     QString destinations_on;
+    // That engine's key, as EngineKey spells it: what a destination chosen
+    // for it is remembered under.
+    QString destinations_key;
     // For the manager: every engine whose destinations can be managed, this
     // computer first. Empty: only the destinations above.
     std::vector<DestinationPlace> places;

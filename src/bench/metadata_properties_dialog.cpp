@@ -43,6 +43,7 @@
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -102,6 +103,17 @@
 #include <vector>
 
 namespace trackknife::bench {
+
+namespace {
+
+// ADR-0238: what the Actions popover was last set to.
+constexpr auto remembered_save_tags_key = "properties/actions/save-tags";
+constexpr auto remembered_rename_key = "properties/actions/rename-files";
+constexpr auto remembered_move_key = "properties/actions/move-files";
+constexpr auto remembered_layout_key = "properties/actions/naming-layout";
+constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
+
+} // namespace
 namespace {
 
 constexpr auto properties_geometry_key = "workspace/metadata-properties-geometry-v1";
@@ -221,7 +233,21 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
                        "problems stop the run before anything is written")));
     save_tags_check_ = new QCheckBox(QStringLiteral("Save tags"), side_panel);
     save_tags_check_->setObjectName(QStringLiteral("bench-preparation-save-tags"));
-    save_tags_check_->setChecked(true);
+    // ADR-0238: as the Actions popover was last left.
+    {
+        const QSettings remembered;
+        save_tags_check_->setChecked(
+            remembered.value(QLatin1String(remembered_save_tags_key), true).toBool());
+        wants_rename_ = remembered.value(QLatin1String(remembered_rename_key), false).toBool();
+        wants_move_ = remembered.value(QLatin1String(remembered_move_key), false).toBool();
+        const auto id_of = [&remembered](const QString& key) -> std::optional<core::StableId> {
+            auto id = core::StableId::parse(remembered.value(key).toString().toStdString());
+            return id ? std::optional{*id} : std::nullopt;
+        };
+        editing_output_layout_id_ = id_of(QLatin1String(remembered_layout_key));
+        editing_destination_id_ = id_of(QLatin1String(remembered_destination_prefix) +
+                                        output_profile_store_.destinations_key);
+    }
     save_tags_check_->setToolTip(QStringLiteral("Write the drafted tag edits into the files"));
     side_layout->addWidget(save_tags_check_);
     rename_files_check_ = new QCheckBox(QStringLiteral("Rename files"), side_panel);
@@ -574,12 +600,10 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     actions_button_ = new QToolButton(footer);
     actions_button_->setObjectName(QStringLiteral("bench-metadata-actions"));
     actions_button_->setText(QStringLiteral("Actions"));
-    actions_button_->setPopupMode(QToolButton::InstantPopup);
-    actions_menu_ = new QMenu(actions_button_);
-    actions_menu_->setObjectName(QStringLiteral("bench-metadata-actions-menu"));
-    actions_button_->setMenu(actions_menu_);
-    connect(actions_menu_, &QMenu::aboutToShow, this,
-            &MetadataPropertiesDialog::rebuildActionsMenu);
+    actions_button_->setToolTip(
+        QStringLiteral("What Apply does: tags, renaming and moving, ReplayGain, scripts"));
+    connect(actions_button_, &QToolButton::clicked, this,
+            &MetadataPropertiesDialog::showActionsPopover);
     footer_layout->addWidget(actions_button_);
     apply_summary_ = new QLabel(footer);
     apply_summary_->setObjectName(QStringLiteral("bench-metadata-apply-summary"));
@@ -1681,11 +1705,11 @@ void MetadataPropertiesDialog::rebuildOutputProfileControls(
         destination_combo_->addItem(display_utf8(saved.profile.name),
                                     QString::fromStdString(saved.id.to_string()));
     }
+    // The one asked for, else the first: a layout or destination that has
+    // gone is not a reason to have none.
     const auto select_id = [](QComboBox* combo, const std::optional<core::StableId>& id) {
-        if (!id) {
-            return combo->count() > 0 ? 0 : -1;
-        }
-        return combo->findData(QString::fromStdString(id->to_string()));
+        const auto found = id ? combo->findData(QString::fromStdString(id->to_string())) : -1;
+        return found >= 0 ? found : (combo->count() > 0 ? 0 : -1);
     };
     const auto layout_index = select_id(output_layout_combo_, selected_layout);
     const auto destination_index = select_id(destination_combo_, selected_destination);
@@ -1774,6 +1798,14 @@ void MetadataPropertiesDialog::updateOutputProfileButtons() {
     if (!move_files_check_->isEnabled() && move_files_check_->isChecked()) {
         move_files_check_->setChecked(false);
     }
+    // ADR-0238: chosen before, and possible now.
+    if (wants_rename_ && rename_files_check_->isEnabled() && !rename_files_check_->isChecked()) {
+        rename_files_check_->setChecked(true);
+    }
+    if (wants_move_ && move_files_check_->isEnabled() && !move_files_check_->isChecked()) {
+        move_files_check_->setChecked(true);
+    }
+    syncActionsPopover();
 }
 
 void MetadataPropertiesDialog::updateWritePlanButton() {
@@ -1794,112 +1826,213 @@ void MetadataPropertiesDialog::updateWritePlanButton() {
 // ADR-0186: the Actions menu is the apply-options surface — checkable
 // actions proxy the hidden panel's controls, preset submenus select the
 // saved profiles, and Manage entries open the matching Settings page.
-void MetadataPropertiesDialog::rebuildActionsMenu() {
-    if (actions_menu_ == nullptr) {
-        return;
-    }
-    actions_menu_->clear();
-    const auto add_check = [this](const QString& label, QCheckBox* box,
-                                  const QString& object_name) {
-        auto* action = actions_menu_->addAction(label);
-        action->setObjectName(object_name);
-        action->setCheckable(true);
-        action->setChecked(box->isChecked());
-        action->setEnabled(box->isEnabled());
-        action->setToolTip(box->toolTip());
-        connect(action, &QAction::toggled, box, &QCheckBox::setChecked);
-        return action;
+void MetadataPropertiesDialog::showActionsPopover() {
+    // Built afresh each time from the controls that hold the state, so it
+    // can never show anything else; changes made in it go straight to them.
+    delete actions_popover_.data();
+    actions_popover_ = new QFrame(this, Qt::Popup);
+    actions_popover_->setObjectName(QStringLiteral("bench-metadata-actions-popover"));
+    actions_popover_->setAttribute(Qt::WA_DeleteOnClose);
+    actions_popover_->setFrameShape(QFrame::StyledPanel);
+    auto* grid = new QGridLayout(actions_popover_);
+    grid->setContentsMargins(12, 12, 12, 12);
+    grid->setHorizontalSpacing(12);
+    grid->setVerticalSpacing(8);
+    const auto link = [this](const QString& text, const QString& object_name, auto&& activated) {
+        auto* label = new QLabel(QStringLiteral("<a href=\"#\">%1</a>").arg(text.toHtmlEscaped()),
+                                 actions_popover_);
+        label->setObjectName(object_name);
+        label->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+        connect(label, &QLabel::linkActivated, this,
+                [this, activated = std::forward<decltype(activated)>(activated)] {
+                    actions_popover_->close();
+                    activated();
+                });
+        return label;
     };
-    add_check(QStringLiteral("Save tags"), save_tags_check_,
-              QStringLiteral("action-metadata-save-tags"));
-    add_check(QStringLiteral("Rename files"), rename_files_check_,
-              QStringLiteral("action-metadata-rename-files"));
-    auto* layout_menu = actions_menu_->addMenu(QStringLiteral("Naming layout"));
-    layout_menu->setObjectName(QStringLiteral("bench-actions-layout-menu"));
-    for (int index = 0; index < output_layout_combo_->count(); ++index) {
-        auto* choice = layout_menu->addAction(output_layout_combo_->itemText(index));
-        choice->setCheckable(true);
-        choice->setChecked(index == output_layout_combo_->currentIndex());
-        connect(choice, &QAction::triggered, this,
-                [this, index] { output_layout_combo_->setCurrentIndex(index); });
-    }
-    layout_menu->addSeparator();
-    auto* manage_layouts = layout_menu->addAction(QStringLiteral("Manage naming layouts…"));
-    manage_layouts->setObjectName(QStringLiteral("action-metadata-manage-layouts"));
-    connect(manage_layouts, &QAction::triggered, this,
-            [this] { emit openSettingsRequested(SettingsDialog::Page::naming); });
-    add_check(QStringLiteral("Move files"), move_files_check_,
-              QStringLiteral("action-metadata-move-files"));
-    auto* destination_menu = actions_menu_->addMenu(QStringLiteral("Move destination"));
-    destination_menu->setObjectName(QStringLiteral("bench-actions-destination-menu"));
-    for (int index = 0; index < destination_combo_->count(); ++index) {
-        auto* choice = destination_menu->addAction(destination_combo_->itemText(index));
-        choice->setCheckable(true);
-        choice->setChecked(index == destination_combo_->currentIndex());
-        connect(choice, &QAction::triggered, this,
-                [this, index] { destination_combo_->setCurrentIndex(index); });
-    }
-    destination_menu->addSeparator();
-    auto* manage_destinations =
-        destination_menu->addAction(QStringLiteral("Manage move destinations…"));
-    manage_destinations->setObjectName(QStringLiteral("action-metadata-manage-destinations"));
-    connect(manage_destinations, &QAction::triggered, this,
-            [this] { emit openSettingsRequested(SettingsDialog::Page::naming); });
+    const auto copy_items = [](QComboBox* from, QComboBox* to) {
+        for (int index = 0; index < from->count(); ++index) {
+            to->addItem(from->itemText(index), from->itemData(index));
+        }
+        to->setCurrentIndex(from->currentIndex());
+        to->setPlaceholderText(from->placeholderText());
+        to->setToolTip(from->toolTip());
+    };
+    int row = 0;
 
-    actions_menu_->addSeparator();
-    auto* replaygain_menu = actions_menu_->addMenu(QStringLiteral("ReplayGain"));
-    replaygain_menu->setObjectName(QStringLiteral("bench-actions-replaygain-menu"));
-    auto* scan_now = replaygain_menu->addAction(QStringLiteral("Scan selection now"));
-    scan_now->setObjectName(QStringLiteral("action-metadata-replaygain-scan"));
-    scan_now->setEnabled(replaygain_scan_button_->isEnabled());
-    connect(scan_now, &QAction::triggered, replaygain_scan_button_, &QPushButton::click);
-    replaygain_menu->addSeparator();
-    for (int index = 0; index < replaygain_grouping_->count(); ++index) {
-        auto* choice = replaygain_menu->addAction(replaygain_grouping_->itemText(index));
-        choice->setCheckable(true);
-        choice->setChecked(index == replaygain_grouping_->currentIndex());
-        connect(choice, &QAction::triggered, this, [this, index] {
-            replaygain_grouping_->setCurrentIndex(index);
-            if (index == 4) {
-                bool accepted = false;
-                const auto expression =
-                    QInputDialog::getText(this, QStringLiteral("Group by expression"),
-                                          QStringLiteral("tkfmt-1 expression:"), QLineEdit::Normal,
-                                          replaygain_expression_->text(), &accepted);
-                if (accepted) {
-                    replaygain_expression_->setText(expression);
-                }
+    actions_save_tags_ = new QCheckBox(QStringLiteral("Save tags"), actions_popover_);
+    actions_save_tags_->setObjectName(QStringLiteral("bench-actions-save-tags"));
+    connect(actions_save_tags_, &QCheckBox::clicked, this, [this](const bool checked) {
+        save_tags_check_->setChecked(checked);
+        rememberActionChoices();
+        syncActionsPopover();
+    });
+    grid->addWidget(actions_save_tags_, row++, 0, 1, 2);
+
+    actions_rename_ = new QCheckBox(QStringLiteral("Rename files"), actions_popover_);
+    actions_rename_->setObjectName(QStringLiteral("bench-actions-rename-files"));
+    connect(actions_rename_, &QCheckBox::clicked, this, [this](const bool checked) {
+        wants_rename_ = checked;
+        rename_files_check_->setChecked(checked);
+        rememberActionChoices();
+        syncActionsPopover();
+    });
+    actions_layout_ = new QComboBox(actions_popover_);
+    actions_layout_->setObjectName(QStringLiteral("bench-actions-layout"));
+    actions_layout_->setAccessibleName(QStringLiteral("Naming layout"));
+    copy_items(output_layout_combo_, actions_layout_);
+    connect(actions_layout_, &QComboBox::activated, this, [this](const int index) {
+        output_layout_combo_->setCurrentIndex(index);
+        rememberActionChoices();
+        syncActionsPopover();
+    });
+    grid->addWidget(actions_rename_, row, 0);
+    grid->addWidget(actions_layout_, row++, 1);
+
+    actions_move_ = new QCheckBox(QStringLiteral("Move files"), actions_popover_);
+    actions_move_->setObjectName(QStringLiteral("bench-actions-move-files"));
+    connect(actions_move_, &QCheckBox::clicked, this, [this](const bool checked) {
+        wants_move_ = checked;
+        move_files_check_->setChecked(checked);
+        rememberActionChoices();
+        syncActionsPopover();
+    });
+    actions_destination_ = new QComboBox(actions_popover_);
+    actions_destination_->setObjectName(QStringLiteral("bench-actions-destination"));
+    actions_destination_->setAccessibleName(QStringLiteral("Move destination"));
+    copy_items(destination_combo_, actions_destination_);
+    connect(actions_destination_, &QComboBox::activated, this, [this](const int index) {
+        destination_combo_->setCurrentIndex(index);
+        rememberActionChoices();
+        syncActionsPopover();
+    });
+    grid->addWidget(actions_move_, row, 0);
+    grid->addWidget(actions_destination_, row++, 1);
+    auto* manage = new QHBoxLayout;
+    manage->setSpacing(16);
+    manage->addWidget(link(QStringLiteral("Manage naming layouts…"),
+                           QStringLiteral("bench-actions-manage-layouts"),
+                           [this] { emit openSettingsRequested(SettingsDialog::Page::naming); }));
+    manage->addWidget(link(QStringLiteral("Manage move destinations…"),
+                           QStringLiteral("bench-actions-manage-destinations"),
+                           [this] { emit openSettingsRequested(SettingsDialog::Page::naming); }));
+    manage->addStretch(1);
+    grid->addLayout(manage, row++, 1);
+
+    auto* replaygain = new QLabel(QStringLiteral("ReplayGain"), actions_popover_);
+    actions_grouping_ = new QComboBox(actions_popover_);
+    actions_grouping_->setObjectName(QStringLiteral("bench-actions-replaygain-grouping"));
+    actions_grouping_->setAccessibleName(QStringLiteral("ReplayGain grouping"));
+    copy_items(replaygain_grouping_, actions_grouping_);
+    connect(actions_grouping_, &QComboBox::activated, this, [this](const int index) {
+        replaygain_grouping_->setCurrentIndex(index);
+        if (index == 4) {
+            bool accepted = false;
+            const auto expression = QInputDialog::getText(
+                this, QStringLiteral("Group by expression"), QStringLiteral("tkfmt-1 expression:"),
+                QLineEdit::Normal, replaygain_expression_->text(), &accepted);
+            if (accepted) {
+                replaygain_expression_->setText(expression);
             }
-        });
-    }
-    replaygain_menu->addSeparator();
-    auto* loudness_sources = replaygain_menu->addAction(QStringLiteral("Loudness sources…"));
-    loudness_sources->setEnabled(replaygain_provenance_button_->isEnabled());
-    connect(loudness_sources, &QAction::triggered, replaygain_provenance_button_,
-            &QPushButton::click);
-    auto* replaygain_settings = replaygain_menu->addAction(QStringLiteral("ReplayGain settings…"));
-    connect(replaygain_settings, &QAction::triggered, this,
-            [this] { emit openSettingsRequested(SettingsDialog::Page::replaygain); });
+        }
+    });
+    actions_scan_ = new QPushButton(QStringLiteral("Scan now"), actions_popover_);
+    actions_scan_->setObjectName(QStringLiteral("bench-actions-replaygain-scan"));
+    connect(actions_scan_, &QPushButton::clicked, this, [this] {
+        actions_popover_->close();
+        replaygain_scan_button_->click();
+    });
+    auto* replaygain_row = new QHBoxLayout;
+    replaygain_row->addWidget(actions_grouping_, 1);
+    replaygain_row->addWidget(actions_scan_);
+    grid->addWidget(replaygain, row, 0);
+    grid->addLayout(replaygain_row, row++, 1);
+    auto* replaygain_links = new QHBoxLayout;
+    replaygain_links->setSpacing(16);
+    auto* sources =
+        link(QStringLiteral("Loudness sources…"), QStringLiteral("bench-actions-loudness-sources"),
+             [this] { replaygain_provenance_button_->click(); });
+    sources->setEnabled(replaygain_provenance_button_->isEnabled());
+    replaygain_links->addWidget(sources);
+    replaygain_links->addWidget(link(
+        QStringLiteral("ReplayGain settings…"), QStringLiteral("bench-actions-replaygain-settings"),
+        [this] { emit openSettingsRequested(SettingsDialog::Page::replaygain); }));
+    replaygain_links->addStretch(1);
+    grid->addLayout(replaygain_links, row++, 1);
 
-    auto* scripts_menu = actions_menu_->addMenu(QStringLiteral("Scripts"));
-    scripts_menu->setObjectName(QStringLiteral("bench-actions-scripts-menu"));
-    for (int row = 0; row < transformation_list_->count(); ++row) {
-        auto* item = transformation_list_->item(row);
-        auto* choice = scripts_menu->addAction(item->text());
-        choice->setCheckable(true);
+    auto* scripts = new QLabel(QStringLiteral("Scripts"), actions_popover_);
+    grid->addWidget(scripts, row, 0, Qt::AlignTop);
+    auto* script_column = new QVBoxLayout;
+    for (int index = 0; index < transformation_list_->count(); ++index) {
+        auto* item = transformation_list_->item(index);
+        auto* choice = new QCheckBox(item->text(), actions_popover_);
+        choice->setObjectName(QStringLiteral("bench-actions-script-%1").arg(index));
         choice->setChecked(item->checkState() == Qt::Checked);
-        connect(choice, &QAction::toggled, this, [this, row](const bool checked) {
-            if (auto* target = transformation_list_->item(row)) {
+        connect(choice, &QCheckBox::toggled, this, [this, index](const bool checked) {
+            if (auto* target = transformation_list_->item(index)) {
                 target->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
             }
         });
+        script_column->addWidget(choice);
     }
-    if (transformation_list_->count() > 0) {
-        scripts_menu->addSeparator();
+    auto* editor =
+        link(QStringLiteral("Open script editor…"), QStringLiteral("bench-actions-script-editor"),
+             [this] { transform_button_->click(); });
+    editor->setEnabled(transform_button_->isEnabled());
+    script_column->addWidget(editor);
+    grid->addLayout(script_column, row++, 1);
+
+    syncActionsPopover();
+    actions_popover_->adjustSize();
+    // Above the button: the footer is at the window's foot. Below it when
+    // there is no room above, and never past the screen's edges.
+    const auto size = actions_popover_->sizeHint();
+    auto at = actions_button_->mapToGlobal(QPoint{0, -size.height()});
+    if (const auto* screen = actions_button_->screen()) {
+        const auto area = screen->availableGeometry();
+        if (at.y() < area.top()) {
+            at.setY(actions_button_->mapToGlobal(QPoint{0, actions_button_->height()}).y());
+        }
+        at.setX(
+            std::clamp(at.x(), area.left(), std::max(area.left(), area.right() - size.width())));
     }
-    auto* open_editor = scripts_menu->addAction(QStringLiteral("Open script editor…"));
-    open_editor->setEnabled(transform_button_->isEnabled());
-    connect(open_editor, &QAction::triggered, transform_button_, &QPushButton::click);
+    actions_popover_->move(at);
+    actions_popover_->show();
+}
+
+void MetadataPropertiesDialog::syncActionsPopover() {
+    if (actions_popover_ == nullptr || actions_save_tags_ == nullptr) {
+        return;
+    }
+    const auto mirror = [](QCheckBox* shown, const QCheckBox* state) {
+        const QSignalBlocker blocker{shown};
+        shown->setChecked(state->isChecked());
+        shown->setEnabled(state->isEnabled());
+        shown->setToolTip(state->toolTip());
+    };
+    mirror(actions_save_tags_, save_tags_check_);
+    mirror(actions_rename_, rename_files_check_);
+    mirror(actions_move_, move_files_check_);
+    actions_layout_->setEnabled(output_layout_combo_->isEnabled());
+    actions_destination_->setEnabled(destination_combo_->isEnabled());
+    actions_scan_->setEnabled(replaygain_scan_button_->isEnabled());
+}
+
+void MetadataPropertiesDialog::rememberActionChoices() const {
+    QSettings settings;
+    settings.setValue(QLatin1String(remembered_save_tags_key), save_tags_check_->isChecked());
+    settings.setValue(QLatin1String(remembered_rename_key), wants_rename_);
+    settings.setValue(QLatin1String(remembered_move_key), wants_move_);
+    if (editing_output_layout_id_) {
+        settings.setValue(QLatin1String(remembered_layout_key),
+                          QString::fromStdString(editing_output_layout_id_->to_string()));
+    }
+    // Destinations are the engine's: one remembered for each.
+    if (editing_destination_id_) {
+        settings.setValue(QLatin1String(remembered_destination_prefix) +
+                              output_profile_store_.destinations_key,
+                          QString::fromStdString(editing_destination_id_->to_string()));
+    }
 }
 
 void MetadataPropertiesDialog::reloadOutputProfiles() { loadOutputProfiles(); }

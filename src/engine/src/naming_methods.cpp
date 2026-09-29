@@ -54,7 +54,11 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
     dispatcher.on("layouts.list",
                   [&workspace](const Json&) -> core::Result<Json> { return layouts(workspace); });
 
-    dispatcher.on("layouts.set", [&workspace](const Json& params) -> core::Result<Json> {
+    // Only ever adds, updates, or removes what it is told to: a client with
+    // an older or smaller set -- another Trackknife, a copy sent late -- must
+    // not take layouts away (this computer's engine shares Trackknife's
+    // workspace, so what it holds is Trackknife's own).
+    dispatcher.on("layouts.put", [&workspace](const Json& params) -> core::Result<Json> {
         const auto given = params.find("layouts");
         if (given == params.end() || !given->is_array()) {
             return std::unexpected(bad_params("the layouts are required", "layouts"));
@@ -67,23 +71,42 @@ void register_naming_methods(protocol::Dispatcher& dispatcher, Workspace& worksp
             }
             wanted.push_back(std::move(*layout));
         }
+        std::vector<core::StableId> removed;
+        if (const auto listed = params.find("removed"); listed != params.end()) {
+            if (!listed->is_array()) {
+                return std::unexpected(bad_params("removed is a list of ids", "removed"));
+            }
+            for (const auto& value : *listed) {
+                auto id = value.is_string()
+                              ? core::StableId::parse(value.get<std::string>())
+                              : core::Result<core::StableId>{std::unexpected(core::Error{})};
+                if (!id) {
+                    return std::unexpected(bad_params("removed is a list of ids", "removed"));
+                }
+                removed.push_back(*id);
+            }
+        }
+        for (const auto& id : removed) {
+            if (auto gone = workspace.remove_output_layout_profile(id); !gone) {
+                return std::unexpected(std::move(gone.error()));
+            }
+        }
         auto held = workspace.load_output_layout_profiles();
         if (!held) {
             return std::unexpected(std::move(held.error()));
         }
-        // Gone ones first: a name moves from one layout to another freely.
-        for (const auto& layout : *held) {
-            if (std::ranges::none_of(wanted, [&layout](const auto& kept) {
-                    return kept.id == layout.id && kept == layout;
-                })) {
-                if (auto removed = workspace.remove_output_layout_profile(layout.id); !removed) {
-                    return std::unexpected(std::move(removed.error()));
-                }
-            }
-        }
         for (const auto& layout : wanted) {
             if (std::ranges::contains(*held, layout)) {
                 continue;
+            }
+            // A name is one layout's: another here by the same name is the
+            // same layout under an older identity, and gives way.
+            for (const auto& other : *held) {
+                if (other.id != layout.id && other.profile.name == layout.profile.name) {
+                    if (auto gone = workspace.remove_output_layout_profile(other.id); !gone) {
+                        return std::unexpected(std::move(gone.error()));
+                    }
+                }
             }
             if (auto saved = workspace.upsert_output_layout_profile(layout); !saved) {
                 return std::unexpected(std::move(saved.error()));

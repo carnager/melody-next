@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "workspace/sources.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
 #include "bench/playback_tab_widget.hpp"
@@ -810,9 +811,7 @@ bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantLis
     return destination != nullptr;
 }
 
-bool BenchMainWindow::localLibraryShown() const {
-    return QSettings{}.value(QLatin1String(SettingsDialog::library_show_local_key), true).toBool();
-}
+bool BenchMainWindow::localLibraryShown() const { return bench::localLibraryShown(); }
 
 void BenchMainWindow::applyLocalLibraryVisibility() {
     if (local_source_tabs_ == nullptr) {
@@ -832,12 +831,7 @@ void BenchMainWindow::selectPreferredSource() {
     }
     // A library unless Folders was chosen: this computer's, or the remote's
     // when this computer's is hidden or the remote's was chosen.
-    auto wanted = QSettings{}.value(QStringLiteral("local-library/view")).toString();
-    if (wanted == QStringLiteral("0")) {
-        wanted = QStringLiteral("folders");
-    } else if (wanted != QStringLiteral("folders") && wanted != QStringLiteral("remote")) {
-        wanted = QStringLiteral("library");
-    }
+    const auto wanted = preferredSource();
     // A library tab of another engine carries that engine's key.
     int remote = -1;
     for (int index = 0; index < local_source_tabs_->count(); ++index) {

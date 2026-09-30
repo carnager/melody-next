@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "workspace/folder_browser.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
 #include "bench/engine_key.hpp"
@@ -403,10 +404,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();
-    void persistFolderBookmarks() const;
-    void addFolderBookmark(const std::string& raw_path);
-    void revealFolderPath(const std::string& raw_path);
-    void revealFolderStep(const QPersistentModelIndex& parent_index, const std::string& raw_path);
+    void addFolderBookmark(const std::string& raw_path) { folder_browser_->addBookmark(raw_path); }
+    void revealFolderPath(const std::string& raw_path) { folder_browser_->reveal(raw_path); }
     void playCurrentRow();
     void showMetadataProperties();
     // ADR-0237: `work` is the engine that does the file work, or null for
@@ -613,6 +612,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void togglePlayPause() { workspace_.togglePlayPause(); }
     void seekToMs(qint64 position_ms) { workspace_.seekToMs(position_ms); }
 
+    FolderBrowser* folder_browser_{nullptr};
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
     // temporary page hosting its file list (ADR-0183 addendum).

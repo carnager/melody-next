@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "workspace/sources.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -113,7 +114,8 @@ void BenchMainWindow::buildWorkspace() {
     track_area_->addWidget(tabs_);
     buildListsPanel();
 
-    folder_model_ = new ui::LocalFolderTreeModel(this);
+    folder_browser_ = new FolderBrowser(this);
+    folder_model_ = folder_browser_->model();
     folders_panel_ = new QWidget(this);
     folders_panel_->setObjectName(QStringLiteral("bench-panel-folders"));
     folders_panel_->setProperty(layout_panel_id_property, QString::fromLatin1(folders_panel_id));
@@ -160,13 +162,10 @@ void BenchMainWindow::buildWorkspace() {
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
         const auto kind = local_source_tabs_->tabData(index).toString();
         // The temporary Files page (ADR-0183 addendum) is session-only.
-        const auto choice = !kind.isEmpty() ? QStringLiteral("remote")
-                            : index == 0    ? QStringLiteral("folders")
-                            : index == 1    ? QStringLiteral("library")
-                                            : QString{};
-        if (!choice.isEmpty()) {
-            QSettings{}.setValue(QStringLiteral("local-library/view"), choice);
-        }
+        rememberSource(!kind.isEmpty() ? QStringLiteral("remote")
+                       : index == 0    ? QStringLiteral("folders")
+                       : index == 1    ? QStringLiteral("library")
+                                       : QString{});
     });
     // Before the window reacts to changes: the rest of it is not built yet.
     selectPreferredSource();
@@ -219,6 +218,15 @@ void BenchMainWindow::buildWorkspace() {
     folder_view_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(folder_view_, &QWidget::customContextMenuRequested, this,
             &BenchMainWindow::showFolderContextMenu);
+    connect(folder_browser_, &FolderBrowser::expandRequested, folder_view_,
+            [this](const QModelIndex& index) { folder_view_->expand(index); });
+    connect(folder_browser_, &FolderBrowser::currentRequested, folder_view_,
+            [this](const QModelIndex& index) {
+                folder_view_->setCurrentIndex(index);
+                folder_view_->scrollTo(index);
+            });
+    connect(folder_browser_, &FolderBrowser::bookmarksChanged, this,
+            &BenchMainWindow::loadFolderBookmarks);
     connect(folder_view_, &QTreeView::activated, this, [this](const QModelIndex& index) {
         if (!index.isValid() || folder_model_->isDirectory(index)) {
             return;
@@ -257,10 +265,7 @@ void BenchMainWindow::buildWorkspace() {
     folder_bookmark_remove_action_ = new QAction(QStringLiteral("Remove bookmark"), this);
     folder_bookmark_remove_action_->setObjectName(QStringLiteral("action-folder-bookmark-remove"));
     connect(folder_bookmark_remove_action_, &QAction::triggered, this, [this] {
-        delete folder_bookmarks_->takeItem(folder_bookmarks_->currentRow());
-        persistFolderBookmarks();
-        folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
-        folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
+        folder_browser_->removeBookmark(folder_bookmarks_->currentRow());
     });
     folder_bookmark_menu_ = new QMenu(this);
     folder_bookmark_menu_->setObjectName(QStringLiteral("bench-folder-bookmark-menu"));
@@ -914,65 +919,18 @@ void BenchMainWindow::refreshPanelLayoutActions() {
 }
 
 void BenchMainWindow::loadFolderBookmarks() {
-    QSettings settings;
-    auto stored = settings.value(QStringLiteral("library/bookmarks")).toList();
-    if (!settings.contains(QStringLiteral("library/bookmarks"))) {
-        // First run of the bookmark panel: the old manually added library
-        // roots become bookmarks, headed by the home directory.
-        stored.push_back(QFile::encodeName(QDir::homePath()));
-        for (const auto& root : settings.value(QStringLiteral("library/roots")).toList()) {
-            if (!root.toByteArray().isEmpty()) {
-                stored.push_back(root);
-            }
-        }
-        settings.setValue(QStringLiteral("library/bookmarks"), stored);
-    }
     folder_bookmarks_->clear();
-    for (const auto& entry : stored) {
-        const auto bytes = entry.toByteArray();
-        if (bytes.isEmpty()) {
-            continue;
-        }
-        const std::string raw_path{bytes.constData(), static_cast<std::size_t>(bytes.size())};
-        const auto display = QString::fromUtf8(
-            core::display_raw_path(std::filesystem::path{raw_path}.filename().native().empty()
-                                       ? raw_path
-                                       : std::filesystem::path{raw_path}.filename().native()));
-        auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")), display,
-                                         folder_bookmarks_);
-        item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
-        item->setData(Qt::UserRole, bytes);
+    for (const auto& raw_path : folder_browser_->bookmarkPaths()) {
+        auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")),
+                                         folderBookmarkLabel(raw_path), folder_bookmarks_);
+        item->setToolTip(folderBookmarkTooltip(raw_path));
+        item->setData(Qt::UserRole,
+                      QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});
     }
-    folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
-    folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
-}
-
-void BenchMainWindow::persistFolderBookmarks() const {
-    QSettings settings;
-    QVariantList stored;
-    for (int row = 0; row < folder_bookmarks_->count(); ++row) {
-        stored.push_back(folder_bookmarks_->item(row)->data(Qt::UserRole));
-    }
-    settings.setValue(QStringLiteral("library/bookmarks"), stored);
-}
-
-void BenchMainWindow::addFolderBookmark(const std::string& raw_path) {
-    const QByteArray bytes{raw_path.data(), static_cast<qsizetype>(raw_path.size())};
-    for (int row = 0; row < folder_bookmarks_->count(); ++row) {
-        if (folder_bookmarks_->item(row)->data(Qt::UserRole).toByteArray() == bytes) {
-            return;
-        }
-    }
-    const auto name = std::filesystem::path{raw_path}.filename().native();
-    auto* item = new QListWidgetItem(
-        QIcon::fromTheme(QStringLiteral("folder")),
-        QString::fromUtf8(core::display_raw_path(name.empty() ? raw_path : name)),
-        folder_bookmarks_);
-    item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
-    item->setData(Qt::UserRole, bytes);
-    persistFolderBookmarks();
-    folder_bookmarks_->setVisible(true);
-    folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
+    const auto folders_visible =
+        local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0;
+    folder_bookmarks_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
+    folder_bookmarks_heading_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
 }
 
 void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
@@ -982,83 +940,6 @@ void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
     }
     folder_bookmarks_->setCurrentRow(index.row());
     folder_bookmark_menu_->popup(folder_bookmarks_->viewport()->mapToGlobal(position));
-}
-
-// Reveals a bookmarked directory in the lazy tree: walk the path from its
-// root, fetching one level at a time and continuing when the rows arrive.
-void BenchMainWindow::revealFolderPath(const std::string& raw_path) {
-    for (int row = 0; row < folder_model_->rowCount(); ++row) {
-        const auto root_index = folder_model_->index(row, 0);
-        const auto root_path = folder_model_->rawPath(root_index);
-        if (raw_path == root_path) {
-            folder_view_->setCurrentIndex(root_index);
-            folder_view_->scrollTo(root_index);
-            folder_view_->expand(root_index);
-            return;
-        }
-        const auto prefix = root_path == "/" ? std::string{"/"} : root_path + '/';
-        if (raw_path.starts_with(prefix)) {
-            revealFolderStep(QPersistentModelIndex{root_index}, raw_path);
-            return;
-        }
-    }
-    // Not under any library root yet: the bookmark becomes a root.
-    folder_model_->addRoot(raw_path);
-    QSettings settings;
-    auto roots = settings.value(QStringLiteral("library/roots")).toList();
-    roots.push_back(QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});
-    settings.setValue(QStringLiteral("library/roots"), roots);
-    for (int row = 0; row < folder_model_->rowCount(); ++row) {
-        const auto root_index = folder_model_->index(row, 0);
-        if (folder_model_->rawPath(root_index) == raw_path) {
-            folder_view_->setCurrentIndex(root_index);
-            folder_view_->scrollTo(root_index);
-            return;
-        }
-    }
-}
-
-void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index,
-                                       const std::string& raw_path) {
-    if (!parent_index.isValid()) {
-        return;
-    }
-    const QModelIndex parent{parent_index};
-    if (!folder_model_->isLoaded(parent)) {
-        // Waits for the listing whether this starts it or another reveal
-        // already has. Treating an in-flight listing as loaded -- which is
-        // what asking canFetchMore did -- found no children and gave up, so a
-        // bookmark clicked while the startup reveal was still listing "/"
-        // silently did nothing.
-        auto connection = std::make_shared<QMetaObject::Connection>();
-        *connection =
-            connect(folder_model_, &ui::LocalFolderTreeModel::directoryLoaded, this,
-                    [this, connection, parent_index, raw_path](const QModelIndex& loaded) {
-                        if (loaded != QModelIndex{parent_index}) {
-                            return;
-                        }
-                        disconnect(*connection);
-                        revealFolderStep(parent_index, raw_path);
-                    });
-        if (folder_model_->canFetchMore(parent)) {
-            folder_model_->fetchMore(parent);
-        }
-        return;
-    }
-    folder_view_->expand(parent);
-    for (int row = 0; row < folder_model_->rowCount(parent); ++row) {
-        const auto child = folder_model_->index(row, 0, parent);
-        const auto child_path = folder_model_->rawPath(child);
-        if (child_path == raw_path) {
-            folder_view_->setCurrentIndex(child);
-            folder_view_->scrollTo(child);
-            return;
-        }
-        if (raw_path.starts_with(child_path + '/')) {
-            revealFolderStep(QPersistentModelIndex{child}, raw_path);
-            return;
-        }
-    }
 }
 
 } // namespace trackknife::bench

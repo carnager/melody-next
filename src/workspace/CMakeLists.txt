@@ -25,10 +25,14 @@ qt_add_library(
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp
+    folder_browser.cpp
+    folder_browser.hpp
     library_browser.cpp
     library_browser.hpp
     list_edit_job.cpp
     list_edit_job.hpp
+    sources.cpp
+    sources.hpp
     startup.cpp
     startup.hpp
     ../bench/artwork_fitting.cpp

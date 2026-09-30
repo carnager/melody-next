@@ -49,6 +49,15 @@ QuickWorkspace::QuickWorkspace(QObject* parent) : QObject(parent) {
     transport_timer_.setInterval(transport_refresh_ms);
     connect(&transport_timer_, &QTimer::timeout, this, &QuickWorkspace::refreshTransport);
     connect(&transfer_, &bench::PlaylistTransfer::changed, this, &QuickWorkspace::transferChanged);
+    connect(&find_, &bench::ListFind::changed, this, &QuickWorkspace::findChanged);
+    connect(&find_, &bench::ListFind::opened, this, &QuickWorkspace::findOpened);
+    connect(&find_, &bench::ListFind::dismissed, this, &QuickWorkspace::findDismissed);
+    connect(&find_, &bench::ListFind::found, this, &QuickWorkspace::revealRow);
+    connect(&rows_, &TrackRowsModel::selectionChanged, &find_, &bench::ListFind::selectionChanged);
+    connect(this, &QuickWorkspace::currentTabChanged, this, [this] {
+        auto* tab = currentTabPointer();
+        find_.setList(tab != nullptr ? tab->model : nullptr, [this] { return rows_.currentRow(); });
+    });
     connect(&transfer_, &bench::PlaylistTransfer::imported, this,
             [this](std::shared_ptr<std::vector<bench::LocalTrackRow>> rows, const QString& name) {
                 workspace_.addImportedList(std::move(*rows), name);
@@ -571,6 +580,13 @@ void QuickWorkspace::exportPlaylist(const QUrl& file) {
     const auto encoded = QFile::encodeName(path);
     transfer_.exportFile({encoded.constData(), static_cast<std::size_t>(encoded.size())},
                          tab->model);
+}
+
+QVariantMap QuickWorkspace::find() const {
+    return {{QStringLiteral("query"), find_.query()},
+            {QStringLiteral("status"), find_.status()},
+            {QStringLiteral("shown"), find_.shown()},
+            {QStringLiteral("available"), find_.available()}};
 }
 
 QVariantMap QuickWorkspace::transfer() const {

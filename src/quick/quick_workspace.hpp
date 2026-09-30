@@ -12,6 +12,7 @@
 #include "workspace/folder_browser.hpp"
 #include "workspace/library_browser.hpp"
 #include "workspace/list_edit_job.hpp"
+#include "workspace/list_find.hpp"
 #include "workspace/playlist_transfer.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
@@ -71,6 +72,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(int shortcutRevision READ shortcutRevision NOTIFY shortcutsChanged)
     // The M3U8 import or export running, or done and not yet closed.
     Q_PROPERTY(QVariantMap transfer READ transfer NOTIFY transferChanged)
+    // Find in the list shown: {query, status, shown, available}.
+    Q_PROPERTY(QVariantMap find READ find NOTIFY findChanged)
 
   public:
     using ListTab = bench::Workspace::ListTab;
@@ -220,6 +223,12 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // The workspace database backed up; or restored at the next start.
     Q_INVOKABLE void backupWorkspace(const QUrl& file);
     Q_INVOKABLE static void scheduleWorkspaceRestore(const QUrl& file);
+    // Find in the list shown.
+    [[nodiscard]] QVariantMap find() const;
+    Q_INVOKABLE void setFindQuery(const QString& query) { find_.setQuery(query); }
+    Q_INVOKABLE void openFind() { find_.open(); }
+    Q_INVOKABLE void findNext(bool backwards) { find_.findNext(backwards); }
+    Q_INVOKABLE void dismissFind() { find_.dismiss(); }
     // Every engine's lists, one to open.
     Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
     // A folder bookmarked, and shown under Folders.
@@ -293,6 +302,12 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // Settings were saved: keys may be others now.
     void shortcutsChanged();
     void transferChanged();
+    void findChanged();
+    // Find opened: its field wants the keyboard; closed: the list does.
+    void findOpened();
+    void findDismissed();
+    // A row of the list shown to select and bring into view.
+    void revealRow(int row);
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();
@@ -325,6 +340,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     int current_source_{0};
     int shortcut_revision_{0};
     bench::PlaylistTransfer transfer_{this};
+    bench::ListFind find_{this};
     void addLibrary(EngineLink& engine);
     void selectPreferredSource();
     [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;

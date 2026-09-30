@@ -458,6 +458,13 @@ FocusScope {
 
     Connections {
         target: Tk
+        function onRevealRow(row) {
+            table.rows.selectRows([row], row);
+            list.positionViewAtIndex(row, ListView.Center);
+        }
+        function onFindDismissed() {
+            list.forceActiveFocus();
+        }
         function onPlaybackCursor(row, jump) {
             table.rows.selectRows([row], row);
             list.positionViewAtIndex(row, ListView.Center);

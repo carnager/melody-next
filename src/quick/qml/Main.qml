@@ -184,20 +184,22 @@ ApplicationWindow {
                 objectName: "action-find-in-list"
                 text: qsTr("Find in current list…")
                 defaultKey: "Ctrl+F"
-                enabled: Tk.currentTab >= 0
-                onTriggered: window.notYet("Find in list")
+                enabled: Tk.find.available ?? false
+                onTriggered: Tk.openFind()
             }
             KeyedAction {
                 objectName: "action-find-next-in-list"
                 text: qsTr("Find next in list")
                 defaultKey: "F3"
-                onTriggered: window.notYet("Find in list")
+                enabled: Tk.find.available ?? false
+                onTriggered: Tk.findNext(false)
             }
             KeyedAction {
                 objectName: "action-find-previous-in-list"
                 text: qsTr("Find previous in list")
                 defaultKey: "Shift+F3"
-                onTriggered: window.notYet("Find in list")
+                enabled: Tk.find.available ?? false
+                onTriggered: Tk.findNext(true)
             }
             MenuSeparator {}
             KeyedAction {
@@ -614,6 +616,9 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 onContextMenuRequested: (row, position) => trackMenu.popup()
                 onHeaderMenuRequested: position => headerMenu.popup()
+            }
+            FindBar {
+                Layout.fillWidth: true
             }
             EditBar {
                 id: editBar

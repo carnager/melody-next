@@ -85,6 +85,7 @@ qt_add_qml_module(
     qml/SettingsWindow.qml
     qml/PlaylistTransferBar.qml
     qml/OpenListDialog.qml
+    qml/FindBar.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

@@ -7,6 +7,12 @@
 
 qt_policy(SET QTP0004 NEW)
 
+# Each QML module's generated files -- its qmldir, type information -- in a
+# directory named for its URI, as Qt's tooling expects: qml/Trackknife/Quick
+# and qml/Trackknife/Style. Both in this one directory, they overwrote each
+# other's qmldir.
+set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/qml")
+
 qt_add_executable(trackknife-quick main.cpp)
 
 # The Trackknife style (ADR-0240): flat controls drawn from the palette,

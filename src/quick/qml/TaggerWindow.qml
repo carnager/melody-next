@@ -391,7 +391,9 @@ ApplicationWindow {
                 id: actionsButton
                 objectName: "bench-metadata-actions"
                 text: qsTr("Actions")
-                onClicked: actions.open()
+                // A toggle: shown as on while they are, a click closes them.
+                checked: actions.visible
+                onClicked: actions.visible ? actions.close() : actions.open()
                 ToolTip.visible: hovered
                 ToolTip.delay: 800
                 ToolTip.text: qsTr("What Apply does: tags, renaming and moving, ReplayGain, scripts")

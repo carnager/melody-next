@@ -45,6 +45,16 @@ T.Menu {
 
 
     contentItem: ListView {
+        // As wide as its widest line -- its text and its key both whole.
+        implicitWidth: {
+            let widest = 0;
+            for (let i = 0; i < control.count; ++i) {
+                const line = control.itemAt(i);
+                if (line && line.visible)
+                    widest = Math.max(widest, line.implicitWidth);
+            }
+            return widest;
+        }
         implicitHeight: contentHeight
         model: control.contentModel
         interactive: Window.window ? contentHeight + control.topPadding + control.bottomPadding

@@ -37,7 +37,9 @@ struct ProgramCacheKey {
     DialectVersion dialect;
     FormatContextKind context{FormatContextKind::track_display};
     std::string source;
-    std::uint32_t function_registry_revision{1};
+    // 2: $decimal. A program compiled against an older registry -- where it
+    // was an unknown function -- is not reused.
+    std::uint32_t function_registry_revision{2};
 
     friend bool operator==(const ProgramCacheKey&, const ProgramCacheKey&) = default;
 };

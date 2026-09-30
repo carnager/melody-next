@@ -12,7 +12,7 @@ statement stands for one typed step, previewed before anything is written.
 
 ```text
 $copy(DATE,ORIGINALYEAR)
-$set(FMPS_RATING,$if($eq(%rating%,5),1.0,0.$mul(%rating%,2)))
+$set(FMPS_RATING,$decimal(%rating%,5,1))
 $if($not(%rating%),$delete(FMPS_RATING))
 $delete(RATING)
 ```

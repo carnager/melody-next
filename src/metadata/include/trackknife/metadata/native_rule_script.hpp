@@ -16,7 +16,7 @@ namespace trackknife::metadata {
 // tkfmt-1 and whose capture patterns are tkcapture-1:
 //
 //   $copy(DATE,ORIGINALYEAR)
-//   $set(FMPS_RATING,$if($eq(%rating%,5),1.0,0.$mul(%rating%,2)))
+//   $set(FMPS_RATING,$decimal(%rating%,5,1))
 //   $if($not(%rating%),$delete(FMPS_RATING))
 //
 // Every typed action has a statement, and export is exact: what it writes

@@ -195,6 +195,8 @@ class Evaluator final {
             return evaluateIntegerFunction(*function, call, id);
         case FunctionId::num:
             return evaluateNum(call, id);
+        case FunctionId::decimal:
+            return evaluateDecimal(call, id);
         case FunctionId::lower:
             return evaluateCase(call, id, false);
         case FunctionId::upper:
@@ -532,6 +534,69 @@ class Evaluator final {
             }
         }
         return checked({std::to_string(result)}, id);
+    }
+
+    // $decimal(value,divisor,places): the quotient as decimal text, rounded
+    // half away from zero to exactly `places` digits after the point -- the
+    // one way to a fraction in a language of whole numbers, as a rating on a
+    // 0.0-1.0 scale needs.
+    [[nodiscard]] core::Result<EvalValue> evaluateDecimal(const CallNode& call, const NodeId id) {
+        auto arguments = evaluateArguments(call);
+        if (!arguments) {
+            return std::unexpected(std::move(arguments.error()));
+        }
+        auto value = coerceInteger(arguments->at(0).text, id);
+        auto divisor = coerceInteger(arguments->at(1).text, id);
+        auto places = coerceInteger(arguments->at(2).text, id);
+        for (const auto* each : {&value, &divisor, &places}) {
+            if (!*each) {
+                return std::unexpected(std::move(each->error()));
+            }
+        }
+        if (*divisor == 0) {
+            return std::unexpected(error(core::ErrorCode::invalid_argument, "division by zero", id));
+        }
+        if (*places < 0 || *places > 9) {
+            return std::unexpected(error(core::ErrorCode::invalid_argument,
+                                         "$decimal places must be from 0 to 9", id));
+        }
+        // Scaled by 10^places, overflow an error as it is everywhere in
+        // tkfmt-1; the rounding is decided on unsigned magnitudes, which
+        // hold even the most negative integer.
+        Integer scaled = *value;
+        for (Integer place = 0; place < *places; ++place) {
+            auto next = checkedMultiply(scaled, 10, id);
+            if (!next) {
+                return std::unexpected(std::move(next.error()));
+            }
+            scaled = *next;
+        }
+        const auto magnitude = [](const Integer number) {
+            return number < 0 ? std::uint64_t{0} - static_cast<std::uint64_t>(number)
+                              : static_cast<std::uint64_t>(number);
+        };
+        const auto top = magnitude(scaled);
+        const auto bottom = magnitude(*divisor);
+        auto quotient = top / bottom;
+        const auto remainder = top % bottom;
+        if (remainder >= bottom - remainder) {
+            ++quotient;
+        }
+        const bool negative = quotient != 0U && ((scaled < 0) != (*divisor < 0));
+        auto digits_left = quotient;
+        std::string digits;
+        do {
+            digits.insert(digits.begin(), static_cast<char>('0' + digits_left % 10U));
+            digits_left /= 10;
+        } while (digits_left != 0);
+        const auto fraction = static_cast<std::size_t>(*places);
+        if (digits.size() <= fraction) {
+            digits.insert(0U, fraction + 1U - digits.size(), '0');
+        }
+        if (fraction > 0U) {
+            digits.insert(digits.size() - fraction, 1U, '.');
+        }
+        return checked({negative ? "-" + digits : digits}, id);
     }
 
     [[nodiscard]] core::Result<EvalValue> evaluateNum(const CallNode& call, const NodeId id) {

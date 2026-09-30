@@ -29,6 +29,7 @@ enum class FunctionId {
     min,
     max,
     num,
+    decimal,
     lower,
     upper,
     trim,

@@ -29,6 +29,8 @@ qt_add_library(
     artwork_session.cpp
     artwork_session.hpp
     field_filter.cpp
+    identify_session.cpp
+    identify_session.hpp
     field_filter.hpp
     folder_browser.cpp
     folder_browser.hpp

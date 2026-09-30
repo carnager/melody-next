@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "workspace/panel_arrangement.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -70,9 +71,8 @@ namespace {} // namespace
 
 namespace {
 
-constexpr auto panel_layout_settings_key = "workspace/panel-layout-v1";
-constexpr auto folders_panel_id = "folders";
-constexpr auto track_lists_panel_id = "track-lists";
+constexpr auto folders_panel_id = PanelArrangement::sources_panel;
+constexpr auto track_lists_panel_id = PanelArrangement::tracks_panel;
 constexpr auto layout_panel_id_property = "trackknife-layout-panel-id";
 constexpr auto layout_panel_title_property = "trackknife-layout-panel-title";
 constexpr auto layout_container_kind_property = "trackknife-layout-container-kind";
@@ -639,37 +639,21 @@ void BenchMainWindow::buildWorkspace() {
 }
 
 ui::PanelLayout BenchMainWindow::defaultPanelLayout() const {
-    std::vector<ui::PanelLayoutNode> children;
-    children.push_back(ui::panelLayoutPanel(QString::fromLatin1(folders_panel_id)));
-    children.push_back(ui::panelLayoutPanel(QString::fromLatin1(track_lists_panel_id)));
-    return ui::PanelLayout{
-        .schema_version = ui::panel_layout_schema_version,
-        .root = ui::panelLayoutSplit(Qt::Horizontal, std::move(children), {1, 3}),
-    };
+    return PanelArrangement::defaultLayout();
 }
 
 void BenchMainWindow::loadPanelLayout() {
-    QSettings settings;
-    const auto encoded =
-        settings.value(QString::fromLatin1(panel_layout_settings_key)).toByteArray();
-    if (encoded.isEmpty()) {
-        applyPanelLayout(defaultPanelLayout());
-        return;
+    if (panel_arrangement_ == nullptr) {
+        panel_arrangement_ = new PanelArrangement(this);
     }
-
-    QString error;
-    const QStringList registered_panel_ids = panel_widgets_.keys();
-    auto restored = ui::deserializePanelLayout(encoded, registered_panel_ids, &error);
-    if (!restored) {
-        panel_layout_persistence_protected_ = true;
-        applyPanelLayout(defaultPanelLayout());
+    const auto error = panel_arrangement_->load();
+    applyPanelLayout(panel_arrangement_->layout());
+    if (!error.isEmpty()) {
         statusBar()->showMessage(
             QStringLiteral("Panel layout was not loaded (%1); the saved value was preserved")
                 .arg(error),
             7'000);
-        return;
     }
-    applyPanelLayout(*restored);
 }
 
 void BenchMainWindow::applyPanelLayout(const ui::PanelLayout& layout) {
@@ -733,11 +717,9 @@ QWidget* BenchMainWindow::renderPanelLayoutNode(const ui::PanelLayoutNode& node,
             splitter->setSizes(scaled);
         });
         connect(splitter, &QSplitter::splitterMoved, this, [this](const int, const int) {
-            if (applying_panel_layout_) {
-                return;
+            if (!applying_panel_layout_) {
+                persistPanelLayout(true);
             }
-            panel_layout_persistence_protected_ = false;
-            persistPanelLayout();
         });
         return splitter;
     }
@@ -758,13 +740,12 @@ QWidget* BenchMainWindow::renderPanelLayoutNode(const ui::PanelLayoutNode& node,
     stack->setCurrentIndex(node.active_child);
     connect(stack, &QTabWidget::currentChanged, this, [this](const int) {
         if (!applying_panel_layout_) {
-            persistPanelLayout();
+            persistPanelLayout(false);
         }
     });
     connect(stack->tabBar(), &QTabBar::tabMoved, this, [this](const int, const int) {
         if (!applying_panel_layout_) {
-            panel_layout_persistence_protected_ = false;
-            persistPanelLayout();
+            persistPanelLayout(true);
         }
     });
     return stack;
@@ -808,18 +789,19 @@ ui::PanelLayoutNode BenchMainWindow::capturePanelLayoutNode(QWidget* widget) con
     return ui::panelLayoutPanel(QStringLiteral("invalid"));
 }
 
-void BenchMainWindow::persistPanelLayout() {
-    if (layout_root_ == nullptr || applying_panel_layout_ || panel_layout_persistence_protected_) {
+void BenchMainWindow::persistPanelLayout(const bool by_hand) {
+    if (layout_root_ == nullptr || applying_panel_layout_ || panel_arrangement_ == nullptr) {
         return;
     }
-    const ui::PanelLayout layout{.schema_version = ui::panel_layout_schema_version,
-                                 .root = capturePanelLayoutNode(layout_root_)};
-    QSettings settings;
-    settings.setValue(QString::fromLatin1(panel_layout_settings_key),
-                      ui::serializePanelLayout(layout));
+    panel_arrangement_->adopt(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
+                                              .root = capturePanelLayoutNode(layout_root_)},
+                              by_hand);
 }
 
 void BenchMainWindow::setLayoutEditMode(const bool editing) {
+    if (panel_arrangement_ != nullptr) {
+        panel_arrangement_->setEditing(editing);
+    }
     layout_host_->setProperty("trackknifeLayoutEditing", editing);
     layout_host_->setStyleSheet(editing
                                     ? QStringLiteral("QWidget[trackknifeLayoutPanel=\"true\"] {"
@@ -836,62 +818,30 @@ void BenchMainWindow::setLayoutEditMode(const bool editing) {
 
 void BenchMainWindow::arrangePanelLayout(const ui::PanelLayoutNodeKind kind,
                                          const Qt::Orientation orientation) {
-    if (layout_root_ == nullptr || kind == ui::PanelLayoutNodeKind::panel) {
+    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
         return;
     }
-    auto root = capturePanelLayoutNode(layout_root_);
-    if (root.children.empty()) {
-        return;
-    }
-    auto children = std::move(root.children);
-    ui::PanelLayoutNode replacement;
-    if (kind == ui::PanelLayoutNodeKind::split) {
-        auto weights = root.kind == ui::PanelLayoutNodeKind::split
-                           ? std::move(root.weights)
-                           : std::vector<int>(children.size(), 1);
-        replacement = ui::panelLayoutSplit(orientation, std::move(children), std::move(weights));
-    } else {
-        auto active = root.kind == ui::PanelLayoutNodeKind::tabs ? root.active_child : 0;
-        if (root.kind != ui::PanelLayoutNodeKind::tabs) {
-            const auto track_lists =
-                std::ranges::find(children, QString::fromLatin1(track_lists_panel_id),
-                                  &ui::PanelLayoutNode::panel_id);
-            if (track_lists != children.end()) {
-                active = static_cast<int>(std::distance(children.begin(), track_lists));
-            }
-        }
-        replacement = ui::panelLayoutTabs(std::move(children), active);
-    }
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                                     .root = std::move(replacement)});
-    persistPanelLayout();
+    // As it is now, sizes included, then arranged anew.
+    persistPanelLayout(false);
+    panel_arrangement_->arrange(kind, orientation);
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::swapPanelLayout() {
-    if (layout_root_ == nullptr) {
+    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
         return;
     }
-    auto root = capturePanelLayoutNode(layout_root_);
-    if (root.children.size() < 2U) {
-        return;
-    }
-    std::ranges::reverse(root.children);
-    if (root.kind == ui::PanelLayoutNodeKind::split) {
-        std::ranges::reverse(root.weights);
-    } else if (root.kind == ui::PanelLayoutNodeKind::tabs) {
-        root.active_child = static_cast<int>(root.children.size()) - 1 - root.active_child;
-    }
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                                     .root = std::move(root)});
-    persistPanelLayout();
+    persistPanelLayout(false);
+    panel_arrangement_->swap();
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::resetPanelLayout() {
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(defaultPanelLayout());
-    persistPanelLayout();
+    if (panel_arrangement_ == nullptr) {
+        return;
+    }
+    panel_arrangement_->reset();
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::refreshPanelLayoutActions() {

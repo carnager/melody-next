@@ -16,6 +16,8 @@
 #include "workspace/library_browser.hpp"
 #include "workspace/list_edit_job.hpp"
 #include "workspace/list_find.hpp"
+#include "workspace/lists_catalog.hpp"
+#include "workspace/panel_arrangement.hpp"
 #include "workspace/playlist_transfer.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
@@ -77,6 +79,14 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(QVariantMap transfer READ transfer NOTIFY transferChanged)
     // Find in the list shown: {query, status, shown, available}.
     Q_PROPERTY(QVariantMap find READ find NOTIFY findChanged)
+    // ADR-0233: the lists as a pane beside the tracks instead of a tab bar,
+    // and every engine's lists in it: [{name, engine, note, lists: [{id,
+    // name, saved, open, dirty, pinned, playing, tracks, current}]}].
+    Q_PROPERTY(bool listsInPanel READ listsInPanel WRITE setListsInPanel NOTIFY listsPanelChanged)
+    Q_PROPERTY(QVariantList listGroups READ listGroups NOTIFY listGroupsChanged)
+    // How the sources and the tracks are arranged: {kind: "split" | "tabs",
+    // vertical, order: [panel ids], weights, active, editing}.
+    Q_PROPERTY(QVariantMap panels READ panels NOTIFY panelsChanged)
 
   public:
     using ListTab = bench::Workspace::ListTab;
@@ -234,6 +244,28 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void openFind() { find_.open(); }
     Q_INVOKABLE void findNext(bool backwards) { find_.findNext(backwards); }
     Q_INVOKABLE void dismissFind() { find_.dismiss(); }
+    [[nodiscard]] bool listsInPanel() const;
+    void setListsInPanel(bool on);
+    [[nodiscard]] QVariantList listGroups() const;
+    Q_INVOKABLE void openPanelList(const QString& engine, const QString& id);
+    Q_INVOKABLE void closePanelList(const QString& engine, const QString& id);
+    Q_INVOKABLE void savePanelList(const QString& engine, const QString& id);
+    Q_INVOKABLE void renamePanelList(const QString& engine, const QString& id,
+                                     const QString& name);
+    Q_INVOKABLE void deletePanelList(const QString& engine, const QString& id);
+    // The lists pane's width, as it was left.
+    Q_INVOKABLE static int listsPanelWidth();
+    Q_INVOKABLE static void setListsPanelWidth(int width);
+    [[nodiscard]] QVariantMap panels() const;
+    // "side", "stacked" or "tabs"; only while editing the layout.
+    Q_INVOKABLE void arrangePanels(const QString& arrangement);
+    Q_INVOKABLE void swapPanels();
+    Q_INVOKABLE void resetPanels();
+    Q_INVOKABLE void setPanelEditing(bool editing);
+    // The room the panels have now, by the divider moved by hand; the tab
+    // chosen.
+    Q_INVOKABLE void setPanelSizes(const QVariantList& sizes);
+    Q_INVOKABLE void setPanelTab(int index);
     // Every engine's lists, one to open.
     Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
     // Search, in the library of the tab in front (or the current tab); one
@@ -293,7 +325,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void engineRemoving(EngineLink& engine) override;
     void engineRemoved() override;
     void enginesSynced() override;
-    void engineListsChanged() override {}
+    void engineListsChanged() override;
     void engineRatingsChanged(const bench::EngineKey& engine,
                               const QHash<QString, unsigned>& ratings) override;
     void engineInterruptionsChanged(bool reported_now) override;
@@ -325,6 +357,11 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void shortcutsChanged();
     void transferChanged();
     void findChanged();
+    void listsPanelChanged();
+    void panelsChanged();
+    void listGroupsChanged();
+    // The list shown wants saving, as its Save action would.
+    void saveListWanted();
     // Find opened: its field wants the keyboard; closed: the list does.
     void findOpened();
     void findDismissed();
@@ -390,6 +427,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     int shortcut_revision_{0};
     bench::PlaylistTransfer transfer_{this};
     bench::ListFind find_{this};
+    bench::ListsCatalog lists_catalog_{workspace_, this};
+    bench::PanelArrangement panel_arrangement_{this};
     void addLibrary(EngineLink& engine);
     void selectPreferredSource();
     [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;

@@ -97,6 +97,8 @@ class LocalFilesMimeData;
 
 namespace trackknife::bench {
 enum class QuickPickKind;
+class ListsCatalog;
+class PanelArrangement;
 class ListsPanel;
 
 class LocalLibraryPanel;
@@ -265,7 +267,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void applyPanelLayout(const ui::PanelLayout& layout);
     [[nodiscard]] QWidget* renderPanelLayoutNode(const ui::PanelLayoutNode& node, QWidget* parent);
     [[nodiscard]] ui::PanelLayoutNode capturePanelLayoutNode(QWidget* widget) const;
-    void persistPanelLayout();
+    void persistPanelLayout(bool by_hand);
     void setLayoutEditMode(bool editing);
     void arrangePanelLayout(ui::PanelLayoutNodeKind kind, Qt::Orientation orientation);
     void swapPanelLayout();
@@ -311,7 +313,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
     QAction* lists_panel_action_{nullptr};
-    QTimer* lists_fetch_timer_{nullptr};
+    ListsCatalog* lists_catalog_{nullptr};
     QTimer* lists_present_timer_{nullptr};
     void backupWorkspace();
     void scheduleWorkspaceRestore();
@@ -712,7 +714,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QStackedWidget* source_stack_{nullptr};
     QHash<QString, QWidget*> panel_widgets_;
     bool applying_panel_layout_{false};
-    bool panel_layout_persistence_protected_{false};
+    PanelArrangement* panel_arrangement_{nullptr};
     bool applying_track_view_layout_{false};
 
     QAction* notifications_action_{nullptr};

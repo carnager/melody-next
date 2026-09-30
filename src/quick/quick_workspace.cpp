@@ -53,6 +53,35 @@ QuickWorkspace::QuickWorkspace(QObject* parent) : QObject(parent) {
     connect(&transport_timer_, &QTimer::timeout, this, &QuickWorkspace::refreshTransport);
     connect(&transfer_, &bench::PlaylistTransfer::changed, this, &QuickWorkspace::transferChanged);
     connect(&find_, &bench::ListFind::changed, this, &QuickWorkspace::findChanged);
+    connect(&panel_arrangement_, &bench::PanelArrangement::changed, this,
+            &QuickWorkspace::panelsChanged);
+    connect(&panel_arrangement_, &bench::PanelArrangement::editingChanged, this,
+            &QuickWorkspace::panelsChanged);
+    if (const auto error = panel_arrangement_.load(); !error.isEmpty()) {
+        QTimer::singleShot(0, this, [this, error] {
+            showMessage(QStringLiteral("Panel layout was not loaded (%1); the saved value was "
+                                       "preserved")
+                            .arg(error),
+                        7'000);
+        });
+    }
+    connect(&lists_catalog_, &bench::ListsCatalog::changed, this,
+            &QuickWorkspace::listGroupsChanged);
+    connect(&lists_catalog_, &bench::ListsCatalog::closeWanted, this, [this](const QString& id) {
+        if (auto* tab = workspace_.tabForDocument(id); tab != nullptr) {
+            closeTab(tabs_.indexOf(tab));
+        }
+    });
+    connect(&lists_catalog_, &bench::ListsCatalog::saveWanted, this,
+            &QuickWorkspace::saveListWanted);
+    // What is open here, as it changes.
+    for (const auto signal : {&QuickWorkspace::currentTabChanged, &QuickWorkspace::listChanged}) {
+        connect(this, signal, this, [this] {
+            if (listsInPanel()) {
+                lists_catalog_.present();
+            }
+        });
+    }
     connect(&find_, &bench::ListFind::opened, this, &QuickWorkspace::findOpened);
     connect(&find_, &bench::ListFind::dismissed, this, &QuickWorkspace::findDismissed);
     connect(&find_, &bench::ListFind::found, this, &QuickWorkspace::revealRow);
@@ -551,8 +580,12 @@ QuickSettings* QuickWorkspace::openSettings() {
         ++shortcut_revision_;
         emit shortcutsChanged();
         emit desktopChanged();
-        // The local library shown or hidden.
+        // The local library shown or hidden, the lists as tabs or a pane.
         emit sourcesChanged();
+        emit listsPanelChanged();
+        if (listsInPanel()) {
+            lists_catalog_.fetch();
+        }
     });
     QQmlEngine::setObjectOwnership(settings, QQmlEngine::CppOwnership);
     return settings;
@@ -583,6 +616,157 @@ void QuickWorkspace::exportPlaylist(const QUrl& file) {
     const auto encoded = QFile::encodeName(path);
     transfer_.exportFile({encoded.constData(), static_cast<std::size_t>(encoded.size())},
                          tab->model);
+}
+
+QVariantMap QuickWorkspace::panels() const {
+    const auto& root = panel_arrangement_.layout().root;
+    QStringList order;
+    QVariantList weights;
+    for (const auto& child : root.children) {
+        order.append(child.panel_id);
+    }
+    for (const auto weight : root.weights) {
+        weights.append(weight);
+    }
+    return {{QStringLiteral("kind"), root.kind == ui::PanelLayoutNodeKind::tabs
+                                         ? QStringLiteral("tabs")
+                                         : QStringLiteral("split")},
+            {QStringLiteral("vertical"), root.orientation == Qt::Vertical},
+            {QStringLiteral("order"), order},
+            {QStringLiteral("weights"), weights},
+            {QStringLiteral("active"), root.active_child},
+            {QStringLiteral("editing"), panel_arrangement_.editing()}};
+}
+
+void QuickWorkspace::arrangePanels(const QString& arrangement) {
+    if (!panel_arrangement_.editing()) {
+        return;
+    }
+    if (arrangement == QStringLiteral("tabs")) {
+        panel_arrangement_.arrange(ui::PanelLayoutNodeKind::tabs, Qt::Horizontal);
+    } else {
+        panel_arrangement_.arrange(ui::PanelLayoutNodeKind::split,
+                                   arrangement == QStringLiteral("stacked") ? Qt::Vertical
+                                                                             : Qt::Horizontal);
+    }
+}
+
+void QuickWorkspace::swapPanels() {
+    if (panel_arrangement_.editing()) {
+        panel_arrangement_.swap();
+    }
+}
+
+void QuickWorkspace::resetPanels() { panel_arrangement_.reset(); }
+
+void QuickWorkspace::setPanelEditing(const bool editing) {
+    panel_arrangement_.setEditing(editing);
+    showMessage(editing ? QStringLiteral("Panel layout editing: choose an arrangement or swap "
+                                         "panels")
+                        : QString{},
+                editing ? 0 : 1);
+}
+
+void QuickWorkspace::setPanelSizes(const QVariantList& sizes) {
+    auto layout = panel_arrangement_.layout();
+    if (layout.root.kind != ui::PanelLayoutNodeKind::split ||
+        sizes.size() != static_cast<qsizetype>(layout.root.children.size())) {
+        return;
+    }
+    std::vector<int> weights;
+    for (const auto& size : sizes) {
+        weights.push_back(std::max(1, size.toInt()));
+    }
+    layout.root.weights = std::move(weights);
+    panel_arrangement_.adopt(std::move(layout), true);
+}
+
+void QuickWorkspace::setPanelTab(const int index) {
+    auto layout = panel_arrangement_.layout();
+    if (layout.root.kind != ui::PanelLayoutNodeKind::tabs || index < 0 ||
+        index >= static_cast<int>(layout.root.children.size())) {
+        return;
+    }
+    layout.root.active_child = index;
+    panel_arrangement_.adopt(std::move(layout), false);
+    emit panelsChanged();
+}
+
+void QuickWorkspace::engineListsChanged() {
+    if (listsInPanel()) {
+        lists_catalog_.fetch();
+    }
+}
+
+bool QuickWorkspace::listsInPanel() const {
+    return QSettings{}.value(QStringLiteral("appearance/lists-display")).toString() ==
+           QStringLiteral("panel");
+}
+
+void QuickWorkspace::setListsInPanel(const bool on) {
+    if (on == listsInPanel()) {
+        return;
+    }
+    QSettings{}.setValue(QStringLiteral("appearance/lists-display"),
+                         on ? QStringLiteral("panel") : QStringLiteral("tabs"));
+    if (on) {
+        lists_catalog_.fetch();
+    }
+    emit listsPanelChanged();
+}
+
+QVariantList QuickWorkspace::listGroups() const {
+    const auto* shown = currentTabPointer();
+    const auto current = shown != nullptr ? bench::document_text(shown->document.id) : QString{};
+    QVariantList groups;
+    for (const auto& group : lists_catalog_.groups()) {
+        QVariantList lists;
+        for (const auto& list : group.lists) {
+            lists.append(QVariantMap{{QStringLiteral("id"), list.id},
+                                     {QStringLiteral("name"), list.name},
+                                     {QStringLiteral("saved"), list.saved},
+                                     {QStringLiteral("open"), list.open},
+                                     {QStringLiteral("dirty"), list.dirty},
+                                     {QStringLiteral("pinned"), list.pinned},
+                                     {QStringLiteral("playing"), list.playing},
+                                     {QStringLiteral("tracks"), list.tracks},
+                                     {QStringLiteral("current"), list.id == current}});
+        }
+        groups.append(QVariantMap{{QStringLiteral("name"), group.name},
+                                  {QStringLiteral("engine"), group.engine.text()},
+                                  {QStringLiteral("note"), group.note},
+                                  {QStringLiteral("lists"), lists}});
+    }
+    return groups;
+}
+
+void QuickWorkspace::openPanelList(const QString& engine, const QString& id) {
+    lists_catalog_.open(bench::EngineKey::fromText(engine), id);
+}
+
+void QuickWorkspace::closePanelList(const QString& engine, const QString& id) {
+    lists_catalog_.close(bench::EngineKey::fromText(engine), id);
+}
+
+void QuickWorkspace::savePanelList(const QString& engine, const QString& id) {
+    lists_catalog_.save(bench::EngineKey::fromText(engine), id);
+}
+
+void QuickWorkspace::renamePanelList(const QString& engine, const QString& id,
+                                     const QString& name) {
+    lists_catalog_.rename(bench::EngineKey::fromText(engine), id, name);
+}
+
+void QuickWorkspace::deletePanelList(const QString& engine, const QString& id) {
+    lists_catalog_.remove(bench::EngineKey::fromText(engine), id);
+}
+
+int QuickWorkspace::listsPanelWidth() {
+    return QSettings{}.value(QStringLiteral("lists-panel/width"), 220).toInt();
+}
+
+void QuickWorkspace::setListsPanelWidth(const int width) {
+    QSettings{}.setValue(QStringLiteral("lists-panel/width"), width);
 }
 
 QVariantMap QuickWorkspace::find() const {

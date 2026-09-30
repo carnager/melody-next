@@ -91,6 +91,7 @@ class Workspace final : public QObject {
 
     // The window drawing it; set once, before anything is asked.
     void setView(WorkspaceView* view) { view_ = view; }
+    [[nodiscard]] WorkspaceView* view() const { return view_; }
 
 
     struct ListTab {

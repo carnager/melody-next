@@ -41,6 +41,8 @@ qt_add_library(
     library_browser.hpp
     list_edit_job.cpp
     list_find.cpp
+    lists_catalog.cpp
+    lists_catalog.hpp
     list_find.hpp
     list_edit_job.hpp
     quick_pick_session.cpp
@@ -55,6 +57,8 @@ qt_add_library(
     lastfm_settings_session.hpp
     open_list_session.cpp
     open_list_session.hpp
+    panel_arrangement.cpp
+    panel_arrangement.hpp
     playlist_transfer.cpp
     playlist_transfer.hpp
     profiles_session.cpp

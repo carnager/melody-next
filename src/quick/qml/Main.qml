@@ -333,10 +333,8 @@ ApplicationWindow {
                 objectName: "action-lists-panel"
                 text: qsTr("Lists in a side panel")
                 checkable: true
-                onTriggered: {
-                    checked = false;
-                    window.notYet("The lists panel");
-                }
+                checked: Tk.listsInPanel
+                onTriggered: Tk.listsInPanel = checked
             }
             MenuSeparator {}
             KeyedAction {
@@ -395,25 +393,45 @@ ApplicationWindow {
                 text: "Edit panel layout"
                 defaultKey: "Ctrl+Alt+L"
                 checkable: true
-                onTriggered: {
-                    checked = false;
-                    window.notYet("Editing the panel layout");
-                }
+                checked: Tk.panels.editing ?? false
+                onTriggered: Tk.setPanelEditing(checked)
             }
             Menu {
+                objectName: "menu-panel-arrangement"
                 title: "Panel arrangement"
-                enabled: false
-                Action { text: "Side by side" }
-                Action { text: "Top and bottom" }
-                Action { text: "Tabbed stack" }
+                enabled: Tk.panels.editing ?? false
+                Action {
+                    objectName: "action-layout-side-by-side"
+                    text: "Side by side"
+                    checkable: true
+                    checked: Tk.panels.kind === "split" && !Tk.panels.vertical
+                    onTriggered: Tk.arrangePanels("side")
+                }
+                Action {
+                    objectName: "action-layout-top-bottom"
+                    text: "Top and bottom"
+                    checkable: true
+                    checked: Tk.panels.kind === "split" && Tk.panels.vertical
+                    onTriggered: Tk.arrangePanels("stacked")
+                }
+                Action {
+                    objectName: "action-layout-tabbed"
+                    text: "Tabbed stack"
+                    checkable: true
+                    checked: Tk.panels.kind === "tabs"
+                    onTriggered: Tk.arrangePanels("tabs")
+                }
             }
             Action {
+                objectName: "action-layout-swap-panels"
                 text: "Swap panels"
-                enabled: false
+                enabled: Tk.panels.editing ?? false
+                onTriggered: Tk.swapPanels()
             }
             Action {
+                objectName: "action-reset-panel-layout"
                 text: "Reset panel layout"
-                onTriggered: window.notYet("Panel layouts")
+                onTriggered: Tk.resetPanels()
             }
         }
         Menu {
@@ -672,37 +690,147 @@ ApplicationWindow {
         anchors.fill: parent
         orientation: Qt.Horizontal
 
-        // bench-panel-folders: Sources.
-        SourcesPanel {
-            id: sources
-            SplitView.minimumWidth: 160
-            SplitView.preferredWidth: (window.width - (upNextSettings.visible ? upNextSettings.width : 0)) / 4
-            onNotYet: what => window.notYet(what)
-        }
-
-        // bench-track-area: the tabs over the list on show.
-        ColumnLayout {
+        // The two panels, arranged as Workspace › Panel arrangement says:
+        // side by side, one above the other, or as tabs; in either order.
+        Item {
+            id: panelsHost
             SplitView.fillWidth: true
-            SplitView.minimumWidth: 200
-            spacing: 0
-            TrackTabBar {
-                Layout.fillWidth: true
-                onContextMenuRequested: (index, position) => tabMenu.popup()
-                onNewListRequested: nameDialog.ask("New list", "", name => Tk.newList(name))
+            SplitView.minimumWidth: 360
+
+            readonly property var panels: Tk.panels
+            readonly property bool tabbed: (panels.kind ?? "split") === "tabs"
+            readonly property var order: panels.order ?? ["folders", "track-lists"]
+            function panelOf(id) {
+                return id === "folders" ? sources : trackArea;
             }
-            TrackTable {
-                id: trackTable
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onContextMenuRequested: (row, position) => trackMenu.popup()
-                onHeaderMenuRequested: position => headerMenu.popup()
+            // The panels in the order and room kept.
+            function arrange() {
+                const first = panelOf(order[0]);
+                if (panelSplit.itemAt(0) !== first)
+                    panelSplit.moveItem(1, 0);
+                const weights = panels.weights ?? [1, 3];
+                const total = weights.reduce((sum, weight) => sum + weight, 0) || 1;
+                const extent = panels.vertical ? panelSplit.height : panelSplit.width;
+                for (let index = 0; index < order.length; ++index) {
+                    const panel = panelOf(order[index]);
+                    const size = Math.max(1, Math.round(extent * (weights[index] ?? 1) / total));
+                    if (panels.vertical)
+                        panel.SplitView.preferredHeight = size;
+                    else
+                        panel.SplitView.preferredWidth = size;
+                }
             }
-            FindBar {
-                Layout.fillWidth: true
-            }
-            EditBar {
-                id: editBar
-                Layout.fillWidth: true
+            onPanelsChanged: Qt.callLater(arrange)
+            onWidthChanged: if (!panelSplit.resizing) Qt.callLater(arrange)
+            onHeightChanged: if (!panelSplit.resizing) Qt.callLater(arrange)
+            Component.onCompleted: Qt.callLater(arrange)
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+                TabBar {
+                    id: panelTabs
+                    Layout.fillWidth: true
+                    visible: panelsHost.tabbed
+                    currentIndex: panelsHost.panels.active ?? 0
+                    onCurrentIndexChanged: if (panelsHost.tabbed) Tk.setPanelTab(currentIndex)
+                    Repeater {
+                        model: panelsHost.order
+                        TabButton {
+                            required property string modelData
+                            text: modelData === "folders" ? qsTr("Sources") : qsTr("Lists and tracks")
+                        }
+                    }
+                }
+                SplitView {
+                    id: panelSplit
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    orientation: (panelsHost.panels.vertical ?? false) ? Qt.Vertical : Qt.Horizontal
+                    // A divider moved by hand: the room each has is kept.
+                    onResizingChanged: {
+                        if (resizing)
+                            return;
+                        const sizes = [];
+                        for (const id of panelsHost.order) {
+                            const panel = panelsHost.panelOf(id);
+                            sizes.push(orientation === Qt.Vertical ? panel.height : panel.width);
+                        }
+                        Tk.setPanelSizes(sizes);
+                    }
+
+                    // bench-panel-folders: Sources.
+                    SourcesPanel {
+                        id: sources
+                        visible: !panelsHost.tabbed || panelsHost.order[panelTabs.currentIndex] === "folders"
+                        SplitView.minimumWidth: 160
+                        SplitView.minimumHeight: 120
+                        onNotYet: what => window.notYet(what)
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: panelsHost.panels.editing ?? false
+                            color: "transparent"
+                            border.color: palette.highlight
+                            border.width: 1
+                        }
+                    }
+
+                    // bench-track-area: the tabs over the list on show, and
+                    // the lists beside it when they are a pane.
+                    SplitView {
+                        id: trackArea
+                        visible: !panelsHost.tabbed || panelsHost.order[panelTabs.currentIndex] === "track-lists"
+                        SplitView.fillWidth: true
+                        SplitView.fillHeight: true
+                        SplitView.minimumWidth: 200
+                        SplitView.minimumHeight: 160
+                        orientation: Qt.Horizontal
+
+                        ColumnLayout {
+                            SplitView.fillWidth: true
+                            SplitView.minimumWidth: 200
+                            spacing: 0
+                            TrackTabBar {
+                                Layout.fillWidth: true
+                                visible: !Tk.listsInPanel
+                                onContextMenuRequested: (index, position) => tabMenu.popup()
+                                onNewListRequested: nameDialog.ask("New list", "", name => Tk.newList(name))
+                            }
+                            TrackTable {
+                                id: trackTable
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                onContextMenuRequested: (row, position) => trackMenu.popup()
+                                onHeaderMenuRequested: position => headerMenu.popup()
+                            }
+                            FindBar {
+                                Layout.fillWidth: true
+                            }
+                            EditBar {
+                                id: editBar
+                                Layout.fillWidth: true
+                            }
+                        }
+                        ListsPane {
+                            visible: Tk.listsInPanel
+                            SplitView.minimumWidth: 160
+                            SplitView.preferredWidth: Tk.listsPanelWidth()
+                            onWidthChanged: if (visible && trackArea.resizing) Tk.setListsPanelWidth(width)
+                            onNewListRequested: nameDialog.ask("New list", "", name => Tk.newList(name))
+                            onRenameRequested: (engine, id, name) => nameDialog.ask("Rename list", name,
+                                                   chosen => Tk.renamePanelList(engine, id, chosen))
+                        }
+                        Rectangle {
+                            parent: trackArea
+                            anchors.fill: parent
+                            z: 10
+                            visible: panelsHost.panels.editing ?? false
+                            color: "transparent"
+                            border.color: palette.highlight
+                            border.width: 1
+                        }
+                    }
+                }
             }
         }
 
@@ -879,6 +1007,9 @@ ApplicationWindow {
 
     Connections {
         target: Tk
+        function onSaveListWanted() {
+            saveAction.trigger();
+        }
         function onMessage(text, timeoutMs) {
             status.showMessage(text, timeoutMs);
         }

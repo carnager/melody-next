@@ -96,6 +96,7 @@ qt_add_qml_module(
     qml/CommandPalette.qml
     qml/SearchWindow.qml
     qml/DynamicPlaylistsWindow.qml
+    qml/ListsPane.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

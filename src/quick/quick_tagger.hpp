@@ -54,6 +54,9 @@ class QuickTagger final : public QObject {
     QML_UNCREATABLE("Opened by the workspace")
     Q_PROPERTY(QString title READ title CONSTANT)
     Q_PROPERTY(trackknife::quick::QuickArtwork* artwork READ artwork CONSTANT)
+    // The engine its files are on, as EngineKey spells it: whose move
+    // destinations it manages.
+    Q_PROPERTY(QString engineKey READ engineKey CONSTANT)
     Q_PROPERTY(bool ready READ ready NOTIFY gridReady)
     Q_PROPERTY(QAbstractItemModel* files READ files NOTIFY gridReady)
     Q_PROPERTY(QAbstractItemModel* fields READ fields NOTIFY gridReady)
@@ -81,6 +84,10 @@ class QuickTagger final : public QObject {
 
     [[nodiscard]] QString title() const { return title_; }
     [[nodiscard]] QuickArtwork* artwork() const { return artwork_; }
+    [[nodiscard]] QString engineKey() const { return engine_key_; }
+    void setEngineKey(const QString& key) { engine_key_ = key; }
+    // Settings saved: how artwork is stored may be another.
+    void refreshStoragePolicy();
     [[nodiscard]] bool ready() const { return session_->ready(); }
     [[nodiscard]] QAbstractItemModel* files() const;
     [[nodiscard]] QAbstractItemModel* fields() const { return field_rows_; }
@@ -205,6 +212,7 @@ class QuickTagger final : public QObject {
     bench::TaggerSession* session_{nullptr};
     bench::ArtworkSession* artwork_session_{nullptr};
     QuickArtwork* artwork_{nullptr};
+    QString engine_key_;
     TaggerFieldRows* field_rows_{nullptr};
     QItemSelectionModel* field_selection_{nullptr};
     bench::FieldFilter filter_;

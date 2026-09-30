@@ -30,6 +30,8 @@ qt_add_qml_module(
     quick_replaygain.cpp
     quick_replaygain.hpp
     quick_script.cpp
+    quick_settings.cpp
+    quick_settings.hpp
     quick_script.hpp
     quick_tagger.cpp
     quick_tagger.hpp
@@ -75,6 +77,10 @@ qt_add_qml_module(
     qml/ScriptEditor.qml
     qml/ReplayGainDialog.qml
     qml/ConvertDialog.qml
+    qml/KeyedAction.qml
+    qml/LibraryFolders.qml
+    qml/EngineFolderDialog.qml
+    qml/SettingsWindow.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

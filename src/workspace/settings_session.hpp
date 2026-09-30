@@ -77,6 +77,7 @@ class SettingsSession final : public QObject {
 
     // The draft, by settings key.
     [[nodiscard]] QVariant value(const QString& key) const { return values_.value(key); }
+    [[nodiscard]] const QVariantMap& values() const { return values_; }
     void setValue(const QString& key, const QVariant& value);
     // A preset fills the buffer's capacity and start; Custom leaves them to
     // be set.

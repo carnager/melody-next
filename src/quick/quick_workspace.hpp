@@ -5,6 +5,7 @@
 #include "quick/list_tabs_model.hpp"
 #include "quick/quick_convert.hpp"
 #include "quick/quick_replaygain.hpp"
+#include "quick/quick_settings.hpp"
 #include "quick/quick_tagger.hpp"
 #include "quick/track_rows_model.hpp"
 #include "workspace/folder_browser.hpp"
@@ -64,6 +65,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(int coverRevision READ coverRevision NOTIFY coverRevisionChanged)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY desktopChanged)
     Q_PROPERTY(bool followPlayback READ followPlayback WRITE setFollowPlayback NOTIFY desktopChanged)
+    Q_PROPERTY(trackknife::bench::LibraryBrowser* localLibrary READ localLibrary NOTIFY sourcesChanged)
+    Q_PROPERTY(int shortcutRevision READ shortcutRevision NOTIFY shortcutsChanged)
 
   public:
     using ListTab = bench::Workspace::ListTab;
@@ -92,6 +95,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] int currentSource() const { return current_source_; }
     // The library of the source shown; none on Folders.
     [[nodiscard]] bench::LibraryBrowser* library() const;
+    // This computer's library, whichever source is shown.
+    [[nodiscard]] bench::LibraryBrowser* localLibrary() const;
+    [[nodiscard]] int shortcutRevision() const { return shortcut_revision_; }
     [[nodiscard]] QImage libraryCover(const QString& engine, const QString& album_key) const;
 
     // The Sources panel: a source chosen (remembered when the user chose
@@ -197,6 +203,10 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void replayGain();
     // "Convert files…": the selected rows converted below a folder.
     Q_INVOKABLE void convertFiles();
+    // Settings: one window's draft, written on its Save.
+    Q_INVOKABLE trackknife::quick::QuickSettings* openSettings();
+    // A command's key: the one saved in Settings, or `default_key`.
+    Q_INVOKABLE static QString shortcut(const QString& id, const QString& default_key);
 
     // The workspace closing: saved at once, and quitting stops this
     // computer's engine.
@@ -263,6 +273,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void taggerOpened(trackknife::quick::QuickTagger* tagger);
     void replayGainOpened(trackknife::quick::QuickReplayGain* replayGain);
     void convertOpened(trackknife::quick::QuickConvert* convert);
+    // Settings were saved: keys may be others now.
+    void shortcutsChanged();
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();
@@ -293,6 +305,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     };
     std::vector<Library> libraries_;
     int current_source_{0};
+    int shortcut_revision_{0};
     void addLibrary(EngineLink& engine);
     void selectPreferredSource();
     [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;

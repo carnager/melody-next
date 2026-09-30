@@ -29,6 +29,20 @@ ApplicationWindow {
     function notYet(what) {
         status.showMessage(what + " is not in the Qt Quick window yet", 3000);
     }
+    // Settings: one window at a time, brought forward on the page asked for.
+    property var settingsWindow: null
+    readonly property var settingsPages: ({general: 0, playback: 1, library: 2, engine: 3,
+                                           naming: 4, replaygain: 5, covers: 6,
+                                           "metadata-services": 7, lastfm: 8, shortcuts: 9})
+    function openSettings(page) {
+        if (!settingsWindow) {
+            const settings = Tk.openSettings();
+            settings.loadShortcuts(window.shortcutCommands());
+            settingsWindow = settingsComponent.createObject(window, {settings: settings});
+        }
+        settingsWindow.showPage(typeof page === "string" ? (settingsPages[page] ?? 0) : (page ?? 0));
+        return settingsWindow;
+    }
     // QA hook (--screenshot with --open): a menu or dialog opened by name,
     // the first row selected, for a picture of it.
     function openForScreenshot(name) {
@@ -62,6 +76,8 @@ ApplicationWindow {
         }
         else if (name === "search" && Tk.library)
             Tk.library.search = "a";
+        else if (name.startsWith("settings"))
+            window.openSettings(name.length > 9 ? name.substring(9) : "general");
     }
     property string taggerForScreenshot: ""
     property bool replayGainForScreenshot: false
@@ -90,52 +106,52 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: "&File"
-            Action {
+            KeyedAction {
                 objectName: "action-new-list"
                 text: "New list…"
-                shortcut: "Ctrl+N"
+                defaultKey: "Ctrl+N"
                 onTriggered: nameDialog.ask("New list", "", name => Tk.newList(name))
             }
-            Action {
+            KeyedAction {
                 objectName: "action-open-files"
                 text: "Open files…"
-                shortcut: "Ctrl+O"
+                defaultKey: "Ctrl+O"
                 onTriggered: filesDialog.open()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-open-folder"
                 text: "Open folder…"
-                shortcut: "Ctrl+Shift+O"
+                defaultKey: "Ctrl+Shift+O"
                 onTriggered: folderDialog.open()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-import-m3u8"
                 text: qsTr("Import M3U8 playlist…")
                 onTriggered: window.notYet("Importing a playlist")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-export-m3u8"
                 text: qsTr("Export list as M3U8…")
                 enabled: Tk.currentTab >= 0
                 onTriggered: window.notYet("Exporting a playlist")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-open-list"
                 text: "Open list…"
-                shortcut: "Ctrl+Alt+O"
+                defaultKey: "Ctrl+Alt+O"
                 onTriggered: window.notYet("Open list")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-dynamic-playlists"
                 text: "Dynamic playlists…"
                 onTriggered: window.notYet("Dynamic playlists")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-backup-workspace"
                 text: "Back up workspace database…"
                 onTriggered: window.notYet("Backing up the workspace")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-restore-workspace"
                 text: "Restore workspace database…"
                 onTriggered: window.notYet("Restoring the workspace")
@@ -145,47 +161,51 @@ ApplicationWindow {
                 onTriggered: window.notYet("Bookmarks")
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
+                objectName: "action-close-window"
                 text: "Close window"
                 onTriggered: window.close()
             }
-            Action {
-                objectName: "action-quit-stop-engine"
+            KeyedAction {
+                objectName: "action-quit"
                 text: "Quit and stop playback"
-                shortcut: "Ctrl+Q"
+                defaultKey: "Ctrl+Q"
                 onTriggered: Tk.quitAndStopEngine()
             }
         }
         Menu {
             title: "&Edit"
-            Action {
+            KeyedAction {
+                objectName: "action-find-in-list"
                 text: qsTr("Find in current list…")
-                shortcut: "Ctrl+F"
+                defaultKey: "Ctrl+F"
                 enabled: Tk.currentTab >= 0
                 onTriggered: window.notYet("Find in list")
             }
-            Action {
+            KeyedAction {
+                objectName: "action-find-next-in-list"
                 text: qsTr("Find next in list")
-                shortcut: "F3"
+                defaultKey: "F3"
                 onTriggered: window.notYet("Find in list")
             }
-            Action {
+            KeyedAction {
+                objectName: "action-find-previous-in-list"
                 text: qsTr("Find previous in list")
-                shortcut: "Shift+F3"
+                defaultKey: "Shift+F3"
                 onTriggered: window.notYet("Find in list")
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-undo-list-edit"
                 text: Tk.history.undoText ?? "Undo list edit"
-                shortcut: "Ctrl+Z"
+                defaultKey: "Ctrl+Z"
                 enabled: Tk.history.canUndo ?? false
                 onTriggered: Tk.undoListEdit()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-redo-list-edit"
                 text: Tk.history.redoText ?? "Redo list edit"
-                shortcut: "Ctrl+Shift+Z"
+                defaultKey: "Ctrl+Shift+Z"
                 enabled: Tk.history.canRedo ?? false
                 onTriggered: Tk.redoListEdit()
             }
@@ -193,99 +213,103 @@ ApplicationWindow {
             SortMenu {
                 onCustomRequested: editBar.openSort()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-reverse-list"
                 text: qsTr("Reverse list")
                 enabled: Tk.history.editable ?? false
                 onTriggered: Tk.edit.reverse()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-shuffle-albums"
                 text: qsTr("Shuffle albums")
                 enabled: Tk.history.editable ?? false
                 onTriggered: Tk.edit.shuffleAlbums()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-deduplicate-list"
                 text: qsTr("Remove duplicate entries")
                 enabled: Tk.history.editable ?? false
                 onTriggered: Tk.edit.removeDuplicates()
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-edit-tags"
                 text: "Edit tags…"
-                shortcut: "Alt+Return"
+                defaultKey: "Alt+Return"
                 enabled: (Tk.selection.count ?? 0) > 0
                 onTriggered: Tk.editTags()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-replaygain"
                 text: "ReplayGain…"
                 enabled: (Tk.selection.count ?? 0) > 0
                 onTriggered: Tk.replayGain()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-convert"
                 text: "Convert files…"
                 enabled: (Tk.selection.count ?? 0) > 0
                 onTriggered: Tk.convertFiles()
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-settings"
                 text: "Settings…"
-                shortcut: "Ctrl+,"
-                onTriggered: window.notYet("Settings")
+                defaultKey: "Ctrl+,"
+                onTriggered: window.openSettings(0)
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-remove-selected"
                 text: "Remove selected"
-                shortcut: "Delete"
+                defaultKey: "Delete"
                 enabled: (Tk.selection.count ?? 0) > 0
                 onTriggered: Tk.removeSelectedRows()
             }
         }
         Menu {
             title: "&Workspace"
-            Action {
+            KeyedAction {
+                objectName: "action-command-palette"
                 text: qsTr("Commands…")
-                shortcut: "Ctrl+Shift+P"
+                defaultKey: "Ctrl+Shift+P"
                 onTriggered: window.notYet("The command palette")
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-jump-to-playing"
                 text: qsTr("Jump to playing")
-                shortcut: "Ctrl+J"
+                defaultKey: "Ctrl+J"
                 onTriggered: Tk.jumpToPlaying()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-follow-playback"
                 text: qsTr("Cursor follows playback")
-                shortcut: "Ctrl+Shift+J"
+                defaultKey: "Ctrl+Shift+J"
                 checkable: true
                 checked: Tk.followPlayback
                 onTriggered: Tk.followPlayback = checked
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
+                objectName: "action-search-dialog"
                 text: "Search…"
-                shortcut: "Ctrl+Shift+F"
+                defaultKey: "Ctrl+Shift+F"
                 onTriggered: window.notYet("Search")
             }
-            Action {
+            KeyedAction {
+                objectName: "action-quick-album"
                 text: qsTr("Quick album…")
-                shortcut: "Ctrl+Shift+A"
+                defaultKey: "Ctrl+Shift+A"
                 onTriggered: window.notYet("Quick album")
             }
-            Action {
+            KeyedAction {
+                objectName: "action-quick-track"
                 text: qsTr("Quick track…")
-                shortcut: "Ctrl+Shift+T"
+                defaultKey: "Ctrl+Shift+T"
                 onTriggered: window.notYet("Quick track")
             }
-            Action {
+            KeyedAction {
                 objectName: "action-lists-panel"
                 text: qsTr("Lists in a side panel")
                 checkable: true
@@ -295,26 +319,29 @@ ApplicationWindow {
                 }
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 id: duplicateAction
+                objectName: "action-duplicate-tab"
                 text: "Duplicate tab"
-                shortcut: "Ctrl+Shift+D"
+                defaultKey: "Ctrl+Shift+D"
                 enabled: Tk.currentTab >= 0
                 onTriggered: Tk.duplicateTab()
             }
-            Action {
+            KeyedAction {
                 id: pinAction
+                objectName: "action-pin-tab"
                 text: "Pin tab"
-                shortcut: "Ctrl+Alt+P"
+                defaultKey: "Ctrl+Alt+P"
                 checkable: true
                 checked: Tk.list.pinned ?? false
                 enabled: Tk.currentTab >= 0
                 onTriggered: Tk.togglePinned()
             }
-            Action {
+            KeyedAction {
                 id: saveAction
+                objectName: "action-save-list"
                 text: "Save list"
-                shortcut: "Ctrl+S"
+                defaultKey: "Ctrl+S"
                 enabled: Tk.currentTab >= 0
                 onTriggered: {
                     if (Tk.list.scratch)
@@ -323,27 +350,30 @@ ApplicationWindow {
                         Tk.saveTab("");
                 }
             }
-            Action {
+            KeyedAction {
                 id: renameAction
+                objectName: "action-rename-tab"
                 text: "Rename tab…"
-                shortcut: "F2"
+                defaultKey: "F2"
                 enabled: Tk.currentTab >= 0
                 onTriggered: nameDialog.ask("Rename list", Tk.list.name, name => Tk.renameTab(name))
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 id: closeAction
+                objectName: "action-close-tab"
                 text: "Close tab"
-                shortcut: "Ctrl+W"
+                defaultKey: "Ctrl+W"
                 enabled: Tk.currentTab >= 0
                 onTriggered: window.closeTab(Tk.currentTab)
             }
             MenuSeparator {}
             TrackLayoutMenu {}
             MenuSeparator {}
-            Action {
+            KeyedAction {
+                objectName: "action-edit-panel-layout"
                 text: "Edit panel layout"
-                shortcut: "Ctrl+Alt+L"
+                defaultKey: "Ctrl+Alt+L"
                 checkable: true
                 onTriggered: {
                     checked = false;
@@ -368,36 +398,36 @@ ApplicationWindow {
         }
         Menu {
             title: "&Playback"
-            Action {
+            KeyedAction {
                 objectName: "action-play-pause"
                 text: Tk.transport.playLabel ?? "Play"
-                shortcut: "Space"
+                defaultKey: "Space"
                 enabled: Tk.transport.canPlayPause ?? false
                 onTriggered: Tk.playPause()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-stop"
                 text: "Stop"
-                shortcut: "Ctrl+."
+                defaultKey: "Ctrl+."
                 enabled: Tk.transport.canStop ?? false
                 onTriggered: Tk.stop()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-previous-track"
                 text: "Previous"
-                shortcut: "Alt+Left"
+                defaultKey: "Alt+Left"
                 enabled: Tk.transport.canPrevious ?? false
                 onTriggered: Tk.previous()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-next-track"
                 text: "Next"
-                shortcut: "Alt+Right"
+                defaultKey: "Alt+Right"
                 enabled: Tk.transport.canNext ?? false
                 onTriggered: Tk.next()
             }
             MenuSeparator {}
-            Action {
+            KeyedAction {
                 objectName: "action-local-repeat"
                 text: "Repeat"
                 checkable: true
@@ -405,7 +435,7 @@ ApplicationWindow {
                 enabled: Tk.modes.enabled ?? false
                 onTriggered: Tk.setRepeat(checked)
             }
-            Action {
+            KeyedAction {
                 objectName: "action-local-random"
                 text: "Random"
                 checkable: true
@@ -413,7 +443,7 @@ ApplicationWindow {
                 enabled: Tk.modes.enabled ?? false
                 onTriggered: Tk.setRandom(checked)
             }
-            Action {
+            KeyedAction {
                 objectName: "action-local-single"
                 text: Tk.modes.single?.text ?? "Single"
                 checkable: true
@@ -421,7 +451,7 @@ ApplicationWindow {
                 enabled: Tk.modes.enabled ?? false
                 onTriggered: Tk.cycleSingle()
             }
-            Action {
+            KeyedAction {
                 objectName: "action-local-album-random"
                 text: qsTr("Album shuffle")
                 checkable: true
@@ -429,7 +459,7 @@ ApplicationWindow {
                 enabled: Tk.modes.enabled ?? false
                 onTriggered: Tk.setAlbumRandom(checked)
             }
-            Action {
+            KeyedAction {
                 objectName: "action-local-consume"
                 text: Tk.modes.consume?.text ?? "Consume"
                 checkable: true
@@ -438,7 +468,7 @@ ApplicationWindow {
                 onTriggered: Tk.cycleConsume()
             }
             ReplayGainMenu {
-                onPreampRequested: window.notYet("The preamp settings")
+                onPreampRequested: window.openSettings("playback").focusReplayGainPreamp()
             }
             MenuSeparator {}
             Action {
@@ -469,10 +499,10 @@ ApplicationWindow {
                     text: "Custom…"
                     checkable: true
                     checked: Tk.bufferProfile === "custom"
-                    onTriggered: window.notYet("A custom buffer")
+                    onTriggered: window.openSettings("playback").editCustomBuffer()
                 }
             }
-            Action {
+            KeyedAction {
                 objectName: "action-refresh-audio-devices"
                 text: "Refresh audio devices"
                 onTriggered: Tk.refreshOutputs()
@@ -493,21 +523,55 @@ ApplicationWindow {
         sequences: ["Ctrl+Y"]
         onActivated: Tk.redoListEdit()
     }
+    // Commands with a key and no menu entry: in Settings › Shortcuts too.
+    readonly property var keyedCommands: [
+        {id: "action-queue-next", label: qsTr("Queue next"), key: "Ctrl+Return"},
+        {id: "action-queue-end", label: qsTr("Queue at end"), key: "Ctrl+Shift+Return"},
+        {id: "action-focus-library-search", label: qsTr("Search the library"), key: "Ctrl+L"},
+        {id: "action-show-up-next", label: qsTr("Up Next"), key: "Ctrl+Shift+U"}
+    ]
+    function keyOf(id) {
+        const command = keyedCommands.find(entry => entry.id === id);
+        return Tk.shortcutRevision >= 0 ? Tk.shortcut(id, command.key) : "";
+    }
     Shortcut {
-        sequence: "Ctrl+Return"
+        sequence: window.keyOf("action-queue-next")
         onActivated: Tk.queueSelection(true)
     }
     Shortcut {
-        sequence: "Ctrl+Shift+Return"
+        sequence: window.keyOf("action-queue-end")
         onActivated: Tk.queueSelection(false)
     }
     Shortcut {
-        sequence: "Ctrl+L"
+        sequence: window.keyOf("action-focus-library-search")
         onActivated: Tk.focusLibrarySearch()
     }
     Shortcut {
-        sequence: "Ctrl+Shift+U"
+        sequence: window.keyOf("action-show-up-next")
         onActivated: upNextSettings.visible = !upNextSettings.visible
+    }
+    // Every command a key can be given: the menus' and those above.
+    function shortcutCommands() {
+        const listed = [];
+        const seen = {};
+        function walk(menu) {
+            for (let i = 0; i < menu.count; ++i) {
+                const submenu = menu.menuAt(i);
+                if (submenu) {
+                    walk(submenu);
+                    continue;
+                }
+                const action = menu.actionAt(i);
+                if (action && action.objectName.startsWith("action-") && !seen[action.objectName]) {
+                    seen[action.objectName] = true;
+                    listed.push({id: action.objectName, label: action.text,
+                                 key: action.defaultKey ?? ""});
+                }
+            }
+        }
+        for (let i = 0; i < window.menuBar.count; ++i)
+            walk(window.menuBar.menuAt(i));
+        return listed.concat(keyedCommands);
     }
 
     SplitView {
@@ -658,8 +722,21 @@ ApplicationWindow {
     Component {
         id: taggerComponent
         TaggerWindow {
-            onSettingsRequested: window.notYet(qsTr("Settings"))
-            onDestinationsRequested: window.notYet(qsTr("Settings"))
+            id: taggerWindow
+            onSettingsRequested: page => {
+                const opened = window.openSettings(page);
+                if (page === "naming")
+                    opened.showNamingLayouts();
+            }
+            // Managing destinations opens those of the engine its tracks
+            // are on.
+            onDestinationsRequested: window.openSettings("naming").showDestinationsOf(taggerWindow.tagger.engineKey)
+        }
+    }
+    Component {
+        id: settingsComponent
+        SettingsWindow {
+            Component.onDestruction: window.settingsWindow = null
         }
     }
     Component {

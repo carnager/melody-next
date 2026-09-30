@@ -1013,52 +1013,13 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             properties->reloadOutputProfiles();
         }
     });
-    // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
-    // each engine that does file work (an emptied one makes them forget it).
-    connect(dialog, &QDialog::accepted, this, [this] {
-        const auto key = QSettings{}
-                             .value(QLatin1String(SettingsDialog::acoustid_client_key))
-                             .toString()
-                             .trimmed()
-                             .toStdString();
-        // Stage 2: so is whether ratings also go into the files.
-        const QSettings chosen;
-        const auto rating_tags =
-            chosen.value(QLatin1String(SettingsDialog::ratings_in_tags_key), false).toBool();
-        const auto rating_scale =
-            chosen.value(QLatin1String(SettingsDialog::rating_tag_scale_key), QStringLiteral("off"))
-                .toString()
-                .toStdString();
-        for (const auto& engine : engines_) {
-            if (engine->does_file_work && engine->file_work) {
-                static_cast<void>(
-                    QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale] {
-                        static_cast<void>(work->set_acoustid_key(key));
-                        static_cast<void>(work->set_rating_tags(rating_tags));
-                        static_cast<void>(work->set_rating_scale(rating_scale));
-                    }));
-            }
-        }
-    });
-    connect(dialog, &QDialog::accepted, this, [this] {
-        // ADR-0234: engines added, removed or pointed elsewhere, at once.
-        syncRemoteEngines();
+    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
+        workspace_.settingsSaved(sharing);
         applyLocalLibraryVisibility();
         applyListsDisplay();
-    });
-    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
-        // ADR-0226: this computer's engine runs apart from the window, so a
-        // change to how it is shared means starting it again.
-        if (localEngineSharing() != sharing && localCatalogue()) {
-            QApplication::setOverrideCursor(Qt::WaitCursor);
-            const bool restarted = localCatalogue()->restartLocalEngine();
-            QApplication::restoreOverrideCursor();
-            statusBar()->showMessage(
-                restarted ? QStringLiteral("This computer's engine restarted with its new settings")
-                          : QStringLiteral("This computer's engine did not restart; see its log"),
-                8'000);
-        }
-        reloadPlaybackPreferences();
+        if (notifications_action_)
+            notifications_action_->setChecked(
+                QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
         for (auto* section : findChildren<MetadataArtworkSection*>())
             section->refreshStoragePolicy();
     });

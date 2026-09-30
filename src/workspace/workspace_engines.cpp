@@ -2,10 +2,14 @@
 
 #include "workspace/workspace.hpp"
 
+#include "bench/engine_launcher.hpp"
 #include "bench/remote_engines.hpp"
+#include "bench/settings_keys.hpp"
 #include "workspace/workspace_view.hpp"
 
 #include <QCursor>
+#include <QSettings>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QGuiApplication>
 
 #include <optional>
@@ -164,6 +168,51 @@ void Workspace::renewOutdatedLocalEngine() {
                              8'000);
 }
 
+
+void Workspace::settingsSaved(const LocalEngineSharing& before) {
+    // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
+    // each engine that does file work (an emptied one makes them forget it).
+    // Stage 2: so is whether ratings also go into the files.
+    const QSettings chosen;
+    const auto key = chosen.value(QLatin1String(SettingsKeys::acoustid_client_key))
+                         .toString()
+                         .trimmed()
+                         .toStdString();
+    const auto rating_tags =
+        chosen.value(QLatin1String(SettingsKeys::ratings_in_tags_key), false).toBool();
+    const auto rating_scale =
+        chosen.value(QLatin1String(SettingsKeys::rating_tag_scale_key), QStringLiteral("off"))
+            .toString()
+            .toStdString();
+    for (const auto& engine : engines_) {
+        if (engine->does_file_work && engine->file_work) {
+            static_cast<void>(
+                QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale] {
+                    static_cast<void>(work->set_acoustid_key(key));
+                    static_cast<void>(work->set_rating_tags(rating_tags));
+                    static_cast<void>(work->set_rating_scale(rating_scale));
+                }));
+        }
+    }
+    // ADR-0234: engines added, removed or pointed elsewhere, at once.
+    syncRemoteEngines();
+    // ADR-0226: this computer's engine runs apart from the window, so a
+    // change to how it is shared means starting it again.
+    if (localEngineSharing() != before && localCatalogue()) {
+        QGuiApplication::setOverrideCursor(QCursor{Qt::WaitCursor});
+        const bool restarted = localCatalogue()->restartLocalEngine();
+        QGuiApplication::restoreOverrideCursor();
+        view_->showMessage(
+            restarted ? QStringLiteral("This computer's engine restarted with its new settings")
+                      : QStringLiteral("This computer's engine did not restart; see its log"),
+            8'000);
+    }
+    reloadPlaybackPreferences();
+    if (notifier_ != nullptr) {
+        notifier_->setBackgroundOnly(
+            chosen.value(QStringLiteral("desktop/notifications-background-only"), false).toBool());
+    }
+}
 
 void Workspace::retireEngines() {
     for (const auto& engine : engines_) {

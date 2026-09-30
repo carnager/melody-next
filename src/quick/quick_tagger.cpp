@@ -602,4 +602,6 @@ QString QuickTagger::requestClose() {
     return QStringLiteral("close");
 }
 
+void QuickTagger::refreshStoragePolicy() { artwork_session_->refreshStoragePolicy(); }
+
 } // namespace trackknife::quick

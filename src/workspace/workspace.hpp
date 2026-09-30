@@ -5,6 +5,7 @@
 #include "bench/catalogue_source.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/engine_key.hpp"
+#include "bench/engine_launcher.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
 #include "bench/lastfm_service.hpp"
@@ -489,6 +490,9 @@ class Workspace final : public QObject {
     void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
     // Settings changed: engines no longer listed let go, new ones connected.
     void syncRemoteEngines();
+    // Settings were saved: the engines, this computer's engine (restarted
+    // when how it is shared changed from `before`) and playback follow.
+    void settingsSaved(const LocalEngineSharing& before);
     void disconnectEngine(const EngineKey& key);
     // ADR-0234: a remote's placeholder key replaced by the id it gave.
     void adoptEngineIdentity(EngineLink& engine);

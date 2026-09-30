@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QKeySequence>
 #include <QSettings>
 
 #include <algorithm>
@@ -509,9 +510,43 @@ void QuickWorkspace::editTags() {
                         count, workspace_.selectionSourceReader(*tab, std::move(selected)),
                         std::move(opening.services), std::move(opening.artwork_applier),
                         std::move(opening.artwork_observer), this);
+    tagger->setEngineKey(opening.engine.text());
     connect(tagger, &QuickTagger::statusMessage, this,
             [this](const QString& message) { showMessage(message, 12'000); });
     emit taggerOpened(tagger);
+}
+
+QuickSettings* QuickWorkspace::openSettings() {
+    auto* settings = new QuickSettings(workspace_, workspace_.buildOutputProfileStore(), this);
+    // ADR-0185: profile edits in Settings refresh every open tag editor's
+    // selectors immediately.
+    connect(settings, &QuickSettings::outputProfilesChanged, this, [this] {
+        for (auto* tagger : findChildren<QuickTagger*>(Qt::FindDirectChildrenOnly)) {
+            tagger->reloadOutputProfiles();
+        }
+    });
+    connect(settings, &QuickSettings::saved, this, [this] {
+        for (auto* tagger : findChildren<QuickTagger*>(Qt::FindDirectChildrenOnly)) {
+            tagger->refreshStoragePolicy();
+        }
+        ++shortcut_revision_;
+        emit shortcutsChanged();
+        emit desktopChanged();
+        // The local library shown or hidden.
+        emit sourcesChanged();
+    });
+    QQmlEngine::setObjectOwnership(settings, QQmlEngine::CppOwnership);
+    return settings;
+}
+
+QString QuickWorkspace::shortcut(const QString& id, const QString& default_key) {
+    return bench::ShortcutSession::saved(id, QKeySequence(default_key, QKeySequence::PortableText))
+        .toString(QKeySequence::PortableText);
+}
+
+bench::LibraryBrowser* QuickWorkspace::localLibrary() const {
+    const auto found = std::ranges::find(libraries_, bench::EngineKey::local(), &Library::engine);
+    return found != libraries_.end() ? found->browser : nullptr;
 }
 
 void QuickWorkspace::removeSelectedRows() {

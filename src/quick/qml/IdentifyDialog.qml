@@ -254,10 +254,10 @@ ApplicationWindow {
                         RowLayout {
                             anchors.fill: parent
                             spacing: 0
-                            HeaderCell { text: qsTr("Local filename"); Layout.fillWidth: true }
+                            HeaderCell { text: qsTr("Local filename"); Layout.fillWidth: true; Layout.preferredWidth: 100 }
                             HeaderCell { text: qsTr("Length"); Layout.preferredWidth: 64 }
                             HeaderCell { text: qsTr("Pairing"); Layout.preferredWidth: 90 }
-                            HeaderCell { text: qsTr("MusicBrainz track"); Layout.fillWidth: true }
+                            HeaderCell { text: qsTr("MusicBrainz track"); Layout.fillWidth: true; Layout.preferredWidth: 100 }
                             HeaderCell { text: qsTr("Length"); Layout.preferredWidth: 64 }
                         }
                     }
@@ -337,10 +337,12 @@ ApplicationWindow {
                                     from = -1;
                                 }
                             }
+                            // The same columns as the header: the two names
+                            // share what is left equally, whatever their length.
                             RowLayout {
                                 anchors.fill: parent
                                 spacing: 0
-                                Cell { text: pair.modelData.file; tip: pair.modelData.fileToolTip; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                                Cell { text: pair.modelData.file; tip: pair.modelData.fileToolTip; Layout.fillWidth: true; Layout.preferredWidth: 100; elide: Text.ElideMiddle }
                                 Cell { text: pair.modelData.length; Layout.preferredWidth: 64 }
                                 Cell {
                                     text: pair.modelData.pairing
@@ -349,7 +351,7 @@ ApplicationWindow {
                                     font.bold: pair.modelData.paired
                                     color: pair.modelData.paired ? palette.link : palette.text
                                 }
-                                Cell { text: pair.modelData.track; tip: pair.modelData.track; Layout.fillWidth: true; elide: Text.ElideMiddle }
+                                Cell { text: pair.modelData.track; tip: pair.modelData.track; Layout.fillWidth: true; Layout.preferredWidth: 100; elide: Text.ElideMiddle }
                                 Cell { text: pair.modelData.trackLength; Layout.preferredWidth: 64 }
                             }
                         }

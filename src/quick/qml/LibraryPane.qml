@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // One engine's library (LocalLibraryPanel): a search row with the query
 // toggle, recently added, refresh and the folders; the tree of artists,
@@ -149,9 +150,19 @@ Item {
                 // Opened before its children are asked for: once asked for,
                 // a row with none yet reads as having none, and would not
                 // open; if it still does not, it opens when they arrive.
+                // Rows an opening shows, fading and sliding in below it.
+                property int revealFrom: -1
+                property int revealDepth: 0
+                property double revealAt: 0
+
                 function toggle(row, open) {
                     const index = tree.index(row, 0);
                     if (open) {
+                        if (Tk.panelAnimations) {
+                            tree.revealFrom = row;
+                            tree.revealDepth = tree.depth(row);
+                            tree.revealAt = Date.now();
+                        }
                         tree.expand(row);
                         if (!tree.isExpanded(row))
                             pane.pendingExpansions.push(index);
@@ -217,6 +228,38 @@ Item {
                                                     && (tree.hoveredRow === row
                                                         || (tree.activeFocus && current))
 
+
+                    // Shown by an opening just now: in with a fade and a slide.
+                    function reveal() {
+                        const recent = Date.now() - tree.revealAt < 400;
+                        const below = tree.revealFrom >= 0 && node.row > tree.revealFrom;
+                        if (recent && below && node.depth > tree.revealDepth)
+                            revealing.restart();
+                    }
+                    Component.onCompleted: reveal()
+                    TableView.onReused: reveal()
+                    transform: Translate {
+                        id: shift
+                    }
+                    ParallelAnimation {
+                        id: revealing
+                        NumberAnimation {
+                            target: node
+                            property: "opacity"
+                            from: 0
+                            to: 1
+                            duration: Theme.moderate
+                        }
+                        NumberAnimation {
+                            target: shift
+                            property: "y"
+                            from: -6
+                            to: 0
+                            duration: Theme.moderate
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+
                     implicitWidth: tree.width
                     implicitHeight: track ? 26 : album ? 40 : artist ? 30 : root ? 34 : 30
 
@@ -247,7 +290,16 @@ Item {
                         width: 12
                         anchors.verticalCenter: parent.verticalCenter
                         visible: node.hasChildren
-                        text: node.expanded ? "▾" : "▸"
+                        text: "▸"
+                        horizontalAlignment: Text.AlignHCenter
+                        rotation: node.expanded ? 90 : 0
+                        Behavior on rotation {
+                            enabled: Tk.panelAnimations
+                            NumberAnimation {
+                                duration: Theme.moderate
+                                easing.type: Easing.OutCubic
+                            }
+                        }
                         color: node.palette.placeholderText
                         TapHandler {
                             onTapped: tree.toggle(node.row, !node.expanded)
@@ -347,6 +399,8 @@ Item {
                     // Append, insert next, replace and play.
                     Row {
                         id: actionRow
+                        // Above the row's own handling: its clicks are its own.
+                        z: 3
                         visible: node.actions
                         anchors.right: parent.right
                         anchors.rightMargin: 4
@@ -357,29 +411,40 @@ Item {
                                 {icon: "go-next|sp:SP_ArrowRight", label: qsTr("Insert next in current list")},
                                 {icon: "media-playback-start|sp:SP_MediaPlay", label: qsTr("Replace list and play")},
                             ]
-                            delegate: AbstractButton {
+                            // Shown and pointed at here; its click is taken
+                            // by the row's one TapHandler below, so the row
+                            // and its buttons never compete for a press.
+                            delegate: Item {
                                 id: action
                                 required property var modelData
                                 required property int index
+                                readonly property bool isAction: true
                                 width: 24
                                 height: 24
-                                hoverEnabled: true
+                                Accessible.role: Accessible.Button
                                 Accessible.name: modelData.label
-                                ToolTip.visible: hovered
+                                HoverHandler {
+                                    id: actionHover
+                                    cursorShape: Qt.PointingHandCursor
+                                }
+                                ToolTip.visible: actionHover.hovered
+                                ToolTip.delay: 600
                                 ToolTip.text: modelData.label
-                                background: Rectangle {
+                                Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: 2
                                     radius: 4
-                                    visible: action.hovered
+                                    opacity: actionHover.hovered ? 1 : 0
                                     color: Shade.alpha(node.palette.highlight, node.selected ? 90 / 255 : 42 / 255)
+                                    Behavior on opacity {
+                                        NumberAnimation { duration: Theme.quick }
+                                    }
                                 }
-                                contentItem: Image {
+                                Image {
+                                    anchors.centerIn: parent
                                     sourceSize: Qt.size(12, 12)
-                                    fillMode: Image.Pad
                                     source: "image://icon/" + action.modelData.icon
                                 }
-                                onClicked: pane.requestAt(node.row, index)
                             }
                         }
                     }
@@ -391,6 +456,18 @@ Item {
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onTapped: (eventPoint, button) => {
+                            // A click on one of the row's buttons is the button's:
+                            // its action, the row neither opened nor closed.
+                            if (actionRow.visible) {
+                                const at = actionRow.mapFromItem(node, eventPoint.position);
+                                const hit = actionRow.childAt(at.x, at.y);
+                                if (hit && hit.isAction) {
+                                    pane.requestAt(node.row, hit.index);
+                                    return;
+                                }
+                                if (actionRow.contains(at))
+                                    return;
+                            }
                             tree.forceActiveFocus();
                             const index = tree.index(node.row, 0);
                             const modifiers = eventPoint.modifiers;
@@ -481,11 +558,15 @@ Item {
             component StatusButton: ToolButton {
                 flat: true
                 display: AbstractButton.IconOnly
-                icon.width: 14
-                icon.height: 14
-                padding: 3
-                implicitWidth: 22
-                implicitHeight: 22
+                icon.width: 16
+                icon.height: 16
+                // All four sides: the style's wider sides would leave the
+                // icon a few pixels wide.
+                padding: 4
+                leftPadding: 4
+                rightPadding: 4
+                implicitWidth: 24
+                implicitHeight: 24
                 Accessible.name: text
                 ToolTip.delay: 600
             }

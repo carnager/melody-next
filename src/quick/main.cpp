@@ -11,6 +11,7 @@
 #include "workspace/startup.hpp"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QMouseEvent>
@@ -138,12 +139,24 @@ int main(int argc, char* argv[]) {
                     return;
                 }
                 const QPointF local{at};
-                QMouseEvent press{QEvent::MouseButtonPress, local, window->mapToGlobal(local),
+                const auto global = window->mapToGlobal(local);
+                const auto stamp = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+                // Pointed at first, as a hand would: what shows on hover shows.
+                QMouseEvent move{QEvent::MouseMove, local, global,
+                                 Qt::NoButton, Qt::NoButton, Qt::NoModifier};
+                move.setTimestamp(stamp);
+                QCoreApplication::sendEvent(window, &move);
+                QMouseEvent press{QEvent::MouseButtonPress, local, global,
                                   Qt::LeftButton, Qt::LeftButton, Qt::NoModifier};
+                press.setTimestamp(stamp + 20);
                 QCoreApplication::sendEvent(window, &press);
-                QMouseEvent release{QEvent::MouseButtonRelease, local, window->mapToGlobal(local),
-                                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier};
-                QCoreApplication::sendEvent(window, &release);
+                // Released a moment later, as a click is.
+                QTimer::singleShot(60, window, [window, local, global, stamp] {
+                    QMouseEvent release{QEvent::MouseButtonRelease, local, global,
+                                        Qt::LeftButton, Qt::NoButton, Qt::NoModifier};
+                    release.setTimestamp(stamp + 80);
+                    QCoreApplication::sendEvent(window, &release);
+                });
             });
         }
         const int grab_at = (grab_live ? 6'000 : 3'000) + static_cast<int>(clicks.size()) * 500;

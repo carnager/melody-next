@@ -40,12 +40,12 @@ T.ToolTip {
         text: control.text
         font: control.font
         wrapMode: Text.Wrap
-        color: control.palette.toolTipText
+        color: control.palette.windowText
     }
 
     background: Rectangle {
         radius: Theme.radius
-        color: control.palette.toolTipBase
+        color: control.palette.base
         border.width: 1
         border.color: Theme.hairline(control.palette)
     }

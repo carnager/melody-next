@@ -4,6 +4,7 @@
 
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_transformation_preview_model.hpp"
+#include "trackknife/metadata/native_rule_script.hpp"
 #include "uicommon/metadata_transformation_interchange.hpp"
 
 #include <QtConcurrent/QtConcurrentRun>
@@ -986,19 +987,9 @@ void ScriptSession::importRuleScript(const QString& source, const bool append) {
     }
     invalidatePreview();
     emit stepsChanged(static_cast<int>(actions_.size()) - 1);
-    if (!append) {
-        const auto raw = encode_utf8(source);
-        raw_read_only_ = false;
-        raw_source_ = source;
-        raw_import_ = metadata::import_metadata_rule_script(raw);
-        raw_valid_ = !raw_import_.has_errors() && !raw_import_.actions.empty();
-        raw_modified_ = true;
-        raw_diagnostics_ =
-            QStringLiteral("Ready · %1 generated typed rules · unsaved").arg(actions_.size());
-        emit rawChanged();
-    } else {
-        refreshRawFromActions();
-    }
+    // The Raw tab shows what the paste became, in Trackknife's own terms: the
+    // Picard source was only ever an import (ADR-0241).
+    refreshRawFromActions();
     catalog_status_ = QStringLiteral("Unsaved · generated %1 typed rules from the pasted script. "
                                      "Review, preview, then click Save to keep them.")
                           .arg(actions_.size());
@@ -1013,12 +1004,13 @@ void ScriptSession::refreshRawFromActions() {
     if (actions_.empty()) {
         raw_read_only_ = false;
         raw_source_.clear();
-        raw_diagnostics_ = QStringLiteral("Enter cleanup source to generate typed rules.");
+        raw_diagnostics_ = QStringLiteral(
+            "Write steps such as $set(FIELD,tkfmt-1 value) or $delete(FIELD), one per line.");
         emit rawChanged();
         emit changed();
         return;
     }
-    const auto exported = metadata::export_metadata_rule_script(actions_);
+    const auto exported = metadata::export_native_rule_script(actions_);
     if (!exported) {
         raw_source_.clear();
         raw_read_only_ = true;
@@ -1037,10 +1029,10 @@ void ScriptSession::refreshRawFromActions() {
     }
     raw_read_only_ = false;
     raw_source_ = display_utf8(*exported);
-    raw_import_ = metadata::import_metadata_rule_script(*exported);
+    raw_import_ = metadata::import_native_rule_script(*exported);
     raw_valid_ = !raw_import_.has_errors();
-    raw_diagnostics_ = QStringLiteral("Ready · %1 typed rules · canonical source is regenerated "
-                                      "after structured edits")
+    raw_diagnostics_ = QStringLiteral("Ready · %1 steps · rewritten in canonical form after "
+                                      "each edit on the Steps tab")
                            .arg(actions_.size());
     emit rawChanged();
     emit changed();
@@ -1052,7 +1044,7 @@ void ScriptSession::setRawSource(const QString& source) {
     }
     raw_source_ = source;
     raw_modified_ = true;
-    raw_import_ = metadata::import_metadata_rule_script(encode_utf8(source));
+    raw_import_ = metadata::import_native_rule_script(encode_utf8(source));
     QStringList diagnostics;
     for (const auto& diagnostic : raw_import_.diagnostics) {
         const auto severity =
@@ -1070,7 +1062,7 @@ void ScriptSession::setRawSource(const QString& source) {
     if (raw_valid_) {
         actions_ = raw_import_.actions;
         diagnostics.prepend(
-            QStringLiteral("Ready · %1 generated typed rules").arg(actions_.size()));
+            QStringLiteral("Ready · %1 steps").arg(actions_.size()));
         emit stepsChanged(static_cast<int>(actions_.size()) - 1);
     }
     raw_diagnostics_ = diagnostics.join(QChar{'\n'});

@@ -114,6 +114,13 @@ target_link_libraries(
 )
 add_test(NAME metadata-transformation COMMAND trackknife_metadata_transformation_tests)
 
+add_executable(trackknife_native_rule_script_tests native_rule_script_test.cpp)
+target_link_libraries(
+    trackknife_native_rule_script_tests
+    PRIVATE Trackknife::Metadata trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME native-rule-script COMMAND trackknife_native_rule_script_tests)
+
 add_executable(trackknife_metadata_write_plan_tests metadata_write_plan_test.cpp)
 target_link_libraries(
     trackknife_metadata_write_plan_tests

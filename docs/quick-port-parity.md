@@ -2073,7 +2073,7 @@ A `QTabWidget` `bench-output-profile-sections` with two tabs, plus a shared stat
 
 **Raw script tab**
 - `QPlainTextEdit`. Placeholder `$if($eq(%totaldiscs%,1),$delete(discnumber)$delete(totaldiscs))`. Tooltip: "Valid source compiles into the steps on the Steps tab; arbitrary script is never executed".
-- Read-only diagnostics box (max 110 px): "Error|Warning · line L, column C · msg", "Ready · N typed rules …", "Raw mode is unavailable: …", "Enter cleanup source to generate typed rules."
+- Read-only diagnostics box (max 110 px): "Error|Warning · line L, column C · msg", "Ready · N steps …", "Raw mode is unavailable: …", "Write steps such as $set(FIELD,tkfmt-1 value) or $delete(FIELD), one per line." The text is the native script of ADR-0241.
 
 **Right pane**
 - Bold "Preview" heading. Tooltip: "Updates automatically as you edit; nothing enters the draft until you add the previewed changes".

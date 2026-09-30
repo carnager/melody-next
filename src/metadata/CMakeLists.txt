@@ -23,6 +23,7 @@ add_library(
     src/ratings.cpp
     src/loudness_sidecar.cpp
     src/proposal.cpp
+    src/native_rule_script.cpp
     src/rule_script_import.cpp
     src/staged_patch.cpp
     src/staged_selection.cpp

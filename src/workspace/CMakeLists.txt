@@ -44,6 +44,8 @@ qt_add_library(
     replaygain_job.hpp
     script_session.cpp
     script_session.hpp
+    settings_session.cpp
+    settings_session.hpp
     sources.cpp
     sources.hpp
     startup.cpp

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "bench/settings_keys.hpp"
+#include "workspace/settings_session.hpp"
 
 #include "bench/remote_engines.hpp"
 
@@ -11,7 +12,9 @@
 
 #include <QDialog>
 
+#include <functional>
 #include <memory>
+#include <vector>
 
 class QAction;
 class QCheckBox;
@@ -22,6 +25,7 @@ class QListWidget;
 class QStackedWidget;
 class QSpinBox;
 class QDoubleSpinBox;
+class QMenu;
 
 namespace trackknife::discovery {
 class Browser;
@@ -79,8 +83,21 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
 
 
   private:
-    void save();
+    void sync();
+    void refreshEngines();
+    void refreshFound();
+    // A field shown from, and written to, the draft.
+    void bind(QCheckBox* box, const char* key);
+    void bind(QLineEdit* field, const char* key);
+    void bind(QSpinBox* box, const char* key);
+    void bind(QDoubleSpinBox* box, const char* key);
+    void bind(QComboBox* box, const std::vector<SettingsSession::Choice>& choices,
+              const char* key);
     ShortcutSettings* shortcuts_{};
+    SettingsSession* session_{nullptr};
+    std::vector<std::function<void()>> syncs_;
+    bool syncing_{false};
+    QMenu* found_menu_{nullptr};
 
     QListWidget* pages_{nullptr};
     QStackedWidget* stack_{nullptr};
@@ -98,21 +115,11 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QLineEdit* remote_folder_{nullptr};
     QLineEdit* remote_mount_{nullptr};
     QComboBox* remote_stream_{nullptr};
-    // ADR-0234: the engines elsewhere, as edited; the form shows one.
-    std::vector<RemoteEngineSetting> engines_list_;
-    int engine_current_{-1};
-    bool loading_engine_{false};
     QListWidget* engines_view_{nullptr};
-    [[nodiscard]] static QString engineLabel(const RemoteEngineSetting& engine);
-    void refreshEngines(int current);
-    void showEngine(int row);
-    void chooseFoundEngine(const QString& address);
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
     QComboBox* stream_nearby_{nullptr};
     QComboBox* stream_away_{nullptr};
-    // Looks for engines while the dialog is open.
-    std::unique_ptr<discovery::Browser> engine_browser_;
     QCheckBox* show_local_library_{nullptr};
     QLineEdit* engine_listen_{nullptr};
     QSpinBox* engine_stream_port_{nullptr};

@@ -42,30 +42,6 @@
 namespace trackknife::bench {
 namespace {
 
-// ADR-0239: what is streamed to this computer's speakers, as kbps of Opus;
-// 0 the original files, -1 (where offered) by the route.
-[[nodiscard]] QString rateLabel(const int kbps) {
-    if (kbps < 0) {
-        return QStringLiteral("Automatic");
-    }
-    return kbps == 0 ? QStringLiteral("Original files") : QStringLiteral("Opus %1 kbps").arg(kbps);
-}
-
-void selectRate(QComboBox* box, const int kbps) {
-    auto index = box->findData(kbps);
-    // Set by hand to a rate not offered: kept, and shown as it is.
-    if (index < 0) {
-        box->addItem(rateLabel(kbps), kbps);
-        index = box->count() - 1;
-    }
-    box->setCurrentIndex(index);
-}
-
-void fillRates(QComboBox* box, const std::initializer_list<int> rates) {
-    for (const auto kbps : rates) {
-        box->addItem(rateLabel(kbps), kbps);
-    }
-}
 class SettingsPageDelegate final : public QStyledItemDelegate {
   public:
     using QStyledItemDelegate::QStyledItemDelegate;
@@ -115,7 +91,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     setAttribute(Qt::WA_DeleteOnClose);
     resize(940, 640);
 
-    const QSettings settings;
+    session_ = new SettingsSession(this);
     auto* root = new QVBoxLayout(this);
     auto* body = new QHBoxLayout;
     pages_ = new QListWidget(this);
@@ -177,15 +153,13 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     notifications_->setObjectName(QStringLiteral("bench-settings-notifications"));
     notifications_->setToolTip(
         QStringLiteral("Show a notification when playback changes to another track."));
-    notifications_->setChecked(
-        settings.value(QStringLiteral("desktop/notifications"), false).toBool());
+    bind(notifications_, "desktop/notifications");
     general_form->addRow(QStringLiteral("Desktop:"), notifications_);
     notifications_background_ =
         new QCheckBox(QStringLiteral("Only while the app is in the background"), general);
     notifications_background_->setObjectName(
         QStringLiteral("bench-settings-notifications-background"));
-    notifications_background_->setChecked(
-        settings.value(QStringLiteral("desktop/notifications-background-only"), false).toBool());
+    bind(notifications_background_, "desktop/notifications-background-only");
     general_form->addRow(QString{}, notifications_background_);
     auto* test_notification = new QPushButton(QStringLiteral("Test notification"), general);
     test_notification->setObjectName(QStringLiteral("bench-settings-notification-test"));
@@ -209,17 +183,12 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
 
     panel_animations_ = new QCheckBox(QStringLiteral("Animate panel opening and closing"), general);
     panel_animations_->setObjectName(QStringLiteral("bench-settings-panel-animations"));
-    panel_animations_->setChecked(
-        settings.value(QStringLiteral("appearance/panel-animations"), true).toBool());
+    bind(panel_animations_, "appearance/panel-animations");
     general_form->addRow(QStringLiteral("Appearance:"), panel_animations_);
     // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
     lists_display_ = new QComboBox(general);
     lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));
-    lists_display_->addItem(QStringLiteral("Tab bar"), QStringLiteral("tabs"));
-    lists_display_->addItem(QStringLiteral("Side panel"), QStringLiteral("panel"));
-    lists_display_->setCurrentIndex(
-        std::max(0, lists_display_->findData(settings.value(
-                        QStringLiteral("appearance/lists-display"), QStringLiteral("tabs")))));
+    bind(lists_display_, SettingsSession::listsDisplays(), "appearance/lists-display");
     general_form->addRow(QStringLiteral("Show lists as:"), lists_display_);
     add_page(QStringLiteral("General"), general);
 
@@ -238,10 +207,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     buffer_form->setVerticalSpacing(12);
     buffer_profile_ = new QComboBox(playback);
     buffer_profile_->setObjectName(QStringLiteral("bench-settings-buffer-profile"));
-    buffer_profile_->addItem(QStringLiteral("Responsive"), QStringLiteral("responsive"));
-    buffer_profile_->addItem(QStringLiteral("Balanced"), QStringLiteral("balanced"));
-    buffer_profile_->addItem(QStringLiteral("Resilient"), QStringLiteral("resilient"));
-    buffer_profile_->addItem(QStringLiteral("Custom"), QStringLiteral("custom"));
     buffer_form->addRow(QStringLiteral("Playback buffer:"), buffer_profile_);
     buffer_capacity_ = new QSpinBox(playback);
     buffer_capacity_->setObjectName(QStringLiteral("bench-settings-buffer-capacity"));
@@ -254,33 +219,15 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     buffer_form->addRow(QStringLiteral("Capacity:"), buffer_capacity_);
     buffer_form->addRow(QStringLiteral("Start playback at:"), buffer_threshold_);
     playback_layout->addLayout(buffer_form);
-    const auto update_buffer = [this] {
-        const auto id = buffer_profile_->currentData().toString().toStdString();
-        const auto preset = audio::playback_buffer_preset_from_id(id);
-        if (preset) {
-            const auto config = audio::playback_buffer_preset_config(*preset);
-            buffer_capacity_->setValue(static_cast<int>(config.capacity.count()));
-            buffer_threshold_->setValue(static_cast<int>(config.start_threshold.count()));
-        }
-        buffer_capacity_->setEnabled(!preset);
-        buffer_threshold_->setEnabled(!preset);
-    };
-    connect(buffer_capacity_, &QSpinBox::valueChanged, buffer_threshold_, &QSpinBox::setMaximum);
-    auto profile =
-        settings.value(QStringLiteral("playback/buffer-profile"), QStringLiteral("balanced"))
-            .toString();
-    const int capacity = settings.value(QStringLiteral("playback/buffer-capacity-ms"), 750).toInt();
-    const int threshold =
-        settings.value(QStringLiteral("playback/buffer-start-threshold-ms"), 100).toInt();
-    if (profile == QStringLiteral("custom") &&
-        (capacity < 10 || capacity > 10000 || threshold < 1 || threshold > capacity))
-        profile = QStringLiteral("balanced");
-    buffer_capacity_->setValue(capacity);
-    buffer_threshold_->setValue(threshold);
-    const int profile_index = buffer_profile_->findData(profile);
-    buffer_profile_->setCurrentIndex(profile_index >= 0 ? profile_index : 1);
-    update_buffer();
-    connect(buffer_profile_, &QComboBox::currentIndexChanged, this, update_buffer);
+    bind(buffer_capacity_, "playback/buffer-capacity-ms");
+    bind(buffer_threshold_, "playback/buffer-start-threshold-ms");
+    bind(buffer_profile_, SettingsSession::bufferProfiles(), "playback/buffer-profile");
+    syncs_.push_back([this] {
+        const auto custom = session_->bufferCustom();
+        buffer_capacity_->setEnabled(custom);
+        buffer_threshold_->setEnabled(custom);
+        buffer_threshold_->setMaximum(buffer_capacity_->value());
+    });
     auto* buffer_note = new QLabel(
         QStringLiteral("Responsive starts sooner; Resilient tolerates longer interruptions. "
                        "Buffer changes take effect on the next track."),
@@ -290,21 +237,21 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     playback_layout->addWidget(buffer_note);
     auto* preamp_form = new QFormLayout;
     preamp_form->setVerticalSpacing(12);
-    const auto make_preamp = [&](const QString& name, const QString& key) {
+    const auto make_preamp = [&](const QString& name, const char* key) {
         auto* spin = new QDoubleSpinBox(playback);
         spin->setObjectName(name);
-        const auto limit = static_cast<double>(audio::maximum_replay_gain_preamp_db);
+        const auto limit = SettingsSession::maximumPreamp();
         spin->setRange(-limit, limit);
         spin->setSingleStep(0.5);
         spin->setDecimals(1);
         spin->setSuffix(QStringLiteral(" dB"));
-        spin->setValue(settings.value(key, 0.0).toDouble());
+        bind(spin, key);
         return spin;
     };
-    preamp_with_ = make_preamp(QStringLiteral("bench-settings-preamp-with"),
-                               QStringLiteral("playback/rg-preamp-with"));
-    preamp_without_ = make_preamp(QStringLiteral("bench-settings-preamp-without"),
-                                  QStringLiteral("playback/rg-preamp-without"));
+    preamp_with_ =
+        make_preamp(QStringLiteral("bench-settings-preamp-with"), "playback/rg-preamp-with");
+    preamp_without_ =
+        make_preamp(QStringLiteral("bench-settings-preamp-without"), "playback/rg-preamp-without");
     preamp_form->addRow(QStringLiteral("Preamp with ReplayGain data:"), preamp_with_);
     preamp_form->addRow(QStringLiteral("Preamp without ReplayGain data:"), preamp_without_);
     playback_layout->addLayout(preamp_form);
@@ -337,24 +284,16 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         QStringLiteral("Ratings stay in each engine's library either way. With this on, each "
                        "engine also writes a track's rating into its files as FMPS_RATING, "
                        "which other players read. Album ratings are not written."));
-    ratings_in_tags_->setChecked(
-        settings.value(QLatin1String(ratings_in_tags_key), false).toBool());
+    bind(ratings_in_tags_, ratings_in_tags_key);
     library_layout->addWidget(ratings_in_tags_);
     auto* scale_form = new QFormLayout;
     rating_tag_scale_ = new QComboBox(library);
     rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));
-    rating_tag_scale_->addItem(QStringLiteral("Don't import"), QStringLiteral("off"));
-    rating_tag_scale_->addItem(QStringLiteral("1–5 (foobar2000)"), QStringLiteral("5"));
-    rating_tag_scale_->addItem(QStringLiteral("0–10"), QStringLiteral("10"));
-    rating_tag_scale_->addItem(QStringLiteral("0–100 (MusicBee, MediaMonkey)"),
-                               QStringLiteral("100"));
     rating_tag_scale_->setToolTip(
         QStringLiteral("Ratings other players left in your files are taken into the library. "
                        "FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed "
                        "scale, so it is read only on the one chosen here."));
-    rating_tag_scale_->setCurrentIndex(
-        std::max(0, rating_tag_scale_->findData(settings.value(QLatin1String(rating_tag_scale_key),
-                                                               QStringLiteral("off")))));
+    bind(rating_tag_scale_, SettingsSession::ratingScales(), rating_tag_scale_key);
     scale_form->addRow(QStringLiteral("RATING tags from other players:"), rating_tag_scale_);
     library_layout->addLayout(scale_form);
     add_page(QStringLiteral("Library"), library);
@@ -382,8 +321,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         "Needed to share this computer's engine, and given to the remote engine unless it has a "
         "password of its own below. It travels unencrypted: across an untrusted network, use "
         "WireGuard or a TLS proxy."));
-    engine_password_->setText(
-        settings.value(QLatin1String(engine_password_key), QString{}).toString());
+    bind(engine_password_, engine_password_key);
     password_form->addRow(QStringLiteral("Password:"), engine_password_);
     engine_layout->addLayout(password_form);
 
@@ -396,28 +334,24 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     show_local_library_->setToolTip(QStringLiteral(
         "Hide it when all your music is in the remote engine's library. Files on this computer "
         "still open and play here."));
-    show_local_library_->setChecked(
-        settings.value(QLatin1String(library_show_local_key), true).toBool());
+    bind(show_local_library_, library_show_local_key);
     sharing_form->addRow(show_local_library_);
     engine_share_ = new QCheckBox(QStringLiteral("Share on the network"), sharing);
     engine_share_->setObjectName(QStringLiteral("bench-settings-engine-share"));
     engine_share_->setToolTip(QStringLiteral(
         "Lets output agents play this computer's music, and other Trackknife windows control it"));
-    engine_share_->setChecked(settings.value(QLatin1String(engine_share_key), false).toBool());
+    bind(engine_share_, engine_share_key);
     sharing_form->addRow(engine_share_);
     engine_listen_ = new QLineEdit(sharing);
     engine_listen_->setObjectName(QStringLiteral("bench-settings-engine-listen"));
-    engine_listen_->setText(
-        settings.value(QLatin1String(engine_listen_key), QString::fromLatin1(engine_listen_default))
-            .toString());
+    bind(engine_listen_, engine_listen_key);
     engine_listen_->setToolTip(
         QStringLiteral("host:port; 0.0.0.0 listens on every network this computer is on"));
     sharing_form->addRow(QStringLiteral("Address:"), engine_listen_);
     engine_stream_port_ = new QSpinBox(sharing);
     engine_stream_port_->setObjectName(QStringLiteral("bench-settings-engine-stream-port"));
     engine_stream_port_->setRange(1, 65535);
-    engine_stream_port_->setValue(
-        settings.value(QLatin1String(engine_stream_port_key), engine_stream_port_default).toInt());
+    bind(engine_stream_port_, engine_stream_port_key);
     engine_stream_port_->setToolTip(
         QStringLiteral("Where agents without a copy of the music fetch it, on the same address"));
     sharing_form->addRow(QStringLiteral("Stream port:"), engine_stream_port_);
@@ -427,8 +361,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_music_root_->setToolTip(QStringLiteral(
         "Agents started with their own --music-root are sent paths relative to this folder; "
         "agents without one stream"));
-    engine_music_root_->setText(
-        settings.value(QLatin1String(engine_music_root_key), QString{}).toString());
+    bind(engine_music_root_, engine_music_root_key);
     auto* music_root_row = new QHBoxLayout;
     music_root_row->addWidget(engine_music_root_, 1);
     auto* music_root_browse = new QPushButton(QStringLiteral("Browse…"), sharing);
@@ -448,42 +381,12 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_agent_command_->setWordWrap(true);
     engine_agent_command_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     sharing_form->addRow(engine_agent_command_);
-    const auto refresh_sharing = [this] {
+    syncs_.push_back([this] {
         const bool on = engine_share_->isChecked();
-        for (QWidget* field :
-             std::initializer_list<QWidget*>{engine_listen_, engine_stream_port_}) {
-            field->setEnabled(on);
-        }
-        if (!on) {
-            engine_agent_command_->setText(QStringLiteral(
-                "Not shared: only this computer plays, and Trackknife here controls it."));
-            return;
-        }
-        const auto listen = engine_listen_->text().trimmed();
-        const auto colon = listen.lastIndexOf(QLatin1Char(':'));
-        auto host = colon > 0 ? listen.left(colon) : listen;
-        if (host.isEmpty() || host == QStringLiteral("0.0.0.0") || host == QStringLiteral("::")) {
-            host = QSysInfo::machineHostName();
-        }
-        const auto port = colon > 0 ? listen.mid(colon + 1) : QString{};
-        if (engine_password_->text().isEmpty()) {
-            engine_agent_command_->setText(
-                QStringLiteral("Set the password above to share: every connection from the "
-                               "network must give it."));
-            return;
-        }
-        const auto command =
-            QStringLiteral("melody-agent --server %1:%2 --password …").arg(host, port);
-        engine_agent_command_->setText(
-            QStringLiteral("On a machine with speakers, run:\n%1\nAdd --music-root DIR where "
-                           "it has the music itself; without it, it streams. Changing these "
-                           "restarts this computer's engine; playback comes back paused.")
-                .arg(command));
-    };
-    connect(engine_share_, &QCheckBox::toggled, this, refresh_sharing);
-    connect(engine_listen_, &QLineEdit::textChanged, this, refresh_sharing);
-    connect(engine_password_, &QLineEdit::textChanged, this, refresh_sharing);
-    refresh_sharing();
+        engine_listen_->setEnabled(on);
+        engine_stream_port_->setEnabled(on);
+        engine_agent_command_->setText(session_->agentCommand());
+    });
     engine_layout->addWidget(sharing);
 
     auto* remote = new QGroupBox(QStringLiteral("Engines elsewhere"), engine);
@@ -491,10 +394,6 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     // ADR-0234: engines on other machines, each connected at once beside
     // this computer's, their libraries in tabs of their own. The list; below
     // it, the one chosen.
-    engines_list_ = loadRemoteEngines();
-    if (engines_list_.empty()) {
-        engines_list_.push_back({});
-    }
     engines_view_ = new QListWidget(remote);
     engines_view_->setObjectName(QStringLiteral("bench-settings-engines"));
     engines_view_->setAccessibleName(QStringLiteral("Engines elsewhere"));
@@ -518,38 +417,15 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     found_engines->setText(QStringLiteral("On the network"));
     found_engines->setToolTip(QStringLiteral("Engines that announce themselves on this network"));
     found_engines->setPopupMode(QToolButton::InstantPopup);
-    auto* found_menu = new QMenu(found_engines);
-    found_menu->setObjectName(QStringLiteral("bench-settings-found-engines-menu"));
-    found_engines->setMenu(found_menu);
-    const auto fill_found = [this, found_menu](const std::vector<discovery::Found>& engines) {
-        found_menu->clear();
-        if (engines.empty()) {
-            found_menu->addAction(QStringLiteral("None found yet"))->setEnabled(false);
-            return;
-        }
-        for (const auto& announced : engines) {
-            const auto where = QStringLiteral("%1:%2")
-                                   .arg(QString::fromStdString(announced.address))
-                                   .arg(announced.port);
-            const bool locked = announced.txt.contains("auth") && announced.txt.at("auth") == "1";
-            auto* choice =
-                found_menu->addAction(QStringLiteral("%1 — %2%3")
-                                          .arg(QString::fromStdString(announced.instance), where,
-                                               locked ? QStringLiteral(" · password") : QString{}));
-            connect(choice, &QAction::triggered, this, [this, where] { chooseFoundEngine(where); });
-        }
-    };
-    fill_found({});
-    if (auto browser = discovery::Browser::start(
-            [this, fill_found](const std::vector<discovery::Found>& engines) {
-                QMetaObject::invokeMethod(
-                    this, [fill_found, engines] { fill_found(engines); }, Qt::QueuedConnection);
-            })) {
-        engine_browser_ = std::move(*browser);
-    } else {
+    found_menu_ = new QMenu(found_engines);
+    found_menu_->setObjectName(QStringLiteral("bench-settings-found-engines-menu"));
+    found_engines->setMenu(found_menu_);
+    if (!session_->discoveryError().isEmpty()) {
         found_engines->setEnabled(false);
-        found_engines->setToolTip(QString::fromStdString(browser.error().message));
+        found_engines->setToolTip(session_->discoveryError());
     }
+    connect(session_, &SettingsSession::foundChanged, this, &SettingsDialog::refreshFound);
+    refreshFound();
     engine_buttons->addStretch(1);
     engine_buttons->addWidget(found_engines);
     remote_layout->addLayout(engine_buttons);
@@ -579,7 +455,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_form->addRow(QStringLiteral("Also reachable here at:"), remote_mount_);
     remote_stream_ = new QComboBox(remote);
     remote_stream_->setObjectName(QStringLiteral("bench-settings-remote-stream"));
-    fillRates(remote_stream_, {-1, 0, 192, 160, 128, 96, 64});
+
     remote_stream_->setToolTip(QStringLiteral(
         "What it streams to this computer's speakers when its music is not reachable here. "
         "Automatic: the rates below, by whether it is on this network or reached through a "
@@ -587,47 +463,33 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     engine_form->addRow(QStringLiteral("Streamed here:"), remote_stream_);
     // The form edits the engine chosen in the list.
     const auto edited = [this] {
-        if (loading_engine_ || engine_current_ < 0 ||
-            engine_current_ >= static_cast<int>(engines_list_.size())) {
+        if (syncing_) {
             return;
         }
-        auto& chosen = engines_list_[static_cast<std::size_t>(engine_current_)];
-        const auto address = engine_socket_->text().trimmed();
-        // Another address may be another engine: its id is learned anew.
-        if (address != chosen.address) {
-            chosen.id.clear();
-        }
-        chosen.address = address;
-        chosen.password = engine_token_->text().trimmed();
-        chosen.music_folder = remote_folder_->text().trimmed();
-        chosen.reachable_at = remote_mount_->text().trimmed();
+        auto chosen = session_->engine();
+        chosen.address = engine_socket_->text();
+        chosen.password = engine_token_->text();
+        chosen.music_folder = remote_folder_->text();
+        chosen.reachable_at = remote_mount_->text();
         chosen.stream_kbps = remote_stream_->currentData().toInt();
-        if (auto* item = engines_view_->item(engine_current_)) {
-            item->setText(engineLabel(chosen));
+        session_->editEngine(chosen);
+        if (auto* item = engines_view_->item(session_->currentEngine())) {
+            item->setText(session_->engineLabels().value(session_->currentEngine()));
         }
     };
     for (auto* field : {engine_socket_, engine_token_, remote_folder_, remote_mount_}) {
         connect(field, &QLineEdit::textChanged, this, edited);
     }
     connect(remote_stream_, &QComboBox::currentIndexChanged, this, edited);
-    connect(engines_view_, &QListWidget::currentRowChanged, this,
-            [this](const int row) { showEngine(row); });
+    connect(engines_view_, &QListWidget::currentRowChanged, session_,
+            &SettingsSession::selectEngine);
     connect(add_engine, &QPushButton::clicked, this, [this] {
-        engines_list_.push_back({});
-        refreshEngines(static_cast<int>(engines_list_.size()) - 1);
+        session_->addEngine();
         engine_socket_->setFocus();
     });
-    connect(remove_engine, &QPushButton::clicked, this, [this] {
-        if (engine_current_ < 0 || engine_current_ >= static_cast<int>(engines_list_.size())) {
-            return;
-        }
-        engines_list_.erase(engines_list_.begin() + engine_current_);
-        if (engines_list_.empty()) {
-            engines_list_.push_back({});
-        }
-        refreshEngines(std::min(engine_current_, static_cast<int>(engines_list_.size()) - 1));
-    });
-    refreshEngines(0);
+    connect(remove_engine, &QPushButton::clicked, session_, &SettingsSession::removeEngine);
+    connect(session_, &SettingsSession::enginesChanged, this, &SettingsDialog::refreshEngines);
+    refreshEngines();
     play_for_remote_ =
         new QCheckBox(QStringLiteral("Let other engines play on this computer's speakers"), remote);
     play_for_remote_->setObjectName(QStringLiteral("bench-settings-play-for-remote"));
@@ -635,35 +497,27 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         "This computer's engine appears among the outputs of the remote engine and of any "
         "engine found on the network, so no melody-agent is needed here. Whichever starts "
         "playing last has the speakers."));
-    play_for_remote_->setChecked(
-        settings.value(QLatin1String(engine_play_for_remote_key), true).toBool());
+    bind(play_for_remote_, engine_play_for_remote_key);
     engine_form->addRow(QString{}, play_for_remote_);
     // ADR-0239: streamed, when the music is not reachable here, by route.
     stream_nearby_ = new QComboBox(remote);
     stream_nearby_->setObjectName(QStringLiteral("bench-settings-stream-nearby"));
-    fillRates(stream_nearby_, {0, 192, 160, 128});
-    selectRate(stream_nearby_, settings.value(QLatin1String(engine_stream_nearby_key),
-                                              engine_stream_nearby_default)
-                                   .toInt());
+    bind(stream_nearby_, session_->nearbyRates(), engine_stream_nearby_key);
     stream_nearby_->setToolTip(
         QStringLiteral("From an engine on this computer's own network"));
     engine_form->addRow(QStringLiteral("Streamed on this network:"), stream_nearby_);
     stream_away_ = new QComboBox(remote);
     stream_away_->setObjectName(QStringLiteral("bench-settings-stream-away"));
-    fillRates(stream_away_, {192, 160, 128, 96, 64, 0});
-    selectRate(stream_away_,
-               settings.value(QLatin1String(engine_stream_away_key), engine_stream_away_default)
-                   .toInt());
+    bind(stream_away_, session_->awayRates(), engine_stream_away_key);
     stream_away_->setToolTip(QStringLiteral(
         "From an engine reached through WireGuard or another VPN, or through a router"));
     engine_form->addRow(QStringLiteral("Through a VPN or router:"), stream_away_);
-    const auto sharing_speakers = [this](const bool on) {
+    syncs_.push_back([this] {
+        const auto on = play_for_remote_->isChecked();
         stream_nearby_->setEnabled(on);
         stream_away_->setEnabled(on);
         remote_stream_->setEnabled(on);
-    };
-    connect(play_for_remote_, &QCheckBox::toggled, this, sharing_speakers);
-    sharing_speakers(play_for_remote_->isChecked());
+    });
     remote_layout->addLayout(engine_form);
     auto* engine_note = new QLabel(
         QStringLiteral("A melodyd on a NAS or server (started with --listen), beside this "
@@ -708,16 +562,14 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     replaygain_sidecar_only_->setToolTip(
         QStringLiteral("Keep ReplayGain values out of file tags; scans write the loudness "
                        "sidecar instead"));
-    replaygain_sidecar_only_->setChecked(
-        settings.value(QLatin1String(replaygain_sidecar_only_key), false).toBool());
+    bind(replaygain_sidecar_only_, replaygain_sidecar_only_key);
     replaygain_layout->addWidget(replaygain_sidecar_only_);
     replaygain_true_peak_ =
         new QCheckBox(QStringLiteral("True peak as ReplayGain peak"), replaygain);
     replaygain_true_peak_->setObjectName(QStringLiteral("bench-replaygain-true-peak"));
     replaygain_true_peak_->setToolTip(
         QStringLiteral("Scan oversampled true peak instead of the plain sample peak"));
-    replaygain_true_peak_->setChecked(
-        settings.value(QLatin1String(replaygain_true_peak_key), false).toBool());
+    bind(replaygain_true_peak_, replaygain_true_peak_key);
     replaygain_layout->addWidget(replaygain_true_peak_);
     replaygain_layout->addStretch(1);
     add_page(QStringLiteral("ReplayGain"), replaygain);
@@ -727,28 +579,23 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     auto* covers_layout = new QVBoxLayout(covers);
     artwork_embed_ = new QCheckBox(QStringLiteral("Embed covers into the files"), covers);
     artwork_embed_->setObjectName(QStringLiteral("bench-artwork-embed"));
-    artwork_embed_->setChecked(settings.value(QLatin1String(artwork_embed_key), true).toBool());
+    bind(artwork_embed_, artwork_embed_key);
     covers_layout->addWidget(artwork_embed_);
     artwork_folder_image_ =
         new QCheckBox(QStringLiteral("Write a front-cover image next to the tracks"), covers);
     artwork_folder_image_->setObjectName(QStringLiteral("bench-artwork-folder-image"));
-    artwork_folder_image_->setChecked(
-        settings.value(QLatin1String(artwork_folder_image_key), false).toBool());
+    bind(artwork_folder_image_, artwork_folder_image_key);
     covers_layout->addWidget(artwork_folder_image_);
     auto* covers_form = new QFormLayout;
     artwork_folder_image_name_ = new QComboBox(covers);
     artwork_folder_image_name_->setObjectName(QStringLiteral("bench-artwork-folder-image-name"));
     artwork_folder_image_name_->setEditable(true);
-    artwork_folder_image_name_->addItems(
-        {QStringLiteral("cover.jpg"), QStringLiteral("folder.jpg")});
-    artwork_folder_image_name_->setCurrentText(
-        settings.value(QLatin1String(artwork_folder_image_name_key), QStringLiteral("cover.jpg"))
-            .toString());
+    artwork_folder_image_name_->addItems(SettingsSession::folderImageNames());
+    bind(artwork_folder_image_name_->lineEdit(), artwork_folder_image_name_key);
     covers_form->addRow(QStringLiteral("Folder image name:"), artwork_folder_image_name_);
     artwork_fetch_source_ = new QComboBox(covers);
     artwork_fetch_source_->setObjectName(QStringLiteral("bench-artwork-fetch-source"));
-    artwork_fetch_source_->addItem(QStringLiteral("Cover Art Archive (front)"),
-                                   QStringLiteral("coverartarchive"));
+    bind(artwork_fetch_source_, SettingsSession::fetchSources(), artwork_fetch_source_key);
     covers_form->addRow(QStringLiteral("Fetch covers from:"), artwork_fetch_source_);
     const auto edge_box = [&](const char* key, const QString& name) {
         auto* box = new QSpinBox(covers);
@@ -757,7 +604,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
         box->setSingleStep(100);
         box->setSuffix(QStringLiteral(" px"));
         box->setSpecialValueText(QStringLiteral("No limit"));
-        box->setValue(settings.value(QLatin1String(key), 0).toInt());
+        bind(box, key);
         return box;
     };
     artwork_max_embedded_edge_ =
@@ -797,7 +644,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     acoustid_key_->setEchoMode(QLineEdit::Password);
     acoustid_key_->setPlaceholderText(
         QStringLiteral("Client/application key for fingerprint lookup"));
-    acoustid_key_->setText(settings.value(QLatin1String(acoustid_client_key)).toString());
+    bind(acoustid_key_, acoustid_client_key);
     auto* key_row = new QHBoxLayout;
     key_row->addWidget(acoustid_key_, 1);
     auto* reveal = new QCheckBox(QStringLiteral("Show"), metadata_services);
@@ -831,7 +678,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     lastfm_key_ = new QLineEdit(metadata_services);
     lastfm_key_->setObjectName(QStringLiteral("bench-settings-lastfm-key"));
     lastfm_key_->setEchoMode(QLineEdit::Password);
-    lastfm_key_->setText(settings.value(QStringLiteral("lastfm/api-key")).toString());
+    bind(lastfm_key_, "lastfm/api-key");
     lastfm_form->addRow(QStringLiteral("Last.fm API key:"), lastfm_key_);
     metadata_layout->addLayout(lastfm_form);
     auto* lastfm_note = new QLabel(
@@ -866,15 +713,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     save_note->setForegroundRole(QPalette::PlaceholderText);
     root->addWidget(save_note);
     connect(pages_, &QListWidget::currentRowChanged, save_note, [save_note](int row) {
-        const auto page = static_cast<Page>(row);
-        if (page == Page::library)
-            save_note->setText(
-                QStringLiteral("Folder changes save immediately. Cancel does not undo them."));
-        else if (page == Page::naming)
-            save_note->setText(QStringLiteral("Save layout, Save destination, and Remove take "
-                                              "effect immediately. Cancel does not undo them."));
-        else
-            save_note->clear();
+        save_note->setText(SettingsSession::saveNote(static_cast<SettingsSession::Page>(row)));
         // Said only where a page does not wait for Save.
         save_note->setVisible(!save_note->text().isEmpty());
     });
@@ -889,16 +728,85 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
             return;
         }
         // ADR-0223: sharing without a password is not a thing to save.
-        if (engine_share_->isChecked() && engine_password_->text().isEmpty()) {
-            showPage(Page::engine);
+        if (const auto refused = session_->save()) {
+            showPage(static_cast<Page>(*refused));
             engine_password_->setFocus();
             return;
         }
-        save();
         accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(buttons);
+    connect(session_, &SettingsSession::changed, this, &SettingsDialog::sync);
+    sync();
+}
+
+void SettingsDialog::bind(QCheckBox* box, const char* key) {
+    const auto name = QLatin1String(key);
+    connect(box, &QCheckBox::toggled, this, [this, name](const bool on) {
+        if (!syncing_) {
+            session_->setValue(name, on);
+        }
+    });
+    syncs_.push_back([this, box, name] { box->setChecked(session_->value(name).toBool()); });
+}
+
+void SettingsDialog::bind(QLineEdit* field, const char* key) {
+    const auto name = QLatin1String(key);
+    connect(field, &QLineEdit::textChanged, this, [this, name](const QString& text) {
+        if (!syncing_) {
+            session_->setValue(name, text);
+        }
+    });
+    syncs_.push_back([this, field, name] {
+        if (const auto text = session_->value(name).toString(); field->text() != text) {
+            field->setText(text);
+        }
+    });
+}
+
+void SettingsDialog::bind(QSpinBox* box, const char* key) {
+    const auto name = QLatin1String(key);
+    connect(box, &QSpinBox::valueChanged, this, [this, name](const int value) {
+        if (!syncing_) {
+            session_->setValue(name, value);
+        }
+    });
+    syncs_.push_back([this, box, name] { box->setValue(session_->value(name).toInt()); });
+}
+
+void SettingsDialog::bind(QDoubleSpinBox* box, const char* key) {
+    const auto name = QLatin1String(key);
+    connect(box, &QDoubleSpinBox::valueChanged, this, [this, name](const double value) {
+        if (!syncing_) {
+            session_->setValue(name, value);
+        }
+    });
+    syncs_.push_back([this, box, name] { box->setValue(session_->value(name).toDouble()); });
+}
+
+void SettingsDialog::bind(QComboBox* box, const std::vector<SettingsSession::Choice>& choices,
+                          const char* key) {
+    for (const auto& choice : choices) {
+        box->addItem(choice.label, choice.value);
+    }
+    const auto name = QLatin1String(key);
+    connect(box, &QComboBox::currentIndexChanged, this, [this, box, name] {
+        if (!syncing_) {
+            session_->setValue(name, box->currentData());
+        }
+    });
+    syncs_.push_back([this, box, name] {
+        box->setCurrentIndex(std::max(0, box->findData(session_->value(name))));
+    });
+}
+
+void SettingsDialog::sync() {
+    syncing_ = true;
+    for (const auto& sync : syncs_) {
+        sync();
+    }
+    syncing_ = false;
 }
 
 void SettingsDialog::editCustomBuffer() {
@@ -928,104 +836,39 @@ void SettingsDialog::showDestinationsOf(const QString& key) {
 
 void SettingsDialog::showPage(const Page page) { pages_->setCurrentRow(static_cast<int>(page)); }
 
-QString SettingsDialog::engineLabel(const RemoteEngineSetting& engine) {
-    return engine.address.isEmpty() ? QStringLiteral("New engine") : engine.address;
-}
-
-void SettingsDialog::refreshEngines(const int current) {
-    const QSignalBlocker blocker{engines_view_};
-    engines_view_->clear();
-    for (const auto& engine : engines_list_) {
-        engines_view_->addItem(engineLabel(engine));
+void SettingsDialog::refreshEngines() {
+    syncing_ = true;
+    {
+        const QSignalBlocker blocker{engines_view_};
+        engines_view_->clear();
+        engines_view_->addItems(session_->engineLabels());
+        engines_view_->setCurrentRow(session_->currentEngine());
     }
-    engines_view_->setCurrentRow(current);
-    showEngine(current);
-}
-
-void SettingsDialog::showEngine(const int row) {
-    engine_current_ = row;
-    if (row < 0 || row >= static_cast<int>(engines_list_.size())) {
-        return;
-    }
-    const auto& engine = engines_list_[static_cast<std::size_t>(row)];
-    loading_engine_ = true;
+    const auto engine = session_->engine();
     engine_socket_->setText(engine.address);
     engine_token_->setText(engine.password);
     remote_folder_->setText(engine.music_folder);
     remote_mount_->setText(engine.reachable_at);
-    selectRate(remote_stream_, engine.stream_kbps < 0 ? -1 : engine.stream_kbps);
-    loading_engine_ = false;
+    remote_stream_->clear();
+    for (const auto& choice : session_->engineRates()) {
+        remote_stream_->addItem(choice.label, choice.value);
+    }
+    remote_stream_->setCurrentIndex(
+        std::max(0, remote_stream_->findData(engine.stream_kbps < 0 ? -1 : engine.stream_kbps)));
+    syncing_ = false;
 }
 
-void SettingsDialog::chooseFoundEngine(const QString& address) {
-    // Known already: chosen. Otherwise into the one being filled in, if it
-    // is still empty, or as one more.
-    for (int row = 0; row < static_cast<int>(engines_list_.size()); ++row) {
-        if (engines_list_[static_cast<std::size_t>(row)].address == address) {
-            refreshEngines(row);
-            return;
-        }
+void SettingsDialog::refreshFound() {
+    found_menu_->clear();
+    if (session_->found().empty()) {
+        found_menu_->addAction(QStringLiteral("None found yet"))->setEnabled(false);
+        return;
     }
-    const bool blank = engine_current_ >= 0 &&
-                       engine_current_ < static_cast<int>(engines_list_.size()) &&
-                       engines_list_[static_cast<std::size_t>(engine_current_)].address.isEmpty();
-    if (!blank) {
-        engines_list_.push_back({});
-        refreshEngines(static_cast<int>(engines_list_.size()) - 1);
+    for (const auto& announced : session_->found()) {
+        auto* choice = found_menu_->addAction(announced.label);
+        connect(choice, &QAction::triggered, this,
+                [this, where = announced.address] { session_->chooseFoundEngine(where); });
     }
-    engine_socket_->setText(address);
-}
-
-void SettingsDialog::save() {
-    QSettings settings;
-    settings.setValue(QLatin1String(acoustid_client_key), acoustid_key_->text().trimmed());
-    settings.setValue(QLatin1String(ratings_in_tags_key), ratings_in_tags_->isChecked());
-    settings.setValue(QLatin1String(rating_tag_scale_key), rating_tag_scale_->currentData());
-    settings.setValue(QStringLiteral("lastfm/api-key"), lastfm_key_->text().trimmed());
-    settings.setValue(QStringLiteral("appearance/panel-animations"),
-                      panel_animations_->isChecked());
-    settings.setValue(QStringLiteral("appearance/lists-display"), lists_display_->currentData());
-    settings.setValue(QStringLiteral("desktop/notifications"), notifications_->isChecked());
-    settings.setValue(QStringLiteral("desktop/notifications-background-only"),
-                      notifications_background_->isChecked());
-    settings.setValue(QStringLiteral("playback/buffer-profile"), buffer_profile_->currentData());
-    settings.setValue(QStringLiteral("playback/buffer-capacity-ms"), buffer_capacity_->value());
-    settings.setValue(QStringLiteral("playback/buffer-start-threshold-ms"),
-                      buffer_threshold_->value());
-    settings.setValue(QStringLiteral("playback/rg-preamp-with"), preamp_with_->value());
-    settings.setValue(QStringLiteral("playback/rg-preamp-without"), preamp_without_->value());
-    // ADR-0234: the engines elsewhere, those with an address.
-    {
-        std::vector<RemoteEngineSetting> kept;
-        for (const auto& entry : engines_list_) {
-            if (!entry.address.isEmpty()) {
-                kept.push_back(entry);
-            }
-        }
-        saveRemoteEngines(kept);
-    }
-    settings.setValue(QLatin1String(library_show_local_key), show_local_library_->isChecked());
-    settings.setValue(QLatin1String(engine_share_key), engine_share_->isChecked());
-    settings.setValue(QLatin1String(engine_listen_key), engine_listen_->text().trimmed());
-    settings.setValue(QLatin1String(engine_stream_port_key), engine_stream_port_->value());
-    settings.setValue(QLatin1String(engine_password_key), engine_password_->text());
-    settings.setValue(QLatin1String(engine_music_root_key), engine_music_root_->text().trimmed());
-    settings.setValue(QLatin1String(engine_play_for_remote_key), play_for_remote_->isChecked());
-    settings.setValue(QLatin1String(engine_stream_nearby_key), stream_nearby_->currentData());
-    settings.setValue(QLatin1String(engine_stream_away_key), stream_away_->currentData());
-    settings.setValue(QLatin1String(replaygain_sidecar_only_key),
-                      replaygain_sidecar_only_->isChecked());
-    settings.setValue(QLatin1String(replaygain_true_peak_key), replaygain_true_peak_->isChecked());
-    settings.setValue(QLatin1String(artwork_embed_key), artwork_embed_->isChecked());
-    settings.setValue(QLatin1String(artwork_folder_image_key), artwork_folder_image_->isChecked());
-    settings.setValue(QLatin1String(artwork_folder_image_name_key),
-                      artwork_folder_image_name_->currentText().trimmed());
-    settings.setValue(QLatin1String(artwork_fetch_source_key),
-                      artwork_fetch_source_->currentData().toString());
-    settings.setValue(QLatin1String(artwork_max_embedded_edge_key),
-                      artwork_max_embedded_edge_->value());
-    settings.setValue(QLatin1String(artwork_max_folder_edge_key),
-                      artwork_max_folder_edge_->value());
 }
 
 } // namespace trackknife::bench

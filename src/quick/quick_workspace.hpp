@@ -4,6 +4,7 @@
 
 #include "quick/list_tabs_model.hpp"
 #include "quick/quick_convert.hpp"
+#include "quick/quick_open_list.hpp"
 #include "quick/quick_replaygain.hpp"
 #include "quick/quick_settings.hpp"
 #include "quick/quick_tagger.hpp"
@@ -11,6 +12,7 @@
 #include "workspace/folder_browser.hpp"
 #include "workspace/library_browser.hpp"
 #include "workspace/list_edit_job.hpp"
+#include "workspace/playlist_transfer.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -67,6 +69,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(bool followPlayback READ followPlayback WRITE setFollowPlayback NOTIFY desktopChanged)
     Q_PROPERTY(trackknife::bench::LibraryBrowser* localLibrary READ localLibrary NOTIFY sourcesChanged)
     Q_PROPERTY(int shortcutRevision READ shortcutRevision NOTIFY shortcutsChanged)
+    // The M3U8 import or export running, or done and not yet closed.
+    Q_PROPERTY(QVariantMap transfer READ transfer NOTIFY transferChanged)
 
   public:
     using ListTab = bench::Workspace::ListTab;
@@ -207,6 +211,19 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE trackknife::quick::QuickSettings* openSettings();
     // A command's key: the one saved in Settings, or `default_key`.
     Q_INVOKABLE static QString shortcut(const QString& id, const QString& default_key);
+    // File: an M3U8 playlist imported into a new list, the list shown
+    // exported as one; the transfer cancelled or its bar closed.
+    Q_INVOKABLE void importPlaylist(const QUrl& file);
+    Q_INVOKABLE void exportPlaylist(const QUrl& file);
+    Q_INVOKABLE void dismissTransfer() { transfer_.dismiss(); }
+    [[nodiscard]] QVariantMap transfer() const;
+    // The workspace database backed up; or restored at the next start.
+    Q_INVOKABLE void backupWorkspace(const QUrl& file);
+    Q_INVOKABLE static void scheduleWorkspaceRestore(const QUrl& file);
+    // Every engine's lists, one to open.
+    Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
+    // A folder bookmarked, and shown under Folders.
+    Q_INVOKABLE void bookmarkFolder(const QUrl& folder);
 
     // The workspace closing: saved at once, and quitting stops this
     // computer's engine.
@@ -275,6 +292,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void convertOpened(trackknife::quick::QuickConvert* convert);
     // Settings were saved: keys may be others now.
     void shortcutsChanged();
+    void transferChanged();
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();
@@ -306,6 +324,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     std::vector<Library> libraries_;
     int current_source_{0};
     int shortcut_revision_{0};
+    bench::PlaylistTransfer transfer_{this};
     void addLibrary(EngineLink& engine);
     void selectPreferredSource();
     [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;

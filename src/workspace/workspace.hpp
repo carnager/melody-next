@@ -370,6 +370,14 @@ class Workspace final : public QObject {
     // The lists. One is added with its rows as its document holds them, and
     // the window is asked to show it; its tags and covers are looked for.
     ListTab* addList(persistence::ListDocument document, bool select);
+    // An imported playlist, as a new saved list of this computer's.
+    void addImportedList(std::vector<LocalTrackRow> rows, const QString& name);
+    // The workspace database and its settings copied beside `path`: the
+    // database there, the settings in `path`.settings.ini; said when done.
+    void backupWorkspace(const QString& path);
+    // `path` restored at the next start, with the settings backed up beside
+    // it; the current database kept for rollback.
+    static void scheduleWorkspaceRestore(const QString& path);
     // The lists as the workspace starts: those saved, or one to begin with.
     void restoreLists(std::vector<persistence::ListDocument> documents);
     // What is saved of each open list, in the order they are shown.

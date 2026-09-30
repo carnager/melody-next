@@ -48,6 +48,10 @@ qt_add_library(
     engine_folder_session.hpp
     lastfm_settings_session.cpp
     lastfm_settings_session.hpp
+    open_list_session.cpp
+    open_list_session.hpp
+    playlist_transfer.cpp
+    playlist_transfer.hpp
     profiles_session.cpp
     shortcut_session.cpp
     shortcut_session.hpp

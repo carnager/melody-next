@@ -127,19 +127,24 @@ ApplicationWindow {
             KeyedAction {
                 objectName: "action-import-m3u8"
                 text: qsTr("Import M3U8 playlist…")
-                onTriggered: window.notYet("Importing a playlist")
+                onTriggered: importDialog.open()
             }
             KeyedAction {
                 objectName: "action-export-m3u8"
                 text: qsTr("Export list as M3U8…")
                 enabled: Tk.currentTab >= 0
-                onTriggered: window.notYet("Exporting a playlist")
+                onTriggered: exportDialog.open()
             }
             KeyedAction {
                 objectName: "action-open-list"
                 text: "Open list…"
                 defaultKey: "Ctrl+Alt+O"
-                onTriggered: window.notYet("Open list")
+                onTriggered: {
+                    if (window.openListWindow)
+                        window.openListWindow.requestActivate();
+                    else
+                        window.openListWindow = openListComponent.createObject(window, {openList: Tk.openList()});
+                }
             }
             KeyedAction {
                 objectName: "action-dynamic-playlists"
@@ -149,16 +154,16 @@ ApplicationWindow {
             KeyedAction {
                 objectName: "action-backup-workspace"
                 text: "Back up workspace database…"
-                onTriggered: window.notYet("Backing up the workspace")
+                onTriggered: backupDialog.open()
             }
             KeyedAction {
                 objectName: "action-restore-workspace"
                 text: "Restore workspace database…"
-                onTriggered: window.notYet("Restoring the workspace")
+                onTriggered: restoreDialog.open()
             }
             Action {
                 text: "Bookmark folder…"
-                onTriggered: window.notYet("Bookmarks")
+                onTriggered: bookmarkDialog.open()
             }
             MenuSeparator {}
             KeyedAction {
@@ -515,8 +520,15 @@ ApplicationWindow {
         onToggleUpNext: upNextSettings.visible = !upNextSettings.visible
     }
 
-    footer: StatusRow {
-        id: status
+    footer: ColumnLayout {
+        spacing: 0
+        PlaylistTransferBar {
+            Layout.fillWidth: true
+        }
+        StatusRow {
+            id: status
+            Layout.fillWidth: true
+        }
     }
 
     Shortcut {
@@ -701,6 +713,64 @@ ApplicationWindow {
         id: folderDialog
         title: "Open folder"
         onAccepted: Tk.openUrls([selectedFolder])
+    }
+
+    FileDialog {
+        id: importDialog
+        title: qsTr("Import M3U8 into a new local list")
+        nameFilters: [qsTr("UTF-8 playlists (*.m3u8)")]
+        fileMode: FileDialog.OpenFile
+        onAccepted: Tk.importPlaylist(selectedFile)
+    }
+    FileDialog {
+        id: exportDialog
+        title: qsTr("Export M3U8 to a new file")
+        nameFilters: [qsTr("UTF-8 playlists (*.m3u8)")]
+        defaultSuffix: "m3u8"
+        fileMode: FileDialog.SaveFile
+        options: FileDialog.DontConfirmOverwrite
+        onAccepted: Tk.exportPlaylist(selectedFile)
+    }
+    FileDialog {
+        id: backupDialog
+        title: qsTr("Back up Trackknife workspace database")
+        nameFilters: [qsTr("Trackknife workspace database (*.sqlite)")]
+        defaultSuffix: "sqlite"
+        fileMode: FileDialog.SaveFile
+        options: FileDialog.DontConfirmOverwrite
+        currentFile: "trackknife-workspace.sqlite"
+        onAccepted: Tk.backupWorkspace(selectedFile)
+    }
+    FileDialog {
+        id: restoreDialog
+        title: qsTr("Restore Trackknife workspace database")
+        nameFilters: [qsTr("Trackknife workspace database (*.sqlite)"), qsTr("All files (*)")]
+        fileMode: FileDialog.OpenFile
+        onAccepted: restoreConfirm.open()
+    }
+    MessageDialog {
+        id: restoreConfirm
+        title: qsTr("Restore workspace database")
+        text: qsTr("Trackknife will validate and restore this database at the next start. The current database will be retained beside it for rollback. Close Trackknife now?")
+        buttons: MessageDialog.Close | MessageDialog.Cancel
+        onButtonClicked: (button, role) => {
+            if (button === MessageDialog.Close) {
+                Tk.scheduleWorkspaceRestore(restoreDialog.selectedFile);
+                window.close();
+            }
+        }
+    }
+    FolderDialog {
+        id: bookmarkDialog
+        title: qsTr("Bookmark folder")
+        onAccepted: Tk.bookmarkFolder(selectedFolder)
+    }
+    property var openListWindow: null
+    Component {
+        id: openListComponent
+        OpenListDialog {
+            Component.onDestruction: window.openListWindow = null
+        }
     }
 
     Connections {

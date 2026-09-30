@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "workspace/open_list_session.hpp"
 #include "workspace/sources.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -114,52 +115,8 @@ void BenchMainWindow::backupWorkspace() {
     dialog->setNameFilter(tr("Trackknife workspace database (*.sqlite)"));
     dialog->setOption(QFileDialog::DontConfirmOverwrite);
     dialog->selectFile(QStringLiteral("trackknife-workspace.sqlite"));
-    connect(dialog, &QFileDialog::fileSelected, this, [this](const QString& path) {
-        const auto settings_path = path + QStringLiteral(".settings.ini");
-        if (QFile::exists(settings_path)) {
-            statusBar()->showMessage(
-                QStringLiteral("Workspace backup failed: %1 already exists").arg(settings_path),
-                10'000);
-            return;
-        }
-        const auto temporary_settings = settings_path + QStringLiteral(".partial");
-        if (QFile::exists(temporary_settings)) {
-            statusBar()->showMessage(
-                QStringLiteral("Workspace backup failed: stale temporary settings file exists"),
-                10'000);
-            return;
-        }
-        QSettings current;
-        QSettings settings_backup{temporary_settings, QSettings::IniFormat};
-        settings_backup.setValue(QStringLiteral("backup/format"), 1);
-        for (const auto& key : current.allKeys()) {
-            settings_backup.setValue(QStringLiteral("values/") + key, current.value(key));
-        }
-        settings_backup.sync();
-        if (settings_backup.status() != QSettings::NoError) {
-            QFile::remove(temporary_settings);
-            statusBar()->showMessage(QStringLiteral("Workspace settings backup failed"), 10'000);
-            return;
-        }
-        const auto encoded = QFile::encodeName(path);
-        const auto destination = std::filesystem::path{
-            std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
-        persistNow(false);
-        statusBar()->showMessage(QStringLiteral("Backing up workspace database…"));
-        persistence_->backupDatabase(destination, [this, path, settings_path,
-                                                   temporary_settings](QString error) {
-            if (error.isEmpty() && !QFile::rename(temporary_settings, settings_path)) {
-                error = QStringLiteral("database saved, but settings could not be published");
-            } else if (!error.isEmpty()) {
-                QFile::remove(temporary_settings);
-            }
-            statusBar()->showMessage(
-                error.isEmpty()
-                    ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
-                    : QStringLiteral("Workspace backup failed: %1").arg(error),
-                error.isEmpty() ? 7'000 : 10'000);
-        });
-    });
+    connect(dialog, &QFileDialog::fileSelected, this,
+            [this](const QString& path) { workspace_.backupWorkspace(path); });
     dialog->open();
 }
 
@@ -178,12 +135,7 @@ void BenchMainWindow::scheduleWorkspaceRestore() {
     if (answer != QMessageBox::Close) {
         return;
     }
-    QSettings settings;
-    settings.setValue(QStringLiteral("recovery/pending-workspace-restore"), path);
-    const auto settings_backup = path + QStringLiteral(".settings.ini");
-    settings.setValue(QStringLiteral("recovery/pending-settings-restore"),
-                      QFile::exists(settings_backup) ? settings_backup : QString{});
-    settings.sync();
+    Workspace::scheduleWorkspaceRestore(path);
     close();
 }
 
@@ -231,6 +183,7 @@ void BenchMainWindow::showOpenListDialog() {
     dialog->setObjectName(QStringLiteral("bench-open-list"));
     dialog->setWindowTitle(QStringLiteral("Open list"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    auto* session = new OpenListSession(workspace_, dialog);
     auto* layout = new QVBoxLayout(dialog);
     auto* tree = new QTreeWidget(dialog);
     tree->setObjectName(QStringLiteral("bench-open-list-tree"));
@@ -242,74 +195,34 @@ void BenchMainWindow::showOpenListDialog() {
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, dialog);
     layout->addWidget(buttons);
     dialog->resize(480, 420);
-    const auto open = [this, tree, dialog] {
-        const auto* item = tree->currentItem();
-        if (item == nullptr || !item->data(0, Qt::UserRole).isValid()) {
+    const auto open = [tree, session] {
+        auto* item = tree->currentItem();
+        if (item == nullptr || item->parent() == nullptr) {
             return;
         }
-        openEngineList(EngineKey::fromText(item->data(0, Qt::UserRole + 1).toString()),
-                       item->data(0, Qt::UserRole).toString());
-        dialog->accept();
+        session->open(tree->indexOfTopLevelItem(item->parent()), item->parent()->indexOfChild(item));
     };
     connect(buttons, &QDialogButtonBox::accepted, dialog, open);
     connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
     connect(tree, &QTreeWidget::itemActivated, dialog, open);
-
-    // Each engine's lists under its name, saved ones first: they are the ones
-    // kept for a reason.
-    const QPointer<QTreeWidget> guarded{tree};
-    const auto fill = [guarded](EnginePlayback* engine, const EngineKey& key, const QString& name) {
-        if (engine == nullptr || !engine->active()) {
-            return;
+    connect(session, &OpenListSession::opened, dialog, &QDialog::accept);
+    const auto fill = [tree, session] {
+        tree->clear();
+        for (const auto& group : session->groups()) {
+            auto* parent = new QTreeWidgetItem(tree, {group.name});
+            parent->setFlags(Qt::ItemIsEnabled);
+            for (const auto& list : group.lists) {
+                new QTreeWidgetItem(parent, {list.label, QString::number(list.tracks)});
+            }
+            if (!group.note.isEmpty()) {
+                auto* none = new QTreeWidgetItem(parent, {group.note});
+                none->setFlags(Qt::NoItemFlags);
+            }
+            parent->setExpanded(true);
         }
-        auto* group = new QTreeWidgetItem(guarded, {name});
-        group->setFlags(Qt::ItemIsEnabled);
-        group->setExpanded(true);
-        engine->request(
-            QStringLiteral("list.all"), protocol::Json::object(),
-            [guarded, key, name](const core::Result<protocol::Json>& answer) {
-                if (guarded == nullptr) {
-                    return;
-                }
-                QTreeWidgetItem* parent = nullptr;
-                for (int index = 0; index < guarded->topLevelItemCount(); ++index) {
-                    if (guarded->topLevelItem(index)->text(0) == name) {
-                        parent = guarded->topLevelItem(index);
-                    }
-                }
-                if (parent == nullptr) {
-                    return;
-                }
-                auto lists = answer ? answer->value("lists", std::vector<protocol::Json>{})
-                                    : std::vector<protocol::Json>{};
-                std::ranges::stable_partition(lists, [](const protocol::Json& list) {
-                    return list.value("kind", std::string{}) == "saved";
-                });
-                for (const auto& list : lists) {
-                    auto label = QString::fromStdString(list.value("name", std::string{}));
-                    if (list.value("kind", std::string{}) != "saved") {
-                        label += QStringLiteral(" (working)");
-                    }
-                    auto* item = new QTreeWidgetItem(
-                        parent, {label, QString::number(list.value("tracks", 0))});
-                    item->setData(0, Qt::UserRole,
-                                  QString::fromStdString(list.value("id", std::string{})));
-                    item->setData(0, Qt::UserRole + 1, key.text());
-                }
-                if (lists.empty()) {
-                    auto* none = new QTreeWidgetItem(
-                        parent,
-                        {answer ? QStringLiteral("No lists")
-                                : QStringLiteral("Cannot say: %1")
-                                      .arg(QString::fromStdString(answer.error().message))});
-                    none->setFlags(Qt::NoItemFlags);
-                }
-            });
     };
-    for (const auto& engine : engines_) {
-        fill(engine->playback, engine->key,
-             engine->key.isLocal() ? QStringLiteral("This computer") : engine->catalogue->name());
-    }
+    connect(session, &OpenListSession::changed, dialog, fill);
+    fill();
     dialog->open();
 }
 

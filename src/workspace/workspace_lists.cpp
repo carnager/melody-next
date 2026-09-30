@@ -9,7 +9,11 @@
 #include "uicommon/debug_log.hpp"
 #include "workspace/workspace_view.hpp"
 
+#include <QFile>
+#include <QSettings>
+
 #include <algorithm>
+#include <filesystem>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
@@ -737,6 +741,76 @@ Workspace::ListTab* Workspace::transferRowsToNewList(ListTab* source_tab,
         return nullptr;
     }
     return tabForDocument(id);
+}
+
+void Workspace::addImportedList(std::vector<LocalTrackRow> rows, const QString& name) {
+    auto* tab = addList({.id = core::StableId::random(),
+                         .kind = persistence::ListKind::saved,
+                         .name = utf8Bytes(name.isEmpty() ? tr("Imported playlist") : name),
+                         .pinned = false,
+                         .dirty = false,
+                         .items = {}},
+                        true);
+    tab->model->replaceRows(std::move(rows));
+    syncArtwork(*tab);
+    schedulePersist();
+}
+
+void Workspace::backupWorkspace(const QString& path) {
+    if (persistence_ == nullptr) {
+        return;
+    }
+    const auto settings_path = path + QStringLiteral(".settings.ini");
+    if (QFile::exists(settings_path)) {
+        view_->showMessage(
+            QStringLiteral("Workspace backup failed: %1 already exists").arg(settings_path), 10'000);
+        return;
+    }
+    const auto temporary_settings = settings_path + QStringLiteral(".partial");
+    if (QFile::exists(temporary_settings)) {
+        view_->showMessage(
+            QStringLiteral("Workspace backup failed: stale temporary settings file exists"), 10'000);
+        return;
+    }
+    QSettings current;
+    QSettings settings_backup{temporary_settings, QSettings::IniFormat};
+    settings_backup.setValue(QStringLiteral("backup/format"), 1);
+    for (const auto& key : current.allKeys()) {
+        settings_backup.setValue(QStringLiteral("values/") + key, current.value(key));
+    }
+    settings_backup.sync();
+    if (settings_backup.status() != QSettings::NoError) {
+        QFile::remove(temporary_settings);
+        view_->showMessage(QStringLiteral("Workspace settings backup failed"), 10'000);
+        return;
+    }
+    const auto encoded = QFile::encodeName(path);
+    const auto destination = std::filesystem::path{
+        std::string{encoded.constData(), static_cast<std::size_t>(encoded.size())}};
+    persistNow(false);
+    view_->showMessage(QStringLiteral("Backing up workspace database…"), 0);
+    persistence_->backupDatabase(destination, [this, path, settings_path,
+                                               temporary_settings](QString error) {
+        if (error.isEmpty() && !QFile::rename(temporary_settings, settings_path)) {
+            error = QStringLiteral("database saved, but settings could not be published");
+        } else if (!error.isEmpty()) {
+            QFile::remove(temporary_settings);
+        }
+        view_->showMessage(
+            error.isEmpty()
+                ? QStringLiteral("Workspace backed up to %1 and %2").arg(path, settings_path)
+                : QStringLiteral("Workspace backup failed: %1").arg(error),
+            error.isEmpty() ? 7'000 : 10'000);
+    });
+}
+
+void Workspace::scheduleWorkspaceRestore(const QString& path) {
+    QSettings settings;
+    settings.setValue(QStringLiteral("recovery/pending-workspace-restore"), path);
+    const auto settings_backup = path + QStringLiteral(".settings.ini");
+    settings.setValue(QStringLiteral("recovery/pending-settings-restore"),
+                      QFile::exists(settings_backup) ? settings_backup : QString{});
+    settings.sync();
 }
 
 } // namespace trackknife::bench

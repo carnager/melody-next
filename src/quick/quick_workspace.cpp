@@ -48,6 +48,13 @@ QuickWorkspace::QuickWorkspace(QObject* parent) : QObject(parent) {
     });
     transport_timer_.setInterval(transport_refresh_ms);
     connect(&transport_timer_, &QTimer::timeout, this, &QuickWorkspace::refreshTransport);
+    connect(&transfer_, &bench::PlaylistTransfer::changed, this, &QuickWorkspace::transferChanged);
+    connect(&transfer_, &bench::PlaylistTransfer::imported, this,
+            [this](std::shared_ptr<std::vector<bench::LocalTrackRow>> rows, const QString& name) {
+                workspace_.addImportedList(std::move(*rows), name);
+            });
+    connect(&transfer_, &bench::PlaylistTransfer::completed, this,
+            [this](bool, const QString& message) { showMessage(message, 8'000); });
 }
 
 QuickWorkspace::~QuickWorkspace() {
@@ -542,6 +549,59 @@ QuickSettings* QuickWorkspace::openSettings() {
 QString QuickWorkspace::shortcut(const QString& id, const QString& default_key) {
     return bench::ShortcutSession::saved(id, QKeySequence(default_key, QKeySequence::PortableText))
         .toString(QKeySequence::PortableText);
+}
+
+void QuickWorkspace::importPlaylist(const QUrl& file) {
+    if (!workspace_.lists_restored_ || transfer_.busy()) {
+        return;
+    }
+    const auto encoded = QFile::encodeName(file.toLocalFile());
+    transfer_.importFile({encoded.constData(), static_cast<std::size_t>(encoded.size())});
+}
+
+void QuickWorkspace::exportPlaylist(const QUrl& file) {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr || transfer_.busy()) {
+        return;
+    }
+    auto path = file.toLocalFile();
+    if (!path.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)) {
+        path += QStringLiteral(".m3u8");
+    }
+    const auto encoded = QFile::encodeName(path);
+    transfer_.exportFile({encoded.constData(), static_cast<std::size_t>(encoded.size())},
+                         tab->model);
+}
+
+QVariantMap QuickWorkspace::transfer() const {
+    return {{QStringLiteral("shown"), transfer_.shown()},
+            {QStringLiteral("active"), transfer_.active()},
+            {QStringLiteral("status"), transfer_.status()}};
+}
+
+void QuickWorkspace::backupWorkspace(const QUrl& file) {
+    workspace_.backupWorkspace(file.toLocalFile());
+}
+
+void QuickWorkspace::scheduleWorkspaceRestore(const QUrl& file) {
+    bench::Workspace::scheduleWorkspaceRestore(file.toLocalFile());
+}
+
+QuickOpenList* QuickWorkspace::openList() {
+    auto* list = new QuickOpenList(new bench::OpenListSession(workspace_), this);
+    QQmlEngine::setObjectOwnership(list, QQmlEngine::CppOwnership);
+    return list;
+}
+
+void QuickWorkspace::bookmarkFolder(const QUrl& folder) {
+    const auto encoded = QFile::encodeName(folder.toLocalFile());
+    if (encoded.isEmpty()) {
+        return;
+    }
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+    folders_.addBookmark(raw_path);
+    selectSource(0, true);
+    folders_.reveal(raw_path);
 }
 
 bench::LibraryBrowser* QuickWorkspace::localLibrary() const {

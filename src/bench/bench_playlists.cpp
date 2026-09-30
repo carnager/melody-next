@@ -61,17 +61,7 @@ void BenchMainWindow::buildPlaylistActions(QMenu* file_menu) {
             &BenchMainWindow::exportPlaylistDialog);
     connect(playlist_transfer_bar_, &PlaylistTransferBar::imported, this,
             [this](std::shared_ptr<std::vector<LocalTrackRow>> rows, const QString& name) {
-                auto* tab =
-                    addListTab({.id = core::StableId::random(),
-                                .kind = persistence::ListKind::saved,
-                                .name = utf8Bytes(name.isEmpty() ? tr("Imported playlist") : name),
-                                .pinned = false,
-                                .dirty = false,
-                                .items = {}},
-                               true);
-                tab->model->replaceRows(std::move(*rows));
-                syncArtwork(*tab);
-                schedulePersist();
+                workspace_.addImportedList(std::move(*rows), name);
                 refreshSelectionStatus();
             });
     connect(playlist_transfer_bar_, &PlaylistTransferBar::completed, this,

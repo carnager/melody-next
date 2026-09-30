@@ -282,7 +282,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
         refreshRatings();
         // A remote that restarted holds the Up Next it saved; this window's
         // is the one the user sees, so it is stated again.
-        engine_requests_.clear();
+        engine_requests_.reset();
         syncEngineRequests();
         // Its tab, named after it -- by address if it was made while the
         // remote was away, which is renamed now that it has said its name.

@@ -117,9 +117,14 @@ void Workspace::applyLocalPlaybackModes() {
 
 void Workspace::syncEngineRequests() {
     // Asks go to the engine whose files they are, and only while it is the
-    // one playing: the other would be asked for paths it does not have.
+    // one playing: the other would be asked for paths it does not have. No
+    // asks at all are stated to whichever engine plays -- it may hold some
+    // from before, saved across its own restart, and would play them.
     const auto* playing = linkOf(transport_);
-    if (!playingOnEngine() || playing == nullptr || playing->key != up_next_engine_) {
+    if (!playingOnEngine() || playing == nullptr) {
+        return;
+    }
+    if (playing->key != up_next_engine_ && !playback_.requests.pending().empty()) {
         return;
     }
     std::vector<LocalTrackRow> rows;
@@ -130,7 +135,7 @@ void Workspace::syncEngineRequests() {
         gains.push_back(local_replay_gain_override(entry.source));
         rows.push_back(entry.source);
     }
-    if (stated == engine_requests_) {
+    if (engine_requests_ == stated) {
         return;
     }
     engine_requests_ = stated;
@@ -367,7 +372,7 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     playback_.row = -1;
     engine_entry_.clear();
     engine_queue_.clear();
-    engine_requests_.clear();
+    engine_requests_.reset();
     engine_consumed_.clear();
     engine_queue_revision_ = 0;
     view_->refreshTransport();

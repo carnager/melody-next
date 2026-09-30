@@ -144,7 +144,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     EnginePlayback*& transport_{workspace_.transport_};
     EngineKey& up_next_engine_{workspace_.up_next_engine_};
     QString& engine_entry_{workspace_.engine_entry_};
-    QString& engine_requests_{workspace_.engine_requests_};
     QString& engine_consumed_{workspace_.engine_consumed_};
     QString& engine_queue_{workspace_.engine_queue_};
     quint64& engine_queue_revision_{workspace_.engine_queue_revision_};

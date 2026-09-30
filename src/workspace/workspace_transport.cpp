@@ -266,7 +266,7 @@ void Workspace::followEngineState(const EnginePlayback::State& state) {
             });
             if (match != pending.end()) {
                 playback_.requests.started(*match);
-                engine_requests_.clear();
+                engine_requests_.reset();
                 persistUpNext();
                 view_->refreshUpNext();
             } else if (playback_.requests.active()) {

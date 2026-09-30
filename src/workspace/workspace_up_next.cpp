@@ -44,7 +44,7 @@ void Workspace::enqueueLocalRequests(std::vector<LocalTrackRow> rows, int positi
     }
     if (!holding) {
         up_next_engine_ = engine;
-        engine_requests_.clear();
+        engine_requests_.reset();
     }
     // Each ask is an occurrence of its own (ADR-0221): the same track asked
     // for twice plays twice, and playing it does not move the list, whose row

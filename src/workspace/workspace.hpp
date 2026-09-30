@@ -219,8 +219,11 @@ class Workspace final : public QObject {
     // double-clicked while something else played.
     QString engine_entry_;
     // The request order last stated to the engine, so an unchanged panel does
-    // not re-send it on every refresh.
-    QString engine_requests_;
+    // not re-send it on every refresh; none when it is not known what the
+    // engine holds -- after a handover, a reconnect or a start -- so even an
+    // empty Up Next is stated then. An empty order is a statement too: the
+    // engine keeps the asks it saved until it is told otherwise.
+    std::optional<QString> engine_requests_;
     // The last entry the engine reported consuming, so one drop is mirrored
     // once however often the state is sampled.
     QString engine_consumed_;

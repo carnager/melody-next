@@ -152,6 +152,7 @@ class EnginePlaybackTest final : public QObject {
     void jumpToPlayingFindsTheEnginesTrack();
     void modesAndReplayGainReachTheEngine();
     void upNextDecidesWhatTheEnginePlaysNext();
+    void anEmptyUpNextTakesBackTheEnginesSavedAsks();
     void editingThePlayingListReachesTheEngine();
     void aQueueChangedElsewhereReachesTheList();
     void aSameSizeReplacementElsewhereReachesTheList();
@@ -950,6 +951,66 @@ void EnginePlaybackTest::upNextDecidesWhatTheEnginePlaysNext() {
     QTRY_COMPARE_WITH_TIMEOUT((*player)->state().source.raw_path, wanted, 5'000);
     QCOMPARE((*player)->queue().size(), 2U);
     QCOMPARE(model->rowCount(), 2);
+
+    (*server)->stop();
+}
+
+// The engine keeps its asks -- across its own restarts, too -- until told
+// otherwise, so a window whose Up Next is empty has to say so: once it
+// stayed quiet, and the engine played a track the panel no longer showed.
+void EnginePlaybackTest::anEmptyUpNextTakesBackTheEnginesSavedAsks() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    std::vector<std::string> raw_paths;
+    for (const auto* name : {"first.flac", "second.flac"}) {
+        const auto media = directory.filePath(QString::fromLatin1(name));
+        QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-long-flac.b64"), media));
+        const auto encoded = QFile::encodeName(media);
+        raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
+    }
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    {
+        BenchMainWindow window;
+        window.show();
+        window.openLocalPaths(raw_paths);
+        auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+        QVERIFY(tabs != nullptr);
+        QTRY_COMPARE(tabs->count(), 1);
+        auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+        QVERIFY(view != nullptr);
+        auto* model = qobject_cast<LocalListModel*>(view->model());
+        QVERIFY(model != nullptr);
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 5'000);
+        emit view->doubleClicked(model->index(0, 0));
+        QTRY_VERIFY_WITH_TIMEOUT((*player)->queue().size() == 2U, 5'000);
+        view->selectionModel()->select(
+            model->index(1, 0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        auto* queue_next = window.findChild<QAction*>(QStringLiteral("action-queue-next"));
+        QVERIFY(queue_next != nullptr);
+        queue_next->trigger();
+        QTRY_VERIFY_WITH_TIMEOUT((*player)->requests().size() == 1U, 5'000);
+        QTest::qWait(500);
+    }
+    // Emptied where this engine was not told: what the next window restores
+    // is an empty Up Next, while the engine still holds the ask.
+    QSettings{}.remove(QStringLiteral("playback/up-next/v1"));
+    QCOMPARE((*player)->requests().size(), 1U);
+
+    BenchMainWindow reopened;
+    reopened.show();
+    QTRY_VERIFY2_WITH_TIMEOUT((*player)->requests().empty(),
+                              "the engine kept an ask the window no longer has", 10'000);
 
     (*server)->stop();
 }

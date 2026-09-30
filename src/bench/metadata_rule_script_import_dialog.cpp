@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_rule_script_import_dialog.hpp"
+#include "workspace/script_session.hpp"
 
 #include "bench/metadata_dialog_helpers.hpp"
 
@@ -66,46 +67,18 @@ MetadataRuleScriptImportDialog::MetadataRuleScriptImportDialog(QWidget* parent) 
     updateTranslation();
 }
 
-std::vector<metadata::MetadataTransformationAction> MetadataRuleScriptImportDialog::takeActions() {
-    return std::move(result_.actions);
-}
-
 MetadataRuleScriptImportDialog::ImportMode
 MetadataRuleScriptImportDialog::importMode() const noexcept {
     return mode_;
 }
 
-std::string MetadataRuleScriptImportDialog::source() const {
-    return encode_utf8(source_->toPlainText());
-}
+QString MetadataRuleScriptImportDialog::sourceText() const { return source_->toPlainText(); }
 
 void MetadataRuleScriptImportDialog::updateTranslation() {
-    result_ = metadata::import_metadata_rule_script(encode_utf8(source_->toPlainText()));
-    QStringList lines;
-    for (const auto& diagnostic : result_.diagnostics) {
-        const auto severity =
-            diagnostic.severity == metadata::MetadataRuleScriptDiagnosticSeverity::error
-                ? QStringLiteral("Error")
-                : QStringLiteral("Warning");
-        lines.push_back(QStringLiteral("%1 · line %2, column %3 · %4")
-                            .arg(severity)
-                            .arg(diagnostic.line)
-                            .arg(diagnostic.column)
-                            .arg(display_utf8(diagnostic.message)));
-    }
-    if (lines.isEmpty()) {
-        lines.push_back(
-            result_.actions.empty()
-                ? QStringLiteral("Paste a script to inspect generated rules.")
-                : QStringLiteral("Ready · %1 generated rules").arg(result_.actions.size()));
-    } else if (!result_.has_errors()) {
-        lines.prepend(
-            QStringLiteral("Ready · %1 generated rules with warnings").arg(result_.actions.size()));
-    }
-    diagnostics_->setPlainText(lines.join(QChar{'\n'}));
-    const auto ready = !result_.has_errors() && !result_.actions.empty();
-    append_->setEnabled(ready);
-    replace_->setEnabled(ready);
+    const auto translated = ScriptSession::translateRuleScript(source_->toPlainText());
+    diagnostics_->setPlainText(translated.diagnostics);
+    append_->setEnabled(translated.ready);
+    replace_->setEnabled(translated.ready);
 }
 
 } // namespace trackknife::bench

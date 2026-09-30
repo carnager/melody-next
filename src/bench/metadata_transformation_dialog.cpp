@@ -9,6 +9,7 @@
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/rule_script_import.hpp"
 #include "uicommon/metadata_transformation_interchange.hpp"
+#include "workspace/script_session.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -62,26 +63,10 @@ constexpr auto transformation_splitter_key = "workspace/metadata-transformation-
 
 class MetadataTransformationDialog final : public QDialog {
   public:
-    using StageCallback =
-        std::function<bool(const metadata::MetadataTransformationPreview& preview)>;
-    using PreviewResult = core::Result<metadata::MetadataTransformationPreview>;
-    using NativeImportResult = core::Result<metadata::MetadataTransformationChain>;
-    using NativeExportResult = core::Result<void>;
-
-    MetadataTransformationDialog(std::shared_ptr<const metadata::StagedMetadataSelection> selection,
-                                 metadata::StagedMetadataPatchSet draft,
-                                 std::vector<std::size_t> item_indexes, QStringList track_labels,
-                                 StageCallback stage, MetadataTransformationStore store,
-                                 QWidget* parent,
-                                 std::optional<core::StableId> initially_selected = std::nullopt,
-                                 const bool preview_initially_selected = false,
-                                 MetadataDialogLayoutStore layout_store = {})
-        : QDialog(parent), watcher_(this), selection_(std::move(selection)),
-          draft_(std::move(draft)), item_indexes_(std::move(item_indexes)),
-          track_labels_(std::move(track_labels)), stage_(std::move(stage)),
-          store_(std::move(store)), initially_selected_(initially_selected),
-          preview_initially_selected_(preview_initially_selected),
-          layout_store_(std::move(layout_store)) {
+    MetadataTransformationDialog(ScriptSession* session, QWidget* parent,
+                                 MetadataDialogLayoutStore layout_store)
+        : QDialog(parent), session_(session), layout_store_(std::move(layout_store)) {
+        session_->setParent(this);
         setObjectName(QStringLiteral("bench-metadata-transformation"));
         setWindowTitle(QStringLiteral("Tagging script editor[*]"));
         setWindowModality(Qt::WindowModal);
@@ -133,7 +118,7 @@ class MetadataTransformationDialog final : public QDialog {
         editor_layout->setContentsMargins(0, 0, 0, 0);
         editor_layout->setSpacing(6);
         auto* name_form = new QFormLayout;
-        name_ = new QLineEdit(QStringLiteral("Untitled script"), this);
+        name_ = new QLineEdit(session_->name(), this);
         name_->setObjectName(QStringLiteral("bench-metadata-transformation-name"));
         name_form->addRow(QStringLiteral("Name:"), name_);
         editor_layout->addLayout(name_form);
@@ -146,70 +131,29 @@ class MetadataTransformationDialog final : public QDialog {
         auto* step_form = new QFormLayout;
         kind_ = new QComboBox(this);
         kind_->setObjectName(QStringLiteral("bench-metadata-transformation-kind"));
-        // Kinds are grouped under unselectable headers; the row index therefore
-        // no longer matches the action kind, which lives in the item data.
-        const auto add_kind_header = [this](const QString& text) {
-            kind_->addItem(text);
-            auto* model = qobject_cast<QStandardItemModel*>(kind_->model());
-            auto* item = model->item(kind_->count() - 1);
-            item->setFlags(Qt::NoItemFlags);
-            auto header_font = item->font();
-            header_font.setBold(true);
-            item->setFont(header_font);
-        };
-        const auto add_kind = [this](const QString& text, const int kind,
-                                     const QString& tool_tip = {}) {
-            kind_->addItem(text, kind);
-            if (!tool_tip.isEmpty()) {
-                kind_->setItemData(kind_->count() - 1, tool_tip, Qt::ToolTipRole);
+        // Kinds are grouped under unselectable headings; the row therefore does
+        // not match the action kind, which lives in the item data.
+        for (const auto& kind : ScriptSession::stepKinds()) {
+            if (kind.kind < 0) {
+                kind_->addItem(kind.label);
+                auto* model = qobject_cast<QStandardItemModel*>(kind_->model());
+                auto* item = model->item(kind_->count() - 1);
+                item->setFlags(Qt::NoItemFlags);
+                auto header_font = item->font();
+                header_font.setBold(true);
+                item->setFont(header_font);
+                continue;
             }
-        };
-        add_kind_header(QStringLiteral("Set values"));
-        add_kind(QStringLiteral("Set one literal value"), 0);
-        add_kind(QStringLiteral("Add one literal value"), 1);
-        add_kind(QStringLiteral("Copy another field"), 7);
-        add_kind(QStringLiteral("Format with tkfmt-1"), 10,
-                 QStringLiteral("Build the value from an expression, "
-                                "for example %artist% — %title%"));
-        add_kind(QStringLiteral("Number by selected-file order"), 13);
-        add_kind(QStringLiteral("Capture fields with tkcapture-1"), 16,
-                 QStringLiteral("Extract several fields at once from the filename, the full "
-                                "path, formatted text, or another field"));
-        add_kind_header(QStringLiteral("Clean up values"));
-        add_kind(QStringLiteral("Trim each value"), 3);
-        add_kind(QStringLiteral("Lowercase each value"), 4);
-        add_kind(QStringLiteral("Uppercase each value"), 5);
-        add_kind(QStringLiteral("Capitalize first character"), 6);
-        add_kind(QStringLiteral("Keep first characters of each value"), 14);
-        add_kind_header(QStringLiteral("Split & join"));
-        add_kind(QStringLiteral("Split by exact separator"), 8);
-        add_kind(QStringLiteral("Join with exact separator"), 9);
-        add_kind_header(QStringLiteral("Remove & replace"));
-        add_kind(QStringLiteral("Remove field"), 2);
-        add_kind(QStringLiteral("Remove field when condition matches"), 15,
-                 QStringLiteral("The field is removed when the expression is non-empty, "
-                                "for example $not(%totaldiscs%)"));
-        add_kind(QStringLiteral("Remove exact matching values"), 11);
-        add_kind(QStringLiteral("Replace exact matching values"), 12);
-        add_kind(QStringLiteral("Remove listed fields (blocklist)"), 18,
-                 QStringLiteral("Remove every named field from the selected files"));
-        add_kind(QStringLiteral("Keep only listed fields (allowlist)"), 19,
-                 QStringLiteral("Remove every field except the named fields"));
-        kind_->setCurrentIndex(1);
+            kind_->addItem(kind.label, kind.kind);
+            if (!kind.tool_tip.isEmpty()) {
+                kind_->setItemData(kind_->count() - 1, kind.tool_tip, Qt::ToolTipRole);
+            }
+        }
+        kind_->setCurrentIndex(ScriptSession::initialStepKind());
         target_label_ = new QLabel(QStringLiteral("Target field:"), this);
         target_ = new QLineEdit(this);
         target_->setObjectName(QStringLiteral("bench-metadata-transformation-target"));
         target_->setPlaceholderText(QStringLiteral("For example: Title or ALBUM ARTIST"));
-        target_field_candidates_.reserve(selection_->field_count());
-        for (std::size_t index = 0U; index < selection_->field_count(); ++index) {
-            const auto& field = selection_->field(index);
-            if (field.present_item_count > 0U) {
-                target_field_candidates_.push_back(metadata::MetadataFieldSuggestionCandidate{
-                    .display_name = field.display_name,
-                    .kind = metadata::MetadataFieldSuggestionKind::present,
-                });
-            }
-        }
         target_completion_model_ = new QStringListModel(this);
         target_completion_model_->setObjectName(
             QStringLiteral("bench-metadata-transformation-target-completions"));
@@ -220,17 +164,11 @@ class MetadataTransformationDialog final : public QDialog {
         target_completer_->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
         target_completer_->setMaxVisibleItems(12);
         target_->setCompleter(target_completer_);
-        target_completion_model_->setStringList(targetFieldSuggestions({}));
+        target_completion_model_->setStringList(session_->targetSuggestions({}));
         input_label_ = new QLabel(QStringLiteral("Value:"), this);
         input_ = new QLineEdit(this);
         input_->setObjectName(QStringLiteral("bench-metadata-transformation-input"));
-        // ADR-0178 field filters complete each comma-separated name from the
-        // selection's present fields plus the standard conventional and
-        // MusicBrainz catalog; any custom name stays freely typable.
-        fields_candidates_ = target_field_candidates_;
-        for (const auto& candidate : metadata::metadata_field_suggestion_catalog()) {
-            fields_candidates_.push_back(candidate);
-        }
+        // ADR-0178 field filters complete each comma-separated name.
         fields_completion_model_ = new QStringListModel(this);
         fields_completion_model_->setObjectName(
             QStringLiteral("bench-metadata-transformation-fields-completions"));
@@ -268,9 +206,7 @@ class MetadataTransformationDialog final : public QDialog {
         capture_source_ = new QComboBox(this);
         capture_source_->setObjectName(
             QStringLiteral("bench-metadata-transformation-capture-source"));
-        capture_source_->addItems(
-            {QStringLiteral("Filename and requested parent folders"), QStringLiteral("Full path"),
-             QStringLiteral("Formatted tkfmt-1 text"), QStringLiteral("Metadata field values")});
+        capture_source_->addItems(ScriptSession::captureSources());
         capture_argument_label_ = new QLabel(QStringLiteral("Source expression:"), this);
         capture_argument_ = new QLineEdit(this);
         capture_argument_->setObjectName(
@@ -351,7 +287,7 @@ class MetadataTransformationDialog final : public QDialog {
             QStringLiteral("Updates automatically as you edit; nothing enters the draft until "
                            "you add the previewed changes"));
         preview_layout->addWidget(preview_heading);
-        summary_ = new QLabel(QStringLiteral("Add a step to see a preview."), preview_pane);
+        summary_ = new QLabel(preview_pane);
         summary_->setObjectName(QStringLiteral("bench-metadata-transformation-summary"));
         summary_->setWordWrap(true);
         preview_layout->addWidget(summary_);
@@ -404,7 +340,7 @@ class MetadataTransformationDialog final : public QDialog {
         connect(capture_source_, &QComboBox::currentIndexChanged, this,
                 [this] { updateInputForKind(); });
         connect(target_, &QLineEdit::textChanged, this, [this](const QString& text) {
-            target_completion_model_->setStringList(targetFieldSuggestions(text));
+            target_completion_model_->setStringList(session_->targetSuggestions(text));
             if (text.trimmed().isEmpty() || target_completion_model_->rowCount() == 0) {
                 return;
             }
@@ -414,17 +350,11 @@ class MetadataTransformationDialog final : public QDialog {
                 }
             });
         });
-        connect(name_, &QLineEdit::textChanged, this, [this] {
-            if (!loading_definition_) {
-                catalog_status_->setText(QStringLiteral("Unsaved name change · Save to keep it"));
-            }
-            updateActions();
-        });
-        connect(saved_, &QComboBox::currentIndexChanged, this,
-                [this](const int index) { selectSaved(index); });
-        connect(save_, &QPushButton::clicked, this, [this] { saveCurrent(false); });
-        connect(save_as_, &QPushButton::clicked, this, [this] { saveCurrent(true); });
-        connect(delete_saved_, &QPushButton::clicked, this, [this] { deleteSaved(); });
+        connect(name_, &QLineEdit::textChanged, session_, &ScriptSession::setName);
+        connect(saved_, &QComboBox::currentIndexChanged, session_, &ScriptSession::selectSaved);
+        connect(save_, &QPushButton::clicked, this, [this] { focus(session_->save(false)); });
+        connect(save_as_, &QPushButton::clicked, this, [this] { focus(session_->save(true)); });
+        connect(delete_saved_, &QPushButton::clicked, session_, &ScriptSession::deleteSaved);
         connect(import_native_, &QPushButton::clicked, this, [this] { importNative(); });
         connect(export_native_, &QPushButton::clicked, this, [this] { exportNative(); });
         connect(add_, &QPushButton::clicked, this, [this] { addStep(); });
@@ -433,51 +363,61 @@ class MetadataTransformationDialog final : public QDialog {
         }
         connect(import_, &QPushButton::clicked, this, [this] { importRules(); });
         connect(raw_source_, &QPlainTextEdit::textChanged, this,
-                [this] { updateRawTranslation(); });
-        connect(remove_, &QPushButton::clicked, this, [this] { removeStep(); });
-        connect(up_, &QPushButton::clicked, this, [this] { moveStep(-1); });
-        connect(down_, &QPushButton::clicked, this, [this] { moveStep(1); });
-        connect(steps_, &QListWidget::currentRowChanged, this, [this] { updateActions(); });
-        preview_timer_ = new QTimer(this);
-        preview_timer_->setObjectName(
-            QStringLiteral("bench-metadata-transformation-preview-timer"));
-        preview_timer_->setSingleShot(true);
-        preview_timer_->setInterval(400);
-        connect(preview_timer_, &QTimer::timeout, this, [this] { startPreview(); });
-        connect(stage_button_, &QPushButton::clicked, this, [this] { stagePreview(); });
+                [this] { session_->setRawSource(raw_source_->toPlainText()); });
+        connect(remove_, &QPushButton::clicked, this,
+                [this] { session_->removeStep(steps_->currentRow()); });
+        connect(up_, &QPushButton::clicked, this,
+                [this] { session_->moveStep(steps_->currentRow(), -1); });
+        connect(down_, &QPushButton::clicked, this,
+                [this] { session_->moveStep(steps_->currentRow(), 1); });
+        connect(steps_, &QListWidget::currentRowChanged, this, [this] { sync(); });
+        connect(stage_button_, &QPushButton::clicked, session_, &ScriptSession::stage);
         connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::close);
-        connect(&watcher_, &QFutureWatcherBase::finished, this, [this] { finishPreview(); });
-        clean_chain_ = currentChain();
-        refreshRawFromActions();
-        updateInputForKind();
-        updateActions();
-        loadSaved();
-        restoreLayoutState();
-    }
 
-    ~MetadataTransformationDialog() override {
-        cancellation_.request_cancellation();
-        if (planning_) {
-            watcher_.waitForFinished();
+        connect(session_, &ScriptSession::changed, this, [this] { sync(); });
+        connect(session_, &ScriptSession::stepsChanged, this,
+                &MetadataTransformationDialog::rebuildSteps);
+        connect(session_, &ScriptSession::savedChanged, this,
+                &MetadataTransformationDialog::rebuildSaved);
+        connect(session_, &ScriptSession::rawChanged, this, [this] {
+            const QSignalBlocker blocker{raw_source_};
+            raw_source_->setReadOnly(session_->rawReadOnly());
+            if (raw_source_->toPlainText() != session_->rawSource()) {
+                raw_source_->setPlainText(session_->rawSource());
+            }
+        });
+        connect(session_, &ScriptSession::previewChanged, this,
+                [this] { table_->setModel(session_->preview()); });
+        connect(session_, &ScriptSession::accepted, this, &QDialog::accept);
+        connect(session_, &ScriptSession::closeRequested, this, &QDialog::close);
+        {
+            const QSignalBlocker blocker{raw_source_};
+            raw_source_->setReadOnly(session_->rawReadOnly());
+            raw_source_->setPlainText(session_->rawSource());
         }
+        // What the session already has: a store may answer at once.
+        rebuildSaved();
+        rebuildSteps(0);
+        table_->setModel(session_->preview());
+        updateInputForKind();
+        sync();
+        restoreLayoutState();
     }
 
   protected:
     void closeEvent(QCloseEvent* event) override {
-        if (planning_) {
-            close_requested_ = true;
-            cancellation_.request_cancellation();
-            summary_->setText(QStringLiteral("Cancelling preview…"));
+        const auto answer = session_->requestClose();
+        if (answer == ScriptSession::CloseAnswer::wait) {
             event->ignore();
             return;
         }
-        if (hasUnsavedChanges()) {
-            const auto answer = QMessageBox::warning(
+        if (answer == ScriptSession::CloseAnswer::confirm_discard) {
+            const auto discard = QMessageBox::warning(
                 this, QStringLiteral("Discard unsaved script changes?"),
                 QStringLiteral("This script differs from its saved version. Save it before "
                                "closing, or explicitly discard the changes."),
                 QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
-            if (answer != QMessageBox::Discard) {
+            if (discard != QMessageBox::Discard) {
                 event->ignore();
                 return;
             }
@@ -516,23 +456,48 @@ class MetadataTransformationDialog final : public QDialog {
                            content_splitter_->saveState(), {});
     }
 
+    void rebuildSteps(const int select) {
+        const QSignalBlocker blocker{steps_};
+        steps_->clear();
+        steps_->addItems(session_->steps());
+        if (steps_->count() > 0) {
+            steps_->setCurrentRow(std::clamp(select, 0, steps_->count() - 1));
+        }
+        sync();
+    }
+
+    void rebuildSaved() {
+        const QSignalBlocker blocker{saved_};
+        saved_->clear();
+        saved_->addItems(session_->savedNames());
+        saved_->setCurrentIndex(session_->savedIndex());
+    }
+
+    void focus(const ScriptSession::Focus where) {
+        switch (where) {
+        case ScriptSession::Focus::target:
+            target_->setFocus(Qt::OtherFocusReason);
+            break;
+        case ScriptSession::Focus::input:
+            input_->setFocus(Qt::OtherFocusReason);
+            break;
+        case ScriptSession::Focus::capture_argument:
+            capture_argument_->setFocus(Qt::OtherFocusReason);
+            break;
+        case ScriptSession::Focus::name:
+            name_->setFocus(Qt::OtherFocusReason);
+            break;
+        case ScriptSession::Focus::none:
+            break;
+        }
+    }
+
     void refreshFieldsCompleter(const bool popup) {
-        const auto kind = currentStepKind();
-        if (kind != 18 && kind != 19) {
+        if (!ScriptSession::stepForm(currentStepKind(), capture_source_->currentIndex())
+                 .field_list) {
             return;
         }
-        const auto text = input_->text();
-        const auto separator = text.lastIndexOf(QLatin1Char(','));
-        const auto token = text.mid(separator + 1).trimmed();
-        const auto encoded = token.toUtf8();
-        const auto suggestions = metadata::suggest_metadata_field_names(
-            std::string_view{encoded.constData(), static_cast<std::size_t>(encoded.size())},
-            fields_candidates_);
-        QStringList names;
-        names.reserve(static_cast<qsizetype>(suggestions.size()));
-        for (const auto& suggestion : suggestions) {
-            names.push_back(display_utf8(suggestion.display_name));
-        }
+        const auto names = session_->fieldListSuggestions(input_->text());
         fields_completion_model_->setStringList(names);
         if (popup && !names.isEmpty()) {
             QTimer::singleShot(0, this, [this] {
@@ -544,366 +509,65 @@ class MetadataTransformationDialog final : public QDialog {
     }
 
     void insertFieldsSuggestion(const QString& name) {
-        const auto text = input_->text();
-        const auto separator = text.lastIndexOf(QLatin1Char(','));
-        auto prefix = separator < 0 ? QString{} : text.left(separator + 1) + QLatin1Char(' ');
-        prefix.replace(QStringLiteral(",  "), QStringLiteral(", "));
-        input_->setText(prefix + name);
+        input_->setText(ScriptSession::completeFieldList(input_->text(), name));
         input_->setFocus(Qt::OtherFocusReason);
     }
 
-    [[nodiscard]] QStringList targetFieldSuggestions(const QString& query) const {
-        const auto encoded = query.toUtf8();
-        const auto suggestions = metadata::suggest_metadata_field_names(
-            std::string_view{encoded.constData(), static_cast<std::size_t>(encoded.size())},
-            target_field_candidates_);
-        QStringList names;
-        names.reserve(static_cast<qsizetype>(suggestions.size()));
-        for (const auto& suggestion : suggestions) {
-            names.push_back(display_utf8(suggestion.display_name));
-        }
-        return names;
+    // The action kind is stored as item data; header rows have none and are
+    // not selectable.
+    [[nodiscard]] int currentStepKind() const {
+        const auto kind_data = kind_->currentData();
+        return kind_data.isValid() ? kind_data.toInt() : -1;
     }
 
-    [[nodiscard]] QString actionText(const metadata::MetadataTransformationAction& action,
-                                     const std::size_t index) const {
-        return std::visit(
-            [index](const auto& typed) {
-                using Action = std::decay_t<decltype(typed)>;
-                const auto field = [&] {
-                    if constexpr (std::is_same_v<Action, metadata::MetadataCaptureValuesAction> ||
-                                  std::is_same_v<Action, metadata::MetadataBlocklistFieldsAction> ||
-                                  std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
-                        return QString{};
-                    } else {
-                        return display_utf8(typed.target_field);
-                    }
-                }();
-                if constexpr (std::is_same_v<Action, metadata::MetadataSetValuesAction>) {
-                    return QStringLiteral("%1. Set %2 to %3")
-                        .arg(index + 1U)
-                        .arg(field, display_plan_values(typed.values));
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataAddValuesAction>) {
-                    return QStringLiteral("%1. Add %3 to %2")
-                        .arg(index + 1U)
-                        .arg(field, display_plan_values(typed.values));
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataRemoveFieldAction>) {
-                    return typed.match_mode == metadata::MetadataFieldMatchMode::exact_native
-                               ? QStringLiteral("%1. Remove exact native field %2")
-                                     .arg(index + 1U)
-                                     .arg(field)
-                               : QStringLiteral("%1. Remove %2").arg(index + 1U).arg(field);
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataRemoveFieldIfAction>) {
-                    return typed.match_mode == metadata::MetadataFieldMatchMode::exact_native
-                               ? QStringLiteral("%1. Remove exact native field %2 when %3")
-                                     .arg(index + 1U)
-                                     .arg(field, display_utf8(typed.condition))
-                               : QStringLiteral("%1. Remove %2 when %3")
-                                     .arg(index + 1U)
-                                     .arg(field, display_utf8(typed.condition));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataBlocklistFieldsAction>) {
-                    QStringList fields;
-                    for (const auto& name : typed.fields) {
-                        fields.push_back(display_utf8(name));
-                    }
-                    return QStringLiteral("%1. Remove listed fields: %2")
-                        .arg(index + 1U)
-                        .arg(fields.join(QStringLiteral(", ")));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataAllowlistFieldsAction>) {
-                    QStringList fields;
-                    for (const auto& name : typed.fields) {
-                        fields.push_back(display_utf8(name));
-                    }
-                    return QStringLiteral("%1. Keep only listed fields: %2")
-                        .arg(index + 1U)
-                        .arg(fields.join(QStringLiteral(", ")));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataTransformValuesAction>) {
-                    QString verb;
-                    switch (typed.transform) {
-                    case metadata::MetadataValueTransformKind::trim_ascii:
-                        verb = QStringLiteral("Trim each value of");
-                        break;
-                    case metadata::MetadataValueTransformKind::lowercase:
-                        verb = QStringLiteral("Lowercase each value of");
-                        break;
-                    case metadata::MetadataValueTransformKind::uppercase:
-                        verb = QStringLiteral("Uppercase each value of");
-                        break;
-                    case metadata::MetadataValueTransformKind::capitalize_first:
-                        verb = QStringLiteral("Capitalize first character of each value of");
-                        break;
-                    }
-                    return QStringLiteral("%1. %2 %3").arg(index + 1U).arg(verb, field);
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataCopyFieldAction>) {
-                    return QStringLiteral("%1. Copy %3 to %2")
-                        .arg(index + 1U)
-                        .arg(field, display_utf8(typed.source_field));
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataSplitValuesAction>) {
-                    return QStringLiteral("%1. Split %2 by %3")
-                        .arg(index + 1U)
-                        .arg(field, display_utf8(typed.separator));
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataJoinValuesAction>) {
-                    const auto separator = typed.separator.empty()
-                                               ? QStringLiteral("(empty separator)")
-                                               : display_utf8(typed.separator);
-                    return QStringLiteral("%1. Join %2 with %3")
-                        .arg(index + 1U)
-                        .arg(field, separator);
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataRemoveMatchingValuesAction>) {
-                    const auto match = typed.match.empty() ? QStringLiteral("(empty value)")
-                                                           : display_utf8(typed.match);
-                    return QStringLiteral("%1. Remove values of %2 equal to %3")
-                        .arg(index + 1U)
-                        .arg(field, match);
-                } else if constexpr (std::is_same_v<
-                                         Action, metadata::MetadataReplaceMatchingValuesAction>) {
-                    const auto match = typed.match.empty() ? QStringLiteral("(empty value)")
-                                                           : display_utf8(typed.match);
-                    return QStringLiteral("%1. Replace values of %2 equal to %3 with %4")
-                        .arg(index + 1U)
-                        .arg(field, match, display_plan_values(typed.replacement_values));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataNumberGroupedItemsAction>) {
-                    return QStringLiteral("%1. Number %2 from %3 within each %4 group")
-                        .arg(index + 1U)
-                        .arg(field)
-                        .arg(typed.start)
-                        .arg(display_utf8(typed.group_expression));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataNumberSelectedItemsAction>) {
-                    return typed.padding == 0U
-                               ? QStringLiteral("%1. Number %2 from %3 by selected-file order")
-                                     .arg(index + 1U)
-                                     .arg(field)
-                                     .arg(typed.start)
-                               : QStringLiteral("%1. Number %2 from %3 by selected-file order "
-                                                "(minimum width %4)")
-                                     .arg(index + 1U)
-                                     .arg(field)
-                                     .arg(typed.start)
-                                     .arg(typed.padding);
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataKeepFirstCharactersAction>) {
-                    return QStringLiteral("%1. Keep the first %3 characters of each value of %2")
-                        .arg(index + 1U)
-                        .arg(field)
-                        .arg(typed.character_count);
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataFormatValueAction>) {
-                    return QStringLiteral("%1. Format %2 as %3")
-                        .arg(index + 1U)
-                        .arg(field, display_utf8(typed.source));
-                } else if constexpr (std::is_same_v<Action,
-                                                    metadata::MetadataCaptureValuesAction>) {
-                    QString source;
-                    switch (typed.source_kind) {
-                    case metadata::MetadataCaptureSourceKind::filename:
-                        source = QStringLiteral("filename");
-                        break;
-                    case metadata::MetadataCaptureSourceKind::full_path:
-                        source = QStringLiteral("full path");
-                        break;
-                    case metadata::MetadataCaptureSourceKind::formatted:
-                        source =
-                            QStringLiteral("formatted text %1").arg(display_utf8(typed.source));
-                        break;
-                    case metadata::MetadataCaptureSourceKind::field:
-                        source = QStringLiteral("field %1").arg(display_utf8(typed.source));
-                        break;
-                    }
-                    return QStringLiteral("%1. Capture %2 with %3")
-                        .arg(index + 1U)
-                        .arg(source, display_utf8(typed.pattern));
-                }
-                return QString{};
-            },
-            action);
+    void updateInputForKind() {
+        const auto form =
+            ScriptSession::stepForm(currentStepKind(), capture_source_->currentIndex());
+        target_label_->setVisible(form.target);
+        target_->setVisible(form.target);
+        input_label_->setVisible(form.input);
+        input_->setVisible(form.input);
+        input_label_->setText(form.input_label);
+        input_->setPlaceholderText(form.input_placeholder);
+        replacement_label_->setVisible(form.replacement);
+        replacement_->setVisible(form.replacement);
+        number_start_label_->setVisible(form.numbering);
+        number_start_->setVisible(form.numbering);
+        number_padding_label_->setVisible(form.numbering);
+        number_padding_->setVisible(form.numbering);
+        character_count_label_->setVisible(form.characters);
+        character_count_->setVisible(form.characters);
+        capture_source_label_->setVisible(form.capture_source);
+        capture_source_->setVisible(form.capture_source);
+        capture_argument_label_->setVisible(form.capture_argument);
+        capture_argument_->setVisible(form.capture_argument);
+        capture_argument_label_->setText(form.capture_argument_label);
+        capture_argument_->setPlaceholderText(form.capture_argument_placeholder);
     }
 
-    [[nodiscard]] QString capitalizationNoChangeSummary() const {
-        if (!preview_ || actions_.empty()) {
-            return {};
-        }
-        for (const auto& action : actions_) {
-            const auto* transform = std::get_if<metadata::MetadataTransformValuesAction>(&action);
-            if (transform == nullptr ||
-                transform->transform != metadata::MetadataValueTransformKind::capitalize_first) {
-                return {};
-            }
-        }
-
-        const auto present = preview_->unchanged_present_cell_count;
-        const auto missing = preview_->unchanged_missing_cell_count;
-        QString target;
-        if (actions_.size() == 1U) {
-            target = display_utf8(
-                std::get<metadata::MetadataTransformValuesAction>(actions_.front()).target_field);
-        }
-        if (present == 0U) {
-            return target.isEmpty()
-                       ? QStringLiteral("No changes: none of the selected files contains the "
-                                        "targeted fields; missing fields are skipped.")
-                       : QStringLiteral("No changes: none of the selected files contains %1; "
-                                        "missing fields are skipped.")
-                             .arg(target);
-        }
-
-        auto message = target.isEmpty()
-                           ? QStringLiteral("No changes: every existing targeted value already "
-                                            "starts with its uppercase form.")
-                           : QStringLiteral("No changes: every existing %1 value already starts "
-                                            "with its uppercase form.")
-                                 .arg(target);
-        if (missing > 0U) {
-            const auto verb = missing == 1U ? QStringLiteral("was") : QStringLiteral("were");
-            message += QStringLiteral(" %1 targeted %2 %3 missing and %4 skipped.")
-                           .arg(missing)
-                           .arg(missing == 1U ? QStringLiteral("field") : QStringLiteral("fields"))
-                           .arg(verb, verb);
-        }
-        return message;
-    }
-
-    void rebuildSteps(const int selected_row) {
-        steps_->clear();
-        for (std::size_t index = 0U; index < actions_.size(); ++index) {
-            steps_->addItem(actionText(actions_[index], index));
-        }
-        if (!actions_.empty()) {
-            steps_->setCurrentRow(
-                std::clamp(selected_row, 0, static_cast<int>(actions_.size()) - 1));
-        }
-        updateActions();
-    }
-
-    void repopulateSaved(const std::optional<core::StableId>& selected = std::nullopt) {
-        std::ranges::sort(catalog_, [](const auto& left, const auto& right) {
-            if (left.chain.name != right.chain.name) {
-                return left.chain.name < right.chain.name;
-            }
-            return left.id.to_string() < right.id.to_string();
+    void addStep() {
+        const auto before = session_->steps().size();
+        const auto where = session_->addStep(ScriptSession::StepInput{
+            .kind = currentStepKind(),
+            .target = target_->text(),
+            .input = input_->text(),
+            .replacement = replacement_->text(),
+            .number_start = number_start_->value(),
+            .number_padding = number_padding_->value(),
+            .character_count = character_count_->value(),
+            .capture_source = capture_source_->currentIndex(),
+            .capture_argument = capture_argument_->text(),
         });
-        const QSignalBlocker blocker{saved_};
-        saved_->clear();
-        saved_->addItem(QStringLiteral("New script"));
-        auto selected_index = 0;
-        for (std::size_t index = 0U; index < catalog_.size(); ++index) {
-            const auto& entry = catalog_[index];
-            saved_->addItem(display_utf8(entry.chain.name),
-                            QString::fromStdString(entry.id.to_string()));
-            if (selected && entry.id == *selected) {
-                selected_index = static_cast<int>(index) + 1;
-            }
+        if (session_->steps().size() != before) {
+            target_->clear();
+            input_->clear();
+            replacement_->clear();
         }
-        saved_->setCurrentIndex(selected_index);
-        selected_saved_ = selected_index > 0 ? selected : std::nullopt;
-        updateActions();
-    }
-
-    void loadSaved() {
-        if (!store_.load) {
-            catalog_status_->setText(
-                QStringLiteral("Saved scripts are unavailable in this session."));
-            updateActions();
-            return;
-        }
-        catalog_busy_ = true;
-        catalog_status_->setText(QStringLiteral("Loading saved scripts…"));
-        updateActions();
-        const QPointer<MetadataTransformationDialog> self{this};
-        store_.load([self](std::vector<persistence::SavedMetadataTransformationChain> chains,
-                           QString error) mutable {
-            if (!self) {
-                return;
-            }
-            self->catalog_busy_ = false;
-            if (!error.isEmpty()) {
-                self->catalog_status_->setText(
-                    QStringLiteral("Could not load saved scripts · %1").arg(error));
-                self->updateActions();
-                return;
-            }
-            self->catalog_ = std::move(chains);
-            self->repopulateSaved(self->initially_selected_);
-            if (self->initially_selected_) {
-                self->selectSaved(self->saved_->currentIndex());
-                if (self->preview_initially_selected_ && !self->actions_.empty()) {
-                    QTimer::singleShot(0, self, [self] {
-                        if (self) {
-                            self->startPreview();
-                        }
-                    });
-                }
-            }
-            self->catalog_status_->setText(QStringLiteral("%1 saved %2 available")
-                                               .arg(self->catalog_.size())
-                                               .arg(self->catalog_.size() == 1U
-                                                        ? QStringLiteral("script")
-                                                        : QStringLiteral("scripts")));
-        });
-    }
-
-    void selectSaved(const int index) {
-        if (catalog_busy_) {
-            return;
-        }
-        loading_definition_ = true;
-        if (index <= 0 || static_cast<std::size_t>(index) > catalog_.size()) {
-            selected_saved_.reset();
-            name_->setText(QStringLiteral("Untitled script"));
-            actions_.clear();
-            invalidatePreview();
-            rebuildSteps(-1);
-            clean_chain_ = currentChain();
-            refreshRawFromActions();
-            loading_definition_ = false;
-            catalog_status_->setText(QStringLiteral("Editing a new script"));
-            return;
-        }
-        const auto& selected = catalog_[static_cast<std::size_t>(index) - 1U];
-        selected_saved_ = selected.id;
-        name_->setText(display_utf8(selected.chain.name));
-        actions_ = selected.chain.actions;
-        invalidatePreview();
-        rebuildSteps(0);
-        clean_chain_ = currentChain();
-        refreshRawFromActions();
-        loading_definition_ = false;
-        catalog_status_->setText(
-            QStringLiteral("Loaded script · %1").arg(display_utf8(selected.chain.name)));
-    }
-
-    [[nodiscard]] metadata::MetadataTransformationChain currentChain() const {
-        return metadata::MetadataTransformationChain{
-            .schema_version = 1U,
-            .name = encode_utf8(name_->text()),
-            .actions = actions_,
-        };
-    }
-
-    [[nodiscard]] bool hasUnsavedChanges() const {
-        return raw_modified_ || !clean_chain_ || currentChain() != *clean_chain_;
-    }
-
-    [[nodiscard]] static QString interchangeErrorText(const core::Error& error) {
-        auto message = display_utf8(error.message);
-        for (const auto& context : error.context) {
-            if (context.key == "location") {
-                message += QStringLiteral(" · %1").arg(display_utf8(context.value));
-            } else if (context.key == "action") {
-                message += QStringLiteral(" · step %1")
-                               .arg(QString::fromStdString(context.value).toULongLong() + 1U);
-            }
-        }
-        return message;
+        focus(where);
     }
 
     [[nodiscard]] bool confirmDiscardBeforeImport() {
-        if (!hasUnsavedChanges()) {
+        if (!session_->unsaved()) {
             return true;
         }
         QMessageBox confirmation{
@@ -920,534 +584,23 @@ class MetadataTransformationDialog final : public QDialog {
     }
 
     void importNative() {
-        if (catalog_busy_ || !confirmDiscardBeforeImport()) {
+        if (!session_->canImport() || !confirmDiscardBeforeImport()) {
             return;
         }
-        const auto path = QFileDialog::getOpenFileName(
+        session_->importNative(QFileDialog::getOpenFileName(
             this, QStringLiteral("Import Trackknife tagging script"), {},
-            QStringLiteral("Trackknife tagging scripts (*.tbtags.json *.json);;All files (*)"));
-        if (path.isEmpty()) {
-            return;
-        }
-
-        catalog_busy_ = true;
-        catalog_status_->setText(QStringLiteral("Importing native tagging script…"));
-        updateActions();
-        auto* watcher = new QFutureWatcher<std::shared_ptr<NativeImportResult>>(this);
-        const QPointer<MetadataTransformationDialog> self{this};
-        connect(watcher, &QFutureWatcherBase::finished, this, [self, watcher] {
-            const auto result = watcher->result();
-            watcher->deleteLater();
-            if (!self) {
-                return;
-            }
-            self->catalog_busy_ = false;
-            if (!result || !*result) {
-                self->catalog_status_->setText(
-                    QStringLiteral("Could not import native tagging script · %1")
-                        .arg(result ? interchangeErrorText(result->error())
-                                    : QStringLiteral("The import task returned no result")));
-                self->updateActions();
-                return;
-            }
-
-            auto chain = std::move(**result);
-            self->loading_definition_ = true;
-            self->selected_saved_.reset();
-            {
-                const QSignalBlocker blocker{self->saved_};
-                self->saved_->setCurrentIndex(0);
-            }
-            self->name_->setText(display_utf8(chain.name));
-            self->actions_ = std::move(chain.actions);
-            self->clearPreview();
-            self->rebuildSteps(0);
-            self->refreshRawFromActions();
-            self->clean_chain_.reset();
-            self->loading_definition_ = false;
-            self->invalidatePreview();
-            self->catalog_status_->setText(
-                QStringLiteral("Imported · review, preview, and Save to keep this script"));
-            self->updateActions();
-        });
-        watcher->setFuture(QtConcurrent::run([path] {
-            return std::make_shared<NativeImportResult>(
-                ui::loadMetadataTransformationChainFile(path));
-        }));
+            QStringLiteral("Trackknife tagging scripts (*.tbtags.json *.json);;All files (*)")));
     }
 
     void exportNative() {
-        if (catalog_busy_ || actions_.empty() || (raw_modified_ && !raw_valid_)) {
+        if (!session_->canExport()) {
             return;
         }
-        auto suggested_name = name_->text().trimmed();
-        suggested_name.replace(QChar{'/'}, QChar{'_'});
-        if (suggested_name.isEmpty()) {
-            suggested_name = QStringLiteral("tagging-script");
-        }
-        suggested_name += QStringLiteral(".tbtags.json");
-        const auto path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Export Trackknife tagging script"), suggested_name,
+        session_->exportNative(QFileDialog::getSaveFileName(
+            this, QStringLiteral("Export Trackknife tagging script"),
+            session_->suggestedExportName(),
             QStringLiteral("Trackknife tagging scripts (*.tbtags.json);;JSON files (*.json);;All "
-                           "files (*)"));
-        if (path.isEmpty()) {
-            return;
-        }
-
-        catalog_busy_ = true;
-        catalog_status_->setText(QStringLiteral("Exporting native tagging script…"));
-        updateActions();
-        auto* watcher = new QFutureWatcher<std::shared_ptr<NativeExportResult>>(this);
-        const QPointer<MetadataTransformationDialog> self{this};
-        connect(watcher, &QFutureWatcherBase::finished, this, [self, watcher] {
-            const auto result = watcher->result();
-            watcher->deleteLater();
-            if (!self) {
-                return;
-            }
-            self->catalog_busy_ = false;
-            if (!result || !*result) {
-                self->catalog_status_->setText(
-                    QStringLiteral("Could not export native tagging script · %1")
-                        .arg(result ? interchangeErrorText(result->error())
-                                    : QStringLiteral("The export task returned no result")));
-            } else {
-                self->catalog_status_->setText(QStringLiteral("Native tagging script exported"));
-            }
-            self->updateActions();
-        });
-        auto chain = currentChain();
-        watcher->setFuture(QtConcurrent::run([path, chain = std::move(chain)] {
-            return std::make_shared<NativeExportResult>(
-                ui::saveMetadataTransformationChainFile(path, chain));
-        }));
-    }
-
-    void refreshRawFromActions() {
-        const QSignalBlocker blocker{raw_source_};
-        raw_modified_ = false;
-        raw_valid_ = false;
-        if (actions_.empty()) {
-            raw_source_->setReadOnly(false);
-            raw_source_->clear();
-            raw_diagnostics_->setPlainText(
-                QStringLiteral("Enter cleanup source to generate typed rules."));
-            updateActions();
-            return;
-        }
-
-        const auto exported = metadata::export_metadata_rule_script(actions_);
-        if (!exported) {
-            raw_source_->clear();
-            raw_source_->setReadOnly(true);
-            auto message = QStringLiteral("Raw mode is unavailable: %1")
-                               .arg(display_utf8(exported.error().message));
-            for (const auto& context : exported.error().context) {
-                if (context.key == "action") {
-                    message += QStringLiteral(" · typed step %1")
-                                   .arg(QString::fromStdString(context.value).toULongLong() + 1U);
-                }
-            }
-            raw_diagnostics_->setPlainText(message);
-            updateActions();
-            return;
-        }
-
-        raw_source_->setReadOnly(false);
-        raw_source_->setPlainText(display_utf8(*exported));
-        raw_import_ = metadata::import_metadata_rule_script(*exported);
-        raw_valid_ = !raw_import_.has_errors();
-        raw_diagnostics_->setPlainText(
-            QStringLiteral("Ready · %1 typed rules · canonical source is regenerated after "
-                           "structured edits")
-                .arg(actions_.size()));
-        updateActions();
-    }
-
-    void updateRawTranslation() {
-        if (raw_source_->isReadOnly()) {
-            return;
-        }
-        raw_modified_ = true;
-        raw_import_ =
-            metadata::import_metadata_rule_script(encode_utf8(raw_source_->toPlainText()));
-        QStringList diagnostics;
-        for (const auto& diagnostic : raw_import_.diagnostics) {
-            const auto severity =
-                diagnostic.severity == metadata::MetadataRuleScriptDiagnosticSeverity::error
-                    ? QStringLiteral("Error")
-                    : QStringLiteral("Warning");
-            diagnostics.push_back(QStringLiteral("%1 · line %2, column %3 · %4")
-                                      .arg(severity)
-                                      .arg(diagnostic.line)
-                                      .arg(diagnostic.column)
-                                      .arg(display_utf8(diagnostic.message)));
-        }
-        raw_valid_ = !raw_import_.has_errors() && !raw_import_.actions.empty();
-        if (raw_valid_) {
-            actions_ = raw_import_.actions;
-            diagnostics.prepend(
-                QStringLiteral("Ready · %1 generated typed rules").arg(actions_.size()));
-            invalidatePreview();
-            rebuildSteps(static_cast<int>(actions_.size()) - 1);
-        } else {
-            invalidatePreview();
-            updateActions();
-        }
-        raw_diagnostics_->setPlainText(diagnostics.join(QChar{'\n'}));
-        catalog_status_->setText(
-            raw_valid_
-                ? QStringLiteral("Unsaved changes · Save to keep them")
-                : QStringLiteral(
-                      "Raw script has errors · the preview and Save wait until they are fixed"));
-        updateActions();
-    }
-
-    void saveCurrent(const bool as_new) {
-        if (catalog_busy_ || !store_.save || actions_.empty()) {
-            return;
-        }
-        if (name_->text().trimmed().isEmpty()) {
-            catalog_status_->setText(QStringLiteral("Enter a script name before saving."));
-            name_->setFocus(Qt::OtherFocusReason);
-            return;
-        }
-        auto chain = currentChain();
-        if (const auto valid = metadata::validate_metadata_transformation_chain(chain); !valid) {
-            catalog_status_->setText(
-                QStringLiteral("Cannot save script · %1").arg(display_utf8(valid.error().message)));
-            return;
-        }
-        persistence::SavedMetadataTransformationChain saved_chain{
-            .id = !as_new && selected_saved_ ? *selected_saved_ : core::StableId::random(),
-            .chain = std::move(chain),
-            .automatic = false,
-        };
-        if (!as_new && selected_saved_) {
-            const auto existing = std::ranges::find(
-                catalog_, *selected_saved_, &persistence::SavedMetadataTransformationChain::id);
-            if (existing != catalog_.end()) {
-                saved_chain.automatic = existing->automatic;
-            }
-        }
-        catalog_busy_ = true;
-        catalog_status_->setText(QStringLiteral("Saving…"));
-        updateActions();
-        const QPointer<MetadataTransformationDialog> self{this};
-        auto retained_chain = saved_chain;
-        store_.save(std::move(saved_chain),
-                    [self, saved_chain = std::move(retained_chain)](QString error) mutable {
-                        if (!self) {
-                            return;
-                        }
-                        self->catalog_busy_ = false;
-                        if (!error.isEmpty()) {
-                            self->catalog_status_->setText(
-                                QStringLiteral("Could not save script · %1").arg(error));
-                            self->updateActions();
-                            return;
-                        }
-                        const auto found =
-                            std::ranges::find(self->catalog_, saved_chain.id,
-                                              &persistence::SavedMetadataTransformationChain::id);
-                        if (found == self->catalog_.end()) {
-                            self->catalog_.push_back(saved_chain);
-                        } else {
-                            *found = saved_chain;
-                        }
-                        self->repopulateSaved(saved_chain.id);
-                        self->clean_chain_ = saved_chain.chain;
-                        self->raw_modified_ = false;
-                        self->updateActions();
-                        self->catalog_status_->setText(
-                            QStringLiteral("Saved · %1").arg(display_utf8(saved_chain.chain.name)));
-                    });
-    }
-
-    void deleteSaved() {
-        if (catalog_busy_ || !store_.remove || !selected_saved_) {
-            return;
-        }
-        const auto id = *selected_saved_;
-        catalog_busy_ = true;
-        catalog_status_->setText(QStringLiteral("Deleting saved script…"));
-        updateActions();
-        const QPointer<MetadataTransformationDialog> self{this};
-        store_.remove(id, [self, id](QString error) {
-            if (!self) {
-                return;
-            }
-            self->catalog_busy_ = false;
-            if (!error.isEmpty()) {
-                self->catalog_status_->setText(
-                    QStringLiteral("Could not delete saved script · %1").arg(error));
-                self->updateActions();
-                return;
-            }
-            std::erase_if(self->catalog_, [id](const auto& entry) { return entry.id == id; });
-            self->selected_saved_.reset();
-            self->repopulateSaved();
-            self->name_->setText(QStringLiteral("Untitled script"));
-            self->actions_.clear();
-            self->invalidatePreview();
-            self->rebuildSteps(-1);
-            self->clean_chain_ = self->currentChain();
-            self->refreshRawFromActions();
-            self->catalog_status_->setText(QStringLiteral("Saved script deleted"));
-        });
-    }
-
-    // The action kind is stored as item data; header rows have none and are
-    // not selectable.
-    [[nodiscard]] int currentStepKind() const {
-        const auto kind_data = kind_->currentData();
-        return kind_data.isValid() ? kind_data.toInt() : -1;
-    }
-
-    void updateInputForKind() {
-        const auto kind = currentStepKind();
-        const auto captures = kind == 16;
-        const auto filters_fields = kind == 18 || kind == 19;
-        target_label_->setVisible(!captures && !filters_fields);
-        target_->setVisible(!captures && !filters_fields);
-        const auto has_input = kind == 0 || kind == 1 || (kind >= 7 && kind <= 12) || kind == 15 ||
-                               captures || filters_fields;
-        input_label_->setVisible(has_input);
-        input_->setVisible(has_input);
-        const auto has_replacement = kind == 12;
-        replacement_label_->setVisible(has_replacement);
-        replacement_->setVisible(has_replacement);
-        const auto has_numbering = kind == 13;
-        number_start_label_->setVisible(has_numbering);
-        number_start_->setVisible(has_numbering);
-        number_padding_label_->setVisible(has_numbering);
-        number_padding_->setVisible(has_numbering);
-        const auto keeps_first = kind == 14;
-        character_count_label_->setVisible(keeps_first);
-        character_count_->setVisible(keeps_first);
-        capture_source_label_->setVisible(captures);
-        capture_source_->setVisible(captures);
-        const auto has_capture_argument = captures && capture_source_->currentIndex() >= 2;
-        capture_argument_label_->setVisible(has_capture_argument);
-        capture_argument_->setVisible(has_capture_argument);
-        if (kind == 7) {
-            input_label_->setText(QStringLiteral("Source field:"));
-            input_->setPlaceholderText(QStringLiteral("For example: Artist"));
-        } else if (kind == 8 || kind == 9) {
-            input_label_->setText(QStringLiteral("Separator:"));
-            input_->setPlaceholderText(kind == 8 ? QStringLiteral("Required exact separator")
-                                                 : QStringLiteral("May be empty"));
-        } else if (kind == 10) {
-            input_label_->setText(QStringLiteral("Expression:"));
-            input_->setPlaceholderText(QStringLiteral("For example: %artist% — %title%"));
-        } else if (kind == 11 || kind == 12) {
-            input_label_->setText(QStringLiteral("Exact value:"));
-            input_->setPlaceholderText(QStringLiteral("Case-sensitive; may be empty"));
-        } else if (kind == 15) {
-            input_label_->setText(QStringLiteral("Condition:"));
-            input_->setPlaceholderText(QStringLiteral("For example: $not(%totaldiscs%)"));
-        } else if (captures) {
-            input_label_->setText(QStringLiteral("Capture pattern:"));
-            input_->setPlaceholderText(QStringLiteral("For example: %tracknumber%. %title%"));
-            const auto from_field = capture_source_->currentIndex() == 3;
-            capture_argument_label_->setText(from_field ? QStringLiteral("Source field:")
-                                                        : QStringLiteral("Source expression:"));
-            capture_argument_->setPlaceholderText(
-                from_field ? QStringLiteral("For example: Comment")
-                           : QStringLiteral("For example: %artist% — %title%"));
-        } else if (filters_fields) {
-            input_label_->setText(QStringLiteral("Fields:"));
-            input_->setPlaceholderText(
-                QStringLiteral("Comma-separated, for example: Comment, Encoder"));
-        } else {
-            input_label_->setText(QStringLiteral("Value:"));
-            input_->setPlaceholderText(QString{});
-        }
-    }
-
-    void addStep() {
-        const auto kind = currentStepKind();
-        const auto field = target_->text().trimmed();
-        if (kind != 16 && kind != 18 && kind != 19 && field.isEmpty()) {
-            summary_->setText(QStringLiteral("Enter a target field before adding the step."));
-            target_->setFocus(Qt::OtherFocusReason);
-            return;
-        }
-        const auto target = encode_utf8(field);
-        switch (kind) {
-        case 0:
-            actions_.push_back(metadata::MetadataSetValuesAction{
-                .target_field = target, .values = {encode_utf8(input_->text())}});
-            break;
-        case 1:
-            actions_.push_back(metadata::MetadataAddValuesAction{
-                .target_field = target, .values = {encode_utf8(input_->text())}});
-            break;
-        case 2:
-            actions_.push_back(metadata::MetadataRemoveFieldAction{.target_field = target});
-            break;
-        case 3:
-            actions_.push_back(metadata::MetadataTransformValuesAction{
-                .target_field = target,
-                .transform = metadata::MetadataValueTransformKind::trim_ascii});
-            break;
-        case 4:
-            actions_.push_back(metadata::MetadataTransformValuesAction{
-                .target_field = target,
-                .transform = metadata::MetadataValueTransformKind::lowercase});
-            break;
-        case 5:
-            actions_.push_back(metadata::MetadataTransformValuesAction{
-                .target_field = target,
-                .transform = metadata::MetadataValueTransformKind::uppercase});
-            break;
-        case 6:
-            actions_.push_back(metadata::MetadataTransformValuesAction{
-                .target_field = target,
-                .transform = metadata::MetadataValueTransformKind::capitalize_first});
-            break;
-        case 7: {
-            const auto source = input_->text().trimmed();
-            if (source.isEmpty()) {
-                summary_->setText(QStringLiteral("Enter a source field for the copy step."));
-                input_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            actions_.push_back(metadata::MetadataCopyFieldAction{
-                .target_field = target, .source_field = encode_utf8(source)});
-            break;
-        }
-        case 8:
-            if (input_->text().isEmpty()) {
-                summary_->setText(QStringLiteral("Split requires a non-empty exact separator."));
-                input_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            actions_.push_back(metadata::MetadataSplitValuesAction{
-                .target_field = target, .separator = encode_utf8(input_->text())});
-            break;
-        case 9:
-            actions_.push_back(metadata::MetadataJoinValuesAction{
-                .target_field = target, .separator = encode_utf8(input_->text())});
-            break;
-        case 10:
-            actions_.push_back(metadata::MetadataFormatValueAction{
-                .target_field = target, .dialect = {}, .source = encode_utf8(input_->text())});
-            break;
-        case 11:
-            actions_.push_back(metadata::MetadataRemoveMatchingValuesAction{
-                .target_field = target, .match = encode_utf8(input_->text())});
-            break;
-        case 12:
-            actions_.push_back(metadata::MetadataReplaceMatchingValuesAction{
-                .target_field = target,
-                .match = encode_utf8(input_->text()),
-                .replacement_values = {encode_utf8(replacement_->text())},
-            });
-            break;
-        case 13:
-            actions_.push_back(metadata::MetadataNumberSelectedItemsAction{
-                .target_field = target,
-                .start = static_cast<std::uint32_t>(number_start_->value()),
-                .padding = static_cast<std::uint32_t>(number_padding_->value()),
-            });
-            break;
-        case 14:
-            actions_.push_back(metadata::MetadataKeepFirstCharactersAction{
-                .target_field = target,
-                .character_count = static_cast<std::uint32_t>(character_count_->value()),
-            });
-            break;
-        case 15:
-            if (input_->text().trimmed().isEmpty()) {
-                summary_->setText(
-                    QStringLiteral("Conditional removal requires a non-empty condition."));
-                input_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            actions_.push_back(metadata::MetadataRemoveFieldIfAction{
-                .target_field = target,
-                .dialect = {},
-                .condition = encode_utf8(input_->text()),
-            });
-            break;
-        case 16: {
-            if (input_->text().isEmpty()) {
-                summary_->setText(QStringLiteral("Enter a tkcapture-1 pattern."));
-                input_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            const auto source_kind =
-                static_cast<metadata::MetadataCaptureSourceKind>(capture_source_->currentIndex());
-            const auto needs_argument =
-                source_kind == metadata::MetadataCaptureSourceKind::formatted ||
-                source_kind == metadata::MetadataCaptureSourceKind::field;
-            if (needs_argument && capture_argument_->text().trimmed().isEmpty()) {
-                summary_->setText(QStringLiteral("Enter the capture source argument."));
-                capture_argument_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            const auto source = source_kind == metadata::MetadataCaptureSourceKind::field
-                                    ? capture_argument_->text().trimmed()
-                                    : capture_argument_->text();
-            actions_.push_back(metadata::MetadataCaptureValuesAction{
-                .dialect = {},
-                .source_kind = source_kind,
-                .source = needs_argument ? encode_utf8(source) : std::string{},
-                .pattern = encode_utf8(input_->text()),
-            });
-            break;
-        }
-        case 18:
-        case 19: {
-            std::vector<std::string> fields;
-            for (const auto& part : input_->text().split(QChar{','}, Qt::SkipEmptyParts)) {
-                const auto trimmed = part.trimmed();
-                if (!trimmed.isEmpty()) {
-                    fields.push_back(encode_utf8(trimmed));
-                }
-            }
-            if (fields.empty()) {
-                summary_->setText(QStringLiteral("Enter at least one comma-separated field name."));
-                input_->setFocus(Qt::OtherFocusReason);
-                return;
-            }
-            if (kind == 18) {
-                actions_.push_back(
-                    metadata::MetadataBlocklistFieldsAction{.fields = std::move(fields)});
-            } else {
-                actions_.push_back(
-                    metadata::MetadataAllowlistFieldsAction{.fields = std::move(fields)});
-            }
-            break;
-        }
-        default:
-            return;
-        }
-        invalidatePreview();
-        rebuildSteps(static_cast<int>(actions_.size()) - 1);
-        refreshRawFromActions();
-        catalog_status_->setText(QStringLiteral("Unsaved changes · Save to keep them"));
-        target_->clear();
-        input_->clear();
-        replacement_->clear();
-        if (kind == 16) {
-            input_->setFocus(Qt::OtherFocusReason);
-        } else {
-            target_->setFocus(Qt::OtherFocusReason);
-        }
-    }
-
-    void removeStep() {
-        const auto row = steps_->currentRow();
-        if (row < 0 || static_cast<std::size_t>(row) >= actions_.size()) {
-            return;
-        }
-        actions_.erase(actions_.begin() + row);
-        invalidatePreview();
-        rebuildSteps(std::min(row, static_cast<int>(actions_.size()) - 1));
-        refreshRawFromActions();
-        catalog_status_->setText(QStringLiteral("Unsaved changes · Save to keep them"));
+                           "files (*)")));
     }
 
     void importRules() {
@@ -1455,224 +608,52 @@ class MetadataTransformationDialog final : public QDialog {
         if (dialog.exec() != QDialog::Accepted) {
             return;
         }
-        const auto raw_source = dialog.source();
-        auto imported = dialog.takeActions();
-        if (dialog.importMode() == MetadataRuleScriptImportDialog::ImportMode::append) {
-            if (actions_.size() > 256U || imported.size() > 256U - actions_.size()) {
-                summary_->setText(
-                    QStringLiteral("Appending those rules would exceed the 256-step limit."));
-                return;
-            }
-            actions_.insert(actions_.end(), std::make_move_iterator(imported.begin()),
-                            std::make_move_iterator(imported.end()));
-        } else {
-            actions_ = std::move(imported);
-        }
-        invalidatePreview();
-        rebuildSteps(static_cast<int>(actions_.size()) - 1);
-        if (dialog.importMode() == MetadataRuleScriptImportDialog::ImportMode::replace) {
-            const QSignalBlocker blocker{raw_source_};
-            raw_source_->setReadOnly(false);
-            raw_source_->setPlainText(display_utf8(raw_source));
-            raw_import_ = metadata::import_metadata_rule_script(raw_source);
-            raw_valid_ = !raw_import_.has_errors() && !raw_import_.actions.empty();
-            raw_modified_ = true;
-            raw_diagnostics_->setPlainText(
-                QStringLiteral("Ready · %1 generated typed rules · unsaved").arg(actions_.size()));
-        } else {
-            refreshRawFromActions();
-        }
-        catalog_status_->setText(
-            QStringLiteral("Unsaved · generated %1 typed rules from the pasted script. Review, "
-                           "preview, then click Save to keep them.")
-                .arg(actions_.size()));
-        updateActions();
+        session_->importRuleScript(dialog.sourceText(),
+                                   dialog.importMode() ==
+                                       MetadataRuleScriptImportDialog::ImportMode::append);
     }
 
-    void moveStep(const int offset) {
+    void sync() {
+        const auto& session = *session_;
         const auto row = steps_->currentRow();
-        const auto destination = row + offset;
-        if (row < 0 || destination < 0 ||
-            static_cast<std::size_t>(destination) >= actions_.size()) {
-            return;
+        const auto editing = session.editing();
+        setWindowModified(session.unsaved());
+        if (name_->text() != session.name()) {
+            const QSignalBlocker blocker{name_};
+            name_->setText(session.name());
         }
-        std::swap(actions_[static_cast<std::size_t>(row)],
-                  actions_[static_cast<std::size_t>(destination)]);
-        invalidatePreview();
-        rebuildSteps(destination);
-        refreshRawFromActions();
-        catalog_status_->setText(QStringLiteral("Unsaved changes · Save to keep them"));
+        summary_->setText(session.summary());
+        catalog_status_->setText(session.catalogStatus());
+        raw_diagnostics_->setPlainText(session.rawDiagnostics());
+        save_->setText(session.saveText());
+        saved_->setEnabled(session.canSelectSaved());
+        save_->setEnabled(session.canSave());
+        save_as_->setEnabled(session.canSaveAsNew());
+        delete_saved_->setEnabled(session.canDelete());
+        import_native_->setEnabled(session.canImport());
+        export_native_->setEnabled(session.canExport());
+        name_->setEnabled(editing);
+        kind_->setEnabled(editing);
+        target_->setEnabled(editing);
+        input_->setEnabled(editing);
+        replacement_->setEnabled(editing);
+        number_start_->setEnabled(editing);
+        number_padding_->setEnabled(editing);
+        character_count_->setEnabled(editing);
+        capture_source_->setEnabled(editing);
+        capture_argument_->setEnabled(editing);
+        raw_source_->setEnabled(editing);
+        import_->setEnabled(editing);
+        add_->setEnabled(session.canAdd());
+        steps_->setEnabled(editing);
+        remove_->setEnabled(session.canRemove(row));
+        up_->setEnabled(session.canMoveUp(row));
+        down_->setEnabled(session.canMoveDown(row));
+        stage_button_->setEnabled(session.canStage());
     }
 
-    void clearPreview() {
-        preview_.reset();
-        if (auto* model = table_->model()) {
-            table_->setModel(nullptr);
-            model->deleteLater();
-        }
-        stage_button_->setEnabled(false);
-    }
-
-    // Invalidation schedules a fresh debounced preview whenever the current
-    // script could produce one, so the preview pane tracks edits by itself.
-    void invalidatePreview() {
-        clearPreview();
-        if (!planning_) {
-            summary_->setText(actions_.empty() ? QStringLiteral("Add a step to see a preview.")
-                                               : QStringLiteral("Updating preview…"));
-        }
-        if (!actions_.empty() && (!raw_modified_ || raw_valid_)) {
-            preview_timer_->start();
-        } else {
-            preview_timer_->stop();
-        }
-    }
-
-    void updateActions() {
-        const auto row = steps_->currentRow();
-        const auto valid = row >= 0 && static_cast<std::size_t>(row) < actions_.size();
-        const auto editing_enabled = !planning_ && !catalog_busy_;
-        const auto raw_ready = !raw_modified_ || raw_valid_;
-        const auto unsaved = hasUnsavedChanges();
-        setWindowModified(unsaved);
-        save_->setText(selected_saved_ ? QStringLiteral("Save changes") : QStringLiteral("Save"));
-        saved_->setEnabled(editing_enabled && static_cast<bool>(store_.load) && !unsaved);
-        save_->setEnabled(editing_enabled && static_cast<bool>(store_.save) && unsaved &&
-                          raw_ready && !actions_.empty() && !name_->text().trimmed().isEmpty());
-        save_as_->setEnabled(editing_enabled && static_cast<bool>(store_.save) && raw_ready &&
-                             !actions_.empty() && !name_->text().trimmed().isEmpty());
-        delete_saved_->setEnabled(editing_enabled && static_cast<bool>(store_.remove) &&
-                                  selected_saved_.has_value());
-        import_native_->setEnabled(editing_enabled);
-        export_native_->setEnabled(editing_enabled && raw_ready && !actions_.empty() &&
-                                   !name_->text().trimmed().isEmpty());
-        name_->setEnabled(editing_enabled);
-        kind_->setEnabled(editing_enabled);
-        target_->setEnabled(editing_enabled);
-        input_->setEnabled(editing_enabled);
-        replacement_->setEnabled(editing_enabled);
-        number_start_->setEnabled(editing_enabled);
-        number_padding_->setEnabled(editing_enabled);
-        character_count_->setEnabled(editing_enabled);
-        capture_source_->setEnabled(editing_enabled);
-        capture_argument_->setEnabled(editing_enabled);
-        raw_source_->setEnabled(editing_enabled);
-        import_->setEnabled(editing_enabled);
-        add_->setEnabled(editing_enabled && actions_.size() < 256U);
-        steps_->setEnabled(editing_enabled);
-        remove_->setEnabled(editing_enabled && valid);
-        up_->setEnabled(editing_enabled && valid && row > 0);
-        down_->setEnabled(editing_enabled && valid && row + 1 < steps_->count());
-        stage_button_->setEnabled(editing_enabled && preview_ != nullptr &&
-                                  !preview_->cells.empty());
-    }
-
-    void startPreview() {
-        if (actions_.empty() || (raw_modified_ && !raw_valid_)) {
-            return;
-        }
-        if (planning_) {
-            preview_timer_->start();
-            return;
-        }
-        clearPreview();
-        cancellation_.request_cancellation();
-        cancellation_ = core::CancellationSource{};
-        auto chain = currentChain();
-        const auto selection = selection_;
-        const auto draft = draft_;
-        const auto items = item_indexes_;
-        const auto cancellation = cancellation_.token();
-        planning_ = true;
-        summary_->setText(QStringLiteral("Updating preview…"));
-        updateActions();
-        watcher_.setFuture(QtConcurrent::run(
-            [selection, draft, items, chain = std::move(chain), cancellation]() mutable {
-                return std::make_shared<PreviewResult>(metadata::plan_metadata_transformation(
-                    *selection, draft, items, std::move(chain), cancellation));
-            }));
-    }
-
-    void finishPreview() {
-        planning_ = false;
-        if (close_requested_) {
-            close();
-            return;
-        }
-        const auto result = watcher_.result();
-        if (!result || !*result) {
-            auto message = result ? display_utf8(result->error().message)
-                                  : QStringLiteral("The preview task returned no result");
-            if (result) {
-                for (const auto& entry : result->error().context) {
-                    if (entry.key == "action") {
-                        message += QStringLiteral(" · step %1")
-                                       .arg(QString::fromStdString(entry.value).toULongLong() + 1U);
-                    } else if (entry.key == "item") {
-                        message += QStringLiteral(" · file row %1")
-                                       .arg(QString::fromStdString(entry.value).toULongLong() + 1U);
-                    }
-                }
-            }
-            summary_->setText(QStringLiteral("Transformation preview failed · %1").arg(message));
-            updateActions();
-            return;
-        }
-        preview_ =
-            std::make_shared<const metadata::MetadataTransformationPreview>(std::move(**result));
-        auto* old_model = table_->model();
-        table_->setModel(createMetadataTransformationPreviewModel(preview_, track_labels_, table_));
-        if (old_model != nullptr) {
-            old_model->deleteLater();
-        }
-        const auto capitalization_summary = capitalizationNoChangeSummary();
-        summary_->setText(
-            preview_->cells.empty()
-                ? (capitalization_summary.isEmpty()
-                       ? QStringLiteral("The script produces no changes for the selected files.")
-                       : capitalization_summary)
-                : QStringLiteral("%1 final cell %2 across %3 selected %4 · add to draft when "
-                                 "ready")
-                      .arg(preview_->cells.size())
-                      .arg(preview_->cells.size() == 1U ? QStringLiteral("change")
-                                                        : QStringLiteral("changes"))
-                      .arg(preview_->changed_item_count)
-                      .arg(preview_->changed_item_count == 1U ? QStringLiteral("file")
-                                                              : QStringLiteral("files")));
-        updateActions();
-    }
-
-    void stagePreview() {
-        if (!preview_ || preview_->cells.empty() || !stage_) {
-            return;
-        }
-        if (!stage_(*preview_)) {
-            invalidatePreview();
-            summary_->setText(QStringLiteral(
-                "The preview is stale or could not fit in the draft. It will refresh "
-                "automatically."));
-            return;
-        }
-        accept();
-    }
-
-    QFutureWatcher<std::shared_ptr<PreviewResult>> watcher_;
-    std::shared_ptr<const metadata::StagedMetadataSelection> selection_;
-    metadata::StagedMetadataPatchSet draft_;
-    std::vector<std::size_t> item_indexes_;
-    QStringList track_labels_;
-    StageCallback stage_;
-    MetadataTransformationStore store_;
-    std::optional<core::StableId> initially_selected_;
-    bool preview_initially_selected_{false};
+    ScriptSession* session_;
     MetadataDialogLayoutStore layout_store_;
-    std::vector<persistence::SavedMetadataTransformationChain> catalog_;
-    std::optional<core::StableId> selected_saved_;
-    std::vector<metadata::MetadataTransformationAction> actions_;
-    std::optional<metadata::MetadataTransformationChain> clean_chain_;
-    metadata::MetadataRuleScriptImportResult raw_import_;
-    std::shared_ptr<const metadata::MetadataTransformationPreview> preview_;
-    core::CancellationSource cancellation_;
     QComboBox* saved_{nullptr};
     QPushButton* save_{nullptr};
     QPushButton* save_as_{nullptr};
@@ -1685,10 +666,8 @@ class MetadataTransformationDialog final : public QDialog {
     QComboBox* kind_{nullptr};
     QLabel* target_label_{nullptr};
     QLineEdit* target_{nullptr};
-    std::vector<metadata::MetadataFieldSuggestionCandidate> target_field_candidates_;
     QStringListModel* target_completion_model_{nullptr};
     QCompleter* target_completer_{nullptr};
-    std::vector<metadata::MetadataFieldSuggestionCandidate> fields_candidates_;
     QStringListModel* fields_completion_model_{nullptr};
     QCompleter* fields_completer_{nullptr};
     QLabel* input_label_{nullptr};
@@ -1713,18 +692,11 @@ class MetadataTransformationDialog final : public QDialog {
     QPushButton* remove_{nullptr};
     QPushButton* up_{nullptr};
     QPushButton* down_{nullptr};
-    QTimer* preview_timer_{nullptr};
     QLabel* summary_{nullptr};
     QTreeView* table_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
     QPushButton* stage_button_{nullptr};
     QSplitter* content_splitter_{nullptr};
-    bool planning_{false};
-    bool catalog_busy_{false};
-    bool close_requested_{false};
-    bool loading_definition_{false};
-    bool raw_modified_{false};
-    bool raw_valid_{false};
     bool layout_state_saved_{false};
 };
 
@@ -1738,9 +710,10 @@ QDialog* createMetadataTransformationDialog(
     std::optional<core::StableId> initially_selected, const bool preview_initially_selected,
     MetadataDialogLayoutStore layout_store) {
     return new MetadataTransformationDialog(
-        std::move(selection), std::move(draft), std::move(item_indexes), std::move(track_labels),
-        std::move(stage), std::move(store), parent, initially_selected, preview_initially_selected,
-        std::move(layout_store));
+        new ScriptSession(std::move(selection), std::move(draft), std::move(item_indexes),
+                          std::move(track_labels), std::move(stage), std::move(store),
+                          initially_selected, preview_initially_selected),
+        parent, std::move(layout_store));
 }
 
 } // namespace trackknife::bench

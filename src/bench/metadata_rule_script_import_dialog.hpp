@@ -26,14 +26,12 @@ class MetadataRuleScriptImportDialog final : public QDialog {
 
     explicit MetadataRuleScriptImportDialog(QWidget* parent);
 
-    [[nodiscard]] std::vector<metadata::MetadataTransformationAction> takeActions();
     [[nodiscard]] ImportMode importMode() const noexcept;
-    [[nodiscard]] std::string source() const;
+    [[nodiscard]] QString sourceText() const;
 
   private:
     void updateTranslation();
 
-    metadata::MetadataRuleScriptImportResult result_;
     ImportMode mode_{ImportMode::replace};
     QPlainTextEdit* source_{nullptr};
     QPlainTextEdit* diagnostics_{nullptr};

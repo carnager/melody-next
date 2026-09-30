@@ -38,6 +38,8 @@ ApplicationWindow {
             popups[name].popup(window.width / 2, window.height / 3);
         else if (name === "editbar")
             editBar.openSort();
+        else if (name === "folders")
+            Tk.selectSource(0, false);
     }
     function closeTab(index) {
         const tab = Tk.tabAt(index);
@@ -464,6 +466,10 @@ ApplicationWindow {
         onActivated: Tk.queueSelection(false)
     }
     Shortcut {
+        sequence: "Ctrl+L"
+        onActivated: Tk.focusLibrarySearch()
+    }
+    Shortcut {
         sequence: "Ctrl+Shift+U"
         onActivated: upNextSettings.visible = !upNextSettings.visible
     }
@@ -473,18 +479,10 @@ ApplicationWindow {
         orientation: Qt.Horizontal
 
         // bench-panel-folders: Sources.
-        Pane {
+        SourcesPanel {
             SplitView.minimumWidth: 160
             SplitView.preferredWidth: (window.width - (upNextSettings.visible ? upNextSettings.width : 0)) / 4
-            padding: 0
-            Label {
-                anchors.centerIn: parent
-                width: parent.width - 24
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                text: "Folders and the library come next in the Qt Quick window."
-                color: palette.placeholderText
-            }
+            onNotYet: what => window.notYet(what)
         }
 
         // bench-track-area: the tabs over the list on show.

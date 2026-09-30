@@ -65,12 +65,12 @@ Menu {
     MenuItem {
         objectName: "action-local-locate-artist"
         text: "Locate artist"
-        onTriggered: contextMenu.notYet("The library")
+        onTriggered: Tk.locate(false)
     }
     MenuItem {
         objectName: "action-local-locate-album"
         text: "Locate album"
-        onTriggered: contextMenu.notYet("The library")
+        onTriggered: Tk.locate(true)
     }
     MenuSeparator {}
     Menu {

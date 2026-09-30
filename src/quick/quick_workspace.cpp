@@ -5,6 +5,7 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/desktop_notifier.hpp"
 #include "bench/mpris_service.hpp"
+#include "workspace/sources.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
@@ -12,6 +13,7 @@
 #include <QJsonObject>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QGuiApplication>
 #include <QSettings>
@@ -65,6 +67,158 @@ QuickWorkspace* QuickWorkspace::create(QQmlEngine*, QJSEngine*) {
 
 void QuickWorkspace::setInstance(QuickWorkspace* instance) { instance_ = instance; }
 
+void QuickWorkspace::addLibrary(EngineLink& engine) {
+    if (engine.catalogue == nullptr) {
+        return;
+    }
+    auto* browser = new bench::LibraryBrowser(*engine.catalogue, engine.key, this);
+    workspace_.attachLibrary(browser);
+    libraries_.push_back(Library{.engine = engine.key, .browser = browser});
+    workspace_.refreshRatings();
+    selectPreferredSource();
+}
+
+// The sources in the order the tabs show them: Folders, this computer's
+// library unless hidden, then each engine elsewhere's.
+QVariantList QuickWorkspace::sources() const {
+    QVariantList list{QVariantMap{{QStringLiteral("kind"), QStringLiteral("folders")},
+                                  {QStringLiteral("title"), QStringLiteral("Folders")}}};
+    for (const auto& library : libraries_) {
+        if (library.engine.isLocal()) {
+            if (bench::localLibraryShown()) {
+                list.push_back(QVariantMap{{QStringLiteral("kind"), QStringLiteral("library")},
+                                           {QStringLiteral("title"), QStringLiteral("Library")}});
+            }
+            continue;
+        }
+        const auto* catalogue = workspace_.catalogueOf(library.engine);
+        list.push_back(QVariantMap{
+            {QStringLiteral("kind"), QStringLiteral("remote")},
+            {QStringLiteral("key"), library.engine.text()},
+            {QStringLiteral("title"), catalogue != nullptr ? catalogue->name() : QString{}},
+            {QStringLiteral("tooltip"), catalogue != nullptr ? catalogue->describe() : QString{}}});
+    }
+    return list;
+}
+
+int QuickWorkspace::sourceIndexOf(const bench::EngineKey& engine) const {
+    const auto list = sources();
+    for (int index = 0; index < list.size(); ++index) {
+        const auto source = list.at(index).toMap();
+        const auto kind = source.value(QStringLiteral("kind")).toString();
+        if ((engine.isLocal() && kind == QStringLiteral("library")) ||
+            (!engine.isLocal() && source.value(QStringLiteral("key")).toString() == engine.text())) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+bench::LibraryBrowser* QuickWorkspace::library() const {
+    const auto list = sources();
+    if (current_source_ <= 0 || current_source_ >= list.size()) {
+        return nullptr;
+    }
+    const auto source = list.at(current_source_).toMap();
+    const auto engine = source.value(QStringLiteral("kind")).toString() == QStringLiteral("library")
+                            ? bench::EngineKey::local()
+                            : bench::EngineKey::fromText(source.value(QStringLiteral("key")).toString());
+    const auto found = std::ranges::find(libraries_, engine, &Library::engine);
+    return found != libraries_.end() ? found->browser : nullptr;
+}
+
+QImage QuickWorkspace::libraryCover(const QString& engine, const QString& album_key) const {
+    const auto found = std::ranges::find(libraries_, bench::EngineKey::fromText(engine),
+                                         &Library::engine);
+    return found != libraries_.end() ? found->browser->cover(album_key) : QImage{};
+}
+
+void QuickWorkspace::selectSource(const int index, const bool chosen) {
+    const auto list = sources();
+    if (index < 0 || index >= list.size()) {
+        return;
+    }
+    if (chosen) {
+        const auto kind = list.at(index).toMap().value(QStringLiteral("kind")).toString();
+        bench::rememberSource(kind);
+    }
+    if (index != current_source_) {
+        current_source_ = index;
+        emit sourcesChanged();
+    }
+}
+
+// A library unless Folders was chosen: this computer's, or an engine
+// elsewhere's when this computer's is hidden or that one was chosen.
+void QuickWorkspace::selectPreferredSource() {
+    const auto list = sources();
+    const auto wanted = bench::preferredSource();
+    int remote = -1;
+    int local = -1;
+    for (int index = 0; index < list.size(); ++index) {
+        const auto kind = list.at(index).toMap().value(QStringLiteral("kind")).toString();
+        if (kind == QStringLiteral("remote")) {
+            remote = index;
+        } else if (kind == QStringLiteral("library")) {
+            local = index;
+        }
+    }
+    int target = 0;
+    if (wanted == QStringLiteral("folders")) {
+        target = 0;
+    } else if (wanted == QStringLiteral("remote") || local < 0) {
+        target = remote >= 0 ? remote : local >= 0 ? local : 0;
+    } else {
+        target = local;
+    }
+    current_source_ = std::max(0, target);
+    emit sourcesChanged();
+}
+
+void QuickWorkspace::openFolderEntry(const QModelIndex& index) {
+    if (index.isValid()) {
+        workspace_.openLocalPaths({folders_.rawPath(index)});
+    }
+}
+
+void QuickWorkspace::locate(const bool album) {
+    auto* tab = currentTabPointer();
+    const auto row = rows_.currentRow();
+    if (tab == nullptr || row < 0 || row >= tab->model->rowCount()) {
+        return;
+    }
+    const auto engine = bench::EngineKey::of(tab->document);
+    const auto index = sourceIndexOf(engine);
+    const auto found = std::ranges::find(libraries_, engine, &Library::engine);
+    if (index < 0 || found == libraries_.end()) {
+        return;
+    }
+    selectSource(index, false);
+    found->browser->locatePath(tab->model->rows()[static_cast<std::size_t>(row)].raw_path, album);
+}
+
+QVariantList QuickWorkspace::libraryListTargets() const {
+    QVariantList targets;
+    if (auto* browser = library(); browser != nullptr) {
+        for (const auto& [id, name] : workspace_.listTargets(browser->engine())) {
+            targets.push_back(
+                QVariantMap{{QStringLiteral("id"), id}, {QStringLiteral("name"), name}});
+        }
+    }
+    return targets;
+}
+
+void QuickWorkspace::focusLibrarySearch() {
+    // On Folders, which has no search: the library it would switch to.
+    if (library() == nullptr) {
+        selectPreferredSource();
+        if (library() == nullptr && sources().size() > 1) {
+            selectSource(1, false);
+        }
+    }
+    emit librarySearchFocused();
+}
+
 void QuickWorkspace::start() {
     // ADR-0226: this window plays nothing itself. The engine owns playback,
     // and the buffer shown here is the one it reports.
@@ -73,6 +227,10 @@ void QuickWorkspace::start() {
     workspace_.startLastFm();
     workspace_.start();
     transport_timer_.start();
+    // The tree browses the whole filesystem; bookmarks are the fast lane.
+    folders_.model()->addRoot("/");
+    const auto home = QFile::encodeName(QDir::homePath());
+    folders_.reveal(std::string{home.constData(), static_cast<std::size_t>(home.size())});
     buildDesktopServices();
     refreshLocalPlaybackControls();
     refreshTransport();
@@ -904,7 +1062,10 @@ QImage QuickWorkspace::cover(const QString& key) const {
 
 // --- bench::WorkspaceView -----------------------------------------------------
 
-void QuickWorkspace::workspaceRestored(const bool) {
+void QuickWorkspace::workspaceRestored(const bool restored) {
+    if (restored) {
+        addLibrary(workspace_.localEngine());
+    }
     refreshList();
     refreshUpNext();
 }
@@ -979,16 +1140,36 @@ void QuickWorkspace::refreshSelectionStatus() {
     }
 }
 
-void QuickWorkspace::engineConnected(EngineLink&, bool) { emit currentTabChanged(); }
+void QuickWorkspace::engineConnected(EngineLink& engine, bool) {
+    addLibrary(engine);
+    emit currentTabChanged();
+}
 
 void QuickWorkspace::engineAttached(EngineLink&) { refreshList(); }
 
-void QuickWorkspace::engineRekeyed(EngineLink&, const bench::EngineKey&, bool) {
+void QuickWorkspace::engineRekeyed(EngineLink& engine, const bench::EngineKey& from, bool) {
+    for (auto& library : libraries_) {
+        if (library.engine == from) {
+            library.engine = engine.key;
+            library.browser->setEngine(engine.key);
+        }
+    }
+    emit sourcesChanged();
     tabs_.layoutChanged();
     refreshList();
 }
 
-void QuickWorkspace::engineRemoving(EngineLink&) {}
+void QuickWorkspace::engineRemoving(EngineLink& engine) {
+    const auto found = std::ranges::find(libraries_, engine.key, &Library::engine);
+    if (found == libraries_.end()) {
+        return;
+    }
+    auto* browser = found->browser;
+    libraries_.erase(found);
+    browser->stop();
+    browser->deleteLater();
+    selectPreferredSource();
+}
 
 void QuickWorkspace::engineRemoved() { refreshList(); }
 

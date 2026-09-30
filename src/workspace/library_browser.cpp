@@ -69,6 +69,28 @@ class LibraryModel final : public QStandardItemModel {
                                                 : text(entry.artist) + QStringLiteral(" · ") + tracks;
             return {};
         }
+        if (role == library_kind_role || role == library_count_role ||
+            role == library_rating_role || role == library_available_role) {
+            const auto value = QStandardItemModel::data(index, entry_role);
+            if (!value.isValid()) {
+                return role == library_kind_role ? QVariant{QString{}} : QVariant{};
+            }
+            const auto entry = value.value<persistence::LibraryEntry>();
+            switch (role) {
+            case library_kind_role:
+                return entry.kind == persistence::LibraryEntryKind::artist  ? QStringLiteral("artist")
+                       : entry.kind == persistence::LibraryEntryKind::album ? QStringLiteral("album")
+                                                                            : QStringLiteral("track");
+            case library_count_role:
+                return entry.kind == persistence::LibraryEntryKind::artist
+                           ? QString::number(entry.albums)
+                           : QString{};
+            case library_rating_role:
+                return entry.rating;
+            default:
+                return entry.available > 0U;
+            }
+        }
         if (role == library_cover_key_role || role == Qt::DecorationRole) {
             const auto value = QStandardItemModel::data(index, entry_role);
             if (value.isValid()) {
@@ -91,6 +113,18 @@ class LibraryModel final : public QStandardItemModel {
             }
         }
         return QStandardItemModel::data(index, role);
+    }
+    QHash<int, QByteArray> roleNames() const override {
+        auto names = QStandardItemModel::roleNames();
+        names.insert(library_kind_role, "kind");
+        names.insert(library_count_role, "count");
+        names.insert(library_rating_role, "rating");
+        names.insert(library_available_role, "available");
+        names.insert(library_secondary_role, "secondary");
+        names.insert(library_cover_key_role, "coverKey");
+        names.insert(library_more_role, "more");
+        names.insert(Qt::ToolTipRole, "tooltip");
+        return names;
     }
     QStringList mimeTypes() const override { return {ui::LocalFilesMimeData::mimeType()}; }
     Qt::DropActions supportedDragActions() const override { return Qt::CopyAction; }

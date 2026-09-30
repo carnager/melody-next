@@ -20,7 +20,15 @@ CoverProvider::CoverProvider(QuickWorkspace& workspace)
 QImage CoverProvider::requestImage(const QString& id, QSize* size, const QSize& requested) {
     // The key, then "#<revision>" so a cover that arrives is asked for again.
     const auto key = QUrl::fromPercentEncoding(id.section(QLatin1Char('#'), 0, 0).toUtf8());
-    auto image = workspace_.cover(key);
+    // "library/<engine>/<album key>": a cover a library loaded for its tree.
+    QImage image;
+    if (key.startsWith(QStringLiteral("library/"))) {
+        const auto rest = key.mid(8);
+        const auto slash = rest.indexOf(QLatin1Char('/'));
+        image = workspace_.libraryCover(rest.left(slash), rest.mid(slash + 1));
+    } else {
+        image = workspace_.cover(key);
+    }
     if (image.isNull()) {
         // Not there, or not yet: a single clear pixel, which the page takes
         // for no cover and draws its placeholder for.

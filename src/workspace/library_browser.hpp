@@ -39,6 +39,13 @@ inline constexpr int library_cover_key_role = Qt::UserRole + 21;
 inline constexpr int library_secondary_role = Qt::UserRole + 6;
 // "Show more…": activating it loads the next page.
 inline constexpr int library_more_role = Qt::UserRole + 4;
+// For a view that draws rows itself: "artist", "album", "track" or none; an
+// artist's album count; the album's or track's rating; whether any of it is
+// there to play.
+inline constexpr int library_kind_role = Qt::UserRole + 23;
+inline constexpr int library_count_role = Qt::UserRole + 24;
+inline constexpr int library_rating_role = Qt::UserRole + 25;
+inline constexpr int library_available_role = Qt::UserRole + 26;
 
 // Set on a library drag's data: the dragged entries, as a QVariantList of
 // persistence::LibraryEntry.
@@ -98,10 +105,11 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] QString rootsError() const { return roots_error_; }
     // Whether it is this computer's library, or that of an engine elsewhere,
     // whose folders are typed as that machine sees them.
-    [[nodiscard]] bool remote() const {
+    [[nodiscard]] Q_INVOKABLE bool remote() const {
         return catalogues_ != nullptr && catalogues_->role() == CatalogueSource::Role::remote;
     }
     [[nodiscard]] Q_INVOKABLE QString name() const;
+    [[nodiscard]] Q_INVOKABLE QString engineText() const { return engine_.text(); }
 
     // The search, as typed: it is looked up a moment after the last key.
     void setSearch(const QString& text);
@@ -160,7 +168,7 @@ class LibraryBrowser final : public QObject {
     void addRoot(std::string raw_path);
     void removeRoot(std::string raw_path);
     Q_INVOKABLE void removeRoot(int index);
-    void loadRoots();
+    Q_INVOKABLE void loadRoots();
 
   signals:
     void statusChanged();

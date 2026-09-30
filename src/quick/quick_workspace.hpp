@@ -4,6 +4,8 @@
 
 #include "quick/list_tabs_model.hpp"
 #include "quick/track_rows_model.hpp"
+#include "workspace/folder_browser.hpp"
+#include "workspace/library_browser.hpp"
 #include "workspace/list_edit_job.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
@@ -43,6 +45,10 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(trackknife::quick::TrackRowsModel* rows READ rows CONSTANT)
     Q_PROPERTY(trackknife::bench::ListEditJob* edit READ edit CONSTANT)
     Q_PROPERTY(QString lastFmState READ lastFmState NOTIFY lastFmStateChanged)
+    Q_PROPERTY(trackknife::bench::FolderBrowser* folders READ folders CONSTANT)
+    Q_PROPERTY(QVariantList sources READ sources NOTIFY sourcesChanged)
+    Q_PROPERTY(int currentSource READ currentSource NOTIFY sourcesChanged)
+    Q_PROPERTY(trackknife::bench::LibraryBrowser* library READ library NOTIFY sourcesChanged)
     Q_PROPERTY(QVariantMap list READ list NOTIFY listChanged)
     Q_PROPERTY(QVariantMap selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap transport READ transport NOTIFY transportChanged)
@@ -78,6 +84,21 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] TrackRowsModel* rows() { return &rows_; }
     [[nodiscard]] bench::ListEditJob* edit() { return &edit_job_; }
     [[nodiscard]] QString lastFmState() const { return lastfm_state_; }
+    [[nodiscard]] bench::FolderBrowser* folders() { return &folders_; }
+    [[nodiscard]] QVariantList sources() const;
+    [[nodiscard]] int currentSource() const { return current_source_; }
+    // The library of the source shown; none on Folders.
+    [[nodiscard]] bench::LibraryBrowser* library() const;
+    [[nodiscard]] QImage libraryCover(const QString& engine, const QString& album_key) const;
+
+    // The Sources panel: a source chosen (remembered when the user chose
+    // it); a file or folder opened, into this computer's list; a list's
+    // track found in its engine's library; the lists a library can add to.
+    Q_INVOKABLE void selectSource(int index, bool chosen);
+    Q_INVOKABLE void openFolderEntry(const QModelIndex& index);
+    Q_INVOKABLE void locate(bool album);
+    Q_INVOKABLE QVariantList libraryListTargets() const;
+    Q_INVOKABLE void focusLibrarySearch();
     [[nodiscard]] QVariantMap list() const { return list_; }
     [[nodiscard]] QVariantMap selection() const { return selection_; }
     [[nodiscard]] QVariantMap transport() const { return transport_; }
@@ -233,6 +254,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();
+    void sourcesChanged();
+    // The library's search field wants the keyboard.
+    void librarySearchFocused();
 
   private:
     void buildDesktopServices();
@@ -250,6 +274,16 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     TrackRowsModel rows_{this};
     bench::ListEditJob edit_job_{this};
     QString lastfm_state_;
+    bench::FolderBrowser folders_{this};
+    struct Library {
+        bench::EngineKey engine;
+        bench::LibraryBrowser* browser{nullptr};
+    };
+    std::vector<Library> libraries_;
+    int current_source_{0};
+    void addLibrary(EngineLink& engine);
+    void selectPreferredSource();
+    [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;
     QMetaObject::Connection lastfm_answer_;
     QVariantMap list_;
     QVariantMap selection_;

@@ -42,6 +42,10 @@ qt_add_qml_module(
     qml/RatingMenuItem.qml
     qml/SortMenu.qml
     qml/EditBar.qml
+    qml/SourcesPanel.qml
+    qml/FolderTree.qml
+    qml/LibraryPane.qml
+    qml/LibraryFoldersDialog.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

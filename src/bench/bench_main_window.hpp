@@ -340,11 +340,17 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // ADR-0156: shared capture/apply plumbing for Properties and the
     // compact context-menu ReplayGain dialog.
     [[nodiscard]] MetadataPropertiesSourceReader
-    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
+    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows) {
+        return workspace_.selectionSourceReader(tab, std::move(rows));
+    }
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
-                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
-    [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
+                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt) {
+        return workspace_.selectionSourceReader(model, std::move(rows), std::move(snapshot));
+    }
+    [[nodiscard]] MetadataApplyObserver metadataApplyObserver() {
+        return workspace_.metadataApplyObserver();
+    }
     void showReplayGainDialog();
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id) {
         return workspace_.tabForDocument(document_id);
@@ -421,7 +427,9 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     // Naming layouts, and the move destinations of `destinations_of`; with
     // every engine's destinations as places for the manager (ADR-0237).
     [[nodiscard]] OutputProfileStore
-    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local()) {
+        return workspace_.buildOutputProfileStore(destinations_of);
+    }
     // ADR-0237: the naming layouts are global; every engine that does file
     // work holds a copy, handed over after each change and when it connects.
     // Only `removed` is taken away there: nothing an engine holds is lost to
@@ -430,16 +438,16 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         workspace_.pushLayouts(std::move(removed));
     }
     void presentInterruptedOperations();
-    void applyCommittedMetadata(const operations::MetadataCommitResult& result);
-    void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
-    void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
-    void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
+    void applyCommittedMetadata(const operations::MetadataCommitResult& result) {
+        workspace_.applyCommittedMetadata(result);
+    }
+    void applyCommittedRelocation(const operations::FilePublicationCommitResult& result) {
+        workspace_.applyCommittedRelocation(result);
+    }
     void queueEngineRelocation(const std::string& from, const std::string& to) {
         workspace_.queueEngineRelocation(from, to);
     }
     void flushEngineRelocations() { workspace_.flushEngineRelocations(); }
-    void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
-                                           const metadata::MetadataDocument& document);
     void removeSelectedRows();
     void transferSelectedRows(QTableView* source, const QString& target_id, bool move);
     [[nodiscard]] static ui::TrackViewLayout
@@ -730,26 +738,13 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> requireFileWork(QTableView* view,
                                                                           const QString& what);
     [[nodiscard]] MetadataWritePlanApplierFactory
-    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+        return workspace_.engineMetadataPlanApplierFactory(std::move(work));
+    }
     [[nodiscard]] ArtworkWritePlanApplierFactory
-    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
-    // Stage 5: moves and renames the engine makes. For an engine elsewhere,
-    // `mounted` receives each move as this computer sees it through the
-    // engine's mount -- this computer's paths and revisions -- for its own
-    // lists to follow.
-    using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
-    [[nodiscard]] FilePublicationPlanApplierFactory
-    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
-                                        bool elsewhere, RemoteMount mount,
-                                        std::shared_ptr<MountedMoves> mounted);
-    // An engine elsewhere moved a file: its own tabs follow at its paths,
-    // everything of this computer's at `here`, the move seen through the
-    // mount, when it is.
-    void applyEngineRelocation(const EngineKey& engine,
-                               const operations::FilePublicationCommitResult& result,
-                               const operations::FilePublicationCommitResult* here);
-    // The engine link whose file-work connection this is.
-    [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+        return workspace_.engineArtworkPlanApplierFactory(std::move(work));
+    }
     // Parts of an engine's link; null when it or the part is not there.
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const {
         return workspace_.playbackOf(key);

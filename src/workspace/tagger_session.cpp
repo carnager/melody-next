@@ -7,8 +7,8 @@
 #include "bench/metadata_grid_model.hpp"
 #include "bench/settings_keys.hpp"
 #include "trackknife/formats/probe.hpp"
-#include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/loudness/grouping.hpp"
+#include "trackknife/metadata/draft_document.hpp"
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/local_reader.hpp"
 #include "uicommon/debug_log.hpp"
@@ -249,11 +249,11 @@ std::optional<ArtworkCoverArtService> TaggerSession::coverArtService() {
                 const auto listing_url =
                     musicbrainz::build_cover_art_listing_url(release_id.toStdString());
                 if (self.isNull() || !listing_url) {
-                    completion(std::unexpected(
-                        listing_url ? core::Error{.code = core::ErrorCode::cancelled,
-                                                  .message = "the tag editor closed",
-                                                  .context = {}}
-                                    : listing_url.error()));
+                    completion(std::unexpected(listing_url
+                                                   ? core::Error{.code = core::ErrorCode::cancelled,
+                                                                 .message = "the tag editor closed",
+                                                                 .context = {}}
+                                                   : listing_url.error()));
                     return;
                 }
                 self->services_.musicbrainz.fetch(
@@ -380,8 +380,8 @@ void TaggerSession::storeLayoutState(const QByteArray& geometry, const QByteArra
     layout_state_saved_ = true;
     services_.layout_store.save(QString::fromLatin1(properties_geometry_key), geometry, {});
     if (!splitter.isEmpty()) {
-        services_.layout_store.save(QString::fromLatin1(properties_metadata_splitter_key),
-                                    splitter, {});
+        services_.layout_store.save(QString::fromLatin1(properties_metadata_splitter_key), splitter,
+                                    {});
     }
 }
 
@@ -522,9 +522,9 @@ void TaggerSession::buildGrid(metadata::StagedMetadataSelection selection) {
     emit gridReady();
     if (grid_model_->rowCount() > 0) {
         file_selection_->setCurrentIndex(grid_model_->index(0, 0), QItemSelectionModel::NoUpdate);
-        const QItemSelection all{grid_model_->index(0, 0),
-                                 grid_model_->index(grid_model_->rowCount() - 1,
-                                                    grid_model_->columnCount() - 1)};
+        const QItemSelection all{
+            grid_model_->index(0, 0),
+            grid_model_->index(grid_model_->rowCount() - 1, grid_model_->columnCount() - 1)};
         file_selection_->select(all, QItemSelectionModel::ClearAndSelect);
         updateSelectionProjection();
     }
@@ -768,8 +768,7 @@ bool TaggerSession::canTransform() const {
 }
 
 bool TaggerSession::canIdentify() const {
-    return canSuggest() && static_cast<bool>(services_.musicbrainz.fetch) &&
-           !identify_dialog_open_;
+    return canSuggest() && static_cast<bool>(services_.musicbrainz.fetch) && !identify_dialog_open_;
 }
 
 bool TaggerSession::canScanReplayGain() const { return canSuggest() && !replaygain_running_; }
@@ -1743,9 +1742,8 @@ void TaggerSession::loadOutputProfiles() {
                     .arg(self->output_layout_catalog_.size() == 1U ? QStringLiteral("layout")
                                                                    : QStringLiteral("layouts"))
                     .arg(self->destination_catalog_.size())
-                    .arg(self->destination_catalog_.size() == 1U
-                             ? QStringLiteral("destination")
-                             : QStringLiteral("destinations"));
+                    .arg(self->destination_catalog_.size() == 1U ? QStringLiteral("destination")
+                                                                 : QStringLiteral("destinations"));
             self->reconcileOutputProfileChoices();
             emit self->outputProfilesChanged();
             emit self->changed();
@@ -1879,11 +1877,11 @@ void TaggerSession::startWritePlan() {
     }
     setStatus(QStringLiteral("Checking files…"));
     emit changed();
-    write_plan_watcher_.setFuture(QtConcurrent::run(
-        [selection, draft = std::move(draft), items = std::move(items), operation_selection,
-         output_layout = std::move(output_layout), destination = std::move(destination),
-         cancellation, plan_options, artwork_intents, cover_policy,
-         tools = services_.tools]() mutable {
+    write_plan_watcher_.setFuture(
+        QtConcurrent::run([selection, draft = std::move(draft), items = std::move(items),
+                           operation_selection, output_layout = std::move(output_layout),
+                           destination = std::move(destination), cancellation, plan_options,
+                           artwork_intents, cover_policy, tools = services_.tools]() mutable {
             // WYSIWYG apply: the plan writes exactly the staged draft.
             // Automatic scripts already staged their edits into the grid.
             const auto metadata_context_change_count =
@@ -2089,11 +2087,10 @@ void TaggerSession::finishWritePlan() {
             .arg(pluralized(rows.size(), QStringLiteral("problem"), QStringLiteral("problems"))));
     emit changed();
     const auto count = rows.size();
-    showFeedback(
-        QStringLiteral("Apply blocked"),
-        QStringLiteral("Nothing was changed. Fix the %1 below, then apply again.")
-            .arg(pluralized(count, QStringLiteral("problem"), QStringLiteral("problems"))),
-        std::move(rows));
+    showFeedback(QStringLiteral("Apply blocked"),
+                 QStringLiteral("Nothing was changed. Fix the %1 below, then apply again.")
+                     .arg(pluralized(count, QStringLiteral("problem"), QStringLiteral("problems"))),
+                 std::move(rows));
 }
 
 void TaggerSession::folderImagesReviewed(const bool accepted) {
@@ -2324,8 +2321,9 @@ void TaggerSession::finishMetadataApply() {
         if (artwork_ != nullptr) {
             artwork_->discardPendingChanges();
         }
-        setStatus(QStringLiteral("Saved %1 %2").arg(saved).arg(
-            pluralized(saved, QStringLiteral("file"), QStringLiteral("files"))));
+        setStatus(QStringLiteral("Saved %1 %2")
+                      .arg(saved)
+                      .arg(pluralized(saved, QStringLiteral("file"), QStringLiteral("files"))));
         emit changed();
         QTimer::singleShot(0, this, &TaggerSession::closeRequested);
         return;
@@ -2485,7 +2483,8 @@ void TaggerSession::finishFileApply() {
                   .arg(outcome.failed_source_count())
                   .arg(outcome.cancelled_source_count()));
     emit changed();
-    showFeedback(stopped ? QStringLiteral("Update stopped") : QStringLiteral("Updated with problems"),
+    showFeedback(stopped ? QStringLiteral("Update stopped")
+                         : QStringLiteral("Updated with problems"),
                  summary, std::move(rows));
 }
 

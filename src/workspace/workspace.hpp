@@ -11,6 +11,8 @@
 #include "bench/local_list_model.hpp"
 #include "bench/local_playback_service.hpp"
 #include "bench/mpris_service.hpp"
+#include "bench/output_profile_store.hpp"
+#include "bench/remote_mount.hpp"
 #include "bench/remote_engines.hpp"
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/core/cancellation.hpp"
@@ -19,6 +21,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
+#include "workspace/tagger_session.hpp"
 
 #include <QElapsedTimer>
 #include <QFutureWatcher>
@@ -26,6 +29,7 @@
 #include <QImage>
 #include <QObject>
 #include <QPersistentModelIndex>
+#include <QPointer>
 #include <QSet>
 #include <QString>
 #include <QThreadPool>
@@ -38,7 +42,9 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // A window's widgets, known here only by name: the workspace holds which
@@ -164,6 +170,8 @@ class Workspace final : public QObject {
         std::unique_ptr<CatalogueSource> catalogue;
         EnginePlayback* playback{nullptr};
         LocalLibraryPanel* library{nullptr};
+        // Its library as a window browses it, once one does.
+        QPointer<LibraryBrowser> browser;
         // What it was last seen doing, to tell a start elsewhere.
         SeenEngine seen;
         // A move is being told to it.
@@ -278,6 +286,63 @@ class Workspace final : public QObject {
     void start();
     // The engines, by key; the parts of one, null when absent.
     [[nodiscard]] EngineLink* link(const EngineKey& key) const;
+
+    // ADR-0237: what a tag editor is given for files `work` holds: where it
+    // applies tags, moves files and keeps its choices, and how this
+    // workspace follows what it changed.
+    struct TaggerOpening {
+        TaggerServices services;
+        ArtworkWritePlanApplierFactory artwork_applier;
+        ArtworkApplyObserver artwork_observer;
+        // The engine whose files they are, whose destinations it moves to.
+        EngineKey engine;
+    };
+    [[nodiscard]] static std::span<const std::string_view> taggerFields();
+    [[nodiscard]] TaggerOpening taggerServices(std::shared_ptr<engine::RemoteFileWork> work);
+    // The engine that does the file work for `engine`'s files, if one does.
+    [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(const EngineKey& engine) const;
+    // The engine link whose file-work connection this is.
+    [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
+    // ADR-0156: the rows of a list a file tool reads, one at a time.
+    [[nodiscard]] MetadataPropertiesSourceReader
+    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
+    [[nodiscard]] MetadataPropertiesSourceReader
+    selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
+                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
+    [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
+    [[nodiscard]] MetadataWritePlanApplierFactory
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    [[nodiscard]] ArtworkWritePlanApplierFactory
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    // Stage 5: moves and renames the engine makes. For an engine elsewhere,
+    // `mounted` receives each move as this computer sees it through the
+    // engine's mount -- this computer's paths and revisions -- for its own
+    // lists to follow.
+    using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
+    [[nodiscard]] FilePublicationPlanApplierFactory
+    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
+                                        bool elsewhere, RemoteMount mount,
+                                        std::shared_ptr<MountedMoves> mounted);
+    // Naming layouts, and the move destinations of `destinations_of`; with
+    // every engine's destinations as places for the manager (ADR-0237).
+    [[nodiscard]] OutputProfileStore
+    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    // What a file tool changed, followed by the lists, the library and the
+    // queue.
+    void applyCommittedMetadata(const operations::MetadataCommitResult& result);
+    void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
+    void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
+    void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
+    void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
+                                           const metadata::MetadataDocument& document);
+    // An engine elsewhere moved a file: its own tabs follow at its paths,
+    // everything of this computer's at `here`, the move seen through the
+    // mount, when it is.
+    void applyEngineRelocation(const EngineKey& engine,
+                               const operations::FilePublicationCommitResult& result,
+                               const operations::FilePublicationCommitResult* here);
+    // This computer's library, looked up again.
+    void refreshLocalLibrary();
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
     // An open list, by its document's identity -- or the list that goes on

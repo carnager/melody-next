@@ -23,6 +23,9 @@ namespace trackknife::bench {
 
 void Workspace::attachLibrary(LibraryBrowser* browser) {
     const QPointer<LibraryBrowser> guard{browser};
+    if (auto* engine = link(browser->engine())) {
+        engine->browser = browser;
+    }
     connect(browser, &LibraryBrowser::actionRequested, this,
             [this, guard](std::vector<persistence::LibraryEntry> entries,
                           const LocalLibraryAction action) {

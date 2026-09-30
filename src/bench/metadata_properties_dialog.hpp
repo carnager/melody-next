@@ -75,6 +75,10 @@ class MetadataPropertiesDialog final : public QDialog {
                              FilePublicationApplyObserver file_apply_observer = {},
                              QWidget* parent = nullptr, MetadataDialogLayoutStore layout_store = {},
                              MusicBrainzLookupService musicbrainz = {}, FileWorkTools tools = {});
+    MetadataPropertiesDialog(std::size_t requested_item_count,
+                             MetadataPropertiesSourceReader source_reader,
+                             std::span<const std::string_view> preferred_fields,
+                             TaggerServices services, QWidget* parent = nullptr);
     ~MetadataPropertiesDialog() override;
 
     void setArtworkMutationServices(ArtworkWritePlanApplierFactory applier_factory,

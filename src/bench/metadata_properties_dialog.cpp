@@ -149,26 +149,33 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     FilePublicationApplyObserver file_apply_observer, QWidget* parent,
     MetadataDialogLayoutStore layout_store, MusicBrainzLookupService musicbrainz,
     FileWorkTools tools)
+    : MetadataPropertiesDialog(
+          requested_item_count, std::move(source_reader), preferred_fields,
+          TaggerServices{
+              .plan_applier_factory = std::move(plan_applier_factory),
+              .apply_observer = std::move(apply_observer),
+              .transformation_store = std::move(transformation_store),
+              .output_profile_store = std::move(output_profile_store),
+              .file_plan_applier_factory = std::move(file_plan_applier_factory),
+              .file_apply_observer = std::move(file_apply_observer),
+              .layout_store = std::move(layout_store),
+              .musicbrainz = std::move(musicbrainz),
+              .tools = std::move(tools),
+          },
+          parent) {}
+
+MetadataPropertiesDialog::MetadataPropertiesDialog(
+    const std::size_t requested_item_count, MetadataPropertiesSourceReader source_reader,
+    const std::span<const std::string_view> preferred_fields, TaggerServices services,
+    QWidget* parent)
     : QDialog(parent) {
     setObjectName(QStringLiteral("bench-metadata-properties"));
     setWindowTitle(QStringLiteral("Edit tags"));
     setModal(false);
     setAttribute(Qt::WA_DeleteOnClose);
     resize(1'020, 620);
-    session_ = new TaggerSession(
-        requested_item_count, std::move(source_reader), preferred_fields,
-        TaggerServices{
-            .plan_applier_factory = std::move(plan_applier_factory),
-            .apply_observer = std::move(apply_observer),
-            .transformation_store = std::move(transformation_store),
-            .output_profile_store = std::move(output_profile_store),
-            .file_plan_applier_factory = std::move(file_plan_applier_factory),
-            .file_apply_observer = std::move(file_apply_observer),
-            .layout_store = std::move(layout_store),
-            .musicbrainz = std::move(musicbrainz),
-            .tools = std::move(tools),
-        },
-        this);
+    session_ = new TaggerSession(requested_item_count, std::move(source_reader), preferred_fields,
+                                 std::move(services), this);
     const QPointer self{this};
     session_->loadLayoutState(
         [self](QByteArray geometry) {
@@ -566,8 +573,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     apply_stop_button_->setToolTip(
         QStringLiteral("Stop after the files already in progress are safe"));
     apply_stop_button_->hide();
-    connect(apply_stop_button_, &QPushButton::clicked, session_,
-            &TaggerSession::requestApplyStop);
+    connect(apply_stop_button_, &QPushButton::clicked, session_, &TaggerSession::requestApplyStop);
     footer_layout->addWidget(apply_stop_button_);
     footer_layout->addWidget(buttons_);
     root_layout_->addWidget(footer);
@@ -585,12 +591,11 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             &MetadataPropertiesDialog::showPreparationFeedback);
     connect(session_, &TaggerSession::folderImagesReviewRequested, this,
             [this](std::vector<metadata::FolderImageWritePlan> images) {
-                reviewFolderImages(this, images,
-                                   [session = QPointer{session_}] {
-                                       if (session) {
-                                           session->folderImagesReviewed(true);
-                                       }
-                                   });
+                reviewFolderImages(this, images, [session = QPointer{session_}] {
+                    if (session) {
+                        session->folderImagesReviewed(true);
+                    }
+                });
             });
     connect(session_, &TaggerSession::closeRequested, this, &QDialog::close);
     connect(session_, &TaggerSession::openSettingsRequested, this,
@@ -891,8 +896,7 @@ void MetadataPropertiesDialog::buildGrid() {
     connect(artwork_section_, &MetadataArtworkSection::coverSettingsRequested, this,
             [this] { emit openSettingsRequested(SettingsDialog::Page::covers); });
     artwork_section_->setActive(true);
-    artwork_section_->setUnifiedApply(
-        static_cast<bool>(session_->services().plan_applier_factory));
+    artwork_section_->setUnifiedApply(static_cast<bool>(session_->services().plan_applier_factory));
     artwork_section_->setMutationServices(session_->artworkApplierFactory(),
                                           session_->artworkAppliedObserver());
     if (auto service = session_->coverArtService()) {

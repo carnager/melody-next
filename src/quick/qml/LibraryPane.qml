@@ -418,6 +418,10 @@ Item {
                         }
                     }
 
+                    // As the widgets tree: a click opens or closes a row with
+                    // children anywhere on it; a track is taken on a click
+                    // where the desktop activates on one, else by Enter or
+                    // the row's own buttons. Double clicks do nothing more.
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onTapped: (eventPoint, button) => {
@@ -429,12 +433,13 @@ Item {
                                 : ItemSelectionModel.ClearAndSelect | ItemSelectionModel.Rows;
                             tree.selectionModel.setCurrentIndex(index, command);
                             pane.browser.noteCurrent(index);
-                        }
-                        onDoubleTapped: {
-                            const index = tree.index(node.row, 0);
-                            if (tree.model.data(index, 256 + 4) || node.kind === "")
+                            if (modifiers & (Qt.ControlModifier | Qt.ShiftModifier))
+                                return;
+                            if (node.hasChildren)
+                                tree.toggle(node.row, !node.expanded);
+                            else if (tree.model.data(index, 256 + 4) || node.kind === "")
                                 pane.browser.activate(index);
-                            else
+                            else if (Qt.styleHints.singleClickActivation)
                                 pane.requestAt(node.row, 0);
                         }
                     }
@@ -453,9 +458,16 @@ Item {
                     }
                 }
 
+                // Enter opens or closes a row with children, and takes the
+                // rest.
                 Keys.onReturnPressed: {
                     const index = tree.selectionModel.currentIndex;
-                    if (index.valid)
+                    if (!index.valid)
+                        return;
+                    const row = tree.rowAtIndex(index);
+                    if (tree.model.hasChildren(index) && row >= 0)
+                        tree.toggle(row, !tree.isExpanded(row));
+                    else
                         pane.browser.request(pane.selectedIndexes(), 0);
                 }
             }

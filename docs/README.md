@@ -111,6 +111,8 @@ also available in [CMakePresets.json](../CMakePresets.json).
   historical.
 - [Query language](query-language.md): the `tkq-1` grammar and evaluation rules.
 - [Title formatting](title-formatting.md): the `tkfmt-1` language specification.
+- [Tagging scripts](tagging-scripts.md): a tagging script as text, one
+  `$`-statement per step.
 - [Open decisions](open-decisions.md): questions that still need a decision.
 - [Release checklist](release-checklist.md): packaging, legal, accessibility,
   stress, backup/restore, and end-to-end acceptance gates.

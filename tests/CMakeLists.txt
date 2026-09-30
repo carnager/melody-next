@@ -114,6 +114,13 @@ target_link_libraries(
 )
 add_test(NAME metadata-transformation COMMAND trackknife_metadata_transformation_tests)
 
+add_executable(trackknife_native_rule_script_tests native_rule_script_test.cpp)
+target_link_libraries(
+    trackknife_native_rule_script_tests
+    PRIVATE Trackknife::Metadata trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME native-rule-script COMMAND trackknife_native_rule_script_tests)
+
 add_executable(trackknife_metadata_write_plan_tests metadata_write_plan_test.cpp)
 target_link_libraries(
     trackknife_metadata_write_plan_tests
@@ -638,6 +645,15 @@ if(TRACKKNIFE_BUILD_UI)
                 trackknife_project_warnings
     )
     add_test(NAME panel-layout COMMAND trackknife_panel_layout_tests)
+
+    qt_add_executable(trackknife_language_reference_tests language_reference_test.cpp)
+    target_link_libraries(
+        trackknife_language_reference_tests
+        PRIVATE Trackknife::Workspace Qt6::Test trackknife_project_options
+                trackknife_project_warnings
+    )
+    add_test(NAME language-reference COMMAND trackknife_language_reference_tests)
+    set_tests_properties(language-reference PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
     qt_add_executable(trackknife_keyed_rows_model_tests keyed_rows_model_test.cpp
                       ${PROJECT_SOURCE_DIR}/src/quick/keyed_rows_model.cpp)

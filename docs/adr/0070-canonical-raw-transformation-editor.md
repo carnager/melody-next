@@ -1,6 +1,7 @@
 # ADR-0070: Canonical raw transformation editor
 
-- Status: accepted
+- Status: accepted; its raw grammar superseded by ADR-0241 (the Raw tab is
+  the native script, every step and full tkfmt-1)
 - Date: 2026-08-30
 - Owners: Trackknife project
 - Extends: ADR-0065 pasted rule-script translation

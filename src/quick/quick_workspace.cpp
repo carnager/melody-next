@@ -9,6 +9,7 @@
 #include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
 #include "workspace/command_search.hpp"
+#include "workspace/language_reference.hpp"
 #include "workspace/sources.hpp"
 
 #include <QJsonObject>
@@ -1703,6 +1704,15 @@ void QuickWorkspace::refreshLocalPlaybackControls() {
     if (modes != modes_) {
         modes_ = std::move(modes);
         emit modesChanged();
+    }
+}
+
+void QuickWorkspace::openReference(const int reference) {
+    QString error;
+    if (!bench::openLanguageReference(reference == 1 ? bench::LanguageReference::scripts
+                                                     : bench::LanguageReference::formatting,
+                                      &error)) {
+        showMessage(error, 6000);
     }
 }
 

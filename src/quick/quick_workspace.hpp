@@ -214,6 +214,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // An empty target is the system default.
     Q_INVOKABLE void setOutputDevice(const QVariant& target);
     Q_INVOKABLE void refreshOutputs() { workspace_.refreshOutputs(); }
+    // 0: tkfmt-1; 1: tagging scripts. In the browser; a failure is said in
+    // the status line.
+    Q_INVOKABLE void openReference(int reference);
     Q_INVOKABLE QVariantList bufferProfiles() const;
     Q_INVOKABLE void setBufferProfile(const QString& profile);
 

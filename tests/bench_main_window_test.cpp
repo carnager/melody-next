@@ -1386,7 +1386,10 @@ void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-backup-workspace")) != nullptr);
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-restore-workspace")) != nullptr);
     QVERIFY(!window.menuBar()->isHidden());
-    QCOMPARE(window.menuBar()->actions().size(), 4);
+    // File, Edit, Workspace, Playback, and Help with the language references.
+    QCOMPARE(window.menuBar()->actions().size(), 5);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-reference-tkfmt")) != nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-reference-scripts")) != nullptr);
     QCOMPARE(device->toolButtonStyle(), Qt::ToolButtonIconOnly);
     // Nothing to name, no chevron squeezed beside the icon.
     QVERIFY(device->findChild<QLabel*>(QStringLiteral("bench-device-chevron"))->isHidden());
@@ -4920,10 +4923,11 @@ void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() 
     QVERIFY(stage != nullptr);
     QVERIFY(preview_table != nullptr);
     QVERIFY(preview_summary != nullptr);
-    // 19 step kinds under 4 unselectable group headers; kinds are found by
+    // 20 step kinds under 4 unselectable group headers; kinds are found by
     // name because the row index no longer matches the action kind.
-    QCOMPARE(kind->count(), 23);
+    QCOMPARE(kind->count(), 24);
     for (const auto& kind_name : {QStringLiteral("Capitalize first character"),
+                                  QStringLiteral("Convert rating to FMPS_RATING"),
                                   QStringLiteral("Remove exact matching values"),
                                   QStringLiteral("Replace exact matching values"),
                                   QStringLiteral("Number by selected-file order"),

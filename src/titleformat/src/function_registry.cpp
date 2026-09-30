@@ -30,6 +30,7 @@ constexpr auto functions = std::to_array<FunctionSpec>({
     {FunctionId::min, "min", 1, unbounded, EvaluationStrategy::eager},
     {FunctionId::max, "max", 1, unbounded, EvaluationStrategy::eager},
     {FunctionId::num, "num", 2, 2, EvaluationStrategy::eager},
+    {FunctionId::decimal, "decimal", 3, 3, EvaluationStrategy::eager},
     {FunctionId::lower, "lower", 1, 1, EvaluationStrategy::eager},
     {FunctionId::upper, "upper", 1, 1, EvaluationStrategy::eager},
     {FunctionId::trim, "trim", 1, 1, EvaluationStrategy::eager},

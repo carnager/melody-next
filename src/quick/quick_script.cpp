@@ -61,7 +61,8 @@ QVariantMap QuickScript::stepForm(const int kind, const int capture_source) {
             {QStringLiteral("captureArgument"), form.capture_argument},
             {QStringLiteral("captureArgumentLabel"), form.capture_argument_label},
             {QStringLiteral("captureArgumentPlaceholder"), form.capture_argument_placeholder},
-            {QStringLiteral("fieldList"), form.field_list}};
+            {QStringLiteral("fieldList"), form.field_list},
+            {QStringLiteral("ratingScale"), form.rating_scale}};
 }
 
 QVariantMap QuickScript::translateRuleScript(const QString& source) {
@@ -97,6 +98,7 @@ QString QuickScript::addStep(const QVariantMap& step) {
         .character_count = step.value(QStringLiteral("characterCount"), 4).toInt(),
         .capture_source = step.value(QStringLiteral("captureSource"), 0).toInt(),
         .capture_argument = step.value(QStringLiteral("captureArgument")).toString(),
+        .rating_scale = step.value(QStringLiteral("ratingScale"), 0).toInt(),
     }));
 }
 

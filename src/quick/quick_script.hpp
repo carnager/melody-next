@@ -27,6 +27,7 @@ class QuickScript final : public QObject {
     Q_PROPERTY(QVariantList stepKinds READ stepKinds CONSTANT)
     Q_PROPERTY(int initialStepKind READ initialStepKind CONSTANT)
     Q_PROPERTY(QStringList captureSources READ captureSources CONSTANT)
+    Q_PROPERTY(QStringList ratingScales READ ratingScales CONSTANT)
 
   public:
     explicit QuickScript(bench::ScriptSession* session, QObject* parent = nullptr);
@@ -42,6 +43,7 @@ class QuickScript final : public QObject {
     [[nodiscard]] static QStringList captureSources() {
         return bench::ScriptSession::captureSources();
     }
+    [[nodiscard]] static QStringList ratingScales() { return bench::ScriptSession::ratingScales(); }
 
     Q_INVOKABLE [[nodiscard]] static QVariantMap stepForm(int kind, int capture_source);
     Q_INVOKABLE [[nodiscard]] QStringList targetSuggestions(const QString& query) const {

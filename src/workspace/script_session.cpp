@@ -4,6 +4,7 @@
 
 #include "bench/metadata_dialog_helpers.hpp"
 #include "bench/metadata_transformation_preview_model.hpp"
+#include "trackknife/metadata/native_rule_script.hpp"
 #include "uicommon/metadata_transformation_interchange.hpp"
 
 #include <QtConcurrent/QtConcurrentRun>
@@ -69,6 +70,9 @@ const std::vector<ScriptSession::StepKind>& ScriptSession::stepKinds() {
         {QStringLiteral("Format with tkfmt-1"), 10,
          QStringLiteral("Build the value from an expression, for example %artist% — %title%")},
         {QStringLiteral("Number by selected-file order"), 13, {}},
+        {QStringLiteral("Convert rating to FMPS_RATING"), 20,
+         QStringLiteral("Take a rating another player wrote into Trackknife's rating tag, "
+                        "converted from its scale -- 4 of 5 stars becomes 0.8")},
         {QStringLiteral("Capture fields with tkcapture-1"), 16,
          QStringLiteral("Extract several fields at once from the filename, the full path, "
                         "formatted text, or another field")},
@@ -96,6 +100,10 @@ const std::vector<ScriptSession::StepKind>& ScriptSession::stepKinds() {
     return kinds;
 }
 
+QStringList ScriptSession::ratingScales() {
+    return {QStringLiteral("0–5 stars"), QStringLiteral("0–10"), QStringLiteral("0–100")};
+}
+
 QStringList ScriptSession::captureSources() {
     return {QStringLiteral("Filename and requested parent folders"), QStringLiteral("Full path"),
             QStringLiteral("Formatted tkfmt-1 text"), QStringLiteral("Metadata field values")};
@@ -105,9 +113,12 @@ ScriptSession::StepForm ScriptSession::stepForm(const int kind, const int captur
     StepForm form;
     const auto captures = kind == 16;
     const auto filters_fields = kind == 18 || kind == 19;
-    form.target = !captures && !filters_fields;
+    const auto rating = kind == 20;
+    // A rating always goes to FMPS_RATING: there is no target to choose.
+    form.target = !captures && !filters_fields && !rating;
+    form.rating_scale = rating;
     form.input = kind == 0 || kind == 1 || (kind >= 7 && kind <= 12) || kind == 15 || captures ||
-                 filters_fields;
+                 filters_fields || rating;
     form.replacement = kind == 12;
     form.numbering = kind == 13;
     form.characters = kind == 14;
@@ -128,6 +139,9 @@ ScriptSession::StepForm ScriptSession::stepForm(const int kind, const int captur
     } else if (kind == 11 || kind == 12) {
         form.input_label = QStringLiteral("Exact value:");
         form.input_placeholder = QStringLiteral("Case-sensitive; may be empty");
+    } else if (rating) {
+        form.input_label = QStringLiteral("Rating field:");
+        form.input_placeholder = QStringLiteral("For example: RATING");
     } else if (kind == 15) {
         form.input_label = QStringLiteral("Condition:");
         form.input_placeholder = QStringLiteral("For example: $not(%totaldiscs%)");
@@ -323,6 +337,15 @@ QString ScriptSession::actionText(const metadata::MetadataTransformationAction& 
                 return QStringLiteral("%1. Copy %3 to %2")
                     .arg(index + 1U)
                     .arg(field, display_utf8(typed.source_field));
+            } else if constexpr (std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
+                const auto scale = typed.scale == metadata::PlainRatingScale::hundred
+                                       ? QStringLiteral("0–100")
+                                   : typed.scale == metadata::PlainRatingScale::ten
+                                       ? QStringLiteral("0–10")
+                                       : QStringLiteral("0–5 stars");
+                return QStringLiteral("%1. Convert the rating in %2 (%3) to %4")
+                    .arg(index + 1U)
+                    .arg(display_utf8(typed.source_field), scale, field);
             } else if constexpr (std::is_same_v<Action, metadata::MetadataSplitValuesAction>) {
                 return QStringLiteral("%1. Split %2 by %3")
                     .arg(index + 1U)
@@ -802,7 +825,7 @@ ScriptSession::Focus ScriptSession::addStep(const StepInput& step) {
         return focus;
     };
     const auto field = step.target.trimmed();
-    if (kind != 16 && kind != 18 && kind != 19 && field.isEmpty()) {
+    if (kind != 16 && kind != 18 && kind != 19 && kind != 20 && field.isEmpty()) {
         return refuse(QStringLiteral("Enter a target field before adding the step."),
                       Focus::target);
     }
@@ -919,6 +942,20 @@ ScriptSession::Focus ScriptSession::addStep(const StepInput& step) {
         });
         break;
     }
+    case 20: {
+        const auto source = step.input.trimmed();
+        if (source.isEmpty()) {
+            return refuse(QStringLiteral("Enter the field the rating is in."), Focus::input);
+        }
+        const auto scale = step.rating_scale == 2   ? metadata::PlainRatingScale::hundred
+                           : step.rating_scale == 1 ? metadata::PlainRatingScale::ten
+                                                    : metadata::PlainRatingScale::five;
+        actions_.push_back(metadata::MetadataConvertRatingAction{
+            .target_field = std::string{metadata::fmps_rating_field},
+            .source_field = encode_utf8(source),
+            .scale = scale});
+        break;
+    }
     case 18:
     case 19: {
         std::vector<std::string> fields;
@@ -986,19 +1023,9 @@ void ScriptSession::importRuleScript(const QString& source, const bool append) {
     }
     invalidatePreview();
     emit stepsChanged(static_cast<int>(actions_.size()) - 1);
-    if (!append) {
-        const auto raw = encode_utf8(source);
-        raw_read_only_ = false;
-        raw_source_ = source;
-        raw_import_ = metadata::import_metadata_rule_script(raw);
-        raw_valid_ = !raw_import_.has_errors() && !raw_import_.actions.empty();
-        raw_modified_ = true;
-        raw_diagnostics_ =
-            QStringLiteral("Ready · %1 generated typed rules · unsaved").arg(actions_.size());
-        emit rawChanged();
-    } else {
-        refreshRawFromActions();
-    }
+    // The Raw tab shows what the paste became, in Trackknife's own terms: the
+    // Picard source was only ever an import (ADR-0241).
+    refreshRawFromActions();
     catalog_status_ = QStringLiteral("Unsaved · generated %1 typed rules from the pasted script. "
                                      "Review, preview, then click Save to keep them.")
                           .arg(actions_.size());
@@ -1013,12 +1040,13 @@ void ScriptSession::refreshRawFromActions() {
     if (actions_.empty()) {
         raw_read_only_ = false;
         raw_source_.clear();
-        raw_diagnostics_ = QStringLiteral("Enter cleanup source to generate typed rules.");
+        raw_diagnostics_ = QStringLiteral(
+            "Write steps such as $set(FIELD,tkfmt-1 value) or $delete(FIELD), one per line.");
         emit rawChanged();
         emit changed();
         return;
     }
-    const auto exported = metadata::export_metadata_rule_script(actions_);
+    const auto exported = metadata::export_native_rule_script(actions_);
     if (!exported) {
         raw_source_.clear();
         raw_read_only_ = true;
@@ -1037,10 +1065,10 @@ void ScriptSession::refreshRawFromActions() {
     }
     raw_read_only_ = false;
     raw_source_ = display_utf8(*exported);
-    raw_import_ = metadata::import_metadata_rule_script(*exported);
+    raw_import_ = metadata::import_native_rule_script(*exported);
     raw_valid_ = !raw_import_.has_errors();
-    raw_diagnostics_ = QStringLiteral("Ready · %1 typed rules · canonical source is regenerated "
-                                      "after structured edits")
+    raw_diagnostics_ = QStringLiteral("Ready · %1 steps · rewritten in canonical form after "
+                                      "each edit on the Steps tab")
                            .arg(actions_.size());
     emit rawChanged();
     emit changed();
@@ -1052,7 +1080,7 @@ void ScriptSession::setRawSource(const QString& source) {
     }
     raw_source_ = source;
     raw_modified_ = true;
-    raw_import_ = metadata::import_metadata_rule_script(encode_utf8(source));
+    raw_import_ = metadata::import_native_rule_script(encode_utf8(source));
     QStringList diagnostics;
     for (const auto& diagnostic : raw_import_.diagnostics) {
         const auto severity =
@@ -1070,7 +1098,7 @@ void ScriptSession::setRawSource(const QString& source) {
     if (raw_valid_) {
         actions_ = raw_import_.actions;
         diagnostics.prepend(
-            QStringLiteral("Ready · %1 generated typed rules").arg(actions_.size()));
+            QStringLiteral("Ready · %1 steps").arg(actions_.size()));
         emit stepsChanged(static_cast<int>(actions_.size()) - 1);
     }
     raw_diagnostics_ = diagnostics.join(QChar{'\n'});

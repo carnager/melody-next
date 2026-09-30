@@ -188,6 +188,20 @@ Integer conversion trims ASCII whitespace, accepts one optional `+` or `-`, and
 then requires at least one decimal digit and no other characters. Invalid input
 converts to zero. Overflow and division by zero are evaluation errors.
 
+### Decimal
+
+| Function | Result |
+| --- | --- |
+| `$decimal(value,divisor,places)` | `value` divided by `divisor` as decimal text with exactly `places` digits after the point, rounded half away from zero. `places` is 0–9; with 0 there is no point. |
+
+Arguments convert as integers do. The sign follows the quotient, and a result
+that rounds to zero has none. Division by zero, `places` outside 0–9, and
+scaling `value` by 10^`places` past the integer range are evaluation errors.
+`$decimal` is the one way to a fraction, as a rating on a 0.0–1.0 scale
+needs from a five-step one: `$decimal(%rating%,5,1)` gives `0.6` for `3`.
+It joined `tkfmt-1` in function-registry revision 2; an expression that uses it
+was a compile error before, so no existing expression changes meaning.
+
 ### Text
 
 Character indexes and lengths count Unicode scalar values, not UTF-8 bytes,

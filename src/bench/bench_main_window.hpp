@@ -371,6 +371,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
     void refreshPlaybackCursor(bool jump = false) override;
     void buildShortcuts();
+    // Help: the language references, opened in the browser.
+    void buildHelpMenu();
     void showCommandPalette();
     // Ctrl+L: the search field of the library showing -- or, from Folders,
     // of the library the source switch would open.

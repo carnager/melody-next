@@ -5,6 +5,7 @@
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/metadata/capture_pattern.hpp"
+#include "trackknife/metadata/ratings.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/titleformat/compiler.hpp"
 
@@ -203,6 +204,21 @@ struct MetadataCaptureValuesAction {
                            const MetadataCaptureValuesAction&) = default;
 };
 
+// Takes a rating another player left in `source_field`, kept on `scale`,
+// into Trackknife's own rating tag (ADR-0244): converted as the engine
+// converts such tags when it reads them, so 4 of 5 stars -- or 3.5 -- become
+// 0.8 and 0.7. The target is always FMPS_RATING, which each format's writer
+// maps to its own spelling and, in MP3, a popularimeter. A missing,
+// unreadable, out-of-scale or zero source leaves the target as it was.
+struct MetadataConvertRatingAction {
+    std::string target_field{fmps_rating_field};
+    std::string source_field;
+    PlainRatingScale scale{PlainRatingScale::five};
+
+    friend bool operator==(const MetadataConvertRatingAction&,
+                           const MetadataConvertRatingAction&) = default;
+};
+
 using MetadataTransformationAction =
     std::variant<MetadataSetValuesAction, MetadataAddValuesAction, MetadataRemoveFieldAction,
                  MetadataRemoveFieldIfAction, MetadataTransformValuesAction,
@@ -211,7 +227,7 @@ using MetadataTransformationAction =
                  MetadataReplaceMatchingValuesAction, MetadataNumberSelectedItemsAction,
                  MetadataKeepFirstCharactersAction, MetadataCaptureValuesAction,
                  MetadataNumberGroupedItemsAction, MetadataBlocklistFieldsAction,
-                 MetadataAllowlistFieldsAction>;
+                 MetadataAllowlistFieldsAction, MetadataConvertRatingAction>;
 
 struct MetadataTransformationChain {
     std::uint32_t schema_version{1U};

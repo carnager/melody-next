@@ -104,6 +104,9 @@ void MetadataTransformationInterchangeTest::roundTripsEveryTypedActionExactly() 
                 },
                 MetadataBlocklistFieldsAction{.fields = {"COMMENT", "ENCODER"}},
                 MetadataAllowlistFieldsAction{.fields = {"TITLE", "ARTIST", "ALBUM"}},
+                MetadataConvertRatingAction{.target_field = "FMPS_RATING",
+                                            .source_field = "RATING",
+                                            .scale = PlainRatingScale::ten},
             },
     };
 

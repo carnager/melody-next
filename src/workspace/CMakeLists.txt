@@ -50,6 +50,8 @@ qt_add_library(
     quick_pick_session.hpp
     replaygain_job.cpp
     replaygain_job.hpp
+    language_reference.cpp
+    language_reference.hpp
     script_session.cpp
     script_session.hpp
     engine_folder_session.cpp
@@ -147,6 +149,15 @@ qt_add_library(
     ../uicommon/track_view_layout.hpp
 )
 add_library(Trackknife::Workspace ALIAS trackknife_workspace)
+
+# The language references, inside the binary: the Help menu opens them in the
+# browser, so no installed file has to be found.
+qt_add_resources(
+    trackknife_workspace "language_reference"
+    PREFIX "/reference"
+    BASE "${PROJECT_SOURCE_DIR}/docs"
+    FILES "${PROJECT_SOURCE_DIR}/docs/title-formatting.md" "${PROJECT_SOURCE_DIR}/docs/tagging-scripts.md"
+)
 
 target_link_libraries(
     trackknife_workspace

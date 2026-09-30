@@ -536,8 +536,8 @@ conventional and MusicBrainz catalog, with the present spelling winning
 duplicates; any custom name remains freely typable.
 The ordinary transformation preview lists every removal before **Add to draft**;
 Apply remains the only file-writing step. Database schema 34 and native JSON
-preserve these actions exactly. They are deliberately unavailable in the
-smaller raw cleanup-script syntax rather than being translated ambiguously.
+preserve these actions exactly, and the Raw script tab writes them as
+`$deletefields(...)` and `$keepfields(...)` (ADR-0241).
 
 **Trackbench decision (ADRs 0048–0053 and 0064–0066, M5 transformation
 slices):** schema 1 chains are Qt-free ordered declarative data evaluated
@@ -613,10 +613,15 @@ separator aliasing. A hand-authored **Remove field** action remains semantic.
 Migration 19 persists exact-native removal and carries the same address through
 the operation journal. ADR-0068 adds the separate `tkcapture-1` multi-target
 action and schema 20 saved-chain representation. Per ADR-0070, the editor also
-projects representable typed cleanup actions into a deterministic **Raw
-script** tab. Valid raw edits immediately regenerate the typed action list;
-invalid text blocks Preview and Save, while typed-only actions make Raw mode
-read-only with an exact step diagnostic. The typed actions remain the saved
+projects the typed actions into a deterministic **Raw script** tab; per
+ADR-0241 that text is the native script -- one `$`-statement per step, full
+`tkfmt-1` in values and conditions -- covering every action kind
+([tagging-scripts.md](tagging-scripts.md)). Valid raw edits immediately
+regenerate the typed action list; invalid text blocks Preview and Save with
+line and column diagnostics. Per ADR-0244 a step converts a rating
+another player left in a tag of its own, on the scale it was kept on, into
+`FMPS_RATING` with the engine's own conversion; a copy or conversion reads a
+freeform source field by its exact native name. The typed actions remain the saved
 authority, so pasted whitespace and spelling are canonicalized after reload.
 Dirty name, typed, pasted, and raw edits require Save or explicit discard.
 ADR-0072 adds the separate strict native JSON interchange form for the complete

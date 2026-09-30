@@ -9,6 +9,7 @@
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/rule_script_import.hpp"
 #include "uicommon/metadata_transformation_interchange.hpp"
+#include "workspace/language_reference.hpp"
 #include "workspace/script_session.hpp"
 
 #include <QApplication>
@@ -207,6 +208,12 @@ class MetadataTransformationDialog final : public QDialog {
         capture_source_->setObjectName(
             QStringLiteral("bench-metadata-transformation-capture-source"));
         capture_source_->addItems(ScriptSession::captureSources());
+        rating_scale_label_ = new QLabel(QStringLiteral("Its scale:"), this);
+        rating_scale_ = new QComboBox(this);
+        rating_scale_->setObjectName(QStringLiteral("bench-metadata-transformation-rating-scale"));
+        rating_scale_->addItems(ScriptSession::ratingScales());
+        rating_scale_->setToolTip(
+            QStringLiteral("The scale the other player kept the rating on; it becomes 0.0-1.0"));
         capture_argument_label_ = new QLabel(QStringLiteral("Source expression:"), this);
         capture_argument_ = new QLineEdit(this);
         capture_argument_->setObjectName(
@@ -219,6 +226,7 @@ class MetadataTransformationDialog final : public QDialog {
         step_form->addRow(number_padding_label_, number_padding_);
         step_form->addRow(character_count_label_, character_count_);
         step_form->addRow(capture_source_label_, capture_source_);
+        step_form->addRow(rating_scale_label_, rating_scale_);
         step_form->addRow(capture_argument_label_, capture_argument_);
         rules_layout->addLayout(step_form);
 
@@ -271,6 +279,32 @@ class MetadataTransformationDialog final : public QDialog {
         raw_diagnostics_->setMaximumBlockCount(128);
         raw_diagnostics_->setMaximumHeight(110);
         raw_layout->addWidget(raw_diagnostics_);
+        // What can be written here, in the browser.
+        auto* reference_row = new QHBoxLayout;
+        reference_row->addStretch(1);
+        const auto reference = [this, raw_page, reference_row](
+                                   const QString& name, const QString& text, const QString& tip,
+                                   const LanguageReference which) {
+            auto* button = new QPushButton(text, raw_page);
+            button->setObjectName(name);
+            button->setFlat(true);
+            button->setToolTip(tip);
+            connect(button, &QPushButton::clicked, this, [this, which] {
+                if (QString error; !openLanguageReference(which, &error)) {
+                    QMessageBox::warning(this, QStringLiteral("Reference"), error);
+                }
+            });
+            reference_row->addWidget(button);
+        };
+        reference(QStringLiteral("bench-metadata-transformation-script-reference"),
+                  QStringLiteral("Script steps"),
+                  QStringLiteral("Every step a script can have, written as text"),
+                  LanguageReference::scripts);
+        reference(QStringLiteral("bench-metadata-transformation-tkfmt-reference"),
+                  QStringLiteral("tkfmt-1 reference"),
+                  QStringLiteral("The language of values and conditions"),
+                  LanguageReference::formatting);
+        raw_layout->addLayout(reference_row);
         editor_tabs_->addTab(raw_page, QStringLiteral("Raw script"));
         editor_layout->addWidget(editor_tabs_, 1);
         content_splitter_->addWidget(editor_pane);
@@ -539,6 +573,8 @@ class MetadataTransformationDialog final : public QDialog {
         character_count_->setVisible(form.characters);
         capture_source_label_->setVisible(form.capture_source);
         capture_source_->setVisible(form.capture_source);
+        rating_scale_label_->setVisible(form.rating_scale);
+        rating_scale_->setVisible(form.rating_scale);
         capture_argument_label_->setVisible(form.capture_argument);
         capture_argument_->setVisible(form.capture_argument);
         capture_argument_label_->setText(form.capture_argument_label);
@@ -557,6 +593,7 @@ class MetadataTransformationDialog final : public QDialog {
             .character_count = character_count_->value(),
             .capture_source = capture_source_->currentIndex(),
             .capture_argument = capture_argument_->text(),
+            .rating_scale = rating_scale_->currentIndex(),
         });
         if (session_->steps().size() != before) {
             target_->clear();
@@ -641,6 +678,7 @@ class MetadataTransformationDialog final : public QDialog {
         number_padding_->setEnabled(editing);
         character_count_->setEnabled(editing);
         capture_source_->setEnabled(editing);
+        rating_scale_->setEnabled(editing);
         capture_argument_->setEnabled(editing);
         raw_source_->setEnabled(editing);
         import_->setEnabled(editing);
@@ -682,6 +720,8 @@ class MetadataTransformationDialog final : public QDialog {
     QSpinBox* character_count_{nullptr};
     QLabel* capture_source_label_{nullptr};
     QComboBox* capture_source_{nullptr};
+    QLabel* rating_scale_label_{nullptr};
+    QComboBox* rating_scale_{nullptr};
     QLabel* capture_argument_label_{nullptr};
     QLineEdit* capture_argument_{nullptr};
     QPushButton* add_{nullptr};

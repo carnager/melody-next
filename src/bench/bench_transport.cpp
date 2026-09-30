@@ -12,6 +12,7 @@
 #include "uicommon/list_persistence_service.hpp"
 
 #include "uicommon/track_row_roles.hpp"
+#include "workspace/language_reference.hpp"
 #include "workspace/shortcut_session.hpp"
 #include <QAction>
 #include <QActionGroup>
@@ -73,6 +74,7 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
     buildWorkspace();
     buildTransport();
     buildLastFm();
+    buildHelpMenu();
     buildShortcuts();
     initializePersistence();
 
@@ -86,6 +88,24 @@ BenchMainWindow::BenchMainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 BenchMainWindow::~BenchMainWindow() { stopBackgroundWork(); }
+
+void BenchMainWindow::buildHelpMenu() {
+    auto* help_menu = menuBar()->addMenu(QStringLiteral("&Help"));
+    const auto add = [this, help_menu](const QString& name, const QString& text,
+                                       const LanguageReference reference) {
+        auto* action = help_menu->addAction(text);
+        action->setObjectName(name);
+        connect(action, &QAction::triggered, this, [this, reference] {
+            if (QString error; !openLanguageReference(reference, &error)) {
+                showMessage(error, 6000);
+            }
+        });
+    };
+    add(QStringLiteral("action-reference-tkfmt"), QStringLiteral("tkfmt-1 reference"),
+        LanguageReference::formatting);
+    add(QStringLiteral("action-reference-scripts"), QStringLiteral("Tagging script reference"),
+        LanguageReference::scripts);
+}
 
 void BenchMainWindow::showMessage(const QString& text, const int timeout_ms) {
     statusBar()->showMessage(text, timeout_ms);

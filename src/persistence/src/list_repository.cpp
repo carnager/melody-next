@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 47U;
+constexpr unsigned current_schema_version = 48U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1436,6 +1436,46 @@ UPDATE schema_version SET version = 47;
             return result;
         }
     }
+    if (version <= 47) {
+        // ADR-0244: a tagging script can convert a rating into FMPS_RATING,
+        // action kind 20. The kind is range-checked, so the table is rebuilt
+        // with the wider check, every row copied as it is.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE metadata_transformation_action_values RENAME TO metadata_transformation_action_values_v47;
+ALTER TABLE metadata_transformation_actions RENAME TO metadata_transformation_actions_v47;
+CREATE TABLE metadata_transformation_actions (
+    chain_id TEXT NOT NULL REFERENCES metadata_transformation_chains(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    kind INTEGER NOT NULL CHECK(kind BETWEEN 0 AND 20),
+    target_field BLOB NOT NULL,
+    argument BLOB,
+    dialect BLOB,
+    dialect_version INTEGER,
+    compiler_schema INTEGER,
+    integer_argument INTEGER,
+    integer_argument_2 INTEGER,
+    PRIMARY KEY(chain_id, position)
+);
+CREATE TABLE metadata_transformation_action_values (
+    chain_id TEXT NOT NULL,
+    action_position INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    value BLOB NOT NULL,
+    PRIMARY KEY(chain_id, action_position, position),
+    FOREIGN KEY(chain_id, action_position)
+        REFERENCES metadata_transformation_actions(chain_id, position) ON DELETE CASCADE
+);
+INSERT INTO metadata_transformation_actions SELECT * FROM metadata_transformation_actions_v47;
+INSERT INTO metadata_transformation_action_values SELECT * FROM metadata_transformation_action_values_v47;
+DROP TABLE metadata_transformation_action_values_v47;
+DROP TABLE metadata_transformation_actions_v47;
+UPDATE schema_version SET version = 48;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
     // Foreign keys are off while the schema changes (see open()); a rebuild
     // that left a reference dangling is refused here rather than committed.
     auto dangling = prepare(database, "PRAGMA foreign_key_check");
@@ -1835,6 +1875,15 @@ serialize_transformation_action(const metadata::MetadataTransformationAction& ac
             } else if constexpr (std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
                 serialized.kind = 19;
                 serialized.values = &typed.fields;
+            } else if constexpr (std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
+                // ADR-0244: the source field, and the scale by its top.
+                serialized.kind = 20;
+                serialized.argument = typed.source_field;
+                serialized.integer_argument = typed.scale == metadata::PlainRatingScale::hundred
+                                                  ? 100U
+                                              : typed.scale == metadata::PlainRatingScale::ten
+                                                  ? 10U
+                                                  : 5U;
             }
             return serialized;
         },
@@ -3722,7 +3771,7 @@ ListRepository::load_metadata_transformation_chains() const {
         const auto kind = sqlite3_column_int(actions_query->get(), 2);
         if (found == chain_indices.end() || position < 0 ||
             static_cast<std::size_t>(position) != chains[found->second].chain.actions.size() ||
-            kind < 0 || kind > 19) {
+            kind < 0 || kind > 20) {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = "Invalid persisted metadata transformation action order",
@@ -3993,6 +4042,24 @@ ListRepository::load_metadata_transformation_chains() const {
                     : metadata::MetadataTransformationAction{
                           metadata::MetadataAllowlistFieldsAction{}};
             break;
+        case 20: {
+            const auto scale = integer_argument == 5    ? metadata::PlainRatingScale::five
+                               : integer_argument == 10 ? metadata::PlainRatingScale::ten
+                               : integer_argument == 100
+                                   ? metadata::PlainRatingScale::hundred
+                                   : metadata::PlainRatingScale::off;
+            if (!argument || has_any_dialect || !has_integer_argument || has_integer_argument_2 ||
+                scale == metadata::PlainRatingScale::off) {
+                return std::unexpected(core::Error{
+                    .code = core::ErrorCode::database,
+                    .message = "Persisted rating conversion is missing its field or scale",
+                    .context = {{"chain_id", chain_id}},
+                });
+            }
+            action = metadata::MetadataConvertRatingAction{
+                .target_field = target, .source_field = *argument, .scale = scale};
+            break;
+        }
         default:
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,

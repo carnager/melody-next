@@ -24,6 +24,8 @@ qt_add_library(
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp
+    library_browser.cpp
+    library_browser.hpp
     list_edit_job.cpp
     list_edit_job.hpp
     startup.cpp

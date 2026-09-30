@@ -19,6 +19,9 @@ qt_add_qml_module(
     VERSION 1.0
     RESOURCE_PREFIX /qt/qml
     IMPORTS QtQuick.Controls.Fusion
+    SOURCES
+    style/pointer.cpp
+    style/pointer.hpp
     QML_FILES
     style/Theme.qml
     style/Chevron.qml
@@ -53,6 +56,7 @@ qt_add_qml_module(
     style/ToolSeparator.qml
     style/SplitView.qml
 )
+target_include_directories(trackknife_quick_style PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/style)
 target_link_libraries(trackknife_quick_style PRIVATE Qt6::Quick Qt6::QuickControls2
                                                  )
 

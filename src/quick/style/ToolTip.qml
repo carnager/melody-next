@@ -6,8 +6,13 @@ import QtQuick.Controls
 T.ToolTip {
     id: control
 
-    x: parent ? (parent.width - implicitWidth) / 2 : 0
-    y: -implicitHeight - 4
+    // By the pointer, below and to the right of it, as the desktop's:
+    // placed as it shows, and kept inside the window by its margins.
+    onAboutToShow: {
+        const at = Pointer.at(parent);
+        x = at.x + 2;
+        y = at.y + 20;
+    }
 
     implicitWidth: Math.max(implicitBackgroundWidth + leftInset + rightInset,
                             contentWidth + leftPadding + rightPadding)

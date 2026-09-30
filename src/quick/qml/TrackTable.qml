@@ -279,7 +279,9 @@ FocusScope {
                             x: playing.visible ? playing.x + playing.width + 4 : 4
                             width: parent.width - x - 4
                             height: parent.height
-                            readonly property color accent: Shade.lighter(row.palette.highlight, 115)
+                            // The playing track in the focused window's accent, whether
+                            // or not this window has focus, readable on the list.
+                            readonly property color accent: Shade.accentOn(row.palette.active.highlight, table.base)
                             readonly property color shade:
                                 (cell.modelData.foreground ?? "") !== "" ? cell.modelData.foreground
                                 : cell.modelData.current ? accent

@@ -389,6 +389,7 @@ class BenchMainWindowTest final : public QObject {
     void crossTabMoveUndoIsOneTransaction();
     void localListUndoActionsRespectAuthorityAndTextEditing();
     void deleteInUpNextTakesItsTrackNotTheLists();
+    void settingsLeftOffReadAsOff();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -12193,6 +12194,35 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
     window.replayListEdit(false);
     QCOMPARE(source->rows(), (std::vector<LocalTrackRow>{second}));
     QCOMPARE(target->rows(), (std::vector<LocalTrackRow>{first, second, first}));
+}
+
+// An INI file hands every value back as text, and the text "false" is true to
+// anything that only asks whether a value is there: the Qt Quick window once
+// showed every option left off as on. Settings come out as their type.
+void BenchMainWindowTest::settingsLeftOffReadAsOff() {
+    QSettings stored;
+    stored.setValue(QLatin1String(SettingsKeys::ratings_in_tags_key), QStringLiteral("false"));
+    stored.setValue(QLatin1String(SettingsKeys::rating_backup_key), QStringLiteral("false"));
+    stored.setValue(QStringLiteral("playback/rg-preamp-with"), QStringLiteral("-3.5"));
+    stored.setValue(QLatin1String(SettingsKeys::rating_tag_scale_key), QStringLiteral("10"));
+    stored.sync();
+    const SettingsSession session;
+    const auto values = session.values();
+    const auto in_tags = values.value(QLatin1String(SettingsKeys::ratings_in_tags_key));
+    QCOMPARE(in_tags.metaType(), QMetaType::fromType<bool>());
+    QVERIFY(!in_tags.toBool());
+    const auto backup = values.value(QLatin1String(SettingsKeys::rating_backup_key));
+    QCOMPARE(backup.metaType(), QMetaType::fromType<bool>());
+    QVERIFY(!backup.toBool());
+    const auto preamp = values.value(QStringLiteral("playback/rg-preamp-with"));
+    QCOMPARE(preamp.metaType(), QMetaType::fromType<double>());
+    QCOMPARE(preamp.toDouble(), -3.5);
+    QCOMPARE(values.value(QLatin1String(SettingsKeys::rating_tag_scale_key)).toString(),
+             QStringLiteral("10"));
+    stored.remove(QLatin1String(SettingsKeys::ratings_in_tags_key));
+    stored.remove(QLatin1String(SettingsKeys::rating_backup_key));
+    stored.remove(QStringLiteral("playback/rg-preamp-with"));
+    stored.remove(QLatin1String(SettingsKeys::rating_tag_scale_key));
 }
 
 // Delete takes what is chosen where the keyboard is: in Up Next, its track,

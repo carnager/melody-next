@@ -743,6 +743,46 @@ Workspace::ListTab* Workspace::transferRowsToNewList(ListTab* source_tab,
     return tabForDocument(id);
 }
 
+Workspace::ListTab* Workspace::openDynamicResult(const QString& name,
+                                                std::vector<LocalTrackRow> rows,
+                                                const EngineKey& engine, const bool show) {
+    auto* destination = addList(persistence::ListDocument{.id = core::StableId::random(),
+                                                          .kind = persistence::ListKind::scratch,
+                                                          .name = utf8Bytes(name),
+                                                          .pinned = false,
+                                                          .dirty = false,
+                                                          .items = {},
+                                                          .engine = engine.stored()},
+                                false);
+    destination->view_layout = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
+    destination->model->replaceRows(std::move(rows));
+    markTabDirty(*destination);
+    syncArtwork(*destination);
+    schedulePersist();
+    if (show) {
+        view_->showList(*destination);
+    }
+    return destination;
+}
+
+void Workspace::markPlaying(LocalListModel& model, const QString& playback_context) {
+    int occurrence = 0;
+    if (playback_context == document_text(playback_.anchors.document)) {
+        if (const auto* tab = tabForDocument(playback_.anchors.document);
+            tab && tab->model->rowCount() <= 500)
+            for (int i = 0; i < playback_.row && i < tab->model->rowCount(); ++i)
+                if (tab->model->source(i) == playback_.anchors.source)
+                    ++occurrence;
+    }
+    int hint = -1;
+    for (int i = 0; i < model.rowCount(); ++i)
+        if (model.source(i) == playback_.anchors.source && occurrence-- == 0) {
+            hint = i;
+            break;
+        }
+    model.setCurrentSource(hint >= 0 ? playback_.anchors.source : LocalTrackSource{}, hint);
+}
+
 void Workspace::addImportedList(std::vector<LocalTrackRow> rows, const QString& name) {
     auto* tab = addList({.id = core::StableId::random(),
                          .kind = persistence::ListKind::saved,

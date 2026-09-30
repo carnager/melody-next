@@ -76,6 +76,11 @@ ApplicationWindow {
         }
         else if (name === "search" && Tk.library)
             Tk.library.search = "a";
+        else if (name === "dynamic") {
+            window.openDynamic();
+            window.dynamicWindow.dynamic.setQuery("ALL");
+            window.dynamicWindow.dynamic.refresh();
+        }
         else if (name === "searchwindow") {
             window.openSearch();
             window.searchWindow.search.setScope(1);
@@ -154,7 +159,7 @@ ApplicationWindow {
             KeyedAction {
                 objectName: "action-dynamic-playlists"
                 text: "Dynamic playlists…"
-                onTriggered: window.notYet("Dynamic playlists")
+                onTriggered: window.openDynamic()
             }
             KeyedAction {
                 objectName: "action-backup-workspace"
@@ -572,6 +577,16 @@ ApplicationWindow {
         sequence: window.keyOf("action-show-up-next")
         onActivated: upNextSettings.visible = !upNextSettings.visible
     }
+    property var dynamicWindow: null
+    function openDynamic() {
+        if (dynamicWindow) {
+            Tk.followDynamic(dynamicWindow.dynamic);
+            dynamicWindow.raise();
+            dynamicWindow.requestActivate();
+            return;
+        }
+        dynamicWindow = dynamicComponent.createObject(window, {dynamic: Tk.openDynamic()});
+    }
     property var searchWindow: null
     function openSearch() {
         if (searchWindow) {
@@ -841,6 +856,12 @@ ApplicationWindow {
     }
     CommandPalette {
         id: commandPaletteDialog
+    }
+    Component {
+        id: dynamicComponent
+        DynamicPlaylistsWindow {
+            Component.onDestruction: window.dynamicWindow = null
+        }
     }
     Component {
         id: searchComponent

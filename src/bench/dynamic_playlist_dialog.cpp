@@ -12,10 +12,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollBar>
-#include <QSettings>
 #include <QSpinBox>
-#include <QTimer>
-#include <QUuid>
 #include <QVBoxLayout>
 
 namespace trackknife::bench {
@@ -44,14 +41,9 @@ QList<QByteArray> resultKeys(QAbstractItemModel* model) {
 } // namespace
 DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Library> libraries,
                                              LibrarySearch search, QWidget* parent)
-    : QDialog(parent), profile_(std::move(profile)),
-      service_(new DynamicPlaylistService(
-          [this, search = std::move(search)](query::CompiledTkq compiled,
-                                             core::CancellationToken cancellation,
-                                             DynamicPlaylistService::Completion completion) {
-              search(engine(), std::move(compiled), std::move(cancellation), std::move(completion));
-          },
-          this)) {
+    : QDialog(parent),
+      session_(new DynamicPlaylistSession(std::move(profile), std::move(libraries),
+                                          std::move(search), this)) {
     setObjectName(QStringLiteral("bench-dynamic-playlists"));
     setWindowTitle(QStringLiteral("Dynamic playlists"));
     setAttribute(Qt::WA_DeleteOnClose);
@@ -70,11 +62,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     library_ = new QComboBox(this);
     library_->setObjectName(QStringLiteral("dynamic-library"));
     library_->setAccessibleName(QStringLiteral("Library"));
-    if (libraries.empty()) {
-        libraries.push_back({EngineKey::local(), QStringLiteral("This computer")});
-    }
-    for (const auto& library : libraries) {
-        library_->addItem(library.name, library.engine.text());
+    const auto libraries_shown = session_->libraryNames();
+    for (int index = 0; index < libraries_shown.size(); ++index) {
+        library_->addItem(libraries_shown.at(index), session_->libraryKey(index));
     }
     auto* catalog_row = new QHBoxLayout;
     catalog_ = new QComboBox(this);
@@ -82,12 +72,12 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     catalog_->setAccessibleName(QStringLiteral("Saved dynamic playlists"));
     catalog_row->addWidget(library_);
     catalog_row->addWidget(catalog_, 1);
-    auto* save = new QPushButton(QStringLiteral("Save definition"), this);
-    save->setObjectName(QStringLiteral("dynamic-save"));
-    auto* remove = new QPushButton(QStringLiteral("Remove"), this);
-    remove->setObjectName(QStringLiteral("dynamic-remove"));
-    catalog_row->addWidget(save);
-    catalog_row->addWidget(remove);
+    save_ = new QPushButton(QStringLiteral("Save definition"), this);
+    save_->setObjectName(QStringLiteral("dynamic-save"));
+    remove_ = new QPushButton(QStringLiteral("Remove"), this);
+    remove_->setObjectName(QStringLiteral("dynamic-remove"));
+    catalog_row->addWidget(save_);
+    catalog_row->addWidget(remove_);
     layout->addLayout(catalog_row);
     form_ = new QFormLayout;
     form_->setRowWrapPolicy(QFormLayout::WrapLongRows);
@@ -100,11 +90,9 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     name_ = line(QStringLiteral("Name:"), QStringLiteral("dynamic-name"));
     source_ = new QComboBox(this);
     source_->setObjectName(QStringLiteral("dynamic-source"));
-    source_->addItem(QStringLiteral("Library rules"), QStringLiteral("rules"));
-    source_->addItem(QStringLiteral("Last.fm similar tracks"), QStringLiteral("similar"));
-    source_->addItem(QStringLiteral("Last.fm loved tracks"), QStringLiteral("loved"));
-    source_->addItem(QStringLiteral("Last.fm top tracks (all time)"), QStringLiteral("top"));
-    source_->addItem(QStringLiteral("Last.fm tag tracks"), QStringLiteral("tag"));
+    for (const auto& choice : DynamicPlaylistSession::sources()) {
+        source_->addItem(choice.label, choice.value);
+    }
     form_->addRow(QStringLiteral("Source:"), source_);
     query_ = line(QStringLiteral("Rules:"), QStringLiteral("dynamic-query"));
     query_->setPlaceholderText(QStringLiteral("genre HAS rock AND rating GREATER 6"));
@@ -151,305 +139,133 @@ DynamicPlaylistDialog::DynamicPlaylistDialog(QString profile, std::vector<Librar
     view_->setAcceptDrops(false);
     view_->setActivateCallback([this](const QModelIndex&) { playCurrent(); });
     connect(view_, &QTableView::doubleClicked, this, [this](const QModelIndex&) { playCurrent(); });
-    local_model_ = new LocalListModel(this);
-    local_model_->setProperty("definition-owned", true);
-    view_->setModel(local_model_);
+    view_->setModel(session_->results());
     // Hidden by default; the owning window supplies the authority's history service.
     view_->setColumnHidden(ui::track_play_count_column, true);
     view_->setColumnHidden(ui::track_last_played_column, true);
     layout->addWidget(view_, 1);
-    refresh_timer_ = new QTimer(this);
-    refresh_timer_->setSingleShot(true);
-    refresh_timer_->setInterval(500);
-    connect(refresh_timer_, &QTimer::timeout, this, [this] {
-        if (source_->currentData() == QStringLiteral("rules"))
-            refresh(true);
+
+    connect(session_, &DynamicPlaylistSession::changed, this, &DynamicPlaylistDialog::sync);
+    connect(session_, &DynamicPlaylistSession::catalogChanged, this,
+            &DynamicPlaylistDialog::syncCatalog);
+    connect(session_, &DynamicPlaylistSession::resultsAboutToChange, this,
+            &DynamicPlaylistDialog::keepPlace);
+    connect(session_, &DynamicPlaylistSession::resultsChanged, this, [this] {
+        restorePlace();
+        emit resultsChanged();
     });
-    auto* poll = new QTimer(this);
-    poll->setInterval(30000);
-    connect(poll, &QTimer::timeout, this, [this] {
-        if (isVisible() && !busy_ && !shuffle_->isChecked())
-            libraryChanged();
-    });
-    poll->start();
-    connect(service_, &DynamicPlaylistService::progress, status_, &QLabel::setText);
-    connect(
-        service_, &DynamicPlaylistService::finished, this,
-        [this](const DynamicPlaylistService::Tracks& tracks, int unmatched, const QString& error) {
-            busy_ = false;
-            refresh_->setEnabled(authority_valid_);
-            if (refresh_pending_) {
-                refresh_pending_ = false;
-                // A database change during this query invalidates its snapshot.
-                // Retain the last displayed result until a fresh evaluation finishes.
-                libraryChanged();
-                return;
-            }
-            if (!error.isEmpty()) {
-                discardResults();
-                status_->setText(error);
-                return;
-            }
-            const auto old_keys = resultKeys(view_->model());
-            QSet<QByteArray> selected;
-            for (const auto& index : view_->selectionModel()->selectedRows())
-                selected.insert(old_keys.value(index.row()));
-            const auto current_key = old_keys.value(view_->currentIndex().row());
-            const auto top = view_->indexAt(QPoint{1, 1});
-            const auto top_key = old_keys.value(top.row());
-            const auto offset = top.isValid() ? view_->visualRect(top).top() : 0;
-            const auto horizontal = view_->horizontalScrollBar()->value();
-            tracks_ = tracks;
-            {
-                const auto& rows = tracks_;
-                const auto& previous = local_model_->rows();
-                const bool unchanged = rows.size() == previous.size() &&
-                                       std::equal(rows.begin(), rows.end(), previous.begin(),
-                                                  [](const auto& a, const auto& b) {
-                                                      return a == b && a.rating == b.rating &&
-                                                             a.album_rating == b.album_rating;
-                                                  });
-                if (!unchanged)
-                    local_model_->replaceRows(rows);
-            }
-            const auto keys = resultKeys(view_->model());
-            view_->selectionModel()->clearSelection();
-            for (int i = 0; i < keys.size(); ++i) {
-                const auto index = view_->model()->index(i, 0);
-                if (selected.contains(keys[i]))
-                    view_->selectionModel()->select(index, QItemSelectionModel::Select |
-                                                               QItemSelectionModel::Rows);
-                if (!current_key.isEmpty() && keys[i] == current_key)
-                    view_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
-                if (!top_key.isEmpty() && keys[i] == top_key) {
-                    view_->scrollTo(index, QAbstractItemView::PositionAtTop);
-                    if (view_->verticalScrollMode() == QAbstractItemView::ScrollPerPixel)
-                        view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->value() -
-                                                             offset);
-                }
-            }
-            view_->horizontalScrollBar()->setValue(horizontal);
-            emit resultsChanged();
-            const auto count = tracks_.size();
-            open_->setEnabled(count > 0);
-            status_->setText(
-                source_->currentData() == QStringLiteral("rules")
-                    ? QStringLiteral(
-                          "%1 tracks · rules update automatically while this window is open")
-                          .arg(count)
-                    : QStringLiteral("%1 tracks selected from %2 library matches · %3 Last.fm "
-                                     "tracks not found%4")
-                          .arg(count)
-                          .arg(service_->matchedPoolSize())
-                          .arg(unmatched)
-                          .arg(service_->matchedPoolSize() <=
-                                       static_cast<std::size_t>(limit_->value())
-                                   ? QStringLiteral(" · all available matches included")
-                                   : QString{}));
-        });
-    connect(refresh_, &QPushButton::clicked, this, &DynamicPlaylistDialog::refresh);
-    connect(stop, &QPushButton::clicked, this, [this] {
-        auto_refresh_ = false;
-        refresh_pending_ = false;
-        refresh_timer_->stop();
-        service_->cancel();
-        busy_ = false;
-        refresh_->setEnabled(authority_valid_);
-        status_->setText(QStringLiteral("Stopped"));
-    });
+    connect(session_, &DynamicPlaylistSession::libraryChosen, this,
+            [this](const EngineKey& chosen) {
+                markViewEngine(view_, chosen);
+                emit libraryChosen(chosen);
+            });
+    connect(refresh_, &QPushButton::clicked, session_, &DynamicPlaylistSession::refresh);
+    connect(stop, &QPushButton::clicked, session_, &DynamicPlaylistSession::stop);
     connect(open_, &QPushButton::clicked, this,
-            [this] { emit snapshotRequested(name_->text().trimmed(), tracks_); });
-    connect(catalog_, &QComboBox::activated, this, [this](int) { loadSelection(); });
-    connect(library_, &QComboBox::currentIndexChanged, this, [this](int) {
-        markViewEngine(view_, engine());
-        emit libraryChosen(engine());
-        // The same definition, run against the other library.
-        const bool saved_rules = !catalog_->currentData().toString().isEmpty() &&
-                                 source_->currentData() == QStringLiteral("rules");
-        discardResults();
-        status_->setText(QStringLiteral("Choose Refresh to evaluate this definition."));
-        if (saved_rules)
-            refresh();
-    });
-    connect(source_, &QComboBox::currentIndexChanged, this, [this](int) {
-        updateFields();
-        discardResults();
-    });
-    for (auto* edit : {query_, artist_, track_, user_, tag_})
-        connect(edit, &QLineEdit::textEdited, this, [this] { discardResults(); });
-    connect(limit_, &QSpinBox::valueChanged, this, [this](int) { discardResults(); });
-    connect(shuffle_, &QCheckBox::toggled, this, [this](bool) { discardResults(); });
-    connect(save, &QPushButton::clicked, this, [this] {
-        auto d = definition();
-        if (d.name.isEmpty()) {
-            status_->setText(QStringLiteral("Give the playlist a name"));
-            return;
-        }
-        if (d.source == QStringLiteral("rules")) {
-            const auto compiled = query::compile_tkq(d.query.toStdString());
-            if (!compiled) {
-                status_->setText(QString::fromStdString(compiled.error().message));
-                return;
-            }
-        }
-        auto next = definitions_;
-        if (d.id.isEmpty()) {
-            d.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            next.push_back(d);
-        } else
-            for (auto& entry : next)
-                if (entry.id == d.id)
-                    entry = d;
-        const auto saved = saveDynamicPlaylists(profile_, next);
-        if (!saved) {
-            status_->setText(QString::fromStdString(saved.error().message));
-            return;
-        }
-        definitions_ = std::move(next);
-        refill(d.id);
-        status_->setText(QStringLiteral("Definition saved"));
-    });
-    connect(remove, &QPushButton::clicked, this, [this] {
-        const auto id = catalog_->currentData().toString();
-        if (id.isEmpty())
-            return;
-        auto next = definitions_;
-        next.removeIf([&id](const auto& d) { return d.id == id; });
-        const auto saved = saveDynamicPlaylists(profile_, next);
-        if (!saved) {
-            status_->setText(QString::fromStdString(saved.error().message));
-            return;
-        }
-        definitions_ = std::move(next);
-        refill();
-        loadSelection();
-    });
-    const auto loaded = loadDynamicPlaylists(profile_);
-    if (loaded)
-        definitions_ = *loaded;
-    else {
-        save->setEnabled(false);
-        remove->setEnabled(false);
-    }
-    refill();
-    loadSelection();
-    if (!loaded)
-        status_->setText(QString::fromStdString(loaded.error().message));
+            [this] { emit snapshotRequested(session_->playlistName(), session_->tracks()); });
+    connect(catalog_, &QComboBox::activated, session_, &DynamicPlaylistSession::selectDefinition);
+    connect(library_, &QComboBox::currentIndexChanged, session_,
+            &DynamicPlaylistSession::chooseLibrary);
+    connect(source_, &QComboBox::currentIndexChanged, this,
+            [this] { session_->setSource(source_->currentData().toString()); });
+    connect(name_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setName);
+    connect(query_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setQuery);
+    connect(artist_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setArtist);
+    connect(track_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setTrack);
+    connect(user_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setUser);
+    connect(tag_, &QLineEdit::textChanged, session_, &DynamicPlaylistSession::setTag);
+    connect(limit_, &QSpinBox::valueChanged, session_, &DynamicPlaylistSession::setLimit);
+    connect(shuffle_, &QCheckBox::toggled, session_, &DynamicPlaylistSession::setShuffle);
+    connect(save_, &QPushButton::clicked, session_, &DynamicPlaylistSession::save);
+    connect(remove_, &QPushButton::clicked, session_, &DynamicPlaylistSession::remove);
+    syncCatalog();
+    sync();
 }
-DynamicPlaylistDialog::~DynamicPlaylistDialog() { service_->cancel(); }
-EngineKey DynamicPlaylistDialog::engine() const {
-    const auto text = library_->currentData().toString();
-    return text.isEmpty() ? EngineKey::local() : EngineKey::fromText(text);
+DynamicPlaylistDialog::~DynamicPlaylistDialog() = default;
+void DynamicPlaylistDialog::showEvent(QShowEvent* event) {
+    QDialog::showEvent(event);
+    session_->setShown(true);
 }
-void DynamicPlaylistDialog::followLibrary(const EngineKey& engine) {
-    const auto wanted = library_->findData(engine.text());
-    if (wanted >= 0)
-        library_->setCurrentIndex(wanted);
+void DynamicPlaylistDialog::hideEvent(QHideEvent* event) {
+    QDialog::hideEvent(event);
+    session_->setShown(false);
 }
-QString DynamicPlaylistDialog::playlistName() const { return name_->text().trimmed(); }
 void DynamicPlaylistDialog::playCurrent() {
-    if (authority_valid_ && view_->currentIndex().isValid())
+    if (session_->authorityValid() && view_->currentIndex().isValid())
         emit playRequested(view_->currentIndex().row());
 }
-void DynamicPlaylistDialog::refill(const QString& selected) {
+void DynamicPlaylistDialog::syncCatalog() {
+    const QSignalBlocker blocker{catalog_};
     catalog_->clear();
-    catalog_->addItem(QStringLiteral("New dynamic playlist…"), QString{});
-    for (const auto& d : definitions_)
-        catalog_->addItem(d.name, d.id);
-    const auto index = catalog_->findData(selected);
-    catalog_->setCurrentIndex(index < 0 ? 0 : index);
+    catalog_->addItems(session_->catalogNames());
+    catalog_->setCurrentIndex(session_->catalogIndex());
+    save_->setEnabled(session_->catalogWritable());
+    remove_->setEnabled(session_->catalogWritable());
 }
-DynamicPlaylistDefinition DynamicPlaylistDialog::definition() const {
-    return {.id = catalog_->currentData().toString(),
-            .name = name_->text().trimmed(),
-            .profile = profile_,
-            .source = source_->currentData().toString(),
-            .query = query_->text(),
-            .artist = artist_->text(),
-            .track = track_->text(),
-            .user = user_->text(),
-            .tag = tag_->text(),
-            .limit = limit_->value(),
-            .shuffle = shuffle_->isChecked()};
-}
-void DynamicPlaylistDialog::loadSelection() {
-    loading_ = true;
-    DynamicPlaylistDefinition d;
-    for (const auto& entry : definitions_)
-        if (entry.id == catalog_->currentData().toString())
-            d = entry;
-    name_->setText(d.name);
-    source_->setCurrentIndex(source_->findData(d.source));
-    query_->setText(d.query);
-    artist_->setText(d.artist);
-    track_->setText(d.track);
-    user_->setText(d.user);
-    tag_->setText(d.tag);
-    limit_->setValue(d.limit);
-    shuffle_->setChecked(d.shuffle);
-    loading_ = false;
-    updateFields();
-    discardResults();
-    status_->setText(QStringLiteral("Choose Refresh to evaluate this definition."));
-    if (!d.id.isEmpty() && d.source == QStringLiteral("rules"))
-        refresh();
-}
-void DynamicPlaylistDialog::updateFields() {
-    const auto source = source_->currentData().toString();
-    shuffle_->setText(source == QStringLiteral("rules")
-                          ? QStringLiteral("Shuffle results on refresh")
-                          : QStringLiteral("Shuffle selected tracks"));
-    shuffle_->setToolTip(source == QStringLiteral("rules")
-                             ? QString{}
-                             : QStringLiteral("Each refresh picks a fresh selection, favouring "
-                                              "tracks outside the previous result. "
-                                              "This option also randomizes their order; otherwise "
-                                              "Last.fm ranking determines the order."));
+void DynamicPlaylistDialog::sync() {
+    const auto show = [](QLineEdit* field, const QString& text) {
+        if (field->text() != text) {
+            const QSignalBlocker blocker{field};
+            field->setText(text);
+        }
+    };
+    {
+        const QSignalBlocker library_blocker{library_};
+        const QSignalBlocker source_blocker{source_};
+        const QSignalBlocker limit_blocker{limit_};
+        const QSignalBlocker shuffle_blocker{shuffle_};
+        library_->setCurrentIndex(session_->library());
+        source_->setCurrentIndex(source_->findData(session_->source()));
+        limit_->setValue(session_->limit());
+        shuffle_->setChecked(session_->shuffle());
+    }
+    show(name_, session_->name());
+    show(query_, session_->query());
+    show(artist_, session_->artist());
+    show(track_, session_->track());
+    show(user_, session_->user());
+    show(tag_, session_->tag());
+    const auto source = session_->source();
+    shuffle_->setText(session_->shuffleText());
+    shuffle_->setToolTip(session_->shuffleTip());
     form_->setRowVisible(query_, source == QStringLiteral("rules"));
     form_->setRowVisible(artist_, source == QStringLiteral("similar"));
     form_->setRowVisible(track_, source == QStringLiteral("similar"));
     form_->setRowVisible(user_,
                          source == QStringLiteral("loved") || source == QStringLiteral("top"));
     form_->setRowVisible(tag_, source == QStringLiteral("tag"));
+    status_->setText(session_->status());
+    refresh_->setEnabled(session_->canRefresh());
+    open_->setEnabled(session_->canOpen());
 }
-void DynamicPlaylistDialog::discardResults() {
-    if (loading_)
-        return;
-    auto_refresh_ = false;
-    refresh_pending_ = false;
-    refresh_timer_->stop();
-    service_->cancel();
-    busy_ = false;
-    refresh_->setEnabled(authority_valid_);
-    open_->setEnabled(false);
-    local_model_->replaceRows({});
+void DynamicPlaylistDialog::keepPlace() {
+    const auto keys = resultKeys(view_->model());
+    kept_selected_.clear();
+    for (const auto& index : view_->selectionModel()->selectedRows())
+        kept_selected_.insert(keys.value(index.row()));
+    kept_current_ = keys.value(view_->currentIndex().row());
+    const auto top = view_->indexAt(QPoint{1, 1});
+    kept_top_ = keys.value(top.row());
+    kept_offset_ = top.isValid() ? view_->visualRect(top).top() : 0;
+    kept_horizontal_ = view_->horizontalScrollBar()->value();
 }
-void DynamicPlaylistDialog::refresh(const bool) {
-    if (!authority_valid_)
-        return;
-    // Definition edits discard explicitly; refresh retains presentation anchors.
-    refresh_timer_->stop();
-    service_->cancel();
-    open_->setEnabled(false);
-    auto_refresh_ = true;
-    refresh_pending_ = false;
-    busy_ = true;
-    refresh_->setEnabled(false);
-    service_->refresh(definition(), QSettings{}.value(QStringLiteral("lastfm/api-key")).toString());
-}
-void DynamicPlaylistDialog::libraryChanged() {
-    if (!authority_valid_ || !auto_refresh_ || source_->currentData() != QStringLiteral("rules") ||
-        query_->text().isEmpty())
-        return;
-    if (busy_)
-        refresh_pending_ = true;
-    else
-        refresh_timer_->start();
-}
-void DynamicPlaylistDialog::invalidateAuthority() {
-    authority_valid_ = false;
-    discardResults();
-    status_->setText(QStringLiteral(
-        "The server connection changed. Reopen Dynamic playlists for the current library."));
+void DynamicPlaylistDialog::restorePlace() {
+    const auto keys = resultKeys(view_->model());
+    view_->selectionModel()->clearSelection();
+    for (int i = 0; i < keys.size(); ++i) {
+        const auto index = view_->model()->index(i, 0);
+        if (kept_selected_.contains(keys[i]))
+            view_->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                       QItemSelectionModel::Rows);
+        if (!kept_current_.isEmpty() && keys[i] == kept_current_)
+            view_->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
+        if (!kept_top_.isEmpty() && keys[i] == kept_top_) {
+            view_->scrollTo(index, QAbstractItemView::PositionAtTop);
+            if (view_->verticalScrollMode() == QAbstractItemView::ScrollPerPixel)
+                view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->value() -
+                                                     kept_offset_);
+        }
+    }
+    view_->horizontalScrollBar()->setValue(kept_horizontal_);
 }
 } // namespace trackknife::bench

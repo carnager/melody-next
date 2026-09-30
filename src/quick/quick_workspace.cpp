@@ -15,6 +15,8 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QFile>
 #include <QGuiApplication>
 #include <QKeySequence>
@@ -201,20 +203,20 @@ void QuickWorkspace::openFolderEntry(const QModelIndex& index) {
     }
 }
 
-void QuickWorkspace::locate(const bool album) {
-    auto* tab = currentTabPointer();
-    const auto row = rows_.currentRow();
-    if (tab == nullptr || row < 0 || row >= tab->model->rowCount()) {
+void QuickWorkspace::locate(const bool album) { locateOf(shownPicked(), album); }
+
+void QuickWorkspace::locateOf(const Picked& picked, const bool album) {
+    const auto row = picked.current;
+    if (picked.model == nullptr || row < 0 || row >= picked.model->rowCount()) {
         return;
     }
-    const auto engine = bench::EngineKey::of(tab->document);
-    const auto index = sourceIndexOf(engine);
-    const auto found = std::ranges::find(libraries_, engine, &Library::engine);
+    const auto index = sourceIndexOf(picked.engine);
+    const auto found = std::ranges::find(libraries_, picked.engine, &Library::engine);
     if (index < 0 || found == libraries_.end()) {
         return;
     }
     selectSource(index, false);
-    found->browser->locatePath(tab->model->rows()[static_cast<std::size_t>(row)].raw_path, album);
+    found->browser->locatePath(picked.model->rows()[static_cast<std::size_t>(row)].raw_path, album);
 }
 
 QVariantList QuickWorkspace::libraryListTargets() const {
@@ -424,18 +426,14 @@ void QuickWorkspace::activateRow(const int row) {
     }
 }
 
-void QuickWorkspace::convertFiles() {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr) {
+void QuickWorkspace::convertFiles() { convertFilesOf(shownPicked()); }
+
+void QuickWorkspace::convertFilesOf(Picked picked) {
+    if (picked.model == nullptr || picked.rows.empty()) {
         return;
     }
-    auto rows = rows_.selectedRows();
-    if (rows.empty()) {
-        return;
-    }
-    const auto selected = rows.size();
-    auto opening =
-        workspace_.convertItems(*tab->model, bench::EngineKey::of(tab->document), std::move(rows));
+    const auto selected = picked.rows.size();
+    auto opening = workspace_.convertItems(*picked.model, picked.engine, std::move(picked.rows));
     if (opening.unreachable > 0U) {
         showMessage(QStringLiteral("%1 of %2 tracks are not reachable on this computer and were "
                                    "left out. Where that engine's music is reachable here is set "
@@ -456,34 +454,24 @@ void QuickWorkspace::convertFiles() {
     emit convertOpened(convert);
 }
 
-void QuickWorkspace::replayGain() {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr) {
-        return;
-    }
-    auto rows = rows_.selectedRows();
-    std::ranges::sort(rows);
-    if (rows.empty()) {
+void QuickWorkspace::replayGain() { replayGainOf(shownPicked()); }
+
+void QuickWorkspace::replayGainOf(Picked picked) {
+    if (picked.model == nullptr || picked.rows.empty()) {
         return;
     }
     // ADR-0237: the engine holding the files measures and writes them, at
     // its own paths.
-    const auto engine = bench::EngineKey::of(tab->document);
-    auto work = workspace_.fileWorkOf(engine);
+    auto work = workspace_.fileWorkOf(picked.engine);
     if (!work) {
         showMessage(tr("%1 is done by the engine on %2, which is not available right now")
-                        .arg(tr("Measuring ReplayGain"), workspace_.engineName(engine)),
+                        .arg(tr("Measuring ReplayGain"), workspace_.engineName(picked.engine)),
                     10'000);
         return;
     }
-    std::vector<QPersistentModelIndex> selected;
-    selected.reserve(rows.size());
-    for (const auto row : rows) {
-        selected.emplace_back(tab->model->index(row, 0));
-    }
-    const auto count = selected.size();
+    const auto count = picked.rows.size();
     auto* job = new QuickReplayGain(
-        new bench::ReplayGainJob(count, workspace_.selectionSourceReader(*tab, std::move(selected)),
+        new bench::ReplayGainJob(count, pickedReader(picked), 
                                  workspace_.engineMetadataPlanApplierFactory(work),
                                  workspace_.metadataApplyObserver(),
                                  bench::engineFileWorkTools(work)),
@@ -491,32 +479,22 @@ void QuickWorkspace::replayGain() {
     emit replayGainOpened(job);
 }
 
-void QuickWorkspace::editTags() {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr) {
-        return;
-    }
-    auto rows = rows_.selectedRows();
-    std::ranges::sort(rows);
-    if (rows.empty()) {
+void QuickWorkspace::editTags() { editTagsOf(shownPicked()); }
+
+void QuickWorkspace::editTagsOf(Picked picked) {
+    if (picked.model == nullptr || picked.rows.empty()) {
         return;
     }
     // ADR-0237: the engine holding the files reads, probes and writes them at
     // its own paths.
-    const auto engine = bench::EngineKey::of(tab->document);
-    auto work = workspace_.fileWorkOf(engine);
+    auto work = workspace_.fileWorkOf(picked.engine);
     if (!work) {
         showMessage(tr("%1 is done by the engine on %2, which is not available right now")
-                        .arg(tr("Editing tags"), workspace_.engineName(engine)),
+                        .arg(tr("Editing tags"), workspace_.engineName(picked.engine)),
                     10'000);
         return;
     }
-    std::vector<QPersistentModelIndex> selected;
-    selected.reserve(rows.size());
-    for (const auto row : rows) {
-        selected.emplace_back(tab->model->index(row, 0));
-    }
-    const auto count = selected.size();
+    const auto count = picked.rows.size();
     auto opening = workspace_.taggerServices(std::move(work));
     // The selection size in the title, so several open editors stay
     // tellable apart.
@@ -524,13 +502,37 @@ void QuickWorkspace::editTags() {
         new QuickTagger(QStringLiteral("Edit tags · %1 %2")
                             .arg(count)
                             .arg(count == 1U ? QStringLiteral("track") : QStringLiteral("tracks")),
-                        count, workspace_.selectionSourceReader(*tab, std::move(selected)),
-                        std::move(opening.services), std::move(opening.artwork_applier),
-                        std::move(opening.artwork_observer), this);
+                        count, pickedReader(picked), std::move(opening.services),
+                        std::move(opening.artwork_applier), std::move(opening.artwork_observer),
+                        this);
     tagger->setEngineKey(opening.engine.text());
     connect(tagger, &QuickTagger::statusMessage, this,
             [this](const QString& message) { showMessage(message, 12'000); });
     emit taggerOpened(tagger);
+}
+
+QuickWorkspace::Picked QuickWorkspace::shownPicked() const {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr) {
+        return {};
+    }
+    auto rows = rows_.selectedRows();
+    std::ranges::sort(rows);
+    return {.tab = tab,
+            .model = tab->model,
+            .engine = bench::EngineKey::of(tab->document),
+            .rows = std::move(rows),
+            .current = rows_.currentRow()};
+}
+
+bench::MetadataPropertiesSourceReader QuickWorkspace::pickedReader(const Picked& picked) {
+    std::vector<QPersistentModelIndex> selected;
+    selected.reserve(picked.rows.size());
+    for (const auto row : picked.rows) {
+        selected.emplace_back(picked.model->index(row, 0));
+    }
+    return picked.tab != nullptr ? workspace_.selectionSourceReader(*picked.tab, std::move(selected))
+                                 : workspace_.selectionSourceReader(picked.model, std::move(selected));
 }
 
 QuickSettings* QuickWorkspace::openSettings() {
@@ -668,6 +670,80 @@ void QuickWorkspace::followSearch(QuickSearch* search) {
                                                     : bench::EngineKey::local());
 }
 
+QuickDynamic* QuickWorkspace::openDynamic() {
+    // One set of definitions: a rule reads the same on either library.
+    const auto profile = QStringLiteral("local");
+    // ADR-0220: through the catalogue source, like every other library read.
+    bench::DynamicPlaylistSession::LibrarySearch search =
+        [this](const bench::EngineKey& engine, query::CompiledTkq compiled,
+               core::CancellationToken cancellation,
+               bench::DynamicPlaylistService::Completion completion) {
+            auto* catalogues = workspace_.catalogueOf(engine);
+            if (catalogues == nullptr) {
+                completion(std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                                       .message = "That engine is not configured",
+                                                       .context = {}}));
+                return;
+            }
+            auto* watcher = new QFutureWatcher<bench::DynamicPlaylistService::Result>(this);
+            connect(watcher, &QFutureWatcher<bench::DynamicPlaylistService::Result>::finished,
+                    this, [watcher, completion = std::move(completion)] {
+                        completion(watcher->future().takeResult());
+                        watcher->deleteLater();
+                    });
+            watcher->setFuture(QtConcurrent::run(
+                [catalogues, compiled = std::move(compiled),
+                 cancellation]() -> bench::DynamicPlaylistService::Result {
+                    const auto catalogue = catalogues->open();
+                    return bench::queryDynamicLibrary(*catalogue, compiled, cancellation);
+                }));
+        };
+    std::vector<bench::DynamicPlaylistSession::Library> libraries;
+    for (const auto& engine : workspace_.engines_) {
+        if (engine->catalogue != nullptr) {
+            libraries.push_back({engine->key, engine->key.isLocal()
+                                                  ? tr("This computer")
+                                                  : engine->catalogue->name()});
+        }
+    }
+    auto* session =
+        new bench::DynamicPlaylistSession(profile, std::move(libraries), std::move(search));
+    session->results()->setListeningHistoryService(workspace_.persistence_);
+    auto* dynamic = new QuickDynamic(session, *this, this);
+    // Rules follow changes to the library they read, and only that one.
+    if (workspace_.persistence_ != nullptr) {
+        connect(workspace_.persistence_, &ui::ListPersistenceService::listeningHistoryChanged,
+                session, &bench::DynamicPlaylistSession::libraryChanged);
+    }
+    for (const auto& library : libraries_) {
+        if (library.browser == nullptr) {
+            continue;
+        }
+        const auto changed = [session, key = library.engine] {
+            if (session->engine() == key)
+                session->libraryChanged();
+        };
+        connect(library.browser, &bench::LibraryBrowser::ratingsChanged, session, changed);
+        connect(library.browser, &bench::LibraryBrowser::libraryContentChanged, session, changed);
+    }
+    followDynamic(dynamic);
+    QQmlEngine::setObjectOwnership(dynamic, QQmlEngine::CppOwnership);
+    return dynamic;
+}
+
+void QuickWorkspace::followDynamic(QuickDynamic* dynamic) {
+    if (dynamic == nullptr) {
+        return;
+    }
+    // As Search does: opened from a remote tab, it starts on the remote's
+    // library; the dropdown switches.
+    const auto* current = currentTabPointer();
+    dynamic->session()->followLibrary(
+        current != nullptr && workspace_.catalogueOf(bench::EngineKey::of(current->document))
+            ? bench::EngineKey::of(current->document)
+            : bench::EngineKey::local());
+}
+
 QuickPick* QuickWorkspace::openQuickPick(const bool albums) {
     // The library of the tab in front: a remote tab's albums come from its
     // engine and go where that tab's would.
@@ -766,22 +842,29 @@ void QuickWorkspace::refreshHistory() {
 void QuickWorkspace::jumpToPlaying() { refreshPlaybackCursor(true); }
 
 void QuickWorkspace::transferSelection(const QString& target_id, const bool move) {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr || rows_.selectedCount() == 0) {
+    transferOf(shownPicked(), target_id, move);
+}
+
+void QuickWorkspace::transferOf(const Picked& picked, const QString& target_id, const bool move) {
+    if (picked.model == nullptr || picked.rows.empty()) {
         return;
     }
-    workspace_.transferRows(tab, tab->model, bench::EngineKey::of(tab->document), false,
-                            rows_.selectedRows(), target_id, move, -1);
+    workspace_.transferRows(picked.tab, picked.model, picked.engine, false, picked.rows, target_id,
+                            move && picked.tab != nullptr, -1);
 }
 
 void QuickWorkspace::transferSelectionToNewTab(const QString& name, const bool move) {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr || rows_.selectedCount() == 0 || name.trimmed().isEmpty()) {
+    transferToNewTabOf(shownPicked(), name, move);
+}
+
+void QuickWorkspace::transferToNewTabOf(const Picked& picked, const QString& name,
+                                        const bool move) {
+    if (picked.model == nullptr || picked.rows.empty() || name.trimmed().isEmpty()) {
         return;
     }
-    if (auto* destination =
-            workspace_.transferRowsToNewList(tab, tab->model, bench::EngineKey::of(tab->document),
-                                             false, rows_.selectedRows(), move, name.trimmed());
+    if (auto* destination = workspace_.transferRowsToNewList(
+            picked.tab, picked.model, picked.engine, false, picked.rows,
+            move && picked.tab != nullptr, name.trimmed());
         destination != nullptr) {
         showList(*destination);
     }
@@ -801,23 +884,24 @@ QVariantList QuickWorkspace::otherLists() const {
     return lists;
 }
 
-QVariantMap QuickWorkspace::ratingState() const {
-    auto* tab = currentTabPointer();
+QVariantMap QuickWorkspace::ratingState() const { return ratingStateOf(shownPicked()); }
+
+QVariantMap QuickWorkspace::ratingStateOf(const Picked& picked) const {
     QVariantMap state{{QStringLiteral("canRate"), false},
                       {QStringLiteral("canRateAlbum"), false},
                       {QStringLiteral("rating"), -1},
                       {QStringLiteral("albumRating"), -1}};
-    if (tab == nullptr) {
+    if (picked.model == nullptr) {
         return state;
     }
-    const auto& rows = tab->model->rows();
+    const auto& rows = picked.model->rows();
     std::optional<unsigned> rating;
     std::optional<unsigned> album_rating;
     bool ratings_match = true;
     bool album_ratings_match = true;
     bool tracks = false;
     bool albums = false;
-    for (const auto row : rows_.selectedRows()) {
+    for (const auto row : picked.rows) {
         const auto& track = rows[static_cast<std::size_t>(row)];
         if (!rating) {
             rating = track.rating;
@@ -832,7 +916,7 @@ QVariantMap QuickWorkspace::ratingState() const {
         tracks = tracks || !track.rating_hash.empty();
         albums = albums || !track.album_rating_hash.empty();
     }
-    const auto ready = workspace_.canRate(bench::EngineKey::of(tab->document));
+    const auto ready = workspace_.canRate(picked.engine);
     state.insert(QStringLiteral("canRate"), ready && tracks);
     state.insert(QStringLiteral("canRateAlbum"), ready && albums);
     state.insert(QStringLiteral("rating"),
@@ -843,20 +927,23 @@ QVariantMap QuickWorkspace::ratingState() const {
 }
 
 void QuickWorkspace::rateSelection(const bool album, const int rating) {
-    auto* tab = currentTabPointer();
-    if (tab == nullptr) {
+    rateOf(shownPicked(), album, rating);
+}
+
+void QuickWorkspace::rateOf(const Picked& picked, const bool album, const int rating) {
+    if (picked.model == nullptr) {
         return;
     }
     QStringList hashes;
-    for (const auto row : rows_.selectedRows()) {
-        const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
+    for (const auto row : picked.rows) {
+        const auto& track = picked.model->rows()[static_cast<std::size_t>(row)];
         const auto hash =
             QString::fromStdString(album ? track.album_rating_hash : track.rating_hash);
         if (!hash.isEmpty() && !hashes.contains(hash)) {
             hashes.push_back(hash);
         }
     }
-    workspace_.rate(bench::EngineKey::of(tab->document), hashes, album,
+    workspace_.rate(picked.engine, hashes, album,
                     static_cast<unsigned>(std::clamp(rating, 0, 10)));
 }
 
@@ -864,19 +951,20 @@ QString QuickWorkspace::ratingLabel(const int rating) {
     return ui::ratingMenuLabel(static_cast<unsigned>(std::clamp(rating, 0, 10)));
 }
 
-QVariantMap QuickWorkspace::lastFmTrack() const {
-    auto* tab = currentTabPointer();
-    const auto selected = rows_.selectedRows();
-    if (tab == nullptr || selected.size() != 1U || workspace_.lastfm_ == nullptr) {
+QVariantMap QuickWorkspace::lastFmTrack() const { return lastFmTrackOf(shownPicked()); }
+
+QVariantMap QuickWorkspace::lastFmTrackOf(const Picked& picked) const {
+    if (picked.model == nullptr || picked.rows.size() != 1U || workspace_.lastfm_ == nullptr) {
         return {};
     }
-    const auto& track = tab->model->rows()[static_cast<std::size_t>(selected.front())];
+    const auto& track = picked.model->rows()[static_cast<std::size_t>(picked.rows.front())];
     return {{QStringLiteral("artist"), QString::fromStdString(track.artist)},
             {QStringLiteral("title"), QString::fromStdString(track.title)}};
 }
 
-void QuickWorkspace::askLastFm() {
-    const auto track = lastFmTrack();
+void QuickWorkspace::askLastFm() { askLastFmOf(lastFmTrack()); }
+
+void QuickWorkspace::askLastFmOf(const QVariantMap& track) {
     const auto artist = track.value(QStringLiteral("artist")).toString();
     const auto title = track.value(QStringLiteral("title")).toString();
     lastfm_state_ = QStringLiteral("Checking loved state…");
@@ -905,8 +993,9 @@ void QuickWorkspace::askLastFm() {
     workspace_.lastfm_->execute(QStringLiteral("info"), {artist, title});
 }
 
-void QuickWorkspace::loveOnLastFm(const bool love) {
-    const auto track = lastFmTrack();
+void QuickWorkspace::loveOnLastFm(const bool love) { loveOnLastFmOf(lastFmTrack(), love); }
+
+void QuickWorkspace::loveOnLastFmOf(const QVariantMap& track, const bool love) {
     if (track.isEmpty() || workspace_.lastfm_ == nullptr) {
         return;
     }
@@ -1354,10 +1443,20 @@ void QuickWorkspace::playUpNextRow(const int row) { workspace_.playUpNextRow(row
 
 void QuickWorkspace::returnToList() { workspace_.returnToList(); }
 
-void QuickWorkspace::queueSelection(const bool next) {
-    if (auto* tab = currentTabPointer(); tab != nullptr && rows_.selectedCount() > 0) {
-        workspace_.enqueueRows(*tab, rows_.selectedRows(), next ? 0 : -1);
+void QuickWorkspace::queueSelection(const bool next) { queueOf(shownPicked(), next); }
+
+void QuickWorkspace::queueOf(const Picked& picked, const bool next) {
+    if (picked.model == nullptr || picked.rows.empty()) {
+        return;
     }
+    std::vector<bench::LocalTrackRow> tracks;
+    for (const auto row : picked.rows) {
+        if (row >= 0 && row < picked.model->rowCount()) {
+            tracks.push_back(picked.model->rows()[static_cast<std::size_t>(row)]);
+        }
+    }
+    workspace_.enqueueLocalRequests(std::move(tracks), next ? 0 : -1, picked.engine);
+    refreshUpNext();
 }
 
 // --- Closing ----------------------------------------------------------------

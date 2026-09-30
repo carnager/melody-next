@@ -83,6 +83,8 @@ qt_add_library(
     ../bench/desktop_notifier.cpp
     ../bench/desktop_notifier.hpp
     ../bench/dynamic_playlist_service.cpp
+    dynamic_playlist_session.cpp
+    dynamic_playlist_session.hpp
     ../bench/dynamic_playlist_service.hpp
     ../bench/engine_key.hpp
     ../bench/engine_launcher.cpp

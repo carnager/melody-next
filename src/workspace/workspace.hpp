@@ -375,6 +375,15 @@ class Workspace final : public QObject {
     // first, else (for another engine) its own tab; or a new tab.
     void placeFoundRows(const QString& name, std::vector<LocalTrackRow> rows,
                         LocalLibraryAction action, const EngineKey& engine);
+    // A dynamic playlist's result as a tab of its own (ADR-0145), laid out
+    // flat as it was shown: to play from (not shown), or as an editable
+    // snapshot (shown).
+    ListTab* openDynamicResult(const QString& name, std::vector<LocalTrackRow> rows,
+                               const EngineKey& engine, bool show);
+    // The playing track marked in rows shown outside the lists -- a dynamic
+    // playlist's result -- when the list `playback_context` plays, the same
+    // occurrence of it; otherwise the first.
+    void markPlaying(LocalListModel& model, const QString& playback_context);
     // An imported playlist, as a new saved list of this computer's.
     void addImportedList(std::vector<LocalTrackRow> rows, const QString& name);
     // The workspace database and its settings copied beside `path`: the

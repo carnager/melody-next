@@ -4,6 +4,8 @@
 #include "bench/engine_key.hpp"
 
 #include "bench/dynamic_playlist_service.hpp"
+#include "workspace/dynamic_playlist_session.hpp"
+#include <QSet>
 #include <QDialog>
 #include <vector>
 
@@ -14,7 +16,6 @@ class QCheckBox;
 class QLabel;
 class QPushButton;
 class QFormLayout;
-class QTimer;
 namespace trackknife::ui {
 class QueueTableView;
 }
@@ -22,15 +23,8 @@ namespace trackknife::bench {
 class DynamicPlaylistDialog final : public QDialog {
     Q_OBJECT
   public:
-    // Which library a refresh searches: that of the engine chosen.
-    using LibrarySearch =
-        std::function<void(const EngineKey& engine, query::CompiledTkq, core::CancellationToken,
-                           DynamicPlaylistService::Completion)>;
-    // A library to choose, by its engine and the name it is shown by.
-    struct Library {
-        EngineKey engine;
-        QString name;
-    };
+    using LibrarySearch = DynamicPlaylistSession::LibrarySearch;
+    using Library = DynamicPlaylistSession::Library;
     // `libraries`: the engines to search, this computer's first; none, only
     // this computer's.
     DynamicPlaylistDialog(QString profile, std::vector<Library> libraries, LibrarySearch search,
@@ -38,13 +32,13 @@ class DynamicPlaylistDialog final : public QDialog {
     ~DynamicPlaylistDialog() override;
     ui::QueueTableView* view() const { return view_; }
     // The library the results come from, and so the engine they play on.
-    EngineKey engine() const;
-    void followLibrary(const EngineKey& engine);
-    void libraryChanged();
-    void invalidateAuthority();
-    bool authorityValid() const { return authority_valid_; }
-    const DynamicPlaylistService::Tracks& tracks() const { return tracks_; }
-    QString playlistName() const;
+    EngineKey engine() const { return session_->engine(); }
+    void followLibrary(const EngineKey& engine) { session_->followLibrary(engine); }
+    void libraryChanged() { session_->libraryChanged(); }
+    void invalidateAuthority() { session_->invalidateAuthority(); }
+    bool authorityValid() const { return session_->authorityValid(); }
+    const DynamicPlaylistService::Tracks& tracks() const { return session_->tracks(); }
+    QString playlistName() const { return session_->playlistName(); }
     void playCurrent();
   signals:
     void playRequested(int row);
@@ -52,22 +46,24 @@ class DynamicPlaylistDialog final : public QDialog {
     void snapshotRequested(const QString& name, const DynamicPlaylistService::Tracks& tracks);
     void libraryChosen(const trackknife::ui::EngineKey& engine);
 
+  protected:
+    void showEvent(QShowEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
+
   private:
-    DynamicPlaylistDefinition definition() const;
-    void loadSelection();
-    void refresh(bool preserve_results = false);
-    void updateFields();
-    void refill(const QString& selected = {});
-    void discardResults();
-    QString profile_;
-    QVector<DynamicPlaylistDefinition> definitions_;
-    bool auto_refresh_{false};
-    bool loading_{false};
-    bool busy_{false};
-    bool refresh_pending_{false};
-    bool authority_valid_{true};
-    DynamicPlaylistService* service_;
-    DynamicPlaylistService::Tracks tracks_;
+    void sync();
+    void syncCatalog();
+    void keepPlace();
+    void restorePlace();
+
+    DynamicPlaylistSession* session_;
+    // Where the results were before a refresh: the rows selected, the one
+    // current and the one at the top, by identity.
+    QSet<QByteArray> kept_selected_;
+    QByteArray kept_current_;
+    QByteArray kept_top_;
+    int kept_offset_{0};
+    int kept_horizontal_{0};
     QComboBox* library_;
     QComboBox* catalog_;
     QComboBox* source_;
@@ -82,9 +78,9 @@ class DynamicPlaylistDialog final : public QDialog {
     QFormLayout* form_;
     QLabel* status_;
     QPushButton* refresh_;
+    QPushButton* save_;
+    QPushButton* remove_;
     QPushButton* open_;
-    QTimer* refresh_timer_;
     ui::QueueTableView* view_;
-    LocalListModel* local_model_{nullptr};
 };
 } // namespace trackknife::bench

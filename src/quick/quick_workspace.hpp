@@ -4,6 +4,7 @@
 
 #include "quick/list_tabs_model.hpp"
 #include "quick/quick_convert.hpp"
+#include "quick/quick_dynamic.hpp"
 #include "quick/quick_open_list.hpp"
 #include "quick/quick_pick.hpp"
 #include "quick/quick_search.hpp"
@@ -241,6 +242,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE trackknife::quick::QuickSearch* openSearch();
     // The open search follows the tab in front.
     Q_INVOKABLE void followSearch(trackknife::quick::QuickSearch* search);
+    // Dynamic playlists, starting on the library of the tab in front.
+    Q_INVOKABLE trackknife::quick::QuickDynamic* openDynamic();
+    Q_INVOKABLE void followDynamic(trackknife::quick::QuickDynamic* dynamic);
     // Quick album or Quick track, in the library of the tab in front; null
     // when there is none.
     Q_INVOKABLE trackknife::quick::QuickPick* openQuickPick(bool albums);
@@ -333,7 +337,34 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // The library's search field wants the keyboard.
     void librarySearchFocused();
 
+  public:
+    // Rows chosen somewhere -- the list shown, or a dynamic playlist's
+    // result -- and what can be done with them.
+    struct Picked {
+        ListTab* tab{nullptr};
+        bench::LocalListModel* model{nullptr};
+        bench::EngineKey engine{bench::EngineKey::local()};
+        // In order.
+        std::vector<int> rows;
+        int current{-1};
+    };
+    void editTagsOf(Picked picked);
+    void replayGainOf(Picked picked);
+    void convertFilesOf(Picked picked);
+    void queueOf(const Picked& picked, bool next);
+    // Copied (moved only from a list) to the list `target_id`, or a new one.
+    void transferOf(const Picked& picked, const QString& target_id, bool move);
+    void transferToNewTabOf(const Picked& picked, const QString& name, bool move);
+    void locateOf(const Picked& picked, bool album);
+    [[nodiscard]] QVariantMap ratingStateOf(const Picked& picked) const;
+    void rateOf(const Picked& picked, bool album, int rating);
+    [[nodiscard]] QVariantMap lastFmTrackOf(const Picked& picked) const;
+    void askLastFmOf(const QVariantMap& track);
+    void loveOnLastFmOf(const QVariantMap& track, bool love);
+
   private:
+    [[nodiscard]] Picked shownPicked() const;
+    [[nodiscard]] bench::MetadataPropertiesSourceReader pickedReader(const Picked& picked);
     void buildDesktopServices();
     void refreshList();
     void refreshHistory();

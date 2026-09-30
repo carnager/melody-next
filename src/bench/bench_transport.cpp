@@ -12,6 +12,7 @@
 #include "uicommon/list_persistence_service.hpp"
 
 #include "uicommon/track_row_roles.hpp"
+#include "workspace/shortcut_session.hpp"
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
@@ -876,10 +877,7 @@ void BenchMainWindow::buildShortcuts() {
             continue;
         action->setProperty("shortcut-default",
                             action->shortcut().toString(QKeySequence::PortableText));
-        const auto key = QStringLiteral("shortcuts/") + action->objectName();
-        if (QSettings{}.contains(key))
-            action->setShortcut(
-                QKeySequence(QSettings{}.value(key).toString(), QKeySequence::PortableText));
+        action->setShortcut(ShortcutSession::saved(action->objectName(), action->shortcut()));
         configurable_shortcuts_.append(action);
     }
     std::sort(configurable_shortcuts_.begin(), configurable_shortcuts_.end(),

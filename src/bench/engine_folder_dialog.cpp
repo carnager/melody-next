@@ -16,17 +16,9 @@
 #include <utility>
 
 namespace trackknife::bench {
-namespace {
-
-[[nodiscard]] std::string joined(const std::string& folder, const std::string& name) {
-    return folder == "/" ? "/" + name : folder + "/" + name;
-}
-
-} // namespace
-
 EngineFolderDialog::EngineFolderDialog(QString engine_name, Lister lister, std::string start,
                                        QWidget* parent)
-    : QDialog(parent), lister_(std::move(lister)) {
+    : QDialog(parent) {
     setObjectName(QStringLiteral("bench-engine-folder-dialog"));
     setWindowTitle(QStringLiteral("Choose a folder on %1").arg(engine_name));
     setAttribute(Qt::WA_DeleteOnClose);
@@ -54,18 +46,12 @@ EngineFolderDialog::EngineFolderDialog(QString engine_name, Lister lister, std::
     layout->addWidget(buttons);
     resize(520, 420);
 
-    connect(up_, &QPushButton::clicked, this, [this] {
-        if (shown_ && shown_->parent) {
-            browse(*shown_->parent);
-        }
-    });
-    connect(folders_, &QListWidget::itemActivated, this, [this](QListWidgetItem* item) {
-        if (shown_ && item != nullptr) {
-            browse(joined(shown_->path, item->data(Qt::UserRole).toByteArray().toStdString()));
-        }
-    });
+    session_ = new EngineFolderSession(std::move(lister), std::move(start), this);
+    connect(up_, &QPushButton::clicked, session_, &EngineFolderSession::up);
+    connect(folders_, &QListWidget::itemActivated, this,
+            [this](QListWidgetItem* item) { session_->open(folders_->row(item)); });
     connect(buttons, &QDialogButtonBox::accepted, this, [this] {
-        if (!shown_) {
+        if (!session_->canChoose()) {
             return;
         }
         const auto chosen = choice();
@@ -73,51 +59,39 @@ EngineFolderDialog::EngineFolderDialog(QString engine_name, Lister lister, std::
         accept();
     });
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    browse(std::move(start));
+    connect(session_, &EngineFolderSession::changed, this, &EngineFolderDialog::sync);
+    sync();
 }
 
 std::string EngineFolderDialog::choice() const {
-    if (!shown_) {
-        return {};
-    }
     const auto* selected = folders_->currentItem();
-    return selected != nullptr && selected->isSelected()
-               ? joined(shown_->path, selected->data(Qt::UserRole).toByteArray().toStdString())
-               : shown_->path;
+    return session_->choice(selected != nullptr && selected->isSelected() ? folders_->row(selected)
+                                                                          : -1);
 }
 
-void EngineFolderDialog::browse(std::string path) {
-    const auto request = ++request_;
-    status_->setText(QStringLiteral("Listing folders…"));
-    up_->setEnabled(false);
-    choose_->setEnabled(false);
-    const QPointer self{this};
-    lister_(std::move(path), [self, request](core::Result<Listing> listed) {
-        if (!self || request != self->request_) {
-            return;
-        }
-        if (!listed) {
-            self->status_->setText(displayText(listed.error().message));
-            self->up_->setEnabled(self->shown_ && self->shown_->parent);
-            self->choose_->setEnabled(self->shown_.has_value());
-            return;
-        }
-        self->present(*listed);
-    });
-}
+void EngineFolderDialog::browse(std::string path) { session_->browse(std::move(path)); }
 
-void EngineFolderDialog::present(const Listing& listing) {
-    shown_ = listing;
-    path_->setText(QString::fromStdString(core::display_raw_path(listing.path)));
-    folders_->clear();
-    for (const auto& name : listing.folders) {
-        auto* item =
-            new QListWidgetItem(QString::fromStdString(core::display_raw_path(name)), folders_);
-        item->setData(Qt::UserRole, QByteArray{name.data(), static_cast<qsizetype>(name.size())});
+void EngineFolderDialog::sync() {
+    path_->setText(session_->path());
+    const auto names = session_->folders();
+    const auto shown = [&] {
+        if (folders_->count() != names.size()) {
+            return false;
+        }
+        for (int row = 0; row < names.size(); ++row) {
+            if (folders_->item(row)->text() != names.at(row)) {
+                return false;
+            }
+        }
+        return true;
+    }();
+    if (!shown) {
+        folders_->clear();
+        folders_->addItems(names);
     }
-    status_->setText(listing.folders.empty() ? QStringLiteral("No folders here") : QString{});
-    up_->setEnabled(listing.parent.has_value());
-    choose_->setEnabled(true);
+    status_->setText(session_->status());
+    up_->setEnabled(session_->canGoUp());
+    choose_->setEnabled(session_->canChoose());
 }
 
 } // namespace trackknife::bench

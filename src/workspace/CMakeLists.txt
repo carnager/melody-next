@@ -44,6 +44,14 @@ qt_add_library(
     replaygain_job.hpp
     script_session.cpp
     script_session.hpp
+    engine_folder_session.cpp
+    engine_folder_session.hpp
+    lastfm_settings_session.cpp
+    lastfm_settings_session.hpp
+    profiles_session.cpp
+    shortcut_session.cpp
+    shortcut_session.hpp
+    profiles_session.hpp
     settings_session.cpp
     settings_session.hpp
     sources.cpp

@@ -11,6 +11,7 @@
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
+#include "workspace/lastfm_settings_session.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -6618,7 +6619,9 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QVERIFY(begin->property("credentials-saved").toBool());
     // Feed deterministic replies without opening a real browser or contacting Last.fm.
     auto* page = dialog->findChild<QWidget*>(QStringLiteral("lastfm-settings"));
-    page->setProperty("auth-waiting", true);
+    auto* session = page->findChild<LastFmSettingsSession*>();
+    QVERIFY(session != nullptr);
+    session->setWaiting(true);
     reply(QStringLiteral("begin"),
           QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"));
     QVERIFY(poll->isActive());
@@ -6630,9 +6633,9 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
           QByteArray(
               R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"));
     QVERIFY(!poll->isActive());
-    QVERIFY(!page->property("auth-waiting").toBool());
+    QVERIFY(!session->waiting());
     QVERIFY(dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-enabled"))->isChecked());
-    page->setProperty("auth-waiting", true);
+    session->setWaiting(true);
     poll->start();
     cancel->click();
     QVERIFY(!poll->isActive());
@@ -6640,7 +6643,7 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     // A late reply after cancellation must not restart polling.
     reply(QStringLiteral("finish"), QByteArray(R"({"authorization_pending":true})"));
     QVERIFY(!poll->isActive());
-    page->setProperty("auth-waiting", true);
+    session->setWaiting(true);
     poll->start();
     QMetaObject::invokeMethod(deadline, "timeout", Qt::DirectConnection);
     QVERIFY(!poll->isActive());

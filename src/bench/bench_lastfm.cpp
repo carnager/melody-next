@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/bench_main_window.hpp"
 #include "bench/lastfm_service.hpp"
+#include "workspace/lastfm_settings_session.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include <QCheckBox>
 #include <QComboBox>
@@ -28,123 +29,10 @@
 #include <algorithm>
 
 namespace trackknife::bench {
-void BenchMainWindow::askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state,
-                                      QPushButton* use) {
-    const QPointer<QLabel> label{state};
-    const QPointer<QPushButton> button{use};
-    // The line to show, and the account the engine uses (empty for none).
-    using Answer = std::pair<QString, QString>;
-    auto* watcher = new QFutureWatcher<Answer>(this);
-    connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, label, button] {
-        watcher->deleteLater();
-        const auto [text, user] = watcher->result();
-        if (label) {
-            label->setText(text);
-        }
-        showEngineAccount(button, user);
-    });
-    watcher->setFuture(QtConcurrent::run([endpoint]() -> Answer {
-        auto client = protocol::Client::connect(endpoint);
-        if (!client) {
-            return {QStringLiteral("Not reachable"), {}};
-        }
-        auto answer = (*client)->call("lastfm.status", protocol::Json::object(),
-                                      std::chrono::seconds{3});
-        (*client)->close();
-        if (!answer) {
-            return {QStringLiteral("Cannot scrobble (engine too old)"), {}};
-        }
-        const auto user = answer->value("user", protocol::Json{});
-        if (!user.is_string() || !answer->value("enabled", false)) {
-            return {QStringLiteral("Not scrobbling"), {}};
-        }
-        const auto name = QString::fromStdString(user.get<std::string>());
-        return {QStringLiteral("Scrobbling as %1 · %2 waiting")
-                    .arg(name)
-                    .arg(answer->value("pending", 0)),
-                name};
-    }));
-}
-
-void BenchMainWindow::showEngineAccount(QPushButton* use, const QString& engine_user) {
-    if (use == nullptr) {
-        return;
-    }
-    // Handing over the account the engine already has would do nothing.
-    const bool in_use = !engine_user.isEmpty() && engine_user == lastfm_user_;
-    use->setEnabled(!in_use);
-    use->setText(in_use ? QStringLiteral("In use") : QStringLiteral("Use this account"));
-}
-
-void BenchMainWindow::handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state,
-                                     QPushButton* use) {
-    const QPointer<QLabel> label{state};
-    const QPointer<QPushButton> button{use};
-    if (label) {
-        label->setText(QStringLiteral("Handing over…"));
-    }
-    // The session, from this window's own sign-in, then to the engine.
-    auto connection = std::make_shared<QMetaObject::Connection>();
-    *connection = connect(
-        lastfm_, &LastFmService::completed, this,
-        [this, endpoint, label, button, connection](const QString& op,
-                                                    const QJsonObject& session,
-                                            const QString& error) {
-            if (op != QStringLiteral("session")) {
-                return;
-            }
-            disconnect(*connection);
-            if (!error.isEmpty()) {
-                if (label) {
-                    label->setText(error);
-                }
-                return;
-            }
-            const protocol::Json params{
-                {"api_key", session.value("api_key").toString().toStdString()},
-                {"secret", session.value("secret").toString().toStdString()},
-                {"session_key", session.value("session_key").toString().toStdString()},
-                {"user", session.value("user").toString().toStdString()}};
-            auto* watcher = new QFutureWatcher<QString>(this);
-            connect(watcher, &QFutureWatcherBase::finished, this,
-                    [this, watcher, label, button, endpoint] {
-                watcher->deleteLater();
-                if (label) {
-                    label->setText(watcher->result());
-                }
-                if (watcher->result().startsWith(QStringLiteral("Scrobbling as "))) {
-                    showEngineAccount(button, lastfm_user_);
-                }
-                // The engines this window plays on may scrobble now: it
-                // stops crediting them itself.
-                for (const auto& engine : engines_) {
-                    if (engine->playback != nullptr) {
-                        engine->playback->refreshScrobbling();
-                    }
-                }
-            });
-            watcher->setFuture(QtConcurrent::run([endpoint, params] {
-                auto client = protocol::Client::connect(endpoint);
-                if (!client) {
-                    return QStringLiteral("Not reachable: %1")
-                        .arg(QString::fromStdString(client.error().message));
-                }
-                auto answer = (*client)->call("lastfm.set_session", params);
-                (*client)->close();
-                if (!answer) {
-                    return QStringLiteral("Not handed over: %1")
-                        .arg(QString::fromStdString(answer.error().message));
-                }
-                return QStringLiteral("Scrobbling as %1")
-                    .arg(QString::fromStdString(answer->value("user", std::string{})));
-            }));
-        });
-    lastfm_->execute(QStringLiteral("session"));
-}
-
 QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* page = new QWidget(parent);
     page->setObjectName(QStringLiteral("lastfm-settings"));
+    auto* session = new LastFmSettingsSession(workspace_, page);
     auto* layout = new QVBoxLayout(page);
     auto* note = new QLabel(
         QStringLiteral("Sign in here once. Hand the account to an engine below and it scrobbles "
@@ -174,7 +62,6 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* key = new QLineEdit(page);
     key->setObjectName(QStringLiteral("lastfm-account-key"));
     key->setEchoMode(QLineEdit::Password);
-    key->setText(QSettings{}.value(QStringLiteral("lastfm/api-key")).toString());
     auto* secret = new QLineEdit(page);
     secret->setObjectName(QStringLiteral("lastfm-account-secret"));
     secret->setEchoMode(QLineEdit::Password);
@@ -192,7 +79,6 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     auto* reuse =
         new QCheckBox(QStringLiteral("Use this API key for dynamic playlists too"), credentials);
     reuse->setObjectName(QStringLiteral("lastfm-reuse-key"));
-    reuse->setChecked(true);
     credentials_layout->addWidget(reuse);
     layout->addWidget(credentials);
     auto* security =
@@ -200,31 +86,10 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     security->setWordWrap(true);
     layout->addWidget(security);
     auto* buttons = new QHBoxLayout;
-    auto* begin = new QPushButton(QStringLiteral("Connect to Last.fm…"), page);
+    auto* begin = new QPushButton(page);
     begin->setObjectName(QStringLiteral("lastfm-authorize"));
     auto* cancel = new QPushButton(QStringLiteral("Cancel"), page);
     cancel->setObjectName(QStringLiteral("lastfm-cancel"));
-    cancel->hide();
-    auto* poll = new QTimer(page);
-    poll->setObjectName(QStringLiteral("lastfm-auth-poll"));
-    poll->setSingleShot(true);
-    poll->setInterval(3000);
-    auto* deadline = new QTimer(page);
-    deadline->setObjectName(QStringLiteral("lastfm-auth-deadline"));
-    deadline->setSingleShot(true);
-    deadline->setInterval(5 * 60 * 1000);
-    auto waiting = [page, begin, cancel, poll, deadline](bool active) {
-        page->setProperty("auth-waiting", active);
-        const bool idle = !active && !page->property("auth-request-pending").toBool();
-        begin->setEnabled(idle);
-        cancel->setVisible(active);
-        if (active)
-            deadline->start();
-        else {
-            poll->stop();
-            deadline->stop();
-        }
-    };
     auto* disconnect = new QPushButton(QStringLiteral("Disconnect / clear pending"), page);
     buttons->addWidget(begin);
     buttons->addWidget(cancel);
@@ -238,45 +103,84 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
     status->setWordWrap(true);
     layout->addWidget(status);
 
-    // ADR-0220: the engines scrobble what they play. One session serves them
-    // all; it is handed over, never read back.
     auto* engines = new QGroupBox(QStringLiteral("Engines scrobble what they play"), page);
     engines->setObjectName(QStringLiteral("lastfm-engines"));
     auto* engines_form = new QFormLayout(engines);
-    const auto add_engine = [this, engines, engines_form](const QString& name,
-                                                          const protocol::Endpoint& endpoint,
-                                                          const QString& object_name) {
-        auto* row = new QHBoxLayout;
-        auto* state = new QLabel(QStringLiteral("Asking…"), engines);
-        state->setObjectName(object_name + QStringLiteral("-state"));
-        auto* use = new QPushButton(QStringLiteral("Use this account"), engines);
-        use->setObjectName(object_name + QStringLiteral("-use"));
-        row->addWidget(state, 1);
-        row->addWidget(use);
-        engines_form->addRow(name + QStringLiteral(":"), row);
-        askEngineLastFm(endpoint, state, use);
-        connect(use, &QPushButton::clicked, this,
-                [this, endpoint, state, use] { handOverLastFm(endpoint, state, use); });
-    };
-    if (localCatalogue() && localCatalogue()->endpoint()) {
-        add_engine(QStringLiteral("This computer"), *localCatalogue()->endpoint(),
-                   QStringLiteral("lastfm-engine-local"));
-    }
-    // Each engine elsewhere, in the order Settings have them.
-    for (int number = 0; const auto& engine : engines_) {
-        if (engine->key.isLocal() || engine->catalogue == nullptr ||
-            !engine->catalogue->endpoint()) {
-            continue;
-        }
-        add_engine(engine->catalogue->name(), *engine->catalogue->endpoint(),
-                   number == 0 ? QStringLiteral("lastfm-engine-remote")
-                               : QStringLiteral("lastfm-engine-remote-%1").arg(number));
-        ++number;
-    }
     auto* another = new QPushButton(QStringLiteral("Another engine…"), engines);
     another->setObjectName(QStringLiteral("lastfm-engine-another"));
     engines_form->addRow(another);
-    connect(another, &QPushButton::clicked, this, [this, engines, add_engine] {
+    layout->addWidget(engines);
+    layout->addStretch();
+
+    const auto sync = [session, key, secret, reuse, credentials, begin, cancel, enabled, status] {
+        const auto show = [](QLineEdit* field, const QString& text) {
+            if (field->text() != text) {
+                const QSignalBlocker blocker{field};
+                field->setText(text);
+            }
+        };
+        show(key, session->key());
+        show(secret, session->secret());
+        {
+            const QSignalBlocker blocker{reuse};
+            reuse->setChecked(session->reuseKey());
+        }
+        credentials->setVisible(!session->credentialsSaved());
+        begin->setText(session->connectText());
+        begin->setProperty("credentials-saved", session->credentialsSaved());
+        begin->setEnabled(session->canConnect());
+        cancel->setVisible(session->waiting());
+        {
+            const QSignalBlocker blocker{enabled};
+            enabled->setChecked(session->scrobbling());
+        }
+        enabled->setEnabled(session->connected());
+        status->setText(session->status());
+    };
+    // One row per engine: what it says, and handing the account to it.
+    auto rows = std::make_shared<std::vector<std::pair<QLabel*, QPushButton*>>>();
+    const auto sync_engines = [session, engines, engines_form, rows] {
+        const auto& listed = session->engines();
+        while (rows->size() < listed.size()) {
+            const auto row = static_cast<int>(rows->size());
+            const auto& engine = listed[rows->size()];
+            auto* line = new QHBoxLayout;
+            auto* state = new QLabel(engines);
+            state->setObjectName(engine.id + QStringLiteral("-state"));
+            auto* use = new QPushButton(engines);
+            use->setObjectName(engine.id + QStringLiteral("-use"));
+            line->addWidget(state, 1);
+            line->addWidget(use);
+            engines_form->insertRow(engines_form->rowCount() - 1, engine.name + QStringLiteral(":"),
+                                    line);
+            QObject::connect(use, &QPushButton::clicked, session,
+                             [session, row] { session->useAccount(row); });
+            rows->emplace_back(state, use);
+        }
+        for (std::size_t row = 0; row < rows->size(); ++row) {
+            const auto [state, use] = (*rows)[row];
+            state->setText(listed[row].state);
+            const bool in_use = session->inUse(static_cast<int>(row));
+            use->setEnabled(!in_use);
+            use->setText(in_use ? QStringLiteral("In use") : QStringLiteral("Use this account"));
+        }
+    };
+    connect(session, &LastFmSettingsSession::changed, page, sync);
+    connect(session, &LastFmSettingsSession::enginesChanged, page, sync_engines);
+    // Settings shows the reused key too, so its Save cannot overwrite it.
+    connect(session, &LastFmSettingsSession::keyReused, page, [parent](const QString& reused) {
+        if (auto* field = parent->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key")))
+            field->setText(reused);
+    });
+    connect(key, &QLineEdit::textChanged, session, &LastFmSettingsSession::setKey);
+    connect(secret, &QLineEdit::textChanged, session, &LastFmSettingsSession::setSecret);
+    connect(reuse, &QCheckBox::toggled, session, &LastFmSettingsSession::setReuseKey);
+    connect(begin, &QPushButton::clicked, session, &LastFmSettingsSession::connectAccount);
+    connect(cancel, &QPushButton::clicked, session, &LastFmSettingsSession::stopWaiting);
+    connect(disconnect, &QPushButton::clicked, session,
+            &LastFmSettingsSession::disconnectAccount);
+    connect(enabled, &QCheckBox::toggled, session, &LastFmSettingsSession::setScrobbling);
+    connect(another, &QPushButton::clicked, this, [this, engines, session] {
         bool accepted = false;
         const auto address = QInputDialog::getText(
             engines, QStringLiteral("Another engine"),
@@ -292,130 +196,12 @@ QWidget* BenchMainWindow::buildLastFmSettings(QWidget* parent) {
         if (!accepted) {
             return;
         }
-        const auto endpoint = protocol::Endpoint::parse(address.toStdString(), password.toStdString());
-        if (!endpoint) {
-            statusBar()->showMessage(QStringLiteral("Not an engine address: %1").arg(address), 6'000);
-            return;
+        if (const auto error = session->addEngine(address, password); !error.isEmpty()) {
+            statusBar()->showMessage(error, 6'000);
         }
-        add_engine(address, *endpoint, QStringLiteral("lastfm-engine-other"));
     });
-    layout->addWidget(engines);
-    layout->addStretch();
-    auto send = [this, status, page](const QString& op, const QStringList& args = QStringList{}) {
-        if (op == QStringLiteral("begin") || op == QStringLiteral("finish"))
-            page->setProperty("auth-request-pending", true);
-        if (op != QStringLiteral("status") && op != QStringLiteral("finish"))
-            status->setText(QStringLiteral("Working…"));
-        lastfm_->execute(op, args);
-    };
-    connect(poll, &QTimer::timeout, page, [send] { send(QStringLiteral("finish")); });
-    connect(deadline, &QTimer::timeout, page, [waiting, status] {
-        waiting(false);
-        status->setText(QStringLiteral("Authorization timed out. Connect again to retry."));
-    });
-    connect(cancel, &QPushButton::clicked, page, [waiting, status] {
-        waiting(false);
-        status->setText(QStringLiteral("Stopped waiting for approval. Connect again to retry."));
-    });
-    auto receive = [page, status, enabled, credentials, begin, secret, poll,
-                    waiting](const QString& op, const QJsonObject& state, const QString& error) {
-        const bool auth_reply = op == QStringLiteral("begin") || op == QStringLiteral("finish");
-        if (auth_reply) {
-            page->setProperty("auth-request-pending", false);
-            if (!page->property("auth-waiting").toBool()) {
-                waiting(false);
-                return;
-            }
-        }
-        if (!error.isEmpty()) {
-            // The provider's "not yet authorized" answer means keep waiting.
-            if (op == QStringLiteral("finish") && error.contains(QStringLiteral("(code 14)"))) {
-                poll->start();
-                return;
-            }
-            if (auth_reply)
-                waiting(false);
-            status->setText(error);
-            return;
-        }
-        QSignalBlocker block(enabled);
-        enabled->setChecked(state.value("enabled").toBool());
-        enabled->setEnabled(state.value("connected").toBool());
-        if (op == QStringLiteral("finish") && state.value("authorization_pending").toBool()) {
-            poll->start();
-            return;
-        }
-        if (op == QStringLiteral("finish"))
-            waiting(false);
-        const bool saved = state.value("credentials_saved").toBool();
-        credentials->setVisible(!saved);
-        begin->setProperty("credentials-saved", saved);
-        begin->setText(saved ? QStringLiteral("Reconnect in browser…")
-                             : QStringLiteral("Connect to Last.fm…"));
-        if (op == QStringLiteral("begin"))
-            secret->clear();
-        status->setText(
-            QStringLiteral("%1 · %2 pending\n%3")
-                .arg(state.value("connected").toBool()
-                         ? QStringLiteral("Connected as %1").arg(state.value("user").toString())
-                         : QStringLiteral("Not connected"))
-                .arg(state.value("pending").toInt())
-                .arg(state.value("message").toString()));
-        if (op == QStringLiteral("begin")) {
-            status->setText(QStringLiteral("Waiting for browser approval…"));
-            poll->start();
-            const QUrl url(state.value("url").toString());
-            if (url.scheme() == QStringLiteral("https") &&
-                url.host() == QStringLiteral("www.last.fm"))
-                QDesktopServices::openUrl(url);
-        }
-    };
-    connect(lastfm_, &LastFmService::completed, page, receive);
-    connect(
-        begin, &QPushButton::clicked, page,
-        [send, key, secret, reuse, begin, status, parent, waiting] {
-            if (begin->property("credentials-saved").toBool()) {
-                waiting(true);
-                send(QStringLiteral("begin"));
-                return;
-            }
-            const auto api_key = key->text().trimmed();
-            const auto shared_secret = secret->text().trimmed();
-            const auto valid = [](const QString& value) {
-                return value.size() == 32 && std::all_of(value.begin(), value.end(), [](QChar c) {
-                           return (c >= u'0' && c <= u'9') || (c >= u'a' && c <= u'f') ||
-                                  (c >= u'A' && c <= u'F');
-                       });
-            };
-            if (!valid(api_key) || !valid(shared_secret)) {
-                status->setText(QStringLiteral("Paste the 32-character API key and shared secret "
-                                               "from your Last.fm API account."));
-                return;
-            }
-            if (reuse->isChecked()) {
-                QSettings{}.setValue(QStringLiteral("lastfm/api-key"), api_key);
-                // Keep the other settings page in sync so Save cannot overwrite the reused key.
-                if (auto* field =
-                        parent->findChild<QLineEdit*>(QStringLiteral("bench-settings-lastfm-key")))
-                    field->setText(api_key);
-            }
-            waiting(true);
-            send(QStringLiteral("begin"), {api_key, shared_secret});
-        });
-    connect(disconnect, &QPushButton::clicked, page, [send, waiting] {
-        waiting(false);
-        send(QStringLiteral("disconnect"));
-    });
-    connect(enabled, &QCheckBox::toggled, page, [send](bool value) {
-        send(QStringLiteral("enable"), {value ? QStringLiteral("1") : QStringLiteral("0")});
-    });
-    auto* timer = new QTimer(page);
-    connect(timer, &QTimer::timeout, page, [page, send] {
-        if (page->isVisible() && !page->property("auth-waiting").toBool())
-            send(QStringLiteral("status"));
-    });
-    timer->start(10000);
-    send(QStringLiteral("status"));
+    sync();
+    sync_engines();
     return page;
 }
 void BenchMainWindow::addLastFmActions(QMenu* menu, QTableView* view) {

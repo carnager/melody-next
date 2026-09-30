@@ -789,12 +789,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
 
     void buildLastFm() { workspace_.startLastFm(); }
     QWidget* buildLastFmSettings(QWidget* parent);
-    // ADR-0220: an engine's own Last.fm state, into `state`; and this
-    // window's session handed to it, so it scrobbles what it plays.
-    void askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
-    void handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
-    // "In use" when the engine already scrobbles as this window's account.
-    void showEngineAccount(QPushButton* use, const QString& engine_user);
     void addLastFmActions(QMenu* menu, QTableView* view);
     bool seeking_{false};
     QToolButton* mute_button_{nullptr};

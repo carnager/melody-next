@@ -4,15 +4,10 @@
 
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/output_profile_store.hpp"
-#include "trackknife/core/stable_id.hpp"
-#include "trackknife/persistence/list_repository.hpp"
+#include "workspace/profiles_session.hpp"
 
 #include <QWidget>
 
-#include <functional>
-#include <optional>
-#include <string>
-#include <vector>
 
 class QLabel;
 class QLineEdit;
@@ -40,30 +35,12 @@ class OutputProfilesManagerWidget final : public QWidget {
     void showNamingLayouts();
 
   private:
-    void reload();
-    void reloadDestinations();
-    void selectPlace(int index);
-    void copyDestinations();
-    void rebuildLists(std::optional<core::StableId> layout_id,
-                      std::optional<core::StableId> destination_id);
-    void selectLayoutRow(int row);
-    void selectDestinationRow(int row);
-    void saveLayout();
-    void saveDestination();
-    void removeLayout();
-    void removeDestination();
+    void sync();
+    void rebuildLists();
     void updateButtons();
 
-    OutputProfileStore store_;
-    std::vector<DestinationPlace> places_;
-    int place_{0};
-    std::vector<persistence::SavedOutputLayoutProfile> layouts_;
-    std::vector<persistence::SavedDestinationProfile> destinations_;
-    std::optional<core::StableId> editing_layout_id_;
-    std::optional<core::StableId> editing_destination_id_;
-    std::string destination_root_raw_path_;
-    bool loading_{false};
-    bool mutation_running_{false};
+    ProfilesSession* session_{nullptr};
+    bool syncing_{false};
 
     QComboBox* layout_list_{nullptr};
     QLineEdit* layout_name_{nullptr};

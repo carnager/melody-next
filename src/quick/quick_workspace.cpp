@@ -1708,7 +1708,6 @@ void QuickWorkspace::refreshLocalPlaybackControls() {
 
 // --- Up Next ----------------------------------------------------------------
 
-QAbstractItemModel* QuickWorkspace::upNextModel() const { return workspace_.up_next_local_model_; }
 
 void QuickWorkspace::refreshUpNext() {
     workspace_.syncUpNextModel();
@@ -1724,20 +1723,32 @@ void QuickWorkspace::refreshUpNext() {
                                       ? workspace_.up_next_local_model_->rowCount()
                                       : 0},
     };
-    QVariantList rows;
+    QList<QVariantMap> rows;
     if (auto* model = workspace_.up_next_local_model_; model != nullptr) {
         for (int row = 0; row < model->rowCount(); ++row) {
             rows.push_back(QVariantMap{
-                {QStringLiteral("title"), model->index(row, bench::local_title_column).data()},
-                {QStringLiteral("artist"), model->index(row, bench::local_artist_column).data()},
-                {QStringLiteral("album"), model->index(row, bench::local_album_column).data()},
-                {QStringLiteral("length"), model->index(row, bench::local_length_column).data()},
+                {QStringLiteral("title"),
+                 model->index(row, bench::local_title_column).data().toString()},
+                {QStringLiteral("artist"),
+                 model->index(row, bench::local_artist_column).data().toString()},
+                {QStringLiteral("album"),
+                 model->index(row, bench::local_album_column).data().toString()},
+                {QStringLiteral("length"),
+                 model->index(row, bench::local_length_column).data().toString()},
                 {QStringLiteral("coverKey"),
-                 model->index(row, 0).data(ui::track_album_artwork_key_role)},
+                 model->index(row, 0).data(ui::track_album_artwork_key_role).toString()},
             });
         }
     }
-    up_next.insert(QStringLiteral("rows"), rows);
+    // Each track by its entry; should the two ever be out of step, by place.
+    auto keys = workspace_.up_next_display_ids_;
+    if (keys.size() != static_cast<std::size_t>(rows.size())) {
+        keys.clear();
+        for (qsizetype row = 0; row < rows.size(); ++row) {
+            keys.push_back(static_cast<std::uint64_t>(row));
+        }
+    }
+    up_next_rows_.update(keys, rows);
     if (up_next != up_next_) {
         up_next_ = std::move(up_next);
         emit upNextChanged();

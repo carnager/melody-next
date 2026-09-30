@@ -107,6 +107,11 @@ ApplicationWindow {
         }
         else if (name === "listspane")
             Tk.listsInPanel = true;
+        else if (name === "upnext") {
+            Tk.rows.selectAll();
+            Tk.queueSelection(false);
+            upNextSettings.visible = true;
+        }
         else if (name === "libraryfolders")
             window.openSettings("library");
         else if (name.startsWith("settings"))

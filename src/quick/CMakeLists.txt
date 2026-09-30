@@ -70,6 +70,8 @@ qt_add_qml_module(
     SOURCES
     image_providers.cpp
     image_providers.hpp
+    keyed_rows_model.cpp
+    keyed_rows_model.hpp
     list_tabs_model.cpp
     list_tabs_model.hpp
     quick_artwork.cpp

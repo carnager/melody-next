@@ -15,7 +15,7 @@ Pane {
 
     readonly property color ground: palette.window
     readonly property color ink: palette.text
-    readonly property var rows: Tk.upNext.rows ?? []
+    readonly property int count: Tk.upNextRows.count
     property var selected: []
     property int current: -1
 
@@ -39,7 +39,7 @@ Pane {
     function edit(operation) {
         Tk.editUpNextRows(selected, operation);
     }
-    onRowsChanged: selected = selected.filter(row => row < rows.length)
+    onCountChanged: selected = selected.filter(row => row < count)
 
     ColumnLayout {
         anchors.fill: parent
@@ -78,7 +78,7 @@ Pane {
                 Layout.alignment: Qt.AlignTop
                 flat: true
                 display: AbstractButton.IconOnly
-                icon.source: "image://icon/window-close"
+                icon.source: "image://icon/window-close|sp:SP_TitleBarCloseButton"
                 icon.width: 14
                 icon.height: 14
                 padding: 4
@@ -102,14 +102,47 @@ Pane {
                 id: list
                 anchors.fill: parent
                 clip: true
-                model: panel.rows
+                model: Tk.upNextRows
+                // A track asked for slides in, one taken or removed fades
+                // out, and the rest move to make or close the room.
+                add: Transition {
+                    enabled: Tk.panelAnimations
+                    ParallelAnimation {
+                        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.moderate }
+                        NumberAnimation { property: "x"; from: 24; duration: Theme.moderate; easing.type: Easing.OutCubic }
+                    }
+                }
+                remove: Transition {
+                    enabled: Tk.panelAnimations
+                    ParallelAnimation {
+                        NumberAnimation { property: "opacity"; to: 0; duration: Theme.moderate }
+                        NumberAnimation { property: "x"; to: -24; duration: Theme.moderate; easing.type: Easing.InCubic }
+                    }
+                }
+                move: Transition {
+                    enabled: Tk.panelAnimations
+                    NumberAnimation { property: "y"; duration: Theme.moderate; easing.type: Easing.OutCubic }
+                }
+                displaced: Transition {
+                    enabled: Tk.panelAnimations
+                    ParallelAnimation {
+                        NumberAnimation { property: "y"; duration: Theme.moderate; easing.type: Easing.OutCubic }
+                        // A row caught mid-way by another change settles whole.
+                        NumberAnimation { property: "opacity"; to: 1; duration: Theme.quick }
+                        NumberAnimation { property: "x"; to: 0; duration: Theme.quick }
+                    }
+                }
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
                 focus: true
                 Keys.onDeletePressed: panel.edit(1)
                 delegate: Item {
                     id: row
-                    required property var modelData
+                    required property string title
+                    required property string artist
+                    required property string album
+                    required property string length
+                    required property string coverKey
                     required property int index
                     readonly property bool chosen: panel.selected.indexOf(index) >= 0
                     width: list.width
@@ -138,14 +171,14 @@ Pane {
                         clip: true
                         InitialsTile {
                             anchors.fill: parent
-                            name: row.modelData.album || row.modelData.title || ""
+                            name: row.album || row.title
                         }
                         Image {
                             anchors.fill: parent
                             asynchronous: false
                             sourceSize: Qt.size(64, 64)
-                            source: (row.modelData.coverKey ?? "") === "" ? ""
-                                    : "image://cover/" + encodeURIComponent(row.modelData.coverKey)
+                            source: row.coverKey === "" ? ""
+                                    : "image://cover/" + encodeURIComponent(row.coverKey)
                                       + "#" + Tk.coverRevision
                         }
                     }
@@ -153,7 +186,7 @@ Pane {
                         id: length
                         anchors.right: area.right
                         anchors.verticalCenter: area.verticalCenter
-                        text: row.modelData.length ?? ""
+                        text: row.length
                         font.pointSize: Math.max(7, Qt.application.font.pointSize - 1)
                         color: panel.palette.placeholderText
                     }
@@ -163,13 +196,13 @@ Pane {
                         anchors.verticalCenter: area.verticalCenter
                         Label {
                             width: parent.width
-                            text: row.modelData.title ?? ""
+                            text: row.title
                             elide: Text.ElideRight
                         }
                         Label {
                             width: parent.width
                             visible: text !== ""
-                            text: row.modelData.artist ?? ""
+                            text: row.artist
                             elide: Text.ElideRight
                             font.pointSize: Math.max(7, Qt.application.font.pointSize - 1)
                             color: panel.palette.placeholderText
@@ -315,36 +348,36 @@ Pane {
                 FooterButton {
                     objectName: "up-next-remove"
                     text: "Remove from Up Next"
-                    icon.source: "image://icon/list-remove"
+                    icon.source: "image://icon/list-remove|sp:SP_TrashIcon"
                     enabled: footer.first >= 0
                     onClicked: panel.edit(1)
                 }
                 FooterButton {
                     objectName: "up-next-move-up"
                     text: "Move up"
-                    icon.source: "image://icon/go-up"
+                    icon.source: "image://icon/go-up|sp:SP_ArrowUp"
                     enabled: footer.first > 0
                     onClicked: panel.edit(2)
                 }
                 FooterButton {
                     objectName: "up-next-move-down"
                     text: "Move down"
-                    icon.source: "image://icon/go-down"
-                    enabled: footer.first >= 0 && footer.last + 1 < panel.rows.length
+                    icon.source: "image://icon/go-down|sp:SP_ArrowDown"
+                    enabled: footer.first >= 0 && footer.last + 1 < panel.count
                     onClicked: panel.edit(3)
                 }
                 ToolSeparator {}
                 FooterButton {
                     objectName: "up-next-clear"
                     text: "Clear pending tracks"
-                    icon.source: "image://icon/edit-clear"
-                    enabled: panel.rows.length > 0
+                    icon.source: "image://icon/edit-clear|sp:SP_DialogResetButton"
+                    enabled: panel.count > 0
                     onClicked: Tk.editUpNext(0)
                 }
                 FooterButton {
                     objectName: "up-next-undo"
                     text: "Undo"
-                    icon.source: "image://icon/edit-undo"
+                    icon.source: "image://icon/edit-undo|sp:SP_ArrowBack"
                     enabled: Tk.upNext.canUndo ?? false
                     onClicked: Tk.undoUpNext()
                 }
@@ -356,7 +389,7 @@ Pane {
                     Layout.maximumWidth: panel.width - footer.x - 180
                     flat: true
                     LayoutMirroring.enabled: true
-                    icon.source: "image://icon/go-next"
+                    icon.source: "image://icon/go-next|sp:SP_ArrowForward"
                     icon.width: 14
                     icon.height: 14
                     topPadding: 4
@@ -391,7 +424,7 @@ Pane {
         }
         MenuItem {
             text: "Move down"
-            enabled: footer.first >= 0 && footer.last + 1 < panel.rows.length
+            enabled: footer.first >= 0 && footer.last + 1 < panel.count
             onTriggered: panel.edit(3)
         }
         MenuSeparator {}

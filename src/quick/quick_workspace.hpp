@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "quick/keyed_rows_model.hpp"
 #include "quick/list_tabs_model.hpp"
 #include "quick/quick_convert.hpp"
 #include "quick/quick_dynamic.hpp"
@@ -68,7 +69,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(QVariantMap modes READ modes NOTIFY modesChanged)
     Q_PROPERTY(QVariantList outputMenu READ outputMenu NOTIFY outputMenuChanged)
     Q_PROPERTY(QString bufferProfile READ bufferProfile NOTIFY bufferProfileChanged)
-    Q_PROPERTY(QAbstractItemModel* upNextModel READ upNextModel CONSTANT)
+    // Up Next's tracks, each kept as itself while it stays: its row moves,
+    // comes and goes rather than the whole list being redrawn.
+    Q_PROPERTY(trackknife::quick::KeyedRowsModel* upNextRows READ upNextRows CONSTANT)
     Q_PROPERTY(QVariantMap upNext READ upNext NOTIFY upNextChanged)
     Q_PROPERTY(QVariantMap history READ history NOTIFY historyChanged)
     Q_PROPERTY(int coverRevision READ coverRevision NOTIFY coverRevisionChanged)
@@ -138,7 +141,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] QVariantMap modes() const { return modes_; }
     [[nodiscard]] QVariantList outputMenu() const { return output_menu_; }
     [[nodiscard]] QString bufferProfile() const { return workspace_.selected_buffer_profile_; }
-    [[nodiscard]] QAbstractItemModel* upNextModel() const;
+    [[nodiscard]] KeyedRowsModel* upNextRows() { return &up_next_rows_; }
     [[nodiscard]] QVariantMap upNext() const { return up_next_; }
     [[nodiscard]] QVariantMap history() const { return history_; }
     [[nodiscard]] int coverRevision() const { return cover_revision_; }
@@ -474,6 +477,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     QVariantMap modes_;
     QVariantList output_menu_;
     QVariantMap up_next_;
+    KeyedRowsModel up_next_rows_{{"title", "artist", "album", "length", "coverKey"}};
     QVariantMap history_;
     int cover_revision_{0};
     int unmuted_volume_{100};

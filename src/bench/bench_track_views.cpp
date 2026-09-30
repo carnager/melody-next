@@ -260,8 +260,12 @@ void BenchMainWindow::refreshSelectionActions() {
     auto* view = activeTrackView();
     const auto has_selection = view != nullptr && view->selectionModel() != nullptr &&
                                !view->selectionModel()->selectedRows().isEmpty();
+    // Delete also takes Up Next's chosen tracks while the keyboard is there.
+    const auto up_next_selection = up_next_view_ != nullptr &&
+                                   up_next_view_->selectionModel() != nullptr &&
+                                   !up_next_view_->selectionModel()->selectedRows().isEmpty();
     if (remove_selected_action_ != nullptr) {
-        remove_selected_action_->setEnabled(has_selection);
+        remove_selected_action_->setEnabled(has_selection || up_next_selection);
     }
     if (play_selected_action_ != nullptr) {
         play_selected_action_->setEnabled(view != nullptr && view->currentIndex().isValid());

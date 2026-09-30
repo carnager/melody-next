@@ -1218,6 +1218,12 @@ void BenchMainWindow::replayListEdit(const bool undo) {
 }
 
 void BenchMainWindow::removeSelectedRows() {
+    // What is chosen where the keyboard is: Up Next's tracks while its list
+    // has it, else the list's rows.
+    if (up_next_view_ != nullptr && up_next_view_->hasFocus()) {
+        editUpNextSelection(1);
+        return;
+    }
     auto* tab = currentListTab();
     if (tab == nullptr || tab->view->selectionModel() == nullptr) {
         return;

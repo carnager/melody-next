@@ -304,12 +304,20 @@ ApplicationWindow {
                 onTriggered: window.openSettings(0)
             }
             MenuSeparator {}
+            // What is chosen where the keyboard is: Up Next's tracks while its
+            // list has it, else the list's rows.
             KeyedAction {
                 objectName: "action-remove-selected"
                 text: "Remove selected"
                 defaultKey: "Delete"
-                enabled: (Tk.selection.count ?? 0) > 0
-                onTriggered: Tk.removeSelectedRows()
+                enabled: upNextPanel.keyboardHere ? upNextPanel.canRemove
+                                                  : (Tk.selection.count ?? 0) > 0
+                onTriggered: {
+                    if (upNextPanel.keyboardHere)
+                        upNextPanel.edit(1);
+                    else
+                        Tk.removeSelectedRows();
+                }
             }
         }
         Menu {

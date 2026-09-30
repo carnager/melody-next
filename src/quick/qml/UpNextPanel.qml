@@ -39,6 +39,10 @@ Pane {
     function edit(operation) {
         Tk.editUpNextRows(selected, operation);
     }
+    // Whether the keyboard is in Up Next's list: then Edit › Remove selected
+    // -- Delete -- takes its chosen tracks, not the list's behind it.
+    readonly property bool keyboardHere: list.activeFocus
+    readonly property bool canRemove: selected.length > 0
     onCountChanged: selected = selected.filter(row => row < count)
 
     ColumnLayout {

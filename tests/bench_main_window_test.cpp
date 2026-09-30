@@ -9922,6 +9922,39 @@ void BenchMainWindowTest::ratingsInTagsIsAnEngineOption() {
     QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"100"}, 5'000);
     choose_scale(QStringLiteral("off"));
     QTRY_COMPARE_WITH_TIMEOUT(scale(), std::string{"off"}, 5'000);
+
+    // ADR-0245: the backup tag, named in Settings, is the engine's; an
+    // official name is written but warned about.
+    const auto backup = [&client] {
+        auto answer = (*client)->call("ratings.tags");
+        return answer ? answer->value("backup_tag", std::string{"?"}) : std::string{"?"};
+    };
+    QCOMPARE(backup(), std::string{});
+    {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* writing =
+            dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-ratings-in-tags"));
+        auto* copy = dialog->findChild<QCheckBox*>(QStringLiteral("bench-settings-rating-backup"));
+        auto* name = dialog->findChild<QLineEdit*>(QStringLiteral("bench-settings-rating-backup-tag"));
+        auto* note = dialog->findChild<QLabel*>(QStringLiteral("bench-settings-rating-backup-note"));
+        QVERIFY(writing && copy && name && note);
+        QVERIFY(!copy->isEnabled());
+        writing->setChecked(true);
+        QVERIFY(copy->isEnabled());
+        copy->setChecked(true);
+        QCOMPARE(name->text(), QStringLiteral("TRACKKNIFE_RATING"));
+        QVERIFY(note->isHidden());
+        name->setText(QStringLiteral("COMMENT"));
+        QVERIFY(!note->isHidden() && note->text().contains(QStringLiteral("official")));
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(backup(), std::string{"COMMENT"}, 5'000);
     (*client)->close();
 }
 

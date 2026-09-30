@@ -421,64 +421,96 @@ ApplicationWindow {
                 // --- Library -----------------------------------------------
                 SettingsPage {
                     heading: settingsWindow.options.pages[2]
-                    LibraryFolders {
+                    GroupBox {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 300
-                        visible: Tk.localLibrary !== null
-                        browser: Tk.localLibrary
-                    }
-                    Note {
-                        intro: true
-                        visible: Tk.localLibrary === null
-                        text: qsTr("Library folders are available from the running workspace.")
-                    }
-                    SettingCheck {
-                        objectName: "bench-settings-ratings-in-tags"
-                        key: "library/ratings-in-tags"
-                        text: qsTr("Also write track ratings into the files")
-                        tip: qsTr("Ratings stay in each engine's library either way. With this on, each engine also writes a track's rating into its files as FMPS_RATING, which other players read. Album ratings are not written.")
-                    }
-                    // ADR-0245: a copy other players leave alone, under it.
-                    RowLayout {
-                        Layout.leftMargin: settingsWindow.fieldIndent + 24
-                        Layout.fillWidth: true
-                        spacing: Theme.gap
-                        SettingCheck {
-                            id: ratingBackup
-                            objectName: "bench-settings-rating-backup"
-                            key: "library/rating-backup"
-                            Layout.leftMargin: 0
-                            enabled: settingsWindow.values["library/ratings-in-tags"] ?? false
-                            text: qsTr("Also write to a backup tag:")
-                            tip: qsTr("A second copy of each rating, as its plain 0-10 number, in a tag other players leave alone -- so a player that rewrites FMPS_RATING or POPM cannot lose it. A tagging script's Convert rating step (scale 0-10) brings it back.")
-                        }
-                        SettingText {
-                            objectName: "bench-settings-rating-backup-tag"
-                            key: "library/rating-backup-tag"
-                            enabled: ratingBackup.enabled && ratingBackup.checked
+                        title: qsTr("Music folders")
+                        ColumnLayout {
+                            anchors.fill: parent
+                            LibraryFolders {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 300
+                                visible: Tk.localLibrary !== null
+                                browser: Tk.localLibrary
+                            }
+                            Note {
+                                intro: true
+                                visible: Tk.localLibrary === null
+                                text: qsTr("Library folders are available from the running workspace.")
+                            }
                         }
                     }
-                    Label {
-                        objectName: "bench-settings-rating-backup-note"
-                        readonly property string note: settingsWindow.settings.ratingBackupNote(
-                            settingsWindow.values["library/rating-backup-tag"] ?? "")
-                        Layout.leftMargin: settingsWindow.fieldIndent + 24
+                    // Ratings in the files: written, their backup copy
+                    // (ADR-0245), and read from other players' tags.
+                    GroupBox {
                         Layout.fillWidth: true
-                        Layout.maximumWidth: 560
-                        visible: ratingBackup.checked && note !== ""
-                        wrapMode: Text.WordWrap
-                        text: note
-                        color: Theme.dim(palette)
-                    }
-                    Form {
-                        FieldLabel {
-                            text: qsTr("RATING tags from other players:")
-                        }
-                        SettingCombo {
-                            objectName: "bench-settings-rating-tag-scale"
-                            key: "library/rating-tag-scale"
-                            choices: settingsWindow.options.ratingScales
-                            tip: qsTr("Ratings other players left in your files are taken into the library. FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed scale, so it is read only on the one chosen here.")
+                        title: qsTr("Ratings")
+                        Form {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            FieldLabel {
+                                text: qsTr("In the files:")
+                            }
+                            SettingCheck {
+                                id: ratingsInTags
+                                objectName: "bench-settings-ratings-in-tags"
+                                key: "library/ratings-in-tags"
+                                text: qsTr("Write track ratings into the files")
+                                tip: qsTr("Ratings stay in each engine's library either way. With this on, each engine also writes a track's rating into its files as FMPS_RATING, which other players read. Album ratings are not written.")
+                            }
+                            FieldLabel {
+                                text: qsTr("Backup copy:")
+                                opacity: ratingBackup.enabled ? 1 : 0.45
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Theme.gap
+                                SettingCheck {
+                                    id: ratingBackup
+                                    objectName: "bench-settings-rating-backup"
+                                    key: "library/rating-backup"
+                                    // Already in the form's field column.
+                                    Layout.leftMargin: 0
+                                    enabled: ratingsInTags.checked
+                                    text: qsTr("Also write to the tag")
+                                    tip: qsTr("A second copy of each rating, as its plain 0-10 number, in a tag other players leave alone -- so a player that rewrites FMPS_RATING or POPM cannot lose it. A tagging script's Convert rating step (scale 0-10) brings it back.")
+                                }
+                                SettingText {
+                                    objectName: "bench-settings-rating-backup-tag"
+                                    key: "library/rating-backup-tag"
+                                    Layout.maximumWidth: 260
+                                    enabled: ratingBackup.enabled && ratingBackup.checked
+                                }
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            // Under the field: why the name will not do, or
+                            // what an official tag loses.
+                            Item {
+                                visible: backupNote.visible
+                                Layout.preferredWidth: Theme.labelWidth
+                            }
+                            Label {
+                                id: backupNote
+                                objectName: "bench-settings-rating-backup-note"
+                                readonly property string note: settingsWindow.settings.ratingBackupNote(
+                                    settingsWindow.values["library/rating-backup-tag"] ?? "")
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: 520
+                                visible: ratingBackup.enabled && ratingBackup.checked && note !== ""
+                                wrapMode: Text.WordWrap
+                                text: note
+                                color: Theme.dim(palette)
+                            }
+                            FieldLabel {
+                                text: qsTr("Other players' RATING tags:")
+                            }
+                            SettingCombo {
+                                objectName: "bench-settings-rating-tag-scale"
+                                key: "library/rating-tag-scale"
+                                choices: settingsWindow.options.ratingScales
+                                tip: qsTr("Ratings other players left in your files are taken into the library. FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed scale, so it is read only on the one chosen here.")
+                            }
                         }
                     }
                 }

@@ -267,29 +267,34 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
 
     auto* library = new QWidget(this);
     auto* library_layout = new QVBoxLayout(library);
+    auto* folders = new QGroupBox(QStringLiteral("Music folders"), library);
+    auto* folders_layout = new QVBoxLayout(folders);
     if (library_folders) {
-        library_layout->addWidget(library_folders(library));
+        folders_layout->addWidget(library_folders(folders));
     } else {
         auto* note = new QLabel(
-            QStringLiteral("Library folders are available from the running workspace."), library);
+            QStringLiteral("Library folders are available from the running workspace."), folders);
         note->setWordWrap(true);
         note->setForegroundRole(QPalette::PlaceholderText);
-        library_layout->addWidget(note);
-        library_layout->addStretch(1);
+        folders_layout->addWidget(note);
     }
-    ratings_in_tags_ =
-        new QCheckBox(QStringLiteral("Also write track ratings into the files"), library);
+    library_layout->addWidget(folders, 1);
+
+    // Ratings in the files: written, their backup copy (ADR-0245), and read
+    // from other players' tags.
+    auto* ratings = new QGroupBox(QStringLiteral("Ratings"), library);
+    auto* ratings_form = new QFormLayout(ratings);
+    ratings_in_tags_ = new QCheckBox(QStringLiteral("Write track ratings into the files"), ratings);
     ratings_in_tags_->setObjectName(QStringLiteral("bench-settings-ratings-in-tags"));
     ratings_in_tags_->setToolTip(
         QStringLiteral("Ratings stay in each engine's library either way. With this on, each "
                        "engine also writes a track's rating into its files as FMPS_RATING, "
                        "which other players read. Album ratings are not written."));
     bind(ratings_in_tags_, ratings_in_tags_key);
-    library_layout->addWidget(ratings_in_tags_);
-    // ADR-0245: a copy other players leave alone, under it.
+    ratings_form->addRow(QStringLiteral("In the files:"), ratings_in_tags_);
+
     auto* backup_row = new QHBoxLayout;
-    backup_row->setContentsMargins(24, 0, 0, 0);
-    rating_backup_ = new QCheckBox(QStringLiteral("Also write to a backup tag:"), library);
+    rating_backup_ = new QCheckBox(QStringLiteral("Also write to the tag"), ratings);
     rating_backup_->setObjectName(QStringLiteral("bench-settings-rating-backup"));
     rating_backup_->setToolTip(
         QStringLiteral("A second copy of each rating, as its plain 0-10 number, in a tag other "
@@ -297,39 +302,47 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "cannot lose it. A tagging script's Convert rating step (scale 0-10) "
                        "brings it back."));
     bind(rating_backup_, rating_backup_key);
-    rating_backup_tag_ = new QLineEdit(library);
+    rating_backup_tag_ = new QLineEdit(ratings);
     rating_backup_tag_->setObjectName(QStringLiteral("bench-settings-rating-backup-tag"));
+    rating_backup_tag_->setMaximumWidth(260);
     bind(rating_backup_tag_, rating_backup_tag_key);
     backup_row->addWidget(rating_backup_);
     backup_row->addWidget(rating_backup_tag_, 1);
-    library_layout->addLayout(backup_row);
-    rating_backup_note_ = new QLabel(library);
+    backup_row->addStretch(1);
+    auto* backup_label = new QLabel(QStringLiteral("Backup copy:"), ratings);
+    ratings_form->addRow(backup_label, backup_row);
+    // Under the field: why the name will not do, or what an official tag
+    // loses.
+    rating_backup_note_ = new QLabel(ratings);
     rating_backup_note_->setObjectName(QStringLiteral("bench-settings-rating-backup-note"));
     rating_backup_note_->setWordWrap(true);
-    rating_backup_note_->setContentsMargins(24, 0, 0, 0);
-    library_layout->addWidget(rating_backup_note_);
-    const auto refresh_backup = [this] {
-        const auto writing = ratings_in_tags_->isChecked();
-        rating_backup_->setEnabled(writing);
-        rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
-        const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
-        rating_backup_note_->setText(note);
-        rating_backup_note_->setVisible(rating_backup_->isChecked() && !note.isEmpty());
-    };
-    connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
-    connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);
-    connect(rating_backup_tag_, &QLineEdit::textChanged, this, refresh_backup);
-    refresh_backup();
-    auto* scale_form = new QFormLayout;
-    rating_tag_scale_ = new QComboBox(library);
+    rating_backup_note_->setForegroundRole(QPalette::PlaceholderText);
+    ratings_form->addRow(QString{}, rating_backup_note_);
+
+    rating_tag_scale_ = new QComboBox(ratings);
     rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));
     rating_tag_scale_->setToolTip(
         QStringLiteral("Ratings other players left in your files are taken into the library. "
                        "FMPS_RATING and MP3 POPM always are; a plain RATING tag has no agreed "
                        "scale, so it is read only on the one chosen here."));
     bind(rating_tag_scale_, SettingsSession::ratingScales(), rating_tag_scale_key);
-    scale_form->addRow(QStringLiteral("RATING tags from other players:"), rating_tag_scale_);
-    library_layout->addLayout(scale_form);
+    ratings_form->addRow(QStringLiteral("Other players' RATING tags:"), rating_tag_scale_);
+    library_layout->addWidget(ratings);
+
+    const auto refresh_backup = [this, backup_label] {
+        const auto writing = ratings_in_tags_->isChecked();
+        rating_backup_->setEnabled(writing);
+        backup_label->setEnabled(writing);
+        rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
+        const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
+        rating_backup_note_->setText(note);
+        rating_backup_note_->setVisible(writing && rating_backup_->isChecked() &&
+                                        !note.isEmpty());
+    };
+    connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_tag_, &QLineEdit::textChanged, this, refresh_backup);
+    refresh_backup();
     add_page(QStringLiteral("Library"), library);
 
     // --- Engine ------------------------------------------------------------

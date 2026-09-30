@@ -79,6 +79,13 @@ Pane {
                 flat: true
                 display: AbstractButton.IconOnly
                 icon.source: "image://icon/window-close"
+                icon.width: 14
+                icon.height: 14
+                padding: 4
+                leftPadding: 4
+                rightPadding: 4
+                implicitWidth: 24
+                implicitHeight: 24
                 text: "Close Up Next"
                 ToolTip.visible: hovered
                 ToolTip.text: text
@@ -285,11 +292,17 @@ Pane {
                 anchors.topMargin: 4
                 anchors.bottomMargin: 4
                 spacing: 0
+                // Compact, as the status line's: the edits are a side panel's.
                 component FooterButton: ToolButton {
                     flat: true
                     display: AbstractButton.IconOnly
-                    icon.width: 16
-                    icon.height: 16
+                    icon.width: 14
+                    icon.height: 14
+                    padding: 4
+                    leftPadding: 4
+                    rightPadding: 4
+                    implicitWidth: 24
+                    implicitHeight: 24
                     ToolTip.visible: hovered
                     ToolTip.text: text
                 }
@@ -340,6 +353,10 @@ Pane {
                     flat: true
                     LayoutMirroring.enabled: true
                     icon.source: "image://icon/go-next"
+                    icon.width: 14
+                    icon.height: 14
+                    topPadding: 4
+                    bottomPadding: 4
                     text: Tk.upNext.back ?? ""
                     enabled: Tk.upNext.backEnabled ?? false
                     ToolTip.visible: hovered

@@ -478,7 +478,7 @@ void TrackRowsModel::selectRows(const QVariantList& rows, const int current) {
     refreshAll();
 }
 
-// Right-clicking an album's header selects the whole album.
+// Clicking an album's header selects the whole album.
 void TrackRowsModel::selectGroup(const int row) {
     if (source_ == nullptr) {
         return;

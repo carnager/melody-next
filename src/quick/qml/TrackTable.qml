@@ -384,7 +384,12 @@ FocusScope {
                 onPressedChanged: {
                     if (pressed) {
                         list.forceActiveFocus();
-                        if (row.selected && point.modifiers === Qt.NoModifier) {
+                        // As the widgets view: a press on an album's header
+                        // chooses the whole album, dragged as one.
+                        if (row.groupStart && point.position.y < row.headerHeight) {
+                            row.pressPending = false;
+                            table.rows.selectGroup(row.index);
+                        } else if (row.selected && point.modifiers === Qt.NoModifier) {
                             row.pressPending = true;
                         } else {
                             row.pressPending = false;
@@ -417,7 +422,7 @@ FocusScope {
                 onTapped: eventPoint => {
                     list.forceActiveFocus();
                     // Right-clicking an album's header selects the album.
-                    if (row.groupStart && eventPoint.position.y < 30)
+                    if (row.groupStart && eventPoint.position.y < row.headerHeight)
                         table.rows.selectGroup(row.index);
                     else if (!row.selected)
                         table.rows.press(row.index, 0);

@@ -106,7 +106,7 @@ Pane {
                             Label {
                                 visible: row.modelData.playing
                                 text: "▶"
-                                color: palette.highlight
+                                color: Shade.accentOn(palette.active.highlight, palette.base)
                             }
                             Label {
                                 Layout.fillWidth: true

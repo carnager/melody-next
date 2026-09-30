@@ -18,4 +18,17 @@ QtObject {
     function lighter(c, factor) {
         return Qt.lighter(c, factor / 100);
     }
+    function luma(c) {
+        return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    }
+    // An accent as text on `ground`: lighter on a dark ground, darker on a
+    // light one, and further until it reads -- a pale highlight on white, as
+    // a light desktop gives an unfocused window, would otherwise vanish.
+    function accentOn(accent, ground) {
+        const light = luma(ground) > 0.5;
+        let shade = light ? Qt.darker(accent, 1.15) : Qt.lighter(accent, 1.15);
+        for (let step = 0; step < 6 && Math.abs(luma(shade) - luma(ground)) < 0.4; ++step)
+            shade = light ? Qt.darker(shade, 1.3) : Qt.lighter(shade, 1.3);
+        return shade;
+    }
 }

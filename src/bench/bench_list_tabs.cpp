@@ -77,6 +77,12 @@ void BenchMainWindow::initializePersistence() {
     });
 }
 
+int BenchMainWindow::currentRow(const ListTab& tab) {
+    return tab.view != nullptr && tab.view->currentIndex().isValid()
+               ? tab.view->currentIndex().row()
+               : -1;
+}
+
 void BenchMainWindow::workspaceRestored(const bool restored) {
     applyLocalLibraryVisibility();
     if (restored) {
@@ -85,126 +91,12 @@ void BenchMainWindow::workspaceRestored(const bool restored) {
         connect(localLibrary(), &LocalLibraryPanel::manageFoldersRequested, this,
                 [this] { showSettingsDialog(SettingsDialog::Page::library); });
         source_stack_->addWidget(localLibrary());
-        connect(
-            localLibrary(), &LocalLibraryPanel::actionRequested, this,
-            [this](std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action) {
-                if (action == LocalLibraryAction::request_next ||
-                    action == LocalLibraryAction::request_end) {
-                    localLibrary()->resolveEntries(
-                        std::move(entries), [this, action](std::vector<std::string> paths) {
-                            std::vector<LocalTrackRow> rows;
-                            for (auto& path : paths) {
-                                LocalTrackRow row;
-                                row.raw_path = std::move(path);
-                                row.title = core::display_raw_path(
-                                    row.raw_path.substr(row.raw_path.find_last_of('/') + 1));
-                                rows.push_back(std::move(row));
-                            }
-                            enqueueLocalRequests(
-                                std::move(rows),
-                                action == LocalLibraryAction::request_next ? 0 : -1);
-                        });
-                    return;
-                }
-                auto* target = currentListTab();
-                // This computer's library goes into a local tab: the one
-                // on screen, or else the first there is (ADR-0227).
-                if (target != nullptr && !EngineKey::of(target->document).isLocal()) {
-                    const auto local = std::ranges::find_if(list_tabs_, [](const auto& tab) {
-                        return EngineKey::of(tab->document).isLocal();
-                    });
-                    target = local != list_tabs_.end() ? local->get() : nullptr;
-                }
-                if (!target || entries.empty()) {
-                    return;
-                }
-                const auto id = QString::fromStdString(target->document.id.to_string());
-                const auto name =
-                    entries.size() == 1U ? entries.front().label : "Library selection";
-                int insertion = -1;
-                if (action == LocalLibraryAction::next) {
-                    insertion = document_text(playback_.anchors.document) == id
-                                    ? playback_.row + 1
-                                : target->view->currentIndex().isValid()
-                                    ? target->view->currentIndex().row() + 1
-                                    : 0;
-                }
-                const QPersistentModelIndex anchor{target->model->index(insertion, 0)};
-                const bool anchored = anchor.isValid();
-                localLibrary()->resolveEntries(
-                    std::move(entries), [this, id, name, action, insertion, anchor,
-                                         anchored](std::vector<std::string> paths) {
-                        auto* destination = tabForDocument(id);
-                        if (!destination || (anchored && !anchor.isValid())) {
-                            return;
-                        }
-                        if (discovery_running_) {
-                            statusBar()->showMessage(
-                                QStringLiteral("A file intake is already running"), 3'000);
-                            return;
-                        }
-                        if (action == LocalLibraryAction::new_list) {
-                            destination = addListTab(
-                                persistence::ListDocument{.id = core::StableId::random(),
-                                                          .kind =
-                                                              persistence::ListKind::scratch,
-                                                          .name = name,
-                                                          .pinned = false,
-                                                          .dirty = false,
-                                                          .items = {}},
-                                true);
-                            schedulePersist();
-                        }
-                        startDiscovery(
-                            std::move(paths),
-                            QString::fromStdString(destination->document.id.to_string()),
-                            anchored ? anchor.row() : insertion,
-                            action == LocalLibraryAction::replace);
-                    });
-            });
-        connect(localLibrary(), &LocalLibraryPanel::ratingsChanged, this,
-                &BenchMainWindow::refreshLocalRatings);
+        workspace_.attachLibrary(&localLibrary()->browser());
         // "Add to list": this computer's lists, in tab order.
         localLibrary()->setListTargets([this] { return listTargets(EngineKey::local()); });
-        connect(localLibrary(), &LocalLibraryPanel::addToListRequested, this,
-                [this](std::vector<persistence::LibraryEntry> entries, const QString& id) {
-                    if (tabForDocument(id) == nullptr || entries.empty()) {
-                        return;
-                    }
-                    localLibrary()->resolveEntries(
-                        std::move(entries), [this, id](std::vector<std::string> paths) {
-                            if (tabForDocument(id) == nullptr) {
-                                return;
-                            }
-                            if (discovery_running_) {
-                                statusBar()->showMessage(
-                                    QStringLiteral("A file intake is already running"), 3'000);
-                                return;
-                            }
-                            startDiscovery(std::move(paths), id, -1, false);
-                        });
-                });
         // Restored rows carry their identity hashes; load stored values
         // once the rating store is reachable.
         refreshLocalRatings();
-        // ADR-0140: Enter in the library search keeps the full result
-        // set as an ordinary scratch list tab.
-        connect(localLibrary(), &LocalLibraryPanel::searchCommitted, this,
-                [this](const QString& query, std::vector<LocalTrackRow> rows) {
-                    auto* destination = addListTab(
-                        persistence::ListDocument{
-                            .id = core::StableId::random(),
-                            .kind = persistence::ListKind::scratch,
-                            .name = utf8Bytes(QStringLiteral("Search: %1").arg(query)),
-                            .pinned = false,
-                            .dirty = false,
-                            .items = {},
-                        },
-                        true);
-                    destination->model->appendRows(std::move(rows));
-                    markTabDirty(*destination);
-                    syncArtwork(*destination);
-                });
         refreshActiveContext();
     }
 }

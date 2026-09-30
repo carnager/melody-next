@@ -377,7 +377,7 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
         command->setObjectName(QStringLiteral("action-local-library-%1").arg(action));
         command->setEnabled(available);
         connect(command, &QAction::triggered, this, [this, entries, action] {
-            emit actionRequested(entries, static_cast<LocalLibraryAction>(action));
+            emit browser_->actionRequested(entries, static_cast<LocalLibraryAction>(action));
         });
         // Beside "Append to current list": to any list of this engine's.
         if (action == 0) {
@@ -391,7 +391,7 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                 auto* choice = lists->addAction(name);
                 choice->setObjectName(QStringLiteral("action-local-library-add-to-%1").arg(target));
                 connect(choice, &QAction::triggered, this,
-                        [this, entries, id] { emit addToListRequested(entries, id); });
+                        [this, entries, id] { emit browser_->addToListRequested(entries, id); });
             }
             lists->setEnabled(available && !targets.empty());
         }

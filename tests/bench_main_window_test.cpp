@@ -1971,7 +1971,7 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     const auto page = catalogue->query(albums);
     QVERIFY(page && !page->entries.empty());
     const auto before = current->model->rowCount();
-    emit window.localLibrary()->addToListRequested(page->entries, chosen_id);
+    emit window.localLibrary()->browser().addToListRequested(page->entries, chosen_id);
     QTRY_COMPARE(chosen->model->rowCount(), 1);
     QCOMPARE(current->model->rowCount(), before);
     QTRY_VERIFY(!window.discovery_running_);
@@ -7151,7 +7151,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                 EngineKey::of(window.currentListTab()->document).isLocal() &&
                 window.currentListTab()->model->rowCount() == 1);
     auto* local_tab = window.currentListTab();
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(remote_tab->model->rowCount(), 1);
     QCOMPARE(local_tab->model->rowCount(), 1);
     QVERIFY(!remote_tab->model->rows().front().title.empty());
@@ -7169,7 +7169,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // added -- tagged, with their own identities -- rather than being traded
     // for the engine's bare paths.
     {
-        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_COMPARE(remote_tab->model->rowCount(), 2);
         const auto added = remote_tab->model->rows();
         for (int wait = 0; wait < 40; ++wait) {
@@ -7481,7 +7481,7 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().album_rating_hash.empty());
     const auto track_hash = tab->model->rows().front().rating_hash;
@@ -7541,7 +7541,7 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().rating_hash.empty());
     const auto hash = tab->model->rows().front().rating_hash;
@@ -7661,7 +7661,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
         tracks.kind = persistence::LibraryEntryKind::track;
         const auto page = window.remoteCatalogue()->open()->query(tracks);
         QVERIFY(page && page->entries.size() == 2U);
-        emit window.remoteLibrary()->actionRequested({page->entries[0]},
+        emit window.remoteLibrary()->browser().actionRequested({page->entries[0]},
                                                      LocalLibraryAction::replace);
         QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
         window.remotePlayback()->setVolume(0);
@@ -7737,7 +7737,7 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
     QVERIFY(page && page->entries.size() == 1U);
     const auto album_name = QString::fromStdString(page->entries.front().album);
     const auto artist_name = QString::fromStdString(page->entries.front().artist);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     window.remoteLibrary()->refreshLibrary();
 
@@ -7793,7 +7793,7 @@ void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
     QVERIFY(page && page->entries.size() == 1U);
     // "Replace list and play" -- from the menu, or Shift+Enter in the quick
     // album popup -- plays, on the remote as it does here.
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(window.remotePlayback()->state().status, QStringLiteral("playing"),
                               10'000);
@@ -7832,7 +7832,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
     QTRY_VERIFY(covered(0));
@@ -8007,7 +8007,7 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
         albums.kind = persistence::LibraryEntryKind::album;
         const auto page = catalogue->query(albums);
         QVERIFY(page && page->entries.size() == 1U);
-        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_VERIFY(covered(remote_tab(window)));
         window.persistNow(false);
         QVERIFY(window.close());

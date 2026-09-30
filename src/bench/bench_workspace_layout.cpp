@@ -1081,7 +1081,7 @@ void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind)
     connect(popup, &QuickPickPopup::chosen, library,
             [library](std::vector<persistence::LibraryEntry> picked, LocalLibraryAction action) {
                 // Exactly what the library's own menu does with it.
-                emit library->actionRequested(std::move(picked), action);
+                emit library->browser().actionRequested(std::move(picked), action);
             });
     popup->popUp(centralWidget() != nullptr ? centralWidget() : this);
 }

@@ -48,6 +48,8 @@ class QTableView;
 namespace trackknife::bench {
 
 class LocalLibraryPanel;
+class LibraryBrowser;
+enum class LocalLibraryAction;
 class WorkspaceView;
 
 // Widget properties, persisted UI state and JSON all carry a document identity
@@ -619,6 +621,17 @@ class Workspace final : public QObject {
     // Whether an engine state has been seen, so the first one does not read
     // as the output changing.
     bool engine_output_seen_{false};
+
+    // A library's requests handled: its entries into lists and Up Next,
+    // searches kept as lists, ratings read again when it stores one.
+    void attachLibrary(LibraryBrowser* browser);
+    void libraryAction(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
+                       LocalLibraryAction action);
+    void libraryAddToList(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
+                          const QString& id);
+    void librarySearchCommitted(LibraryBrowser& browser, const QString& query,
+                                std::vector<LocalTrackRow> rows);
+    [[nodiscard]] int insertionForNext(const ListTab& target);
 
     // Last.fm, signed in as this window's account: listens credited from
     // what the engine followed reports, unless it scrobbles itself.

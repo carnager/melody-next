@@ -119,9 +119,7 @@ void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
         first ? QStringLiteral("bench-remote-library")
               : QStringLiteral("bench-remote-library-%1").arg(engines_.size() - 1));
     source_stack_->addWidget(link->library);
-    // Ratings set in remote tabs are stored on the remote, and read from it.
-    connect(link->library, &LocalLibraryPanel::ratingsChanged, this,
-            &BenchMainWindow::refreshLocalRatings);
+    workspace_.attachLibrary(&link->library->browser());
     refreshLocalRatings();
     const auto index = local_source_tabs_->addTab(link->catalogue->name());
     // The engine's key, which the tab is found and followed by (ADR-0234).
@@ -131,116 +129,7 @@ void BenchMainWindow::engineConnected(EngineLink& engine, const bool first) {
     applyLocalLibraryVisibility();
     selectPreferredSource();
 
-    connect(
-        link->library, &LocalLibraryPanel::actionRequested, this,
-        [this, link](std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action) {
-            if (entries.empty()) {
-                return;
-            }
-            if (action == LocalLibraryAction::request_next ||
-                action == LocalLibraryAction::request_end) {
-                link->library->resolveEntryRows(
-                    std::move(entries), [this, link, action](std::vector<LocalTrackRow> rows) {
-                        enqueueLocalRequests(std::move(rows),
-                                             action == LocalLibraryAction::request_next ? 0 : -1,
-                                             link->key);
-                    });
-                return;
-            }
-            // Into the remote tab on screen, or the remote's own: a
-            // remote file never lands in a local tab.
-            auto* target = currentListTab();
-            if (target == nullptr || EngineKey::of(target->document).isLocal()) {
-                target = engineTab(*link);
-            }
-            if (target == nullptr) {
-                return;
-            }
-            if (action == LocalLibraryAction::new_list) {
-                target = addListTab(
-                    persistence::ListDocument{.id = core::StableId::random(),
-                                              .kind = persistence::ListKind::scratch,
-                                              .name = entries.size() == 1U ? entries.front().label
-                                                                           : "Library selection",
-                                              .pinned = false,
-                                              .dirty = false,
-                                              .items = {},
-                                              .engine = link->key.stored()},
-                    true);
-                schedulePersist();
-            }
-            int insertion = -1;
-            if (action == LocalLibraryAction::next) {
-                insertion = playback_.anchors.document == target->document.id ? playback_.row + 1
-                            : target->view->currentIndex().isValid()
-                                ? target->view->currentIndex().row() + 1
-                                : 0;
-            }
-            const auto id = QString::fromStdString(target->document.id.to_string());
-            link->library->resolveEntryRows(
-                std::move(entries),
-                [this, link, id, action, insertion](std::vector<LocalTrackRow> rows) {
-                    auto* destination = tabForDocument(id);
-                    if (destination == nullptr || rows.empty()) {
-                        return;
-                    }
-                    if (action == LocalLibraryAction::replace) {
-                        destination->model->replaceRows(std::move(rows), true);
-                    } else {
-                        destination->model->appendRows(std::move(rows), insertion);
-                    }
-                    markTabDirty(*destination);
-                    syncArtwork(*destination);
-                    schedulePersist();
-                    tabs_->setCurrentWidget(destination->view);
-                    // "Replace list and play", as this computer's library does.
-                    if (action == LocalLibraryAction::replace &&
-                        destination->model->rowCount() > 0) {
-                        playRow(*destination, 0);
-                    }
-                });
-        });
     link->library->setListTargets([this, link] { return listTargets(link->key); });
-    connect(link->library, &LocalLibraryPanel::addToListRequested, this,
-            [this, link](std::vector<persistence::LibraryEntry> entries, const QString& id) {
-                if (tabForDocument(id) == nullptr || entries.empty()) {
-                    return;
-                }
-                link->library->resolveEntryRows(
-                    std::move(entries), [this, link, id](std::vector<LocalTrackRow> rows) {
-                        auto* destination = tabForDocument(id);
-                        if (destination == nullptr || rows.empty()) {
-                            return;
-                        }
-                        const auto count = rows.size();
-                        destination->model->appendRows(std::move(rows));
-                        markTabDirty(*destination);
-                        syncArtwork(*destination);
-                        schedulePersist();
-                        statusBar()->showMessage(
-                            QStringLiteral("Added %1 to “%2”")
-                                .arg(count == 1U ? QStringLiteral("1 track")
-                                                 : QStringLiteral("%1 tracks").arg(count),
-                                     displayText(destination->document.name)),
-                            4'000);
-                    });
-            });
-    connect(link->library, &LocalLibraryPanel::searchCommitted, this,
-            [this, link](const QString& query, std::vector<LocalTrackRow> rows) {
-                auto* destination = addListTab(
-                    persistence::ListDocument{
-                        .id = core::StableId::random(),
-                        .kind = persistence::ListKind::scratch,
-                        .name = utf8Bytes(QStringLiteral("Search: %1").arg(query)),
-                        .pinned = false,
-                        .dirty = false,
-                        .items = {},
-                        .engine = link->key.stored()},
-                    true);
-                destination->model->appendRows(std::move(rows));
-                markTabDirty(*destination);
-                syncArtwork(*destination);
-            });
 }
 
 } // namespace trackknife::bench

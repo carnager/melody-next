@@ -187,6 +187,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
     [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const override;
     [[nodiscard]] QObject* modelParent() override { return this; }
+    [[nodiscard]] int currentRow(const ListTab& tab) override {
+        return &tab == currentTabPointer() ? rows_.currentRow() : -1;
+    }
     void refreshTabChrome(ListTab& tab) override;
     void refreshListHistoryActions() override;
     void refreshSelectionStatus() override;

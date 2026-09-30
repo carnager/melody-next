@@ -17,6 +17,7 @@ qt_add_library(
     workspace_desktop.cpp
     workspace_engines.cpp
     workspace_ingest.cpp
+    workspace_library.cpp
     workspace_lists.cpp
     workspace_playback.cpp
     workspace_ratings.cpp

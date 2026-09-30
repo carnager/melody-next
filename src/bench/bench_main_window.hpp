@@ -208,6 +208,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     [[nodiscard]] ListTab* currentList() override;
     [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
     [[nodiscard]] QObject* modelParent() override;
+    [[nodiscard]] int currentRow(const ListTab& tab) override;
     void artworkLoaded(const QString& key) override;
     void workspaceRestored(bool restored) override;
     void engineConnected(EngineLink& engine, bool first) override;

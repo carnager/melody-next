@@ -34,6 +34,8 @@ class WorkspaceView {
     virtual void showList(Workspace::ListTab& tab) = 0;
     [[nodiscard]] virtual Workspace::ListTab* currentList() = 0;
     [[nodiscard]] virtual std::vector<Workspace::ListTab*> listsInOrder() = 0;
+    // The row a list's cursor is on, or -1.
+    [[nodiscard]] virtual int currentRow(const Workspace::ListTab& tab) = 0;
     // How a list's columns are arranged now, to be saved with it.
     [[nodiscard]] virtual ui::TrackViewLayout
     captureTrackViewLayout(const Workspace::ListTab& tab) const = 0;

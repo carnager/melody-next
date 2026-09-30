@@ -6,6 +6,7 @@
 #include "quick/quick_convert.hpp"
 #include "quick/quick_open_list.hpp"
 #include "quick/quick_pick.hpp"
+#include "quick/quick_search.hpp"
 #include "quick/quick_replaygain.hpp"
 #include "quick/quick_settings.hpp"
 #include "quick/quick_tagger.hpp"
@@ -234,6 +235,12 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void dismissFind() { find_.dismiss(); }
     // Every engine's lists, one to open.
     Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
+    // Search, in the library of the tab in front (or the current tab); one
+    // at a time, which the window keeps. Null without this computer's
+    // library.
+    Q_INVOKABLE trackknife::quick::QuickSearch* openSearch();
+    // The open search follows the tab in front.
+    Q_INVOKABLE void followSearch(trackknife::quick::QuickSearch* search);
     // Quick album or Quick track, in the library of the tab in front; null
     // when there is none.
     Q_INVOKABLE trackknife::quick::QuickPick* openQuickPick(bool albums);

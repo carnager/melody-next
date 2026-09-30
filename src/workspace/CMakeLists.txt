@@ -61,6 +61,8 @@ qt_add_library(
     shortcut_session.cpp
     shortcut_session.hpp
     profiles_session.hpp
+    search_session.cpp
+    search_session.hpp
     settings_session.cpp
     settings_session.hpp
     sources.cpp

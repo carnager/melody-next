@@ -567,51 +567,7 @@ void BenchMainWindow::openSearchDialog() {
     connect(search_dialog_, &SearchDialog::rowsRequested, this,
             [this](const QString& name, std::vector<LocalTrackRow> rows,
                    const LocalLibraryAction action, const EngineKey& engine) {
-                // ADR-0227: a library's rows go to a tab of the same engine --
-                // the current one if it is, else that engine's first, else
-                // (for the remote) its own tab.
-                auto* destination = currentListTab();
-                if (destination == nullptr || EngineKey::of(destination->document) != engine) {
-                    const auto first = std::ranges::find_if(list_tabs_, [&engine](const auto& tab) {
-                        return EngineKey::of(tab->document) == engine;
-                    });
-                    destination = first != list_tabs_.end() ? first->get()
-                                  : link(engine) != nullptr && !engine.isLocal()
-                                      ? engineTab(*link(engine))
-                                      : nullptr;
-                }
-                int insertion = -1;
-                if (action == LocalLibraryAction::new_list) {
-                    destination =
-                        addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                             .kind = persistence::ListKind::scratch,
-                                                             .name = utf8Bytes(name),
-                                                             .pinned = false,
-                                                             .dirty = false,
-                                                             .items = {},
-                                                             .engine = engine.stored()},
-                                   true);
-                    schedulePersist();
-                } else if (destination != nullptr && action == LocalLibraryAction::next) {
-                    const auto id = QString::fromStdString(destination->document.id.to_string());
-                    insertion = document_text(playback_.anchors.document) == id ? playback_.row + 1
-                                : destination->view->currentIndex().isValid()
-                                    ? destination->view->currentIndex().row() + 1
-                                    : 0;
-                }
-                if (destination == nullptr) {
-                    return;
-                }
-                if (action == LocalLibraryAction::replace) {
-                    destination->model->replaceRows(std::move(rows), true);
-                } else {
-                    destination->model->appendRows(std::move(rows), insertion);
-                }
-                markTabDirty(*destination);
-                syncArtwork(*destination);
-                if (action == LocalLibraryAction::replace && destination->model->rowCount() > 0) {
-                    playRow(*destination, 0);
-                }
+                workspace_.placeFoundRows(name, std::move(rows), action, engine);
             });
     search_dialog_->followLibrary(from);
     search_dialog_->show();

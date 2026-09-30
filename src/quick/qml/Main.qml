@@ -76,6 +76,11 @@ ApplicationWindow {
         }
         else if (name === "search" && Tk.library)
             Tk.library.search = "a";
+        else if (name === "searchwindow") {
+            window.openSearch();
+            window.searchWindow.search.setScope(1);
+            window.searchWindow.search.setText("tone");
+        }
         else if (name.startsWith("settings"))
             window.openSettings(name.length > 9 ? name.substring(9) : "general");
     }
@@ -305,7 +310,7 @@ ApplicationWindow {
                 objectName: "action-search-dialog"
                 text: "Search…"
                 defaultKey: "Ctrl+Shift+F"
-                onTriggered: window.notYet("Search")
+                onTriggered: window.openSearch()
             }
             KeyedAction {
                 objectName: "action-quick-album"
@@ -567,6 +572,21 @@ ApplicationWindow {
         sequence: window.keyOf("action-show-up-next")
         onActivated: upNextSettings.visible = !upNextSettings.visible
     }
+    property var searchWindow: null
+    function openSearch() {
+        if (searchWindow) {
+            Tk.followSearch(searchWindow.search);
+            searchWindow.raise();
+            searchWindow.requestActivate();
+            searchWindow.focusInput();
+            return;
+        }
+        const search = Tk.openSearch();
+        if (!search)
+            return;
+        searchWindow = searchComponent.createObject(window, {search: search});
+        searchWindow.focusInput();
+    }
     function openQuickPick(albums) {
         const pick = Tk.openQuickPick(albums);
         if (!pick)
@@ -821,6 +841,12 @@ ApplicationWindow {
     }
     CommandPalette {
         id: commandPaletteDialog
+    }
+    Component {
+        id: searchComponent
+        SearchWindow {
+            Component.onDestruction: window.searchWindow = null
+        }
     }
     property var openListWindow: null
     Component {

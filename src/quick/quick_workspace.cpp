@@ -610,6 +610,64 @@ QuickOpenList* QuickWorkspace::openList() {
     return list;
 }
 
+QuickSearch* QuickWorkspace::openSearch() {
+    auto* local = workspace_.localCatalogue();
+    if (local == nullptr) {
+        return nullptr;
+    }
+    std::vector<bench::SearchSession::OtherLibrary> others;
+    for (const auto& engine : workspace_.engines_) {
+        if (!engine->key.isLocal() && engine->catalogue != nullptr) {
+            others.push_back({.engine = engine->key,
+                              .catalogues = engine->catalogue.get(),
+                              .name = engine->catalogue->name()});
+        }
+    }
+    // ADR-0153: database scope reads the workspace index; tab scope
+    // snapshots the current local tab's rows and reports on-demand
+    // technicals back onto every tab holding the probed file.
+    auto* session = new bench::SearchSession(
+        *local,
+        [this]() -> std::optional<bench::SearchSession::TabSnapshot> {
+            auto* tab = currentTabPointer();
+            if (tab == nullptr) {
+                return std::nullopt;
+            }
+            return bench::SearchSession::TabSnapshot{QString::fromUtf8(tab->document.name),
+                                                     tab->model->rows()};
+        },
+        [this](std::string raw_path, bench::LocalTrackTechnicals technicals) {
+            for (const auto& tab : workspace_.list_tabs_) {
+                tab->model->applyTechnicals(raw_path, technicals);
+            }
+        },
+        std::move(others));
+    connect(session, &bench::SearchSession::rowsRequested, this,
+            [this](const QString& name, std::vector<bench::LocalTrackRow> rows,
+                   const bench::LocalLibraryAction action, const bench::EngineKey& engine) {
+                workspace_.placeFoundRows(name, std::move(rows), action, engine);
+            });
+    auto* search = new QuickSearch(session, this);
+    connect(this, &QuickWorkspace::currentTabChanged, search, [this, search] {
+        auto* tab = currentTabPointer();
+        search->session()->watchCurrentModel(tab != nullptr ? tab->model : nullptr);
+    });
+    followSearch(search);
+    QQmlEngine::setObjectOwnership(search, QQmlEngine::CppOwnership);
+    return search;
+}
+
+void QuickWorkspace::followSearch(QuickSearch* search) {
+    if (search == nullptr) {
+        return;
+    }
+    // Opened from a tab of another engine, it searches that engine's library.
+    auto* tab = currentTabPointer();
+    search->session()->watchCurrentModel(tab != nullptr ? tab->model : nullptr);
+    search->session()->followLibrary(tab != nullptr ? bench::EngineKey::of(tab->document)
+                                                    : bench::EngineKey::local());
+}
+
 QuickPick* QuickWorkspace::openQuickPick(const bool albums) {
     // The library of the tab in front: a remote tab's albums come from its
     // engine and go where that tab's would.

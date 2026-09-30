@@ -12,6 +12,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "trackknife/query/search_presets.hpp"
 #include "trackknife/query/tkq.hpp"
+#include "workspace/search_session.hpp"
 
 #include <QDialog>
 #include <QFutureWatcher>
@@ -42,30 +43,21 @@ class SearchDialog final : public QDialog {
     Q_OBJECT
 
   public:
-    struct TabSnapshot {
-        QString title;
-        std::vector<LocalTrackRow> rows;
-    };
-    using TabAccess = std::function<std::optional<TabSnapshot>()>;
-    using TechnicalsSink = std::function<void(std::string, LocalTrackTechnicals)>;
+    using TabSnapshot = SearchSession::TabSnapshot;
+    using TabAccess = SearchSession::TabAccess;
+    using TechnicalsSink = SearchSession::TechnicalsSink;
+    using OtherLibrary = SearchSession::OtherLibrary;
 
-    // Another engine's library, offered as a scope of its own (ADR-0227,
-    // ADR-0234) under its name.
-    struct OtherLibrary {
-        EngineKey engine;
-        const CatalogueSource* catalogues{nullptr};
-        QString name;
-    };
     SearchDialog(const CatalogueSource& catalogues, TabAccess tab_access,
                  TechnicalsSink technicals_sink, QWidget* parent = nullptr,
                  std::vector<OtherLibrary> others = {});
     ~SearchDialog() override;
 
-    void watchCurrentModel(QAbstractItemModel* model);
+    void watchCurrentModel(QAbstractItemModel* model) { session_->watchCurrentModel(model); }
     void focusInput();
     // The library of the tab it was opened from: its engine's. "Current tab"
     // is kept.
-    void followLibrary(const EngineKey& engine);
+    void followLibrary(const EngineKey& engine) { session_->followLibrary(engine); }
 
   protected:
     void showEvent(QShowEvent* event) override;
@@ -79,58 +71,19 @@ class SearchDialog final : public QDialog {
 
   private:
     void populatePresets(QMenu* menu);
-    void usePreset(const query::SearchPreset& preset);
-    struct Outcome {
-        std::vector<std::string> labels;
-        std::vector<LocalTrackRow> rows;
-        // Words in a library: artists and albums as well as tracks, each
-        // shown under its own heading.
-        bool grouped{false};
-        std::vector<persistence::LibraryEntry> artists;
-        std::vector<persistence::LibraryEntry> albums;
-        std::vector<std::pair<std::string, LocalTrackTechnicals>> probed;
-        QString error;
-        std::size_t scanned{0U};
-    };
+    void usePreset(int preset);
+    void sync();
+    void syncSaved();
+    void syncResults();
+    void openSelected(LocalLibraryAction action);
 
-    void loadSavedSearches(std::optional<persistence::SavedSearch> write = std::nullopt,
-                           bool remove = false);
-    void finishSavedSearches();
-    void useSavedSearch(int index);
-    void saveSearch(bool update);
-    void renameSearch();
-    void deleteSearch();
-    void updateSavedSearchButtons();
-    [[nodiscard]] std::optional<persistence::SavedSearch> selectedSearch() const;
-
-    void scheduleSearch();
-    void startSearch();
-    void finishSearch();
-    void openResults(LocalLibraryAction action, bool selection_only);
-    [[nodiscard]] std::optional<query::CompiledTkq> compileInput();
-    [[nodiscard]] bool databaseScope() const;
-    // The engine whose library the scope searches; this computer's for the
-    // current tab.
-    [[nodiscard]] EngineKey scopeEngine() const;
-    [[nodiscard]] const CatalogueSource* scopeCatalogues() const;
-
-    const CatalogueSource* catalogues_{nullptr};
-    std::vector<OtherLibrary> others_;
-    TabAccess tab_access_;
-    TechnicalsSink technicals_sink_;
-    std::vector<QMetaObject::Connection> current_model_connections_;
+    SearchSession* session_;
     QComboBox* saved_searches_{nullptr};
     QPushButton* save_search_{nullptr};
     QPushButton* update_search_{nullptr};
     QPushButton* rename_search_{nullptr};
     QPushButton* delete_search_{nullptr};
     QLabel* saved_status_{nullptr};
-    std::vector<persistence::SavedSearch> catalog_;
-    QFutureWatcher<core::Result<std::vector<persistence::SavedSearch>>> catalog_watcher_;
-    std::optional<core::StableId> catalog_selection_;
-    bool catalog_busy_{false};
-    bool catalog_ready_{false};
-    std::size_t search_job_generation_{0U};
     QComboBox* scope_{nullptr};
     QLineEdit* input_{nullptr};
     QCheckBox* query_mode_{nullptr};
@@ -138,17 +91,6 @@ class SearchDialog final : public QDialog {
     QListWidget* results_{nullptr};
     QLabel* status_{nullptr};
     QPushButton* open_button_{nullptr};
-    QTimer* debounce_{nullptr};
-    QFutureWatcher<Outcome> watcher_;
-    core::CancellationSource cancellation_;
-    std::size_t generation_{0U};
-    bool searching_{false};
-    // The last successful search's full result payload.
-    std::vector<LocalTrackRow> result_rows_;
-    std::vector<persistence::LibraryEntry> result_artists_;
-    std::vector<persistence::LibraryEntry> result_albums_;
-    EngineKey result_engine_{EngineKey::local()};
-    QString result_query_;
 };
 
 } // namespace trackknife::bench

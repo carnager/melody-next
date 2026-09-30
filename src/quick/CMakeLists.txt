@@ -32,6 +32,8 @@ qt_add_qml_module(
     quick_pick.cpp
     quick_pick.hpp
     quick_replaygain.cpp
+    quick_search.cpp
+    quick_search.hpp
     quick_replaygain.hpp
     quick_script.cpp
     quick_settings.cpp
@@ -90,6 +92,7 @@ qt_add_qml_module(
     qml/FindBar.qml
     qml/QuickPickPopup.qml
     qml/CommandPalette.qml
+    qml/SearchWindow.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

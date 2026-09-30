@@ -370,6 +370,11 @@ class Workspace final : public QObject {
     // The lists. One is added with its rows as its document holds them, and
     // the window is asked to show it; its tags and covers are looked for.
     ListTab* addList(persistence::ListDocument document, bool select);
+    // Rows a search found (ADR-0153, ADR-0227), put in a tab of the engine
+    // whose library they are: the current one if it is, else that engine's
+    // first, else (for another engine) its own tab; or a new tab.
+    void placeFoundRows(const QString& name, std::vector<LocalTrackRow> rows,
+                        LocalLibraryAction action, const EngineKey& engine);
     // An imported playlist, as a new saved list of this computer's.
     void addImportedList(std::vector<LocalTrackRow> rows, const QString& name);
     // The workspace database and its settings copied beside `path`: the

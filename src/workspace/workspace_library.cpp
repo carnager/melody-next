@@ -59,6 +59,46 @@ int Workspace::insertionForNext(const ListTab& target) {
     return current >= 0 ? current + 1 : 0;
 }
 
+void Workspace::placeFoundRows(const QString& name, std::vector<LocalTrackRow> rows,
+                               const LocalLibraryAction action, const EngineKey& engine) {
+    auto* destination = view_->currentList();
+    if (destination == nullptr || EngineKey::of(destination->document) != engine) {
+        const auto first = std::ranges::find_if(list_tabs_, [&engine](const auto& tab) {
+            return EngineKey::of(tab->document) == engine;
+        });
+        destination = first != list_tabs_.end()                        ? first->get()
+                      : link(engine) != nullptr && !engine.isLocal() ? engineTab(*link(engine))
+                                                                     : nullptr;
+    }
+    int insertion = -1;
+    if (action == LocalLibraryAction::new_list) {
+        destination = addList(persistence::ListDocument{.id = core::StableId::random(),
+                                                        .kind = persistence::ListKind::scratch,
+                                                        .name = utf8Bytes(name),
+                                                        .pinned = false,
+                                                        .dirty = false,
+                                                        .items = {},
+                                                        .engine = engine.stored()},
+                              true);
+        schedulePersist();
+    } else if (destination != nullptr && action == LocalLibraryAction::next) {
+        insertion = insertionForNext(*destination);
+    }
+    if (destination == nullptr) {
+        return;
+    }
+    if (action == LocalLibraryAction::replace) {
+        destination->model->replaceRows(std::move(rows), true);
+    } else {
+        destination->model->appendRows(std::move(rows), insertion);
+    }
+    markTabDirty(*destination);
+    syncArtwork(*destination);
+    if (action == LocalLibraryAction::replace && destination->model->rowCount() > 0) {
+        playRow(*destination, 0);
+    }
+}
+
 void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
                               const LocalLibraryAction action) {
     if (entries.empty()) {

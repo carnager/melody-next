@@ -2,6 +2,9 @@
 
 #include "trackknife/metadata/ratings.hpp"
 
+#include "trackknife/metadata/document.hpp"
+#include "trackknife/metadata/flac_mapping.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -111,6 +114,29 @@ std::optional<PlainRatingScale> plain_rating_scale_named(const std::string_view 
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::string> rating_backup_tag_problem(const std::string_view name) {
+    if (name.empty()) {
+        return "Name the tag the rating is copied into";
+    }
+    if (name.size() > 64U) {
+        return "A tag name of at most 64 characters";
+    }
+    // Vorbis comments, the strictest: printable ASCII without '='.
+    if (std::ranges::any_of(name, [](const char character) {
+            return character < 0x20 || character > 0x7d || character == '=';
+        })) {
+        return "A tag name of plain letters, digits and punctuation, without '='";
+    }
+    if (canonicalize_field_name(name) == canonicalize_field_name(fmps_rating_field)) {
+        return "FMPS_RATING is the rating itself; the copy needs a tag of its own";
+    }
+    return std::nullopt;
+}
+
+bool official_tag_name(const std::string_view name) {
+    return !name.empty() && resolve_text_property_identity(name).conventional;
 }
 
 } // namespace trackknife::metadata

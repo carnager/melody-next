@@ -388,6 +388,7 @@ class BenchMainWindowTest final : public QObject {
     void localListHistoryBranchesAndBounds();
     void crossTabMoveUndoIsOneTransaction();
     void localListUndoActionsRespectAuthorityAndTextEditing();
+    void deleteInUpNextTakesItsTrackNotTheLists();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -1979,6 +1980,17 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     emit window.localLibrary()->browser().addToListRequested(page->entries, chosen_id);
     QTRY_COMPARE(chosen->model->rowCount(), 1);
     QCOMPARE(current->model->rowCount(), before);
+    QTRY_VERIFY(!window.discovery_running_);
+
+    // Or into a new list, called what it was named.
+    const auto tabs_before = window.list_tabs_.size();
+    emit window.localLibrary()->browser().newListRequested(page->entries,
+                                                           QStringLiteral("Picked"));
+    QTRY_COMPARE(window.list_tabs_.size(), tabs_before + 1U);
+    auto* picked = window.list_tabs_.back().get();
+    QCOMPARE(picked->document.name, std::string{"Picked"});
+    QTRY_COMPARE(picked->model->rowCount(), 1);
+    QCOMPARE(chosen->model->rowCount(), 1);
     QTRY_VERIFY(!window.discovery_running_);
 
     // The folder, dragged from the folder browser onto the list on screen.
@@ -12148,6 +12160,45 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
     window.replayListEdit(false);
     QCOMPARE(source->rows(), (std::vector<LocalTrackRow>{second}));
     QCOMPARE(target->rows(), (std::vector<LocalTrackRow>{first, second, first}));
+}
+
+// Delete takes what is chosen where the keyboard is: in Up Next, its track,
+// never the row chosen in the list behind it.
+void BenchMainWindowTest::deleteInUpNextTakesItsTrackNotTheLists() {
+    BenchMainWindow window;
+    window.show();
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model);
+    LocalTrackRow row;
+    row.raw_path = "/unavailable/track.flac";
+    row.probed = true;
+    model->replaceRows({row, row, row});
+    // Nothing chosen in the list: Delete still works in Up Next.
+    view->clearSelection();
+
+    row.title = "Asked for";
+    window.enqueueLocalRequests({row, row});
+    QCOMPARE(window.up_next_display_ids_.size(), std::size_t{2});
+    window.findChild<QAction*>(QStringLiteral("action-show-up-next"))->trigger();
+    QTRY_VERIFY(window.up_next_view_->isVisible());
+    window.up_next_view_->setCurrentIndex(window.up_next_view_->model()->index(0, 0));
+    window.up_next_view_->setFocus();
+    QTRY_VERIFY(window.up_next_view_->hasFocus());
+    QTest::keyClick(window.up_next_view_, Qt::Key_Delete);
+    QTRY_COMPARE(window.up_next_display_ids_.size(), std::size_t{1});
+    QCOMPARE(model->rowCount(), 3);
+
+    // In the list, the list's row.
+    view->setCurrentIndex(model->index(1, 0));
+    view->setFocus();
+    QTest::keyClick(view, Qt::Key_Delete);
+    QCOMPARE(model->rowCount(), 2);
+    QCOMPARE(window.up_next_display_ids_.size(), std::size_t{1});
 }
 
 void BenchMainWindowTest::localListUndoActionsRespectAuthorityAndTextEditing() {

@@ -2,6 +2,8 @@
 
 #include "bench/settings_keys.hpp"
 
+#include "trackknife/metadata/ratings.hpp"
+
 #include <QFile>
 #include <QSettings>
 
@@ -15,6 +17,19 @@ QString SettingsKeys::remoteEnginePassword() {
         settings.value(QLatin1String(library_engine_token_key), QString{}).toString().trimmed();
     return own.isEmpty() ? settings.value(QLatin1String(engine_password_key), QString{}).toString()
                          : own;
+}
+
+std::string SettingsKeys::ratingBackupTag() {
+    const QSettings settings;
+    if (!settings.value(QLatin1String(rating_backup_key), false).toBool()) {
+        return {};
+    }
+    const auto tag = settings.value(QLatin1String(rating_backup_tag_key),
+                                    QString::fromLatin1(metadata::default_rating_backup_tag))
+                         .toString()
+                         .trimmed()
+                         .toStdString();
+    return metadata::rating_backup_tag_problem(tag) ? std::string{} : tag;
 }
 
 metadata::ArtworkStoragePolicy SettingsKeys::artworkPolicy() {

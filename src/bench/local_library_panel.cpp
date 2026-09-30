@@ -384,8 +384,28 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
             auto* lists = menu->addMenu(QIcon::fromTheme(QStringLiteral("view-media-playlist")),
                                         tr("Add to list"));
             lists->setObjectName(QStringLiteral("local-library-add-to-list"));
+            // A new list, named as it is made -- after the album or artist
+            // chosen, unless renamed.
+            auto* create = lists->addAction(tr("New list…"));
+            create->setObjectName(QStringLiteral("action-local-library-add-to-new-list"));
+            connect(create, &QAction::triggered, this, [this, entries] {
+                bool accepted = false;
+                const auto name = QInputDialog::getText(
+                                      this, tr("New list"), tr("Name:"), QLineEdit::Normal,
+                                      entries.size() == 1U
+                                          ? QString::fromStdString(entries.front().label)
+                                          : tr("Library selection"),
+                                      &accepted)
+                                      .trimmed();
+                if (accepted && !name.isEmpty()) {
+                    emit browser_->newListRequested(entries, name);
+                }
+            });
             const auto targets = list_targets_ ? list_targets_()
                                                : std::vector<std::pair<QString, QString>>{};
+            if (!targets.empty()) {
+                lists->addSeparator();
+            }
             for (std::size_t target = 0; target < targets.size(); ++target) {
                 const auto& [id, name] = targets[target];
                 auto* choice = lists->addAction(name);
@@ -393,7 +413,7 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                 connect(choice, &QAction::triggered, this,
                         [this, entries, id] { emit browser_->addToListRequested(entries, id); });
             }
-            lists->setEnabled(available && !targets.empty());
+            lists->setEnabled(available);
         }
     }
     // ADR-0179: rate the targeted track or album entry by content identity.

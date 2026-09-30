@@ -372,6 +372,10 @@ void Workspace::watchFileWork(EngineLink& link) {
                             .toString()
                             .toStdString()));
                 }
+                if (chosen.contains(QLatin1String(SettingsKeys::rating_backup_key))) {
+                    static_cast<void>(
+                        work->set_rating_backup_tag(SettingsKeys::ratingBackupTag()));
+                }
                 if (auto answer = work->interrupted()) {
                     // What it finished or rolled back at its start, itself.
                     recovered = answer->value("recovered", std::size_t{0U});

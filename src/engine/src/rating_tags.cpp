@@ -28,6 +28,7 @@ using protocol::Json;
 constexpr std::string_view rating_field = metadata::fmps_rating_field;
 constexpr std::string_view enabled_key = "ratings.write-tags";
 constexpr std::string_view imported_key = "ratings.imported-from-tags";
+constexpr std::string_view backup_key = "ratings.backup-tag";
 
 [[nodiscard]] std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -42,6 +43,9 @@ RatingTags::RatingTags(std::filesystem::path database, LocalCatalogue& catalogue
     : database_(std::move(database)), catalogue_(catalogue), workspace_(workspace) {
     if (auto stored = workspace_.load_engine_state(enabled_key); stored && *stored) {
         enabled_ = **stored == "1";
+    }
+    if (auto stored = workspace_.load_engine_state(backup_key); stored && *stored) {
+        backup_tag_ = **stored;
     }
     // Ratings in files are imported as they are read. A library read before
     // that is caught up once, from what it read.
@@ -88,6 +92,41 @@ core::Result<void> RatingTags::set_enabled(const bool enabled) {
             // What is waiting is not written; what is in the files stays.
             queue_.clear();
         } else if (!was) {
+            queue_.push_back(Work{.hash = std::nullopt, .rating = 0U});
+        }
+    }
+    changed_.notify_all();
+    return {};
+}
+
+std::string RatingTags::backup_tag() const {
+    const std::lock_guard guard{mutex_};
+    return backup_tag_;
+}
+
+core::Result<void> RatingTags::set_backup_tag(std::string tag) {
+    if (!tag.empty()) {
+        if (auto problem = metadata::rating_backup_tag_problem(tag)) {
+            return std::unexpected(core::Error{.code = core::ErrorCode::invalid_argument,
+                                               .message = std::move(*problem),
+                                               .context = {{.key = "param", .value = "backup_tag"}}});
+        }
+    }
+    if (tag == backup_tag()) {
+        return {};
+    }
+    if (auto saved = workspace_.save_engine_state(backup_key, tag, now_ms()); !saved) {
+        return saved;
+    }
+    {
+        const std::lock_guard guard{mutex_};
+        backup_tag_ = tag;
+        std::cerr << "melodyd: ratings are "
+                  << (tag.empty() ? std::string{"no longer copied into a backup tag"}
+                                  : "also copied into " + tag)
+                  << "\n";
+        // Every rated track once, now that the copy goes somewhere new.
+        if (enabled_ && !tag.empty()) {
             queue_.push_back(Work{.hash = std::nullopt, .rating = 0U});
         }
     }
@@ -179,14 +218,17 @@ void RatingTags::run() {
             if (token.is_cancellation_requested()) {
                 break;
             }
+            std::string backup;
             {
                 // Turned off meanwhile: nothing more is written.
                 const std::lock_guard guard{mutex_};
                 if (!enabled_) {
                     break;
                 }
+                backup = backup_tag_;
             }
-            if (auto written = write(database_, catalogue_, path, rating, token); !written) {
+            if (auto written = write(database_, catalogue_, path, rating, token, backup);
+                !written) {
                 std::cerr << "melodyd: could not write the rating into "
                           << core::display_raw_path(path) << ": " << written.error().message
                           << "\n";
@@ -203,7 +245,8 @@ void RatingTags::run() {
 core::Result<bool> RatingTags::write(const std::filesystem::path& database,
                                      LocalCatalogue& catalogue, const std::string& raw_path,
                                      const unsigned rating,
-                                     const core::CancellationToken& cancellation) {
+                                     const core::CancellationToken& cancellation,
+                                     const std::string_view backup_tag) {
     auto read = metadata::read_local_metadata(raw_path, cancellation);
     if (!read) {
         return std::unexpected(std::move(read.error()));
@@ -213,7 +256,13 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
     }
     const std::vector<std::string> wanted =
         rating == 0U ? std::vector<std::string>{} : std::vector{metadata::fmps_rating_text(rating)};
-    if (read->document.effective_values(rating_field) == wanted) {
+    // The copy: the plain 0-10 number (ADR-0245).
+    const std::vector<std::string> copied =
+        rating == 0U ? std::vector<std::string>{} : std::vector{std::to_string(rating)};
+    const bool rating_differs = read->document.effective_values(rating_field) != wanted;
+    const bool copy_differs =
+        !backup_tag.empty() && read->document.effective_values(backup_tag) != copied;
+    if (!rating_differs && !copy_differs) {
         return false;
     }
     auto selection = metadata::StagedMetadataSelection::create(
@@ -223,16 +272,37 @@ core::Result<bool> RatingTags::write(const std::filesystem::path& database,
     if (!selection) {
         return std::unexpected(std::move(selection.error()));
     }
-    // Written under exactly this name, as other players look for it.
-    auto field = selection->ensure_exact_native_field(rating_field, rating_field);
-    if (!field) {
-        return std::unexpected(std::move(field.error()));
-    }
     metadata::StagedMetadataPatchSet patches;
-    auto staged = rating == 0U ? patches.remove_field(*selection, 0U, *field)
-                               : patches.replace_values(*selection, 0U, *field, wanted);
-    if (!staged) {
-        return std::unexpected(std::move(staged.error()));
+    const auto stage = [&](const std::size_t field,
+                           const std::vector<std::string>& values) -> core::Result<void> {
+        auto staged = values.empty() ? patches.remove_field(*selection, 0U, field)
+                                     : patches.replace_values(*selection, 0U, field, values);
+        return staged ? core::Result<void>{} : std::unexpected(std::move(staged.error()));
+    };
+    if (rating_differs) {
+        // Written under exactly this name, as other players look for it.
+        auto field = selection->ensure_exact_native_field(rating_field, rating_field);
+        if (!field) {
+            return std::unexpected(std::move(field.error()));
+        }
+        if (auto staged = stage(*field, wanted); !staged) {
+            return std::unexpected(std::move(staged.error()));
+        }
+    }
+    if (copy_differs) {
+        // An official tag is written as each format writes it -- COMMENT as
+        // MP3's COMM frame -- and any other name exactly as it is spelled.
+        auto field = metadata::official_tag_name(backup_tag)
+                         ? (selection->field_index(backup_tag)
+                                ? core::Result<std::size_t>{*selection->field_index(backup_tag)}
+                                : selection->ensure_missing_field(backup_tag, backup_tag))
+                         : selection->ensure_exact_native_field(backup_tag, backup_tag);
+        if (!field) {
+            return std::unexpected(std::move(field.error()));
+        }
+        if (auto staged = stage(*field, copied); !staged) {
+            return std::unexpected(std::move(staged.error()));
+        }
     }
     auto plan = metadata::revalidate_metadata_write_plan(*selection, patches, cancellation);
     if (!plan) {
@@ -266,13 +336,21 @@ void register_rating_tag_methods(protocol::Dispatcher& dispatcher, RatingTags& t
         return Json{
             {"write_tags", tags.enabled()},
             {"rating_scale", std::string{metadata::plain_rating_scale_name(tags.plain_scale())}},
+            {"backup_tag", tags.backup_tag()},
             {"pending", tags.pending()}};
     };
     dispatcher.on("ratings.tags", [state](const Json&) -> core::Result<Json> { return state(); });
     dispatcher.on("ratings.set_tags", [&tags, state](const Json& params) -> core::Result<Json> {
         const auto wanted = params.find("write_tags");
         const auto scale = params.find("rating_scale");
-        if ((wanted == params.end() && scale == params.end()) ||
+        const auto backup = params.find("backup_tag");
+        if (backup != params.end() && !backup->is_string()) {
+            return std::unexpected(
+                core::Error{.code = core::ErrorCode::invalid_argument,
+                            .message = "backup_tag must be a tag name, or empty for none",
+                            .context = {{.key = "param", .value = "backup_tag"}}});
+        }
+        if ((wanted == params.end() && scale == params.end() && backup == params.end()) ||
             (wanted != params.end() && !wanted->is_boolean())) {
             return std::unexpected(
                 core::Error{.code = core::ErrorCode::invalid_argument,
@@ -298,6 +376,11 @@ void register_rating_tag_methods(protocol::Dispatcher& dispatcher, RatingTags& t
         }
         if (named) {
             if (auto set = tags.set_plain_scale(*named); !set) {
+                return std::unexpected(std::move(set.error()));
+            }
+        }
+        if (backup != params.end()) {
+            if (auto set = tags.set_backup_tag(backup->get<std::string>()); !set) {
                 return std::unexpected(std::move(set.error()));
             }
         }

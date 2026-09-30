@@ -77,6 +77,9 @@ class QuickSettings final : public QObject {
     [[nodiscard]] QVariantMap shortcuts() const;
 
     Q_INVOKABLE static QString saveNote(int page);
+    Q_INVOKABLE static QString ratingBackupNote(const QString& name) {
+        return bench::SettingsSession::ratingBackupNote(name);
+    }
     // A notification sent to see that the desktop shows it; what came of
     // it in state.notificationStatus.
     Q_INVOKABLE void testNotification();

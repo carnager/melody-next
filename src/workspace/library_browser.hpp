@@ -151,10 +151,15 @@ class LibraryBrowser final : public QObject {
     // those under a selected row left to it; at most 1,000.
     [[nodiscard]] static std::vector<persistence::LibraryEntry>
     selectedEntries(QModelIndexList indexes);
-    // The entries of `indexes`, asked for as `action` (actionRequested), or
-    // appended to the list with `id` (addToListRequested).
+    // The entries of `indexes`, asked for as `action` (actionRequested),
+    // appended to the list with `id` (addToListRequested), or made a new list
+    // called `name` (newListRequested).
     Q_INVOKABLE void request(const QModelIndexList& indexes, int action);
     Q_INVOKABLE void addToList(const QModelIndexList& indexes, const QString& id);
+    Q_INVOKABLE void addToNewList(const QModelIndexList& indexes, const QString& name);
+    // What a new list of `indexes` is called unless named: the one entry's
+    // label, or "Library selection".
+    [[nodiscard]] Q_INVOKABLE static QString newListName(const QModelIndexList& indexes);
 
     // ADR-0179: ratings by content identity, on the library's queue.
     void requestRatings(std::vector<std::string> hashes,
@@ -187,6 +192,7 @@ class LibraryBrowser final : public QObject {
     // What the window is asked to do with entries.
     void actionRequested(std::vector<persistence::LibraryEntry> entries, LocalLibraryAction action);
     void addToListRequested(std::vector<persistence::LibraryEntry> entries, const QString& id);
+    void newListRequested(std::vector<persistence::LibraryEntry> entries, const QString& name);
     void searchCommitted(QString query, std::vector<LocalTrackRow> rows);
     void ratingsChanged();
     void libraryContentChanged();

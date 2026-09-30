@@ -787,6 +787,19 @@ void LibraryBrowser::request(const QModelIndexList& indexes, const int action) {
     }
 }
 
+void LibraryBrowser::addToNewList(const QModelIndexList& indexes, const QString& name) {
+    auto entries = selectedEntries(indexes);
+    if (!entries.empty()) {
+        emit newListRequested(std::move(entries), name);
+    }
+}
+
+QString LibraryBrowser::newListName(const QModelIndexList& indexes) {
+    const auto entries = selectedEntries(indexes);
+    return entries.size() == 1U ? QString::fromStdString(entries.front().label)
+                                : tr("Library selection");
+}
+
 void LibraryBrowser::addToList(const QModelIndexList& indexes, const QString& id) {
     auto entries = selectedEntries(indexes);
     if (!entries.empty()) {

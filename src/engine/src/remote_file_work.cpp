@@ -638,6 +638,18 @@ core::Result<void> RemoteFileWork::set_rating_scale(const std::string& scale) {
     return {};
 }
 
+core::Result<void> RemoteFileWork::set_rating_backup_tag(const std::string& tag) {
+    auto connection = client();
+    if (!connection) {
+        return std::unexpected(std::move(connection.error()));
+    }
+    auto answer = (*connection)->call("ratings.set_tags", Json{{"backup_tag", tag}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    return {};
+}
+
 core::Result<void>
 RemoteFileWork::put_layouts(const std::vector<persistence::SavedOutputLayoutProfile>& layouts,
                             const std::vector<core::StableId>& removed) {

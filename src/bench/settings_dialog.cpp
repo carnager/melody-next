@@ -286,6 +286,40 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
                        "which other players read. Album ratings are not written."));
     bind(ratings_in_tags_, ratings_in_tags_key);
     library_layout->addWidget(ratings_in_tags_);
+    // ADR-0245: a copy other players leave alone, under it.
+    auto* backup_row = new QHBoxLayout;
+    backup_row->setContentsMargins(24, 0, 0, 0);
+    rating_backup_ = new QCheckBox(QStringLiteral("Also write to a backup tag:"), library);
+    rating_backup_->setObjectName(QStringLiteral("bench-settings-rating-backup"));
+    rating_backup_->setToolTip(
+        QStringLiteral("A second copy of each rating, as its plain 0-10 number, in a tag other "
+                       "players leave alone -- so a player that rewrites FMPS_RATING or POPM "
+                       "cannot lose it. A tagging script's Convert rating step (scale 0-10) "
+                       "brings it back."));
+    bind(rating_backup_, rating_backup_key);
+    rating_backup_tag_ = new QLineEdit(library);
+    rating_backup_tag_->setObjectName(QStringLiteral("bench-settings-rating-backup-tag"));
+    bind(rating_backup_tag_, rating_backup_tag_key);
+    backup_row->addWidget(rating_backup_);
+    backup_row->addWidget(rating_backup_tag_, 1);
+    library_layout->addLayout(backup_row);
+    rating_backup_note_ = new QLabel(library);
+    rating_backup_note_->setObjectName(QStringLiteral("bench-settings-rating-backup-note"));
+    rating_backup_note_->setWordWrap(true);
+    rating_backup_note_->setContentsMargins(24, 0, 0, 0);
+    library_layout->addWidget(rating_backup_note_);
+    const auto refresh_backup = [this] {
+        const auto writing = ratings_in_tags_->isChecked();
+        rating_backup_->setEnabled(writing);
+        rating_backup_tag_->setEnabled(writing && rating_backup_->isChecked());
+        const auto note = SettingsSession::ratingBackupNote(rating_backup_tag_->text());
+        rating_backup_note_->setText(note);
+        rating_backup_note_->setVisible(rating_backup_->isChecked() && !note.isEmpty());
+    };
+    connect(ratings_in_tags_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_, &QCheckBox::toggled, this, refresh_backup);
+    connect(rating_backup_tag_, &QLineEdit::textChanged, this, refresh_backup);
+    refresh_backup();
     auto* scale_form = new QFormLayout;
     rating_tag_scale_ = new QComboBox(library);
     rating_tag_scale_->setObjectName(QStringLiteral("bench-settings-rating-tag-scale"));

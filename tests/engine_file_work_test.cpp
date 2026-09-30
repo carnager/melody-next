@@ -917,6 +917,65 @@ void ratings_are_written_where_players_read_them(const std::filesystem::path& di
             "in an atom named as the specification spells it");
 }
 
+// ADR-0245: a copy of the rating as its plain 0-10 number, in a tag the user
+// names -- one of its own spelled exactly, an official one as each format
+// writes it -- and gone with the rating.
+void ratings_are_copied_into_a_backup_tag(const std::filesystem::path& directory,
+                                          const std::filesystem::path& fixtures) {
+    namespace metadata = trackknife::metadata;
+    const auto database = directory / "backups.sqlite3";
+    engine::LocalCatalogue catalogue{database};
+    require(catalogue.prepare().has_value(), "a library");
+
+    const auto flac = materialize(fixtures, "tagged-tone-flac", directory / "copied.flac").string();
+    require(engine::RatingTags::write(database, catalogue, flac, 8, {}, "TRACKKNIFE_RATING")
+                .value_or(false),
+            "a FLAC is rated, with a copy");
+    const auto read = metadata::read_local_metadata(flac);
+    require(read && read->document.first_effective_value("FMPS_RATING") ==
+                        std::optional<std::string>{"0.8"} &&
+                read->document.first_effective_value("TRACKKNIFE_RATING") ==
+                    std::optional<std::string>{"8"},
+            "the rating, and its copy as 0-10");
+    require(!engine::RatingTags::write(database, catalogue, flac, 8, {}, "TRACKKNIFE_RATING")
+                 .value_or(true),
+            "nothing to write when both are there");
+    // Named after the rating was already written: only the copy is added.
+    require(engine::RatingTags::write(database, catalogue, flac, 8, {}, "RATING_COPY")
+                .value_or(false),
+            "a new name gets the copy");
+    require(metadata::read_local_metadata(flac)->document.first_effective_value("RATING_COPY") ==
+                std::optional<std::string>{"8"},
+            "under it");
+
+    // An official tag, as MP3 writes it: COMMENT is its comment frame.
+    const auto mp3 = materialize(fixtures, "tagged-tone-mp3", directory / "copied.mp3").string();
+    require(engine::RatingTags::write(database, catalogue, mp3, 6, {}, "COMMENT").value_or(false),
+            "an MP3 is rated, with a copy in its comment");
+    {
+        TagLib::MPEG::File file{mp3.c_str(), false};
+        require(file.isValid() && file.hasID3v2Tag() &&
+                    file.ID3v2Tag()->comment() == TagLib::String{"6"},
+                "in the COMM frame players show");
+    }
+    require(engine::RatingTags::write(database, catalogue, mp3, 0, {}, "COMMENT").value_or(false),
+            "unrated");
+    const auto cleared = metadata::read_local_metadata(mp3);
+    require(cleared && cleared->document.effective_values("FMPS_RATING").empty() &&
+                cleared->document.effective_values("COMMENT").empty(),
+            "the copy goes with the rating");
+
+    // What cannot hold the copy is said, not tried.
+    require(metadata::rating_backup_tag_problem("").has_value() &&
+                metadata::rating_backup_tag_problem("FMPS_RATING").has_value() &&
+                metadata::rating_backup_tag_problem("A=B").has_value() &&
+                !metadata::rating_backup_tag_problem("TRACKKNIFE_RATING").has_value(),
+            "names are checked");
+    require(metadata::official_tag_name("COMMENT") && metadata::official_tag_name("Title") &&
+                !metadata::official_tag_name("TRACKKNIFE_RATING"),
+            "official names are known");
+}
+
 // POPM and plain RATING tags other players wrote come in too.
 void other_players_ratings_are_imported(const std::filesystem::path& directory,
                                         const std::filesystem::path& fixtures) {
@@ -1471,6 +1530,7 @@ int main(int argc, char** argv) {
     ratings_go_into_tags_when_asked(directory, argv[1]);
     ratings_in_files_are_imported(directory, argv[1]);
     ratings_are_written_where_players_read_them(directory, argv[1]);
+    ratings_are_copied_into_a_backup_tag(directory, argv[1]);
     other_players_ratings_are_imported(directory, argv[1]);
     naming_and_destinations_are_the_engines(directory);
     the_engine_writes_replaygain_in_one_job(directory, argv[1]);

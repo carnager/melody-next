@@ -438,6 +438,38 @@ ApplicationWindow {
                         text: qsTr("Also write track ratings into the files")
                         tip: qsTr("Ratings stay in each engine's library either way. With this on, each engine also writes a track's rating into its files as FMPS_RATING, which other players read. Album ratings are not written.")
                     }
+                    // ADR-0245: a copy other players leave alone, under it.
+                    RowLayout {
+                        Layout.leftMargin: settingsWindow.fieldIndent + 24
+                        Layout.fillWidth: true
+                        spacing: Theme.gap
+                        SettingCheck {
+                            id: ratingBackup
+                            objectName: "bench-settings-rating-backup"
+                            key: "library/rating-backup"
+                            Layout.leftMargin: 0
+                            enabled: settingsWindow.values["library/ratings-in-tags"] ?? false
+                            text: qsTr("Also write to a backup tag:")
+                            tip: qsTr("A second copy of each rating, as its plain 0-10 number, in a tag other players leave alone -- so a player that rewrites FMPS_RATING or POPM cannot lose it. A tagging script's Convert rating step (scale 0-10) brings it back.")
+                        }
+                        SettingText {
+                            objectName: "bench-settings-rating-backup-tag"
+                            key: "library/rating-backup-tag"
+                            enabled: ratingBackup.enabled && ratingBackup.checked
+                        }
+                    }
+                    Label {
+                        objectName: "bench-settings-rating-backup-note"
+                        readonly property string note: settingsWindow.settings.ratingBackupNote(
+                            settingsWindow.values["library/rating-backup-tag"] ?? "")
+                        Layout.leftMargin: settingsWindow.fieldIndent + 24
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 560
+                        visible: ratingBackup.checked && note !== ""
+                        wrapMode: Text.WordWrap
+                        text: note
+                        color: Theme.dim(palette)
+                    }
                     Form {
                         FieldLabel {
                             text: qsTr("RATING tags from other players:")

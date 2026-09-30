@@ -97,7 +97,7 @@ ADR-0224.
 | Advanced library views | Partial | Structured `tkq-1` filters over every tag and technical value (ADR-0150), saved searches (ADR-0163), committed result tabs. Autoplaylists, custom tree expressions, logical-title indexing and a Trackknife artwork grid remain open. |
 | Playback | Implemented | FFmpeg/libopenmpt sources through PipeWire, sample-range seeking, gapless transitions, buffer profiles, ReplayGain preamps, output/default/hotplug handling, all in the engine. |
 | Playback modes | Implemented | Repeat, Random, Single/Consume including one-shot modes, owned by the engine (ADRs 0119–0121). |
-| Track and album ratings | Implemented | 0–10 scale (ADR-0179), stored in the engine. Tag storage remains an opt-in follow-up. |
+| Track and album ratings | Implemented | 0–10 scale (ADR-0179), stored in the engine. Optionally written into files as `FMPS_RATING` and MP3 POPM (ADR-0237), with a plain 0–10 copy in a backup tag of the user's naming (ADR-0245). |
 | Album shuffle, history, and resume | Implemented, bounded | Listening statistics, paused resume including Up Next, one-shot and continuous album shuffle, `HISTORY(...)` predicates and history sorting (ADRs 0207–0216), per engine. Calendar-relative time operators remain open. |
 | MPRIS/media keys/notifications | Partial | MPRIS and media keys control the engine that plays (ADR-0135); opt-in track-change notifications (ADRs 0144, 0195). Notification artwork, MPRIS artwork URLs and LoopStatus/Shuffle mapping remain open. |
 

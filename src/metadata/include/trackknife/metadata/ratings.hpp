@@ -39,4 +39,15 @@ enum class PlainRatingScale : std::uint8_t { off, five, ten, hundred };
 [[nodiscard]] std::string_view plain_rating_scale_name(PlainRatingScale scale);
 [[nodiscard]] std::optional<PlainRatingScale> plain_rating_scale_named(std::string_view name);
 
+// ADR-0245: a second copy of a track's rating, as its plain 0-10 number, in
+// a tag the user names -- apart from FMPS_RATING and POPM, which other
+// players rewrite, so the rating survives them. Unrated removes it.
+inline constexpr std::string_view default_rating_backup_tag = "TRACKKNIFE_RATING";
+// Why `name` cannot hold the copy -- empty, FMPS_RATING itself, or not a
+// name every format can carry (plain ASCII, no '=') -- or nothing.
+[[nodiscard]] std::optional<std::string> rating_backup_tag_problem(std::string_view name);
+// Whether `name` is an official tag other players show and use, such as
+// COMMENT or TITLE: the copy would replace what it holds.
+[[nodiscard]] bool official_tag_name(std::string_view name);
+
 } // namespace trackknife::metadata

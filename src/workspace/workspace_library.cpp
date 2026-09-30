@@ -33,6 +33,12 @@ void Workspace::attachLibrary(LibraryBrowser* browser) {
                     libraryAction(*guard, std::move(entries), action);
                 }
             });
+    connect(browser, &LibraryBrowser::newListRequested, this,
+            [this, guard](std::vector<persistence::LibraryEntry> entries, const QString& name) {
+                if (guard) {
+                    libraryAction(*guard, std::move(entries), LocalLibraryAction::new_list, name);
+                }
+            });
     connect(browser, &LibraryBrowser::addToListRequested, this,
             [this, guard](std::vector<persistence::LibraryEntry> entries, const QString& id) {
                 if (guard) {
@@ -100,10 +106,14 @@ void Workspace::placeFoundRows(const QString& name, std::vector<LocalTrackRow> r
 }
 
 void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
-                              const LocalLibraryAction action) {
+                              const LocalLibraryAction action, const QString& name) {
     if (entries.empty()) {
         return;
     }
+    // A new list is called what it was named, else after what went into it.
+    const auto list_name = !name.trimmed().isEmpty() ? utf8Bytes(name.trimmed())
+                           : entries.size() == 1U   ? entries.front().label
+                                                    : std::string{"Library selection"};
     const auto engine = browser.engine();
     const QPointer<LibraryBrowser> guard{&browser};
     const auto queue = action == LocalLibraryAction::request_next ||
@@ -126,6 +136,30 @@ void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::
                 });
             return;
         }
+        // A new list needs no list to be open: it is made when the files
+        // are known.
+        if (action == LocalLibraryAction::new_list) {
+            browser.resolveEntries(
+                std::move(entries), [this, list_name](std::vector<std::string> paths) {
+                    if (discovery_running_) {
+                        view_->showMessage(QStringLiteral("A file intake is already running"),
+                                           3'000);
+                        return;
+                    }
+                    auto* destination =
+                        addList(persistence::ListDocument{.id = core::StableId::random(),
+                                                          .kind = persistence::ListKind::scratch,
+                                                          .name = list_name,
+                                                          .pinned = false,
+                                                          .dirty = false,
+                                                          .items = {}},
+                                true);
+                    schedulePersist();
+                    startDiscovery(std::move(paths), document_text(destination->document.id), -1,
+                                   false);
+                });
+            return;
+        }
         // This computer's library goes into a local list: the one on screen,
         // or else the first there is (ADR-0227).
         auto* target = view_->currentList();
@@ -139,12 +173,11 @@ void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::
             return;
         }
         const auto id = document_text(target->document.id);
-        const auto name = entries.size() == 1U ? entries.front().label : "Library selection";
         const auto insertion = action == LocalLibraryAction::next ? insertionForNext(*target) : -1;
         const QPersistentModelIndex anchor{target->model->index(insertion, 0)};
         const bool anchored = anchor.isValid();
         browser.resolveEntries(
-            std::move(entries), [this, id, name, action, insertion, anchor,
+            std::move(entries), [this, id, action, insertion, anchor,
                                  anchored](std::vector<std::string> paths) {
                 auto* destination = tabForDocument(id);
                 if (destination == nullptr || (anchored && !anchor.isValid())) {
@@ -153,17 +186,6 @@ void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::
                 if (discovery_running_) {
                     view_->showMessage(QStringLiteral("A file intake is already running"), 3'000);
                     return;
-                }
-                if (action == LocalLibraryAction::new_list) {
-                    destination = addList(
-                        persistence::ListDocument{.id = core::StableId::random(),
-                                                  .kind = persistence::ListKind::scratch,
-                                                  .name = name,
-                                                  .pinned = false,
-                                                  .dirty = false,
-                                                  .items = {}},
-                        true);
-                    schedulePersist();
                 }
                 startDiscovery(std::move(paths), document_text(destination->document.id),
                                anchored ? anchor.row() : insertion,
@@ -196,8 +218,7 @@ void Workspace::libraryAction(LibraryBrowser& browser, std::vector<persistence::
         target = addList(
             persistence::ListDocument{.id = core::StableId::random(),
                                       .kind = persistence::ListKind::scratch,
-                                      .name = entries.size() == 1U ? entries.front().label
-                                                                   : "Library selection",
+                                      .name = list_name,
                                       .pinned = false,
                                       .dirty = false,
                                       .items = {},

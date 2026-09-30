@@ -69,6 +69,9 @@ void BenchMainWindow::buildUpNext() {
     up_next_view_ = new ui::QueueTableView(content);
     up_next_view_->setObjectName(QStringLiteral("up-next-tracks"));
     up_next_view_->setModel(up_next_local_model_);
+    // Edit › Remove selected follows Up Next's choice too.
+    connect(up_next_view_->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+            &BenchMainWindow::refreshSelectionActions);
     auto flat = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(up_next_view_, flat, flat);
     up_next_view_->setAlbumGroupingEnabled(false);
@@ -176,10 +179,9 @@ void BenchMainWindow::buildUpNext() {
     footer_layout->addWidget(resume);
     layout->addWidget(footer);
     connect(resume, &QToolButton::clicked, &workspace_, &Workspace::returnToList);
-    auto* remove = removeAction;
-    remove->setShortcut(Qt::Key_Delete);
-    remove->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    up_next_view_->addAction(remove);
+    // Delete is Edit › Remove selected's, which takes Up Next's tracks while
+    // the keyboard is here: a second action on the same key made Qt fire
+    // neither.
     up_next_view_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(
         up_next_view_, &QWidget::customContextMenuRequested, this,

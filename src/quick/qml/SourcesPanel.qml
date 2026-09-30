@@ -13,6 +13,7 @@ Pane {
 
     signal notYet(string what)
     signal foldersRequested()
+    signal nameRequested(string title, string current, var then)
 
     padding: 0
 
@@ -164,6 +165,7 @@ Pane {
             LibraryPane {
                 id: libraryPane
                 onFoldersRequested: panel.foldersRequested()
+                onNameRequested: (title, current, then) => panel.nameRequested(title, current, then)
             }
         }
     }

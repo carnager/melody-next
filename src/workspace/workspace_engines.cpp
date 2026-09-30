@@ -184,13 +184,15 @@ void Workspace::settingsSaved(const LocalEngineSharing& before) {
         chosen.value(QLatin1String(SettingsKeys::rating_tag_scale_key), QStringLiteral("off"))
             .toString()
             .toStdString();
+    const auto rating_backup = SettingsKeys::ratingBackupTag();
     for (const auto& engine : engines_) {
         if (engine->does_file_work && engine->file_work) {
-            static_cast<void>(
-                QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale] {
+            static_cast<void>(QtConcurrent::run(
+                [work = engine->file_work, key, rating_tags, rating_scale, rating_backup] {
                     static_cast<void>(work->set_acoustid_key(key));
                     static_cast<void>(work->set_rating_tags(rating_tags));
                     static_cast<void>(work->set_rating_scale(rating_scale));
+                    static_cast<void>(work->set_rating_backup_tag(rating_backup));
                 }));
         }
     }

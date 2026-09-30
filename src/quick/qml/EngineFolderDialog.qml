@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // ADR-0237: a folder on an engine's machine, as that engine lists it --
 // double-click to go in, Up to go out, Choose for the folder shown or the
@@ -23,6 +24,12 @@ ApplicationWindow {
 
     Component.onDestruction: folder.release()
     onClosing: Qt.callLater(() => chooser.destroy())
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: chooser.close()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -49,7 +56,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 id: folders

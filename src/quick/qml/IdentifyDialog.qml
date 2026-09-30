@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // "Identify with MusicBrainz" (ADR-0090): search by artist and album (or by
 // audio fingerprint), pick the exact release version, then pair the files
@@ -28,6 +29,12 @@ ApplicationWindow {
 
     Component.onDestruction: identify.release()
     onClosing: Qt.callLater(() => dialog.destroy())
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: dialog.close()
+    }
 
     Connections {
         target: dialog.identify
@@ -135,7 +142,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: palette.base
-                border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+                border.color: Theme.hairline(palette)
                 radius: 4
                 clip: true
                 ColumnLayout {
@@ -233,7 +240,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: palette.base
-                border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+                border.color: Theme.hairline(palette)
                 radius: 4
                 clip: true
                 ColumnLayout {

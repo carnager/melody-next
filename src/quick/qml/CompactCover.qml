@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The files' front cover beside their fields: drop an image on it, paste
 // one, or fetch one; its menu chooses a file, removes the cover or opens
@@ -26,7 +27,7 @@ ColumnLayout {
         Layout.preferredHeight: 150
         color: Shade.mix(palette.base, palette.window, 0.5)
         border.color: drop.containsDrag ? palette.highlight
-                                        : Shade.mix(palette.window, palette.windowText, 0.15)
+                                        : Theme.hairline(palette)
         border.width: drop.containsDrag ? 2 : 1
         radius: 4
         activeFocusOnTab: true

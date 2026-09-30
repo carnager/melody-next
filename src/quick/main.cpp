@@ -18,17 +18,22 @@
 #include <QQuickWindow>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QtQml/QQmlExtensionPlugin>
 
 #include <string>
 #include <vector>
 
+Q_IMPORT_QML_PLUGIN(Trackknife_StylePlugin)
+
 namespace {
 
-// Fusion on every system (ADR-0240): the same controls on Linux, macOS and
-// Windows, in the system's colours.
+// The Trackknife style on every system (ADR-0240): the same flat controls on
+// Linux, macOS and Windows, in the system's colours; Fusion under it for
+// what it does not draw. QT_QUICK_CONTROLS_STYLE still chooses another.
 void chooseStyle() {
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
-        QQuickStyle::setStyle(QStringLiteral("Fusion"));
+        QQuickStyle::setStyle(QStringLiteral("Trackknife.Style"));
+        QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
     }
 }
 

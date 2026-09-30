@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The tagging script editor (ADR-0178): a script's steps -- built one at a
 // time or compiled from raw Picard-style source -- previewed on the
@@ -43,6 +44,12 @@ ApplicationWindow {
         } else {
             Qt.callLater(() => editor.destroy());
         }
+    }
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: editor.close()
     }
 
     function focusField(name) {
@@ -420,7 +427,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         color: palette.base
-                        border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+                        border.color: Theme.hairline(palette)
                         radius: 4
                         ListView {
                             id: steps
@@ -536,7 +543,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: palette.base
-                border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+                border.color: Theme.hairline(palette)
                 radius: 4
                 clip: true
                 HorizontalHeaderView {

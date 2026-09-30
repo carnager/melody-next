@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The tag editor's Artwork page: the pictures in and beside the selected
 // files, what is staged for them, and their problems. Covers are staged
@@ -48,7 +49,7 @@ ColumnLayout {
         signal deletePressed()
 
         color: palette.base
-        border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+        border.color: Theme.hairline(palette)
         radius: 4
         clip: true
 

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // "Open list": each engine's lists under its name, saved ones first; one
 // opened into a tab.
@@ -22,6 +23,12 @@ ApplicationWindow {
 
     Component.onDestruction: openList.release()
     onClosing: Qt.callLater(() => dialog.destroy())
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: dialog.close()
+    }
 
     Connections {
         target: dialog.openList
@@ -43,7 +50,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ScrollView {
                 anchors.fill: parent

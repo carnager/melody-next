@@ -86,6 +86,22 @@ ApplicationWindow {
             window.searchWindow.search.setScope(1);
             window.searchWindow.search.setText("tone");
         }
+        else if (name === "palette") {
+            commandPaletteDialog.commands = window.paletteCommands();
+            commandPaletteDialog.open();
+        }
+        else if (name === "quickalbum")
+            window.openQuickPick(true);
+        else if (name === "openlist")
+            window.openListWindow = openListComponent.createObject(window, {openList: Tk.openList()});
+        else if (name === "find") {
+            Tk.openFind();
+            Tk.setFindQuery("tone");
+        }
+        else if (name === "listspane")
+            Tk.listsInPanel = true;
+        else if (name === "libraryfolders")
+            window.openSettings("library");
         else if (name.startsWith("settings"))
             window.openSettings(name.length > 9 ? name.substring(9) : "general");
     }
@@ -1070,7 +1086,9 @@ ApplicationWindow {
             const opened = taggerComponent.createObject(window, {tagger: tagger});
             opened.raise();
             opened.requestActivate();
-            if (window.taggerForScreenshot !== "tagger")
+            // QA hook only: a picture of the editor with an edit staged.
+            if (window.taggerForScreenshot.startsWith("tagger")
+                    && window.taggerForScreenshot !== "tagger")
                 Qt.callLater(() => stageTimer.start());
             stageTimer.opened = opened;
         }

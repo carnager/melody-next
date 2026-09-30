@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // ADR-0238: what Apply does, all in view at once -- tags, renaming with a
 // naming layout, moving to a destination, ReplayGain, and the scripts that
@@ -21,7 +22,7 @@ Popup {
     signal destinations()
     signal expression()
 
-    padding: 14
+    padding: Theme.gapLarge
     modal: false
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
@@ -30,6 +31,7 @@ Popup {
         id: link
         signal activated()
         textFormat: Text.RichText
+        linkColor: palette.highlight
         onLinkActivated: {
             actions.close();
             activated();
@@ -42,8 +44,8 @@ Popup {
 
     contentItem: GridLayout {
         columns: 2
-        columnSpacing: 12
-        rowSpacing: 8
+        columnSpacing: Theme.gap + 4
+        rowSpacing: Theme.gap
 
         CheckBox {
             objectName: "bench-actions-save-tags"
@@ -132,6 +134,7 @@ Popup {
         }
 
         Label {
+            leftPadding: 4
             text: qsTr("ReplayGain")
         }
         RowLayout {
@@ -182,6 +185,7 @@ Popup {
 
         Label {
             Layout.alignment: Qt.AlignTop
+            leftPadding: 4
             text: qsTr("Scripts")
             ToolTip.visible: scriptsHover.hovered
             ToolTip.delay: 800
@@ -230,8 +234,8 @@ Popup {
             Label {
                 visible: text !== ""
                 text: actions.state.scriptStatus ?? ""
-                opacity: 0.7
-                font.pointSize: Qt.application.font.pointSize * 0.9
+                color: Theme.dim(palette)
+                font.pointSize: Theme.smallSize
             }
             LinkLabel {
                 objectName: "bench-actions-script-editor"
@@ -246,8 +250,9 @@ Popup {
             Layout.maximumWidth: 460
             visible: text !== ""
             wrapMode: Text.WordWrap
-            opacity: 0.6
-            font.pointSize: Qt.application.font.pointSize * 0.9
+            leftPadding: 4
+            color: Theme.dim(palette)
+            font.pointSize: Theme.smallSize
             text: actions.state.profileStatus ?? ""
         }
     }

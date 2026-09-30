@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The library's folders: which belong to it, added and removed; saved at
 // once, the files never touched. An engine elsewhere's are typed as that
@@ -36,7 +37,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 id: roots
@@ -55,6 +56,15 @@ Item {
                     ToolTip.visible: hovered && modelData.tooltip !== ""
                     ToolTip.text: modelData.tooltip
                     onClicked: roots.currentIndex = index
+                }
+                Label {
+                    anchors.centerIn: parent
+                    width: parent.width - 32
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    visible: roots.count === 0
+                    color: Theme.dim(palette)
+                    text: qsTr("No folders yet. Add folder… chooses one.")
                 }
             }
         }

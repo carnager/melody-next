@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Dynamic playlists (ADR-0145): saved rules or a Last.fm source, refreshed
 // into the tracks they match in the library chosen; played from, or kept as
@@ -31,6 +32,12 @@ ApplicationWindow {
     onClosing: {
         dynamic.setShown(false);
         Qt.callLater(() => dynamicWindow.destroy());
+    }
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: dynamicWindow.close()
     }
 
     function chosenRows() {
@@ -64,320 +71,333 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 8
+        spacing: 0
 
-        Label {
+        ColumnLayout {
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            text: qsTr("Save rules or a Last.fm source, then refresh to see the matching tracks. Rules update while this window is open. Last.fm refreshes draw a fresh selection when requested. Opening a snapshot keeps that list stable while you listen.")
-        }
-        RowLayout {
-            // As in Search: the library searched, and so the engine that
-            // plays what is found (ADR-0227).
-            ComboBox {
-                objectName: "dynamic-library"
-                model: dynamicWindow.dynamic.libraries
-                currentIndex: dynamicWindow.state.library ?? 0
-                onActivated: index => dynamicWindow.dynamic.chooseLibrary(index)
-                Accessible.name: qsTr("Library")
+            Layout.fillHeight: true
+            Layout.margins: Theme.margin
+            spacing: Theme.gap + 4
+
+            Hint {
+                text: qsTr("Save rules or a Last.fm source, then refresh to see the matching tracks. Rules update while this window is open. Last.fm refreshes draw a fresh selection when requested. Opening a snapshot keeps that list stable while you listen.")
             }
-            ComboBox {
-                objectName: "dynamic-catalog"
+            RowLayout {
+                spacing: Theme.gap
+                // As in Search: the library searched, and so the engine that
+                // plays what is found (ADR-0227).
+                ComboBox {
+                    objectName: "dynamic-library"
+                    model: dynamicWindow.dynamic.libraries
+                    currentIndex: dynamicWindow.state.library ?? 0
+                    onActivated: index => dynamicWindow.dynamic.chooseLibrary(index)
+                    Accessible.name: qsTr("Library")
+                }
+                ComboBox {
+                    objectName: "dynamic-catalog"
+                    Layout.fillWidth: true
+                    model: dynamicWindow.dynamic.catalog
+                    currentIndex: dynamicWindow.state.catalogIndex ?? 0
+                    onActivated: index => dynamicWindow.dynamic.selectDefinition(index)
+                    Accessible.name: qsTr("Saved dynamic playlists")
+                }
+                Button {
+                    objectName: "dynamic-save"
+                    text: qsTr("Save definition")
+                    enabled: dynamicWindow.state.writable ?? false
+                    onClicked: dynamicWindow.dynamic.save()
+                }
+                Button {
+                    objectName: "dynamic-remove"
+                    text: qsTr("Remove")
+                    enabled: dynamicWindow.state.writable ?? false
+                    onClicked: dynamicWindow.dynamic.remove()
+                }
+            }
+            GridLayout {
                 Layout.fillWidth: true
-                model: dynamicWindow.dynamic.catalog
-                currentIndex: dynamicWindow.state.catalogIndex ?? 0
-                onActivated: index => dynamicWindow.dynamic.selectDefinition(index)
-                Accessible.name: qsTr("Saved dynamic playlists")
-            }
-            Button {
-                objectName: "dynamic-save"
-                text: qsTr("Save definition")
-                enabled: dynamicWindow.state.writable ?? false
-                onClicked: dynamicWindow.dynamic.save()
-            }
-            Button {
-                objectName: "dynamic-remove"
-                text: qsTr("Remove")
-                enabled: dynamicWindow.state.writable ?? false
-                onClicked: dynamicWindow.dynamic.remove()
-            }
-        }
-        GridLayout {
-            Layout.fillWidth: true
-            columns: 2
-            columnSpacing: 12
-            rowSpacing: 8
-            readonly property string source: dynamicWindow.state.source ?? "rules"
+                columns: 2
+                columnSpacing: Theme.gap + 4
+                rowSpacing: Theme.gap
+                readonly property string source: dynamicWindow.state.source ?? "rules"
 
-            Label {
-                text: qsTr("Name:")
-            }
-            Field {
-                objectName: "dynamic-name"
-                text: dynamicWindow.state.name ?? ""
-                onTextEdited: dynamicWindow.dynamic.setName(text)
-            }
-            Label {
-                text: qsTr("Source:")
-            }
-            ComboBox {
-                objectName: "dynamic-source"
-                Layout.preferredWidth: 280
-                model: dynamicWindow.dynamic.sources
-                textRole: "label"
-                currentIndex: {
-                    const sources = dynamicWindow.dynamic.sources;
-                    for (let i = 0; i < sources.length; ++i) {
-                        if (sources[i].value === parent.source)
-                            return i;
+                FormLabel {
+                    columnWidth: 130
+                    text: qsTr("Name:")
+                }
+                Field {
+                    objectName: "dynamic-name"
+                    text: dynamicWindow.state.name ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setName(text)
+                }
+                FormLabel {
+                    columnWidth: 130
+                    text: qsTr("Source:")
+                }
+                ComboBox {
+                    objectName: "dynamic-source"
+                    Layout.preferredWidth: 280
+                    model: dynamicWindow.dynamic.sources
+                    textRole: "label"
+                    currentIndex: {
+                        const sources = dynamicWindow.dynamic.sources;
+                        for (let i = 0; i < sources.length; ++i) {
+                            if (sources[i].value === parent.source)
+                                return i;
+                        }
+                        return 0;
                     }
-                    return 0;
+                    onActivated: index => dynamicWindow.dynamic.setSource(model[index].value)
                 }
-                onActivated: index => dynamicWindow.dynamic.setSource(model[index].value)
-            }
-            Label {
-                visible: parent.source === "rules"
-                text: qsTr("Rules:")
-            }
-            Field {
-                objectName: "dynamic-query"
-                visible: parent.source === "rules"
-                placeholderText: qsTr("genre HAS rock AND rating GREATER 6")
-                text: dynamicWindow.state.query ?? ""
-                onTextEdited: dynamicWindow.dynamic.setQuery(text)
-                ToolTip.visible: hovered
-                ToolTip.delay: 800
-                ToolTip.text: qsTr("Ratings use 0–10; 8 means four stars. Example: genre HAS jazz SORT BY %album%")
-            }
-            Label {
-                visible: parent.source === "similar"
-                text: qsTr("Seed artist:")
-            }
-            Field {
-                objectName: "dynamic-artist"
-                visible: parent.source === "similar"
-                text: dynamicWindow.state.artist ?? ""
-                onTextEdited: dynamicWindow.dynamic.setArtist(text)
-            }
-            Label {
-                visible: parent.source === "similar"
-                text: qsTr("Seed track:")
-            }
-            Field {
-                objectName: "dynamic-track"
-                visible: parent.source === "similar"
-                text: dynamicWindow.state.track ?? ""
-                onTextEdited: dynamicWindow.dynamic.setTrack(text)
-            }
-            Label {
-                visible: parent.source === "loved" || parent.source === "top"
-                text: qsTr("Last.fm user:")
-            }
-            Field {
-                objectName: "dynamic-user"
-                visible: parent.source === "loved" || parent.source === "top"
-                text: dynamicWindow.state.user ?? ""
-                onTextEdited: dynamicWindow.dynamic.setUser(text)
-            }
-            Label {
-                visible: parent.source === "tag"
-                text: qsTr("Last.fm tag:")
-            }
-            Field {
-                objectName: "dynamic-tag"
-                visible: parent.source === "tag"
-                text: dynamicWindow.state.tag ?? ""
-                onTextEdited: dynamicWindow.dynamic.setTag(text)
-            }
-            Label {
-                text: qsTr("Maximum tracks:")
-            }
-            SpinBox {
-                objectName: "dynamic-limit"
-                from: 1
-                to: 500
-                editable: true
-                value: dynamicWindow.state.limit ?? 100
-                onValueModified: dynamicWindow.dynamic.setLimit(value)
-            }
-            Item {
-                Layout.preferredWidth: 1
-            }
-            CheckBox {
-                objectName: "dynamic-shuffle"
-                text: dynamicWindow.state.shuffleText ?? ""
-                checked: dynamicWindow.state.shuffle ?? false
-                onToggled: {
-                    dynamicWindow.dynamic.setShuffle(checked);
-                    checked = Qt.binding(() => dynamicWindow.state.shuffle ?? false);
+                FormLabel {
+                    columnWidth: 130
+                    visible: parent.source === "rules"
+                    text: qsTr("Rules:")
                 }
-                ToolTip.visible: hovered && (dynamicWindow.state.shuffleTip ?? "") !== ""
-                ToolTip.delay: 800
-                ToolTip.text: dynamicWindow.state.shuffleTip ?? ""
+                Field {
+                    objectName: "dynamic-query"
+                    visible: parent.source === "rules"
+                    placeholderText: qsTr("genre HAS rock AND rating GREATER 6")
+                    text: dynamicWindow.state.query ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setQuery(text)
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 800
+                    ToolTip.text: qsTr("Ratings use 0–10; 8 means four stars. Example: genre HAS jazz SORT BY %album%")
+                }
+                FormLabel {
+                    columnWidth: 130
+                    visible: parent.source === "similar"
+                    text: qsTr("Seed artist:")
+                }
+                Field {
+                    objectName: "dynamic-artist"
+                    visible: parent.source === "similar"
+                    text: dynamicWindow.state.artist ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setArtist(text)
+                }
+                FormLabel {
+                    columnWidth: 130
+                    visible: parent.source === "similar"
+                    text: qsTr("Seed track:")
+                }
+                Field {
+                    objectName: "dynamic-track"
+                    visible: parent.source === "similar"
+                    text: dynamicWindow.state.track ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setTrack(text)
+                }
+                FormLabel {
+                    columnWidth: 130
+                    visible: parent.source === "loved" || parent.source === "top"
+                    text: qsTr("Last.fm user:")
+                }
+                Field {
+                    objectName: "dynamic-user"
+                    visible: parent.source === "loved" || parent.source === "top"
+                    text: dynamicWindow.state.user ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setUser(text)
+                }
+                FormLabel {
+                    columnWidth: 130
+                    visible: parent.source === "tag"
+                    text: qsTr("Last.fm tag:")
+                }
+                Field {
+                    objectName: "dynamic-tag"
+                    visible: parent.source === "tag"
+                    text: dynamicWindow.state.tag ?? ""
+                    onTextEdited: dynamicWindow.dynamic.setTag(text)
+                }
+                FormLabel {
+                    columnWidth: 130
+                    text: qsTr("Maximum tracks:")
+                }
+                SpinBox {
+                    objectName: "dynamic-limit"
+                    from: 1
+                    to: 500
+                    editable: true
+                    value: dynamicWindow.state.limit ?? 100
+                    onValueModified: dynamicWindow.dynamic.setLimit(value)
+                }
+                FormLabel {
+                    columnWidth: 130
+                }
+                CheckBox {
+                    objectName: "dynamic-shuffle"
+                    text: dynamicWindow.state.shuffleText ?? ""
+                    checked: dynamicWindow.state.shuffle ?? false
+                    onToggled: {
+                        dynamicWindow.dynamic.setShuffle(checked);
+                        checked = Qt.binding(() => dynamicWindow.state.shuffle ?? false);
+                    }
+                    ToolTip.visible: hovered && (dynamicWindow.state.shuffleTip ?? "") !== ""
+                    ToolTip.delay: 800
+                    ToolTip.text: dynamicWindow.state.shuffleTip ?? ""
+                }
+            }
+            RowLayout {
+                Layout.leftMargin: 130 + Theme.gap + 4
+                spacing: Theme.gap
+                Button {
+                    objectName: "dynamic-refresh"
+                    text: qsTr("Refresh")
+                    enabled: dynamicWindow.state.canRefresh ?? false
+                    onClicked: dynamicWindow.dynamic.refresh()
+                }
+                Button {
+                    objectName: "dynamic-stop"
+                    text: qsTr("Stop")
+                    onClicked: dynamicWindow.dynamic.stop()
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: palette.base
+                border.color: Theme.hairline(palette)
+                radius: Theme.radius
+                clip: true
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    spacing: 0
+                    // The flat columns the snapshot keeps.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 10
+                        Layout.rightMargin: 10
+                        Layout.preferredHeight: 28
+                        spacing: 8
+                        Label {
+                            Layout.preferredWidth: 36
+                            text: "#"
+                            font.bold: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 3
+                            text: qsTr("Title")
+                            font.bold: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 2
+                            text: qsTr("Artist")
+                            font.bold: true
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 2
+                            text: qsTr("Album")
+                            font.bold: true
+                        }
+                        Label {
+                            Layout.preferredWidth: 56
+                            horizontalAlignment: Text.AlignRight
+                            text: qsTr("Length")
+                            font.bold: true
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: Shade.mix(palette.base, palette.text, 0.12)
+                    }
+                    ListView {
+                        id: results
+                        objectName: "dynamic-tracks"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: dynamicWindow.dynamic.results
+                        currentIndex: -1
+                        highlightMoveDuration: 0
+                        ScrollBar.vertical: ScrollBar {}
+                        Keys.onPressed: event => {
+                            const step = event.key === Qt.Key_Down ? 1 : event.key === Qt.Key_Up ? -1 : 0;
+                            if (step !== 0) {
+                                const row = Math.max(0, Math.min(count - 1, dynamicWindow.cursorRow + step));
+                                if (count > 0)
+                                    dynamicWindow.choose(row, event.modifiers);
+                                event.accepted = true;
+                            } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                       && (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier) {
+                                if (dynamicWindow.cursorRow >= 0)
+                                    dynamicWindow.dynamic.play(dynamicWindow.cursorRow);
+                                event.accepted = true;
+                            }
+                        }
+                        delegate: ItemDelegate {
+                            id: trackRow
+                            required property var modelData
+                            required property int index
+                            width: results.width
+                            height: 26
+                            highlighted: dynamicWindow.chosen[index] === true
+                            font.bold: modelData.playing
+                            onClicked: {
+                                results.forceActiveFocus();
+                                dynamicWindow.choose(index, Qt.application.keyboardModifiers);
+                            }
+                            onDoubleClicked: dynamicWindow.dynamic.play(index)
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    if (!dynamicWindow.chosen[trackRow.index])
+                                        dynamicWindow.choose(trackRow.index, 0);
+                                    trackMenu.popup();
+                                }
+                            }
+                            contentItem: RowLayout {
+                                spacing: 8
+                                Label {
+                                    Layout.preferredWidth: 36
+                                    opacity: 0.7
+                                    text: trackRow.modelData.playing ? "▶" : trackRow.modelData.number
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 3
+                                    elide: Text.ElideRight
+                                    text: trackRow.modelData.title
+                                    font: trackRow.font
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 2
+                                    elide: Text.ElideRight
+                                    text: trackRow.modelData.artist
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 2
+                                    elide: Text.ElideRight
+                                    text: trackRow.modelData.album
+                                }
+                                Label {
+                                    Layout.preferredWidth: 56
+                                    horizontalAlignment: Text.AlignRight
+                                    text: trackRow.modelData.length
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
-        RowLayout {
-            Button {
-                objectName: "dynamic-refresh"
-                text: qsTr("Refresh")
-                enabled: dynamicWindow.state.canRefresh ?? false
-                onClicked: dynamicWindow.dynamic.refresh()
-            }
-            Button {
-                objectName: "dynamic-stop"
-                text: qsTr("Stop")
-                onClicked: dynamicWindow.dynamic.stop()
-            }
-            Item {
-                Layout.fillWidth: true
+
+        WindowFooter {
+            Hint {
+                objectName: "dynamic-status"
+                text: dynamicWindow.state.status ?? ""
             }
             Button {
                 objectName: "dynamic-open"
                 text: qsTr("Open snapshot in new tab")
                 enabled: dynamicWindow.state.canOpen ?? false
                 onClicked: dynamicWindow.dynamic.openSnapshot()
-            }
-        }
-        Label {
-            objectName: "dynamic-status"
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            text: dynamicWindow.state.status ?? ""
-        }
-
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
-            radius: 4
-            clip: true
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 1
-                spacing: 0
-                // The flat columns the snapshot keeps.
-                RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: 8
-                    Layout.rightMargin: 8
-                    height: 26
-                    spacing: 8
-                    Label {
-                        Layout.preferredWidth: 36
-                        text: "#"
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 3
-                        text: qsTr("Title")
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 2
-                        text: qsTr("Artist")
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 2
-                        text: qsTr("Album")
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.preferredWidth: 56
-                        horizontalAlignment: Text.AlignRight
-                        text: qsTr("Length")
-                        font.bold: true
-                    }
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: Shade.mix(palette.base, palette.text, 0.12)
-                }
-                ListView {
-                    id: results
-                    objectName: "dynamic-tracks"
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: dynamicWindow.dynamic.results
-                    currentIndex: -1
-                    highlightMoveDuration: 0
-                    ScrollBar.vertical: ScrollBar {}
-                    Keys.onPressed: event => {
-                        const step = event.key === Qt.Key_Down ? 1 : event.key === Qt.Key_Up ? -1 : 0;
-                        if (step !== 0) {
-                            const row = Math.max(0, Math.min(count - 1, dynamicWindow.cursorRow + step));
-                            if (count > 0)
-                                dynamicWindow.choose(row, event.modifiers);
-                            event.accepted = true;
-                        } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                                   && (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier) {
-                            if (dynamicWindow.cursorRow >= 0)
-                                dynamicWindow.dynamic.play(dynamicWindow.cursorRow);
-                            event.accepted = true;
-                        }
-                    }
-                    delegate: ItemDelegate {
-                        id: trackRow
-                        required property var modelData
-                        required property int index
-                        width: results.width
-                        height: 26
-                        highlighted: dynamicWindow.chosen[index] === true
-                        font.bold: modelData.playing
-                        onClicked: {
-                            results.forceActiveFocus();
-                            dynamicWindow.choose(index, Qt.application.keyboardModifiers);
-                        }
-                        onDoubleClicked: dynamicWindow.dynamic.play(index)
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: {
-                                if (!dynamicWindow.chosen[trackRow.index])
-                                    dynamicWindow.choose(trackRow.index, 0);
-                                trackMenu.popup();
-                            }
-                        }
-                        contentItem: RowLayout {
-                            spacing: 8
-                            Label {
-                                Layout.preferredWidth: 36
-                                opacity: 0.7
-                                text: trackRow.modelData.playing ? "▶" : trackRow.modelData.number
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 3
-                                elide: Text.ElideRight
-                                text: trackRow.modelData.title
-                                font: trackRow.font
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 2
-                                elide: Text.ElideRight
-                                text: trackRow.modelData.artist
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 2
-                                elide: Text.ElideRight
-                                text: trackRow.modelData.album
-                            }
-                            Label {
-                                Layout.preferredWidth: 56
-                                horizontalAlignment: Text.AlignRight
-                                text: trackRow.modelData.length
-                            }
-                        }
-                    }
-                }
             }
         }
     }

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The exact ordered value list of the current field on the selected files:
 // one row per value, empty ones kept, reordered, added and removed; OK
@@ -75,7 +76,7 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 id: list

@@ -9,6 +9,52 @@ qt_policy(SET QTP0004 NEW)
 
 qt_add_executable(trackknife-quick main.cpp)
 
+# The Trackknife style (ADR-0240): flat controls drawn from the palette,
+# Fusion for anything it does not draw itself.
+qt_add_library(trackknife_quick_style STATIC)
+set_source_files_properties(style/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+qt_add_qml_module(
+    trackknife_quick_style
+    URI Trackknife.Style
+    VERSION 1.0
+    RESOURCE_PREFIX /qt/qml
+    IMPORTS QtQuick.Controls.Fusion
+    QML_FILES
+    style/Theme.qml
+    style/Chevron.qml
+    style/CheckMark.qml
+    style/Button.qml
+    style/ToolButton.qml
+    style/TextField.qml
+    style/TextArea.qml
+    style/CheckBox.qml
+    style/ComboBox.qml
+    style/SpinBox.qml
+    style/TabBar.qml
+    style/TabButton.qml
+    style/ItemDelegate.qml
+    style/Menu.qml
+    style/MenuItem.qml
+    style/MenuSeparator.qml
+    style/MenuBar.qml
+    style/MenuBarItem.qml
+    style/ScrollBar.qml
+    style/Dialog.qml
+    style/DialogButtonBox.qml
+    style/ToolTip.qml
+    style/GroupBox.qml
+    style/Frame.qml
+    style/Pane.qml
+    style/Popup.qml
+    style/ProgressBar.qml
+    style/Slider.qml
+    style/ToolBar.qml
+    style/ToolSeparator.qml
+    style/SplitView.qml
+)
+target_link_libraries(trackknife_quick_style PRIVATE Qt6::Quick Qt6::QuickControls2
+                                                 )
+
 set_source_files_properties(qml/Shade.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_qml_module(
@@ -97,11 +143,15 @@ qt_add_qml_module(
     qml/SearchWindow.qml
     qml/DynamicPlaylistsWindow.qml
     qml/ListsPane.qml
+    qml/FormLabel.qml
+    qml/Hint.qml
+    qml/WindowFooter.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(
     trackknife-quick
     PRIVATE Trackknife::Workspace Qt6::Widgets Qt6::Quick Qt6::QuickControls2
+            trackknife_quick_styleplugin
             trackknife_project_options
 )

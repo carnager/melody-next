@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // ADR-0156: measure the selected tracks' loudness and save track and album
 // volume adjustments, without the tag editor. Audio samples are not changed.
@@ -23,6 +24,12 @@ ApplicationWindow {
 
     Component.onDestruction: replayGain.release()
     onClosing: Qt.callLater(() => dialog.destroy())
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: dialog.close()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -73,7 +80,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 objectName: "bench-replaygain-dialog-groups"

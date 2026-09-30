@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // "Edit tags" (MetadataPropertiesDialog), in Qt Quick: the selected files on
 // the left, their fields with original and draft values on the right, and
@@ -98,14 +99,13 @@ ApplicationWindow {
     }
 
     header: ToolBar {
-        background: Rectangle {
-            color: Shade.mix(palette.window, palette.base, 0.35)
-        }
+        topPadding: Theme.gap + 2
+        bottomPadding: Theme.gap + 2
+        leftPadding: Theme.margin
+        rightPadding: Theme.margin
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
-            spacing: 12
+            spacing: Theme.gapLarge
             Label {
                 objectName: "bench-metadata-summary"
                 text: taggerWindow.state.summary ?? ""
@@ -116,7 +116,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
-                opacity: 0.75
+                color: Theme.dim(palette)
                 text: taggerWindow.state.technical ?? ""
                 ToolTip.visible: technicalHover.hovered && text !== ""
                 ToolTip.text: text
@@ -140,7 +140,6 @@ ApplicationWindow {
         id: split
         objectName: "bench-metadata-splitter"
         anchors.fill: parent
-        anchors.margins: 8
         visible: taggerWindow.tagger.ready
         orientation: Qt.Horizontal
 
@@ -153,222 +152,227 @@ ApplicationWindow {
             enabled: taggerWindow.state.filesEnabled ?? true
         }
 
-        ColumnLayout {
+        Item {
             SplitView.fillWidth: true
             SplitView.minimumWidth: 360
-            spacing: 6
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Theme.margin
+                anchors.topMargin: Theme.gap
+                spacing: Theme.gap
 
-            TabBar {
-                id: sections
-                objectName: "bench-metadata-sections"
-                Layout.fillWidth: true
-                TabButton {
-                    text: qsTr("Fields")
-                    width: implicitWidth + 24
+                TabBar {
+                    id: sections
+                    objectName: "bench-metadata-sections"
+                    Layout.fillWidth: true
+                    TabButton {
+                        text: qsTr("Fields")
+                        width: implicitWidth + 24
+                    }
+                    TabButton {
+                        text: qsTr("Artwork")
+                        width: implicitWidth + 24
+                    }
                 }
-                TabButton {
-                    text: qsTr("Artwork")
-                    width: implicitWidth + 24
-                }
-            }
 
-            StackLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                currentIndex: sections.currentIndex
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: sections.currentIndex
 
-                // Fields.
-                ColumnLayout {
-                    spacing: 6
+                    // Fields.
+                    ColumnLayout {
+                        spacing: Theme.gap
 
-                    // The review bar: presentation only; hidden fields keep
-                    // their edits.
-                    RowLayout {
-                        objectName: "bench-metadata-field-review"
-                        Layout.fillWidth: true
-                        TextField {
-                            objectName: "bench-metadata-field-filter"
+                        // The review bar: presentation only; hidden fields keep
+                        // their edits.
+                        RowLayout {
+                            objectName: "bench-metadata-field-review"
                             Layout.fillWidth: true
-                            placeholderText: qsTr("Filter fields…")
-                            text: taggerWindow.tagger.filterText
-                            onTextEdited: taggerWindow.tagger.filterText = text
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Match display or canonical field names; values are not searched.")
-                        }
-                        CheckBox {
-                            objectName: "bench-metadata-changed-only"
-                            text: qsTr("Changed fields only")
-                            checked: taggerWindow.tagger.changedOnly
-                            onToggled: taggerWindow.tagger.changedOnly = checked
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Show fields with staged edits in the selected files.")
-                        }
-                        CheckBox {
-                            id: showFiles
-                            objectName: "bench-metadata-show-files"
-                            text: qsTr("Show files")
-                            checked: true
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Hide the file list to make more room for fields. The selected files stay selected.")
-                        }
-                    }
-                    Label {
-                        objectName: "bench-metadata-field-filter-status"
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        opacity: 0.7
-                        font.pointSize: Qt.application.font.pointSize * 0.9
-                        text: taggerWindow.tagger.filterStatus
-                    }
-
-                    // The grid tools.
-                    RowLayout {
-                        objectName: "bench-metadata-grid-tools"
-                        Layout.fillWidth: true
-                        spacing: 6
-                        Button {
-                            objectName: "bench-metadata-add-field"
-                            text: qsTr("Add field…")
-                            enabled: taggerWindow.state.canAddField ?? false
-                            onClicked: addField.open()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Add an arbitrary metadata field (Insert)")
-                        }
-                        Button {
-                            objectName: "bench-metadata-remove-field"
-                            text: qsTr("Remove field")
-                            enabled: taggerWindow.state.canRemoveFields ?? false
-                            onClicked: taggerWindow.tagger.removeFields()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Remove the selected fields from the selected files (Delete)")
-                        }
-                        Button {
-                            objectName: "bench-metadata-edit-values"
-                            text: qsTr("Edit values…")
-                            enabled: taggerWindow.state.canEditValues ?? false
-                            onClicked: exactValues.edit()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Edit the exact ordered value list (Ctrl+Enter)")
+                            TextField {
+                                objectName: "bench-metadata-field-filter"
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("Filter fields…")
+                                text: taggerWindow.tagger.filterText
+                                onTextEdited: taggerWindow.tagger.filterText = text
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Match display or canonical field names; values are not searched.")
+                            }
+                            CheckBox {
+                                objectName: "bench-metadata-changed-only"
+                                text: qsTr("Changed fields only")
+                                checked: taggerWindow.tagger.changedOnly
+                                onToggled: taggerWindow.tagger.changedOnly = checked
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Show fields with staged edits in the selected files.")
+                            }
+                            CheckBox {
+                                id: showFiles
+                                objectName: "bench-metadata-show-files"
+                                text: qsTr("Show files")
+                                checked: true
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Hide the file list to make more room for fields. The selected files stay selected.")
+                            }
                         }
                         Label {
-                            text: qsTr("Fields:")
-                            visible: taggerWindow.tagger.fieldLayouts.length > 0
-                        }
-                        ComboBox {
-                            id: fieldLayout
-                            objectName: "bench-metadata-field-layout"
-                            visible: taggerWindow.tagger.fieldLayouts.length > 0
-                            textRole: "name"
-                            valueRole: "id"
-                            model: [{id: "", name: qsTr("All fields")}].concat(taggerWindow.tagger.fieldLayouts)
-                            currentIndex: Math.max(0, indexOfValue(taggerWindow.tagger.activeFieldLayout))
-                            onActivated: taggerWindow.tagger.selectFieldLayout(currentValue)
-                        }
-                        Button {
-                            objectName: "bench-metadata-identify"
-                            text: qsTr("Identify…")
-                            enabled: taggerWindow.state.canIdentify ?? false
-                            onClicked: {
-                                const identify = taggerWindow.tagger.identify();
-                                if (identify)
-                                    identifyComponent.createObject(taggerWindow, {identify: identify});
-                            }
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Search MusicBrainz by artist and album — no MusicBrainz tags needed — pick the exact release version, and stage the match as ordinary colored draft edits")
-                        }
-                        Button {
-                            id: moreButton
-                            objectName: "bench-metadata-more"
-                            text: qsTr("More")
-                            onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
-                            Menu {
-                                id: moreMenu
-                                MenuItem {
-                                    text: qsTr("Suggest album totals and artist")
-                                    enabled: taggerWindow.state.canSuggest ?? false
-                                    onTriggered: taggerWindow.tagger.suggest()
-                                }
-                                MenuItem {
-                                    text: qsTr("Save visible fields as set…")
-                                    onTriggered: fieldSetName.open()
-                                }
-                                MenuItem {
-                                    text: qsTr("Delete current field set")
-                                    enabled: taggerWindow.tagger.activeFieldLayout !== ""
-                                    onTriggered: taggerWindow.tagger.removeFieldLayout()
-                                }
-                            }
-                        }
-                        Item {
+                            objectName: "bench-metadata-field-filter-status"
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            color: Theme.dim(palette)
+                            font.pointSize: Theme.smallSize
+                            text: taggerWindow.tagger.filterStatus
                         }
-                        ToolButton {
-                            objectName: "bench-metadata-undo"
-                            icon.source: "image://icon/edit-undo|sp:SP_ArrowBack"
-                            enabled: taggerWindow.state.canUndo ?? false
-                            onClicked: taggerWindow.tagger.undo()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Undo the last draft edit (Ctrl+Z)")
+
+                        // The grid tools.
+                        RowLayout {
+                            objectName: "bench-metadata-grid-tools"
+                            Layout.fillWidth: true
+                            spacing: Theme.gap
+                            Button {
+                                objectName: "bench-metadata-add-field"
+                                text: qsTr("Add field…")
+                                enabled: taggerWindow.state.canAddField ?? false
+                                onClicked: addField.open()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Add an arbitrary metadata field (Insert)")
+                            }
+                            Button {
+                                objectName: "bench-metadata-remove-field"
+                                text: qsTr("Remove field")
+                                enabled: taggerWindow.state.canRemoveFields ?? false
+                                onClicked: taggerWindow.tagger.removeFields()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Remove the selected fields from the selected files (Delete)")
+                            }
+                            Button {
+                                objectName: "bench-metadata-edit-values"
+                                text: qsTr("Edit values…")
+                                enabled: taggerWindow.state.canEditValues ?? false
+                                onClicked: exactValues.edit()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Edit the exact ordered value list (Ctrl+Enter)")
+                            }
+                            Label {
+                                text: qsTr("Fields:")
+                                visible: taggerWindow.tagger.fieldLayouts.length > 0
+                            }
+                            ComboBox {
+                                id: fieldLayout
+                                objectName: "bench-metadata-field-layout"
+                                visible: taggerWindow.tagger.fieldLayouts.length > 0
+                                textRole: "name"
+                                valueRole: "id"
+                                model: [{id: "", name: qsTr("All fields")}].concat(taggerWindow.tagger.fieldLayouts)
+                                currentIndex: Math.max(0, indexOfValue(taggerWindow.tagger.activeFieldLayout))
+                                onActivated: taggerWindow.tagger.selectFieldLayout(currentValue)
+                            }
+                            Button {
+                                objectName: "bench-metadata-identify"
+                                text: qsTr("Identify…")
+                                enabled: taggerWindow.state.canIdentify ?? false
+                                onClicked: {
+                                    const identify = taggerWindow.tagger.identify();
+                                    if (identify)
+                                        identifyComponent.createObject(taggerWindow, {identify: identify});
+                                }
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Search MusicBrainz by artist and album — no MusicBrainz tags needed — pick the exact release version, and stage the match as ordinary colored draft edits")
+                            }
+                            Button {
+                                id: moreButton
+                                objectName: "bench-metadata-more"
+                                text: qsTr("More")
+                                onClicked: moreMenu.popup(moreButton, 0, moreButton.height)
+                                Menu {
+                                    id: moreMenu
+                                    MenuItem {
+                                        text: qsTr("Suggest album totals and artist")
+                                        enabled: taggerWindow.state.canSuggest ?? false
+                                        onTriggered: taggerWindow.tagger.suggest()
+                                    }
+                                    MenuItem {
+                                        text: qsTr("Save visible fields as set…")
+                                        onTriggered: fieldSetName.open()
+                                    }
+                                    MenuItem {
+                                        text: qsTr("Delete current field set")
+                                        enabled: taggerWindow.tagger.activeFieldLayout !== ""
+                                        onTriggered: taggerWindow.tagger.removeFieldLayout()
+                                    }
+                                }
+                            }
+                            Item {
+                                Layout.fillWidth: true
+                            }
+                            ToolButton {
+                                objectName: "bench-metadata-undo"
+                                icon.source: "image://icon/edit-undo|sp:SP_ArrowBack"
+                                enabled: taggerWindow.state.canUndo ?? false
+                                onClicked: taggerWindow.tagger.undo()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Undo the last draft edit (Ctrl+Z)")
+                            }
+                            ToolButton {
+                                objectName: "bench-metadata-redo"
+                                icon.source: "image://icon/edit-redo|sp:SP_ArrowForward"
+                                enabled: taggerWindow.state.canRedo ?? false
+                                onClicked: taggerWindow.tagger.redo()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Redo the last undone draft edit (Ctrl+Shift+Z)")
+                            }
+                            ToolButton {
+                                objectName: "bench-metadata-discard"
+                                icon.source: "image://icon/edit-clear|sp:SP_DialogDiscardButton"
+                                enabled: (taggerWindow.state.draftCount ?? 0) > 0
+                                onClicked: taggerWindow.tagger.discardAll()
+                                ToolTip.visible: hovered
+                                ToolTip.delay: 800
+                                ToolTip.text: qsTr("Throw away every pending draft edit")
+                            }
                         }
-                        ToolButton {
-                            objectName: "bench-metadata-redo"
-                            icon.source: "image://icon/edit-redo|sp:SP_ArrowForward"
-                            enabled: taggerWindow.state.canRedo ?? false
-                            onClicked: taggerWindow.tagger.redo()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Redo the last undone draft edit (Ctrl+Shift+Z)")
-                        }
-                        ToolButton {
-                            objectName: "bench-metadata-discard"
-                            icon.source: "image://icon/edit-clear|sp:SP_DialogDiscardButton"
-                            enabled: (taggerWindow.state.draftCount ?? 0) > 0
-                            onClicked: taggerWindow.tagger.discardAll()
-                            ToolTip.visible: hovered
-                            ToolTip.delay: 800
-                            ToolTip.text: qsTr("Throw away every pending draft edit")
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            spacing: Theme.gap
+                            TaggerFieldTable {
+                                id: fieldTable
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                tagger: taggerWindow.tagger
+                                onEditValues: exactValues.edit()
+                                onAddField: addField.open()
+                            }
+                            CompactCover {
+                                Layout.fillHeight: true
+                                artwork: taggerWindow.tagger.artwork
+                                onOpenArtwork: sections.currentIndex = 1
+                                onCoverSettings: taggerWindow.settingsRequested("covers")
+                                onFetch: artworkPage.openPicker()
+                            }
                         }
                     }
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        spacing: 8
-                        TaggerFieldTable {
-                            id: fieldTable
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            tagger: taggerWindow.tagger
-                            onEditValues: exactValues.edit()
-                            onAddField: addField.open()
-                        }
-                        CompactCover {
-                            Layout.fillHeight: true
-                            artwork: taggerWindow.tagger.artwork
-                            onOpenArtwork: sections.currentIndex = 1
-                            onCoverSettings: taggerWindow.settingsRequested("covers")
-                            onFetch: artworkPage.openPicker()
-                        }
+                    // Artwork.
+                    ArtworkPage {
+                        id: artworkPage
+                        artwork: taggerWindow.tagger.artwork
+                        onFeedback: (title, summary, rows) => artworkFeedback.show(title, summary, rows, false, false)
+                        onFolderReview: (note, rows) => artworkFolderReview.show(
+                                            qsTr("Review folder covers"), note,
+                                            [qsTr("Destination"), qsTr("Change"), qsTr("Incoming image")],
+                                            rows, true)
                     }
-                }
-
-                // Artwork.
-                ArtworkPage {
-                    id: artworkPage
-                    artwork: taggerWindow.tagger.artwork
-                    onFeedback: (title, summary, rows) => artworkFeedback.show(title, summary, rows, false, false)
-                    onFolderReview: (note, rows) => artworkFolderReview.show(
-                                        qsTr("Review folder covers"), note,
-                                        [qsTr("Destination"), qsTr("Change"), qsTr("Incoming image")],
-                                        rows, true)
                 }
             }
         }
@@ -376,14 +380,13 @@ ApplicationWindow {
 
     footer: ToolBar {
         objectName: "bench-metadata-footer"
-        background: Rectangle {
-            color: Shade.mix(palette.window, palette.base, 0.35)
-        }
+        topPadding: Theme.gap
+        bottomPadding: Theme.gap
+        leftPadding: Theme.margin
+        rightPadding: Theme.margin
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            spacing: 8
+            spacing: Theme.gap
             Button {
                 id: actionsButton
                 objectName: "bench-metadata-actions"

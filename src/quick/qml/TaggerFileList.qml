@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The files being edited: their common folder once above them, each named
 // relative to it. Checked files receive new edits: a click on a name selects
@@ -13,26 +14,28 @@ Rectangle {
 
     required property QuickTagger tagger
 
-    color: palette.base
-    border.color: Shade.mix(palette.window, palette.windowText, 0.15)
-    radius: 4
+    // A side pane, a shade off the window, as the settings' pages are.
+    color: Theme.sunken(palette)
     implicitWidth: 260
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 1
+        anchors.leftMargin: Theme.gap
+        anchors.rightMargin: Theme.gap
         spacing: 0
 
         Label {
             objectName: "bench-metadata-files-dir"
             Layout.fillWidth: true
-            Layout.margins: 8
-            Layout.bottomMargin: 4
+            Layout.leftMargin: Theme.gap
+            Layout.rightMargin: Theme.gap
+            Layout.topMargin: Theme.gap + 4
+            Layout.bottomMargin: Theme.gap
             visible: text !== ""
             text: files.tagger.commonFolder
             elide: Text.ElideMiddle
-            opacity: 0.7
-            font.pointSize: Qt.application.font.pointSize * 0.9
+            color: Theme.dim(palette)
+            font.pointSize: Theme.smallSize
             ToolTip.visible: dirHover.hovered
             ToolTip.text: text
             HoverHandler {
@@ -61,6 +64,7 @@ Rectangle {
                 }
             }
 
+            spacing: 1
             delegate: Rectangle {
                 id: row
                 required property int index
@@ -69,12 +73,11 @@ Rectangle {
                     return files.tagger.fileSelected(index);
                 }
                 width: ListView.view.width
-                height: 32
-                color: rowHover.hovered ? Shade.alpha(palette.highlight, 0.12)
-                                        : (index % 2 ? Shade.mix(palette.base, palette.alternateBase, 1)
-                                                     : palette.base)
+                height: Theme.rowHeight + 2
+                radius: Theme.radius
+                color: rowHover.hovered ? Theme.hovered(palette) : "transparent"
                 border.width: ListView.isCurrentItem && list.activeFocus ? 1 : 0
-                border.color: Shade.alpha(palette.highlight, 0.6)
+                border.color: Theme.alpha(palette.highlight, 0.6)
 
                 HoverHandler {
                     id: rowHover
@@ -89,9 +92,9 @@ Rectangle {
                 }
                 RowLayout {
                     anchors.fill: parent
-                    spacing: 6
+                    spacing: Theme.gapSmall
                     CheckBox {
-                        Layout.leftMargin: 6
+                        Layout.leftMargin: Theme.gapSmall
                         checked: row.chosen
                         focusPolicy: Qt.NoFocus
                         onClicked: {
@@ -108,7 +111,7 @@ Rectangle {
                             return files.tagger.fileText(row.index);
                         }
                         elide: Text.ElideRight
-                        opacity: row.chosen ? 1 : 0.65
+                        color: row.chosen ? palette.windowText : Theme.dim(palette)
                     }
                 }
                 ToolTip.visible: rowHover.hovered

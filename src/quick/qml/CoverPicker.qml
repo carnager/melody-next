@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // One picker for a cover: the images beside the files, then what the Cover
 // Art Archive has for the release, their thumbnails arriving as they come.
@@ -60,7 +61,7 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 id: list

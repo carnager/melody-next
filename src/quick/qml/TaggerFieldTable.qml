@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The selected files' fields: name, original value and draft. The draft is
 // edited in place (double-click, F2, or just typing); edits are staged as
@@ -19,7 +20,7 @@ Rectangle {
     readonly property int rowHeight: 26
 
     color: palette.base
-    border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+    border.color: Theme.hairline(palette)
     radius: 4
 
     // A field shown: scrolled to, in the middle.

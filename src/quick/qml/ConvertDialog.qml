@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Converts the selection below a destination folder (ADR-0107): a preset, a
 // naming layout (or the source folders mirrored) with a live preview of the
@@ -30,6 +31,12 @@ ApplicationWindow {
             close.accepted = false;
         else
             Qt.callLater(() => dialog.destroy());
+    }
+
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: dialog.close()
     }
 
     function indexOfValue(choices, value) {
@@ -286,7 +293,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 objectName: "bench-convert-preview"

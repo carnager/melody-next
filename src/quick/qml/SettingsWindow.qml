@@ -4,6 +4,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Settings (ADR-0112, ADR-0185): a draft of every value, written on Save;
 // the pages that act at once -- library folders, naming layouts and move
@@ -43,6 +44,12 @@ ApplicationWindow {
     Component.onDestruction: settings.release()
     onClosing: Qt.callLater(() => settingsWindow.destroy())
 
+    // Esc closes it, as it closes any dialog.
+    Shortcut {
+        sequence: StandardKey.Cancel
+        onActivated: settingsWindow.close()
+    }
+
     function showPage(index) {
         page = index;
         raise();
@@ -77,27 +84,41 @@ ApplicationWindow {
         return 0;
     }
 
+    // Where fields begin: a form's labels are a column this wide.
+    readonly property int fieldIndent: Theme.labelWidth + Theme.gap + 4
+
     component Note: Label {
+        // A page's opening words span it; a hint under fields starts where
+        // they do.
+        property bool intro: false
         Layout.fillWidth: true
+        Layout.leftMargin: intro ? 0 : settingsWindow.fieldIndent
+        color: Theme.dim(palette)
+        linkColor: palette.highlight
         wrapMode: Text.WordWrap
-        opacity: 0.65
         onLinkActivated: link => Qt.openUrlExternally(link)
         HoverHandler {
             cursorShape: parent.hoveredLink !== "" ? Qt.PointingHandCursor : Qt.ArrowCursor
         }
     }
     component FieldLabel: Label {
-        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+        Layout.preferredWidth: Theme.labelWidth
+        Layout.minimumWidth: Theme.labelWidth
+        Layout.alignment: Qt.AlignVCenter
+        horizontalAlignment: Text.AlignRight
+        wrapMode: Text.WordWrap
     }
     component Form: GridLayout {
         Layout.fillWidth: true
         columns: 2
-        columnSpacing: 12
-        rowSpacing: 10
+        columnSpacing: Theme.gap + 4
+        rowSpacing: Theme.gap
     }
     component SettingCheck: CheckBox {
         required property string key
         property string tip
+        // Beside a form's fields, or under them.
+        Layout.leftMargin: parent && parent.columns === undefined ? settingsWindow.fieldIndent : 0
         checked: settingsWindow.values[key] ?? false
         onToggled: {
             settingsWindow.settings.setValue(key, checked);
@@ -169,14 +190,15 @@ ApplicationWindow {
         clip: true
         ColumnLayout {
             id: column
-            x: 12
-            width: settingsPage.availableWidth - 24
-            spacing: 12
+            x: Theme.margin + Theme.gap
+            width: settingsPage.availableWidth - 2 * (Theme.margin + Theme.gap)
+            spacing: Theme.gap + 4
             Label {
                 objectName: "bench-settings-page-title"
-                topPadding: 8
+                topPadding: Theme.margin
+                bottomPadding: Theme.gapSmall
                 text: settingsPage.heading
-                font.pointSize: Qt.application.font.pointSize * 1.3
+                font.pointSize: Qt.application.font.pointSize * 1.35
                 font.weight: Font.DemiBold
             }
         }
@@ -189,11 +211,22 @@ ApplicationWindow {
         property bool listening: false
         Layout.preferredWidth: 220
         text: listening ? qsTr("Press keys…") : (shown === "" ? qsTr("None") : shown)
+        background: Rectangle {
+            implicitHeight: Theme.controlHeight
+            radius: Theme.radius
+            color: keyField.listening ? Theme.alpha(keyField.palette.highlight, 0.12)
+                                      : keyField.palette.base
+            border.width: 1
+            border.color: keyField.listening || keyField.activeFocus ? keyField.palette.highlight
+                                                                    : Theme.border(keyField.palette)
+        }
         onClicked: {
             listening = true;
             forceActiveFocus();
         }
         onActiveFocusChanged: if (!activeFocus) listening = false
+        // While keys are awaited, Esc stops that rather than closing Settings.
+        Keys.onShortcutOverride: event => event.accepted = listening
         Keys.onPressed: event => {
             if (!listening)
                 return;
@@ -210,50 +243,47 @@ ApplicationWindow {
         }
     }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 8
+        spacing: 0
 
-        RowLayout {
-            Layout.fillWidth: true
+        // The pages, down a side bar a shade off the window.
+        Rectangle {
+            Layout.preferredWidth: 190
             Layout.fillHeight: true
-            spacing: 12
-
+            color: Theme.sunken(palette)
             Rectangle {
-                Layout.preferredWidth: 160
-                Layout.fillHeight: true
-                color: palette.base
-                radius: 4
-                ListView {
-                    id: pages
-                    objectName: "bench-settings-pages"
-                    anchors.fill: parent
-                    anchors.topMargin: 4
-                    clip: true
-                    model: settingsWindow.options.pages
-                    currentIndex: settingsWindow.page
-                    delegate: ItemDelegate {
-                        id: pageItem
-                        required property string modelData
-                        required property int index
-                        width: pages.width
-                        text: modelData
-                        font.bold: ListView.isCurrentItem
-                        highlighted: ListView.isCurrentItem
-                        onClicked: settingsWindow.page = index
-                        Rectangle {
-                            visible: pageItem.ListView.isCurrentItem
-                            x: 0
-                            y: 5
-                            width: 3
-                            height: parent.height - 10
-                            radius: 1.5
-                            color: palette.highlight
-                        }
-                    }
+                anchors.right: parent.right
+                width: 1
+                height: parent.height
+                color: Theme.hairline(palette)
+            }
+            ListView {
+                id: pages
+                objectName: "bench-settings-pages"
+                anchors.fill: parent
+                anchors.margins: Theme.gap
+                anchors.topMargin: Theme.margin
+                spacing: 2
+                clip: true
+                model: settingsWindow.options.pages
+                currentIndex: settingsWindow.page
+                delegate: ItemDelegate {
+                    id: pageItem
+                    required property string modelData
+                    required property int index
+                    width: pages.width
+                    text: modelData
+                    highlighted: ListView.isCurrentItem
+                    onClicked: settingsWindow.page = index
                 }
             }
+        }
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
 
             StackLayout {
                 objectName: "bench-settings-stack"
@@ -274,25 +304,28 @@ ApplicationWindow {
                             text: qsTr("Track-change notifications")
                             tip: qsTr("Show a notification when playback changes to another track.")
                         }
-                        Item {
-                            Layout.preferredWidth: 1
-                        }
+                        FieldLabel {}
                         SettingCheck {
                             objectName: "bench-settings-notifications-background"
                             key: "desktop/notifications-background-only"
                             text: qsTr("Only while the app is in the background")
                         }
-                        Button {
-                            objectName: "bench-settings-notification-test"
-                            Layout.alignment: Qt.AlignRight
-                            text: qsTr("Test notification")
-                            onClicked: settingsWindow.settings.testNotification()
-                        }
-                        Label {
-                            objectName: "bench-settings-notification-status"
+                        FieldLabel {}
+                        RowLayout {
                             Layout.fillWidth: true
-                            wrapMode: Text.WordWrap
-                            text: settingsWindow.state.notificationStatus ?? ""
+                            spacing: Theme.gap
+                            Button {
+                                objectName: "bench-settings-notification-test"
+                                text: qsTr("Test notification")
+                                onClicked: settingsWindow.settings.testNotification()
+                            }
+                            Label {
+                                objectName: "bench-settings-notification-status"
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                color: Theme.dim(palette)
+                                text: settingsWindow.state.notificationStatus ?? ""
+                            }
                         }
                         FieldLabel {
                             text: qsTr("Appearance:")
@@ -317,6 +350,7 @@ ApplicationWindow {
                 SettingsPage {
                     heading: settingsWindow.options.pages[1]
                     Note {
+                        intro: true
                         text: qsTr("The engine plays the music and keeps its queue: closing this window never interrupts it, and an engine that restarts restores its queue, paused.")
                     }
                     Form {
@@ -387,6 +421,7 @@ ApplicationWindow {
                         browser: Tk.localLibrary
                     }
                     Note {
+                        intro: true
                         visible: Tk.localLibrary === null
                         text: qsTr("Library folders are available from the running workspace.")
                     }
@@ -413,6 +448,7 @@ ApplicationWindow {
                 SettingsPage {
                     heading: settingsWindow.options.pages[3]
                     Note {
+                        intro: true
                         text: qsTr("melodyd plays the music and keeps the library. Trackknife starts this computer's, and it plays on after the window closes.")
                     }
                     Form {
@@ -488,6 +524,8 @@ ApplicationWindow {
                             Label {
                                 objectName: "bench-settings-engine-agent-command"
                                 Layout.fillWidth: true
+                                Layout.leftMargin: settingsWindow.fieldIndent
+                                color: Theme.dim(palette)
                                 wrapMode: Text.WordWrap
                                 textFormat: Text.PlainText
                                 text: settingsWindow.state.agentCommand ?? ""
@@ -501,10 +539,11 @@ ApplicationWindow {
                             anchors.fill: parent
                             Rectangle {
                                 Layout.fillWidth: true
+                                Layout.leftMargin: settingsWindow.fieldIndent
                                 Layout.preferredHeight: 110
                                 color: palette.base
-                                border.color: Shade.mix(palette.window, palette.windowText, 0.15)
-                                radius: 4
+                                border.color: Theme.hairline(palette)
+                                radius: Theme.radius
                                 ListView {
                                     id: enginesList
                                     objectName: "bench-settings-engines"
@@ -525,6 +564,7 @@ ApplicationWindow {
                                 }
                             }
                             RowLayout {
+                                Layout.leftMargin: settingsWindow.fieldIndent
                                 Button {
                                     objectName: "bench-settings-engine-add"
                                     text: qsTr("Add")
@@ -641,9 +681,7 @@ ApplicationWindow {
                                     ToolTip.delay: 800
                                     ToolTip.text: qsTr("What it streams to this computer's speakers when its music is not reachable here. Automatic: the rates below, by whether it is on this network or reached through a VPN or a router.")
                                 }
-                                Item {
-                                    Layout.preferredWidth: 1
-                                }
+                                FieldLabel {}
                                 SettingCheck {
                                     id: playForRemote
                                     objectName: "bench-settings-play-for-remote"
@@ -700,14 +738,21 @@ ApplicationWindow {
 
                         ColumnLayout {
                             spacing: 12
-                            ComboBox {
-                                objectName: "bench-output-layout-list"
+                            RowLayout {
                                 Layout.fillWidth: true
-                                model: settingsWindow.profiles.layouts ?? []
-                                currentIndex: settingsWindow.profiles.layoutRow ?? -1
-                                displayText: currentIndex < 0 ? qsTr("New naming layout") : currentText
-                                onActivated: index => settingsWindow.settings.selectLayout(index)
-                                Accessible.name: qsTr("Naming layout")
+                                spacing: Theme.gap + 4
+                                FieldLabel {
+                                    text: qsTr("Layout:")
+                                }
+                                ComboBox {
+                                    objectName: "bench-output-layout-list"
+                                    Layout.fillWidth: true
+                                    model: settingsWindow.profiles.layouts ?? []
+                                    currentIndex: settingsWindow.profiles.layoutRow ?? -1
+                                    displayText: currentIndex < 0 ? qsTr("New naming layout") : currentText
+                                    onActivated: index => settingsWindow.settings.selectLayout(index)
+                                    Accessible.name: qsTr("Naming layout")
+                                }
                             }
                             Form {
                                 FieldLabel {
@@ -759,6 +804,8 @@ ApplicationWindow {
                                 }
                             }
                             RowLayout {
+                                Layout.leftMargin: settingsWindow.fieldIndent
+                                spacing: Theme.gap
                                 Button {
                                     objectName: "bench-output-layout-new"
                                     text: qsTr("New")
@@ -789,8 +836,9 @@ ApplicationWindow {
                             // engine's machine; which one is always in sight.
                             RowLayout {
                                 Layout.fillWidth: true
-                                Label {
-                                    text: qsTr("Move destinations on")
+                                spacing: Theme.gap + 4
+                                FieldLabel {
+                                    text: qsTr("Destinations on:")
                                 }
                                 ComboBox {
                                     objectName: "bench-destination-engine"
@@ -811,14 +859,21 @@ ApplicationWindow {
                                     ToolTip.text: qsTr("Save this computer's destinations that lie under this engine's music folder here too, as the engine names them")
                                 }
                             }
-                            ComboBox {
-                                objectName: "bench-destination-list"
+                            RowLayout {
                                 Layout.fillWidth: true
-                                model: settingsWindow.profiles.destinations ?? []
-                                currentIndex: settingsWindow.profiles.destinationRow ?? -1
-                                displayText: currentIndex < 0 ? qsTr("New move destination") : currentText
-                                onActivated: index => settingsWindow.settings.selectDestination(index)
-                                Accessible.name: qsTr("Move destination")
+                                spacing: Theme.gap + 4
+                                FieldLabel {
+                                    text: qsTr("Destination:")
+                                }
+                                ComboBox {
+                                    objectName: "bench-destination-list"
+                                    Layout.fillWidth: true
+                                    model: settingsWindow.profiles.destinations ?? []
+                                    currentIndex: settingsWindow.profiles.destinationRow ?? -1
+                                    displayText: currentIndex < 0 ? qsTr("New move destination") : currentText
+                                    onActivated: index => settingsWindow.settings.selectDestination(index)
+                                    Accessible.name: qsTr("Move destination")
+                                }
                             }
                             Form {
                                 FieldLabel {
@@ -859,6 +914,8 @@ ApplicationWindow {
                                 }
                             }
                             RowLayout {
+                                Layout.leftMargin: settingsWindow.fieldIndent
+                                spacing: Theme.gap
                                 Button {
                                     objectName: "bench-destination-new"
                                     text: qsTr("New")
@@ -885,6 +942,8 @@ ApplicationWindow {
                     }
                     Label {
                         objectName: "bench-output-profiles-status"
+                        Layout.leftMargin: settingsWindow.fieldIndent
+                        color: Theme.dim(palette)
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
                         text: settingsWindow.profiles.status ?? ""
@@ -978,6 +1037,7 @@ ApplicationWindow {
                 SettingsPage {
                     heading: settingsWindow.options.pages[7]
                     Note {
+                        intro: true
                         text: qsTr("MusicBrainz text search works without an account or API key. Lookups start only when you request identification.")
                     }
                     Form {
@@ -1031,6 +1091,7 @@ ApplicationWindow {
                     objectName: "lastfm-settings"
                     heading: settingsWindow.options.pages[8]
                     Note {
+                        intro: true
                         text: qsTr("Sign in here once. Hand the account to an engine below and it scrobbles what it plays itself, with Trackknife closed; until then, playback is scrobbled while Trackknife is open. Account actions take effect immediately.")
                     }
                     ColumnLayout {
@@ -1072,6 +1133,7 @@ ApplicationWindow {
                         }
                         CheckBox {
                             objectName: "lastfm-reuse-key"
+                            Layout.leftMargin: settingsWindow.fieldIndent
                             text: qsTr("Use this API key for dynamic playlists too")
                             checked: settingsWindow.lastFm.reuseKey ?? true
                             onToggled: {
@@ -1082,10 +1144,14 @@ ApplicationWindow {
                     }
                     Label {
                         Layout.fillWidth: true
+                        Layout.leftMargin: settingsWindow.fieldIndent
                         wrapMode: Text.WordWrap
+                        color: Theme.dim(palette)
                         text: qsTr("Credentials are saved privately on this computer.")
                     }
                     RowLayout {
+                        Layout.leftMargin: settingsWindow.fieldIndent
+                        spacing: Theme.gap
                         Button {
                             objectName: "lastfm-authorize"
                             text: settingsWindow.lastFm.connectText ?? ""
@@ -1105,6 +1171,7 @@ ApplicationWindow {
                     }
                     CheckBox {
                         objectName: "lastfm-enabled"
+                        Layout.leftMargin: settingsWindow.fieldIndent
                         text: qsTr("Scrobble playback to Last.fm")
                         enabled: settingsWindow.lastFm.connected ?? false
                         checked: settingsWindow.lastFm.scrobbling ?? false
@@ -1116,6 +1183,7 @@ ApplicationWindow {
                     Label {
                         objectName: "lastfm-status"
                         Layout.fillWidth: true
+                        Layout.leftMargin: settingsWindow.fieldIndent
                         wrapMode: Text.WordWrap
                         text: settingsWindow.lastFm.status ?? ""
                     }
@@ -1135,7 +1203,8 @@ ApplicationWindow {
                                     required property var modelData
                                     required property int index
                                     Layout.fillWidth: true
-                                    Label {
+                                    spacing: Theme.gap + 4
+                                    FieldLabel {
                                         text: engineRow.modelData.name + ":"
                                     }
                                     Label {
@@ -1153,6 +1222,7 @@ ApplicationWindow {
                                 }
                             }
                             RowLayout {
+                                Layout.leftMargin: settingsWindow.fieldIndent
                                 Button {
                                     objectName: "lastfm-engine-another"
                                     text: qsTr("Another engine…")
@@ -1172,6 +1242,7 @@ ApplicationWindow {
                 SettingsPage {
                     heading: settingsWindow.options.pages[9]
                     Note {
+                        intro: true
                         text: qsTr("Click a shortcut and press the new keys. Clear it to disable it. Changes take effect on Save. Shortcuts operate within Trackknife, not across the desktop.")
                     }
                     GridLayout {
@@ -1230,30 +1301,44 @@ ApplicationWindow {
                     }
                 }
             }
-        }
 
-        Note {
-            objectName: "bench-settings-save-note"
-            visible: text !== ""
-            text: settingsWindow.settings.saveNote(settingsWindow.page)
-        }
-
-        DialogButtonBox {
-            objectName: "bench-settings-buttons"
-            Layout.fillWidth: true
-            standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
-            onAccepted: {
-                const refused = settingsWindow.settings.save();
-                if (refused < 0) {
-                    settingsWindow.close();
-                    return;
-                }
-                // ADR-0223: sharing without a password is not a thing to save.
-                settingsWindow.page = refused;
-                if (refused === settingsWindow.enginePage)
-                    enginePassword.forceActiveFocus();
+            // What Save does, and does not, beside the buttons.
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: Theme.hairline(palette)
             }
-            onRejected: settingsWindow.close()
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: Theme.margin
+                Layout.topMargin: Theme.gap + 4
+                Layout.bottomMargin: Theme.gap + 4
+                spacing: Theme.gapLarge
+                Label {
+                    objectName: "bench-settings-save-note"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.dim(palette)
+                    text: settingsWindow.settings.saveNote(settingsWindow.page)
+                }
+                DialogButtonBox {
+                    objectName: "bench-settings-buttons"
+                    padding: 0
+                    standardButtons: DialogButtonBox.Save | DialogButtonBox.Cancel
+                    onAccepted: {
+                        const refused = settingsWindow.settings.save();
+                        if (refused < 0) {
+                            settingsWindow.close();
+                            return;
+                        }
+                        // ADR-0223: sharing without a password is not a thing to save.
+                        settingsWindow.page = refused;
+                        if (refused === settingsWindow.enginePage)
+                            enginePassword.forceActiveFocus();
+                    }
+                    onRejected: settingsWindow.close()
+                }
+            }
         }
     }
 

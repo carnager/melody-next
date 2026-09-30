@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Adds a metadata field to the selected files, suggesting names as they are
 // typed: the fields already there, those added lately, then the common ones.
@@ -53,7 +54,7 @@ Dialog {
             Layout.preferredHeight: Math.min(12, suggestions.count) * 26 + 2
             visible: suggestions.count > 0
             color: palette.base
-            border.color: Shade.mix(palette.window, palette.windowText, 0.15)
+            border.color: Theme.hairline(palette)
             radius: 4
             ListView {
                 id: suggestions

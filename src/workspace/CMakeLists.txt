@@ -35,6 +35,8 @@ qt_add_library(
     sources.hpp
     startup.cpp
     startup.hpp
+    tagger_session.cpp
+    tagger_session.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp
     ../bench/artwork_services.hpp

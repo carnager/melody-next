@@ -820,6 +820,7 @@ ApplicationWindow {
                         SplitView.minimumWidth: 160
                         SplitView.minimumHeight: 120
                         onNotYet: what => window.notYet(what)
+                        onNameRequested: (title, current, then) => nameDialog.ask(title, current, then)
                         Rectangle {
                             anchors.fill: parent
                             visible: panelsHost.panels.editing ?? false

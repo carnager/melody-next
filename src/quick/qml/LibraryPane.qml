@@ -13,6 +13,8 @@ Item {
     id: pane
 
     signal foldersRequested()
+    // A name to ask for, and what to do with it once given.
+    signal nameRequested(string title, string current, var then)
 
     readonly property var browser: Tk.library
     readonly property color ground: palette.window
@@ -347,7 +349,7 @@ Item {
                             anchors.fill: parent
                             visible: !node.album
                             sourceSize: Qt.size(node.iconExtent, node.iconExtent)
-                            source: "image://icon/audio-x-generic"
+                            source: "image://icon/audio-x-generic|sp:SP_FileIcon"
                                     + (node.available ? "" : "?disabled")
                         }
                     }
@@ -637,7 +639,20 @@ Item {
         Menu {
             objectName: "local-library-add-to-list"
             title: qsTr("Add to list")
-            enabled: libraryMenu.targets.length > 0
+            // A new list, named as it is made -- after the album or artist
+            // chosen, unless renamed.
+            MenuItem {
+                objectName: "action-local-library-add-to-new-list"
+                text: qsTr("New list…")
+                onTriggered: {
+                    const indexes = pane.selectedIndexes();
+                    pane.nameRequested(qsTr("New list"), pane.browser.newListName(indexes),
+                                       name => pane.browser.addToNewList(indexes, name));
+                }
+            }
+            MenuSeparator {
+                visible: libraryMenu.targets.length > 0
+            }
             Repeater {
                 model: libraryMenu.targets
                 delegate: MenuItem {

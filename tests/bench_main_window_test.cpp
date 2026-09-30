@@ -1981,6 +1981,17 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     QCOMPARE(current->model->rowCount(), before);
     QTRY_VERIFY(!window.discovery_running_);
 
+    // Or into a new list, called what it was named.
+    const auto tabs_before = window.list_tabs_.size();
+    emit window.localLibrary()->browser().newListRequested(page->entries,
+                                                           QStringLiteral("Picked"));
+    QTRY_COMPARE(window.list_tabs_.size(), tabs_before + 1U);
+    auto* picked = window.list_tabs_.back().get();
+    QCOMPARE(picked->document.name, std::string{"Picked"});
+    QTRY_COMPARE(picked->model->rowCount(), 1);
+    QCOMPARE(chosen->model->rowCount(), 1);
+    QTRY_VERIFY(!window.discovery_running_);
+
     // The folder, dragged from the folder browser onto the list on screen.
     auto* folder_model = window.findChild<ui::LocalFolderTreeModel*>();
     QVERIFY(folder_model != nullptr);

@@ -766,8 +766,9 @@ class Workspace final : public QObject {
     // A library's requests handled: its entries into lists and Up Next,
     // searches kept as lists, ratings read again when it stores one.
     void attachLibrary(LibraryBrowser* browser);
+    // `name`, for a new list: what it is called, else after its entries.
     void libraryAction(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
-                       LocalLibraryAction action);
+                       LocalLibraryAction action, const QString& name = {});
     void libraryAddToList(LibraryBrowser& browser, std::vector<persistence::LibraryEntry> entries,
                           const QString& id);
     void librarySearchCommitted(LibraryBrowser& browser, const QString& query,

@@ -7,7 +7,7 @@ import Trackknife.Quick
 // (ADR-0228), then the chosen one's sound devices, then a refresh. Its
 // contents are the workspace's (Workspace::outputMenu).
 Menu {
-    id: menu
+    id: outputsMenu
 
     // Entries are taken out of the menu, not removed: removing destroys an
     // item, and the Instantiator destroys its own again.
@@ -19,8 +19,8 @@ Menu {
                            : modelData.kind === "heading" ? heading : choice
             onLoaded: item.entry = modelData
         }
-        onObjectAdded: (index, object) => menu.insertItem(index, object.item)
-        onObjectRemoved: (index, object) => menu.takeItem(index)
+        onObjectAdded: (index, object) => outputsMenu.insertItem(index, object.item)
+        onObjectRemoved: (index, object) => outputsMenu.takeItem(index)
     }
     MenuSeparator {}
     MenuItem {

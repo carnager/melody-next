@@ -19,7 +19,6 @@ namespace trackknife::ui {
 void paintRatingOverlay(QPainter* painter, const QRect& cover, unsigned rating);
 
 // The accessible menu label for a rating ("Unrate", "1 star", … "5 stars").
-[[nodiscard]] QString ratingMenuLabel(unsigned rating);
 
 // One Rate submenu row painted as a full five-star strip: filled yellow
 // stars up to the value, muted outlines for the rest, plus the shared menu

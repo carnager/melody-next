@@ -29,6 +29,16 @@ ApplicationWindow {
     function notYet(what) {
         status.showMessage(what + " is not in the Qt Quick window yet", 3000);
     }
+    // QA hook (--screenshot with --open): a menu or dialog opened by name,
+    // the first row selected, for a picture of it.
+    function openForScreenshot(name) {
+        Tk.rows.press(0, 0);
+        const popups = {track: trackMenu, header: headerMenu, tab: tabMenu};
+        if (popups[name])
+            popups[name].popup(window.width / 2, window.height / 3);
+        else if (name === "editbar")
+            editBar.openSort();
+    }
     function closeTab(index) {
         const tab = Tk.tabAt(index);
         if (tab.dirty === true && tab.pinned !== true) {
@@ -143,31 +153,26 @@ ApplicationWindow {
                 onTriggered: Tk.redoListEdit()
             }
             MenuSeparator {}
-            Menu {
-                title: qsTr("Sort list")
-                enabled: Tk.history.editable ?? false
-                Action { text: qsTr("Title"); onTriggered: window.notYet("Sorting") }
-                Action { text: qsTr("Artist / album / track"); onTriggered: window.notYet("Sorting") }
-                Action { text: qsTr("Album / track"); onTriggered: window.notYet("Sorting") }
-                Action { text: qsTr("Track number"); onTriggered: window.notYet("Sorting") }
-                Action { text: qsTr("Path"); onTriggered: window.notYet("Sorting") }
-                MenuSeparator {}
-                Action { text: qsTr("Custom expression…"); onTriggered: window.notYet("Sorting") }
+            SortMenu {
+                onCustomRequested: editBar.openSort()
             }
             Action {
+                objectName: "action-reverse-list"
                 text: qsTr("Reverse list")
                 enabled: Tk.history.editable ?? false
-                onTriggered: window.notYet("Reversing")
+                onTriggered: Tk.edit.reverse()
             }
             Action {
+                objectName: "action-shuffle-albums"
                 text: qsTr("Shuffle albums")
                 enabled: Tk.history.editable ?? false
-                onTriggered: window.notYet("Shuffling albums")
+                onTriggered: Tk.edit.shuffleAlbums()
             }
             Action {
+                objectName: "action-deduplicate-list"
                 text: qsTr("Remove duplicate entries")
                 enabled: Tk.history.editable ?? false
-                onTriggered: window.notYet("Removing duplicates")
+                onTriggered: Tk.edit.removeDuplicates()
             }
             MenuSeparator {}
             Action {
@@ -499,6 +504,10 @@ ApplicationWindow {
                 onContextMenuRequested: (row, position) => trackMenu.popup()
                 onHeaderMenuRequested: position => headerMenu.popup()
             }
+            EditBar {
+                id: editBar
+                Layout.fillWidth: true
+            }
         }
 
         UpNextPanel {
@@ -523,36 +532,12 @@ ApplicationWindow {
         MenuItem { action: closeAction }
     }
 
-    Menu {
+    TrackContextMenu {
         id: trackMenu
-        MenuItem {
-            text: "Play"
-            onTriggered: Tk.activateRow(Tk.rows.currentRow)
-        }
-        MenuItem {
-            text: qsTr("Queue next")
-            onTriggered: Tk.queueSelection(true)
-        }
-        MenuItem {
-            text: qsTr("Queue at end")
-            onTriggered: Tk.queueSelection(false)
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: "Remove selected"
-            onTriggered: Tk.removeSelectedRows()
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: Tk.history.undoText ?? "Undo list edit"
-            enabled: Tk.history.canUndo ?? false
-            onTriggered: Tk.undoListEdit()
-        }
-        MenuItem {
-            text: Tk.history.redoText ?? "Redo list edit"
-            enabled: Tk.history.canRedo ?? false
-            onTriggered: Tk.redoListEdit()
-        }
+        onNotYet: what => window.notYet(what)
+        onCustomSortRequested: editBar.openSort()
+        onNewTabRequested: move => nameDialog.ask("New tab", "Selection",
+                                                  name => Tk.transferSelectionToNewTab(name, move))
     }
 
     TrackLayoutMenu {

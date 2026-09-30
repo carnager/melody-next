@@ -38,6 +38,10 @@ qt_add_qml_module(
     qml/ReplayGainMenu.qml
     qml/UpNextPanel.qml
     qml/TrackLayoutMenu.qml
+    qml/TrackContextMenu.qml
+    qml/RatingMenuItem.qml
+    qml/SortMenu.qml
+    qml/EditBar.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

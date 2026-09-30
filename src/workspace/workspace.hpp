@@ -345,6 +345,11 @@ class Workspace final : public QObject {
     bool transferRows(ListTab* source_tab, LocalListModel* source_model, const EngineKey& from,
                       bool dynamic, std::vector<int> rows, const QString& target_id, bool move,
                       int insertion_row);
+    // The rows into a new list named `name`, of the same engine; the list,
+    // or null when nothing went.
+    ListTab* transferRowsToNewList(ListTab* source_tab, LocalListModel* source_model,
+                                   const EngineKey& from, bool dynamic, std::vector<int> rows,
+                                   bool move, const QString& name);
     [[nodiscard]] bool canReplayCrossTabMove(bool undo);
     // A list's last edit undone, or redone -- a move between two lists as
     // one step. False when there was none.

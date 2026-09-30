@@ -163,19 +163,4 @@ QWidget* RatingMenuAction::createWidget(QWidget* parent) {
     return new RatingMenuItem{this, parent};
 }
 
-QString ratingMenuLabel(const unsigned rating) {
-    if (rating == 0U) {
-        return QStringLiteral("Unrate");
-    }
-    if (rating > 10U) {
-        return {};
-    }
-    const auto half = rating % 2U != 0U;
-    const auto stars = rating / 2U;
-    if (half) {
-        return stars == 0U ? QStringLiteral("½ star") : QStringLiteral("%1½ stars").arg(stars);
-    }
-    return stars == 1U ? QStringLiteral("1 star") : QStringLiteral("%1 stars").arg(stars);
-}
-
 } // namespace trackknife::ui

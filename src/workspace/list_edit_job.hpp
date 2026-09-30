@@ -25,6 +25,11 @@ class LocalListModel;
 // the list while it is planned stops it. Both windows' edit bars draw it.
 class ListEditJob final : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool active READ active NOTIFY changed)
+    Q_PROPERTY(bool sorting READ sorting NOTIFY changed)
+    Q_PROPERTY(QString status READ status NOTIFY changed)
+    Q_PROPERTY(QString expression READ expression NOTIFY changed)
+    Q_PROPERTY(bool descending READ descending NOTIFY changed)
 
   public:
     explicit ListEditJob(QObject* parent = nullptr);
@@ -34,13 +39,23 @@ class ListEditJob final : public QObject {
     void setModel(LocalListModel* model);
     [[nodiscard]] LocalListModel* model() const { return model_; }
     void start(lists::EditRequest request);
-    void cancel();
+    Q_INVOKABLE void cancel();
 
     [[nodiscard]] bool active() const noexcept { return active_; }
     // Whether the last request was a sort: the bar shows its expression.
     [[nodiscard]] bool sorting() const noexcept { return request_.kind == lists::EditKind::sort; }
     [[nodiscard]] const lists::EditRequest& request() const noexcept { return request_; }
     [[nodiscard]] QString status() const { return status_; }
+    [[nodiscard]] QString expression() const {
+        return QString::fromStdString(request_.expression);
+    }
+    [[nodiscard]] bool descending() const { return request_.descending; }
+    // What the Edit menu offers: sorting by an expression (Ascending or
+    // Descending), reversing, shuffling albums, removing duplicates.
+    Q_INVOKABLE void sort(const QString& expression, bool descending);
+    Q_INVOKABLE void reverse();
+    Q_INVOKABLE void shuffleAlbums();
+    Q_INVOKABLE void removeDuplicates();
 
     [[nodiscard]] static QString label(lists::EditKind kind);
 

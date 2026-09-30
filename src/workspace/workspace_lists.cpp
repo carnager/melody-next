@@ -712,4 +712,31 @@ void Workspace::setTrackViewLayout(ListTab& tab, ui::TrackViewLayout layout) {
     schedulePersist();
 }
 
+Workspace::ListTab* Workspace::transferRowsToNewList(ListTab* source_tab,
+                                                    LocalListModel* source_model,
+                                                    const EngineKey& from, const bool dynamic,
+                                                    std::vector<int> rows, const bool move,
+                                                    const QString& name) {
+    if (source_model == nullptr || (!dynamic && source_tab == nullptr) || (dynamic && move) ||
+        rows.empty() || std::ranges::any_of(rows, [source_model](const int row) {
+            return row < 0 || row >= source_model->rowCount();
+        })) {
+        return nullptr;
+    }
+    // The new list is the same engine's as the rows (ADR-0227).
+    auto* destination = addList(persistence::ListDocument{.id = core::StableId::random(),
+                                                          .kind = persistence::ListKind::scratch,
+                                                          .name = utf8Bytes(name),
+                                                          .pinned = false,
+                                                          .dirty = false,
+                                                          .items = {},
+                                                          .engine = from.stored()},
+                                false);
+    const auto id = document_text(destination->document.id);
+    if (!transferRows(source_tab, source_model, from, dynamic, std::move(rows), id, move, -1)) {
+        return nullptr;
+    }
+    return tabForDocument(id);
+}
+
 } // namespace trackknife::bench

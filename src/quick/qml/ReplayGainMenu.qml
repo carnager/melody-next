@@ -6,7 +6,7 @@ import Trackknife.Quick
 // ReplayGain: Off, Track, Album or Automatic; then the preamps. The same
 // menu in the Playback menu and on the status bar.
 Menu {
-    id: menu
+    id: gainMenu
     title: "ReplayGain"
 
     signal preampRequested()
@@ -22,12 +22,12 @@ Menu {
             enabled: Tk.modes.enabled ?? false
             onTriggered: Tk.setReplayGain(modelData.value)
         }
-        onObjectAdded: (index, object) => menu.insertItem(index, object)
-        onObjectRemoved: (index, object) => menu.takeItem(index)
+        onObjectAdded: (index, object) => gainMenu.insertItem(index, object)
+        onObjectRemoved: (index, object) => gainMenu.takeItem(index)
     }
     MenuSeparator {}
     MenuItem {
         text: "Preamp…"
-        onTriggered: menu.preampRequested()
+        onTriggered: gainMenu.preampRequested()
     }
 }

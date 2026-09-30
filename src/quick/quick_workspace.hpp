@@ -4,6 +4,7 @@
 
 #include "quick/list_tabs_model.hpp"
 #include "quick/track_rows_model.hpp"
+#include "workspace/list_edit_job.hpp"
 #include "workspace/workspace.hpp"
 #include "workspace/workspace_view.hpp"
 
@@ -40,6 +41,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(int currentTab READ currentTab WRITE setCurrentTab NOTIFY currentTabChanged)
     Q_PROPERTY(QAbstractItemModel* listModel READ listModel NOTIFY currentTabChanged)
     Q_PROPERTY(trackknife::quick::TrackRowsModel* rows READ rows CONSTANT)
+    Q_PROPERTY(trackknife::bench::ListEditJob* edit READ edit CONSTANT)
+    Q_PROPERTY(QString lastFmState READ lastFmState NOTIFY lastFmStateChanged)
     Q_PROPERTY(QVariantMap list READ list NOTIFY listChanged)
     Q_PROPERTY(QVariantMap selection READ selection NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap transport READ transport NOTIFY transportChanged)
@@ -73,6 +76,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void setCurrentTab(int index);
     [[nodiscard]] QAbstractItemModel* listModel() const;
     [[nodiscard]] TrackRowsModel* rows() { return &rows_; }
+    [[nodiscard]] bench::ListEditJob* edit() { return &edit_job_; }
+    [[nodiscard]] QString lastFmState() const { return lastfm_state_; }
     [[nodiscard]] QVariantMap list() const { return list_; }
     [[nodiscard]] QVariantMap selection() const { return selection_; }
     [[nodiscard]] QVariantMap transport() const { return transport_; }
@@ -100,6 +105,21 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void undoListEdit();
     Q_INVOKABLE void redoListEdit();
     Q_INVOKABLE void jumpToPlaying();
+    // The selection into another list, or a new one named `name`.
+    Q_INVOKABLE void transferSelection(const QString& target_id, bool move);
+    Q_INVOKABLE void transferSelectionToNewTab(const QString& name, bool move);
+    // The other lists of the list shown, by id and name, for "Copy to list".
+    Q_INVOKABLE QVariantList otherLists() const;
+    // What the Rate menus offer for the selection: whether each can be
+    // used, and the rating all of it shares (-1 for none).
+    Q_INVOKABLE QVariantMap ratingState() const;
+    Q_INVOKABLE void rateSelection(bool album, int rating);
+    Q_INVOKABLE static QString ratingLabel(int rating);
+    // Last.fm, for the one track selected: whether it is loved (asked now,
+    // told in lastFmState), and loving it or not.
+    Q_INVOKABLE QVariantMap lastFmTrack() const;
+    Q_INVOKABLE void askLastFm();
+    Q_INVOKABLE void loveOnLastFm(bool love);
     // The track view's columns: which, how wide, in what order.
     Q_INVOKABLE QVariantList columns() const;
     Q_INVOKABLE void setColumnWidth(const QString& id, int width);
@@ -209,6 +229,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void quitRequested();
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
+    void lastFmStateChanged();
 
   private:
     void buildDesktopServices();
@@ -224,6 +245,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // a closed tab (32 at most).
     std::vector<ListTab*> visited_;
     TrackRowsModel rows_{this};
+    bench::ListEditJob edit_job_{this};
+    QString lastfm_state_;
+    QMetaObject::Connection lastfm_answer_;
     QVariantMap list_;
     QVariantMap selection_;
     QVariantMap transport_;

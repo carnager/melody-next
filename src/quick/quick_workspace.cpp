@@ -6,7 +6,10 @@
 #include "bench/desktop_notifier.hpp"
 #include "bench/mpris_service.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
+
+#include <QJsonObject>
 
 #include <QCoreApplication>
 #include <QFile>
@@ -30,6 +33,16 @@ QuickWorkspace* instance_ = nullptr;
 QuickWorkspace::QuickWorkspace(QObject* parent) : QObject(parent) {
     workspace_.setView(this);
     connect(&rows_, &TrackRowsModel::selectionChanged, this, &QuickWorkspace::selectionEdited);
+    connect(&edit_job_, &bench::ListEditJob::edited, this, [this](bench::LocalListModel* model) {
+        for (const auto& tab : workspace_.list_tabs_) {
+            if (tab->model == model) {
+                workspace_.markTabDirty(*tab);
+                workspace_.syncArtwork(*tab);
+                break;
+            }
+        }
+        refreshSelectionStatus();
+    });
     transport_timer_.setInterval(transport_refresh_ms);
     connect(&transport_timer_, &QTimer::timeout, this, &QuickWorkspace::refreshTransport);
 }
@@ -124,6 +137,7 @@ void QuickWorkspace::setCurrentTab(const int index) {
         visited_.erase(visited_.begin());
     }
     rows_.setSource(tab->model, tab->view_layout);
+    edit_job_.setModel(tab->model);
     emit currentTabChanged();
     refreshList();
     refreshSelectionStatus();
@@ -205,8 +219,10 @@ void QuickWorkspace::closeTab(const int index) {
     }
     if (auto* shown = currentTabPointer(); shown != nullptr) {
         rows_.setSource(shown->model, shown->view_layout);
+        edit_job_.setModel(shown->model);
     } else {
         rows_.setSource(nullptr, {});
+        edit_job_.setModel(nullptr);
     }
     emit currentTabChanged();
     refreshList();
@@ -263,6 +279,155 @@ void QuickWorkspace::refreshHistory() {
 }
 
 void QuickWorkspace::jumpToPlaying() { refreshPlaybackCursor(true); }
+
+void QuickWorkspace::transferSelection(const QString& target_id, const bool move) {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr || rows_.selectedCount() == 0) {
+        return;
+    }
+    workspace_.transferRows(tab, tab->model, bench::EngineKey::of(tab->document), false,
+                            rows_.selectedRows(), target_id, move, -1);
+}
+
+void QuickWorkspace::transferSelectionToNewTab(const QString& name, const bool move) {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr || rows_.selectedCount() == 0 || name.trimmed().isEmpty()) {
+        return;
+    }
+    if (auto* destination = workspace_.transferRowsToNewList(
+            tab, tab->model, bench::EngineKey::of(tab->document), false, rows_.selectedRows(),
+            move, name.trimmed());
+        destination != nullptr) {
+        showList(*destination);
+    }
+}
+
+QVariantList QuickWorkspace::otherLists() const {
+    QVariantList lists;
+    auto* shown = currentTabPointer();
+    for (const auto& tab : workspace_.list_tabs_) {
+        if (tab.get() == shown) {
+            continue;
+        }
+        lists.push_back(QVariantMap{{QStringLiteral("id"), bench::document_text(tab->document.id)},
+                                    {QStringLiteral("name"),
+                                     bench::displayText(tab->document.name)}});
+    }
+    return lists;
+}
+
+QVariantMap QuickWorkspace::ratingState() const {
+    auto* tab = currentTabPointer();
+    QVariantMap state{{QStringLiteral("canRate"), false},
+                      {QStringLiteral("canRateAlbum"), false},
+                      {QStringLiteral("rating"), -1},
+                      {QStringLiteral("albumRating"), -1}};
+    if (tab == nullptr) {
+        return state;
+    }
+    const auto& rows = tab->model->rows();
+    std::optional<unsigned> rating;
+    std::optional<unsigned> album_rating;
+    bool ratings_match = true;
+    bool album_ratings_match = true;
+    bool tracks = false;
+    bool albums = false;
+    for (const auto row : rows_.selectedRows()) {
+        const auto& track = rows[static_cast<std::size_t>(row)];
+        if (!rating) {
+            rating = track.rating;
+        } else if (*rating != track.rating) {
+            ratings_match = false;
+        }
+        if (!album_rating) {
+            album_rating = track.album_rating;
+        } else if (*album_rating != track.album_rating) {
+            album_ratings_match = false;
+        }
+        tracks = tracks || !track.rating_hash.empty();
+        albums = albums || !track.album_rating_hash.empty();
+    }
+    const auto ready = workspace_.canRate(bench::EngineKey::of(tab->document));
+    state.insert(QStringLiteral("canRate"), ready && tracks);
+    state.insert(QStringLiteral("canRateAlbum"), ready && albums);
+    state.insert(QStringLiteral("rating"),
+                 rating && ratings_match ? static_cast<int>(*rating) : -1);
+    state.insert(QStringLiteral("albumRating"),
+                 album_rating && album_ratings_match ? static_cast<int>(*album_rating) : -1);
+    return state;
+}
+
+void QuickWorkspace::rateSelection(const bool album, const int rating) {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr) {
+        return;
+    }
+    QStringList hashes;
+    for (const auto row : rows_.selectedRows()) {
+        const auto& track = tab->model->rows()[static_cast<std::size_t>(row)];
+        const auto hash = QString::fromStdString(album ? track.album_rating_hash : track.rating_hash);
+        if (!hash.isEmpty() && !hashes.contains(hash)) {
+            hashes.push_back(hash);
+        }
+    }
+    workspace_.rate(bench::EngineKey::of(tab->document), hashes, album,
+                    static_cast<unsigned>(std::clamp(rating, 0, 10)));
+}
+
+QString QuickWorkspace::ratingLabel(const int rating) {
+    return ui::ratingMenuLabel(static_cast<unsigned>(std::clamp(rating, 0, 10)));
+}
+
+QVariantMap QuickWorkspace::lastFmTrack() const {
+    auto* tab = currentTabPointer();
+    const auto selected = rows_.selectedRows();
+    if (tab == nullptr || selected.size() != 1U || workspace_.lastfm_ == nullptr) {
+        return {};
+    }
+    const auto& track = tab->model->rows()[static_cast<std::size_t>(selected.front())];
+    return {{QStringLiteral("artist"), QString::fromStdString(track.artist)},
+            {QStringLiteral("title"), QString::fromStdString(track.title)}};
+}
+
+void QuickWorkspace::askLastFm() {
+    const auto track = lastFmTrack();
+    const auto artist = track.value(QStringLiteral("artist")).toString();
+    const auto title = track.value(QStringLiteral("title")).toString();
+    lastfm_state_ = QStringLiteral("Checking loved state…");
+    emit lastFmStateChanged();
+    if (artist.isEmpty() || title.isEmpty()) {
+        return;
+    }
+    // One answer is waited for at a time; the menu asks again when shown.
+    disconnect(lastfm_answer_);
+    lastfm_answer_ = connect(
+        workspace_.lastfm_, &bench::LastFmService::completed, this,
+        [this, artist, title](const QString& op, const QJsonObject& state, const QString& error) {
+            if (op != QStringLiteral("info")) {
+                return;
+            }
+            if (!error.isEmpty()) {
+                lastfm_state_ = error;
+            } else if (state.value(QStringLiteral("artist")).toString() == artist &&
+                       state.value(QStringLiteral("title")).toString() == title) {
+                lastfm_state_ = state.value(QStringLiteral("loved")).toBool()
+                                    ? QStringLiteral("♥ Loved on Last.fm")
+                                    : QStringLiteral("Not loved on Last.fm");
+            }
+            emit lastFmStateChanged();
+        });
+    workspace_.lastfm_->execute(QStringLiteral("info"), {artist, title});
+}
+
+void QuickWorkspace::loveOnLastFm(const bool love) {
+    const auto track = lastFmTrack();
+    if (track.isEmpty() || workspace_.lastfm_ == nullptr) {
+        return;
+    }
+    workspace_.lastfm_->execute(love ? QStringLiteral("love") : QStringLiteral("unlove"),
+                                {track.value(QStringLiteral("artist")).toString(),
+                                 track.value(QStringLiteral("title")).toString()});
+}
 
 QVariantList QuickWorkspace::columns() const {
     QVariantList columns;

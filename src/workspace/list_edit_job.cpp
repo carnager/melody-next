@@ -5,6 +5,7 @@
 #include "bench/local_list_model.hpp"
 
 #include <QElapsedTimer>
+#include <QRandomGenerator>
 #include <QtConcurrentRun>
 
 namespace trackknife::bench {
@@ -55,6 +56,24 @@ QString ListEditJob::label(const lists::EditKind kind) {
         return tr("Remove duplicate entries");
     }
     return {};
+}
+
+void ListEditJob::sort(const QString& expression, const bool descending) {
+    start({.kind = lists::EditKind::sort,
+           .expression = expression.toStdString(),
+           .descending = descending});
+}
+
+void ListEditJob::reverse() { start({.kind = lists::EditKind::reverse, .expression = {}}); }
+
+void ListEditJob::shuffleAlbums() {
+    start({.kind = lists::EditKind::shuffle_albums,
+           .expression = {},
+           .seed = QRandomGenerator::global()->generate()});
+}
+
+void ListEditJob::removeDuplicates() {
+    start({.kind = lists::EditKind::remove_duplicates, .expression = {}});
 }
 
 ListEditJob::ListEditJob(QObject* parent) : QObject(parent) {

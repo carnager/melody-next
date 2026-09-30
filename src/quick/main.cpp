@@ -48,11 +48,18 @@ int main(int argc, char* argv[]) {
     const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
 
     QString screenshot_path;
+    QString open_for_screenshot;
     std::vector<std::string> raw_paths;
     const auto arguments = QApplication::arguments();
     for (qsizetype index = 1; index < arguments.size(); ++index) {
         if (arguments.at(index) == QStringLiteral("--screenshot") && index + 1 < arguments.size()) {
             screenshot_path = arguments.at(++index);
+            continue;
+        }
+        // QA hook: what to open before the screenshot -- a menu or dialog the
+        // window names (Main.qml's openForScreenshot).
+        if (arguments.at(index) == QStringLiteral("--open") && index + 1 < arguments.size()) {
+            open_for_screenshot = arguments.at(++index);
             continue;
         }
         if (arguments.at(index) == QStringLiteral("--debug")) {
@@ -89,6 +96,14 @@ int main(int argc, char* argv[]) {
         workspace.workspace().openLocalPaths(std::move(raw_paths));
     }
     if (!screenshot_path.isEmpty()) {
+        if (!open_for_screenshot.isEmpty()) {
+            QTimer::singleShot(2'000, &application, [&qml, open_for_screenshot] {
+                if (auto* root = qml.rootObjects().value(0)) {
+                    QMetaObject::invokeMethod(root, "openForScreenshot",
+                                              Q_ARG(QVariant, open_for_screenshot));
+                }
+            });
+        }
         QTimer::singleShot(3'000, &application, [&qml, screenshot_path] {
             auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
             const bool saved = window != nullptr && window->grabWindow().save(screenshot_path);

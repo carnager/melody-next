@@ -893,35 +893,29 @@ bool BenchMainWindow::transferRows(QTableView* source, const QVariantList& rows,
 
 bool BenchMainWindow::transferRowsToNewTab(QTableView* source, const QVariantList& rows,
                                            const bool move, const QString& name) {
-    const auto* source_tab = source == nullptr
-                                 ? nullptr
-                                 : tabForDocument(source->property("bench-document-id").toString());
+    auto* source_tab = source == nullptr
+                           ? nullptr
+                           : tabForDocument(source->property("bench-document-id").toString());
     auto* source_model = source ? qobject_cast<LocalListModel*>(source->model()) : nullptr;
     const bool dynamic = source && source->property("definition-owned").toBool();
-    if (!source_model || (!dynamic && (!source_tab || source_tab->view != source)) ||
-        (dynamic && move) || rows.isEmpty() ||
-        std::ranges::any_of(rows, [source_model](const QVariant& row) {
-            bool valid = false;
-            const auto index = row.toInt(&valid);
-            return !valid || index < 0 || index >= source_model->rowCount();
-        })) {
+    if (!dynamic && source_tab != nullptr && source_tab->view != source) {
         return false;
     }
-    // The new tab is the same engine's as the rows (ADR-0227).
-    auto* destination =
-        addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                             .kind = persistence::ListKind::scratch,
-                                             .name = utf8Bytes(name),
-                                             .pinned = false,
-                                             .dirty = false,
-                                             .items = {},
-                                             .engine = engineOfView(source).stored()},
-                   false);
-    const auto transferred = transferRows(
-        source, rows, QString::fromStdString(destination->document.id.to_string()), move, -1);
-    if (transferred)
+    std::vector<int> row_indexes;
+    for (const auto& row : rows) {
+        bool valid = false;
+        row_indexes.push_back(row.toInt(&valid));
+        if (!valid) {
+            return false;
+        }
+    }
+    auto* destination = workspace_.transferRowsToNewList(
+        dynamic ? nullptr : source_tab, source_model, source ? engineOfView(source) : EngineKey{},
+        dynamic, std::move(row_indexes), move, name);
+    if (destination != nullptr) {
         tabs_->setCurrentWidget(destination->view);
-    return transferred;
+    }
+    return destination != nullptr;
 }
 
 bool BenchMainWindow::localLibraryShown() const {

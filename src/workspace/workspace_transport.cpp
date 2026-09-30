@@ -221,6 +221,25 @@ void Workspace::setReplayGain(const QString& mode) {
 }
 
 void Workspace::followEngineState(const EnginePlayback::State& state) {
+    // ReplayGain changed on the playing engine from elsewhere: taken, and
+    // given to the others. Only a change counts -- what an engine reports
+    // before it has been given this window's setting is its default, not a
+    // choice -- and a report from before this window's own change, still on
+    // its way, is none.
+    const auto reported = state.replay_gain_mode;
+    const bool changed_there =
+        engine_replay_gain_.has_value() && *engine_replay_gain_ != reported;
+    engine_replay_gain_ = reported;
+    if (changed_there && !transport_->settling() && reported != resolvedReplayGain()) {
+        local_replaygain_ = reported == audio::ReplayGainMode::track
+                                ? QStringLiteral("track")
+                            : reported == audio::ReplayGainMode::album
+                                ? QStringLiteral("album")
+                                : QStringLiteral("off");
+        saveLocalPlaybackModes();
+        syncReplayGain();
+        view_->refreshLocalPlaybackControls();
+    }
     if (state.modes != playback_.modes) {
         // The engine owns the modes while it owns playback: a one-shot
         // expires where the track actually ended. Adopted rather than pushed

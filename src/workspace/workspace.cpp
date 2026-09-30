@@ -27,6 +27,8 @@ Workspace::Workspace(QObject* parent) : QObject(parent) {
     engines_.front()->key = EngineKey::local();
     // Up Next's rows, as every window shows them.
     up_next_local_model_ = new LocalListModel(this);
+    // The playback modes and ReplayGain as they were left, whichever window.
+    loadLocalPlaybackModes();
 }
 
 Workspace::~Workspace() {

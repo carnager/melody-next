@@ -42,8 +42,16 @@ const QString lastfm_key = QStringLiteral("lastfm/api-key");
 
 SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     const QSettings settings;
+    // As the type its default has: an INI file hands every value back as text,
+    // and the text "false" is true to anything that only asks whether a
+    // value is there -- the Qt Quick window's checkboxes showed every option
+    // left off as on.
     const auto read = [this, &settings](const QString& key, const QVariant& fallback) {
-        values_.insert(key, settings.value(key, fallback));
+        auto value = settings.value(key, fallback);
+        if (value.metaType() != fallback.metaType() && !value.convert(fallback.metaType())) {
+            value = fallback;
+        }
+        values_.insert(key, value);
     };
     read(notifications_key, false);
     read(notifications_background_key, false);

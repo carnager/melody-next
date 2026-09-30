@@ -100,7 +100,8 @@ validateSerializedTextBudget(const metadata::MetadataTransformationChain& chain)
                         return dialect;
                     }
                     return add(typed.source);
-                } else if constexpr (std::is_same_v<Action, metadata::MetadataCopyFieldAction>) {
+                } else if constexpr (std::is_same_v<Action, metadata::MetadataCopyFieldAction> ||
+                                     std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
                     return add(typed.source_field);
                 } else if constexpr (std::is_same_v<Action, metadata::MetadataSplitValuesAction> ||
                                      std::is_same_v<Action, metadata::MetadataJoinValuesAction>) {
@@ -451,6 +452,15 @@ readCaptureSource(const QJsonObject& object, const std::string_view location) {
             } else if constexpr (std::is_same_v<Action, metadata::MetadataAllowlistFieldsAction>) {
                 return {{QStringLiteral("fields"), valuesToJson(typed.fields)},
                         {QStringLiteral("kind"), QStringLiteral("allowlist_fields")}};
+            } else if constexpr (std::is_same_v<Action, metadata::MetadataConvertRatingAction>) {
+                // ADR-0244: the scale by its top -- 5, 10 or 100.
+                const auto top = typed.scale == metadata::PlainRatingScale::hundred ? 100
+                                 : typed.scale == metadata::PlainRatingScale::ten   ? 10
+                                                                                    : 5;
+                return {{QStringLiteral("kind"), QStringLiteral("convert_rating")},
+                        {QStringLiteral("scale"), top},
+                        {QStringLiteral("source_field"), jsonString(typed.source_field)},
+                        {QStringLiteral("target_field"), jsonString(typed.target_field)}};
             }
             return {};
         },
@@ -505,6 +515,37 @@ readAction(const QJsonValue& value, const std::size_t index) {
         }
         return metadata::MetadataRemoveFieldAction{.target_field = std::move(*target),
                                                    .match_mode = *mode};
+    }
+    if (*kind == "convert_rating") {
+        if (auto keys = requireExactKeys(object, {"kind", "scale", "source_field", "target_field"},
+                                         location);
+            !keys) {
+            return std::unexpected(keys.error());
+        }
+        auto target = readString(object, "target_field", location);
+        auto source = readString(object, "source_field", location);
+        auto top = readUnsigned(object, "scale", location);
+        if (!target) {
+            return std::unexpected(target.error());
+        }
+        if (!source) {
+            return std::unexpected(source.error());
+        }
+        if (!top) {
+            return std::unexpected(top.error());
+        }
+        const auto scale = *top == 5U    ? metadata::PlainRatingScale::five
+                           : *top == 10U ? metadata::PlainRatingScale::ten
+                           : *top == 100U ? metadata::PlainRatingScale::hundred
+                                          : metadata::PlainRatingScale::off;
+        if (scale == metadata::PlainRatingScale::off) {
+            return std::unexpected(interchangeError(core::ErrorCode::invalid_argument,
+                                                    "A rating conversion's scale is 5, 10 or 100",
+                                                    location));
+        }
+        return metadata::MetadataConvertRatingAction{.target_field = std::move(*target),
+                                                     .source_field = std::move(*source),
+                                                     .scale = scale};
     }
     if (*kind == "blocklist_fields" || *kind == "allowlist_fields") {
         if (auto keys = requireExactKeys(object, {"fields", "kind"}, location); !keys) {

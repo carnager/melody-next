@@ -475,11 +475,46 @@ apply_action(const PreparedAction& prepared, WorkingDocument& document,
                 }
                 found->second = std::move(transformed);
             } else if constexpr (std::is_same_v<Action, MetadataCopyFieldAction>) {
-                const auto source = document.find(prepared.canonical_source_field);
-                if (source == document.end()) {
+                // A freeform source is kept by its exact native name, not in
+                // the logical document: read from there, or the copy found
+                // nothing and emptied its target.
+                const Values* values = nullptr;
+                if (!prepared.exact_native_source_field.empty()) {
+                    if (const auto native = native_document.find(prepared.exact_native_source_field);
+                        native != native_document.end()) {
+                        values = &native->second.values;
+                    }
+                } else if (const auto logical = document.find(prepared.canonical_source_field);
+                           logical != document.end()) {
+                    values = &logical->second;
+                }
+                if (values == nullptr) {
                     document.erase(prepared.canonical_field);
                 } else {
-                    document[prepared.canonical_field] = source->second;
+                    document[prepared.canonical_field] = *values;
+                }
+            } else if constexpr (std::is_same_v<Action, MetadataConvertRatingAction>) {
+                // The first value, read as the engine reads a player's rating;
+                // anything it cannot place on the scale, or no rating at all,
+                // leaves FMPS_RATING alone.
+                // A player's own tag is usually no conventional field: then it
+                // is found by its exact native name, as a capture's source is.
+                const Values* values = nullptr;
+                if (!prepared.exact_native_source_field.empty()) {
+                    if (const auto native = native_document.find(prepared.exact_native_source_field);
+                        native != native_document.end()) {
+                        values = &native->second.values;
+                    }
+                } else if (const auto logical = document.find(prepared.canonical_source_field);
+                           logical != document.end()) {
+                    values = &logical->second;
+                }
+                if (values == nullptr || values->empty()) {
+                    return {};
+                }
+                const auto rating = rating_from_plain(values->front(), action.scale);
+                if (rating && *rating > 0U) {
+                    document[prepared.canonical_field] = {fmps_rating_text(*rating)};
                 }
             } else if constexpr (std::is_same_v<Action, MetadataSplitValuesAction>) {
                 const auto found = document.find(prepared.canonical_field);
@@ -1027,6 +1062,10 @@ prepare_chain(const MetadataTransformationChain& chain,
             }
         } else if (const auto* copy = std::get_if<MetadataCopyFieldAction>(&action)) {
             prepared_action.canonical_source_field = canonicalize_field_name(copy->source_field);
+            if (!resolve_text_property_identity(copy->source_field).conventional) {
+                prepared_action.exact_native_source_field =
+                    canonicalize_native_field_name(copy->source_field);
+            }
             if (copy->source_field.empty() || copy->source_field.size() > limits.field_name_bytes ||
                 prepared_action.canonical_source_field.empty()) {
                 return std::unexpected(transformation_error(
@@ -1039,6 +1078,36 @@ prepare_chain(const MetadataTransformationChain& chain,
                                            "metadata transformation source field", action_index);
                 !valid) {
                 return std::unexpected(std::move(valid.error()));
+            }
+        } else if (const auto* convert = std::get_if<MetadataConvertRatingAction>(&action)) {
+            prepared_action.canonical_source_field = canonicalize_field_name(convert->source_field);
+            if (!resolve_text_property_identity(convert->source_field).conventional) {
+                prepared_action.exact_native_source_field =
+                    canonicalize_native_field_name(convert->source_field);
+            }
+            if (convert->source_field.empty() ||
+                convert->source_field.size() > limits.field_name_bytes ||
+                prepared_action.canonical_source_field.empty()) {
+                return std::unexpected(transformation_error(
+                    core::ErrorCode::invalid_argument,
+                    "the rating conversion needs the field the rating is in", action_index));
+            }
+            if (auto valid = validate_utf8(convert->source_field,
+                                           "metadata transformation source field", action_index);
+                !valid) {
+                return std::unexpected(std::move(valid.error()));
+            }
+            if (canonical != canonicalize_field_name(fmps_rating_field)) {
+                return std::unexpected(transformation_error(
+                    core::ErrorCode::invalid_argument,
+                    "a rating is converted into FMPS_RATING, Trackknife's rating tag",
+                    action_index));
+            }
+            if (convert->scale == PlainRatingScale::off) {
+                return std::unexpected(transformation_error(
+                    core::ErrorCode::invalid_argument,
+                    "the rating conversion needs the scale the rating is kept on: 5, 10 or 100",
+                    action_index));
             }
         } else if (const auto* split = std::get_if<MetadataSplitValuesAction>(&action)) {
             if (split->separator.empty() || split->separator.size() > limits.action_text_bytes) {

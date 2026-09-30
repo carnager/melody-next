@@ -618,7 +618,10 @@ ADR-0241 that text is the native script -- one `$`-statement per step, full
 `tkfmt-1` in values and conditions -- covering every action kind
 ([tagging-scripts.md](tagging-scripts.md)). Valid raw edits immediately
 regenerate the typed action list; invalid text blocks Preview and Save with
-line and column diagnostics. The typed actions remain the saved
+line and column diagnostics. Per ADR-0244 a step converts a rating
+another player left in a tag of its own, on the scale it was kept on, into
+`FMPS_RATING` with the engine's own conversion; a copy or conversion reads a
+freeform source field by its exact native name. The typed actions remain the saved
 authority, so pasted whitespace and spelling are canonicalized after reload.
 Dirty name, typed, pasted, and raw edits require Save or explicit discard.
 ADR-0072 adds the separate strict native JSON interchange form for the complete

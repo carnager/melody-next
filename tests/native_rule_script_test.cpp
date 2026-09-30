@@ -76,6 +76,9 @@ void everyStepRoundTrips() {
                                     .pattern = "Rated \\%%rating%"},
         MetadataBlocklistFieldsAction{.fields = {"ENCODER", "iTunSMPB"}},
         MetadataAllowlistFieldsAction{.fields = {"TITLE", "ARTIST", "ALBUM"}},
+        MetadataConvertRatingAction{.target_field = "FMPS_RATING",
+                                    .source_field = "RATING",
+                                    .scale = PlainRatingScale::hundred},
     };
     for (std::size_t index = 0U; index < actions.size(); ++index) {
         const auto one = export_native_rule_script(std::span{&actions[index], 1U});
@@ -149,6 +152,8 @@ void mistakesAreReportedInPlace() {
     CHECK(import_native_rule_script("$delete(A,sometimes)").has_errors());
     CHECK(import_native_rule_script("$number(TRACKNUMBER,one,2)").has_errors());
     CHECK(import_native_rule_script("$setvalues(GENRE,50%)").has_errors());
+    CHECK(import_native_rule_script("$rating(RATING,7)").has_errors());
+    CHECK(!import_native_rule_script("$rating( RATING ,5)").has_errors());
 }
 
 } // namespace

@@ -208,6 +208,12 @@ class MetadataTransformationDialog final : public QDialog {
         capture_source_->setObjectName(
             QStringLiteral("bench-metadata-transformation-capture-source"));
         capture_source_->addItems(ScriptSession::captureSources());
+        rating_scale_label_ = new QLabel(QStringLiteral("Its scale:"), this);
+        rating_scale_ = new QComboBox(this);
+        rating_scale_->setObjectName(QStringLiteral("bench-metadata-transformation-rating-scale"));
+        rating_scale_->addItems(ScriptSession::ratingScales());
+        rating_scale_->setToolTip(
+            QStringLiteral("The scale the other player kept the rating on; it becomes 0.0-1.0"));
         capture_argument_label_ = new QLabel(QStringLiteral("Source expression:"), this);
         capture_argument_ = new QLineEdit(this);
         capture_argument_->setObjectName(
@@ -220,6 +226,7 @@ class MetadataTransformationDialog final : public QDialog {
         step_form->addRow(number_padding_label_, number_padding_);
         step_form->addRow(character_count_label_, character_count_);
         step_form->addRow(capture_source_label_, capture_source_);
+        step_form->addRow(rating_scale_label_, rating_scale_);
         step_form->addRow(capture_argument_label_, capture_argument_);
         rules_layout->addLayout(step_form);
 
@@ -566,6 +573,8 @@ class MetadataTransformationDialog final : public QDialog {
         character_count_->setVisible(form.characters);
         capture_source_label_->setVisible(form.capture_source);
         capture_source_->setVisible(form.capture_source);
+        rating_scale_label_->setVisible(form.rating_scale);
+        rating_scale_->setVisible(form.rating_scale);
         capture_argument_label_->setVisible(form.capture_argument);
         capture_argument_->setVisible(form.capture_argument);
         capture_argument_label_->setText(form.capture_argument_label);
@@ -584,6 +593,7 @@ class MetadataTransformationDialog final : public QDialog {
             .character_count = character_count_->value(),
             .capture_source = capture_source_->currentIndex(),
             .capture_argument = capture_argument_->text(),
+            .rating_scale = rating_scale_->currentIndex(),
         });
         if (session_->steps().size() != before) {
             target_->clear();
@@ -668,6 +678,7 @@ class MetadataTransformationDialog final : public QDialog {
         number_padding_->setEnabled(editing);
         character_count_->setEnabled(editing);
         capture_source_->setEnabled(editing);
+        rating_scale_->setEnabled(editing);
         capture_argument_->setEnabled(editing);
         raw_source_->setEnabled(editing);
         import_->setEnabled(editing);
@@ -709,6 +720,8 @@ class MetadataTransformationDialog final : public QDialog {
     QSpinBox* character_count_{nullptr};
     QLabel* capture_source_label_{nullptr};
     QComboBox* capture_source_{nullptr};
+    QLabel* rating_scale_label_{nullptr};
+    QComboBox* rating_scale_{nullptr};
     QLabel* capture_argument_label_{nullptr};
     QLineEdit* capture_argument_{nullptr};
     QPushButton* add_{nullptr};

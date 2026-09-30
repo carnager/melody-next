@@ -12,8 +12,8 @@ statement stands for one typed step, previewed before anything is written.
 
 ```text
 $copy(DATE,ORIGINALYEAR)
-$set(FMPS_RATING,$decimal(%rating%,5,1))
-$if($not(%rating%),$delete(FMPS_RATING))
+$set(ALBUMARTISTSORT,$if2(%albumartistsort%,%albumartist%))
+$rating(RATING,5)
 $delete(RATING)
 ```
 
@@ -36,6 +36,7 @@ $delete(RATING)
 | `$number(FIELD,start,padding)` | Number the selected files in order. |
 | `$numberby(FIELD,group,start,padding)` | Number again from `start` for each value of the tkfmt-1 `group`, such as `%album%`. |
 | `$keepfirst(FIELD,count)` | Keep the first `count` characters of each value. |
+| `$rating(FROM,5)` | Convert a rating in `FROM`, kept on 0–5 stars (or `10`, `100`), into `FMPS_RATING`: 4 of 5 becomes `0.8`, 3.5 becomes `0.7`. A missing, unrated or out-of-scale rating changes nothing. |
 | `$capture(filename,pattern)` | Capture fields from the filename; also `path` for the full path. |
 | `$capture(formatted,expression,pattern)` | Capture fields from a tkfmt-1 result. |
 | `$capture(field,FROM,pattern)` | Capture fields from another field. |

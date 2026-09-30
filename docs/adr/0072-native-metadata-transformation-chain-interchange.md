@@ -63,6 +63,7 @@ review.
   | `number_selected_items` | `target_field`, `start`, `padding` |
   | `keep_first_characters` | `target_field`, `character_count` |
   | `capture_values` | `dialect`, `source_kind`, `source`, `pattern` |
+  | `convert_rating` | `target_field`, `source_field`, `scale` (5, 10 or 100) -- added by ADR-0244 |
 
 - `match_mode` is `logical` or `exact_native`. `transform` is `trim_ascii`,
   `lowercase`, `uppercase`, or `capitalize_first`. `source_kind` is

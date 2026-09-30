@@ -4923,10 +4923,11 @@ void BenchMainWindowTest::metadataTransformationChainPreviewsAndStagesOneUndo() 
     QVERIFY(stage != nullptr);
     QVERIFY(preview_table != nullptr);
     QVERIFY(preview_summary != nullptr);
-    // 19 step kinds under 4 unselectable group headers; kinds are found by
+    // 20 step kinds under 4 unselectable group headers; kinds are found by
     // name because the row index no longer matches the action kind.
-    QCOMPARE(kind->count(), 23);
+    QCOMPARE(kind->count(), 24);
     for (const auto& kind_name : {QStringLiteral("Capitalize first character"),
+                                  QStringLiteral("Convert rating to FMPS_RATING"),
                                   QStringLiteral("Remove exact matching values"),
                                   QStringLiteral("Replace exact matching values"),
                                   QStringLiteral("Number by selected-file order"),

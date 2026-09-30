@@ -74,7 +74,8 @@ ApplicationWindow {
             numberPadding: numberPadding.value,
             characterCount: characterCount.value,
             captureSource: captureSource.currentIndex,
-            captureArgument: captureArgument.text
+            captureArgument: captureArgument.text,
+            ratingScale: ratingScale.currentIndex
         });
         if (script.steps.length !== before) {
             target.text = "";
@@ -405,6 +406,20 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             visible: editor.form.captureSource
                             model: editor.script.captureSources
+                        }
+                        Label {
+                            text: qsTr("Its scale:")
+                            visible: editor.form.ratingScale
+                        }
+                        ComboBox {
+                            id: ratingScale
+                            objectName: "bench-metadata-transformation-rating-scale"
+                            Layout.fillWidth: true
+                            visible: editor.form.ratingScale
+                            model: editor.script.ratingScales
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 800
+                            ToolTip.text: qsTr("The scale the other player kept the rating on; it becomes 0.0-1.0")
                         }
                         Label {
                             text: editor.form.captureArgumentLabel

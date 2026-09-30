@@ -57,6 +57,8 @@ class ScriptSession final : public QObject {
         QString capture_argument_placeholder;
         // The input is a comma-separated field list.
         bool field_list{false};
+        // A choice of the scale a rating is kept on (ratingScales()).
+        bool rating_scale{false};
     };
     // What the step form holds when a step is added.
     struct StepInput {
@@ -69,6 +71,8 @@ class ScriptSession final : public QObject {
         int character_count{4};
         int capture_source{0};
         QString capture_argument;
+        // An index into ratingScales().
+        int rating_scale{0};
     };
     // Where the view should put the cursor after adding a step fails or
     // succeeds.
@@ -93,6 +97,8 @@ class ScriptSession final : public QObject {
     [[nodiscard]] static int initialStepKind() { return 1; }
     [[nodiscard]] static StepForm stepForm(int kind, int capture_source);
     [[nodiscard]] static QStringList captureSources();
+    // The scales a rating to convert can be kept on, as the step offers them.
+    [[nodiscard]] static QStringList ratingScales();
     [[nodiscard]] static RuleScript translateRuleScript(const QString& source);
 
     // The saved scripts: "New script" first.

@@ -177,6 +177,133 @@ void exactAddCopySplitAndJoinPreserveOrderedState() {
           (std::optional<std::vector<std::string>>{{"Élan", "Two WORDS", ""}}));
 }
 
+// A rating another player wrote becomes FMPS_RATING on the scale it was kept
+// on, read as the engine reads such tags; what cannot be placed changes
+// nothing (ADR-0244).
+void ratingsConvertIntoTheRatingTag() {
+    using namespace trackknife::metadata;
+    const std::array<std::string_view, 2> preferred{"Rating", "FMPS_RATING"};
+    const auto source = [](std::string path, std::vector<MetadataField> fields) {
+        return StagedMetadataSource{
+            .raw_path = std::move(path),
+            .source_revision = std::nullopt,
+            .baseline = MetadataDocument{.fields = std::move(fields),
+                                         .unsupported_native_objects = {}},
+        };
+    };
+    auto created = StagedMetadataSelection::create(
+        {
+            source("/music/four.flac", {field("RATING", {"4"})}),
+            source("/music/half.flac", {field("RATING", {"3.5"})}),
+            source("/music/unrated.flac", {field("RATING", {"0"})}),
+            source("/music/beyond.flac", {field("RATING", {"7"})}),
+            source("/music/words.flac", {field("RATING", {"great"})}),
+            source("/music/none.flac", {field("TITLE", {"No rating"})}),
+            source("/music/rated.flac", {field("RATING", {"5"}), field("FMPS_RATING", {"0.2"})}),
+        },
+        preferred);
+    CHECK(created.has_value());
+    if (!created) {
+        return;
+    }
+    const auto& baseline = *created;
+    const StagedMetadataPatchSet draft;
+    const std::array items{std::size_t{0U}, std::size_t{1U}, std::size_t{2U}, std::size_t{3U},
+                           std::size_t{4U}, std::size_t{5U}, std::size_t{6U}};
+    const MetadataTransformationChain chain{
+        .schema_version = 1U,
+        .name = "Ratings",
+        .actions = {MetadataConvertRatingAction{.target_field = "FMPS_RATING",
+                                                .source_field = "Rating",
+                                                .scale = PlainRatingScale::five}},
+    };
+    CHECK(validate_metadata_transformation_chain(chain).has_value());
+    const auto preview = plan_metadata_transformation(baseline, draft, items, chain);
+    CHECK(preview.has_value());
+    if (!preview) {
+        return;
+    }
+    std::array<std::optional<std::vector<std::string>>, 7> after{};
+    for (const auto& cell : preview->cells) {
+        if (cell.canonical_field == canonicalize_field_name("FMPS_RATING") &&
+            cell.item_index < after.size()) {
+            after[cell.item_index] = cell.after;
+        }
+    }
+    using Values = std::optional<std::vector<std::string>>;
+    CHECK(after[0] == (Values{{"0.8"}}));
+    CHECK(after[1] == (Values{{"0.7"}}));
+    CHECK(after[6] == (Values{{"1.0"}}));
+    // Unrated, out of scale, unreadable or absent: nothing to change.
+    CHECK(!after[2] && !after[3] && !after[4] && !after[5]);
+
+    const auto hundred = MetadataTransformationChain{
+        .schema_version = 1U,
+        .name = "Hundred",
+        .actions = {MetadataConvertRatingAction{.target_field = "FMPS_RATING",
+                                                .source_field = "RATING",
+                                                .scale = PlainRatingScale::hundred}},
+    };
+    const auto scaled = plan_metadata_transformation(baseline, draft, items, hundred);
+    CHECK(scaled.has_value());
+    if (scaled) {
+        for (const auto& cell : scaled->cells) {
+            if (cell.canonical_field == canonicalize_field_name("FMPS_RATING") &&
+                cell.item_index == 3U) {
+                CHECK(cell.after == (Values{{"0.1"}}));
+            }
+        }
+    }
+
+    // Only into FMPS_RATING, and only from a scale.
+    CHECK(!validate_metadata_transformation_chain(
+        {.schema_version = 1U,
+         .name = "Elsewhere",
+         .actions = {MetadataConvertRatingAction{.target_field = "COMMENT",
+                                                 .source_field = "RATING",
+                                                 .scale = PlainRatingScale::five}}}));
+    CHECK(!validate_metadata_transformation_chain(
+        {.schema_version = 1U,
+         .name = "No scale",
+         .actions = {MetadataConvertRatingAction{.target_field = "FMPS_RATING",
+                                                 .source_field = "RATING",
+                                                 .scale = PlainRatingScale::off}}}));
+}
+
+// A player's own tag is freeform, kept by its exact native name: a copy
+// from it carries its values, where once it found nothing.
+void copyReadsAFreeformSource() {
+    using namespace trackknife::metadata;
+    const std::array<std::string_view, 1> preferred{"Comment"};
+    auto created = StagedMetadataSelection::create(
+        {StagedMetadataSource{
+            .raw_path = "/music/strange.flac",
+            .source_revision = std::nullopt,
+            .baseline = MetadataDocument{.fields = {field("STRANGETAG", {"4", "extra"})},
+                                         .unsupported_native_objects = {}},
+        }},
+        preferred);
+    CHECK(created.has_value());
+    if (!created) {
+        return;
+    }
+    const StagedMetadataPatchSet draft;
+    const std::array items{std::size_t{0U}};
+    const MetadataTransformationChain chain{
+        .schema_version = 1U,
+        .name = "Freeform copy",
+        .actions = {MetadataCopyFieldAction{.target_field = "Comment",
+                                            .source_field = "strangetag"}},
+    };
+    const auto preview = plan_metadata_transformation(*created, draft, items, chain);
+    CHECK(preview.has_value() && preview->cells.size() == 1U);
+    if (preview && preview->cells.size() == 1U) {
+        CHECK(preview->cells[0].canonical_field == "comment");
+        CHECK(preview->cells[0].after ==
+              (std::optional<std::vector<std::string>>{{"4", "extra"}}));
+    }
+}
+
 void fieldListsRemoveOnlyPreviewedMetadata() {
     using namespace trackknife::metadata;
     const auto baseline = selection();
@@ -996,6 +1123,8 @@ void plansRejectInvalidDialectInputLimitsAndCancellation() {
 int main() {
     orderedChainsSeeEarlierActionsAndCurrentDraft();
     exactAddCopySplitAndJoinPreserveOrderedState();
+    ratingsConvertIntoTheRatingTag();
+    copyReadsAFreeformSource();
     fieldListsRemoveOnlyPreviewedMetadata();
     capitalizationNoOpCountsPresentAndMissingTargets();
     keepFirstCharactersUsesUnicodeAndRetainsShortValues();

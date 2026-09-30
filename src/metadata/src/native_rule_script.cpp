@@ -511,6 +511,23 @@ class Reader final {
                 add(call, MetadataKeepFirstCharactersAction{.target_field = std::move(*target),
                                                             .character_count = *count});
             }
+        } else if (name == "rating") {
+            if (!arity(call, 2U, 2U, "$rating(FROM FIELD,5|10|100)")) {
+                return;
+            }
+            auto from = field(arguments[0]);
+            const auto word = from ? literal(arguments[1]) : std::nullopt;
+            if (!word) {
+                return;
+            }
+            const auto scale = plain_rating_scale_named(trim_ascii(*word));
+            if (!scale || *scale == PlainRatingScale::off) {
+                error(arguments[1].begin, "Write the scale the rating is kept on: 5, 10 or 100");
+                return;
+            }
+            add(call, MetadataConvertRatingAction{.target_field = std::string{fmps_rating_field},
+                                                  .source_field = std::move(*from),
+                                                  .scale = *scale});
         } else if (name == "capture") {
             translate_capture(call);
         } else if (name == "deletefields" || name == "keepfields") {
@@ -824,6 +841,16 @@ export_native_rule_script(const std::span<const MetadataTransformationAction> ac
                 } else if constexpr (std::is_same_v<Action, MetadataAllowlistFieldsAction>) {
                     auto text = joined(action.fields);
                     return "$keepfields(" + text.substr(text.empty() ? 0U : 1U) + ')';
+                } else if constexpr (std::is_same_v<Action, MetadataConvertRatingAction>) {
+                    if (canonicalize_field_name(action.target_field) !=
+                        canonicalize_field_name(fmps_rating_field)) {
+                        return std::unexpected(
+                            unsupported("This rating conversion writes a field other than "
+                                        "FMPS_RATING",
+                                        index));
+                    }
+                    return "$rating(" + quote_literal(action.source_field) + ',' +
+                           std::string{plain_rating_scale_name(action.scale)} + ')';
                 } else {
                     static_assert(!sizeof(Action), "every typed step has a statement");
                 }

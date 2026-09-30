@@ -3,6 +3,7 @@
 #pragma once
 
 #include "quick/list_tabs_model.hpp"
+#include "quick/quick_replaygain.hpp"
 #include "quick/quick_tagger.hpp"
 #include "quick/track_rows_model.hpp"
 #include "workspace/folder_browser.hpp"
@@ -191,6 +192,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void queueSelection(bool next);
     // "Edit tags": the selected rows in a tag editor of their own.
     Q_INVOKABLE void editTags();
+    // "ReplayGain…": the selected rows measured and tagged.
+    Q_INVOKABLE void replayGain();
 
     // The workspace closing: saved at once, and quitting stops this
     // computer's engine.
@@ -255,6 +258,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void rowsRestored(const QVariantList& rows);
     void quitRequested();
     void taggerOpened(trackknife::quick::QuickTagger* tagger);
+    void replayGainOpened(trackknife::quick::QuickReplayGain* replayGain);
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();

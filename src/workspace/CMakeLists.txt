@@ -38,6 +38,8 @@ qt_add_library(
     library_browser.hpp
     list_edit_job.cpp
     list_edit_job.hpp
+    replaygain_job.cpp
+    replaygain_job.hpp
     script_session.cpp
     script_session.hpp
     sources.cpp

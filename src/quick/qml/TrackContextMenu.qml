@@ -53,7 +53,8 @@ Menu {
         }
         MenuItem {
             text: "ReplayGain…"
-            onTriggered: contextMenu.notYet("ReplayGain scanning")
+            enabled: contextMenu.selection
+            onTriggered: Tk.replayGain()
         }
         MenuItem {
             text: "Convert files…"

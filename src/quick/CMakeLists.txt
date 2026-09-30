@@ -25,6 +25,8 @@ qt_add_qml_module(
     quick_artwork.hpp
     quick_identify.cpp
     quick_identify.hpp
+    quick_replaygain.cpp
+    quick_replaygain.hpp
     quick_script.cpp
     quick_script.hpp
     quick_tagger.cpp
@@ -69,6 +71,7 @@ qt_add_qml_module(
     qml/CoverPicker.qml
     qml/IdentifyDialog.qml
     qml/ScriptEditor.qml
+    qml/ReplayGainDialog.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

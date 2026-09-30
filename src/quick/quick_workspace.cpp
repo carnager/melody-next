@@ -406,6 +406,41 @@ void QuickWorkspace::activateRow(const int row) {
     }
 }
 
+void QuickWorkspace::replayGain() {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr) {
+        return;
+    }
+    auto rows = rows_.selectedRows();
+    std::ranges::sort(rows);
+    if (rows.empty()) {
+        return;
+    }
+    // ADR-0237: the engine holding the files measures and writes them, at
+    // its own paths.
+    const auto engine = bench::EngineKey::of(tab->document);
+    auto work = workspace_.fileWorkOf(engine);
+    if (!work) {
+        showMessage(tr("%1 is done by the engine on %2, which is not available right now")
+                        .arg(tr("Measuring ReplayGain"), workspace_.engineName(engine)),
+                    10'000);
+        return;
+    }
+    std::vector<QPersistentModelIndex> selected;
+    selected.reserve(rows.size());
+    for (const auto row : rows) {
+        selected.emplace_back(tab->model->index(row, 0));
+    }
+    const auto count = selected.size();
+    auto* job = new QuickReplayGain(
+        new bench::ReplayGainJob(count, workspace_.selectionSourceReader(*tab, std::move(selected)),
+                                 workspace_.engineMetadataPlanApplierFactory(work),
+                                 workspace_.metadataApplyObserver(),
+                                 bench::engineFileWorkTools(work)),
+        this);
+    emit replayGainOpened(job);
+}
+
 void QuickWorkspace::editTags() {
     auto* tab = currentTabPointer();
     if (tab == nullptr) {

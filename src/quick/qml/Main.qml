@@ -46,6 +46,11 @@ ApplicationWindow {
             sources.openArtistForScreenshot();
             Qt.callLater(() => albumTimer.start());
         }
+        else if (name === "replaygain") {
+            Tk.rows.selectAll();
+            window.replayGainForScreenshot = true;
+            Tk.replayGain();
+        }
         else if (name.startsWith("tagger")) {
             Tk.rows.selectAll();
             window.taggerForScreenshot = name;
@@ -55,6 +60,7 @@ ApplicationWindow {
             Tk.library.search = "a";
     }
     property string taggerForScreenshot: ""
+    property bool replayGainForScreenshot: false
     Timer {
         id: stageTimer
         property var opened
@@ -212,7 +218,8 @@ ApplicationWindow {
             Action {
                 objectName: "action-replaygain"
                 text: "ReplayGain…"
-                onTriggered: window.notYet("ReplayGain scanning")
+                enabled: (Tk.selection.count ?? 0) > 0
+                onTriggered: Tk.replayGain()
             }
             Action {
                 objectName: "action-convert"
@@ -651,8 +658,19 @@ ApplicationWindow {
             onDestinationsRequested: window.notYet(qsTr("Settings"))
         }
     }
+    Component {
+        id: replayGainComponent
+        ReplayGainDialog {}
+    }
     Connections {
         target: Tk
+        function onReplayGainOpened(replayGain) {
+            const opened = replayGainComponent.createObject(window, {replayGain: replayGain});
+            if (window.replayGainForScreenshot)
+                replayGain.preview();
+            opened.raise();
+            opened.requestActivate();
+        }
         function onTaggerOpened(tagger) {
             const opened = taggerComponent.createObject(window, {tagger: tagger});
             opened.raise();

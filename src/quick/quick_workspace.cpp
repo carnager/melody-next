@@ -1586,10 +1586,13 @@ void QuickWorkspace::refreshTransport() {
         shown.insert(QStringLiteral("tooltip"), now.tooltip);
         shown.insert(QStringLiteral("windowTitle"), now.window_title);
         QString cover_key;
+        QString album;
         if (const auto* row = workspace_.playingRow(now.cover_entry); row != nullptr) {
             cover_key = bench::LocalListModel::groupKeyOf(*row);
+            album = QString::fromStdString(row->album);
         }
         shown.insert(QStringLiteral("coverKey"), cover_key);
+        shown.insert(QStringLiteral("album"), album);
         workspace_.followEngineState(state);
         refreshOutputControls(state);
         for (const auto& [key, value] : output_summary_.asKeyValueRange()) {
@@ -1727,6 +1730,7 @@ void QuickWorkspace::refreshUpNext() {
             rows.push_back(QVariantMap{
                 {QStringLiteral("title"), model->index(row, bench::local_title_column).data()},
                 {QStringLiteral("artist"), model->index(row, bench::local_artist_column).data()},
+                {QStringLiteral("album"), model->index(row, bench::local_album_column).data()},
                 {QStringLiteral("length"), model->index(row, bench::local_length_column).data()},
                 {QStringLiteral("coverKey"),
                  model->index(row, 0).data(ui::track_album_artwork_key_role)},

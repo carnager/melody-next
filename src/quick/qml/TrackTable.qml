@@ -337,18 +337,10 @@ FocusScope {
                     y: 6 - row.coverOffset
                     width: 44
                     height: 44
-                    Rectangle {
+                    InitialsTile {
                         anchors.fill: parent
                         visible: art.status !== Image.Ready || art.implicitWidth <= 1
-                        radius: 3
-                        color: row.palette.mid
-                        Image {
-                            anchors.centerIn: parent
-                            width: 16
-                            height: 16
-                            sourceSize: Qt.size(16, 16)
-                            source: "image://icon/media-optical-audio|sp:SP_FileIcon?disabled"
-                        }
+                        name: row.headerAlbum
                     }
                     Image {
                         id: art

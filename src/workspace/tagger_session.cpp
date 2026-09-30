@@ -43,6 +43,7 @@ constexpr auto remembered_layout_key = "properties/actions/naming-layout";
 constexpr auto remembered_destination_prefix = "properties/actions/move-destination/";
 
 constexpr auto properties_geometry_key = "workspace/metadata-properties-geometry-v1";
+constexpr auto properties_window_key = "workspace/metadata-properties-window-v1";
 constexpr auto properties_metadata_splitter_key =
     "workspace/metadata-properties-metadata-splitter-v1";
 constexpr auto properties_field_layouts_key = "workspace/metadata-field-layouts-v1";
@@ -383,6 +384,33 @@ void TaggerSession::storeLayoutState(const QByteArray& geometry, const QByteArra
         services_.layout_store.save(QString::fromLatin1(properties_metadata_splitter_key), splitter,
                                     {});
     }
+}
+
+void TaggerSession::loadWindowState(std::function<void(QVariantMap)> loaded) {
+    if (!services_.layout_store.load) {
+        return;
+    }
+    const QPointer self{this};
+    services_.layout_store.load(
+        QString::fromLatin1(properties_window_key),
+        [self, loaded = std::move(loaded)](const QByteArray& state, const QString& error) {
+            if (!self || !error.isEmpty() || state.isEmpty()) {
+                return;
+            }
+            const auto document = QJsonDocument::fromJson(state);
+            if (document.isObject()) {
+                loaded(document.object().toVariantMap());
+            }
+        });
+}
+
+void TaggerSession::storeWindowState(const QVariantMap& state) {
+    if (!services_.layout_store.save) {
+        return;
+    }
+    services_.layout_store.save(
+        QString::fromLatin1(properties_window_key),
+        QJsonDocument(QJsonObject::fromVariantMap(state)).toJson(QJsonDocument::Compact), {});
 }
 
 // The files.

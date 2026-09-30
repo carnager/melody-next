@@ -305,34 +305,16 @@ Item {
                             onTapped: tree.toggle(node.row, !node.expanded)
                         }
                     }
-                    // An artist has no picture: their initials on a quiet tile.
-                    Rectangle {
+                    // An artist has no picture: their initials on a tile
+                    // coloured by their name.
+                    InitialsTile {
                         id: tile
                         visible: node.artist
                         x: arrow.x + 16
                         anchors.verticalCenter: parent.verticalCenter
                         width: node.iconExtent
                         height: node.iconExtent
-                        radius: 3
-                        color: Shade.mix(node.palette.base, node.palette.text, 0.12)
-                        Label {
-                            anchors.centerIn: parent
-                            text: {
-                                let initials = "";
-                                for (const character of node.display) {
-                                    if (character.toUpperCase() !== character.toLowerCase()
-                                            || (character >= "0" && character <= "9")) {
-                                        initials += character.toUpperCase();
-                                        if (initials.length === 2)
-                                            break;
-                                    }
-                                }
-                                return initials;
-                            }
-                            font.pointSize: Math.max(6, Qt.application.font.pointSize * 0.72)
-                            font.weight: Font.DemiBold
-                            color: node.palette.placeholderText
-                        }
+                        name: node.display
                     }
                     Item {
                         id: picture
@@ -354,12 +336,18 @@ Item {
                                       + "#" + pane.coverRevision
                                     : ""
                         }
+                        // An album without a cover: its tile, as in the list.
+                        InitialsTile {
+                            anchors.fill: parent
+                            visible: node.album && !cover.visible
+                            opacity: node.available ? 1 : 0.45
+                            name: node.display
+                        }
                         Image {
                             anchors.fill: parent
-                            visible: !cover.visible
+                            visible: !node.album
                             sourceSize: Qt.size(node.iconExtent, node.iconExtent)
-                            source: "image://icon/" + (node.album ? "media-optical-audio"
-                                                                  : "audio-x-generic")
+                            source: "image://icon/audio-x-generic"
                                     + (node.available ? "" : "?disabled")
                         }
                     }

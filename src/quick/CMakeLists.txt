@@ -106,6 +106,7 @@ qt_add_qml_module(
     qml/TransportBar.qml
     qml/LineSlider.qml
     qml/PillButton.qml
+    qml/InitialsTile.qml
     qml/OutputMenu.qml
     qml/TrackTabBar.qml
     qml/TrackTable.qml

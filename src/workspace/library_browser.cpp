@@ -623,9 +623,12 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                                                     ? QStringLiteral("media-optical-audio")
                                                     : QStringLiteral("audio-x-generic")));
                  item->setData(QVariant::fromValue(entry), entry_role);
+                 // A track by its file, an album by whose it is, an artist
+                 // by name alone.
                  item->setToolTip(entry.kind == persistence::LibraryEntryKind::track
                                       ? pathLabel(entry.key)
-                                      : text(entry.artist + " — " + entry.album));
+                                  : entry.album.empty() ? text(entry.artist)
+                                                        : text(entry.artist + " — " + entry.album));
                  if (entry.kind != persistence::LibraryEntryKind::track) {
                      persistence::LibraryQuery children;
                      if (entry.kind == persistence::LibraryEntryKind::artist) {

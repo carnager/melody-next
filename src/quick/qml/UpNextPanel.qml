@@ -134,8 +134,12 @@ Pane {
                         width: 32
                         height: 32
                         radius: 2
-                        color: Shade.mix(panel.palette.base, panel.ink, 0.10)
+                        color: "transparent"
                         clip: true
+                        InitialsTile {
+                            anchors.fill: parent
+                            name: row.modelData.album || row.modelData.title || ""
+                        }
                         Image {
                             anchors.fill: parent
                             asynchronous: false

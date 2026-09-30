@@ -33,7 +33,34 @@ ApplicationWindow {
     // Its window gone, so is the editor.
     Component.onDestruction: tagger.release()
     function closed() {
+        tagger.storeWindowState({
+            width: taggerWindow.visibility === Window.Maximized ? restoredWidth : width,
+            height: taggerWindow.visibility === Window.Maximized ? restoredHeight : height,
+            maximized: taggerWindow.visibility === Window.Maximized,
+            listWidth: fileList.width,
+        });
         Qt.callLater(() => taggerWindow.destroy());
+    }
+
+    // Opened as it was last left: its size, maximized or not, and the file
+    // list's width. The size before maximizing is the one kept.
+    property int restoredWidth: width
+    property int restoredHeight: height
+    onWidthChanged: if (visibility !== Window.Maximized) restoredWidth = width
+    onHeightChanged: if (visibility !== Window.Maximized) restoredHeight = height
+    Component.onCompleted: tagger.loadWindowState()
+    Connections {
+        target: taggerWindow.tagger
+        function onWindowStateLoaded(state) {
+            if ((state.width ?? 0) >= taggerWindow.minimumWidth)
+                taggerWindow.width = state.width;
+            if ((state.height ?? 0) >= taggerWindow.minimumHeight)
+                taggerWindow.height = state.height;
+            if ((state.listWidth ?? 0) > 0)
+                fileList.SplitView.preferredWidth = state.listWidth;
+            if (state.maximized)
+                taggerWindow.showMaximized();
+        }
     }
 
     onClosing: close => {

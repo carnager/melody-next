@@ -44,82 +44,92 @@ ApplicationWindow {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 8
-        Rectangle {
+        spacing: 0
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: palette.base
-            border.color: Theme.hairline(palette)
-            radius: 4
-            ScrollView {
-                anchors.fill: parent
-                anchors.margins: 1
-                clip: true
-                Column {
-                    objectName: "bench-open-list-tree"
-                    width: dialog.width - 26
-                    Repeater {
-                        model: dialog.openList.groups
-                        Column {
-                            id: group
-                            required property var modelData
-                            required property int index
-                            width: parent.width
-                            Label {
-                                leftPadding: 8
-                                topPadding: 6
-                                bottomPadding: 4
-                                text: group.modelData.name
-                                font.bold: true
-                            }
-                            Repeater {
-                                model: group.modelData.lists
-                                ItemDelegate {
-                                    id: listItem
-                                    required property var modelData
-                                    required property int index
-                                    width: group.width
-                                    leftPadding: 24
-                                    highlighted: dialog.chosenGroup === group.index && dialog.chosenRow === index
-                                    onClicked: {
-                                        dialog.chosenGroup = group.index;
-                                        dialog.chosenRow = index;
-                                    }
-                                    onDoubleClicked: {
-                                        onClicked();
-                                        dialog.open();
-                                    }
-                                    contentItem: RowLayout {
-                                        Label {
-                                            Layout.fillWidth: true
-                                            elide: Text.ElideRight
-                                            text: listItem.modelData.label
+            Layout.margins: Theme.margin
+            spacing: Theme.gap
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: palette.base
+                border.color: Theme.hairline(palette)
+                radius: 4
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    clip: true
+                    Column {
+                        objectName: "bench-open-list-tree"
+                        width: dialog.width - 26
+                        Repeater {
+                            model: dialog.openList.groups
+                            Column {
+                                id: group
+                                required property var modelData
+                                required property int index
+                                width: parent.width
+                                Label {
+                                    leftPadding: 8
+                                    topPadding: 6
+                                    bottomPadding: 4
+                                    text: group.modelData.name
+                                    font.bold: true
+                                }
+                                Repeater {
+                                    model: group.modelData.lists
+                                    ItemDelegate {
+                                        id: listItem
+                                        required property var modelData
+                                        required property int index
+                                        width: group.width
+                                        leftPadding: 24
+                                        highlighted: dialog.chosenGroup === group.index && dialog.chosenRow === index
+                                        onClicked: {
+                                            dialog.chosenGroup = group.index;
+                                            dialog.chosenRow = index;
                                         }
-                                        Label {
-                                            text: listItem.modelData.tracks
-                                            opacity: 0.7
+                                        onDoubleClicked: {
+                                            onClicked();
+                                            dialog.open();
+                                        }
+                                        contentItem: RowLayout {
+                                            Label {
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
+                                                text: listItem.modelData.label
+                                            }
+                                            Label {
+                                                text: listItem.modelData.tracks
+                                                opacity: 0.7
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            Label {
-                                visible: group.modelData.note !== ""
-                                leftPadding: 24
-                                bottomPadding: 4
-                                opacity: 0.6
-                                text: group.modelData.note
+                                Label {
+                                    visible: group.modelData.note !== ""
+                                    leftPadding: 24
+                                    bottomPadding: 4
+                                    opacity: 0.6
+                                    text: group.modelData.note
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        DialogButtonBox {
-            Layout.fillWidth: true
-            standardButtons: DialogButtonBox.Open | DialogButtonBox.Cancel
-            onAccepted: dialog.open()
-            onRejected: dialog.close()
+        WindowFooter {
+            Item {
+                Layout.fillWidth: true
+            }
+            DialogButtonBox {
+                padding: 0
+                standardButtons: DialogButtonBox.Open | DialogButtonBox.Cancel
+                onAccepted: dialog.open()
+                onRejected: dialog.close()
+            }
         }
     }
 }

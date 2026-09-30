@@ -79,7 +79,7 @@ ApplicationWindow {
 
     StackLayout {
         anchors.fill: parent
-        anchors.margins: 10
+        anchors.margins: Theme.margin
         currentIndex: dialog.identify.matching ? 1 : 0
 
         // The release versions.

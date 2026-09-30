@@ -149,13 +149,12 @@ ApplicationWindow {
     }
 
     header: ToolBar {
-        background: Rectangle {
-            color: Shade.mix(palette.window, palette.base, 0.35)
-        }
+        topPadding: Theme.gap
+        bottomPadding: Theme.gap
+        leftPadding: Theme.margin
+        rightPadding: Theme.margin
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
             spacing: 6
             Label {
                 text: qsTr("Script:")
@@ -218,8 +217,18 @@ ApplicationWindow {
     SplitView {
         objectName: "bench-metadata-transformation-splitter"
         anchors.fill: parent
-        anchors.margins: 8
+        anchors.margins: Theme.margin
         orientation: Qt.Horizontal
+        // Room either side of the line between steps and preview.
+        handle: Item {
+            implicitWidth: 2 * Theme.gap + 1
+            Rectangle {
+                x: Theme.gap
+                width: 1
+                height: parent.height
+                color: SplitHandle.pressed ? palette.highlight : Theme.hairline(palette)
+            }
+        }
 
         ColumnLayout {
             SplitView.preferredWidth: 460
@@ -597,13 +606,12 @@ ApplicationWindow {
     }
 
     footer: ToolBar {
-        background: Rectangle {
-            color: Shade.mix(palette.window, palette.base, 0.35)
-        }
+        topPadding: Theme.gap
+        bottomPadding: Theme.gap
+        leftPadding: Theme.margin
+        rightPadding: Theme.margin
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
             spacing: 8
             Label {
                 objectName: "bench-metadata-transformation-catalog-status"

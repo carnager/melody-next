@@ -33,9 +33,17 @@ ToolBar {
             Layout.preferredWidth: 44
             Layout.preferredHeight: 44
             Accessible.name: "Cover of the current album"
+            // Playing, and no cover: the album's tile, as in the list.
+            InitialsTile {
+                anchors.fill: parent
+                visible: (cover.status !== Image.Ready || cover.implicitWidth <= 1)
+                         && (bar.transport.album ?? "") !== ""
+                name: bar.transport.album ?? ""
+            }
             Rectangle {
                 anchors.fill: parent
-                visible: cover.status !== Image.Ready || cover.implicitWidth <= 1
+                visible: (cover.status !== Image.Ready || cover.implicitWidth <= 1)
+                         && (bar.transport.album ?? "") === ""
                 radius: 3
                 color: Shade.mix(bar.ground, bar.ink, 0.10)
                 Text {
@@ -59,12 +67,12 @@ ToolBar {
         }
 
         // bench-track-display: title over "Artist — Album (Year)".
+        // A set width: the seek line takes the rest, as long as the window.
         ColumnLayout {
-            Layout.fillWidth: true
-            Layout.horizontalStretchFactor: 3
+            // Not filling, though its labels do.
+            Layout.fillWidth: false
             Layout.minimumWidth: 140
-            Layout.maximumWidth: 420
-            Layout.preferredWidth: 280
+            Layout.preferredWidth: Math.min(260, Math.max(140, bar.width * 0.2))
             spacing: 1
             Item { Layout.fillHeight: true }
             Label {
@@ -174,7 +182,6 @@ ToolBar {
             id: seek
             objectName: "bench-seek"
             Layout.fillWidth: true
-            Layout.horizontalStretchFactor: 4
             Layout.minimumWidth: 120
             enabled: bar.transport.seekEnabled ?? false
             from: 0

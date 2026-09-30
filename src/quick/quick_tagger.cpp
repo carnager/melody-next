@@ -588,6 +588,15 @@ QVariantMap QuickTagger::loudnessSources() const {
 
 // Closing.
 
+void QuickTagger::loadWindowState() {
+    const QPointer self{this};
+    session_->loadWindowState([self](const QVariantMap& state) {
+        if (self) {
+            emit self->windowStateLoaded(state);
+        }
+    });
+}
+
 QString QuickTagger::requestClose() {
     switch (session_->requestClose()) {
     case bench::TaggerSession::CloseAnswer::close:

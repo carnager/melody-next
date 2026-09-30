@@ -280,6 +280,7 @@ class BenchMainWindowTest final : public QObject {
     void fileWorkWithoutAnEngineSaysWhy();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
+    void taggerWindowStateRoundTrips();
     void metadataFieldLayoutsLoadFilterAndPersist();
     void metadataGridDisplaysUnicodePaths();
     void metadataGridReusesExactNativeFieldWithoutInvalidIndexes();
@@ -3534,6 +3535,51 @@ void BenchMainWindowTest::metadataApplyCancellationPreservesDraftForFreshPreview
         aggregate_model->data(aggregate_model->index(*title_row, 2), Qt::EditRole).toString(),
         QStringLiteral("Cancelled batch title"));
     delete properties;
+}
+
+// The size a window of any toolkit restores: stored on close, handed back
+// to the next tagger as it was.
+void BenchMainWindowTest::taggerWindowStateRoundTrips() {
+    QHash<QString, QByteArray> saved_states;
+    TaggerServices services;
+    services.layout_store = MetadataDialogLayoutStore{
+        .load =
+            [this, &saved_states](QString key,
+                                  MetadataDialogLayoutStore::LoadCompletion completion) {
+                const auto state = saved_states.value(key);
+                QTimer::singleShot(0, this, [completion = std::move(completion), state]() mutable {
+                    completion(state, {});
+                });
+            },
+        .save =
+            [&saved_states](QString key, QByteArray value,
+                            MetadataDialogLayoutStore::Completion completion) {
+                saved_states.insert(std::move(key), std::move(value));
+                if (completion) {
+                    completion({});
+                }
+            },
+    };
+    const auto no_source = [](std::size_t) -> std::optional<MetadataPropertiesSource> {
+        return std::nullopt;
+    };
+    {
+        TaggerSession first(0U, no_source, {}, services);
+        first.storeWindowState({{QStringLiteral("width"), 930},
+                                {QStringLiteral("height"), 640},
+                                {QStringLiteral("maximized"), true},
+                                {QStringLiteral("listWidth"), 210}});
+    }
+    QVERIFY(saved_states.contains(QStringLiteral("workspace/metadata-properties-window-v1")));
+
+    TaggerSession second(0U, no_source, {}, services);
+    QVariantMap loaded;
+    second.loadWindowState([&loaded](QVariantMap state) { loaded = std::move(state); });
+    QTRY_VERIFY(!loaded.isEmpty());
+    QCOMPARE(loaded.value(QStringLiteral("width")).toInt(), 930);
+    QCOMPARE(loaded.value(QStringLiteral("height")).toInt(), 640);
+    QCOMPARE(loaded.value(QStringLiteral("maximized")).toBool(), true);
+    QCOMPARE(loaded.value(QStringLiteral("listWidth")).toInt(), 210);
 }
 
 void BenchMainWindowTest::metadataDialogLayoutsPersistAsynchronously() {

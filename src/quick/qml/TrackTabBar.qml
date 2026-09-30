@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import Trackknife.Quick
+import Trackknife.Style
 
 // PlaybackTabBar: tabs drawn by the bar itself, the same under every style.
 // The current tab is filled with the list's own ground so it reads as the
@@ -98,6 +99,45 @@ Item {
         currentIndex: Tk.currentTab
         highlightFollowsCurrentItem: false
         onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+
+        // After the last tab: a new list.
+        footer: Item {
+            width: 30
+            height: tabs.height
+            Item {
+                id: plus
+                x: 4
+                y: 3 + (parent.height - 3 - height) / 2
+                width: 22
+                height: 22
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("New list")
+                HoverHandler {
+                    id: plusHover
+                }
+                ToolTip.visible: plusHover.hovered
+                ToolTip.delay: 600
+                ToolTip.text: qsTr("New list")
+                Rectangle {
+                    anchors.fill: parent
+                    radius: Theme.radius
+                    color: Theme.hovered(bar.palette)
+                    opacity: plusHover.hovered ? 1 : 0
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.quick }
+                    }
+                }
+                Label {
+                    anchors.centerIn: parent
+                    text: "+"
+                    font.pixelSize: 16
+                    color: plusHover.hovered ? bar.palette.windowText : bar.palette.placeholderText
+                }
+                TapHandler {
+                    onTapped: bar.newListRequested()
+                }
+            }
+        }
 
         delegate: Item {
             id: tab

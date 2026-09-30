@@ -359,6 +359,10 @@ class TaggerSession final : public QObject {
     void loadLayoutState(std::function<void(QByteArray)> geometry,
                          std::function<void(QByteArray)> splitter);
     void storeLayoutState(const QByteArray& geometry, const QByteArray& splitter);
+    // The same, in a form any window can restore: "width", "height",
+    // "maximized" and the file list's "listWidth".
+    void loadWindowState(std::function<void(QVariantMap)> loaded);
+    void storeWindowState(const QVariantMap& state);
 
   signals:
     // Anything shown changed.

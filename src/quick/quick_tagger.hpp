@@ -178,12 +178,18 @@ class QuickTagger final : public QObject {
     // Closing: "close", "confirm-artwork", "confirm-drafts" or "wait".
     Q_INVOKABLE QString requestClose();
     Q_INVOKABLE void closing(bool discard) { session_->closing(discard); }
+    // The window's size, as last left: windowStateLoaded when known.
+    Q_INVOKABLE void loadWindowState();
+    Q_INVOKABLE void storeWindowState(const QVariantMap& state) {
+        session_->storeWindowState(state);
+    }
     // Closing without the covers staged.
     Q_INVOKABLE void discardArtwork() { artwork_session_->discardPendingChanges(); }
     // Its window closed: gone.
     Q_INVOKABLE void release() { deleteLater(); }
 
   signals:
+    void windowStateLoaded(const QVariantMap& state);
     void changed();
     void gridReady();
     void filesChanged();

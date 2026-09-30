@@ -55,6 +55,11 @@ Item {
         }
     }
 
+    // QA hook: a row opened as a click on its arrow opens it.
+    function toggleRowForScreenshot(row) {
+        tree.toggle(row, true);
+    }
+
     property var pendingExpansions: []
     function completeExpansions() {
         const waiting = [];
@@ -175,13 +180,20 @@ Item {
                 Accessible.name: qsTr("Local artists, albums, and tracks")
                 property int hoveredRow: -1
 
+                // Opened before its children are asked for: once asked for,
+                // a row with none yet reads as having none, and would not
+                // open; if it still does not, it opens when they arrive.
                 function toggle(row, open) {
                     const index = tree.index(row, 0);
-                    pane.browser.noteExpanded(index, open);
-                    if (open)
+                    if (open) {
                         tree.expand(row);
-                    else
+                        if (!tree.isExpanded(row))
+                            pane.pendingExpansions.push(index);
+                        pane.browser.noteExpanded(index, true);
+                    } else {
                         tree.collapse(row);
+                        pane.browser.noteExpanded(index, false);
+                    }
                 }
 
                 // The covers of the albums in view are asked for.

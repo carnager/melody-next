@@ -15,6 +15,13 @@ Pane {
 
     padding: 0
 
+    function openArtistForScreenshot() {
+        libraryPane.toggleRowForScreenshot(0);
+    }
+    function openRowForScreenshot(row) {
+        libraryPane.toggleRowForScreenshot(row);
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -122,6 +129,7 @@ Pane {
             currentIndex: Tk.currentSource === 0 ? 0 : 1
             FolderTree {}
             LibraryPane {
+                id: libraryPane
                 onFoldersRequested: panel.foldersRequested()
             }
         }

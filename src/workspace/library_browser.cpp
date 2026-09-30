@@ -513,6 +513,7 @@ void LibraryBrowser::reload() {
         group->setEditable(false);
         group->setDragEnabled(false);
         group->setData(true, loaded_role);
+        group->setColumnCount(1);
         model_->appendRow(group);
         loadFilterChildren(QPersistentModelIndex{group->index()},
                            std::make_shared<query::CompiledTkq>(std::move(*compiled)));
@@ -526,6 +527,7 @@ void LibraryBrowser::reload() {
         group->setEditable(false);
         group->setDragEnabled(false);
         group->setData(true, loaded_role);
+        group->setColumnCount(1);
         model_->appendRow(group);
         persistence::LibraryQuery query;
         query.kind = kind;
@@ -634,6 +636,10 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                          children.album_key = entry.key;
                      }
                      item->setData(QVariant::fromValue(children), query_role);
+                     // Its column before its rows: added with the first row,
+                     // it is a column insertion under a nested row, which
+                     // QML's tree adapter cannot follow.
+                     item->setColumnCount(1);
                  }
                  target->appendRow(item);
                  if (locate_target_) {

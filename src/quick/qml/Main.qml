@@ -40,8 +40,19 @@ ApplicationWindow {
             editBar.openSort();
         else if (name === "folders")
             Tk.selectSource(0, false);
+        else if (name === "artist")
+            sources.openArtistForScreenshot();
+        else if (name === "album") {
+            sources.openArtistForScreenshot();
+            Qt.callLater(() => albumTimer.start());
+        }
         else if (name === "search" && Tk.library)
             Tk.library.search = "a";
+    }
+    Timer {
+        id: albumTimer
+        interval: 500
+        onTriggered: sources.openRowForScreenshot(1)
     }
     function closeTab(index) {
         const tab = Tk.tabAt(index);
@@ -482,6 +493,7 @@ ApplicationWindow {
 
         // bench-panel-folders: Sources.
         SourcesPanel {
+            id: sources
             SplitView.minimumWidth: 160
             SplitView.preferredWidth: (window.width - (upNextSettings.visible ? upNextSettings.width : 0)) / 4
             onNotYet: what => window.notYet(what)

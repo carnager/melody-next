@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QMouseEvent>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -56,6 +57,9 @@ int main(int argc, char* argv[]) {
     QString screenshot_path;
     bool grab_live = false;
     QString open_for_screenshot;
+    // QA hook: --click <x>,<y> (repeatable) -- left clicks, in order, once
+    // what was opened is shown.
+    QList<QPoint> clicks;
     std::vector<std::string> raw_paths;
     const auto arguments = QApplication::arguments();
     for (qsizetype index = 1; index < arguments.size(); ++index) {
@@ -74,6 +78,13 @@ int main(int argc, char* argv[]) {
         // window names (Main.qml's openForScreenshot).
         if (arguments.at(index) == QStringLiteral("--open") && index + 1 < arguments.size()) {
             open_for_screenshot = arguments.at(++index);
+            continue;
+        }
+        if (arguments.at(index) == QStringLiteral("--click") && index + 1 < arguments.size()) {
+            const auto at = arguments.at(++index).split(QLatin1Char(','));
+            if (at.size() == 2) {
+                clicks.append(QPoint{at.at(0).toInt(), at.at(1).toInt()});
+            }
             continue;
         }
         if (arguments.at(index) == QStringLiteral("--debug")) {
@@ -119,7 +130,24 @@ int main(int argc, char* argv[]) {
                 }
             });
         }
-        QTimer::singleShot(grab_live ? 6'000 : 3'000, &application, [&qml, screenshot_path] {
+        for (qsizetype click = 0; click < clicks.size(); ++click) {
+            QTimer::singleShot(4'000 + static_cast<int>(click) * 500, &application,
+                               [&qml, at = clicks.at(click)] {
+                auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
+                if (window == nullptr) {
+                    return;
+                }
+                const QPointF local{at};
+                QMouseEvent press{QEvent::MouseButtonPress, local, window->mapToGlobal(local),
+                                  Qt::LeftButton, Qt::LeftButton, Qt::NoModifier};
+                QCoreApplication::sendEvent(window, &press);
+                QMouseEvent release{QEvent::MouseButtonRelease, local, window->mapToGlobal(local),
+                                    Qt::LeftButton, Qt::NoButton, Qt::NoModifier};
+                QCoreApplication::sendEvent(window, &release);
+            });
+        }
+        const int grab_at = (grab_live ? 6'000 : 3'000) + static_cast<int>(clicks.size()) * 500;
+        QTimer::singleShot(grab_at, &application, [&qml, screenshot_path] {
             // The window opened last -- a tag editor, say -- else the main one.
             auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
             for (bool deeper = true; deeper;) {

@@ -24,6 +24,7 @@
 
 #include <QAbstractItemModel>
 #include <QObject>
+#include <QPointer>
 #include <QTimer>
 #include <QVariantList>
 #include <QUrl>
@@ -266,6 +267,31 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // chosen.
     Q_INVOKABLE void setPanelSizes(const QVariantList& sizes);
     Q_INVOKABLE void setPanelTab(int index);
+    // Drag and drop (ADR-0233). A drag says what it carries when it starts:
+    // the rows chosen in the list shown, a library's selection, a folder
+    // or file of the folder tree. A drop says where: a tab (before a row,
+    // -1 the end; tab -1 a new list), Up Next, a list in the lists pane.
+    // Files from elsewhere arrive as URLs, with no drag begun here.
+    Q_INVOKABLE void dragRows();
+    Q_INVOKABLE void dragLibrary(const QModelIndexList& indexes);
+    Q_INVOKABLE void dragFolder(const QModelIndex& index);
+    // Up Next's own rows, to be moved within it.
+    Q_INVOKABLE void dragUpNext() {
+        dragged_ = {};
+        dragging_up_next_ = true;
+    }
+    Q_INVOKABLE void endDrag() {
+        dragged_ = {};
+        dragging_up_next_ = false;
+    }
+    // What a drag carries now: "rows", "files", "upnext" or "".
+    [[nodiscard]] Q_INVOKABLE QString draggedKind() const;
+    Q_INVOKABLE bool dropOnTab(int tab, int row, bool copy);
+    Q_INVOKABLE bool dropOnUpNext(int position);
+    Q_INVOKABLE bool dropOnPanelList(const QString& engine, const QString& id);
+    Q_INVOKABLE bool dropUrls(const QList<QUrl>& urls, int tab, int row);
+    Q_INVOKABLE bool dropUrlsOnPanelList(const QList<QUrl>& urls, const QString& engine,
+                                         const QString& id);
     // Every engine's lists, one to open.
     Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
     // Search, in the library of the tab in front (or the current tab); one
@@ -385,6 +411,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
         std::vector<int> rows;
         int current{-1};
     };
+    // A drag of these rows begun (from a dynamic result: `dynamic`).
+    void dragPicked(const Picked& picked, bool dynamic);
     void editTagsOf(Picked picked);
     void replayGainOf(Picked picked);
     void convertFilesOf(Picked picked);
@@ -429,6 +457,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     bench::ListFind find_{this};
     bench::ListsCatalog lists_catalog_{workspace_, this};
     bench::PanelArrangement panel_arrangement_{this};
+    bench::Workspace::Dragged dragged_;
+    QPointer<bench::LocalListModel> dragged_model_;
+    bool dragging_up_next_{false};
     void addLibrary(EngineLink& engine);
     void selectPreferredSource();
     [[nodiscard]] int sourceIndexOf(const bench::EngineKey& engine) const;

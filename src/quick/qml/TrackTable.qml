@@ -376,15 +376,41 @@ FocusScope {
                 border.color: Shade.alpha(row.palette.highlight, 200 / 255)
             }
 
+            // A press on a chosen row keeps the choice, to be dragged; a
+            // click without dragging then chooses that row alone.
+            property bool pressPending: false
             TapHandler {
                 acceptedButtons: Qt.LeftButton
                 onPressedChanged: {
                     if (pressed) {
                         list.forceActiveFocus();
-                        table.rows.press(row.index, point.modifiers);
+                        if (row.selected && point.modifiers === Qt.NoModifier) {
+                            row.pressPending = true;
+                        } else {
+                            row.pressPending = false;
+                            table.rows.press(row.index, point.modifiers);
+                        }
                     }
                 }
+                onTapped: {
+                    if (row.pressPending)
+                        table.rows.press(row.index, 0);
+                    row.pressPending = false;
+                }
+                onCanceled: row.pressPending = false
                 onDoubleTapped: Tk.activateRow(row.index)
+            }
+            DragSource {
+                label: {
+                    const count = Tk.selection.count ?? 1;
+                    return count === 1 ? qsTr("1 track") : qsTr("%1 tracks").arg(count);
+                }
+                onBegan: {
+                    row.pressPending = false;
+                    if (!row.selected)
+                        table.rows.press(row.index, 0);
+                    Tk.dragRows();
+                }
             }
             TapHandler {
                 acceptedButtons: Qt.RightButton
@@ -430,6 +456,68 @@ FocusScope {
             table.rows.moveCurrent(Math.max(0, Math.min(count - 1, target)), event.modifiers);
             positionViewAtIndex(table.rows.currentRow, ListView.Contain);
             event.accepted = true;
+        }
+
+        // Rows, library selections, folders and files dropped here land
+        // between rows: before one when over its upper half, after it
+        // when over its lower half.
+        DropArea {
+            id: drops
+            parent: list
+            anchors.fill: parent
+            keys: ["application/x-trackknife-drag", "text/uri-list"]
+            property int insertion: -1
+            function insertionAt(y) {
+                const at = list.indexAt(10, y + list.contentY);
+                if (at < 0)
+                    return -1;
+                const item = list.itemAtIndex(at);
+                if (!item)
+                    return at;
+                const local = y + list.contentY - item.y;
+                const top = item.headerHeight + item.discHeight;
+                if (local < top)
+                    return at;
+                return local < top + (item.height - top) / 2 ? at : at + 1;
+            }
+            function showAt(y) {
+                insertion = insertionAt(y);
+                const index = insertion < 0 ? list.count - 1 : Math.min(insertion, list.count - 1);
+                const item = list.itemAtIndex(index);
+                marker.visible = list.count > 0;
+                if (!item) {
+                    marker.y = list.count > 0 ? Math.min(list.height - 2, list.contentHeight - list.contentY) : 0;
+                    return;
+                }
+                const edge = insertion < 0 || insertion >= list.count
+                             ? item.y + item.height
+                             : item.y + item.headerHeight + item.discHeight;
+                marker.y = edge - list.contentY - 1;
+            }
+            onEntered: drag => {
+                if (Tk.currentTab < 0) {
+                    drag.accepted = false;
+                    return;
+                }
+                showAt(drag.y);
+            }
+            onPositionChanged: drag => showAt(drag.y)
+            onExited: marker.visible = false
+            onDropped: drop => {
+                marker.visible = false;
+                const row = insertion >= list.count ? -1 : insertion;
+                const taken = Tk.draggedKind() !== ""
+                              ? Tk.dropOnTab(Tk.currentTab, row, drop.action === Qt.CopyAction)
+                              : Tk.dropUrls(drop.urls, Tk.currentTab, row);
+                if (taken)
+                    drop.accept(drop.action === Qt.CopyAction ? Qt.CopyAction : drop.proposedAction);
+            }
+        }
+        DropMarker {
+            id: marker
+            parent: list
+            x: 4
+            width: list.width - 8
         }
 
         // An empty list says what can go in it, two fifths of the way down.

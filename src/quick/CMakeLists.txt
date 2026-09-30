@@ -23,6 +23,7 @@ qt_add_qml_module(
     style/Theme.qml
     style/Chevron.qml
     style/CheckMark.qml
+    style/FolderGlyph.qml
     style/Button.qml
     style/ToolButton.qml
     style/TextField.qml
@@ -146,6 +147,8 @@ qt_add_qml_module(
     qml/FormLabel.qml
     qml/Hint.qml
     qml/WindowFooter.qml
+    qml/DragSource.qml
+    qml/DropMarker.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

@@ -86,6 +86,12 @@ ApplicationWindow {
             window.searchWindow.search.setScope(1);
             window.searchWindow.search.setText("tone");
         }
+        // A library of these files, scanned, and shown.
+        else if (name.startsWith("library:")) {
+            Tk.localLibrary.addRoot(name.substring(8));
+            Tk.localLibrary.toggleScan();
+            Tk.selectSource(1, false);
+        }
         else if (name === "palette") {
             commandPaletteDialog.commands = window.paletteCommands();
             commandPaletteDialog.open();
@@ -700,6 +706,18 @@ ApplicationWindow {
         for (let i = 0; i < window.menuBar.count; ++i)
             walk(window.menuBar.menuAt(i));
         return listed.concat(keyedCommands);
+    }
+
+    // Files dropped from a file manager anywhere nothing else takes them:
+    // opened, as File › Open files does.
+    DropArea {
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        onEntered: drag => drag.accepted = drag.hasUrls && Tk.draggedKind() === ""
+        onDropped: drop => {
+            Tk.openUrls(drop.urls);
+            drop.accept(Qt.CopyAction);
+        }
     }
 
     SplitView {

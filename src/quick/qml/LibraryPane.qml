@@ -443,6 +443,23 @@ Item {
                                 pane.requestAt(node.row, 0);
                         }
                     }
+                    // Dragged, the albums, artists or tracks chosen go where
+                    // they are dropped: a list, a new one, Up Next.
+                    DragSource {
+                        enabled: node.kind !== "" && node.available
+                        copyOnly: true
+                        label: {
+                            const count = tree.selectionModel.selectedIndexes.length;
+                            return count > 1 ? qsTr("%1 items").arg(count) : node.display;
+                        }
+                        onBegan: {
+                            const index = tree.index(node.row, 0);
+                            if (!tree.selectionModel.isSelected(index))
+                                tree.selectionModel.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect
+                                                                    | ItemSelectionModel.Rows);
+                            Tk.dragLibrary(pane.selectedIndexes());
+                        }
+                    }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
                         onTapped: {

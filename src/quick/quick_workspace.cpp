@@ -692,6 +692,137 @@ void QuickWorkspace::setPanelTab(const int index) {
     emit panelsChanged();
 }
 
+void QuickWorkspace::dragRows() {
+    dragPicked(shownPicked(), false);
+}
+
+void QuickWorkspace::dragPicked(const Picked& picked, const bool dynamic) {
+    dragged_ = {};
+    if (picked.model == nullptr || picked.rows.empty()) {
+        return;
+    }
+    dragged_.from_tab = picked.tab;
+    dragged_.from_model = picked.model;
+    dragged_.dynamic = dynamic;
+    dragged_.rows = picked.rows;
+    dragged_.engine = picked.engine;
+    dragged_model_ = picked.model;
+}
+
+void QuickWorkspace::dragLibrary(const QModelIndexList& indexes) {
+    dragged_ = {};
+    auto* browser = library();
+    if (browser == nullptr || indexes.isEmpty()) {
+        return;
+    }
+    auto entries = browser->selectedEntries(indexes);
+    if (entries.empty()) {
+        return;
+    }
+    dragged_.library = browser;
+    dragged_.entries = entries;
+    dragged_.engine = browser->engine();
+    dragged_.resolve = [browser = QPointer{browser}, entries](
+                           std::function<void(std::vector<std::string>)> done) {
+        if (browser) {
+            browser->resolveEntries(entries, std::move(done));
+        }
+    };
+}
+
+void QuickWorkspace::dragFolder(const QModelIndex& index) {
+    dragged_ = {};
+    auto path = folders_.rawPath(index);
+    if (!path.empty()) {
+        dragged_.paths.push_back(std::move(path));
+    }
+}
+
+QString QuickWorkspace::draggedKind() const {
+    if (dragging_up_next_) {
+        return QStringLiteral("upnext");
+    }
+    if (dragged_.isRows() && dragged_model_) {
+        return QStringLiteral("rows");
+    }
+    return dragged_.isFiles() ? QStringLiteral("files") : QString{};
+}
+
+bool QuickWorkspace::dropOnTab(const int tab, const int row, const bool copy) {
+    if (draggedKind().isEmpty() || dragging_up_next_) {
+        return false;
+    }
+    auto dragged = std::exchange(dragged_, {});
+    if (tab < 0) {
+        return workspace_.dropOnNewList(std::move(dragged), copy);
+    }
+    auto* target = tabs_.at(tab);
+    if (target == nullptr) {
+        return false;
+    }
+    // Rows dropped on their own tab's name: nothing to move.
+    if (row < 0 && target->model == dragged.from_model) {
+        return false;
+    }
+    const bool taken = workspace_.dropOnList(std::move(dragged), *target, row, copy);
+    if (taken && tab != current_) {
+        setCurrentTab(tab);
+    }
+    return taken;
+}
+
+bool QuickWorkspace::dropOnUpNext(const int position) {
+    if (draggedKind().isEmpty() || dragging_up_next_) {
+        return false;
+    }
+    return workspace_.dropOnUpNext(std::exchange(dragged_, {}), position);
+}
+
+bool QuickWorkspace::dropOnPanelList(const QString& engine, const QString& id) {
+    if (draggedKind().isEmpty() || dragging_up_next_) {
+        return false;
+    }
+    return workspace_.dropOnEngineList(std::exchange(dragged_, {}),
+                                       bench::EngineKey::fromText(engine), id);
+}
+
+namespace {
+
+// Files from a file manager: this computer's.
+[[nodiscard]] bench::Workspace::Dragged droppedFiles(const QList<QUrl>& urls) {
+    bench::Workspace::Dragged dragged;
+    for (const auto& url : urls) {
+        if (url.isLocalFile()) {
+            const auto encoded = QFile::encodeName(url.toLocalFile());
+            dragged.paths.emplace_back(encoded.constData(),
+                                       static_cast<std::size_t>(encoded.size()));
+        }
+    }
+    return dragged;
+}
+
+} // namespace
+
+bool QuickWorkspace::dropUrlsOnPanelList(const QList<QUrl>& urls, const QString& engine,
+                                         const QString& id) {
+    auto dragged = droppedFiles(urls);
+    return !dragged.paths.empty() &&
+           workspace_.dropOnEngineList(std::move(dragged), bench::EngineKey::fromText(engine), id);
+}
+
+bool QuickWorkspace::dropUrls(const QList<QUrl>& urls, const int tab, const int row) {
+    auto dragged = droppedFiles(urls);
+    if (dragged.paths.empty()) {
+        return false;
+    }
+    // Files from a file manager are this computer's.
+    if (tab < 0) {
+        return workspace_.dropOnNewList(std::move(dragged), true);
+    }
+    auto* target = tabs_.at(tab);
+    return target != nullptr && workspace_.dropOnList(std::move(dragged), *target, row, true);
+}
+
 void QuickWorkspace::engineListsChanged() {
     if (listsInPanel()) {
         lists_catalog_.fetch();
@@ -1757,7 +1888,17 @@ void QuickWorkspace::engineConnected(EngineLink& engine, bool) {
     emit currentTabChanged();
 }
 
-void QuickWorkspace::engineAttached(EngineLink&) { refreshList(); }
+// Now answering, the engine is called as it says -- not by the address
+// Settings gave -- in the sources and on its lists' tabs.
+void QuickWorkspace::engineAttached(EngineLink& engine) {
+    for (auto* tab : tabs_.tabs()) {
+        if (bench::EngineKey::of(tab->document) == engine.key) {
+            tabs_.refresh(*tab);
+        }
+    }
+    emit sourcesChanged();
+    refreshList();
+}
 
 void QuickWorkspace::engineRekeyed(EngineLink& engine, const bench::EngineKey& from, bool) {
     for (auto& library : libraries_) {

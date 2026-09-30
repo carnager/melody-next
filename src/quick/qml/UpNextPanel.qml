@@ -163,14 +163,38 @@ Pane {
                             color: panel.palette.placeholderText
                         }
                     }
+                    // A press on a chosen row keeps the choice, to be dragged.
+                    property bool pressPending: false
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onPressedChanged: if (pressed) {
                             list.forceActiveFocus();
-                            panel.select(row.index, point.modifiers);
+                            if (row.chosen && point.modifiers === Qt.NoModifier) {
+                                row.pressPending = true;
+                            } else {
+                                row.pressPending = false;
+                                panel.select(row.index, point.modifiers);
+                            }
                         }
+                        onTapped: {
+                            if (row.pressPending)
+                                panel.select(row.index, 0);
+                            row.pressPending = false;
+                        }
+                        onCanceled: row.pressPending = false
                         // Activated, an ask plays now.
                         onDoubleTapped: Tk.playUpNextRow(row.index)
+                    }
+                    // Dragged, the asks chosen move within Up Next.
+                    DragSource {
+                        label: panel.selected.length === 1 ? qsTr("1 track")
+                                                           : qsTr("%1 tracks").arg(panel.selected.length)
+                        onBegan: {
+                            row.pressPending = false;
+                            if (!row.chosen)
+                                panel.select(row.index, 0);
+                            Tk.dragUpNext();
+                        }
                     }
                     TapHandler {
                         acceptedButtons: Qt.RightButton
@@ -181,6 +205,42 @@ Pane {
                             menu.popup();
                         }
                     }
+                }
+                // Tracks and a library's albums dropped here are asked for,
+                // before the row under the pointer's upper half.
+                DropArea {
+                    parent: list
+                    anchors.fill: parent
+                    keys: ["application/x-trackknife-drag"]
+                    property int position: -1
+                    function show(y) {
+                        const at = Math.floor((y + list.contentY + 20) / 40);
+                        position = at >= list.count ? -1 : at;
+                        upNextMarker.visible = true;
+                        upNextMarker.y = Math.min(at, list.count) * 40 - list.contentY - 1;
+                    }
+                    onEntered: drag => show(drag.y)
+                    onPositionChanged: drag => show(drag.y)
+                    onExited: upNextMarker.visible = false
+                    onDropped: drop => {
+                        upNextMarker.visible = false;
+                        let taken = false;
+                        if (Tk.draggedKind() === "upnext") {
+                            Tk.editUpNextRows(panel.selected, 4,
+                                              position < 0 ? list.count : position);
+                            taken = true;
+                        } else {
+                            taken = Tk.dropOnUpNext(position);
+                        }
+                        if (taken)
+                            drop.accept(Qt.CopyAction);
+                    }
+                }
+                DropMarker {
+                    id: upNextMarker
+                    parent: list
+                    x: 4
+                    width: list.width - 8
                 }
                 Column {
                     visible: list.count === 0

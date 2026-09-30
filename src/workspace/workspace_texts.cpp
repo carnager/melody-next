@@ -111,12 +111,15 @@ Workspace::UpNextHeading Workspace::upNextHeading() const {
         playing = QString::fromStdString(playback_.requests.active()->source.artist + " — " +
                                          playback_.requests.active()->source.title);
     }
-    // Up Next belongs to the engine that is playing (ADR-0227), so it is
-    // named by it -- "Local" was the MPD era's word for this computer.
+    // Up Next holds one engine's tracks (ADR-0227): named by that engine
+    // while it holds any, else by the engine that is playing -- "Local" was
+    // the MPD era's word for this computer.
+    const bool holding =
+        !playback_.requests.pending().empty() || playback_.requests.active().has_value();
     const auto* playing_engine = linkOf(transport_);
-    const auto engine = playing_engine == nullptr || playing_engine->key.isLocal()
-                            ? QStringLiteral("This computer")
-                            : engineName(playing_engine->key);
+    const auto key = holding ? up_next_engine_
+                             : (playing_engine != nullptr ? playing_engine->key : EngineKey::local());
+    const auto engine = key.isLocal() ? QStringLiteral("This computer") : engineName(key);
     heading.status =
         QStringLiteral("%1 · %2 waiting").arg(engine).arg(playback_.requests.pending().size());
     heading.status_tooltip = playing.isEmpty() ? QString{} : QStringLiteral("Playing: ") + playing;

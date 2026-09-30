@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The "Transport" toolbar (bench-transport): one row, as players read --
 // what is playing on the left, the controls and the position in the middle,
@@ -320,6 +321,23 @@ ToolBar {
                 }
             }
             onClicked: bar.toggleUpNext()
+            // Tracks or a library's albums dropped on it join the end of
+            // Up Next.
+            DropArea {
+                id: pillDrop
+                anchors.fill: parent
+                keys: ["application/x-trackknife-drag"]
+                onEntered: drag => drag.accepted = Tk.draggedKind() !== "" && Tk.draggedKind() !== "upnext"
+                onDropped: drop => {
+                    if (Tk.dropOnUpNext(-1))
+                        drop.accept(Qt.CopyAction);
+                }
+            }
+            DropMarker {
+                whole: true
+                anchors.fill: parent
+                visible: pillDrop.containsDrag
+            }
         }
 
     }

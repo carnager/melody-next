@@ -385,6 +385,40 @@ class Workspace final : public QObject {
     // playlist's result -- when the list `playback_context` plays, the same
     // occurrence of it; otherwise the first.
     void markPlaying(LocalListModel& model, const QString& playback_context);
+    // What is dragged, as a drop needs it: rows of a list (or of a dynamic
+    // playlist's result, which are only ever copied), or files -- paths
+    // given, or resolved from a library's entries -- of `engine`.
+    struct Dragged {
+        ListTab* from_tab{nullptr};
+        LocalListModel* from_model{nullptr};
+        bool dynamic{false};
+        std::vector<int> rows;
+        std::vector<std::string> paths;
+        // Files still to be found: a library's selection.
+        std::function<void(std::function<void(std::vector<std::string>)>)> resolve;
+        // That selection's entries, for Up Next, which takes tracks.
+        QPointer<LibraryBrowser> library;
+        std::vector<persistence::LibraryEntry> entries;
+        EngineKey engine{EngineKey::local()};
+        [[nodiscard]] bool isRows() const { return from_model != nullptr && !rows.empty(); }
+        [[nodiscard]] bool isFiles() const { return !paths.empty() || static_cast<bool>(resolve); }
+    };
+    // Dropped on a list before `insertion_row` (-1: the end): its own rows
+    // reordered, another's moved there (copied when `copy`, or from a
+    // dynamic result), files added. False when it cannot take them.
+    bool dropOnList(Dragged dragged, ListTab& target, int insertion_row, bool copy);
+    // Dropped where no list is: a new list of them, shown.
+    bool dropOnNewList(Dragged dragged, bool copy);
+    // Dropped on Up Next before `position` (-1: the end): tracks, not
+    // folders or files from elsewhere.
+    bool dropOnUpNext(Dragged dragged, int position);
+    // Dropped on a list in the lists pane: open here, as on its tab; not
+    // open, copied into it once it is.
+    bool dropOnEngineList(Dragged dragged, const EngineKey& engine, const QString& id);
+    // Files of `files_engine` added to the list `id` before `row` (-1: the
+    // end), as that list's engine sees them.
+    void addDroppedPaths(const QString& id, const EngineKey& files_engine,
+                         std::vector<std::string> paths, int row = -1);
     // An imported playlist, as a new saved list of this computer's.
     void addImportedList(std::vector<LocalTrackRow> rows, const QString& name);
     // The workspace database and its settings copied beside `path`: the

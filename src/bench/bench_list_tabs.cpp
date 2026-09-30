@@ -390,69 +390,32 @@ void BenchMainWindow::listAdded(ListTab& added, const bool select) {
     view->setLocalFilesDropCallback(
         [this, id](const ui::LocalFilesMimeData& files, int insertion_row) {
             auto* target = tabForDocument(id);
-            if (!target || discovery_running_) {
+            if (target == nullptr) {
                 return false;
             }
-            const auto from = files.engine();
-            const auto into = EngineKey::of(target->document);
-            const QPersistentModelIndex anchor{target->model->index(insertion_row, 0)};
-            const bool anchored = anchor.isValid();
-            const QPointer<BenchMainWindow> window{this};
-            files.resolve([window, id, insertion_row, anchor, anchored, from,
-                           into](std::vector<std::string> paths) {
-                auto* destination = window ? window->tabForDocument(id) : nullptr;
-                if (destination == nullptr || (anchored && !anchor.isValid())) {
-                    return;
-                }
-                const auto row = anchored ? anchor.row() : insertion_row;
-                // From another engine's library: as this tab's engine sees
-                // those files, where it can.
-                if (from != into) {
-                    paths = window->crossEnginePaths(std::move(paths), from, into);
-                    if (paths.empty()) {
-                        return;
-                    }
-                }
-                // ADR-0227: a remote's paths are its machine's. Looking for
-                // them here, as discovery does, would find nothing without a
-                // mount and drop them all.
-                if (!into.isLocal()) {
-                    window->insertRemotePaths(*destination, std::move(paths), row);
-                    return;
-                }
-                window->startDiscovery(std::move(paths), id, row);
-            });
-            return true;
+            Workspace::Dragged dragged;
+            dragged.engine = files.engine();
+            dragged.resolve = [&files](std::function<void(std::vector<std::string>)> done) {
+                files.resolve(std::move(done));
+            };
+            return workspace_.dropOnList(std::move(dragged), *target, insertion_row, true);
         });
     view->setLocalUrlDropCallback([this, id](const QList<QUrl>& urls, const int insertion_row) {
         auto* target = tabForDocument(id);
         if (target == nullptr) {
             return false;
         }
-        std::vector<std::string> raw_paths;
-        raw_paths.reserve(static_cast<std::size_t>(urls.size()));
+        // Files from a file manager are this computer's.
+        Workspace::Dragged dragged;
         for (const auto& url : urls) {
-            if (!url.isLocalFile()) {
-                continue;
+            if (url.isLocalFile()) {
+                const auto encoded = QFile::encodeName(url.toLocalFile());
+                dragged.paths.emplace_back(encoded.constData(),
+                                           static_cast<std::size_t>(encoded.size()));
             }
-            const auto encoded = QFile::encodeName(url.toLocalFile());
-            raw_paths.emplace_back(encoded.constData(), static_cast<std::size_t>(encoded.size()));
         }
-        if (raw_paths.empty()) {
-            return false;
-        }
-        // Files from a file manager are this computer's; a remote tab takes
-        // them as the remote sees them, when its library has them.
-        if (const auto into = EngineKey::of(target->document); !into.isLocal()) {
-            raw_paths = crossEnginePaths(std::move(raw_paths), EngineKey::local(), into);
-            if (raw_paths.empty()) {
-                return false;
-            }
-            insertRemotePaths(*target, std::move(raw_paths), insertion_row);
-            return true;
-        }
-        startDiscovery(std::move(raw_paths), id, insertion_row);
-        return true;
+        return !dragged.paths.empty() &&
+               workspace_.dropOnList(std::move(dragged), *target, insertion_row, true);
     });
 
     // ADR-0233, ADR-0234: at the end of its engine's group.

@@ -11,6 +11,7 @@ T.MenuBarItem {
                              implicitContentHeight + topPadding + bottomPadding)
     padding: 4
     leftPadding: 10
+    font.pointSize: Theme.menuSize
     rightPadding: 10
     topInset: 3
     bottomInset: 3

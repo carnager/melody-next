@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Sources (bench-panel-folders): a tab per source -- Folders, this
 // computer's Library, each engine elsewhere's -- the bookmarks under
@@ -96,9 +97,12 @@ Pane {
                 required property int index
                 width: bookmarks.width
                 text: modelData.label
-                icon.source: "image://icon/folder"
-                icon.width: 16
-                icon.height: 16
+                leftPadding: 30
+                FolderGlyph {
+                    x: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Theme.dim(palette)
+                }
                 ToolTip.visible: hovered
                 ToolTip.text: modelData.tooltip
                 onClicked: Tk.folders.revealBookmark(index)

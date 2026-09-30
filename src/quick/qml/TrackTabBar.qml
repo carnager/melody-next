@@ -42,6 +42,48 @@ Item {
         onDoubleTapped: bar.newListRequested()
     }
 
+    // Tracks, a library's selection, folders or files dropped on a tab go
+    // to that list (moved, or copied with Ctrl); on empty space, into a new
+    // one.
+    DropArea {
+        id: drops
+        anchors.fill: parent
+        keys: ["application/x-trackknife-drag", "text/uri-list"]
+        property int over: -1
+        function tabAt(x, y) {
+            return tabs.indexAt(x + tabs.contentX, y);
+        }
+        function show(x, y) {
+            over = tabAt(x, y);
+            const item = over >= 0 ? tabs.itemAtIndex(over) : null;
+            marker.visible = true;
+            if (item) {
+                marker.x = item.x - tabs.contentX;
+                marker.width = item.width;
+            } else {
+                marker.x = Math.min(tabs.contentWidth - tabs.contentX, bar.width - 40);
+                marker.width = 36;
+            }
+        }
+        onEntered: drag => show(drag.x, drag.y)
+        onPositionChanged: drag => show(drag.x, drag.y)
+        onExited: marker.visible = false
+        onDropped: drop => {
+            marker.visible = false;
+            const taken = Tk.draggedKind() !== ""
+                          ? Tk.dropOnTab(over, -1, drop.action === Qt.CopyAction)
+                          : Tk.dropUrls(drop.urls, over, -1);
+            if (taken)
+                drop.accept(drop.action);
+        }
+    }
+    DropMarker {
+        id: marker
+        whole: true
+        y: 2
+        height: bar.height - 4
+    }
+
     ListView {
         id: tabs
 

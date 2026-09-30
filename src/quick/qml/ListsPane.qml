@@ -68,6 +68,31 @@ Pane {
                         leftPadding: 18
                         highlighted: modelData.current
                         onClicked: Tk.openPanelList(group.modelData.engine, modelData.id)
+                        // Dropped on: tracks, a library's selection, folders
+                        // or files go to this list, opened first when it
+                        // is not.
+                        DropArea {
+                            id: listDrop
+                            anchors.fill: parent
+                            keys: ["application/x-trackknife-drag", "text/uri-list"]
+                            onDropped: drop => {
+                                const engine = group.modelData.engine;
+                                const id = row.modelData.id;
+                                let taken = false;
+                                if (Tk.draggedKind() !== "") {
+                                    taken = Tk.dropOnPanelList(engine, id);
+                                } else {
+                                    taken = Tk.dropUrlsOnPanelList(drop.urls, engine, id);
+                                }
+                                if (taken)
+                                    drop.accept(Qt.CopyAction);
+                            }
+                        }
+                        DropMarker {
+                            whole: true
+                            anchors.fill: parent
+                            visible: listDrop.containsDrag
+                        }
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: {

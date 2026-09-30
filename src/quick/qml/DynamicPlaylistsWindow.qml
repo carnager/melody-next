@@ -342,6 +342,20 @@ ApplicationWindow {
                                 dynamicWindow.choose(index, Qt.application.keyboardModifiers);
                             }
                             onDoubleClicked: dynamicWindow.dynamic.play(index)
+                            // Dragged, the tracks chosen are copied where they
+                            // are dropped; the definition stays as it is.
+                            DragSource {
+                                copyOnly: true
+                                label: {
+                                    const count = dynamicWindow.chosenRows().length;
+                                    return count > 1 ? qsTr("%1 tracks").arg(count) : qsTr("1 track");
+                                }
+                                onBegan: {
+                                    if (!dynamicWindow.chosen[trackRow.index])
+                                        dynamicWindow.choose(trackRow.index, 0);
+                                    dynamicWindow.dynamic.drag(dynamicWindow.chosenRows());
+                                }
+                            }
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {

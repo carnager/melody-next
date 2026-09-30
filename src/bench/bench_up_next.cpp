@@ -215,15 +215,13 @@ bool BenchMainWindow::enqueueLibraryDrop(const ui::LocalFilesMimeData& files, co
     if (carried.isEmpty() || library == nullptr) {
         return false;
     }
-    std::vector<persistence::LibraryEntry> entries;
+    Workspace::Dragged dragged;
+    dragged.library = &library->browser();
+    dragged.engine = files.engine();
     for (const auto& entry : carried) {
-        entries.push_back(entry.value<persistence::LibraryEntry>());
+        dragged.entries.push_back(entry.value<persistence::LibraryEntry>());
     }
-    library->resolveEntryRows(std::move(entries), [this, position, engine = files.engine()](
-                                                      std::vector<LocalTrackRow> rows) {
-        enqueueLocalRequests(std::move(rows), position, engine);
-    });
-    return true;
+    return workspace_.dropOnUpNext(std::move(dragged), position);
 }
 
 void BenchMainWindow::refreshUpNext() {

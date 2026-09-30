@@ -142,6 +142,10 @@ void QuickDynamic::queue(const QVariantList& rows, const bool next) {
     workspace_.queueOf(picked(*session_, rowsOf(rows)), next);
 }
 
+void QuickDynamic::drag(const QVariantList& rows) {
+    workspace_.dragPicked(picked(*session_, rowsOf(rows)), true);
+}
+
 void QuickDynamic::editTags(const QVariantList& rows) {
     workspace_.editTagsOf(picked(*session_, rowsOf(rows)));
 }

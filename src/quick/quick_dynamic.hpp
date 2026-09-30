@@ -61,6 +61,8 @@ class QuickDynamic final : public QObject {
     // The rows chosen (`current` the one the cursor is on), as a list's
     // would be.
     Q_INVOKABLE void queue(const QVariantList& rows, bool next);
+    // Dragged out: copied wherever they are dropped.
+    Q_INVOKABLE void drag(const QVariantList& rows);
     Q_INVOKABLE void editTags(const QVariantList& rows);
     Q_INVOKABLE void replayGain(const QVariantList& rows);
     Q_INVOKABLE void convertFiles(const QVariantList& rows);

@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import Trackknife.Quick
+import Trackknife.Style
 
 // bench-folder-tree: the filesystem, a level at a time. A file opened goes
 // into this computer's list; a folder can be added, opened or bookmarked.
@@ -46,8 +47,14 @@ Rectangle {
 
             Rectangle {
                 anchors.fill: parent
-                visible: node.selected
-                color: node.palette.highlight
+                anchors.leftMargin: 4
+                anchors.rightMargin: 4
+                radius: Theme.radius
+                visible: node.selected || rowHover.hovered
+                color: node.selected ? Theme.selection(node.palette) : Theme.rowHover(node.palette)
+            }
+            HoverHandler {
+                id: rowHover
             }
             Label {
                 id: arrow
@@ -56,19 +63,19 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: node.hasChildren
                 text: node.expanded ? "▾" : "▸"
-                color: node.selected ? node.palette.highlightedText : node.palette.placeholderText
+                color: Theme.dim(node.palette)
                 TapHandler {
                     onTapped: tree.openRow(node.row, !node.expanded)
                 }
             }
-            Image {
+            FolderGlyph {
                 id: icon
                 x: arrow.x + 16
                 anchors.verticalCenter: parent.verticalCenter
                 width: 16
                 height: 16
-                sourceSize: Qt.size(16, 16)
-                source: "image://icon/" + (node.hasChildren ? "folder" : "audio-x-generic|text-x-generic")
+                file: !node.hasChildren
+                color: Theme.dim(node.palette)
             }
             Label {
                 x: icon.x + 22
@@ -76,7 +83,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: node.display
                 elide: Text.ElideRight
-                color: node.selected ? node.palette.highlightedText : node.palette.text
+                color: node.palette.text
             }
             TapHandler {
                 acceptedButtons: Qt.LeftButton
@@ -100,6 +107,17 @@ Rectangle {
                 onDoubleTapped: {
                     if (!Qt.styleHints.singleClickActivation)
                         activate();
+                }
+            }
+            // Dragged, a folder or file goes where it is dropped.
+            DragSource {
+                copyOnly: true
+                label: node.display
+                onBegan: {
+                    const index = tree.index(node.row, 0);
+                    tree.selectionModel.setCurrentIndex(index, ItemSelectionModel.ClearAndSelect
+                                                        | ItemSelectionModel.Rows);
+                    Tk.dragFolder(index);
                 }
             }
             TapHandler {

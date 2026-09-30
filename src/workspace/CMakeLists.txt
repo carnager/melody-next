@@ -15,6 +15,7 @@ qt_add_library(
     workspace.hpp
     workspace_connections.cpp
     workspace_desktop.cpp
+    workspace_drops.cpp
     workspace_engines.cpp
     workspace_file_work.cpp
     workspace_ingest.cpp

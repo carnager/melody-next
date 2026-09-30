@@ -19,6 +19,8 @@ QtObject {
     readonly property int controlHeight: 28
     readonly property int rowHeight: 28
     readonly property real smallSize: Qt.application.font.pointSize * 0.9
+    // Menus read smaller than the window, as the desktop's own do.
+    readonly property real menuSize: Qt.application.font.pointSize * 0.95
 
     // `a` moved `t` of the way toward `b`.
     function mix(a, b, t) {

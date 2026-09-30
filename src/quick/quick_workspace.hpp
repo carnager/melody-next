@@ -74,6 +74,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(int coverRevision READ coverRevision NOTIFY coverRevisionChanged)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY desktopChanged)
     Q_PROPERTY(bool followPlayback READ followPlayback WRITE setFollowPlayback NOTIFY desktopChanged)
+    // Settings › General: panels slide open and closed.
+    Q_PROPERTY(bool panelAnimations READ panelAnimations NOTIFY desktopChanged)
     Q_PROPERTY(trackknife::bench::LibraryBrowser* localLibrary READ localLibrary NOTIFY sourcesChanged)
     Q_PROPERTY(int shortcutRevision READ shortcutRevision NOTIFY shortcutsChanged)
     // The M3U8 import or export running, or done and not yet closed.
@@ -118,6 +120,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] bench::LibraryBrowser* library() const;
     // This computer's library, whichever source is shown.
     [[nodiscard]] bench::LibraryBrowser* localLibrary() const;
+    [[nodiscard]] static bool panelAnimations();
     [[nodiscard]] int shortcutRevision() const { return shortcut_revision_; }
     [[nodiscard]] QImage libraryCover(const QString& engine, const QString& album_key) const;
 

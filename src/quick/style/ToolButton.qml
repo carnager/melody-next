@@ -36,7 +36,12 @@ T.ToolButton {
         radius: Theme.radius
         color: control.down ? Theme.pressed(control.palette)
                : control.checked ? Theme.alpha(control.palette.highlight, 0.18)
-               : Theme.hovered(control.palette)
-        visible: control.down || control.checked || (control.hovered && control.enabled)
+               : control.hovered && control.enabled ? Theme.hovered(control.palette)
+               : Theme.alpha(Theme.hovered(control.palette), 0)
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 }

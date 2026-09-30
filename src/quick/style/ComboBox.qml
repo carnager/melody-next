@@ -66,6 +66,11 @@ T.ComboBox {
         border.width: control.editable || control.visualFocus ? 1 : 0
         border.color: control.activeFocus ? control.palette.highlight : Theme.border(control.palette)
         opacity: control.enabled ? 1 : 0.6
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 
     popup: T.Popup {
@@ -84,6 +89,22 @@ T.ComboBox {
             currentIndex: control.highlightedIndex
             highlightMoveDuration: 0
             T.ScrollIndicator.vertical: ScrollIndicator {}
+        }
+
+        enter: Transition {
+            NumberAnimation {
+                property: "opacity"
+                from: 0
+                to: 1
+                duration: Theme.quick
+            }
+        }
+        exit: Transition {
+            NumberAnimation {
+                property: "opacity"
+                to: 0
+                duration: Theme.quick
+            }
         }
 
         background: Rectangle {

@@ -18,6 +18,32 @@ T.Menu {
 
     delegate: MenuItem {}
 
+    enter: Transition {
+        ParallelAnimation {
+            NumberAnimation {
+                property: "opacity"
+                from: 0
+                to: 1
+                duration: Theme.quick
+            }
+            NumberAnimation {
+                property: "scale"
+                from: 0.97
+                to: 1
+                duration: Theme.moderate
+                easing.type: Easing.OutCubic
+            }
+        }
+    }
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            to: 0
+            duration: Theme.quick
+        }
+    }
+
+
     contentItem: ListView {
         implicitHeight: contentHeight
         model: control.contentModel

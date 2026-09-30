@@ -26,6 +26,11 @@ T.TabButton {
         text: control.text
         font: control.font
         color: control.checked ? control.palette.windowText : Theme.dim(control.palette)
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 
     background: Item {
@@ -37,16 +42,6 @@ T.TabButton {
             color: Theme.hovered(control.palette)
             visible: control.hovered && !control.checked
         }
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            height: 2
-            radius: 1
-            color: control.palette.highlight
-            visible: control.checked
-        }
+
     }
 }

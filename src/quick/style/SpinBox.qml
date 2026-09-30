@@ -86,6 +86,11 @@ T.SpinBox {
         color: control.palette.base
         border.width: 1
         border.color: control.activeFocus ? control.palette.highlight : Theme.border(control.palette)
+        Behavior on border.color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
         opacity: control.enabled ? 1 : 0.6
     }
 }

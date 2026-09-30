@@ -31,13 +31,30 @@ T.CheckBox {
         border.color: control.visualFocus || control.hovered ? control.palette.highlight
                                                              : Theme.border(control.palette)
         opacity: control.enabled ? 1 : 0.45
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
         CheckMark {
             anchors.centerIn: parent
             width: 10
             height: 10
             color: control.palette.highlightedText
             partial: control.checkState === Qt.PartiallyChecked
-            visible: control.on
+            scale: control.on ? 1 : 0.4
+            opacity: control.on ? 1 : 0
+            Behavior on scale {
+                NumberAnimation {
+                    duration: Theme.moderate
+                    easing.type: Easing.OutBack
+                }
+            }
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Theme.quick
+                }
+            }
         }
     }
 

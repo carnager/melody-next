@@ -1116,6 +1116,10 @@ QString QuickWorkspace::nativeShortcut(const QString& portable) {
     return QKeySequence(portable, QKeySequence::PortableText).toString(QKeySequence::NativeText);
 }
 
+bool QuickWorkspace::panelAnimations() {
+    return QSettings{}.value(QStringLiteral("appearance/panel-animations"), true).toBool();
+}
+
 bench::LibraryBrowser* QuickWorkspace::localLibrary() const {
     const auto found = std::ranges::find(libraries_, bench::EngineKey::local(), &Library::engine);
     return found != libraries_.end() ? found->browser : nullptr;

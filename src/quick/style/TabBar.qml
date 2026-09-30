@@ -20,7 +20,22 @@ T.TabBar {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.AutoFlickIfNeeded
         snapMode: ListView.SnapToItem
-        highlightMoveDuration: 0
+        highlightFollowsCurrentItem: true
+        highlightMoveDuration: Theme.moderate
+        highlightResizeDuration: Theme.moderate
+        highlight: Item {
+            z: 2
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                height: 2
+                radius: 1
+                color: control.palette.highlight
+            }
+        }
         highlightRangeMode: ListView.ApplyRange
         preferredHighlightBegin: 40
         preferredHighlightEnd: width - 40

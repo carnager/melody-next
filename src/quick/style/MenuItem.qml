@@ -93,7 +93,13 @@ T.MenuItem {
         implicitWidth: 160
         implicitHeight: 24
         radius: Theme.radius
-        color: Theme.selection(control.palette)
-        visible: (control.highlighted || control.down) && control.enabled
+        color: (control.highlighted || control.down) && control.enabled
+               ? Theme.selection(control.palette)
+               : Theme.alpha(Theme.selection(control.palette), 0)
+        Behavior on color {
+            ColorAnimation {
+                duration: 70
+            }
+        }
     }
 }

@@ -188,6 +188,13 @@ ApplicationWindow {
         default property alias content: column.data
         contentWidth: availableWidth
         clip: true
+        // A page shown fades in.
+        opacity: visible ? 1 : 0
+        Behavior on opacity {
+            NumberAnimation {
+                duration: Theme.moderate
+            }
+        }
         ColumnLayout {
             id: column
             x: Theme.margin + Theme.gap

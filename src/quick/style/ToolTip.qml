@@ -18,6 +18,21 @@ T.ToolTip {
     padding: 6
     leftPadding: 8
     rightPadding: 8
+    enter: Transition {
+        NumberAnimation {
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: Theme.quick
+        }
+    }
+    exit: Transition {
+        NumberAnimation {
+            property: "opacity"
+            to: 0
+            duration: Theme.quick
+        }
+    }
     closePolicy: T.Popup.CloseOnEscape | T.Popup.CloseOnPressOutsideParent
                  | T.Popup.CloseOnReleaseOutsideParent
 

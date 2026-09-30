@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Find in the list shown (ADR-0142): any metadata value, the duration, the
 // audio format or the path; Enter for the next match, Shift+Enter the one
@@ -13,7 +14,18 @@ Pane {
 
     readonly property var find: Tk.find
 
-    visible: find.shown ?? false
+    // Slides in and out, when panels are animated.
+    property real open: (bar.find.shown ?? false) ? 1 : 0
+    Behavior on open {
+        enabled: Tk.panelAnimations
+        NumberAnimation {
+            duration: Theme.moderate
+            easing.type: Easing.OutCubic
+        }
+    }
+    visible: open > 0
+    clip: true
+    Layout.preferredHeight: implicitHeight * open
     padding: 4
     leftPadding: 8
     rightPadding: 8

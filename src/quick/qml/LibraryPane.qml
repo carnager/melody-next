@@ -118,40 +118,6 @@ Item {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Interpret the search as a tkq query, e.g. genre HAS jazz AND date GREATER 1990")
             }
-            component SearchRowButton: ToolButton {
-                flat: true
-                display: AbstractButton.IconOnly
-                icon.width: 16
-                icon.height: 16
-                Accessible.name: text
-            }
-            SearchRowButton {
-                objectName: "local-library-newest"
-                text: qsTr("Recently added")
-                icon.source: "image://icon/document-open-recent"
-                checkable: true
-                checked: pane.browser ? pane.browser.newestFirst : false
-                onToggled: pane.browser.newestFirst = checked
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Show albums newest first, as they came into the library")
-            }
-            SearchRowButton {
-                objectName: "local-library-scan"
-                readonly property bool scanning: pane.browser ? pane.browser.scanning : false
-                text: scanning ? qsTr("Stop") : qsTr("Refresh")
-                icon.source: scanning ? "image://icon/process-stop" : "image://icon/view-refresh"
-                ToolTip.visible: hovered
-                ToolTip.text: scanning ? qsTr("Stop scanning") : qsTr("Refresh")
-                onClicked: pane.browser.toggleScan()
-            }
-            SearchRowButton {
-                objectName: "local-library-folders"
-                text: qsTr("Folders…")
-                icon.source: "image://icon/folder"
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Choose which folders belong to your music library")
-                onClicked: foldersDialog.open()
-            }
         }
         Label {
             objectName: "local-library-query-error"
@@ -496,16 +462,60 @@ Item {
             implicitHeight: 1
             color: Shade.mix(pane.ground, pane.ink, 0.12)
         }
-        Label {
-            objectName: "local-library-status"
+        // Its news on the left; recently added, refresh and the library's
+        // folders small on the right.
+        RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 4
-            Layout.rightMargin: 4
+            Layout.rightMargin: 2
             Layout.topMargin: 2
-            wrapMode: Text.WordWrap
-            text: pane.browser ? pane.browser.status : ""
-            color: pane.palette.placeholderText
-            font.pointSize: Qt.application.font.pointSize * 0.9
+            spacing: 0
+            Label {
+                objectName: "local-library-status"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: pane.browser ? pane.browser.status : ""
+                color: pane.palette.placeholderText
+                font.pointSize: Qt.application.font.pointSize * 0.9
+            }
+            component StatusButton: ToolButton {
+                flat: true
+                display: AbstractButton.IconOnly
+                icon.width: 14
+                icon.height: 14
+                padding: 3
+                implicitWidth: 22
+                implicitHeight: 22
+                Accessible.name: text
+                ToolTip.delay: 600
+            }
+            StatusButton {
+                objectName: "local-library-newest"
+                text: qsTr("Recently added")
+                icon.source: "image://icon/document-open-recent|sp:SP_FileDialogDetailedView"
+                checkable: true
+                checked: pane.browser ? pane.browser.newestFirst : false
+                onToggled: pane.browser.newestFirst = checked
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Show albums newest first, as they came into the library")
+            }
+            StatusButton {
+                objectName: "local-library-scan"
+                readonly property bool scanning: pane.browser ? pane.browser.scanning : false
+                text: scanning ? qsTr("Stop") : qsTr("Refresh")
+                icon.source: scanning ? "image://icon/process-stop|sp:SP_BrowserStop" : "image://icon/view-refresh|sp:SP_BrowserReload"
+                ToolTip.visible: hovered
+                ToolTip.text: scanning ? qsTr("Stop scanning") : qsTr("Refresh")
+                onClicked: pane.browser.toggleScan()
+            }
+            StatusButton {
+                objectName: "local-library-folders"
+                text: qsTr("Folders…")
+                icon.source: "image://icon/folder|sp:SP_DirIcon"
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Choose which folders belong to your music library")
+                onClicked: foldersDialog.open()
+            }
         }
         // Which library this is, when it does not answer (ADR-0220).
         Label {

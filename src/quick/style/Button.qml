@@ -37,8 +37,9 @@ T.Button {
         implicitWidth: 72
         implicitHeight: Theme.controlHeight
         radius: Theme.radius
-        visible: !control.flat || control.down || control.hovered || control.accent
-        color: control.accent
+        color: control.flat && !control.down && !control.hovered && !control.accent
+               ? Theme.alpha(Theme.hovered(control.palette), 0)
+               : control.accent
                ? (control.down ? Qt.darker(control.palette.highlight, 1.15)
                   : control.hovered ? Qt.lighter(control.palette.highlight, 1.08)
                   : control.palette.highlight)
@@ -47,5 +48,10 @@ T.Button {
                : Theme.raised(control.palette)
         border.width: control.visualFocus ? 1 : 0
         border.color: control.palette.highlight
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 }

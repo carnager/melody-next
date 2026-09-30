@@ -42,5 +42,10 @@ T.TextArea {
         color: control.readOnly ? Theme.sunken(control.palette) : control.palette.base
         border.width: 1
         border.color: control.activeFocus ? control.palette.highlight : Theme.border(control.palette)
+        Behavior on border.color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 }

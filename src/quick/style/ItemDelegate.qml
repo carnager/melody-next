@@ -38,7 +38,12 @@ T.ItemDelegate {
         implicitHeight: Theme.rowHeight
         radius: Theme.radius
         color: control.highlighted || control.down ? Theme.selection(control.palette)
-               : Theme.rowHover(control.palette)
-        visible: control.highlighted || control.down || (control.hovered && control.enabled)
+               : control.hovered && control.enabled ? Theme.rowHover(control.palette)
+               : Theme.alpha(Theme.rowHover(control.palette), 0)
+        Behavior on color {
+            ColorAnimation {
+                duration: Theme.quick
+            }
+        }
     }
 }

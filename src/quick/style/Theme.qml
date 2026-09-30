@@ -18,6 +18,10 @@ QtObject {
     readonly property int popupRadius: 6
     readonly property int controlHeight: 28
     readonly property int rowHeight: 28
+    // Motion: a colour change, something opening, something moving across.
+    readonly property int quick: 110
+    readonly property int moderate: 180
+    readonly property int slow: 240
     readonly property real smallSize: Qt.application.font.pointSize * 0.9
     // Menus read smaller than the window, as the desktop's own do.
     readonly property real menuSize: Qt.application.font.pointSize * 0.95

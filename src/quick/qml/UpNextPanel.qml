@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // Up Next (bench-up-next): the asks waiting to play before the list goes
 // on -- a heading, the tracks, and the edits under a hairline with the way

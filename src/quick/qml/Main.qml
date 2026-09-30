@@ -5,6 +5,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import Trackknife.Quick
+import Trackknife.Style
 
 // The Trackknife window (BenchMainWindow), in Qt Quick: the transport on
 // top, the sources and the track lists side by side, Up Next on the right,
@@ -845,11 +846,24 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                             }
                         }
+                        // The lists pane slides in and out, when panels are
+                        // animated.
                         ListsPane {
-                            visible: Tk.listsInPanel
-                            SplitView.minimumWidth: 160
-                            SplitView.preferredWidth: Tk.listsPanelWidth()
-                            onWidthChanged: if (visible && trackArea.resizing) Tk.setListsPanelWidth(width)
+                            id: listsPane
+                            property real open: Tk.listsInPanel ? 1 : 0
+                            readonly property int kept: Tk.listsPanelWidth()
+                            Behavior on open {
+                                enabled: Tk.panelAnimations
+                                NumberAnimation {
+                                    duration: Theme.slow
+                                    easing.type: Easing.OutCubic
+                                }
+                            }
+                            visible: open > 0
+                            clip: true
+                            SplitView.minimumWidth: 160 * open
+                            SplitView.preferredWidth: kept * open
+                            onWidthChanged: if (open === 1 && trackArea.resizing) Tk.setListsPanelWidth(width)
                             onNewListRequested: nameDialog.ask("New list", "", name => Tk.newList(name))
                             onRenameRequested: (engine, id, name) => nameDialog.ask("Rename list", name,
                                                    chosen => Tk.renamePanelList(engine, id, chosen))
@@ -868,12 +882,23 @@ ApplicationWindow {
             }
         }
 
+        // Up Next slides open and closed, when panels are animated.
         UpNextPanel {
-            visible: upNextSettings.visible
-            SplitView.minimumWidth: 260
-            SplitView.maximumWidth: Math.max(260, window.width / 2)
-            SplitView.preferredWidth: upNextSettings.width
-            onWidthChanged: if (visible && width >= 260)
+            id: upNextPanel
+            property real open: upNextSettings.visible ? 1 : 0
+            Behavior on open {
+                enabled: Tk.panelAnimations
+                NumberAnimation {
+                    duration: Theme.slow
+                    easing.type: Easing.OutCubic
+                }
+            }
+            visible: open > 0
+            clip: true
+            SplitView.minimumWidth: 260 * open
+            SplitView.maximumWidth: Math.max(260, window.width / 2) * Math.max(open, 0.001)
+            SplitView.preferredWidth: upNextSettings.width * open
+            onWidthChanged: if (open === 1 && width >= 260)
                 upNextSettings.width = width
             onCloseRequested: upNextSettings.visible = false
         }

@@ -3,6 +3,7 @@
 #include "bench/metadata_field_review_bar.hpp"
 
 #include "bench/metadata_grid_model.hpp"
+#include "workspace/field_filter.hpp"
 
 #include <QCheckBox>
 #include <QHBoxLayout>
@@ -87,36 +88,23 @@ QStringList MetadataFieldReviewBar::visibleFieldNames() const {
 }
 
 void MetadataFieldReviewBar::refresh() {
-    // Wait for the existing bounded worker projection instead of traversing tracks.
-    const auto ready = model_->summaryReady() && model_->draftPreviewReady();
-    if (changed_only_->isChecked() && !ready) {
-        status_->setText(tr("Updating changed fields… · Apply includes hidden edits."));
+    const auto outcome =
+        filterFields(*model_, FieldFilter{.query = search_->text(),
+                                          .changed_only = changed_only_->isChecked(),
+                                          .layout_fields = layout_fields_});
+    status_->setText(outcome.status);
+    if (!outcome.hidden) {
         return;
     }
-    const auto query = search_->text().trimmed();
-    int visible = 0;
-    int changed = 0;
     QItemSelection hidden_selection;
     for (int row = 0; row < model_->rowCount(); ++row) {
-        const auto field = model_->index(row, 0);
-        const auto staged = model_->index(row, 2).data(metadata_cell_staged_role).toBool();
-        changed += staged ? 1 : 0;
-        const auto matches = field.data().toString().contains(query, Qt::CaseInsensitive) ||
-                             field.data(metadata_field_canonical_name_role)
-                                 .toString()
-                                 .contains(query, Qt::CaseInsensitive);
-        const auto in_layout =
-            layout_fields_.isEmpty() ||
-            layout_fields_.contains(field.data(metadata_field_canonical_name_role).toString(),
-                                    Qt::CaseInsensitive);
-        const auto hidden = !in_layout || !matches || (changed_only_->isChecked() && !staged);
+        const auto hidden = (*outcome.hidden)[static_cast<std::size_t>(row)];
         if (fields_->isRowHidden(row) != hidden) {
             fields_->setRowHidden(row, hidden);
         }
         if (hidden) {
-            hidden_selection.select(field, model_->index(row, model_->columnCount() - 1));
-        } else {
-            ++visible;
+            hidden_selection.select(model_->index(row, 0),
+                                    model_->index(row, model_->columnCount() - 1));
         }
     }
     // A field that disappears must not remain an invisible Remove/Revert target.
@@ -125,12 +113,6 @@ void MetadataFieldReviewBar::refresh() {
     if (current.isValid() && fields_->isRowHidden(current.row())) {
         fields_->selectionModel()->setCurrentIndex({}, QItemSelectionModel::NoUpdate);
     }
-    const auto counts = tr("%1 of %2 fields shown").arg(visible).arg(model_->rowCount());
-    status_->setText(ready
-                         ? tr("%1 · %2 changed in selected files · Apply includes hidden edits.")
-                               .arg(counts)
-                               .arg(changed)
-                         : tr("%1 · Updating changes… · Apply includes hidden edits.").arg(counts));
 }
 
 void MetadataFieldReviewBar::setFilesToggleVisible(const bool visible) {

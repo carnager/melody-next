@@ -49,7 +49,7 @@ Menu {
         MenuItem {
             text: "Edit tags…"
             enabled: contextMenu.selection
-            onTriggered: contextMenu.notYet("The tagger")
+            onTriggered: Tk.editTags()
         }
         MenuItem {
             text: "ReplayGain…"

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "quick/list_tabs_model.hpp"
+#include "quick/quick_tagger.hpp"
 #include "quick/track_rows_model.hpp"
 #include "workspace/folder_browser.hpp"
 #include "workspace/library_browser.hpp"
@@ -188,6 +189,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void undoUpNext() { workspace_.undoUpNext(); }
     Q_INVOKABLE void returnToList();
     Q_INVOKABLE void queueSelection(bool next);
+    // "Edit tags": the selected rows in a tag editor of their own.
+    Q_INVOKABLE void editTags();
 
     // The workspace closing: saved at once, and quitting stops this
     // computer's engine.
@@ -251,6 +254,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     // Rows the list's undo or redo put back, to select again.
     void rowsRestored(const QVariantList& rows);
     void quitRequested();
+    void taggerOpened(trackknife::quick::QuickTagger* tagger);
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/cover_review.hpp"
 #include "trackknife/core/local_sources.hpp"
+#include "workspace/tagger_session.hpp"
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QHeaderView>
@@ -21,12 +22,7 @@ void reviewFolderImages(QWidget* parent, const std::vector<metadata::FolderImage
     dialog->setWindowModality(Qt::WindowModal);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     auto* layout = new QVBoxLayout(dialog);
-    auto* note = new QLabel(
-        QStringLiteral("Save publishes these folder images and the reviewed media edits. "
-                       "Each file has its own recovery journal; a later failure can leave earlier "
-                       "files saved. "
-                       "Existing folder images retain a recovery backup."),
-        dialog);
+    auto* note = new QLabel(QString::fromLatin1(folder_image_review_note), dialog);
     note->setWordWrap(true);
     layout->addWidget(note);
     auto* table = new QTableWidget(0, 3, dialog);
@@ -34,25 +30,12 @@ void reviewFolderImages(QWidget* parent, const std::vector<metadata::FolderImage
                                       QStringLiteral("Incoming image")});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    std::set<std::string> seen;
-    for (const auto& image : images) {
-        if (!seen.insert(image.raw_path).second)
-            continue;
+    for (const auto& cells : folderImageReviewRows(images)) {
         const auto row = table->rowCount();
         table->insertRow(row);
-        table->setItem(
-            row, 0,
-            new QTableWidgetItem(QString::fromStdString(core::display_raw_path(image.raw_path))));
-        const auto identical = image.original && image.original->content_fingerprint ==
-                                                     image.image.content_fingerprint;
-        table->setItem(row, 1,
-                       new QTableWidgetItem(identical ? QStringLiteral("Already matches")
-                                            : image.original
-                                                ? QStringLiteral("Replace (retain backup)")
-                                                : QStringLiteral("Create")));
-        table->setItem(row, 2,
-                       new QTableWidgetItem(
-                           QString::fromStdString(core::display_raw_path(image.image.raw_path))));
+        for (int column = 0; column < cells.size(); ++column) {
+            table->setItem(row, column, new QTableWidgetItem(cells.at(column)));
+        }
     }
     layout->addWidget(table);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, dialog);

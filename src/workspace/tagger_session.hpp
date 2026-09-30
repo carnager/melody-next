@@ -172,6 +172,13 @@ class TaggerSession final : public QObject {
         QString artist;
         QString release;
     };
+    // The exact ordered values of a field on the selected files, to edit.
+    struct ExactValues {
+        int row{-1};
+        QString heading;
+        QString context;
+        QStringList values;
+    };
     struct Provenance {
         QStringList headers;
         std::vector<QStringList> rows;
@@ -213,6 +220,9 @@ class TaggerSession final : public QObject {
     [[nodiscard]] MetadataAggregateModel* aggregateModel() const { return aggregate_model_; }
     [[nodiscard]] QItemSelectionModel* fileSelection() const { return file_selection_; }
     [[nodiscard]] std::vector<std::size_t> selectedItems() const;
+    // ADR-0221: the folder every file is in, shown once above the list, the
+    // files named below it relative to it; empty when they share none.
+    [[nodiscard]] QString commonFolder() const;
     [[nodiscard]] std::size_t selectedItemCount() const { return selected_item_count_; }
 
     // Enablement, as the widgets window's buttons had it.
@@ -254,6 +264,7 @@ class TaggerSession final : public QObject {
     // A field added to the selected files: the row it is in, or -1.
     int addField(const QString& name);
     [[nodiscard]] QStringList fieldNameSuggestions(const QString& query) const;
+    [[nodiscard]] std::optional<ExactValues> exactValues(int row) const;
     void replaceValues(int row, std::vector<std::string> values);
     // A transformation previewed elsewhere (the script editor), staged; the
     // selection kept.
@@ -540,5 +551,14 @@ class TaggerSession final : public QObject {
     bool artwork_operation_running_{false};
     bool layout_state_saved_{false};
 };
+
+// The folder images an Apply writes, as they are reviewed first: where each
+// goes, what it does there, and the image written.
+inline constexpr auto folder_image_review_note =
+    "Save publishes these folder images and the reviewed media edits. Each file has its own "
+    "recovery journal; a later failure can leave earlier files saved. Existing folder images "
+    "retain a recovery backup.";
+[[nodiscard]] std::vector<QStringList>
+folderImageReviewRows(const std::vector<metadata::FolderImageWritePlan>& images);
 
 } // namespace trackknife::bench

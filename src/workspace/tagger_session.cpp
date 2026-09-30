@@ -550,6 +550,27 @@ std::vector<std::size_t> TaggerSession::selectedItems() const {
     return selected_items;
 }
 
+QString TaggerSession::commonFolder() const {
+    QString common_dir;
+    if (grid_model_ == nullptr) {
+        return common_dir;
+    }
+    for (int row = 0; row < grid_model_->rowCount(); ++row) {
+        const auto path = grid_model_->index(row, 0).data(Qt::DisplayRole).toString();
+        const auto slash = path.lastIndexOf(QLatin1Char('/'));
+        auto directory = slash >= 0 ? path.left(slash + 1) : QString{};
+        if (row == 0) {
+            common_dir = directory;
+            continue;
+        }
+        while (!common_dir.isEmpty() && !directory.startsWith(common_dir)) {
+            const auto parent = common_dir.lastIndexOf(QLatin1Char('/'), common_dir.size() - 2);
+            common_dir = parent >= 0 ? common_dir.left(parent + 1) : QString{};
+        }
+    }
+    return common_dir;
+}
+
 std::vector<std::size_t> TaggerSession::itemsOrAll() const {
     auto items = selectedItems();
     if (items.empty() && grid_model_ != nullptr) {
@@ -934,6 +955,33 @@ QStringList TaggerSession::fieldNameSuggestions(const QString& query) const {
         display_names.push_back(display_utf8(suggestion.display_name));
     }
     return display_names;
+}
+
+std::optional<TaggerSession::ExactValues> TaggerSession::exactValues(const int row) const {
+    if (grid_model_ == nullptr || !selectionReady() || row < 0 ||
+        row >= aggregate_model_->rowCount()) {
+        return std::nullopt;
+    }
+    const auto& field = grid_model_->selection().field(static_cast<std::size_t>(row));
+    auto values = aggregate_model_->index(row, 2).data(metadata_cell_values_role).toStringList();
+    ExactValues exact{
+        .row = row,
+        .heading =
+            QStringLiteral("%1 — %2 selected %3")
+                .arg(display_utf8(field.display_name))
+                .arg(selected_item_count_)
+                .arg(selected_item_count_ == 1U ? QStringLiteral("file") : QStringLiteral("files")),
+        .context = values.isEmpty()
+                       ? QStringLiteral("The selected files do not currently share one exact "
+                                        "value list. Values entered here replace this field on "
+                                        "those files.")
+                       : QStringLiteral("Edit the exact ordered value list applied to the "
+                                        "selected files. Duplicates and empty values remain "
+                                        "distinct."),
+        .values = {},
+    };
+    exact.values = std::move(values);
+    return exact;
 }
 
 void TaggerSession::replaceValues(const int row, std::vector<std::string> values) {
@@ -2722,6 +2770,27 @@ void TaggerSession::updateTechnicalSummary() {
     }
     technical_ = parts.join(QStringLiteral(" · "));
     emit changed();
+}
+
+std::vector<QStringList>
+folderImageReviewRows(const std::vector<metadata::FolderImageWritePlan>& images) {
+    std::vector<QStringList> rows;
+    std::set<std::string> seen;
+    for (const auto& image : images) {
+        if (!seen.insert(image.raw_path).second) {
+            continue;
+        }
+        const auto identical = image.original && image.original->content_fingerprint ==
+                                                     image.image.content_fingerprint;
+        rows.push_back(QStringList{
+            QString::fromStdString(core::display_raw_path(image.raw_path)),
+            identical        ? QStringLiteral("Already matches")
+            : image.original ? QStringLiteral("Replace (retain backup)")
+                             : QStringLiteral("Create"),
+            QString::fromStdString(core::display_raw_path(image.image.raw_path)),
+        });
+    }
+    return rows;
 }
 
 } // namespace trackknife::bench

@@ -21,8 +21,12 @@ qt_add_qml_module(
     image_providers.hpp
     list_tabs_model.cpp
     list_tabs_model.hpp
+    quick_tagger.cpp
+    quick_tagger.hpp
     quick_workspace.cpp
     quick_workspace.hpp
+    text_rows.cpp
+    text_rows.hpp
     track_rows_model.cpp
     track_rows_model.hpp
     QML_FILES
@@ -46,6 +50,14 @@ qt_add_qml_module(
     qml/FolderTree.qml
     qml/LibraryPane.qml
     qml/LibraryFoldersDialog.qml
+    qml/TaggerWindow.qml
+    qml/TaggerActions.qml
+    qml/TaggerFieldTable.qml
+    qml/TaggerFileList.qml
+    qml/FeedbackDialog.qml
+    qml/ExactValuesDialog.qml
+    qml/AddFieldDialog.qml
+    qml/TableDialog.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

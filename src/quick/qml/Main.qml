@@ -46,8 +46,20 @@ ApplicationWindow {
             sources.openArtistForScreenshot();
             Qt.callLater(() => albumTimer.start());
         }
+        else if (name.startsWith("tagger")) {
+            Tk.rows.selectAll();
+            window.taggerForScreenshot = name;
+            Tk.editTags();
+        }
         else if (name === "search" && Tk.library)
             Tk.library.search = "a";
+    }
+    property string taggerForScreenshot: ""
+    Timer {
+        id: stageTimer
+        property var opened
+        interval: 1500
+        onTriggered: opened.stageForScreenshot()
     }
     Timer {
         id: albumTimer
@@ -195,7 +207,7 @@ ApplicationWindow {
                 text: "Edit tags…"
                 shortcut: "Alt+Return"
                 enabled: (Tk.selection.count ?? 0) > 0
-                onTriggered: window.notYet("The tagger")
+                onTriggered: Tk.editTags()
             }
             Action {
                 objectName: "action-replaygain"
@@ -629,4 +641,25 @@ ApplicationWindow {
     }
 
     onClosing: Tk.closeWindow()
+
+    // Each "Edit tags" is a window of its own (ADR-0221): several can stand
+    // open over different selections.
+    Component {
+        id: taggerComponent
+        TaggerWindow {
+            onSettingsRequested: window.notYet(qsTr("Settings"))
+            onDestinationsRequested: window.notYet(qsTr("Settings"))
+        }
+    }
+    Connections {
+        target: Tk
+        function onTaggerOpened(tagger) {
+            const opened = taggerComponent.createObject(window, {tagger: tagger});
+            opened.raise();
+            opened.requestActivate();
+            if (window.taggerForScreenshot === "tagger-edit")
+                Qt.callLater(() => stageTimer.start());
+            stageTimer.opened = opened;
+        }
+    }
 }

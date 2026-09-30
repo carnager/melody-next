@@ -963,22 +963,7 @@ void MetadataPropertiesDialog::refreshFileListScope() {
     if (file_list_ == nullptr) {
         return;
     }
-    QString common_dir;
-    if (const auto* model = file_list_->model()) {
-        for (int row = 0; row < model->rowCount(); ++row) {
-            const auto path = model->index(row, 0).data(Qt::DisplayRole).toString();
-            const auto slash = path.lastIndexOf(QLatin1Char('/'));
-            auto directory = slash >= 0 ? path.left(slash + 1) : QString{};
-            if (row == 0) {
-                common_dir = directory;
-                continue;
-            }
-            while (!common_dir.isEmpty() && !directory.startsWith(common_dir)) {
-                const auto parent = common_dir.lastIndexOf(QLatin1Char('/'), common_dir.size() - 2);
-                common_dir = parent >= 0 ? common_dir.left(parent + 1) : QString{};
-            }
-        }
-    }
+    const auto common_dir = session_->commonFolder();
     if (file_list_dir_ != nullptr) {
         file_list_dir_->setText(common_dir);
         file_list_dir_->setToolTip(common_dir);
@@ -1379,28 +1364,15 @@ void MetadataPropertiesDialog::editCurrentValues() {
         return;
     }
 
-    const auto field_index = static_cast<std::size_t>(current.row());
-    const auto& field = session_->gridModel()->selection().field(field_index);
-    const auto value_index = session_->aggregateModel()->index(current.row(), 2);
-    const auto current_values = value_index.data(metadata_cell_values_role).toStringList();
-    const auto selected = session_->selectedItemCount();
-    const auto heading =
-        QStringLiteral("%1 — %2 selected %3")
-            .arg(display_utf8(field.display_name))
-            .arg(selected)
-            .arg(selected == 1U ? QStringLiteral("file") : QStringLiteral("files"));
-    const auto context =
-        current_values.isEmpty()
-            ? QStringLiteral(
-                  "The selected files do not currently share one exact value list. Values "
-                  "entered here replace this field on those files.")
-            : QStringLiteral("Edit the exact ordered value list applied to the selected files. "
-                             "Duplicates and empty values remain distinct.");
-
-    auto* editor = createMetadataExactValueDialog(heading, context, current_values, this);
+    const auto exact = session_->exactValues(current.row());
+    if (!exact) {
+        return;
+    }
+    auto* editor =
+        createMetadataExactValueDialog(exact->heading, exact->context, exact->values, this);
     exact_values_dialog_ = editor;
     session_->setExactValuesDialogOpen(true);
-    const QPersistentModelIndex target{value_index};
+    const QPersistentModelIndex target{session_->aggregateModel()->index(exact->row, 2)};
     connect(editor, &QDialog::accepted, this, [this, editor, target] {
         if (target.isValid()) {
             session_->replaceValues(target.row(), metadataExactValueDialogValues(editor));

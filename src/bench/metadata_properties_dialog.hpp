@@ -92,8 +92,6 @@ class MetadataPropertiesDialog final : public QDialog {
     void reloadOutputProfiles();
 
   private:
-    class Artwork;
-
     // What the session says, shown.
     void sync();
     void buildGrid();
@@ -123,7 +121,6 @@ class MetadataPropertiesDialog final : public QDialog {
     void reject() override;
 
     TaggerSession* session_{nullptr};
-    std::unique_ptr<Artwork> artwork_;
     QLabel* file_list_dir_{nullptr};
     QVBoxLayout* root_layout_{nullptr};
     QLabel* summary_{nullptr};

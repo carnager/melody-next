@@ -97,49 +97,6 @@ class EmptyStateListWidget final : public QListWidget {
 
 } // namespace
 
-// The artwork section, as the session needs it.
-class MetadataPropertiesDialog::Artwork final : public TaggerArtwork {
-  public:
-    explicit Artwork(MetadataArtworkSection* section) : section_(section) {}
-    [[nodiscard]] bool hasPendingChanges() const override {
-        return section_ != nullptr && section_->hasPendingChanges();
-    }
-    [[nodiscard]] std::vector<metadata::ArtworkWritePlanIntent> pendingIntents() const override {
-        return section_ != nullptr ? section_->pendingIntents()
-                                   : std::vector<metadata::ArtworkWritePlanIntent>{};
-    }
-    [[nodiscard]] bool isBusy() const override { return section_ != nullptr && section_->isBusy(); }
-    void setWorking(const bool working) override {
-        if (section_ != nullptr) {
-            section_->setEnabled(!working);
-        }
-    }
-    void discardPendingChanges() override {
-        if (section_ != nullptr) {
-            section_->discardPendingChanges();
-        }
-    }
-    void requestOperationCancellation() override {
-        if (section_ != nullptr) {
-            section_->requestOperationCancellation();
-        }
-    }
-    void setScope(std::vector<MetadataArtworkScopeSource> sources,
-                  const bool source_limit_exceeded) override {
-        if (section_ != nullptr) {
-            section_->setScope(std::move(sources), source_limit_exceeded);
-        }
-    }
-    void setCoverArtRelease(std::optional<QString> release_id) override {
-        if (section_ != nullptr) {
-            section_->setCoverArtRelease(std::move(release_id));
-        }
-    }
-
-  private:
-    QPointer<MetadataArtworkSection> section_;
-};
-
 MetadataPropertiesDialog::MetadataPropertiesDialog(
     const std::size_t requested_item_count, MetadataPropertiesSourceReader source_reader,
     const std::span<const std::string_view> preferred_fields,
@@ -914,8 +871,7 @@ void MetadataPropertiesDialog::buildGrid() {
                     artwork_section_->setActive(index == 0 || index == artwork_page);
                 }
             });
-    artwork_ = std::make_unique<Artwork>(artwork_section_);
-    session_->setArtwork(artwork_.get());
+    session_->setArtwork(&artwork_section_->session());
 
     metadata_splitter_->addWidget(file_list_);
     metadata_splitter_->addWidget(metadata_sections_);

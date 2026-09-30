@@ -26,6 +26,8 @@ qt_add_library(
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp
+    artwork_session.cpp
+    artwork_session.hpp
     field_filter.cpp
     field_filter.hpp
     folder_browser.cpp

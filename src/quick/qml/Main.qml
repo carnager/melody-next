@@ -280,7 +280,10 @@ ApplicationWindow {
                 objectName: "action-command-palette"
                 text: qsTr("Commands…")
                 defaultKey: "Ctrl+Shift+P"
-                onTriggered: window.notYet("The command palette")
+                onTriggered: {
+                    commandPaletteDialog.commands = window.paletteCommands();
+                    commandPaletteDialog.open();
+                }
             }
             MenuSeparator {}
             KeyedAction {
@@ -308,13 +311,13 @@ ApplicationWindow {
                 objectName: "action-quick-album"
                 text: qsTr("Quick album…")
                 defaultKey: "Ctrl+Shift+A"
-                onTriggered: window.notYet("Quick album")
+                onTriggered: window.openQuickPick(true)
             }
             KeyedAction {
                 objectName: "action-quick-track"
                 text: qsTr("Quick track…")
                 defaultKey: "Ctrl+Shift+T"
-                onTriggered: window.notYet("Quick track")
+                onTriggered: window.openQuickPick(false)
             }
             KeyedAction {
                 objectName: "action-lists-panel"
@@ -564,6 +567,48 @@ ApplicationWindow {
         sequence: window.keyOf("action-show-up-next")
         onActivated: upNextSettings.visible = !upNextSettings.visible
     }
+    function openQuickPick(albums) {
+        const pick = Tk.openQuickPick(albums);
+        if (!pick)
+            return;
+        quickPickPopup.pick = pick;
+        quickPickPopup.open();
+    }
+    // The workspace commands the command palette offers, as they stand.
+    function paletteCommands() {
+        const ids = Tk.workspaceCommandIds();
+        const listed = [];
+        const seen = {};
+        function walk(menu) {
+            for (let i = 0; i < menu.count; ++i) {
+                const submenu = menu.menuAt(i);
+                if (submenu) {
+                    walk(submenu);
+                    continue;
+                }
+                const action = menu.actionAt(i);
+                if (!action || seen[action.objectName] || !ids.includes(action.objectName))
+                    continue;
+                seen[action.objectName] = true;
+                listed.push({id: action.objectName, label: action.text.replace(/&/g, "").trim(),
+                             shortcut: Tk.nativeShortcut(String(action.shortcut ?? "")),
+                             enabled: action.enabled, checked: action.checkable && action.checked,
+                             run: () => action.trigger()});
+            }
+        }
+        for (let i = 0; i < window.menuBar.count; ++i)
+            walk(window.menuBar.menuAt(i));
+        const runs = {"action-focus-library-search": () => Tk.focusLibrarySearch(),
+                      "action-show-up-next": () => upNextSettings.visible = !upNextSettings.visible};
+        for (const command of keyedCommands) {
+            if (runs[command.id] && !seen[command.id])
+                listed.push({id: command.id, label: command.label,
+                             shortcut: Tk.nativeShortcut(window.keyOf(command.id)),
+                             enabled: true, checked: command.id === "action-show-up-next" && upNextSettings.visible,
+                             run: runs[command.id]});
+        }
+        return listed.sort((a, b) => a.label.localeCompare(b.label));
+    }
     // Every command a key can be given: the menus' and those above.
     function shortcutCommands() {
         const listed = [];
@@ -769,6 +814,13 @@ ApplicationWindow {
         id: bookmarkDialog
         title: qsTr("Bookmark folder")
         onAccepted: Tk.bookmarkFolder(selectedFolder)
+    }
+    QuickPickPopup {
+        id: quickPickPopup
+        parent: Overlay.overlay
+    }
+    CommandPalette {
+        id: commandPaletteDialog
     }
     property var openListWindow: null
     Component {

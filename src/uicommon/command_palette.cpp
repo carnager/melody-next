@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "uicommon/command_palette.hpp"
+#include "workspace/command_search.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -124,7 +125,6 @@ CommandPalette::CommandPalette(QList<QAction*> actions, QWidget* parent) : QDial
 
 void CommandPalette::rebuild() {
     const QPointer<QAction> selected = currentAction();
-    const auto words = filter_->text().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
     results_->clear();
     int selected_row = -1;
     for (qsizetype index = 0; index < actions_.size(); ++index) {
@@ -133,11 +133,7 @@ void CommandPalette::rebuild() {
             continue;
         const auto shortcut = action->shortcut().toString(QKeySequence::NativeText);
         const auto name = commandName(action);
-        const auto haystack =
-            name + QLatin1Char(' ') + shortcut + QLatin1Char(' ') + action->objectName();
-        if (!std::ranges::all_of(words, [&](const auto& word) {
-                return haystack.contains(word, Qt::CaseInsensitive);
-            }))
+        if (!bench::commandMatches(filter_->text(), name, shortcut, action->objectName()))
             continue;
         auto label = name;
         if (action->isCheckable() && action->isChecked())

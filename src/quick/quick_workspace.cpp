@@ -8,6 +8,7 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
+#include "workspace/command_search.hpp"
 #include "workspace/sources.hpp"
 
 #include <QJsonObject>
@@ -609,6 +610,48 @@ QuickOpenList* QuickWorkspace::openList() {
     return list;
 }
 
+QuickPick* QuickWorkspace::openQuickPick(const bool albums) {
+    // The library of the tab in front: a remote tab's albums come from its
+    // engine and go where that tab's would.
+    const auto* current = currentTabPointer();
+    auto engine = current != nullptr ? bench::EngineKey::of(current->document)
+                                     : bench::EngineKey::local();
+    if (workspace_.catalogueOf(engine) == nullptr ||
+        std::ranges::find(libraries_, engine, &Library::engine) == libraries_.end()) {
+        engine = bench::EngineKey::local();
+    }
+    const auto* source = workspace_.catalogueOf(engine);
+    const auto library = std::ranges::find(libraries_, engine, &Library::engine);
+    if (source == nullptr || library == libraries_.end() || library->browser == nullptr) {
+        return nullptr;
+    }
+    auto* session = new bench::QuickPickSession(
+        albums ? bench::QuickPickKind::album : bench::QuickPickKind::track,
+        std::shared_ptr<engine::Catalogue>{source->open()}, source->name());
+    // Exactly what the library's own menu does with it.
+    connect(session, &bench::QuickPickSession::chosen, library->browser,
+            [browser = library->browser](std::vector<persistence::LibraryEntry> picked,
+                                         bench::LocalLibraryAction action) {
+                emit browser->actionRequested(std::move(picked), action);
+            });
+    auto* pick = new QuickPick(session, this);
+    QQmlEngine::setObjectOwnership(pick, QQmlEngine::CppOwnership);
+    return pick;
+}
+
+QStringList QuickWorkspace::workspaceCommandIds() {
+    QStringList ids;
+    for (const auto* id : bench::workspace_command_ids) {
+        ids.append(QString::fromLatin1(id));
+    }
+    return ids;
+}
+
+bool QuickWorkspace::commandMatches(const QString& filter, const QString& name,
+                                    const QString& shortcut, const QString& id) {
+    return bench::commandMatches(filter, name, shortcut, id);
+}
+
 void QuickWorkspace::bookmarkFolder(const QUrl& folder) {
     const auto encoded = QFile::encodeName(folder.toLocalFile());
     if (encoded.isEmpty()) {
@@ -618,6 +661,10 @@ void QuickWorkspace::bookmarkFolder(const QUrl& folder) {
     folders_.addBookmark(raw_path);
     selectSource(0, true);
     folders_.reveal(raw_path);
+}
+
+QString QuickWorkspace::nativeShortcut(const QString& portable) {
+    return QKeySequence(portable, QKeySequence::PortableText).toString(QKeySequence::NativeText);
 }
 
 bench::LibraryBrowser* QuickWorkspace::localLibrary() const {

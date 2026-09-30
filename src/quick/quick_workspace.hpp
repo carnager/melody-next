@@ -5,6 +5,7 @@
 #include "quick/list_tabs_model.hpp"
 #include "quick/quick_convert.hpp"
 #include "quick/quick_open_list.hpp"
+#include "quick/quick_pick.hpp"
 #include "quick/quick_replaygain.hpp"
 #include "quick/quick_settings.hpp"
 #include "quick/quick_tagger.hpp"
@@ -214,6 +215,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE trackknife::quick::QuickSettings* openSettings();
     // A command's key: the one saved in Settings, or `default_key`.
     Q_INVOKABLE static QString shortcut(const QString& id, const QString& default_key);
+    // A key as this desktop writes it.
+    Q_INVOKABLE static QString nativeShortcut(const QString& portable);
     // File: an M3U8 playlist imported into a new list, the list shown
     // exported as one; the transfer cancelled or its bar closed.
     Q_INVOKABLE void importPlaylist(const QUrl& file);
@@ -231,6 +234,14 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void dismissFind() { find_.dismiss(); }
     // Every engine's lists, one to open.
     Q_INVOKABLE trackknife::quick::QuickOpenList* openList();
+    // Quick album or Quick track, in the library of the tab in front; null
+    // when there is none.
+    Q_INVOKABLE trackknife::quick::QuickPick* openQuickPick(bool albums);
+    // The commands the command palette offers, and whether one matches
+    // what is typed.
+    Q_INVOKABLE static QStringList workspaceCommandIds();
+    Q_INVOKABLE static bool commandMatches(const QString& filter, const QString& name,
+                                           const QString& shortcut, const QString& id);
     // A folder bookmarked, and shown under Folders.
     Q_INVOKABLE void bookmarkFolder(const QUrl& folder);
 

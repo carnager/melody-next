@@ -29,6 +29,8 @@ qt_add_qml_module(
     quick_convert.hpp
     quick_open_list.cpp
     quick_open_list.hpp
+    quick_pick.cpp
+    quick_pick.hpp
     quick_replaygain.cpp
     quick_replaygain.hpp
     quick_script.cpp
@@ -86,6 +88,8 @@ qt_add_qml_module(
     qml/PlaylistTransferBar.qml
     qml/OpenListDialog.qml
     qml/FindBar.qml
+    qml/QuickPickPopup.qml
+    qml/CommandPalette.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

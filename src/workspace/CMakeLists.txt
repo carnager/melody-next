@@ -28,6 +28,7 @@ qt_add_library(
     workspace_view.hpp
     artwork_session.cpp
     artwork_session.hpp
+    command_search.hpp
     convert_job.cpp
     convert_job.hpp
     field_filter.cpp
@@ -42,6 +43,8 @@ qt_add_library(
     list_find.cpp
     list_find.hpp
     list_edit_job.hpp
+    quick_pick_session.cpp
+    quick_pick_session.hpp
     replaygain_job.cpp
     replaygain_job.hpp
     script_session.cpp

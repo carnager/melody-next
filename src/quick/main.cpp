@@ -48,12 +48,20 @@ int main(int argc, char* argv[]) {
     const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
 
     QString screenshot_path;
+    bool grab_live = false;
     QString open_for_screenshot;
     std::vector<std::string> raw_paths;
     const auto arguments = QApplication::arguments();
     for (qsizetype index = 1; index < arguments.size(); ++index) {
         if (arguments.at(index) == QStringLiteral("--screenshot") && index + 1 < arguments.size()) {
             screenshot_path = arguments.at(++index);
+            continue;
+        }
+        // QA hook: --grab <file> is --screenshot on the real settings and
+        // engine -- for a sandbox whose XDG directories are its own.
+        if (arguments.at(index) == QStringLiteral("--grab") && index + 1 < arguments.size()) {
+            screenshot_path = arguments.at(++index);
+            grab_live = true;
             continue;
         }
         // QA hook: what to open before the screenshot -- a menu or dialog the
@@ -71,7 +79,7 @@ int main(int argc, char* argv[]) {
     }
     // ADR-0226: only the application starts an engine, and not when it is
     // taking screenshots against test data.
-    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty());
+    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty() || grab_live);
 
     trackknife::quick::QuickWorkspace workspace(&application);
     trackknife::quick::QuickWorkspace::setInstance(&workspace);
@@ -104,7 +112,7 @@ int main(int argc, char* argv[]) {
                 }
             });
         }
-        QTimer::singleShot(3'000, &application, [&qml, screenshot_path] {
+        QTimer::singleShot(grab_live ? 6'000 : 3'000, &application, [&qml, screenshot_path] {
             auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
             const bool saved = window != nullptr && window->grabWindow().save(screenshot_path);
             QApplication::exit(saved ? 0 : 1);

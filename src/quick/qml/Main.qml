@@ -40,6 +40,8 @@ ApplicationWindow {
             editBar.openSort();
         else if (name === "folders")
             Tk.selectSource(0, false);
+        else if (name === "search" && Tk.library)
+            Tk.library.search = "a";
     }
     function closeTab(index) {
         const tab = Tk.tabAt(index);

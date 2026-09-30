@@ -54,26 +54,30 @@ class LibraryModel final : public QStandardItemModel {
     }
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
         if (role == library_secondary_role) {
+            // Text, empty where there is none: a view binding it as a
+            // string must not be handed nothing.
             const auto value = QStandardItemModel::data(index, entry_role);
             if (!value.isValid())
-                return {};
+                return QString{};
             const auto entry = value.value<persistence::LibraryEntry>();
             // An artist's album count is the row's quiet count instead.
             if (entry.kind == persistence::LibraryEntryKind::artist)
-                return {};
+                return QString{};
             const auto tracks =
                 LibraryBrowser::tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
             // Under its artist, an album need not name them again.
             if (entry.kind == persistence::LibraryEntryKind::album)
                 return index.parent().isValid() ? tracks
                                                 : text(entry.artist) + QStringLiteral(" · ") + tracks;
-            return {};
+            return QString{};
         }
         if (role == library_kind_role || role == library_count_role ||
             role == library_rating_role || role == library_available_role) {
             const auto value = QStandardItemModel::data(index, entry_role);
             if (!value.isValid()) {
-                return role == library_kind_role ? QVariant{QString{}} : QVariant{};
+                return role == library_kind_role || role == library_count_role ? QVariant{QString{}}
+                       : role == library_available_role ? QVariant{false}
+                                                        : QVariant{0U};
             }
             const auto entry = value.value<persistence::LibraryEntry>();
             switch (role) {
@@ -109,7 +113,7 @@ class LibraryModel final : public QStandardItemModel {
                 }
             }
             if (role == library_cover_key_role) {
-                return {};
+                return QString{};
             }
         }
         return QStandardItemModel::data(index, role);

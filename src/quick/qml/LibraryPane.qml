@@ -21,11 +21,17 @@ Item {
     Connections {
         target: pane.browser
         ignoreUnknownSignals: true
+        // A row asked open before its children are there waits for them,
+        // as the widgets tree's pending expansions do.
         function onExpandRequested(index) {
-            tree.expandToIndex(index);
-            const row = tree.rowAtIndex(index);
-            if (row >= 0)
-                tree.expand(row);
+            pane.pendingExpansions.push(index);
+            pane.completeExpansions();
+        }
+        function onReloadStarted() {
+            pane.pendingExpansions = [];
+        }
+        function onLevelLoaded() {
+            pane.completeExpansions();
         }
         function onCurrentRequested(index, focus) {
             tree.expandToIndex(index);
@@ -47,6 +53,24 @@ Item {
             search.forceActiveFocus();
             search.selectAll();
         }
+    }
+
+    property var pendingExpansions: []
+    function completeExpansions() {
+        const waiting = [];
+        for (const index of pendingExpansions) {
+            if (!index.valid)
+                continue;
+            if (!tree.model.hasChildren(index)) {
+                waiting.push(index);
+                continue;
+            }
+            tree.expandToIndex(index);
+            const row = tree.rowAtIndex(index);
+            if (row >= 0)
+                tree.expand(row);
+        }
+        pendingExpansions = waiting;
     }
 
     function selectedIndexes() {
@@ -266,7 +290,8 @@ Item {
                             text: {
                                 let initials = "";
                                 for (const character of node.display) {
-                                    if (/[\p{L}\p{N}]/u.test(character)) {
+                                    if (character.toUpperCase() !== character.toLowerCase()
+                                            || (character >= "0" && character <= "9")) {
                                         initials += character.toUpperCase();
                                         if (initials.length === 2)
                                             break;

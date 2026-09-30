@@ -274,7 +274,11 @@ ApplicationWindow {
                             objectName: "bench-metadata-identify"
                             text: qsTr("Identify…")
                             enabled: taggerWindow.state.canIdentify ?? false
-                            onClicked: taggerWindow.notYet(qsTr("Identifying with MusicBrainz"))
+                            onClicked: {
+                                const identify = taggerWindow.tagger.identify();
+                                if (identify)
+                                    identifyComponent.createObject(taggerWindow, {identify: identify});
+                            }
                             ToolTip.visible: hovered
                             ToolTip.delay: 800
                             ToolTip.text: qsTr("Search MusicBrainz by artist and album — no MusicBrainz tags needed — pick the exact release version, and stage the match as ordinary colored draft edits")
@@ -477,6 +481,12 @@ ApplicationWindow {
             sections.currentIndex = 1;
             return;
         }
+        if (name === "tagger-identify") {
+            const identify = tagger.identify();
+            if (identify)
+                identifyComponent.createObject(taggerWindow, {identify: identify});
+            return;
+        }
         tagger.setField(0, "Edited title");
         actions.open();
     }
@@ -487,6 +497,10 @@ ApplicationWindow {
             provenance.show(qsTr("Loudness sources"), "", sources.headers, sources.rows, false);
     }
 
+    Component {
+        id: identifyComponent
+        IdentifyDialog {}
+    }
     FeedbackDialog {
         id: feedback
         onRetry: taggerWindow.tagger.retry()

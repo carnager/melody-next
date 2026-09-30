@@ -117,11 +117,16 @@ int main(int argc, char* argv[]) {
         QTimer::singleShot(grab_live ? 6'000 : 3'000, &application, [&qml, screenshot_path] {
             // The window opened last -- a tag editor, say -- else the main one.
             auto* window = qobject_cast<QQuickWindow*>(qml.rootObjects().value(0));
-            for (auto* candidate : QGuiApplication::topLevelWindows()) {
-                if (auto* quick = qobject_cast<QQuickWindow*>(candidate);
-                    quick != nullptr && quick != window && quick->isVisible() &&
-                    quick->transientParent() == window) {
-                    window = quick;
+            for (bool deeper = true; deeper;) {
+                deeper = false;
+                for (auto* candidate : QGuiApplication::topLevelWindows()) {
+                    if (auto* quick = qobject_cast<QQuickWindow*>(candidate);
+                        quick != nullptr && quick != window && quick->isVisible() &&
+                        quick->transientParent() == window) {
+                        window = quick;
+                        deeper = true;
+                        break;
+                    }
                 }
             }
             const bool saved = window != nullptr && window->grabWindow().save(screenshot_path);

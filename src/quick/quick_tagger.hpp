@@ -3,6 +3,7 @@
 #pragma once
 
 #include "quick/quick_artwork.hpp"
+#include "quick/quick_identify.hpp"
 #include "workspace/field_filter.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -127,6 +128,9 @@ class QuickTagger final : public QObject {
     Q_INVOKABLE void discardAll() { session_->discardAll(); }
     Q_INVOKABLE void statusLink(const QString& link);
     Q_INVOKABLE void suggest() { session_->startProposals(); }
+    // "Identify…": a MusicBrainz search for the selected files; none when
+    // it cannot open.
+    Q_INVOKABLE trackknife::quick::QuickIdentify* identify();
 
     // Field sets.
     Q_INVOKABLE void selectFieldLayout(const QString& id);

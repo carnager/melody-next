@@ -465,6 +465,34 @@ void QuickTagger::replaceValues(const int row, const QStringList& values) {
 
 void QuickTagger::statusLink(const QString& link) { session_->statusLinkActivated(link); }
 
+QuickIdentify* QuickTagger::identify() {
+    auto request = session_->identifyRequest();
+    if (!request) {
+        return nullptr;
+    }
+    auto* identify = new QuickIdentify(
+        new bench::IdentifySession(session_->services().musicbrainz,
+                                   std::move(request->descriptors), std::move(request->local_paths),
+                                   std::move(request->items), request->artist, request->release),
+        this);
+    // Kept by this editor, not the QML engine: its window releases it.
+    QQmlEngine::setObjectOwnership(identify, QQmlEngine::CppOwnership);
+    session_->setIdentifyDialogOpen(true);
+    const QPointer session{session_};
+    connect(identify->findChild<bench::IdentifySession*>(), &bench::IdentifySession::accepted, this,
+            [session](metadata::MetadataProposalSet proposals) {
+                if (session) {
+                    session->applyMusicBrainzProposals(std::move(proposals));
+                }
+            });
+    connect(identify, &QObject::destroyed, this, [session] {
+        if (session) {
+            session->setIdentifyDialogOpen(false);
+        }
+    });
+    return identify;
+}
+
 // Field sets.
 
 void QuickTagger::selectFieldLayout(const QString& id) { session_->selectFieldLayout(id); }

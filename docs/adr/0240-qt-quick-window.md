@@ -51,3 +51,19 @@ later setting.
 - Dialogs take longer to arrive in the Qt Quick window, because each is
   rebuilt rather than reused. Their logic moves into shared controllers on
   the way, which the widgets window uses too.
+
+## Addendum: sessions behind dialogs
+
+A dialog's logic moves into a session in `src/workspace`: a `QObject` with
+no widgets that holds its state, models, selections, texts and enablement,
+runs its work off the UI thread, and says what changed. Each window's dialog
+is a view over it: the widgets dialog keeps its controls and object names,
+so its tests still drive it; the Qt Quick dialog is drawn from the same
+getters and calls the same methods. Where a view needs a model, it shares
+the session's model and selection model rather than keeping its own.
+
+The first are the tag editor's: `TaggerSession` (the editor),
+`ArtworkSession` (its covers, and the editor's artwork itself),
+`IdentifySession` and `TrackMatchSession` (MusicBrainz). `Workspace`
+hands a tag editor its services (`taggerServices`), so both windows open
+it the same way.

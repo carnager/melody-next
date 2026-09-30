@@ -928,28 +928,6 @@ void SettingsDialog::showDestinationsOf(const QString& key) {
 
 void SettingsDialog::showPage(const Page page) { pages_->setCurrentRow(static_cast<int>(page)); }
 
-metadata::ArtworkStoragePolicy SettingsDialog::artworkPolicy() {
-    const QSettings settings;
-    return {.embed = settings.value(QLatin1String(artwork_embed_key), true).toBool(),
-            .write_folder_image =
-                settings.value(QLatin1String(artwork_folder_image_key), false).toBool(),
-            .folder_image_name =
-                QFile::encodeName(settings
-                                      .value(QLatin1String(artwork_folder_image_name_key),
-                                             QStringLiteral("cover.jpg"))
-                                      .toString())
-                    .toStdString(),
-            .fetch_source = settings
-                                .value(QLatin1String(artwork_fetch_source_key),
-                                       QStringLiteral("coverartarchive"))
-                                .toString()
-                                .toStdString(),
-            .max_embedded_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_embedded_edge_key), 0).toInt())),
-            .max_folder_edge = static_cast<std::uint32_t>(std::max(
-                0, settings.value(QLatin1String(artwork_max_folder_edge_key), 0).toInt()))};
-}
-
 QString SettingsDialog::engineLabel(const RemoteEngineSetting& engine) {
     return engine.address.isEmpty() ? QStringLiteral("New engine") : engine.address;
 }

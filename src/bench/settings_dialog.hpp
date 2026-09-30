@@ -76,7 +76,6 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     void showNamingLayouts();
     void editCustomBuffer();
     void focusReplayGainPreamp();
-    [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();
 
 
   private:

@@ -43,8 +43,6 @@ qt_add_library(
     metadata_artwork_section.hpp
     metadata_exact_value_dialog.cpp
     metadata_exact_value_dialog.hpp
-    metadata_grid_model.cpp
-    metadata_grid_model.hpp
     metadata_field_review_bar.cpp
     metadata_field_review_bar.hpp
     metadata_properties_dialog.cpp

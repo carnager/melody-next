@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
-#include "workspace/sources.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -11,7 +10,9 @@
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "workspace/sources.hpp"
 #include <QRandomGenerator>
+#include <QStyle>
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/command_palette.hpp"
@@ -264,9 +265,8 @@ void BenchMainWindow::buildWorkspace() {
     });
     folder_bookmark_remove_action_ = new QAction(QStringLiteral("Remove bookmark"), this);
     folder_bookmark_remove_action_->setObjectName(QStringLiteral("action-folder-bookmark-remove"));
-    connect(folder_bookmark_remove_action_, &QAction::triggered, this, [this] {
-        folder_browser_->removeBookmark(folder_bookmarks_->currentRow());
-    });
+    connect(folder_bookmark_remove_action_, &QAction::triggered, this,
+            [this] { folder_browser_->removeBookmark(folder_bookmarks_->currentRow()); });
     folder_bookmark_menu_ = new QMenu(this);
     folder_bookmark_menu_->setObjectName(QStringLiteral("bench-folder-bookmark-menu"));
     folder_bookmark_menu_->addAction(folder_bookmark_remove_action_);
@@ -921,8 +921,9 @@ void BenchMainWindow::refreshPanelLayoutActions() {
 void BenchMainWindow::loadFolderBookmarks() {
     folder_bookmarks_->clear();
     for (const auto& raw_path : folder_browser_->bookmarkPaths()) {
-        auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")),
-                                         folderBookmarkLabel(raw_path), folder_bookmarks_);
+        auto* item = new QListWidgetItem(
+            QIcon::fromTheme(QStringLiteral("folder"), style()->standardIcon(QStyle::SP_DirIcon)),
+            folderBookmarkLabel(raw_path), folder_bookmarks_);
         item->setToolTip(folderBookmarkTooltip(raw_path));
         item->setData(Qt::UserRole,
                       QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});

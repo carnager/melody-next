@@ -37,6 +37,9 @@ qt_add_library(
     startup.hpp
     ../bench/artwork_fitting.cpp
     ../bench/artwork_fitting.hpp
+    ../bench/artwork_services.hpp
+    ../bench/engine_folder_listing.hpp
+    ../bench/output_profile_store.hpp
     ../bench/bench_main_window_helpers.cpp
     ../bench/bench_main_window_helpers.hpp
     ../bench/catalogue_source.cpp
@@ -62,6 +65,8 @@ qt_add_library(
     ../bench/local_playback_service.hpp
     ../bench/metadata_dialog_helpers.cpp
     ../bench/metadata_dialog_helpers.hpp
+    ../bench/metadata_grid_model.cpp
+    ../bench/metadata_grid_model.hpp
     ../bench/metadata_transformation_preview_model.cpp
     ../bench/metadata_transformation_preview_model.hpp
     ../bench/mpris_service.cpp

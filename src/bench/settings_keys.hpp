@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "trackknife/metadata/artwork_write_plan.hpp"
+
 #include <QString>
 
 namespace trackknife::bench {
@@ -14,6 +16,8 @@ struct SettingsKeys {
     // otherwise this computer's -- one password everywhere, as melodyd
     // falls back to its own for the engines it plays for.
     [[nodiscard]] static QString remoteEnginePassword();
+    // How covers are stored, as Settings › Covers says (ADR-0091).
+    [[nodiscard]] static metadata::ArtworkStoragePolicy artworkPolicy();
 
     static constexpr auto acoustid_client_key = "musicbrainz/acoustid-client-key";
     // ADR-0237 stage 2: engines also write track ratings into the files.

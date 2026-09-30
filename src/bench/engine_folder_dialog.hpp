@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "bench/engine_folder_listing.hpp"
 #include "trackknife/core/result.hpp"
 
 #include <QByteArray>
@@ -28,15 +29,9 @@ class EngineFolderDialog final : public QDialog {
     Q_OBJECT
 
   public:
-    struct Listing {
-        std::string path;
-        std::optional<std::string> parent;
-        std::vector<std::string> folders;
-    };
-    using ListingCompletion = std::function<void(core::Result<Listing>)>;
-    // Lists a folder (empty: where the engine starts) and answers on this
-    // dialog's thread.
-    using Lister = std::function<void(std::string, ListingCompletion)>;
+    using Listing = EngineFolderListing;
+    using ListingCompletion = EngineFolderListingCompletion;
+    using Lister = EngineFolderLister;
 
     EngineFolderDialog(QString engine_name, Lister lister, std::string start, QWidget* parent);
 

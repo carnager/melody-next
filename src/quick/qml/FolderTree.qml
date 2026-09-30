@@ -80,17 +80,26 @@ Rectangle {
             }
             TapHandler {
                 acceptedButtons: Qt.LeftButton
-                onTapped: {
-                    tree.selectionModel.setCurrentIndex(tree.index(node.row, 0),
-                                                        ItemSelectionModel.ClearAndSelect
-                                                        | ItemSelectionModel.Rows);
-                }
-                onDoubleTapped: {
+                // Activated as the desktop activates items: on a click where
+                // it does so on one, else on a double click -- a folder
+                // opens, a file goes into this computer's list.
+                function activate() {
                     const index = tree.index(node.row, 0);
                     if (Tk.folders.isDirectory(index))
                         tree.openRow(node.row, !node.expanded);
                     else
                         Tk.openFolderEntry(index);
+                }
+                onTapped: {
+                    tree.selectionModel.setCurrentIndex(tree.index(node.row, 0),
+                                                        ItemSelectionModel.ClearAndSelect
+                                                        | ItemSelectionModel.Rows);
+                    if (Qt.styleHints.singleClickActivation)
+                        activate();
+                }
+                onDoubleTapped: {
+                    if (!Qt.styleHints.singleClickActivation)
+                        activate();
                 }
             }
             TapHandler {

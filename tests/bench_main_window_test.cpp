@@ -14159,11 +14159,17 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
     track_menu->close();
     QCOMPARE(model->rows().front().rating, 0U);
     QCOMPARE(model->index(0, local_rating_column).data().toString(), QString{});
+    // As above, the store is asked until the workspace's write reached it.
     stored.reset();
-    panel->requestRatings({track_hash},
-                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
-    QTRY_VERIFY(stored.has_value());
-    QCOMPARE(*stored, (std::vector<unsigned>{0U}));
+    const auto ask_track = [&] {
+        panel->requestRatings({track_hash}, [&stored](std::vector<unsigned> values) {
+            stored = std::move(values);
+        });
+    };
+    ask_track();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (stored.has_value() && *stored == std::vector<unsigned>{0U}) || (ask_track(), false),
+        10'000);
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {

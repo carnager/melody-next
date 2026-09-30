@@ -89,28 +89,76 @@ void Workspace::saveLocalPlaybackModes() {
 }
 
 
-void Workspace::applyLocalPlaybackModes() {
-    saveLocalPlaybackModes();
+// As they were left, for either window: read once, when the workspace is
+// made, before any engine is reached.
+void Workspace::loadLocalPlaybackModes() {
+    const QSettings settings;
+    playback_.modes.repeat = settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
+    playback_.modes.random = settings.value(QStringLiteral("playback/local-random"), false).toBool();
+    playback_.modes.album_random =
+        settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
+    if (playback_.modes.album_random) {
+        playback_.modes.random = false;
+    }
+    playback_.modes.single = audio::mode_state_from_int(
+        settings.value(QStringLiteral("playback/local-single"), 0).toInt());
+    playback_.modes.consume = audio::mode_state_from_int(
+        settings.value(QStringLiteral("playback/local-consume"), 0).toInt());
+    local_replaygain_ =
+        settings.value(QStringLiteral("playback/local-replaygain"), QStringLiteral("off"))
+            .toString();
+    if (local_replaygain_ != QStringLiteral("track") &&
+        local_replaygain_ != QStringLiteral("album") &&
+        local_replaygain_ != QStringLiteral("auto")) {
+        local_replaygain_ = QStringLiteral("off");
+    }
+    const auto preamp_limit = static_cast<double>(audio::maximum_replay_gain_preamp_db);
+    local_rg_preamp_with_ =
+        std::clamp(settings.value(QStringLiteral("playback/rg-preamp-with"), 0.0).toDouble(),
+                   -preamp_limit, preamp_limit);
+    local_rg_preamp_without_ =
+        std::clamp(settings.value(QStringLiteral("playback/rg-preamp-without"), 0.0).toDouble(),
+                   -preamp_limit, preamp_limit);
+}
+
+audio::ReplayGainMode Workspace::resolvedReplayGain() const {
     // "Auto" is this window's policy about its own shuffle, so it resolves
     // here whichever player is listening.
-    auto mode = audio::ReplayGainMode::off;
     if (local_replaygain_ == QStringLiteral("track") ||
         (local_replaygain_ == QStringLiteral("auto") && playback_.modes.random)) {
-        mode = audio::ReplayGainMode::track;
-    } else if (local_replaygain_ == QStringLiteral("album") ||
-               local_replaygain_ == QStringLiteral("auto")) {
-        mode = audio::ReplayGainMode::album;
+        return audio::ReplayGainMode::track;
     }
+    if (local_replaygain_ == QStringLiteral("album") ||
+        local_replaygain_ == QStringLiteral("auto")) {
+        return audio::ReplayGainMode::album;
+    }
+    return audio::ReplayGainMode::off;
+}
+
+void Workspace::syncReplayGain() {
+    // One ReplayGain for every engine this window reaches: whichever plays
+    // next plays as loud as the last.
+    const auto mode = resolvedReplayGain();
     const audio::ReplayGainPreamps preamps{
         .with_gain_db = static_cast<float>(local_rg_preamp_with_),
         .without_gain_db = static_cast<float>(local_rg_preamp_without_),
     };
-    if (playingOnEngine()) {
-        // The engine decides what plays next and how loud it is, so every one
-        // of these is its business.
-        transport_->setModes(playback_.modes);
-        transport_->setReplayGain(mode, preamps);
+    for (const auto& engine : engines_) {
+        if (engine->playback != nullptr && engine->playback->active()) {
+            engine->playback->setReplayGain(mode, preamps);
+        }
     }
+    // What the playing engine reports next is the answer to this, not news.
+    engine_replay_gain_.reset();
+}
+
+void Workspace::applyLocalPlaybackModes() {
+    saveLocalPlaybackModes();
+    if (playingOnEngine()) {
+        // The engine decides what plays next, so the modes are its business.
+        transport_->setModes(playback_.modes);
+    }
+    syncReplayGain();
     view_->refreshLocalPlaybackControls();
 }
 
@@ -373,6 +421,7 @@ void Workspace::followPlayback(EnginePlayback* playback, const bool stop_other) 
     engine_entry_.clear();
     engine_queue_.clear();
     engine_requests_.reset();
+    engine_replay_gain_.reset();
     engine_consumed_.clear();
     engine_queue_revision_ = 0;
     view_->refreshTransport();

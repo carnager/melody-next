@@ -224,6 +224,9 @@ class Workspace final : public QObject {
     // empty Up Next is stated then. An empty order is a statement too: the
     // engine keeps the asks it saved until it is told otherwise.
     std::optional<QString> engine_requests_;
+    // The ReplayGain mode the playing engine last reported, so a change made
+    // on it elsewhere is told from its default and from this window's own.
+    std::optional<audio::ReplayGainMode> engine_replay_gain_;
     // The last entry the engine reported consuming, so one drop is mirrored
     // once however often the state is sampled.
     QString engine_consumed_;
@@ -584,6 +587,11 @@ class Workspace final : public QObject {
     void seekToMs(qint64 position_ms);
     // The modes and ReplayGain, saved, and told to the engine.
     void saveLocalPlaybackModes();
+    void loadLocalPlaybackModes();
+    // The ReplayGain mode this window's setting means now ("auto" follows
+    // shuffle), and that mode given to every engine it reaches.
+    [[nodiscard]] audio::ReplayGainMode resolvedReplayGain() const;
+    void syncReplayGain();
     void applyLocalPlaybackModes();
     // Makes `playback` the one followed, stopping the other when
     // `stop_other`: one engine plays at a time.

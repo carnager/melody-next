@@ -656,34 +656,7 @@ QIcon BenchMainWindow::oneShotIcon(const QIcon& plain) const {
 }
 
 void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
-    const QSettings settings;
-    playback_.modes.repeat =
-        settings.value(QStringLiteral("playback/local-repeat"), false).toBool();
-    playback_.modes.random =
-        settings.value(QStringLiteral("playback/local-random"), false).toBool();
-    playback_.modes.album_random =
-        settings.value(QStringLiteral("playback/local-album-random"), false).toBool();
-    if (playback_.modes.album_random)
-        playback_.modes.random = false;
-    playback_.modes.single = audio::mode_state_from_int(
-        settings.value(QStringLiteral("playback/local-single"), 0).toInt());
-    playback_.modes.consume = audio::mode_state_from_int(
-        settings.value(QStringLiteral("playback/local-consume"), 0).toInt());
-    local_replaygain_ =
-        settings.value(QStringLiteral("playback/local-replaygain"), QStringLiteral("off"))
-            .toString();
-    if (local_replaygain_ != QStringLiteral("track") &&
-        local_replaygain_ != QStringLiteral("album") &&
-        local_replaygain_ != QStringLiteral("auto")) {
-        local_replaygain_ = QStringLiteral("off");
-    }
-    const auto preamp_limit = static_cast<double>(audio::maximum_replay_gain_preamp_db);
-    local_rg_preamp_with_ =
-        std::clamp(settings.value(QStringLiteral("playback/rg-preamp-with"), 0.0).toDouble(),
-                   -preamp_limit, preamp_limit);
-    local_rg_preamp_without_ =
-        std::clamp(settings.value(QStringLiteral("playback/rg-preamp-without"), 0.0).toDouble(),
-                   -preamp_limit, preamp_limit);
+    // The modes themselves the workspace read when it was made.
     const auto add_mode = [&](const QString& id, const QString& label, const QString& icon) {
         auto* action = new QAction(label, this);
         action->setObjectName(QStringLiteral("action-local-%1").arg(id));

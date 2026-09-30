@@ -394,10 +394,21 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     auto server = engine::Server::listen(socket, recorder.dispatcher());
     QVERIFY(server.has_value());
     (*server)->start();
+    // State pushed as melodyd pushes it, so a change another client makes
+    // reaches the window -- and an engine's own default arrives first, as it
+    // does on a real start.
+    engine::PlaybackWatcher watcher{**player, (*server)->sink()};
+    watcher.start();
     QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
                          QString::fromStdString(socket.string()));
     // As if the user had chosen album gain in an earlier session.
     QSettings{}.setValue(QStringLiteral("playback/local-replaygain"), QStringLiteral("album"));
+    // Read by the workspace itself, whichever window is drawn over it: the Qt
+    // Quick window once came up with ReplayGain off.
+    {
+        const Workspace bare;
+        QCOMPARE(bare.resolvedReplayGain(), audio::ReplayGainMode::album);
+    }
 
     // A list tab, because the mode buttons belong to local playback and are
     // hidden while an MPD tab is on screen.
@@ -445,6 +456,25 @@ void EnginePlaybackTest::modesAndReplayGainReachTheEngine() {
     QTRY_COMPARE_WITH_TIMEOUT((*player)->state().replay_gain_mode, audio::ReplayGainMode::off,
                               5'000);
 
+    // Changed on the engine by another client: the window takes it, rather
+    // than showing -- and one day sending back -- its own old setting.
+    auto other = protocol::Client::connect(protocol::Endpoint{
+        .socket = socket.string(), .host = {}, .port = 0, .token = {}});
+    QVERIFY(other.has_value());
+    QVERIFY((*other)
+                ->call("playback.set_replay_gain",
+                       protocol::Json{{"mode", "track"},
+                                      {"preamp_with_gain_db", 0.0},
+                                      {"preamp_without_gain_db", 0.0}})
+                .has_value());
+    auto* track_gain = window.findChild<QAction*>(QStringLiteral("action-local-replaygain-track"));
+    QVERIFY(track_gain != nullptr);
+    QTRY_VERIFY_WITH_TIMEOUT(track_gain->isChecked(), 5'000);
+    QCOMPARE(QSettings{}.value(QStringLiteral("playback/local-replaygain")).toString(),
+             QStringLiteral("track"));
+    (*other)->close();
+
+    watcher.stop();
     (*server)->stop();
 }
 

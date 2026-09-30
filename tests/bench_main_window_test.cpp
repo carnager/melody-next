@@ -14133,12 +14133,17 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
     QCOMPARE(model->rows().front().rating, 8U);
     QCOMPARE(model->index(0, local_rating_column).data().toString(), QStringLiteral("★★★★"));
 
-    // The serialized library queue proves both identities reached the store.
+    // Both identities reach the store. It is written by the workspace, not
+    // through the panel's queue, so the panel is asked until it has them.
     std::optional<std::vector<unsigned>> stored;
-    panel->requestRatings({track_hash, album_hash},
-                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
-    QTRY_VERIFY(stored.has_value());
-    QCOMPARE(*stored, (std::vector<unsigned>{8U, 6U}));
+    const auto ask = [&] {
+        panel->requestRatings({track_hash, album_hash}, [&stored](std::vector<unsigned> values) {
+            stored = std::move(values);
+        });
+    };
+    ask();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (stored.has_value() && *stored == std::vector<unsigned>{8U, 6U}) || (ask(), false), 10'000);
     // The store notification reloads rows, filling the album rating painted
     // over the group's cover artwork.
     QTRY_COMPARE(model->rows().front().album_rating, 6U);

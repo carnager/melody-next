@@ -217,7 +217,6 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void engineRemoved() override;
     void enginesSynced() override;
     void engineListsChanged() override { fetchEngineLists(); }
-    void refreshRatings() override { refreshLocalRatings(); }
     void engineRatingsChanged(const EngineKey& engine,
                               const QHash<QString, unsigned>& ratings) override;
     void engineInterruptionsChanged(bool reported_now) override;
@@ -321,7 +320,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void refreshActiveContext();
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
     void addLocalRateMenus(QMenu* menu, QTableView* view);
-    void refreshLocalRatings();
+    void refreshLocalRatings() { workspace_.refreshRatings(); }
     // A rating an engine says was set -- here, on the phone, from a script:
     // shown in the tabs whose tracks are that engine's.
     void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating) {

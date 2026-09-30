@@ -1359,54 +1359,6 @@ void BenchMainWindow::engineRatingsChanged(const EngineKey& engine,
     }
 }
 
-void BenchMainWindow::refreshLocalRatings() {
-    // Ratings live with the engine whose library holds the track, so each
-    // engine's tabs ask their own engine.
-    for (const auto& engine_link : engines_) {
-        const auto engine = engine_link->key;
-        auto* library = engine_link->library;
-        if (library == nullptr) {
-            continue;
-        }
-        QStringList hashes;
-        QSet<QString> unique;
-        for (const auto& tab : list_tabs_) {
-            if (EngineKey::of(tab->document) != engine) {
-                continue;
-            }
-            for (const auto& hash : tab->model->ratingHashes()) {
-                if (!unique.contains(hash)) {
-                    unique.insert(hash);
-                    hashes.push_back(hash);
-                }
-            }
-        }
-        if (hashes.isEmpty()) {
-            continue;
-        }
-        std::vector<std::string> keys;
-        keys.reserve(static_cast<std::size_t>(hashes.size()));
-        for (const auto& hash : hashes) {
-            keys.push_back(hash.toStdString());
-        }
-        library->requestRatings(
-            std::move(keys), [this, hashes, engine](std::vector<unsigned> values) {
-                if (values.size() != static_cast<std::size_t>(hashes.size())) {
-                    return;
-                }
-                QHash<QString, unsigned> ratings;
-                ratings.reserve(hashes.size());
-                for (qsizetype index = 0; index < hashes.size(); ++index) {
-                    ratings.insert(hashes.at(index), values[static_cast<std::size_t>(index)]);
-                }
-                for (const auto& tab : list_tabs_) {
-                    if (EngineKey::of(tab->document) == engine) {
-                        tab->model->applyRatings(ratings);
-                    }
-                }
-            });
-    }
-}
 
 void BenchMainWindow::addLocalRateMenus(QTableView* view, ListTab* source_tab) {
     if (source_tab)
@@ -1459,8 +1411,7 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
     // A rating belongs to the engine whose library holds the track: a
     // remote tab's ratings are stored there, where its queries see them.
     const auto engine = engineOfView(view);
-    auto* const library = libraryOf(engine);
-    const auto store_ready = library != nullptr;
+    const auto store_ready = workspace_.canRate(engine);
     menu->addSeparator();
     auto* rate_menu = menu->addMenu(QStringLiteral("Rate"));
     rate_menu->setObjectName(QStringLiteral("bench-local-rate-menu"));
@@ -1482,37 +1433,15 @@ void BenchMainWindow::addLocalRateMenus(QMenu* menu, QTableView* view) {
         auto* rate = make_rating_action(rate_menu, rating);
         rate->setObjectName(QStringLiteral("action-local-rate-%1").arg(rating));
         rate->setChecked(ratings_match && common_rating == rating);
-        connect(rate, &QAction::triggered, this,
-                [this, model = QPointer{model}, library = QPointer{library}, engine, track_hashes,
-                 rating] {
-                    if (library == nullptr) {
-                        return;
-                    }
-                    QHash<QString, unsigned> applied;
-                    for (const auto& hash : track_hashes) {
-                        library->storeRating(hash.toStdString(), false, rating);
-                        applied.insert(hash, rating);
-                    }
-                    for (const auto& other : list_tabs_) {
-                        if (EngineKey::of(other->document) == engine) {
-                            other->model->applyRatings(applied);
-                        }
-                    }
-                    if (model)
-                        model->applyRatings(applied);
-                });
+        connect(rate, &QAction::triggered, this, [this, engine, track_hashes, rating] {
+            workspace_.rate(engine, track_hashes, false, rating);
+        });
         auto* album_rate = make_rating_action(album_rate_menu, rating);
         album_rate->setObjectName(QStringLiteral("action-local-album-rate-%1").arg(rating));
         album_rate->setChecked(album_ratings_match && common_album_rating == rating);
-        connect(album_rate, &QAction::triggered, this,
-                [library = QPointer{library}, album_hashes, rating] {
-                    if (library == nullptr) {
-                        return;
-                    }
-                    for (const auto& hash : album_hashes) {
-                        library->storeRating(hash.toStdString(), true, rating);
-                    }
-                });
+        connect(album_rate, &QAction::triggered, this, [this, engine, album_hashes, rating] {
+            workspace_.rate(engine, album_hashes, true, rating);
+        });
     }
 }
 

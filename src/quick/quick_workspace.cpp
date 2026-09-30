@@ -829,8 +829,6 @@ void QuickWorkspace::engineRemoved() { refreshList(); }
 
 void QuickWorkspace::enginesSynced() {}
 
-void QuickWorkspace::refreshRatings() {}
-
 void QuickWorkspace::engineRatingsChanged(const bench::EngineKey&, const QHash<QString, unsigned>&) {}
 
 void QuickWorkspace::engineInterruptionsChanged(bool) {}

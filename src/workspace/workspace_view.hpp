@@ -69,8 +69,7 @@ class WorkspaceView {
     virtual void enginesSynced() = 0;
     // An engine's lists changed, or who has which.
     virtual void engineListsChanged() = 0;
-    // Stored ratings are to be read again; one engine's changed.
-    virtual void refreshRatings() = 0;
+    // One engine's stored ratings changed.
     virtual void engineRatingsChanged(const EngineKey& engine,
                                       const QHash<QString, unsigned>& ratings) = 0;
     // File work the engines could not settle; `reported_now` when some is new.

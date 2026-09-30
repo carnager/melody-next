@@ -20,6 +20,7 @@ constexpr int persist_debounce_ms = 1'000;
 
 Workspace::Workspace(QObject* parent) : QObject(parent) {
     layout_pushes_.setMaxThreadCount(1);
+    catalogue_work_.setMaxThreadCount(1);
     // ADR-0234: this computer's engine is always the first link, connected
     // or not; remotes follow when configured.
     engines_.push_back(std::make_unique<EngineLink>());
@@ -48,7 +49,7 @@ void Workspace::start() {
     persistence_timer_->setInterval(persist_debounce_ms);
     connect(persistence_timer_, &QTimer::timeout, this, [this] {
         persistNow(false);
-        view_->refreshRatings();
+        refreshRatings();
     });
     persistence_->initialize([this](ui::PersistedWorkspace workspace, QString error) {
         if (!error.isEmpty()) {

@@ -279,7 +279,7 @@ void Workspace::connectRemoteEngine(const RemoteEngineSetting& setting, const bo
                 syncArtwork(*tab);
             }
         }
-        view_->refreshRatings();
+        refreshRatings();
         // A remote that restarted holds the Up Next it saved; this window's
         // is the one the user sees, so it is stated again.
         engine_requests_.clear();

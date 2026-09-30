@@ -183,7 +183,6 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void engineRemoved() override;
     void enginesSynced() override;
     void engineListsChanged() override {}
-    void refreshRatings() override;
     void engineRatingsChanged(const bench::EngineKey& engine,
                               const QHash<QString, unsigned>& ratings) override;
     void engineInterruptionsChanged(bool reported_now) override;

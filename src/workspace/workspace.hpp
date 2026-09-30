@@ -246,6 +246,8 @@ class Workspace final : public QObject {
     std::vector<persistence::SavedDestinationProfile> local_destinations_;
     // Layout hand-overs to engines, one at a time and in order.
     QThreadPool layout_pushes_;
+    // Ratings read and stored, one at a time.
+    QThreadPool catalogue_work_;
     // Paths opened before the asynchronous list restore finishes are queued
     // and flushed into the initial tab once it exists.
     std::vector<std::string> pending_open_paths_;
@@ -406,6 +408,11 @@ class Workspace final : public QObject {
     void disconnectEngine(const EngineKey& key);
     // ADR-0234: a remote's placeholder key replaced by the id it gave.
     void adoptEngineIdentity(EngineLink& engine);
+    // Ratings (ADR-0179), read from and stored on the engine whose library
+    // holds the tracks, by their hashes; album ratings by the album's.
+    void refreshRatings();
+    [[nodiscard]] bool canRate(const EngineKey& engine) const;
+    void rate(const EngineKey& engine, const QStringList& hashes, bool album, unsigned rating);
     // A rating an engine stored, shown in its lists.
     void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
     // ADR-0237: whether an engine does the file tools' work, asked each time

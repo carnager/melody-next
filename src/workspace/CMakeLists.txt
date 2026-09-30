@@ -19,10 +19,13 @@ qt_add_library(
     workspace_ingest.cpp
     workspace_lists.cpp
     workspace_playback.cpp
+    workspace_ratings.cpp
     workspace_texts.cpp
     workspace_transport.cpp
     workspace_up_next.cpp
     workspace_view.hpp
+    list_edit_job.cpp
+    list_edit_job.hpp
     startup.cpp
     startup.hpp
     ../bench/artwork_fitting.cpp

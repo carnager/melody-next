@@ -4,6 +4,7 @@
 
 #include "quick/quick_artwork.hpp"
 #include "quick/quick_identify.hpp"
+#include "quick/quick_script.hpp"
 #include "workspace/field_filter.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -131,6 +132,9 @@ class QuickTagger final : public QObject {
     // "Identify…": a MusicBrainz search for the selected files; none when
     // it cannot open.
     Q_INVOKABLE trackknife::quick::QuickIdentify* identify();
+    // The script editor over the selected files, opened on the saved script
+    // `id` (or a new one); none when it cannot open.
+    Q_INVOKABLE trackknife::quick::QuickScript* scriptEditor(const QString& id);
 
     // Field sets.
     Q_INVOKABLE void selectFieldLayout(const QString& id);

@@ -25,6 +25,8 @@ qt_add_qml_module(
     quick_artwork.hpp
     quick_identify.cpp
     quick_identify.hpp
+    quick_script.cpp
+    quick_script.hpp
     quick_tagger.cpp
     quick_tagger.hpp
     quick_workspace.cpp
@@ -66,6 +68,7 @@ qt_add_qml_module(
     qml/CompactCover.qml
     qml/CoverPicker.qml
     qml/IdentifyDialog.qml
+    qml/ScriptEditor.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

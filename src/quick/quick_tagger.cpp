@@ -465,6 +465,43 @@ void QuickTagger::replaceValues(const int row, const QStringList& values) {
 
 void QuickTagger::statusLink(const QString& link) { session_->statusLinkActivated(link); }
 
+QuickScript* QuickTagger::scriptEditor(const QString& id) {
+    if (!session_->canTransform()) {
+        return nullptr;
+    }
+    auto items = session_->selectedItems();
+    if (items.empty()) {
+        return nullptr;
+    }
+    auto* grid = session_->gridModel();
+    QStringList labels;
+    labels.reserve(grid->rowCount());
+    for (auto row = 0; row < grid->rowCount(); ++row) {
+        labels.push_back(grid->trackLabel(row));
+    }
+    const auto parsed = core::StableId::parse(id.toStdString());
+    const auto initially = parsed ? std::optional{*parsed} : std::nullopt;
+    const QPointer session{session_};
+    auto* script = new QuickScript(
+        new bench::ScriptSession(
+            grid->sharedSelection(), grid->patches(), std::move(items), std::move(labels),
+            [session](const metadata::MetadataTransformationPreview& preview) {
+                return session && session->stageTransformation(preview);
+            },
+            session_->services().transformation_store, initially),
+        this);
+    // Kept by this editor, not the QML engine: its window releases it.
+    QQmlEngine::setObjectOwnership(script, QQmlEngine::CppOwnership);
+    session_->setTransformationDialogOpen(true);
+    connect(script, &QObject::destroyed, this, [session, initially] {
+        if (session) {
+            session->setTransformationDialogOpen(false);
+            session->reloadScripts(initially);
+        }
+    });
+    return script;
+}
+
 QuickIdentify* QuickTagger::identify() {
     auto request = session_->identifyRequest();
     if (!request) {

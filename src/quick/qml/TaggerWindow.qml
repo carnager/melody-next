@@ -398,7 +398,7 @@ ApplicationWindow {
                     tagger: taggerWindow.tagger
                     y: -height - 6
                     onProvenance: taggerWindow.showLoudnessSources()
-                    onScriptEditor: taggerWindow.notYet(qsTr("The script editor"))
+                    onScriptEditor: id => taggerWindow.openScriptEditor(id)
                     onSettings: page => taggerWindow.settingsRequested(page)
                     onDestinations: taggerWindow.destinationsRequested()
                     onExpression: expressionDialog.open()
@@ -481,6 +481,14 @@ ApplicationWindow {
             sections.currentIndex = 1;
             return;
         }
+        if (name === "tagger-script") {
+            const script = tagger.scriptEditor("");
+            if (script) {
+                const opened = scriptComponent.createObject(taggerWindow, {script: script});
+                opened.stageForScreenshot();
+            }
+            return;
+        }
         if (name === "tagger-identify") {
             const identify = tagger.identify();
             if (identify)
@@ -491,12 +499,22 @@ ApplicationWindow {
         actions.open();
     }
 
+    function openScriptEditor(id) {
+        const script = tagger.scriptEditor(id);
+        if (script)
+            scriptComponent.createObject(taggerWindow, {script: script});
+    }
+
     function showLoudnessSources() {
         const sources = tagger.loudnessSources();
         if (sources.rows.length > 0)
             provenance.show(qsTr("Loudness sources"), "", sources.headers, sources.rows, false);
     }
 
+    Component {
+        id: scriptComponent
+        ScriptEditor {}
+    }
     Component {
         id: identifyComponent
         IdentifyDialog {}

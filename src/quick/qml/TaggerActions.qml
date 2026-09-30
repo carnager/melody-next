@@ -15,7 +15,8 @@ Popup {
     readonly property var state: tagger.state
 
     signal provenance()
-    signal scriptEditor()
+    // The script editor, on the saved script `id` (empty: a new one).
+    signal scriptEditor(string id)
     signal settings(string page)
     signal destinations()
     signal expression()
@@ -198,18 +199,32 @@ Popup {
             }
             Repeater {
                 model: actions.tagger.scripts
-                CheckBox {
+                RowLayout {
+                    id: scriptRow
                     required property var modelData
                     required property int index
-                    objectName: "bench-actions-script-" + index
-                    text: modelData.name
-                    checked: modelData.automatic
-                    enabled: !(actions.state.scriptsLoading ?? false) && (actions.state.canTransform ?? false)
-                    onClicked: actions.tagger.toggleScript(modelData.id, checked)
-                    ToolTip.visible: hovered
-                    ToolTip.delay: 800
-                    ToolTip.text: modelData.automatic ? qsTr("Staged automatically as colored draft edits")
-                                                      : qsTr("Not staged automatically")
+                    spacing: 4
+                    CheckBox {
+                        objectName: "bench-actions-script-" + scriptRow.index
+                        Layout.fillWidth: true
+                        text: scriptRow.modelData.name
+                        checked: scriptRow.modelData.automatic
+                        enabled: !(actions.state.scriptsLoading ?? false) && (actions.state.canTransform ?? false)
+                        onClicked: actions.tagger.toggleScript(scriptRow.modelData.id, checked)
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 800
+                        ToolTip.text: scriptRow.modelData.automatic
+                                      ? qsTr("Staged automatically as colored draft edits")
+                                      : qsTr("Not staged automatically")
+                    }
+                    ToolButton {
+                        text: qsTr("Edit…")
+                        enabled: actions.state.canTransform ?? false
+                        onClicked: {
+                            actions.close();
+                            actions.scriptEditor(scriptRow.modelData.id);
+                        }
+                    }
                 }
             }
             Label {
@@ -222,7 +237,7 @@ Popup {
                 objectName: "bench-actions-script-editor"
                 enabled: actions.state.canTransform ?? false
                 text: "<a href=\"#\">" + qsTr("Open script editor…") + "</a>"
-                onActivated: actions.scriptEditor()
+                onActivated: actions.scriptEditor("")
             }
         }
 

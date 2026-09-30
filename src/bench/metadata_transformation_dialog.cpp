@@ -9,6 +9,7 @@
 #include "trackknife/metadata/field_suggestions.hpp"
 #include "trackknife/metadata/rule_script_import.hpp"
 #include "uicommon/metadata_transformation_interchange.hpp"
+#include "workspace/language_reference.hpp"
 #include "workspace/script_session.hpp"
 
 #include <QApplication>
@@ -271,6 +272,32 @@ class MetadataTransformationDialog final : public QDialog {
         raw_diagnostics_->setMaximumBlockCount(128);
         raw_diagnostics_->setMaximumHeight(110);
         raw_layout->addWidget(raw_diagnostics_);
+        // What can be written here, in the browser.
+        auto* reference_row = new QHBoxLayout;
+        reference_row->addStretch(1);
+        const auto reference = [this, raw_page, reference_row](
+                                   const QString& name, const QString& text, const QString& tip,
+                                   const LanguageReference which) {
+            auto* button = new QPushButton(text, raw_page);
+            button->setObjectName(name);
+            button->setFlat(true);
+            button->setToolTip(tip);
+            connect(button, &QPushButton::clicked, this, [this, which] {
+                if (QString error; !openLanguageReference(which, &error)) {
+                    QMessageBox::warning(this, QStringLiteral("Reference"), error);
+                }
+            });
+            reference_row->addWidget(button);
+        };
+        reference(QStringLiteral("bench-metadata-transformation-script-reference"),
+                  QStringLiteral("Script steps"),
+                  QStringLiteral("Every step a script can have, written as text"),
+                  LanguageReference::scripts);
+        reference(QStringLiteral("bench-metadata-transformation-tkfmt-reference"),
+                  QStringLiteral("tkfmt-1 reference"),
+                  QStringLiteral("The language of values and conditions"),
+                  LanguageReference::formatting);
+        raw_layout->addLayout(reference_row);
         editor_tabs_->addTab(raw_page, QStringLiteral("Raw script"));
         editor_layout->addWidget(editor_tabs_, 1);
         content_splitter_->addWidget(editor_pane);

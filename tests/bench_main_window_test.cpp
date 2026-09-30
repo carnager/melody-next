@@ -1386,7 +1386,10 @@ void BenchMainWindowTest::transportIsOneRowWithCoverAndPills() {
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-backup-workspace")) != nullptr);
     QVERIFY(window.findChild<QAction*>(QStringLiteral("action-restore-workspace")) != nullptr);
     QVERIFY(!window.menuBar()->isHidden());
-    QCOMPARE(window.menuBar()->actions().size(), 4);
+    // File, Edit, Workspace, Playback, and Help with the language references.
+    QCOMPARE(window.menuBar()->actions().size(), 5);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-reference-tkfmt")) != nullptr);
+    QVERIFY(window.findChild<QAction*>(QStringLiteral("action-reference-scripts")) != nullptr);
     QCOMPARE(device->toolButtonStyle(), Qt::ToolButtonIconOnly);
     // Nothing to name, no chevron squeezed beside the icon.
     QVERIFY(device->findChild<QLabel*>(QStringLiteral("bench-device-chevron"))->isHidden());

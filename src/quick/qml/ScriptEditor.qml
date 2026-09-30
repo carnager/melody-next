@@ -524,6 +524,31 @@ ApplicationWindow {
                             text: editor.state.rawDiagnostics ?? ""
                         }
                     }
+                    // What can be written here, in the browser.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Item {
+                            Layout.fillWidth: true
+                        }
+                        Button {
+                            objectName: "bench-metadata-transformation-script-reference"
+                            text: qsTr("Script steps")
+                            flat: true
+                            onClicked: Tk.openReference(1)
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 800
+                            ToolTip.text: qsTr("Every step a script can have, written as text")
+                        }
+                        Button {
+                            objectName: "bench-metadata-transformation-tkfmt-reference"
+                            text: qsTr("tkfmt-1 reference")
+                            flat: true
+                            onClicked: Tk.openReference(0)
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 800
+                            ToolTip.text: qsTr("The language of values and conditions")
+                        }
+                    }
                 }
             }
         }

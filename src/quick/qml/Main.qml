@@ -574,6 +574,20 @@ ApplicationWindow {
                 onTriggered: Tk.refreshOutputs()
             }
         }
+        // The language references, opened in the browser.
+        Menu {
+            title: qsTr("&Help")
+            Action {
+                objectName: "action-reference-tkfmt"
+                text: qsTr("tkfmt-1 reference")
+                onTriggered: Tk.openReference(0)
+            }
+            Action {
+                objectName: "action-reference-scripts"
+                text: qsTr("Tagging script reference")
+                onTriggered: Tk.openReference(1)
+            }
+        }
     }
 
     header: TransportBar {

@@ -6,7 +6,7 @@ script** tab shows the same script as text and accepts it typed or pasted
 (ADR-0241). Both edit one script: a change on either is the change on both.
 
 Each line is one step, written as a `$`-call. Values, conditions and groups
-are **tkfmt-1** expressions ([title-formatting.md](title-formatting.md));
+are **tkfmt-1** expressions ([tkfmt-1 reference](title-formatting.md));
 capture patterns are **tkcapture-1** (ADR-0068). Nothing is executed: every
 statement stands for one typed step, previewed before anything is written.
 

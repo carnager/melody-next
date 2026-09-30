@@ -164,7 +164,7 @@ Evidence: [conversion](playback-library-conversion.md#converter),
 
 | Capability | Status | Current behavior and remaining work |
 | --- | --- | --- |
-| `tkfmt-1` | Implemented | Versioned deterministic pure formatting, corpus, parser/evaluator, and shared typed use. Core support does not imply every UI has an expression editor; no foobar2000/Picard script compatibility promise. |
+| `tkfmt-1` | Implemented | Versioned deterministic pure formatting, corpus, parser/evaluator, and shared typed use. Core support does not imply every UI has an expression editor; no foobar2000/Picard script compatibility promise. Help → tkfmt-1 reference opens the shipped specification in the browser (ADR-0242). |
 | Persistence | Implemented | Schema **33**, with reversible migrations for profiles, lists, layouts, scripts, presets, caches, library records, and operation journals. Serialized worker ownership and durable list flush. ADR-0175 adds a File-menu online database backup with integrity/schema validation and a versioned settings companion; restart-safe restore retains the previous database as a rollback. |
 | Job execution | Partial | Bounded operation-specific pools with cancellation/progress and partial results. Shared resource-class scheduling and generalized retry remain open. |
 | Performance and hardening | Partial | Regression suites, sanitizer/static-analysis tooling, fuzz targets, and cached-view benchmarks exist. Representative large-library/network/device latency and sustained combined-workflow validation remain release work. Historical test counts are not current suite results. |

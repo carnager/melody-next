@@ -6,6 +6,8 @@
 
 #include <QString>
 
+#include <string>
+
 namespace trackknife::bench {
 
 // The QSettings keys the Settings dialog writes and the rest of the
@@ -24,6 +26,13 @@ struct SettingsKeys {
     static constexpr auto ratings_in_tags_key = "library/ratings-in-tags";
     // The scale other players' plain RATING tags are read on: off, 5, 10, 100.
     static constexpr auto rating_tag_scale_key = "library/rating-tag-scale";
+    // ADR-0245: ratings also copied, as their 0-10 number, into a tag of the
+    // user's naming -- when they are written at all.
+    static constexpr auto rating_backup_key = "library/rating-backup";
+    static constexpr auto rating_backup_tag_key = "library/rating-backup-tag";
+    // The tag the engines copy ratings into: empty when off, or when the name
+    // chosen cannot hold it.
+    [[nodiscard]] static std::string ratingBackupTag();
     // ADR-0220: empty means the library is opened in this process, which is
     // what it has always done. A socket path routes it through an engine
     // instead, so pointing at one is a deliberate act and the default is

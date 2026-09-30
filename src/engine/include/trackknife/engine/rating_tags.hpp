@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace trackknife::engine {
@@ -54,6 +55,13 @@ class RatingTags final {
     [[nodiscard]] metadata::PlainRatingScale plain_scale() const;
     [[nodiscard]] core::Result<void> set_plain_scale(metadata::PlainRatingScale scale);
 
+    // ADR-0245: the tag a second copy of each rating goes into, as its plain
+    // 0-10 number, while ratings are written; empty, none. Kept across
+    // restarts. Named or renamed while on, every rated track is written once;
+    // a tag left behind by a rename stays in the files.
+    [[nodiscard]] std::string backup_tag() const;
+    [[nodiscard]] core::Result<void> set_backup_tag(std::string tag);
+
     // A rating was stored: its files follow, when this is on.
     void rated(const std::string& hash, bool album, unsigned rating);
 
@@ -61,12 +69,14 @@ class RatingTags final {
     [[nodiscard]] std::size_t pending() const;
     void wait_idle();
 
-    // One file given `rating` (0 removes it). False when it already had it,
-    // or cannot carry tags.
+    // One file given `rating` (0 removes it), and its copy in `backup_tag`
+    // when one is named. False when it already had them, or cannot carry
+    // tags.
     [[nodiscard]] static core::Result<bool> write(const std::filesystem::path& database,
                                                   LocalCatalogue& catalogue,
                                                   const std::string& raw_path, unsigned rating,
-                                                  const core::CancellationToken& cancellation = {});
+                                                  const core::CancellationToken& cancellation = {},
+                                                  std::string_view backup_tag = {});
 
   private:
     struct Work {
@@ -84,14 +94,16 @@ class RatingTags final {
     std::deque<Work> queue_;
     std::size_t in_flight_{0U};
     bool enabled_{false};
+    std::string backup_tag_;
     bool stopping_{false};
     core::CancellationSource cancellation_;
     std::thread worker_;
 };
 
-// ratings.tags answers {write_tags, rating_scale, pending}; ratings.set_tags
-// {write_tags?, rating_scale?} changes either -- rating_scale "off", "5",
-// "10" or "100" -- and answers the same.
+// ratings.tags answers {write_tags, rating_scale, backup_tag, pending};
+// ratings.set_tags {write_tags?, rating_scale?, backup_tag?} changes any --
+// rating_scale "off", "5", "10" or "100", backup_tag a tag name or "" for
+// none -- and answers the same.
 void register_rating_tag_methods(protocol::Dispatcher& dispatcher, RatingTags& tags);
 
 } // namespace trackknife::engine

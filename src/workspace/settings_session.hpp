@@ -65,6 +65,10 @@ class SettingsSession final : public QObject {
     [[nodiscard]] static std::vector<Choice> listsDisplays();
     [[nodiscard]] static std::vector<Choice> bufferProfiles();
     [[nodiscard]] static std::vector<Choice> ratingScales();
+    // What to say under the backup tag's name (ADR-0245): why it cannot hold
+    // the copy, a warning when it is an official tag whose content the copy
+    // replaces, or nothing.
+    [[nodiscard]] static QString ratingBackupNote(const QString& name);
     [[nodiscard]] static std::vector<Choice> fetchSources();
     [[nodiscard]] static QStringList folderImageNames();
     [[nodiscard]] static double maximumPreamp();

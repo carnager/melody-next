@@ -121,6 +121,8 @@ class RemoteFileWork final {
     // "5", "10", "100").
     [[nodiscard]] core::Result<void> set_rating_tags(bool write_tags);
     [[nodiscard]] core::Result<void> set_rating_scale(const std::string& scale);
+    // ADR-0245: the tag ratings are copied into; empty for none.
+    [[nodiscard]] core::Result<void> set_rating_backup_tag(const std::string& tag);
 
     // Naming layouts handed over (layouts.put): each added or updated, and
     // only `removed` taken away. This engine's own move destinations, and

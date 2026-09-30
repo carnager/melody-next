@@ -129,6 +129,9 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QLineEdit* lastfm_key_{nullptr};
     QLineEdit* acoustid_key_{nullptr};
     QCheckBox* ratings_in_tags_{nullptr};
+    QCheckBox* rating_backup_{nullptr};
+    QLineEdit* rating_backup_tag_{nullptr};
+    QLabel* rating_backup_note_{nullptr};
     OutputProfilesManagerWidget* output_profiles_{nullptr};
     QComboBox* rating_tag_scale_{nullptr};
     QCheckBox* replaygain_sidecar_only_{nullptr};

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/bench_main_window.hpp"
+#include "workspace/panel_arrangement.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -10,7 +11,9 @@
 #include "bench/settings_dialog.hpp"
 #include "bench/track_list_find_bar.hpp"
 #include "trackknife/audio/local_audition.hpp"
+#include "workspace/sources.hpp"
 #include <QRandomGenerator>
+#include <QStyle>
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/command_palette.hpp"
@@ -68,9 +71,8 @@ namespace {} // namespace
 
 namespace {
 
-constexpr auto panel_layout_settings_key = "workspace/panel-layout-v1";
-constexpr auto folders_panel_id = "folders";
-constexpr auto track_lists_panel_id = "track-lists";
+constexpr auto folders_panel_id = PanelArrangement::sources_panel;
+constexpr auto track_lists_panel_id = PanelArrangement::tracks_panel;
 constexpr auto layout_panel_id_property = "trackknife-layout-panel-id";
 constexpr auto layout_panel_title_property = "trackknife-layout-panel-title";
 constexpr auto layout_container_kind_property = "trackknife-layout-container-kind";
@@ -113,7 +115,8 @@ void BenchMainWindow::buildWorkspace() {
     track_area_->addWidget(tabs_);
     buildListsPanel();
 
-    folder_model_ = new ui::LocalFolderTreeModel(this);
+    folder_browser_ = new FolderBrowser(this);
+    folder_model_ = folder_browser_->model();
     folders_panel_ = new QWidget(this);
     folders_panel_->setObjectName(QStringLiteral("bench-panel-folders"));
     folders_panel_->setProperty(layout_panel_id_property, QString::fromLatin1(folders_panel_id));
@@ -160,13 +163,10 @@ void BenchMainWindow::buildWorkspace() {
     connect(local_source_tabs_, &QTabBar::tabBarClicked, this, [this](const int index) {
         const auto kind = local_source_tabs_->tabData(index).toString();
         // The temporary Files page (ADR-0183 addendum) is session-only.
-        const auto choice = !kind.isEmpty() ? QStringLiteral("remote")
-                            : index == 0    ? QStringLiteral("folders")
-                            : index == 1    ? QStringLiteral("library")
-                                            : QString{};
-        if (!choice.isEmpty()) {
-            QSettings{}.setValue(QStringLiteral("local-library/view"), choice);
-        }
+        rememberSource(!kind.isEmpty() ? QStringLiteral("remote")
+                       : index == 0    ? QStringLiteral("folders")
+                       : index == 1    ? QStringLiteral("library")
+                                       : QString{});
     });
     // Before the window reacts to changes: the rest of it is not built yet.
     selectPreferredSource();
@@ -219,6 +219,15 @@ void BenchMainWindow::buildWorkspace() {
     folder_view_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(folder_view_, &QWidget::customContextMenuRequested, this,
             &BenchMainWindow::showFolderContextMenu);
+    connect(folder_browser_, &FolderBrowser::expandRequested, folder_view_,
+            [this](const QModelIndex& index) { folder_view_->expand(index); });
+    connect(folder_browser_, &FolderBrowser::currentRequested, folder_view_,
+            [this](const QModelIndex& index) {
+                folder_view_->setCurrentIndex(index);
+                folder_view_->scrollTo(index);
+            });
+    connect(folder_browser_, &FolderBrowser::bookmarksChanged, this,
+            &BenchMainWindow::loadFolderBookmarks);
     connect(folder_view_, &QTreeView::activated, this, [this](const QModelIndex& index) {
         if (!index.isValid() || folder_model_->isDirectory(index)) {
             return;
@@ -256,12 +265,8 @@ void BenchMainWindow::buildWorkspace() {
     });
     folder_bookmark_remove_action_ = new QAction(QStringLiteral("Remove bookmark"), this);
     folder_bookmark_remove_action_->setObjectName(QStringLiteral("action-folder-bookmark-remove"));
-    connect(folder_bookmark_remove_action_, &QAction::triggered, this, [this] {
-        delete folder_bookmarks_->takeItem(folder_bookmarks_->currentRow());
-        persistFolderBookmarks();
-        folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
-        folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
-    });
+    connect(folder_bookmark_remove_action_, &QAction::triggered, this,
+            [this] { folder_browser_->removeBookmark(folder_bookmarks_->currentRow()); });
     folder_bookmark_menu_ = new QMenu(this);
     folder_bookmark_menu_->setObjectName(QStringLiteral("bench-folder-bookmark-menu"));
     folder_bookmark_menu_->addAction(folder_bookmark_remove_action_);
@@ -634,37 +639,21 @@ void BenchMainWindow::buildWorkspace() {
 }
 
 ui::PanelLayout BenchMainWindow::defaultPanelLayout() const {
-    std::vector<ui::PanelLayoutNode> children;
-    children.push_back(ui::panelLayoutPanel(QString::fromLatin1(folders_panel_id)));
-    children.push_back(ui::panelLayoutPanel(QString::fromLatin1(track_lists_panel_id)));
-    return ui::PanelLayout{
-        .schema_version = ui::panel_layout_schema_version,
-        .root = ui::panelLayoutSplit(Qt::Horizontal, std::move(children), {1, 3}),
-    };
+    return PanelArrangement::defaultLayout();
 }
 
 void BenchMainWindow::loadPanelLayout() {
-    QSettings settings;
-    const auto encoded =
-        settings.value(QString::fromLatin1(panel_layout_settings_key)).toByteArray();
-    if (encoded.isEmpty()) {
-        applyPanelLayout(defaultPanelLayout());
-        return;
+    if (panel_arrangement_ == nullptr) {
+        panel_arrangement_ = new PanelArrangement(this);
     }
-
-    QString error;
-    const QStringList registered_panel_ids = panel_widgets_.keys();
-    auto restored = ui::deserializePanelLayout(encoded, registered_panel_ids, &error);
-    if (!restored) {
-        panel_layout_persistence_protected_ = true;
-        applyPanelLayout(defaultPanelLayout());
+    const auto error = panel_arrangement_->load();
+    applyPanelLayout(panel_arrangement_->layout());
+    if (!error.isEmpty()) {
         statusBar()->showMessage(
             QStringLiteral("Panel layout was not loaded (%1); the saved value was preserved")
                 .arg(error),
             7'000);
-        return;
     }
-    applyPanelLayout(*restored);
 }
 
 void BenchMainWindow::applyPanelLayout(const ui::PanelLayout& layout) {
@@ -728,11 +717,9 @@ QWidget* BenchMainWindow::renderPanelLayoutNode(const ui::PanelLayoutNode& node,
             splitter->setSizes(scaled);
         });
         connect(splitter, &QSplitter::splitterMoved, this, [this](const int, const int) {
-            if (applying_panel_layout_) {
-                return;
+            if (!applying_panel_layout_) {
+                persistPanelLayout(true);
             }
-            panel_layout_persistence_protected_ = false;
-            persistPanelLayout();
         });
         return splitter;
     }
@@ -753,13 +740,12 @@ QWidget* BenchMainWindow::renderPanelLayoutNode(const ui::PanelLayoutNode& node,
     stack->setCurrentIndex(node.active_child);
     connect(stack, &QTabWidget::currentChanged, this, [this](const int) {
         if (!applying_panel_layout_) {
-            persistPanelLayout();
+            persistPanelLayout(false);
         }
     });
     connect(stack->tabBar(), &QTabBar::tabMoved, this, [this](const int, const int) {
         if (!applying_panel_layout_) {
-            panel_layout_persistence_protected_ = false;
-            persistPanelLayout();
+            persistPanelLayout(true);
         }
     });
     return stack;
@@ -803,18 +789,19 @@ ui::PanelLayoutNode BenchMainWindow::capturePanelLayoutNode(QWidget* widget) con
     return ui::panelLayoutPanel(QStringLiteral("invalid"));
 }
 
-void BenchMainWindow::persistPanelLayout() {
-    if (layout_root_ == nullptr || applying_panel_layout_ || panel_layout_persistence_protected_) {
+void BenchMainWindow::persistPanelLayout(const bool by_hand) {
+    if (layout_root_ == nullptr || applying_panel_layout_ || panel_arrangement_ == nullptr) {
         return;
     }
-    const ui::PanelLayout layout{.schema_version = ui::panel_layout_schema_version,
-                                 .root = capturePanelLayoutNode(layout_root_)};
-    QSettings settings;
-    settings.setValue(QString::fromLatin1(panel_layout_settings_key),
-                      ui::serializePanelLayout(layout));
+    panel_arrangement_->adopt(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
+                                              .root = capturePanelLayoutNode(layout_root_)},
+                              by_hand);
 }
 
 void BenchMainWindow::setLayoutEditMode(const bool editing) {
+    if (panel_arrangement_ != nullptr) {
+        panel_arrangement_->setEditing(editing);
+    }
     layout_host_->setProperty("trackknifeLayoutEditing", editing);
     layout_host_->setStyleSheet(editing
                                     ? QStringLiteral("QWidget[trackknifeLayoutPanel=\"true\"] {"
@@ -831,62 +818,30 @@ void BenchMainWindow::setLayoutEditMode(const bool editing) {
 
 void BenchMainWindow::arrangePanelLayout(const ui::PanelLayoutNodeKind kind,
                                          const Qt::Orientation orientation) {
-    if (layout_root_ == nullptr || kind == ui::PanelLayoutNodeKind::panel) {
+    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
         return;
     }
-    auto root = capturePanelLayoutNode(layout_root_);
-    if (root.children.empty()) {
-        return;
-    }
-    auto children = std::move(root.children);
-    ui::PanelLayoutNode replacement;
-    if (kind == ui::PanelLayoutNodeKind::split) {
-        auto weights = root.kind == ui::PanelLayoutNodeKind::split
-                           ? std::move(root.weights)
-                           : std::vector<int>(children.size(), 1);
-        replacement = ui::panelLayoutSplit(orientation, std::move(children), std::move(weights));
-    } else {
-        auto active = root.kind == ui::PanelLayoutNodeKind::tabs ? root.active_child : 0;
-        if (root.kind != ui::PanelLayoutNodeKind::tabs) {
-            const auto track_lists =
-                std::ranges::find(children, QString::fromLatin1(track_lists_panel_id),
-                                  &ui::PanelLayoutNode::panel_id);
-            if (track_lists != children.end()) {
-                active = static_cast<int>(std::distance(children.begin(), track_lists));
-            }
-        }
-        replacement = ui::panelLayoutTabs(std::move(children), active);
-    }
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                                     .root = std::move(replacement)});
-    persistPanelLayout();
+    // As it is now, sizes included, then arranged anew.
+    persistPanelLayout(false);
+    panel_arrangement_->arrange(kind, orientation);
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::swapPanelLayout() {
-    if (layout_root_ == nullptr) {
+    if (layout_root_ == nullptr || panel_arrangement_ == nullptr) {
         return;
     }
-    auto root = capturePanelLayoutNode(layout_root_);
-    if (root.children.size() < 2U) {
-        return;
-    }
-    std::ranges::reverse(root.children);
-    if (root.kind == ui::PanelLayoutNodeKind::split) {
-        std::ranges::reverse(root.weights);
-    } else if (root.kind == ui::PanelLayoutNodeKind::tabs) {
-        root.active_child = static_cast<int>(root.children.size()) - 1 - root.active_child;
-    }
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(ui::PanelLayout{.schema_version = ui::panel_layout_schema_version,
-                                     .root = std::move(root)});
-    persistPanelLayout();
+    persistPanelLayout(false);
+    panel_arrangement_->swap();
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::resetPanelLayout() {
-    panel_layout_persistence_protected_ = false;
-    applyPanelLayout(defaultPanelLayout());
-    persistPanelLayout();
+    if (panel_arrangement_ == nullptr) {
+        return;
+    }
+    panel_arrangement_->reset();
+    applyPanelLayout(panel_arrangement_->layout());
 }
 
 void BenchMainWindow::refreshPanelLayoutActions() {
@@ -914,65 +869,19 @@ void BenchMainWindow::refreshPanelLayoutActions() {
 }
 
 void BenchMainWindow::loadFolderBookmarks() {
-    QSettings settings;
-    auto stored = settings.value(QStringLiteral("library/bookmarks")).toList();
-    if (!settings.contains(QStringLiteral("library/bookmarks"))) {
-        // First run of the bookmark panel: the old manually added library
-        // roots become bookmarks, headed by the home directory.
-        stored.push_back(QFile::encodeName(QDir::homePath()));
-        for (const auto& root : settings.value(QStringLiteral("library/roots")).toList()) {
-            if (!root.toByteArray().isEmpty()) {
-                stored.push_back(root);
-            }
-        }
-        settings.setValue(QStringLiteral("library/bookmarks"), stored);
-    }
     folder_bookmarks_->clear();
-    for (const auto& entry : stored) {
-        const auto bytes = entry.toByteArray();
-        if (bytes.isEmpty()) {
-            continue;
-        }
-        const std::string raw_path{bytes.constData(), static_cast<std::size_t>(bytes.size())};
-        const auto display = QString::fromUtf8(
-            core::display_raw_path(std::filesystem::path{raw_path}.filename().native().empty()
-                                       ? raw_path
-                                       : std::filesystem::path{raw_path}.filename().native()));
-        auto* item = new QListWidgetItem(QIcon::fromTheme(QStringLiteral("folder")), display,
-                                         folder_bookmarks_);
-        item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
-        item->setData(Qt::UserRole, bytes);
+    for (const auto& raw_path : folder_browser_->bookmarkPaths()) {
+        auto* item = new QListWidgetItem(
+            QIcon::fromTheme(QStringLiteral("folder"), style()->standardIcon(QStyle::SP_DirIcon)),
+            folderBookmarkLabel(raw_path), folder_bookmarks_);
+        item->setToolTip(folderBookmarkTooltip(raw_path));
+        item->setData(Qt::UserRole,
+                      QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});
     }
-    folder_bookmarks_->setVisible(folder_bookmarks_->count() > 0);
-    folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
-}
-
-void BenchMainWindow::persistFolderBookmarks() const {
-    QSettings settings;
-    QVariantList stored;
-    for (int row = 0; row < folder_bookmarks_->count(); ++row) {
-        stored.push_back(folder_bookmarks_->item(row)->data(Qt::UserRole));
-    }
-    settings.setValue(QStringLiteral("library/bookmarks"), stored);
-}
-
-void BenchMainWindow::addFolderBookmark(const std::string& raw_path) {
-    const QByteArray bytes{raw_path.data(), static_cast<qsizetype>(raw_path.size())};
-    for (int row = 0; row < folder_bookmarks_->count(); ++row) {
-        if (folder_bookmarks_->item(row)->data(Qt::UserRole).toByteArray() == bytes) {
-            return;
-        }
-    }
-    const auto name = std::filesystem::path{raw_path}.filename().native();
-    auto* item = new QListWidgetItem(
-        QIcon::fromTheme(QStringLiteral("folder")),
-        QString::fromUtf8(core::display_raw_path(name.empty() ? raw_path : name)),
-        folder_bookmarks_);
-    item->setToolTip(QString::fromUtf8(core::display_raw_path(raw_path)));
-    item->setData(Qt::UserRole, bytes);
-    persistFolderBookmarks();
-    folder_bookmarks_->setVisible(true);
-    folder_bookmarks_heading_->setVisible(folder_bookmarks_->isVisibleTo(folders_panel_));
+    const auto folders_visible =
+        local_source_tabs_ == nullptr || local_source_tabs_->currentIndex() == 0;
+    folder_bookmarks_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
+    folder_bookmarks_heading_->setVisible(folders_visible && folder_bookmarks_->count() > 0);
 }
 
 void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
@@ -982,83 +891,6 @@ void BenchMainWindow::showFolderBookmarkMenu(const QPoint& position) {
     }
     folder_bookmarks_->setCurrentRow(index.row());
     folder_bookmark_menu_->popup(folder_bookmarks_->viewport()->mapToGlobal(position));
-}
-
-// Reveals a bookmarked directory in the lazy tree: walk the path from its
-// root, fetching one level at a time and continuing when the rows arrive.
-void BenchMainWindow::revealFolderPath(const std::string& raw_path) {
-    for (int row = 0; row < folder_model_->rowCount(); ++row) {
-        const auto root_index = folder_model_->index(row, 0);
-        const auto root_path = folder_model_->rawPath(root_index);
-        if (raw_path == root_path) {
-            folder_view_->setCurrentIndex(root_index);
-            folder_view_->scrollTo(root_index);
-            folder_view_->expand(root_index);
-            return;
-        }
-        const auto prefix = root_path == "/" ? std::string{"/"} : root_path + '/';
-        if (raw_path.starts_with(prefix)) {
-            revealFolderStep(QPersistentModelIndex{root_index}, raw_path);
-            return;
-        }
-    }
-    // Not under any library root yet: the bookmark becomes a root.
-    folder_model_->addRoot(raw_path);
-    QSettings settings;
-    auto roots = settings.value(QStringLiteral("library/roots")).toList();
-    roots.push_back(QByteArray{raw_path.data(), static_cast<qsizetype>(raw_path.size())});
-    settings.setValue(QStringLiteral("library/roots"), roots);
-    for (int row = 0; row < folder_model_->rowCount(); ++row) {
-        const auto root_index = folder_model_->index(row, 0);
-        if (folder_model_->rawPath(root_index) == raw_path) {
-            folder_view_->setCurrentIndex(root_index);
-            folder_view_->scrollTo(root_index);
-            return;
-        }
-    }
-}
-
-void BenchMainWindow::revealFolderStep(const QPersistentModelIndex& parent_index,
-                                       const std::string& raw_path) {
-    if (!parent_index.isValid()) {
-        return;
-    }
-    const QModelIndex parent{parent_index};
-    if (!folder_model_->isLoaded(parent)) {
-        // Waits for the listing whether this starts it or another reveal
-        // already has. Treating an in-flight listing as loaded -- which is
-        // what asking canFetchMore did -- found no children and gave up, so a
-        // bookmark clicked while the startup reveal was still listing "/"
-        // silently did nothing.
-        auto connection = std::make_shared<QMetaObject::Connection>();
-        *connection =
-            connect(folder_model_, &ui::LocalFolderTreeModel::directoryLoaded, this,
-                    [this, connection, parent_index, raw_path](const QModelIndex& loaded) {
-                        if (loaded != QModelIndex{parent_index}) {
-                            return;
-                        }
-                        disconnect(*connection);
-                        revealFolderStep(parent_index, raw_path);
-                    });
-        if (folder_model_->canFetchMore(parent)) {
-            folder_model_->fetchMore(parent);
-        }
-        return;
-    }
-    folder_view_->expand(parent);
-    for (int row = 0; row < folder_model_->rowCount(parent); ++row) {
-        const auto child = folder_model_->index(row, 0, parent);
-        const auto child_path = folder_model_->rawPath(child);
-        if (child_path == raw_path) {
-            folder_view_->setCurrentIndex(child);
-            folder_view_->scrollTo(child);
-            return;
-        }
-        if (raw_path.starts_with(child_path + '/')) {
-            revealFolderStep(QPersistentModelIndex{child}, raw_path);
-            return;
-        }
-    }
 }
 
 } // namespace trackknife::bench
@@ -1081,7 +913,7 @@ void trackknife::bench::BenchMainWindow::openQuickPick(const QuickPickKind kind)
     connect(popup, &QuickPickPopup::chosen, library,
             [library](std::vector<persistence::LibraryEntry> picked, LocalLibraryAction action) {
                 // Exactly what the library's own menu does with it.
-                emit library->actionRequested(std::move(picked), action);
+                emit library->browser().actionRequested(std::move(picked), action);
             });
     popup->popUp(centralWidget() != nullptr ? centralWidget() : this);
 }
@@ -1131,52 +963,13 @@ trackknife::bench::BenchMainWindow::showSettingsDialog(const SettingsDialog::Pag
             properties->reloadOutputProfiles();
         }
     });
-    // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
-    // each engine that does file work (an emptied one makes them forget it).
-    connect(dialog, &QDialog::accepted, this, [this] {
-        const auto key = QSettings{}
-                             .value(QLatin1String(SettingsDialog::acoustid_client_key))
-                             .toString()
-                             .trimmed()
-                             .toStdString();
-        // Stage 2: so is whether ratings also go into the files.
-        const QSettings chosen;
-        const auto rating_tags =
-            chosen.value(QLatin1String(SettingsDialog::ratings_in_tags_key), false).toBool();
-        const auto rating_scale =
-            chosen.value(QLatin1String(SettingsDialog::rating_tag_scale_key), QStringLiteral("off"))
-                .toString()
-                .toStdString();
-        for (const auto& engine : engines_) {
-            if (engine->does_file_work && engine->file_work) {
-                static_cast<void>(
-                    QtConcurrent::run([work = engine->file_work, key, rating_tags, rating_scale] {
-                        static_cast<void>(work->set_acoustid_key(key));
-                        static_cast<void>(work->set_rating_tags(rating_tags));
-                        static_cast<void>(work->set_rating_scale(rating_scale));
-                    }));
-            }
-        }
-    });
-    connect(dialog, &QDialog::accepted, this, [this] {
-        // ADR-0234: engines added, removed or pointed elsewhere, at once.
-        syncRemoteEngines();
+    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
+        workspace_.settingsSaved(sharing);
         applyLocalLibraryVisibility();
         applyListsDisplay();
-    });
-    connect(dialog, &QDialog::accepted, this, [this, sharing = localEngineSharing()] {
-        // ADR-0226: this computer's engine runs apart from the window, so a
-        // change to how it is shared means starting it again.
-        if (localEngineSharing() != sharing && localCatalogue()) {
-            QApplication::setOverrideCursor(Qt::WaitCursor);
-            const bool restarted = localCatalogue()->restartLocalEngine();
-            QApplication::restoreOverrideCursor();
-            statusBar()->showMessage(
-                restarted ? QStringLiteral("This computer's engine restarted with its new settings")
-                          : QStringLiteral("This computer's engine did not restart; see its log"),
-                8'000);
-        }
-        reloadPlaybackPreferences();
+        if (notifications_action_)
+            notifications_action_->setChecked(
+                QSettings{}.value(QStringLiteral("desktop/notifications"), false).toBool());
         for (auto* section : findChildren<MetadataArtworkSection*>())
             section->refreshStoragePolicy();
     });

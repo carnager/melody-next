@@ -5,7 +5,7 @@
 #include "trackknife/protocol/message.hpp"
 
 #include "bench/engine_launcher.hpp"
-#include "bench/settings_dialog.hpp"
+#include "bench/settings_keys.hpp"
 #include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/remote_catalogue.hpp"
 
@@ -224,7 +224,7 @@ CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role
         // workspace starts, or one named for development and tests.
         const auto running =
             settings
-                .value(QLatin1String(SettingsDialog::library_local_engine_socket_key), QString{})
+                .value(QLatin1String(SettingsKeys::library_local_engine_socket_key), QString{})
                 .toString();
         if (!running.isEmpty()) {
             endpoint_ = protocol::Endpoint::parse(running.toStdString(), {});
@@ -244,9 +244,9 @@ CatalogueSource::CatalogueSource(std::filesystem::path database, const Role role
     } else {
         // The first engine elsewhere, if one is configured (ADR-0227).
         const auto configured =
-            settings.value(QLatin1String(SettingsDialog::library_engine_socket_key), QString{})
+            settings.value(QLatin1String(SettingsKeys::library_engine_socket_key), QString{})
                 .toString();
-        if (!configureRemote(configured, SettingsDialog::remoteEnginePassword())) {
+        if (!configureRemote(configured, SettingsKeys::remoteEnginePassword())) {
             return;
         }
     }

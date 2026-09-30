@@ -38,63 +38,31 @@
 namespace trackknife::ui {
 namespace {
 
-constexpr int maximum_side_artwork_extent = 160;
-constexpr int artwork_padding = 6;
+constexpr int artwork_padding = side_artwork_padding;
 
 [[nodiscard]] int viewColumn(const QTableView* view, const char* property, const int fallback) {
     return view->property(property).isValid() ? view->property(property).toInt() : fallback;
 }
 
+[[nodiscard]] TrackGroupColumns groupColumns(const QTableView* view) {
+    return {.album = viewColumn(view, track_album_column_property, track_album_column),
+            .date = viewColumn(view, track_date_column_property, track_date_column)};
+}
+
 [[nodiscard]] QString groupKey(const QTableView* view, const int row) {
-    const auto* model = view->model();
-    if (model == nullptr || row < 0 || row >= model->rowCount()) {
-        return {};
-    }
-    const auto album_column = viewColumn(view, track_album_column_property, track_album_column);
-    const auto date_column = viewColumn(view, track_date_column_property, track_date_column);
-    const auto anchor = model->index(row, 0);
-    return anchor.data(track_album_artist_role).toString() + QChar::Null +
-           model->index(row, album_column).data().toString() + QChar::Null +
-           model->index(row, date_column).data().toString();
-}
-
-[[nodiscard]] bool inAlbum(const QTableView* view, const int row) {
-    const auto* model = view->model();
-    const auto key = groupKey(view, row);
-    return (row > 0 && key == groupKey(view, row - 1)) ||
-           (row + 1 < model->rowCount() && key == groupKey(view, row + 1));
-}
-
-// A lone track whose row above belongs to an album: a gap and a hairline.
-[[nodiscard]] bool beginsLooseRun(const QTableView* view, const int row) {
-    return view->model() != nullptr && row > 0 && row < view->model()->rowCount() &&
-           !inAlbum(view, row) && inAlbum(view, row - 1);
+    return view->model() != nullptr ? trackGroupKey(*view->model(), row, groupColumns(view))
+                                    : QString{};
 }
 
 [[nodiscard]] bool beginsAlbum(const QTableView* view, const int row) {
-    const auto* model = view->model();
-    if (model == nullptr || row < 0 || row >= model->rowCount()) {
-        return false;
-    }
-    const auto cached = model->index(row, 0).data(track_album_group_start_role);
-    if (cached.isValid()) {
-        return cached.toBool();
-    }
-    const auto key = groupKey(view, row);
-    return (row == 0 || key != groupKey(view, row - 1)) && row + 1 < model->rowCount() &&
-           key == groupKey(view, row + 1);
+    return view->model() != nullptr && beginsTrackGroup(*view->model(), row, groupColumns(view));
 }
 
 // What a row adds above its track: an album's header, a run's gap, or none
 // -- and a disc's name where one of several begins.
 [[nodiscard]] int groupSpacing(const QTableView* view, const int row) {
-    const auto disc = view->model() != nullptr && !discStart(view->model()->index(row, 0)).isEmpty()
-                          ? QueueItemDelegate::disc_header_height
-                          : 0;
-    if (beginsAlbum(view, row)) {
-        return QueueItemDelegate::album_header_height + disc;
-    }
-    return (beginsLooseRun(view, row) ? QueueItemDelegate::loose_run_gap : 0) + disc;
+    return view->model() != nullptr ? trackGroupSpacing(*view->model(), row, groupColumns(view))
+                                    : 0;
 }
 
 void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
@@ -601,16 +569,6 @@ void QueueTableView::refitColumnsToViewport() {
     if (visible.isEmpty()) {
         return;
     }
-    QList<int> expanding;
-    for (const auto column : expanding_columns_) {
-        if (visible.contains(column)) {
-            expanding.push_back(column);
-        }
-    }
-    if (expanding.isEmpty()) {
-        expanding.push_back(visible.back());
-    }
-
     const auto minimum = [this](const int column) {
         return std::max(
             horizontalHeader()->minimumSectionSize(),
@@ -620,50 +578,8 @@ void QueueTableView::refitColumnsToViewport() {
         return std::max(minimum(column), preferred_column_widths_.value(
                                              column, horizontalHeader()->sectionSize(column)));
     };
-
-    QHash<int, int> target_widths;
-    int fixed_total = 0;
-    int expanding_minimum_total = 0;
-    for (const auto column : visible) {
-        if (expanding.contains(column)) {
-            expanding_minimum_total += minimum(column);
-        } else {
-            const auto width = preferred(column);
-            target_widths.insert(column, width);
-            fixed_total += width;
-        }
-    }
-
-    auto available_for_expanding = viewport()->width() - fixed_total;
-    if (available_for_expanding < expanding_minimum_total) {
-        // A narrow viewport may require compact columns to participate too.
-        expanding = visible;
-        target_widths.clear();
-        expanding_minimum_total = 0;
-        for (const auto column : expanding) {
-            expanding_minimum_total += minimum(column);
-        }
-        available_for_expanding = viewport()->width();
-    }
-
-    const auto distributable = std::max(0, available_for_expanding - expanding_minimum_total);
-    int total_weight = 0;
-    for (const auto column : expanding) {
-        total_weight += std::max(1, preferred(column) - minimum(column));
-    }
-    auto remaining = available_for_expanding;
-    for (qsizetype index = 0; index < expanding.size(); ++index) {
-        const auto column = expanding.at(index);
-        int width = minimum(column);
-        if (index + 1 == expanding.size()) {
-            width = std::max(width, remaining);
-        } else if (total_weight > 0) {
-            const auto weight = std::max(1, preferred(column) - minimum(column));
-            width += distributable * weight / total_weight;
-        }
-        target_widths.insert(column, width);
-        remaining -= width;
-    }
+    const auto target_widths =
+        fitTrackColumns(visible, expanding_columns_, minimum, preferred, viewport()->width());
 
     refitting_columns_ = true;
     const QSignalBlocker blocker{horizontalHeader()};

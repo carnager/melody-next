@@ -48,6 +48,15 @@ LocalCatalogue::inventory(const std::string& folder, const std::string& after,
     return library->inventory(folder, after, limit);
 }
 
+core::Result<persistence::LibraryFolder>
+LocalCatalogue::folder(const std::string& raw_path, const core::CancellationToken& cancellation) const {
+    auto library = open();
+    if (!library) {
+        return std::unexpected(std::move(library.error()));
+    }
+    return library->folder(raw_path, cancellation);
+}
+
 core::Result<std::size_t> LocalCatalogue::refresh(const std::vector<std::string>& raw_paths,
                                                   const core::CancellationToken& cancellation) {
     auto library = open();

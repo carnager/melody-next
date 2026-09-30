@@ -5,7 +5,7 @@
 #include "bench/metadata_dialog_helpers.hpp"
 #include "trackknife/metadata/flac_mapping.hpp"
 
-#include <QApplication>
+#include <QGuiApplication>
 #include <QBrush>
 #include <QColor>
 #include <QFont>
@@ -55,7 +55,7 @@ enum class DraftChangeKind : std::uint8_t { added, changed, removed };
 }
 
 [[nodiscard]] QFont draft_change_font(const DraftChangeKind kind) {
-    auto font = QApplication::font();
+    auto font = QGuiApplication::font();
     font.setItalic(true);
     font.setStrikeOut(kind == DraftChangeKind::removed);
     return font;
@@ -216,7 +216,7 @@ QVariant MetadataGridModel::data(const QModelIndex& index, const int role) const
         return font;
     }
     if (role == Qt::ForegroundRole && !projected.present) {
-        return QApplication::palette().brush(QPalette::PlaceholderText);
+        return QGuiApplication::palette().brush(QPalette::PlaceholderText);
     }
     if (role == Qt::ToolTipRole) {
         if (projected.patch != nullptr) {
@@ -856,7 +856,7 @@ QVariant MetadataAggregateModel::data(const QModelIndex& index, const int role) 
         const auto staged =
             summary_ready_ && draft_counts_ready_ && staged_counts_[field_index] > 0U;
         if (role == Qt::FontRole && staged) {
-            auto font = QApplication::font();
+            auto font = QGuiApplication::font();
             font.setBold(true);
             return font;
         }
@@ -1125,7 +1125,7 @@ QVariant MetadataAggregateModel::originalData(const std::size_t field_index, con
             return QStringLiteral("(preparing selection…)");
         }
         if (role == Qt::ForegroundRole) {
-            return QApplication::palette().brush(QPalette::PlaceholderText);
+            return QGuiApplication::palette().brush(QPalette::PlaceholderText);
         }
         return {};
     }
@@ -1172,7 +1172,7 @@ QVariant MetadataAggregateModel::originalData(const std::size_t field_index, con
     }
     if (role == Qt::ForegroundRole &&
         subset.state != metadata::MetadataSelectionFieldState::common) {
-        return QApplication::palette().brush(QPalette::PlaceholderText);
+        return QGuiApplication::palette().brush(QPalette::PlaceholderText);
     }
     return {};
 }
@@ -1187,7 +1187,7 @@ QVariant MetadataAggregateModel::draftData(const std::size_t field_index, const 
             return QStringLiteral("(preparing selection…)");
         }
         if (role == Qt::ForegroundRole) {
-            return QApplication::palette().brush(QPalette::PlaceholderText);
+            return QGuiApplication::palette().brush(QPalette::PlaceholderText);
         }
         return {};
     }
@@ -1256,7 +1256,7 @@ QVariant MetadataAggregateModel::draftData(const std::size_t field_index, const 
                 .arg(item_indexes_.size());
         }
         if (role == Qt::ForegroundRole) {
-            return QApplication::palette().brush(QPalette::PlaceholderText);
+            return QGuiApplication::palette().brush(QPalette::PlaceholderText);
         }
         return {};
     }
@@ -1313,7 +1313,7 @@ QVariant MetadataAggregateModel::draftData(const std::size_t field_index, const 
     }
     if (role == Qt::ForegroundRole &&
         projection.state != metadata::MetadataSelectionFieldState::common) {
-        return QApplication::palette().brush(QPalette::PlaceholderText);
+        return QGuiApplication::palette().brush(QPalette::PlaceholderText);
     }
     return {};
 }

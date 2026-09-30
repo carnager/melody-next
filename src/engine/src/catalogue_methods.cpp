@@ -9,6 +9,7 @@
 #include "trackknife/protocol/message.hpp"
 #include "trackknife/query/tkq.hpp"
 
+#include <filesystem>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -538,6 +539,64 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             return std::unexpected(std::move(refreshed.error()));
         }
         return Json{{"refreshed", Json::array({*refreshed})}};
+    });
+
+    // A folder as the library holds it, for browsing by folder where the
+    // files are out of reach:
+    //   catalogue.folder {path?} -> {path, name, parent, folders: [{path,
+    //   name}], tracks: [entry]}
+    // Without a path it is the library's own folders, with no parent; a
+    // library folder's parent is null too, which is the way back to them.
+    dispatcher.on("catalogue.folder", [&catalogue, render_page](const Json& params) -> core::Result<Json> {
+        const auto roots = catalogue.roots();
+        if (!roots) {
+            return std::unexpected(std::move(roots.error()));
+        }
+        const auto given = params.find("path");
+        if (given == params.end() || given->is_null()) {
+            auto listed = Json::array();
+            for (const auto& root : *roots) {
+                listed.push_back(Json{{"path", protocol::encode_raw_path(root.raw_path)},
+                                      {"name", protocol::displayable_text(root.raw_path)}});
+            }
+            return Json{{"path", nullptr},
+                        {"name", ""},
+                        {"parent", nullptr},
+                        {"folders", std::move(listed)},
+                        {"tracks", Json::array()}};
+        }
+        if (!given->is_string()) {
+            return std::unexpected(bad_params("path is an encoded path", "path"));
+        }
+        auto decoded = protocol::decode_raw_path(given->get<std::string>());
+        if (!decoded || decoded->empty()) {
+            return std::unexpected(bad_params("path is an encoded path", "path"));
+        }
+        auto here = std::filesystem::path{*decoded}.lexically_normal();
+        if (here.native().size() > 1U && here.native().back() == '/') {
+            here = here.parent_path();
+        }
+        auto folder = catalogue.folder(here.native());
+        if (!folder) {
+            return std::unexpected(std::move(folder.error()));
+        }
+        auto listed = Json::array();
+        for (const auto& name : folder->folders) {
+            listed.push_back(Json{{"path", protocol::encode_raw_path((here / name).native())},
+                                  {"name", protocol::displayable_text(name)}});
+        }
+        const auto is_root = std::ranges::any_of(*roots, [&here](const persistence::LibraryRoot& root) {
+            return std::filesystem::path{root.raw_path}.lexically_normal() == here;
+        });
+        const auto parent = here.parent_path();
+        const auto page = render_page(persistence::LibraryPage{.entries = std::move(folder->tracks), .more = false},
+                                      Json::object());
+        return Json{{"path", protocol::encode_raw_path(here.native())},
+                    {"name", protocol::displayable_text(is_root ? here.native() : here.filename().native())},
+                    {"parent", is_root || parent == here ? Json(nullptr)
+                                                         : Json(protocol::encode_raw_path(parent.native()))},
+                    {"folders", std::move(listed)},
+                    {"tracks", page.value("entries", Json::array())}};
     });
 
     // ADR-0232: what is indexed under a folder, for melody-watch to compare

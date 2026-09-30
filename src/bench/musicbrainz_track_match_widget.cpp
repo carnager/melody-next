@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/musicbrainz_track_match_widget.hpp"
+#include "workspace/identify_session.hpp"
 
 #include <QCollator>
 #include <QDrag>
@@ -29,16 +30,6 @@
 
 namespace trackknife::bench {
 namespace {
-
-QString text(const std::string& value) { return QString::fromUtf8(value); }
-
-QString duration(const std::optional<std::int64_t> milliseconds) {
-    if (!milliseconds || *milliseconds < 0) {
-        return QStringLiteral("—");
-    }
-    const auto seconds = *milliseconds / 1'000;
-    return QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char{'0'});
-}
 
 // Own the drag lifecycle so Qt never deletes source rows after the mapping
 // controller has already moved them. External/cross-window drops are rejected.
@@ -135,31 +126,20 @@ class LocalFileOrderView final : public QTreeWidget {
     QString identity_{QUuid::createUuid().toString()};
 };
 
+// A view over a TrackMatchSession: the files and the album's tracks side by
+// side, scrolled together, a row's pair shaded.
 class TrackMatchWidget final : public QWidget {
   public:
-    TrackMatchWidget(musicbrainz::Release release,
-                     std::vector<musicbrainz::LocalTrackDescriptor> local_tracks,
-                     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
-                     std::function<void(metadata::MetadataProposalSet)> accepted,
-                     std::function<void()> back, QWidget* parent)
-        : QWidget(parent), release_(std::move(release)), local_tracks_(std::move(local_tracks)),
-          local_paths_(std::move(local_paths)), item_indexes_(std::move(item_indexes)),
-          accepted_(std::move(accepted)) {
+    TrackMatchWidget(TrackMatchSession* session, std::function<void()> back, QWidget* parent)
+        : QWidget(parent), session_(session) {
         setObjectName(QStringLiteral("bench-musicbrainz-track-match"));
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
-        auto* heading =
-            new QLabel(tr("Match files to %1 · %2 · %3")
-                           .arg(text(release_.title), text(release_.date), text(release_.country)),
-                       this);
+        auto* heading = new QLabel(session_->heading(), this);
         heading->setTextFormat(Qt::PlainText);
         heading->setWordWrap(true);
         layout->addWidget(heading);
-        auto* help = new QLabel(
-            tr("Each row pairs a local file with the MusicBrainz track beside it. "
-               "Drag files in the left pane or use Move file up/down to change pairings. "
-               "MusicBrainz tracks stay in album order. Review before staging."),
-            this);
+        auto* help = new QLabel(TrackMatchSession::help(), this);
         help->setWordWrap(true);
         layout->addWidget(help);
         auto* splitter = new QSplitter(this);
@@ -195,13 +175,7 @@ class TrackMatchWidget final : public QWidget {
             rows_->setCurrentItem(rows_->topLevelItem(tracks_->indexOfTopLevelItem(item)));
         });
         rows_->moveFile = [this](std::size_t from, std::size_t to) {
-            if (!ready_ || from >= slots_.size() || to >= slots_.size() || from == to) {
-                return;
-            }
-            const auto local = slots_[from];
-            slots_.erase(slots_.begin() + static_cast<std::ptrdiff_t>(from));
-            slots_.insert(slots_.begin() + static_cast<std::ptrdiff_t>(to), local);
-            refresh(to);
+            session_->moveFile(from, to);
         };
         layout->addWidget(splitter, 1);
         auto* actions = new QHBoxLayout;
@@ -225,7 +199,7 @@ class TrackMatchWidget final : public QWidget {
         order_->setToolTip(
             tr("Pair files in their original selection order with the album tracks."));
         layout->addLayout(actions);
-        status_ = new QLabel(tr("Preparing suggested matches…"), this);
+        status_ = new QLabel(this);
         status_->setObjectName(QStringLiteral("bench-musicbrainz-match-status"));
         status_->setWordWrap(true);
         layout->addWidget(status_);
@@ -243,249 +217,85 @@ class TrackMatchWidget final : public QWidget {
         layout->addLayout(footer);
 
         connect(rows_, &QTreeWidget::itemSelectionChanged, this, [this] { updateButtons(); });
-        connect(up_, &QPushButton::clicked, this, [this] { moveFile(-1); });
-        connect(down_, &QPushButton::clicked, this, [this] { moveFile(1); });
+        connect(up_, &QPushButton::clicked, this, [this] { session_->move(selectedRow(), -1); });
+        connect(down_, &QPushButton::clicked, this, [this] { session_->move(selectedRow(), 1); });
         for (const auto& entry : {std::pair{QKeySequence{Qt::ALT | Qt::Key_Up}, -1},
                                   std::pair{QKeySequence{Qt::ALT | Qt::Key_Down}, 1}}) {
             auto* shortcut = new QShortcut(entry.first, rows_);
             shortcut->setContext(Qt::WidgetWithChildrenShortcut);
             connect(shortcut, &QShortcut::activated, this,
-                    [this, direction = entry.second] { moveFile(direction); });
+                    [this, direction = entry.second] { session_->move(selectedRow(), direction); });
         }
-        connect(unmatch_, &QPushButton::clicked, this, [this] {
-            const auto row = selectedRow();
-            if (!ready_ || !row || *row >= alignment_.release_tracks.size() || !slots_[*row]) {
-                return;
-            }
-            const auto local = slots_[*row];
-            slots_[*row].reset();
-            slots_.push_back(local);
-            refresh(slots_.size() - 1);
-        });
-        connect(sort_, &QPushButton::clicked, this, [this] { resetOrder(true); });
-        connect(order_, &QPushButton::clicked, this, [this] { resetOrder(false); });
-        connect(stage_, &QPushButton::clicked, this, [this] { stage(); });
-        updateButtons();
-
-        std::size_t release_track_count = 0;
-        for (const auto& medium : release_.media) {
-            release_track_count += medium.tracks.size();
-        }
-        if (local_tracks_.size() > 2'000U || release_track_count > 2'000U ||
-            local_tracks_.size() != item_indexes_.size()) {
-            status_->setText(tr("Track matching supports up to 2,000 local files and 2,000 release "
-                                "tracks. Choose a smaller selection."));
-            return;
-        }
-        // Keep the potentially expensive similarity matcher off the UI thread.
-        auto* watcher = new QFutureWatcher<musicbrainz::ReleaseAlignment>(this);
-        connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher] {
-            alignment_ = watcher->result();
-            watcher->deleteLater();
-            slots_.resize(alignment_.release_tracks.size());
-            std::vector<bool> placed(local_tracks_.size(), false);
-            for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
-                const auto& match = alignment_.tracks[local];
-                if (match.confidence >= 0.5 && match.release_track_index &&
-                    *match.release_track_index < slots_.size() &&
-                    !slots_[*match.release_track_index]) {
-                    slots_[*match.release_track_index] = local;
-                    placed[local] = true;
-                }
-            }
-            // Fill remaining gaps in file order as reviewable proposals, not confidence claims.
-            std::size_t gap = 0;
-            for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
-                if (placed[local]) {
-                    continue;
-                }
-                while (gap < slots_.size() && slots_[gap]) {
-                    ++gap;
-                }
-                if (gap == slots_.size()) {
-                    slots_.push_back(local);
-                } else {
-                    slots_[gap] = local;
-                }
-            }
-            ready_ = true;
-            refresh();
-        });
-        watcher->setFuture(QtConcurrent::run(
-            [release = release_, tracks = local_tracks_, token = cancellation_.token()] {
-                return musicbrainz::align_release_tracks(tracks, release, token);
-            }));
+        connect(unmatch_, &QPushButton::clicked, this,
+                [this] { session_->unmatch(selectedRow()); });
+        connect(sort_, &QPushButton::clicked, this, [this] { session_->resetOrder(true); });
+        connect(order_, &QPushButton::clicked, this, [this] { session_->resetOrder(false); });
+        connect(stage_, &QPushButton::clicked, session_, &TrackMatchSession::stage);
+        connect(session_, &TrackMatchSession::changed, this, &TrackMatchWidget::refresh);
+        refresh(-1);
     }
-
-    ~TrackMatchWidget() override { cancellation_.request_cancellation(); }
 
   private:
-    std::optional<std::size_t> selectedRow() const {
-        const auto row = rows_->indexOfTopLevelItem(rows_->currentItem());
-        return row < 0 ? std::nullopt : std::optional{static_cast<std::size_t>(row)};
-    }
-    QString localPath(std::size_t local) const {
-        if (local < local_paths_.size() && !local_paths_[local].isEmpty()) {
-            return local_paths_[local];
-        }
-        return local_tracks_[local].title.empty() ? tr("File %1").arg(local + 1)
-                                                  : text(local_tracks_[local].title);
-    }
-    void resetOrder(bool sort) {
-        if (!ready_) {
-            return;
-        }
-        std::vector<std::size_t> files;
-        for (std::size_t local = 0; local < local_tracks_.size(); ++local) {
-            files.push_back(local);
-        }
-        if (sort) {
-            QCollator collator;
-            if (collator.locale().language() == QLocale::C) {
-                collator.setLocale(QLocale{QLocale::English});
-            }
-            collator.setNumericMode(true);
-            collator.setCaseSensitivity(Qt::CaseInsensitive);
-            std::stable_sort(files.begin(), files.end(), [this, &collator](auto a, auto b) {
-                return collator.compare(QFileInfo(localPath(a)).fileName(),
-                                        QFileInfo(localPath(b)).fileName()) < 0;
-            });
-        }
-        slots_.assign(std::max(files.size(), alignment_.release_tracks.size()), std::nullopt);
-        for (std::size_t row = 0; row < files.size(); ++row) {
-            slots_[row] = files[row];
-        }
-        refresh(0);
-    }
-    void moveFile(int direction) {
-        const auto row = selectedRow();
-        if (!ready_ || !row || (direction < 0 && *row == 0) ||
-            (direction > 0 && *row + 1 >= slots_.size())) {
-            return;
-        }
-        const auto target = direction < 0 ? *row - 1 : *row + 1;
-        std::swap(slots_[*row], slots_[target]);
-        refresh(target);
-    }
-    QString trackLabel(const std::size_t target) const {
-        const auto& track = alignment_.release_tracks[target];
-        return tr("%1.%2 · %3")
-            .arg(track.medium_position)
-            .arg(track.track.position)
-            .arg(text(track.track.title));
+    [[nodiscard]] int selectedRow() const {
+        return rows_->indexOfTopLevelItem(rows_->currentItem());
     }
     void updateButtons() {
         const auto row = selectedRow();
-        up_->setEnabled(ready_ && row && *row > 0);
-        down_->setEnabled(ready_ && row && *row + 1 < slots_.size());
-        unmatch_->setEnabled(ready_ && row && *row < alignment_.release_tracks.size() &&
-                             slots_[*row]);
-        sort_->setEnabled(ready_);
-        order_->setEnabled(ready_);
-        stage_->setEnabled(ready_ && std::ranges::any_of(assignments_, [](const auto& value) {
-                               return value.has_value();
-                           }));
+        up_->setEnabled(session_->canMoveUp(row));
+        down_->setEnabled(session_->canMoveDown(row));
+        unmatch_->setEnabled(session_->canUnmatch(row));
+        sort_->setEnabled(session_->ready());
+        order_->setEnabled(session_->ready());
+        stage_->setEnabled(session_->canStage());
     }
-    void refresh(std::optional<std::size_t> selected = std::nullopt) {
-        while (slots_.size() > alignment_.release_tracks.size() && !slots_.back()) {
-            slots_.pop_back();
-        }
+    void refresh(const int selected) {
         rows_->invalidateDrag();
-        assignments_.assign(local_tracks_.size(), std::nullopt);
         rows_->clear();
         tracks_->clear();
-        std::size_t count = 0;
-        for (std::size_t row = 0; row < slots_.size(); ++row) {
+        const auto base = palette().color(QPalette::Base);
+        const auto accent = palette().color(QPalette::Highlight);
+        const QColor tint{(base.red() * 9 + accent.red()) / 10,
+                          (base.green() * 9 + accent.green()) / 10,
+                          (base.blue() * 9 + accent.blue()) / 10};
+        // Equal row heights keep the two panes aligned, including gaps.
+        const auto height = fontMetrics().height() + 12;
+        for (const auto& row : session_->rows()) {
             auto* item = new QTreeWidgetItem(rows_);
             item->setFlags(item->flags() & ~Qt::ItemIsDropEnabled);
             auto* track_item = new QTreeWidgetItem(tracks_);
-            // Equal row heights keep the two panes aligned, including gaps.
-            const auto height = fontMetrics().height() + 12;
             item->setSizeHint(0, QSize{0, height});
             track_item->setSizeHint(0, QSize{0, height});
-            if (const auto local = slots_[row]) {
-                item->setText(0, QFileInfo(localPath(*local)).fileName());
-                item->setToolTip(0, localPath(*local));
-                item->setText(1, duration(local_tracks_[*local].duration_ms));
-                if (row < alignment_.release_tracks.size()) {
-                    assignments_[*local] = row;
-                    const auto& track = alignment_.release_tracks[row];
-                    item->setText(
-                        2, tr("→ %1.%2").arg(track.medium_position).arg(track.track.position));
-                    item->setToolTip(
-                        2, tr("Paired with %1. Review before staging.").arg(trackLabel(row)));
-                    auto font = item->font(2);
-                    font.setBold(true);
-                    item->setFont(2, font);
-                    item->setForeground(2, palette().brush(QPalette::Link));
-                    const auto base = palette().color(QPalette::Base);
-                    const auto accent = palette().color(QPalette::Highlight);
-                    const QColor tint{(base.red() * 9 + accent.red()) / 10,
-                                      (base.green() * 9 + accent.green()) / 10,
-                                      (base.blue() * 9 + accent.blue()) / 10};
-                    for (int column = 0; column < 3; ++column) {
-                        item->setBackground(column, tint);
-                    }
-                    for (int column = 0; column < 2; ++column) {
-                        track_item->setBackground(column, tint);
-                    }
-                    ++count;
+            item->setText(0, row.file);
+            item->setToolTip(0, row.file_tool_tip);
+            item->setText(1, row.length);
+            item->setText(2, row.pairing);
+            item->setToolTip(2, row.pairing_tool_tip);
+            if (row.paired) {
+                auto font = item->font(2);
+                font.setBold(true);
+                item->setFont(2, font);
+                item->setForeground(2, palette().brush(QPalette::Link));
+                for (int column = 0; column < 3; ++column) {
+                    item->setBackground(column, tint);
                 }
-            } else {
-                item->setText(0, tr("No local file"));
-                item->setText(2, tr("— Gap"));
+                for (int column = 0; column < 2; ++column) {
+                    track_item->setBackground(column, tint);
+                }
             }
-            if (row < alignment_.release_tracks.size()) {
-                track_item->setText(0, trackLabel(row));
-                track_item->setToolTip(0, trackLabel(row));
-                track_item->setText(1, duration(alignment_.release_tracks[row].track.length_ms));
-            } else {
-                item->setText(2, tr("Unmatched"));
-                track_item->setText(0, tr("— No tags will be staged"));
-            }
+            track_item->setText(0, row.track);
+            track_item->setToolTip(0, row.track);
+            track_item->setText(1, row.track_length);
         }
-        if (selected && !slots_.empty()) {
-            auto* item =
-                rows_->topLevelItem(static_cast<int>(std::min(*selected, slots_.size() - 1)));
+        if (selected >= 0 && selected < rows_->topLevelItemCount()) {
+            auto* item = rows_->topLevelItem(selected);
             rows_->setCurrentItem(item);
             rows_->scrollToItem(item);
         }
-        status_->setText(
-            tr("%1 files paired · %2 files unmatched · %3 album tracks without a file. "
-               "Pairings are suggestions until you Stage matches.")
-                .arg(count)
-                .arg(local_tracks_.size() - count)
-                .arg(alignment_.release_tracks.size() - count));
+        status_->setText(session_->status());
         updateButtons();
     }
-    void stage() {
-        if (!ready_ || !stage_->isEnabled()) {
-            return;
-        }
-        auto confirmed = musicbrainz::confirm_release_mapping(alignment_, assignments_);
-        if (!confirmed) {
-            status_->setText(text(confirmed.error().message));
-            return;
-        }
-        auto proposals =
-            musicbrainz::release_metadata_proposals(release_, *confirmed, item_indexes_);
-        if (!proposals) {
-            status_->setText(text(proposals.error().message));
-            return;
-        }
-        if (accepted_) {
-            accepted_(std::move(*proposals));
-        }
-    }
 
-    musicbrainz::Release release_;
-    std::vector<musicbrainz::LocalTrackDescriptor> local_tracks_;
-    std::vector<QString> local_paths_;
-    std::vector<std::size_t> item_indexes_;
-    std::function<void(metadata::MetadataProposalSet)> accepted_;
-    musicbrainz::ReleaseAlignment alignment_;
-    std::vector<std::optional<std::size_t>> assignments_;
-    std::vector<std::optional<std::size_t>> slots_;
+    TrackMatchSession* session_;
     LocalFileOrderView* rows_;
     QTreeWidget* tracks_;
     QPushButton* up_;
@@ -495,8 +305,6 @@ class TrackMatchWidget final : public QWidget {
     QPushButton* order_;
     QPushButton* stage_;
     QLabel* status_;
-    bool ready_{false};
-    core::CancellationSource cancellation_;
 };
 
 } // namespace
@@ -506,9 +314,22 @@ QWidget* createMusicBrainzTrackMatchWidget(
     std::vector<QString> local_paths, std::vector<std::size_t> item_indexes,
     std::function<void(metadata::MetadataProposalSet)> accepted, std::function<void()> back,
     QWidget* parent) {
-    return new TrackMatchWidget(std::move(release), std::move(local_tracks), std::move(local_paths),
-                                std::move(item_indexes), std::move(accepted), std::move(back),
-                                parent);
+    auto* session = new TrackMatchSession(std::move(release), std::move(local_tracks),
+                                          std::move(local_paths), std::move(item_indexes));
+    auto* widget = new TrackMatchWidget(session, std::move(back), parent);
+    session->setParent(widget);
+    QObject::connect(session, &TrackMatchSession::accepted, widget,
+                     [accepted = std::move(accepted)](metadata::MetadataProposalSet proposals) {
+                         if (accepted) {
+                             accepted(std::move(proposals));
+                         }
+                     });
+    return widget;
+}
+
+QWidget* createMusicBrainzTrackMatchView(TrackMatchSession* session, std::function<void()> back,
+                                         QWidget* parent) {
+    return new TrackMatchWidget(session, std::move(back), parent);
 }
 
 } // namespace trackknife::bench

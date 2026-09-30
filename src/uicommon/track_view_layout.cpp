@@ -15,7 +15,9 @@ constexpr int minimum_column_width = 24;
 constexpr int maximum_column_width = 4'096;
 constexpr qsizetype maximum_layout_bytes = 64 * 1'024;
 
-[[nodiscard]] QString presentationName(const TrackViewPresentation presentation) {
+} // namespace
+
+QString trackViewPresentationId(const TrackViewPresentation presentation) {
     switch (presentation) {
     case TrackViewPresentation::albums_side_artwork:
         return QStringLiteral("albums-side-artwork");
@@ -29,7 +31,7 @@ constexpr qsizetype maximum_layout_bytes = 64 * 1'024;
     return {};
 }
 
-[[nodiscard]] std::optional<TrackViewPresentation> parsePresentation(const QString& name) {
+std::optional<TrackViewPresentation> trackViewPresentationFromId(const QString& name) {
     if (name == QStringLiteral("albums-side-artwork")) {
         return TrackViewPresentation::albums_side_artwork;
     }
@@ -45,8 +47,6 @@ constexpr qsizetype maximum_layout_bytes = 64 * 1'024;
     return std::nullopt;
 }
 
-} // namespace
-
 QByteArray serializeTrackViewLayout(const TrackViewLayout& layout) {
     QJsonArray columns;
     for (const auto& column : layout.columns) {
@@ -57,7 +57,7 @@ QByteArray serializeTrackViewLayout(const TrackViewLayout& layout) {
     return QJsonDocument{
         QJsonObject{
             {QStringLiteral("schema"), layout.schema_version},
-            {QStringLiteral("presentation"), presentationName(layout.presentation)},
+            {QStringLiteral("presentation"), trackViewPresentationId(layout.presentation)},
             {QStringLiteral("columns"), columns},
         }}
         .toJson(QJsonDocument::Compact);
@@ -91,7 +91,7 @@ std::optional<TrackViewLayout> deserializeTrackViewLayout(const QByteArray& byte
         return fail(QStringLiteral("Unsupported track-view layout version"));
     }
     const auto presentation =
-        parsePresentation(object.value(QStringLiteral("presentation")).toString());
+        trackViewPresentationFromId(object.value(QStringLiteral("presentation")).toString());
     if (!presentation) {
         return fail(QStringLiteral("Track-view presentation is unsupported"));
     }

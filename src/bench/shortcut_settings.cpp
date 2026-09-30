@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "bench/shortcut_settings.hpp"
+#include "workspace/shortcut_session.hpp"
 #include <QAction>
 #include <QFormLayout>
 #include <QKeySequenceEdit>
 #include <QLabel>
 #include <QPushButton>
-#include <QSettings>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 namespace trackknife::bench {
 ShortcutSettings::ShortcutSettings(const QList<QAction*>& actions, QWidget* parent)
-    : QWidget(parent) {
+    : QWidget(parent), actions_(actions) {
+    std::vector<ShortcutSession::Command> commands;
+    for (auto* action : actions) {
+        auto label = action->text();
+        label.remove('&');
+        commands.push_back({action->objectName(), label, action->shortcut(),
+                            QKeySequence(action->property("shortcut-default").toString(),
+                                         QKeySequence::PortableText)});
+    }
+    session_ = new ShortcutSession(std::move(commands), this);
     auto* layout = new QVBoxLayout(this);
     auto* note = new QLabel(
         tr("Click a shortcut and press the new keys. Clear it to disable it. Changes take effect "
@@ -20,14 +30,15 @@ ShortcutSettings::ShortcutSettings(const QList<QAction*>& actions, QWidget* pare
     note->setForegroundRole(QPalette::PlaceholderText);
     layout->addWidget(note);
     auto* form = new QFormLayout;
-    for (auto* action : actions) {
-        auto* edit = new QKeySequenceEdit(action->shortcut(), this);
-        edit->setObjectName(QStringLiteral("shortcut-") + action->objectName());
-        auto label = action->text();
-        label.remove('&');
-        edit->setAccessibleName(label);
-        form->addRow(label, edit);
-        bindings_.append({action, edit});
+    for (int row = 0; const auto& command : session_->commands()) {
+        auto* edit = new QKeySequenceEdit(command.key, this);
+        edit->setObjectName(QStringLiteral("shortcut-") + command.id);
+        edit->setAccessibleName(command.label);
+        form->addRow(command.label, edit);
+        connect(edit, &QKeySequenceEdit::keySequenceChanged, this,
+                [this, row](const QKeySequence& key) { session_->setKey(row, key); });
+        edits_.append(edit);
+        ++row;
     }
     layout->addLayout(form);
     error_ = new QLabel(this);
@@ -36,40 +47,30 @@ ShortcutSettings::ShortcutSettings(const QList<QAction*>& actions, QWidget* pare
     layout->addWidget(error_);
     auto* reset = new QPushButton(tr("Restore defaults"), this);
     reset->setObjectName(QStringLiteral("shortcut-restore-defaults"));
-    connect(reset, &QPushButton::clicked, this, [this] {
-        for (const auto& binding : bindings_)
-            binding.edit->setKeySequence(
-                QKeySequence(binding.action->property("shortcut-default").toString(),
-                             QKeySequence::PortableText));
-        error_->clear();
-    });
+    connect(reset, &QPushButton::clicked, session_, &ShortcutSession::restoreDefaults);
     layout->addWidget(reset);
     layout->addStretch();
+    connect(session_, &ShortcutSession::changed, this, &ShortcutSettings::sync);
+}
+
+void ShortcutSettings::sync() {
+    for (qsizetype row = 0; row < edits_.size(); ++row) {
+        const auto& key = session_->commands()[static_cast<std::size_t>(row)].key;
+        if (edits_[row]->keySequence() != key) {
+            const QSignalBlocker blocker{edits_[row]};
+            edits_[row]->setKeySequence(key);
+        }
+    }
+    error_->setText(session_->error());
 }
 
 bool ShortcutSettings::apply() {
-    const auto overlaps = [](const QKeySequence& a, const QKeySequence& b) {
-        return !a.isEmpty() && !b.isEmpty() &&
-               (a.matches(b) != QKeySequence::NoMatch || b.matches(a) != QKeySequence::NoMatch);
-    };
-    for (qsizetype i = 0; i < bindings_.size(); ++i) {
-        const auto key = bindings_[i].edit->keySequence();
-        for (qsizetype j = 0; j < i; ++j) {
-            if (overlaps(key, bindings_[j].edit->keySequence())) {
-                error_->setText(tr("Conflicting shortcuts: %1 and %2")
-                                    .arg(bindings_[i].action->text(), bindings_[j].action->text()));
-                return false;
-            }
-        }
+    if (!session_->apply()) {
+        return false;
     }
-    QSettings settings;
-    for (const auto& binding : bindings_) {
-        const auto key = binding.edit->keySequence();
-        binding.action->setShortcut(key);
-        settings.setValue(QStringLiteral("shortcuts/") + binding.action->objectName(),
-                          key.toString(QKeySequence::PortableText));
+    for (qsizetype row = 0; row < actions_.size(); ++row) {
+        actions_[row]->setShortcut(session_->commands()[static_cast<std::size_t>(row)].key);
     }
-    error_->clear();
     return true;
 }
 } // namespace trackknife::bench

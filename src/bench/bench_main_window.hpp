@@ -3,6 +3,9 @@
 #pragma once
 
 #include "bench/catalogue_source.hpp"
+#include "workspace/folder_browser.hpp"
+#include "workspace/workspace.hpp"
+#include "workspace/workspace_view.hpp"
 #include "bench/engine_key.hpp"
 #include "bench/engine_list_sync.hpp"
 #include "bench/engine_playback.hpp"
@@ -94,8 +97,9 @@ class LocalFilesMimeData;
 
 namespace trackknife::bench {
 enum class QuickPickKind;
+class ListsCatalog;
+class PanelArrangement;
 class ListsPanel;
-struct ConvertDialogItem;
 
 class LocalLibraryPanel;
 class MetadataPropertiesDialog;
@@ -109,22 +113,82 @@ class PlaylistTransferBar;
 // Trackknife main window: composed Folders/Track Lists panels, configurable
 // local working-list views, and one transport over the serialized playback worker
 // (ADR-0021/0023/0024, promoted to first-class playback by ADR-0025).
-// Widget properties, persisted UI state and JSON all carry a document identity
-// as text. ADR-0220 Phase 0 makes the playback anchor hold the identity itself,
-// so these two are the only places the two spellings meet.
-[[nodiscard]] inline QString document_text(const core::StableId& id) {
-    return id.is_nil() ? QString{} : QString::fromStdString(id.to_string());
-}
-
-[[nodiscard]] inline core::StableId document_identity(const QString& text) {
-    auto parsed = core::StableId::parse(text.toStdString());
-    return parsed ? *parsed : core::StableId{};
-}
-
-class BenchMainWindow final : public QMainWindow {
+class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     Q_OBJECT
-    // ADR-0234: one engine this window reaches (defined further down).
-    struct EngineLink;
+    // ADR-0220: the workspace's state and behaviour live in Workspace, which
+    // both windows are drawn over; this window reaches them through these
+    // names while its logic moves across.
+    using ListTab = Workspace::ListTab;
+    using CrossTabMoveEdit = Workspace::CrossTabMoveEdit;
+    using PendingRelocation = Workspace::PendingRelocation;
+    using DiscoveryOutcome = Workspace::DiscoveryOutcome;
+    using ProbeJob = Workspace::ProbeJob;
+    using ProbeOutcome = Workspace::ProbeOutcome;
+    using ArtworkJob = Workspace::ArtworkJob;
+    using ArtworkOutcome = Workspace::ArtworkOutcome;
+    using SeenEngine = Workspace::SeenEngine;
+    using EngineLink = Workspace::EngineLink;
+    using EngineInterruption = Workspace::EngineInterruption;
+    using ModeText = Workspace::ModeText;
+    // In the window's object tree, so what it holds is found through it.
+    Workspace workspace_{this};
+    std::vector<std::unique_ptr<ListTab>>& list_tabs_{workspace_.list_tabs_};
+    QHash<QString, QByteArray>& restored_track_view_layouts_{workspace_.restored_track_view_layouts_};
+    MprisService*& mpris_{workspace_.mpris_};
+    DesktopNotifier*& notifier_{workspace_.notifier_};
+    ui::ListPersistenceService*& persistence_{workspace_.persistence_};
+    std::filesystem::path& database_path_{workspace_.database_path_};
+    std::vector<std::unique_ptr<EngineLink>>& engines_{workspace_.engines_};
+    EngineListSync*& list_sync_{workspace_.list_sync_};
+    std::vector<PendingRelocation>& pending_relocations_{workspace_.pending_relocations_};
+    EnginePlayback*& transport_{workspace_.transport_};
+    EngineKey& up_next_engine_{workspace_.up_next_engine_};
+    QString& engine_entry_{workspace_.engine_entry_};
+    QString& engine_consumed_{workspace_.engine_consumed_};
+    QString& engine_queue_{workspace_.engine_queue_};
+    quint64& engine_queue_revision_{workspace_.engine_queue_revision_};
+    quint64& engine_queue_asked_{workspace_.engine_queue_asked_};
+    quint64& engine_reattach_asked_{workspace_.engine_reattach_asked_};
+    QTimer*& persistence_timer_{workspace_.persistence_timer_};
+    QFutureWatcher<DiscoveryOutcome>& discovery_watcher_{workspace_.discovery_watcher_};
+    QString& discovery_target_document_{workspace_.discovery_target_document_};
+    int& discovery_insertion_row_{workspace_.discovery_insertion_row_};
+    QPersistentModelIndex& discovery_insertion_anchor_{workspace_.discovery_insertion_anchor_};
+    bool& discovery_anchored_{workspace_.discovery_anchored_};
+    bool& discovery_replace_and_play_{workspace_.discovery_replace_and_play_};
+    bool& discovery_running_{workspace_.discovery_running_};
+    QFutureWatcher<std::vector<ProbeOutcome>>& probe_watcher_{workspace_.probe_watcher_};
+    std::deque<ProbeJob>& probe_queue_{workspace_.probe_queue_};
+    bool& probe_running_{workspace_.probe_running_};
+    core::CancellationSource& probe_cancellation_{workspace_.probe_cancellation_};
+    QFutureWatcher<void>& artwork_watcher_{workspace_.artwork_watcher_};
+    std::shared_ptr<ArtworkOutcome>& artwork_outcome_{workspace_.artwork_outcome_};
+    std::deque<ArtworkJob>& artwork_queue_{workspace_.artwork_queue_};
+    QHash<QString, QImage>& artwork_cache_{workspace_.artwork_cache_};
+    QSet<QString>& artwork_pending_{workspace_.artwork_pending_};
+    QSet<QString>& artwork_invalidated_while_loading_{workspace_.artwork_invalidated_while_loading_};
+    bool& artwork_running_{workspace_.artwork_running_};
+    std::optional<CrossTabMoveEdit>& cross_tab_move_edit_{workspace_.cross_tab_move_edit_};
+    std::vector<EngineInterruption>& engine_interruptions_{workspace_.engine_interruptions_};
+    std::vector<persistence::SavedDestinationProfile>& local_destinations_{workspace_.local_destinations_};
+    QThreadPool& layout_pushes_{workspace_.layout_pushes_};
+    std::vector<std::string>& pending_open_paths_{workspace_.pending_open_paths_};
+    bool& lists_restored_{workspace_.lists_restored_};
+    QString& local_replaygain_{workspace_.local_replaygain_};
+    double& local_rg_preamp_with_{workspace_.local_rg_preamp_with_};
+    double& local_rg_preamp_without_{workspace_.local_rg_preamp_without_};
+    std::optional<ListTab>& detached_playback_{workspace_.detached_playback_};
+    LocalListModel*& up_next_local_model_{workspace_.up_next_local_model_};
+    std::vector<std::uint64_t>& up_next_display_ids_{workspace_.up_next_display_ids_};
+    bool& up_next_restored_{workspace_.up_next_restored_};
+    std::uint64_t& up_next_local_revision_{workspace_.up_next_local_revision_};
+    LocalPlaybackService& playback_{workspace_.playback_};
+    bool& consuming_row_{workspace_.consuming_row_};
+    LastFmService*& lastfm_{workspace_.lastfm_};
+    QElapsedTimer& lastfm_clock_{workspace_.lastfm_clock_};
+    qint64& lastfm_sample_time_{workspace_.lastfm_sample_time_};
+    QString& lastfm_user_{workspace_.lastfm_user_};
+    QString& active_local_list_id_{workspace_.active_local_list_id_};
 
   public:
     explicit BenchMainWindow(QWidget* parent = nullptr);
@@ -134,7 +198,30 @@ class BenchMainWindow final : public QMainWindow {
     BenchMainWindow& operator=(const BenchMainWindow&) = delete;
 
     void importM3u8Path(std::string raw_path);
-    void openLocalPaths(std::vector<std::string> raw_paths);
+    void openLocalPaths(std::vector<std::string> raw_paths) {
+        workspace_.openLocalPaths(std::move(raw_paths));
+    }
+
+    // WorkspaceView
+    void showMessage(const QString& text, int timeout_ms) override;
+    void listAdded(ListTab& tab, bool select) override;
+    void showList(ListTab& tab) override;
+    [[nodiscard]] ListTab* currentList() override;
+    [[nodiscard]] std::vector<ListTab*> listsInOrder() override;
+    [[nodiscard]] QObject* modelParent() override;
+    [[nodiscard]] int currentRow(const ListTab& tab) override;
+    void artworkLoaded(const QString& key) override;
+    void workspaceRestored(bool restored) override;
+    void engineConnected(EngineLink& engine, bool first) override;
+    void engineAttached(EngineLink& engine) override;
+    void engineRekeyed(EngineLink& engine, const EngineKey& from, bool lists_follow) override;
+    void engineRemoving(EngineLink& engine) override;
+    void engineRemoved() override;
+    void enginesSynced() override;
+    void engineListsChanged() override { fetchEngineLists(); }
+    void engineRatingsChanged(const EngineKey& engine,
+                              const QHash<QString, unsigned>& ratings) override;
+    void engineInterruptionsChanged(bool reported_now) override;
 
   protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -149,14 +236,6 @@ class BenchMainWindow final : public QMainWindow {
     bool handleTabFileDrop(QDropEvent* drop, int tab_index);
     bool handleTabTrackDrop(QAbstractItemView* source, QDropEvent* event, const QPoint& position);
     bool handleTrackDropOnTab(QAbstractItemView* source, QDropEvent* drop, int tab_index);
-    struct ListTab {
-        persistence::ListDocument document;
-        LocalListModel* model{nullptr};
-        QTableView* view{nullptr};
-        ui::TrackViewLayout view_layout;
-        QByteArray preserved_view_layout;
-        bool view_layout_persistence_protected{false};
-    };
 
     void buildPlaylistActions(QMenu* file_menu);
     void importPlaylistDialog();
@@ -164,38 +243,40 @@ class BenchMainWindow final : public QMainWindow {
     void buildWorkspace();
     void buildTransport();
     void buildUpNext();
-    void refreshUpNext();
+    void refreshUpNext() override;
     // Queues what was dragged out of a library, with its tags.
     bool enqueueLibraryDrop(const ui::LocalFilesMimeData& files, int position);
     void enqueueUpNext(QTableView* source, bool prepend, int position = -1);
     // `engine`: whose files these are (ADR-0227). Up Next holds one engine's
     // asks at a time.
     void enqueueLocalRequests(std::vector<LocalTrackRow> rows, int position = -1,
-                              const EngineKey& engine = EngineKey::local());
+                              const EngineKey& engine = EngineKey::local()) {
+        workspace_.enqueueLocalRequests(std::move(rows), position, engine);
+    }
     void addUpNextActions(QMenu* menu, QTableView* source);
-    void editUpNext(int operation, int row = -1, int destination = -1);
+    void editUpNext(int operation, int row = -1, int destination = -1) {
+        workspace_.editUpNext(operation, row, destination);
+    }
     void editUpNextSelection(int operation, int destination = -1);
-    void persistUpNext();
-    void restoreUpNext();
+    void persistUpNext() { workspace_.persistUpNext(); }
+    void restoreUpNext() { workspace_.restoreUpNext(); }
 
     [[nodiscard]] ui::PanelLayout defaultPanelLayout() const;
     void loadPanelLayout();
     void applyPanelLayout(const ui::PanelLayout& layout);
     [[nodiscard]] QWidget* renderPanelLayoutNode(const ui::PanelLayoutNode& node, QWidget* parent);
     [[nodiscard]] ui::PanelLayoutNode capturePanelLayoutNode(QWidget* widget) const;
-    void persistPanelLayout();
+    void persistPanelLayout(bool by_hand);
     void setLayoutEditMode(bool editing);
     void arrangePanelLayout(ui::PanelLayoutNodeKind kind, Qt::Orientation orientation);
     void swapPanelLayout();
     void resetPanelLayout();
     void refreshPanelLayoutActions();
     void initializePersistence();
-    void restoreLists(std::vector<persistence::ListDocument> documents);
-    void schedulePersist();
-    void persistNow(bool wait);
+    void schedulePersist() { workspace_.schedulePersist(); }
+    void persistNow(bool wait) { workspace_.persistNow(wait); }
     // ADR-0233: another client's version of a list open here, and a save of
     // one that someone else saved first.
-    void adoptEngineList(const persistence::ListDocument& document);
     void settleListConflict(const QString& id);
     // The lists of every engine this window reaches, to open one as a tab.
     void showOpenListDialog();
@@ -205,10 +286,13 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] int engineRank(const QWidget* view) const;
     bool regrouping_tabs_{false};
     // The open lists of one engine, in tab order, by id and name.
-    [[nodiscard]] std::vector<std::pair<QString, QString>>
-    listTargets(const EngineKey& engine) const;
+    [[nodiscard]] std::vector<std::pair<QString, QString>> listTargets(const EngineKey& engine) const {
+        return workspace_.listTargets(engine);
+    }
     // Then, whatever is to be done with it once it is open.
-    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {});
+    void openEngineList(const EngineKey& key, const QString& id, std::function<void()> then = {}) {
+        workspace_.openEngineList(key, id, std::move(then));
+    }
     // ADR-0233: the lists as a pane beside the tracks instead of as a tab
     // bar, by the setting below.
     static constexpr auto lists_display_key = "appearance/lists-display";
@@ -228,58 +312,64 @@ class BenchMainWindow final : public QMainWindow {
     QWidget* lists_pane_{nullptr};
     ListsPanel* lists_panel_{nullptr};
     QAction* lists_panel_action_{nullptr};
-    QTimer* lists_fetch_timer_{nullptr};
+    ListsCatalog* lists_catalog_{nullptr};
     QTimer* lists_present_timer_{nullptr};
     void backupWorkspace();
     void scheduleWorkspaceRestore();
-    [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
-    [[nodiscard]] std::vector<persistence::TrackViewPreset> collectTrackViewLayouts();
+    [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments() {
+        return workspace_.collectDocuments();
+    }
     void refreshActiveContext();
     void addLocalRateMenus(QTableView* view, ListTab* source_tab);
     void addLocalRateMenus(QMenu* menu, QTableView* view);
-    void refreshLocalRatings();
+    void refreshLocalRatings() { workspace_.refreshRatings(); }
     // A rating an engine says was set -- here, on the phone, from a script:
     // shown in the tabs whose tracks are that engine's.
-    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating);
+    void adoptEngineRating(const EngineKey& engine, const QString& hash, unsigned rating) {
+        workspace_.adoptEngineRating(engine, hash, rating);
+    }
 
     void showDynamicPlaylists();
 
-    ListTab* addListTab(persistence::ListDocument document, bool select);
+    ListTab* addListTab(persistence::ListDocument document, bool select) {
+        return workspace_.addList(std::move(document), select);
+    }
     [[nodiscard]] ListTab* currentListTab();
     // ADR-0153: the standalone search dialog, created lazily, one instance.
     void openSearchDialog();
     // ADR-0156: shared capture/apply plumbing for Properties and the
     // compact context-menu ReplayGain dialog.
     [[nodiscard]] MetadataPropertiesSourceReader
-    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows);
+    selectionSourceReader(ListTab& tab, std::vector<QPersistentModelIndex> rows) {
+        return workspace_.selectionSourceReader(tab, std::move(rows));
+    }
     [[nodiscard]] MetadataPropertiesSourceReader
     selectionSourceReader(LocalListModel* model, std::vector<QPersistentModelIndex> rows,
-                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt);
-    [[nodiscard]] MetadataApplyObserver metadataApplyObserver();
+                          std::optional<std::vector<LocalTrackRow>> snapshot = std::nullopt) {
+        return workspace_.selectionSourceReader(model, std::move(rows), std::move(snapshot));
+    }
+    [[nodiscard]] MetadataApplyObserver metadataApplyObserver() {
+        return workspace_.metadataApplyObserver();
+    }
     void showReplayGainDialog();
-    [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
+    [[nodiscard]] ListTab* tabForDocument(const QString& document_id) {
+        return workspace_.tabForDocument(document_id);
+    }
     // ADR-0220 Phase 0: playback state names its document by identity, not
     // by a rendered QString. Widget properties still carry the text form, so
     // both spellings resolve to the same tab.
-    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id);
+    [[nodiscard]] ListTab* tabForDocument(const core::StableId& document_id) {
+        return workspace_.tabForDocument(document_id);
+    }
     bool transferRows(QTableView* source, const QVariantList& rows, const QString& target_id,
                       bool move, int insertion_row);
     bool transferRowsToNewTab(QTableView* source, const QVariantList& rows, bool move,
                               const QString& name);
-    struct CrossTabMoveEdit {
-        QString source_id;
-        QString target_id;
-        std::vector<LocalTrackRow> source_before;
-        std::vector<LocalTrackRow> source_after;
-        std::vector<LocalTrackRow> target_before;
-        std::vector<LocalTrackRow> target_after;
-        bool applied{true};
-    };
-    [[nodiscard]] bool canReplayCrossTabMove(bool undo);
-    bool replayCrossTabMove(bool undo);
-    void refreshTabChrome(ListTab& tab);
-    void setActiveLocalList(const QString& id);
-    void refreshPlaybackCursor(bool jump = false);
+    [[nodiscard]] bool canReplayCrossTabMove(bool undo) { return workspace_.canReplayCrossTabMove(undo); }
+    bool replayCrossTabMove(bool undo) { return workspace_.replayCrossTabMove(undo); }
+    void refreshTabChrome(ListTab& tab) override;
+    void setActiveLocalList(const QString& id) { workspace_.setActiveLocalList(id); }
+    void refreshPlaybackCursor(bool jump = false) override;
     void buildShortcuts();
     void showCommandPalette();
     // Ctrl+L: the search field of the library showing -- or, from Folders,
@@ -293,16 +383,16 @@ class BenchMainWindow final : public QMainWindow {
     QPointer<QTableView> followed_playback_view_;
     QPersistentModelIndex followed_playback_index_;
     void refreshTabActions();
-    void refreshListHistoryActions();
+    void refreshListHistoryActions() override;
     void replayListEdit(bool undo);
     // An edit made here: saved, and -- to the list playing -- told to its
     // engine, whose queue it is.
-    void markTabDirty(ListTab& tab);
+    void markTabDirty(ListTab& tab) { workspace_.markTabDirty(tab); }
     // A change the engine made -- its queue adopted, a consumed row dropped:
     // saved, never sent back. Sent back, it is this window's copy of the
     // engine's queue replacing the queue itself, tags another client gave it
     // and all.
-    void takeEngineChange(ListTab& tab);
+    void takeEngineChange(ListTab& tab) { workspace_.takeEngineChange(tab); }
     void closeTabAt(int index);
     // Most-recently-visited tabs, newest first, so closing one returns to
     // where you came from rather than to its neighbour.
@@ -320,10 +410,8 @@ class BenchMainWindow final : public QMainWindow {
     void showFolderContextMenu(const QPoint& position);
     void showFolderBookmarkMenu(const QPoint& position);
     void loadFolderBookmarks();
-    void persistFolderBookmarks() const;
-    void addFolderBookmark(const std::string& raw_path);
-    void revealFolderPath(const std::string& raw_path);
-    void revealFolderStep(const QPersistentModelIndex& parent_index, const std::string& raw_path);
+    void addFolderBookmark(const std::string& raw_path) { folder_browser_->addBookmark(raw_path); }
+    void revealFolderPath(const std::string& raw_path) { folder_browser_->reveal(raw_path); }
     void playCurrentRow();
     void showMetadataProperties();
     // ADR-0237: `work` is the engine that does the file work, or null for
@@ -339,44 +427,36 @@ class BenchMainWindow final : public QMainWindow {
     // Naming layouts, and the move destinations of `destinations_of`; with
     // every engine's destinations as places for the manager (ADR-0237).
     [[nodiscard]] OutputProfileStore
-    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local());
+    buildOutputProfileStore(const EngineKey& destinations_of = EngineKey::local()) {
+        return workspace_.buildOutputProfileStore(destinations_of);
+    }
     // ADR-0237: the naming layouts are global; every engine that does file
     // work holds a copy, handed over after each change and when it connects.
     // Only `removed` is taken away there: nothing an engine holds is lost to
     // a set it was sent.
-    void pushLayouts(std::vector<core::StableId> removed = {});
+    void pushLayouts(std::vector<core::StableId> removed = {}) {
+        workspace_.pushLayouts(std::move(removed));
+    }
     void presentInterruptedOperations();
-    void applyCommittedMetadata(const operations::MetadataCommitResult& result);
-    void applyCommittedCueReplayGain(const operations::CueReplayGainCommitResult& result);
-    void applyCommittedLoudnessSidecar(const operations::LoudnessSidecarCommitResult& result);
-    void applyCommittedRelocation(const operations::FilePublicationCommitResult& result);
-    // ADR-0233: a file moved here is followed in the engines' lists too --
-    // those this window has open and those it has not. Kept in Settings until
-    // each engine has taken it, so one that is away catches up when it is
-    // back.
-    struct PendingRelocation {
-        std::string from;
-        std::string to;
-        // The engines told, by key; "*" is every engine elsewhere -- what an
-        // older release's "the remote has it" means now.
-        std::set<QString> done;
-        [[nodiscard]] bool doneFor(const EngineKey& engine) const {
-            return done.contains(engine.text()) || (!engine.isLocal() && done.contains("*"));
-        }
-    };
-    void queueEngineRelocation(const std::string& from, const std::string& to);
-    void flushEngineRelocations();
-    void storePendingRelocations() const;
-    void loadPendingRelocations();
-    void applyCommittedPublicationMetadata(const operations::FilePublicationCommitResult& result,
-                                           const metadata::MetadataDocument& document);
+    void applyCommittedMetadata(const operations::MetadataCommitResult& result) {
+        workspace_.applyCommittedMetadata(result);
+    }
+    void applyCommittedRelocation(const operations::FilePublicationCommitResult& result) {
+        workspace_.applyCommittedRelocation(result);
+    }
+    void queueEngineRelocation(const std::string& from, const std::string& to) {
+        workspace_.queueEngineRelocation(from, to);
+    }
+    void flushEngineRelocations() { workspace_.flushEngineRelocations(); }
     void removeSelectedRows();
     void transferSelectedRows(QTableView* source, const QString& target_id, bool move);
-    [[nodiscard]] ui::TrackViewLayout
+    [[nodiscard]] static ui::TrackViewLayout
     defaultTrackViewLayout(ui::TrackViewPresentation presentation =
-                               ui::TrackViewPresentation::albums_side_artwork) const;
+                               ui::TrackViewPresentation::albums_side_artwork) {
+        return Workspace::defaultTrackViewLayout(presentation);
+    }
     void applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout);
-    [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const;
+    [[nodiscard]] ui::TrackViewLayout captureTrackViewLayout(const ListTab& tab) const override;
     void applyTrackViewLayout(QTableView* view, ui::TrackViewLayout& state,
                               const ui::TrackViewLayout& layout);
     [[nodiscard]] ui::TrackViewLayout
@@ -387,7 +467,7 @@ class BenchMainWindow final : public QMainWindow {
     void copyTrackViewLayoutToAllTabs();
     void refreshTrackViewActions();
     void stopBackgroundWork();
-    void refreshSelectionStatus();
+    void refreshSelectionStatus() override;
     void refreshSelectionActions();
     [[nodiscard]] QTableView* activeTrackView();
     void showTrackViewHeaderMenu(QTableView* view, const QPoint& position);
@@ -396,43 +476,32 @@ class BenchMainWindow final : public QMainWindow {
     void openFolderDialog();
     void addFolderRoot();
     void startDiscovery(std::vector<std::string> raw_paths, QString target_document_id,
-                        int insertion_row, bool replace_and_play = false);
-    void finishDiscovery();
+                        int insertion_row, bool replace_and_play = false) {
+        workspace_.startDiscovery(std::move(raw_paths), std::move(target_document_id), insertion_row,
+                                  replace_and_play);
+    }
 
-    struct DiscoveryOutcome {
-        std::vector<LocalTrackRow> rows;
-        std::vector<core::LocalSourceIssue> issues;
-        bool cancelled{false};
-        bool truncated{false};
-    };
 
-    struct ProbeJob {
-        QString document_id;
-        std::string raw_path;
-        int hint_row{-1};
-    };
-    struct ProbeOutcome {
-        ProbeJob job;
-        std::vector<LocalTrackRow> rows;
-        LocalTrackRow whole_file_fallback;
-    };
-    void enqueueUnprobedRows(ListTab& tab);
-    void enrichRemoteRows(ListTab& tab);
+    void enqueueUnprobedRows(ListTab& tab) { workspace_.enqueueUnprobedRows(tab); }
     // ADR-0226: this computer's engine outlives the window, so a rebuilt or
     // updated one keeps running the old program until it is restarted --
     // done here, at once when nothing plays, else when playback stops.
-    void renewOutdatedLocalEngine();
+    void renewOutdatedLocalEngine() { workspace_.renewOutdatedLocalEngine(); }
     // Shows or hides this computer's library tab, as Settings says.
     void applyLocalLibraryVisibility();
     // What an empty list tab says, and how to fill it.
-    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const;
-    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const;
+    [[nodiscard]] QString emptyListTitle(const EngineKey& engine) const {
+        return workspace_.emptyListTitle(engine);
+    }
+    [[nodiscard]] QString emptyListHint(const EngineKey& engine) const {
+        return workspace_.emptyListHint(engine);
+    }
     // How an engine is named to the user: "this computer", or its name.
-    [[nodiscard]] QString engineName(const EngineKey& engine) const;
+    [[nodiscard]] QString engineName(const EngineKey& engine) const { return workspace_.engineName(engine); }
     // Shows the source the user last chose, or a library by default.
     void selectPreferredSource();
     [[nodiscard]] bool localLibraryShown() const;
-    bool engine_renewal_pending_{false};
+    bool& engine_renewal_pending_{workspace_.engine_renewal_pending_};
     // Quit, as opposed to closing the window: this computer's engine stops
     // too, instead of playing on.
     void quitAndStopEngine();
@@ -440,136 +509,124 @@ class BenchMainWindow final : public QMainWindow {
     // as the other engine sees them (RemoteMount). What cannot be -- not
     // reachable here, or not in the remote's library -- is left out, and the
     // status bar says how much and why.
-    [[nodiscard]] std::optional<std::string>
-    crossEnginePath(const std::string& path, const EngineKey& from, const EngineKey& to) const;
-    [[nodiscard]] std::vector<std::string>
-    crossEnginePaths(std::vector<std::string> paths, const EngineKey& from, const EngineKey& to);
-    [[nodiscard]] std::vector<LocalTrackRow>
-    crossEngineRows(std::vector<LocalTrackRow> rows, const EngineKey& from, const EngineKey& to);
+    [[nodiscard]] std::optional<std::string> crossEnginePath(const std::string& path, const EngineKey& from,
+                                                           const EngineKey& to) const {
+        return workspace_.crossEnginePath(path, from, to);
+    }
+    [[nodiscard]] std::vector<std::string> crossEnginePaths(std::vector<std::string> paths,
+                                                          const EngineKey& from, const EngineKey& to) {
+        return workspace_.crossEnginePaths(std::move(paths), from, to);
+    }
     // An engine's library folders, asked of it; empty when it is not
     // reachable, and then nothing is known to cross to it.
-    [[nodiscard]] std::vector<std::string> rootsOf(const EngineLink& engine) const;
     // Where an engine's music is reachable here, as Settings say now: a change
     // there applies at once, as the one remote's always did.
-    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const;
+    [[nodiscard]] RemoteMount mountOf(const EngineLink& engine) const { return workspace_.mountOf(engine); }
     // Rows from paths a remote engine gave -- a drag from its library --
     // without looking for them on this computer, where they need not be.
-    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row);
-    void pumpProbeQueue();
-    void finishProbeBatch();
+    void insertRemotePaths(ListTab& tab, std::vector<std::string> raw_paths, int insertion_row) {
+        workspace_.insertRemotePaths(tab, std::move(raw_paths), insertion_row);
+    }
 
-    struct ArtworkJob {
-        QString key;
-        std::string raw_path;
-        // Asked for the cover when the file is on its machine, not this one:
-        // a remote tab's (ADR-0227). Unset, the file is read here.
-        std::shared_ptr<engine::Catalogue> engine;
-    };
-    struct ArtworkOutcome {
-        QString key;
-        QImage image;
-        // The engine could not be asked -- unreachable, say -- which is not
-        // the same as "this album has no cover", and is not remembered as it.
-        bool failed{false};
-    };
-    void syncArtwork(ListTab& tab);
-    void invalidateArtwork(const std::string& raw_path);
-    void pumpArtworkQueue();
-    void finishArtworkLoad();
+    void syncArtwork(ListTab& tab) { workspace_.syncArtwork(tab); }
+    void invalidateArtwork(const std::string& raw_path) { workspace_.invalidateArtwork(raw_path); }
 
     void buildLocalPlaybackControls(QMenu* playback_menu);
-    void refreshLocalPlaybackControls();
-    void saveLocalPlaybackModes();
+    void refreshLocalPlaybackControls() override;
+    void saveLocalPlaybackModes() { workspace_.saveLocalPlaybackModes(); }
     void styleStatusBar();
-    void applyLocalPlaybackModes();
+    void applyLocalPlaybackModes() { workspace_.applyLocalPlaybackModes(); }
     void showReplayGainPreampDialog();
     // Resolve the playing entry to its current row in `tab`, or -1 when the
     // entry is no longer there. playback_row_ serves as the lookup hint.
-    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const;
+    [[nodiscard]] int resolvePlaybackRow(const ListTab* tab) const { return workspace_.resolvePlaybackRow(tab); }
     // Adopts whatever the engine is already playing. An engine outlives the
     // window, so a window that only learns about playback by having started it
     // shows nothing after a restart while the music is still going.
-    void reattachToEngine();
+    void reattachToEngine() { workspace_.reattachToEngine(); }
     // Mirrors the up-next panel onto the engine, which is what makes Next
     // play a requested track rather than the next row of the list. Cheap when
     // nothing changed.
-    void syncEngineRequests();
+    void syncEngineRequests() { workspace_.syncEngineRequests(); }
     // Keeps the engine's queue and the playing list in step, in both
     // directions: an edit here is pushed, and a change the engine made that
     // this window did not cause is read back.
-    void syncEngineQueue();
-    void adoptEngineQueue();
-    void adoptEngineQueue(std::vector<LocalTrackRow> held);
-    void reattachToQueue(std::vector<LocalTrackRow> rows);
+    void syncEngineQueue() { workspace_.syncEngineQueue(); }
+    void adoptEngineQueue() { workspace_.adoptEngineQueue(); }
     // Credits listening to Last.fm from the engine's state rather than from a
     // local player that is not running.
-    void sampleLastFmFromEngine(const EnginePlayback::State& state);
+    void sampleLastFmFromEngine(const EnginePlayback::State& state) {
+        workspace_.sampleLastFm(state);
+    }
     // Points the workspace at an entry the engine is playing.
-    void adoptEngineRow(ListTab& tab, int row, const core::StableId& entry);
     // Makes `playback` the one the transport follows, stopping the other if it
     // was playing: one engine plays at a time.
     // `stop_other`: the engine followed until now is stopped -- as when this
     // window starts playing elsewhere. Not when another client did it: then
     // the window only looks where the music started.
-    void followPlayback(EnginePlayback* playback, bool stop_other = true);
+    void followPlayback(EnginePlayback* playback, bool stop_other = true) {
+        workspace_.followPlayback(playback, stop_other);
+    }
     // Another client -- a script, the phone, a picker -- started the engine
     // this window does not follow: the window follows the music there.
-    void followIfStartedElsewhere(EnginePlayback* playback);
+    void followIfStartedElsewhere(EnginePlayback* playback) { workspace_.followIfStartedElsewhere(playback); }
     // What each engine was last seen doing, so a start is told from a state
     // the window already knew of.
-    void rememberEngineState(EnginePlayback* playback);
+    void rememberEngineState(EnginePlayback* playback) { workspace_.rememberEngineState(playback); }
     // Builds the remote connection, its library panel and its default tab.
     // ADR-0234: one engine elsewhere, as Settings name it; the first is the
     // one an older release's remote lists belong to.
-    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first);
-    void adoptEngineIdentity(EngineLink& engine);
+    void connectRemoteEngine(const RemoteEngineSetting& setting, bool first) {
+        workspace_.connectRemoteEngine(setting, first);
+    }
     // Settings changed: engines listed and not connected are connected,
     // those connected and no longer listed -- or now at another address or
     // with another password -- are let go, and connected again if listed.
-    void syncRemoteEngines();
-    // Lets go of an engine elsewhere: its connection, library panel and tab.
-    // Its lists stay, as those of an engine that is not reached.
-    void disconnectEngine(const EngineKey& key);
-    [[nodiscard]] ListTab* remoteQueueTab();
+    void syncRemoteEngines() { workspace_.syncRemoteEngines(); }
+    [[nodiscard]] ListTab* remoteQueueTab() { return workspace_.remoteQueueTab(); }
     // An engine's own tab: its first, or one made for it, named after it.
-    [[nodiscard]] ListTab* engineTab(EngineLink& engine);
+    [[nodiscard]] ListTab* engineTab(EngineLink& engine) { return workspace_.engineTab(engine); }
     // True while an engine is connected. ADR-0226: nothing plays otherwise;
     // this window has no player of its own.
-    [[nodiscard]] bool playingOnEngine() const;
+    [[nodiscard]] bool playingOnEngine() const { return workspace_.playingOnEngine(); }
     // The transport view: controls, cursor, output and buffer, all from the
     // engine's state. Resume, listening and gapless are the engine's own.
     void refreshEngineTransport();
     void refreshOutputControls(const EnginePlayback::State& state);
     // The row for the entry the engine is playing, wherever this window holds
     // it: the list it was played from, Up Next, or another open list.
-    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry);
+    [[nodiscard]] const LocalTrackRow* playingRow(const QString& entry) { return workspace_.playingRow(entry); }
     // The cover of the playing entry's album, from a tab that has it.
     void refreshHeaderCover(const QString& entry);
     // An album's cover from the lists or the cache; fetched when neither has
     // it, arriving later through the same path as a tab's.
-    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine);
+    [[nodiscard]] QImage coverFor(const LocalTrackRow& track, const EngineKey& engine) {
+        return workspace_.coverFor(track, engine);
+    }
     void setUpNextCount(int count);
-    void playRow(ListTab& tab, int row);
-    void refreshTransport();
+    void playRow(ListTab& tab, int row) { workspace_.playRow(tab, row); }
+    void refreshTransport() override;
     void buildMprisService();
-    void publishMprisState();
+    void publishMprisState() { workspace_.publishDesktopState(); }
     void rebuildDeviceMenu();
     // A mode's icon marked as one-shot: on for one track, then off.
     [[nodiscard]] QIcon oneShotIcon(const QIcon& plain) const;
-    void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms);
+    void configurePlaybackBuffer(const QString& profile, int capacity_ms, int start_threshold_ms) {
+        workspace_.configurePlaybackBuffer(profile, capacity_ms, start_threshold_ms);
+    }
     void showCustomPlaybackBufferDialog();
-    void refreshPlaybackBufferChecks();
+    void refreshPlaybackBufferChecks() override;
     void reloadPlaybackPreferences();
-    void togglePlayPause();
-    void seekToMs(qint64 position_ms);
+    void togglePlayPause() { workspace_.togglePlayPause(); }
+    void seekToMs(qint64 position_ms) { workspace_.seekToMs(position_ms); }
 
+    FolderBrowser* folder_browser_{nullptr};
     ui::LocalFolderTreeModel* folder_model_{nullptr};
     // Folders and Library, plus -- while the tag editor is open -- a
     // temporary page hosting its file list (ADR-0183 addendum).
     QTabBar* local_source_tabs_{nullptr};
     QTreeView* folder_view_{nullptr};
     QTabWidget* tabs_{nullptr};
-    std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QPointer<SearchDialog> search_dialog_;
     QAction* replaygain_action_{nullptr};
 
@@ -656,49 +713,11 @@ class BenchMainWindow final : public QMainWindow {
     QStackedWidget* source_stack_{nullptr};
     QHash<QString, QWidget*> panel_widgets_;
     bool applying_panel_layout_{false};
-    bool panel_layout_persistence_protected_{false};
+    PanelArrangement* panel_arrangement_{nullptr};
     bool applying_track_view_layout_{false};
-    QHash<QString, QByteArray> restored_track_view_layouts_;
 
-    MprisService* mpris_{nullptr};
-    DesktopNotifier* notifier_{nullptr};
     QAction* notifications_action_{nullptr};
-    ui::ListPersistenceService* persistence_{nullptr};
-    std::filesystem::path database_path_;
-    struct SeenEngine {
-        QString status;
-        QString entry;
-        std::uint64_t queue_revision{0};
-    };
-    // ADR-0234: one engine this window reaches -- this computer's, which is
-    // always there, or a remote configured in Settings -- and everything the
-    // window keeps for it. Code that needs an engine asks for its link.
-    struct EngineLink {
-        EngineKey key;
-        // How Settings name it; empty for this computer's.
-        RemoteEngineSetting setting;
-        // The password it was connected with. An empty one in `setting`
-        // means this computer's, which Settings may have changed since.
-        QString password;
-        std::unique_ptr<CatalogueSource> catalogue;
-        EnginePlayback* playback{nullptr};
-        LocalLibraryPanel* library{nullptr};
-        // What it was last seen doing, to tell a start elsewhere.
-        SeenEngine seen;
-        // A move is being told to it.
-        bool relocating{false};
-        // Its last list.all, for the lists pane; empty, not known.
-        std::optional<std::vector<protocol::Json>> lists;
-        QString lists_error;
-        // ADR-0237: the file tools' reads, scans and writes through it, and
-        // whether it does them -- asked each time it connects, off this
-        // thread. Until it has said so, the tools do the work themselves.
-        std::shared_ptr<engine::RemoteFileWork> file_work;
-        bool does_file_work{false};
-    };
-    // This computer's first.
-    std::vector<std::unique_ptr<EngineLink>> engines_;
-    [[nodiscard]] EngineLink* link(const EngineKey& key) const;
+    [[nodiscard]] EngineLink* link(const EngineKey& key) const { return workspace_.link(key); }
     [[nodiscard]] EngineLink& localEngine() const { return *engines_.front(); }
     // The remote configured in Settings -- by its id once it has said it,
     // "remote" until then. Null when none is configured.
@@ -711,10 +730,7 @@ class BenchMainWindow final : public QMainWindow {
         return nullptr;
     }
     // The link a connection belongs to; null for none of this window's.
-    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const;
-    // ADR-0237: asks the link's engine whether it does file work, now and on
-    // every reconnection.
-    void watchFileWork(EngineLink& link);
+    [[nodiscard]] EngineLink* linkOf(const EnginePlayback* playback) const { return workspace_.linkOf(playback); }
     // The engine that does the file work for a view's files, if one does.
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> fileWorkOf(QTableView* view) const;
     // That engine, or -- having said in the status bar why `what` cannot be
@@ -722,29 +738,20 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] std::shared_ptr<engine::RemoteFileWork> requireFileWork(QTableView* view,
                                                                           const QString& what);
     [[nodiscard]] MetadataWritePlanApplierFactory
-    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
+    engineMetadataPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+        return workspace_.engineMetadataPlanApplierFactory(std::move(work));
+    }
     [[nodiscard]] ArtworkWritePlanApplierFactory
-    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work);
-    // Stage 5: moves and renames the engine makes. For an engine elsewhere,
-    // `mounted` receives each move as this computer sees it through the
-    // engine's mount -- this computer's paths and revisions -- for its own
-    // lists to follow.
-    using MountedMoves = std::vector<operations::FilePublicationCommitResult>;
-    [[nodiscard]] FilePublicationPlanApplierFactory
-    enginePublicationPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work,
-                                        bool elsewhere, RemoteMount mount,
-                                        std::shared_ptr<MountedMoves> mounted);
-    // An engine elsewhere moved a file: its own tabs follow at its paths,
-    // everything of this computer's at `here`, the move seen through the
-    // mount, when it is.
-    void applyEngineRelocation(const EngineKey& engine,
-                               const operations::FilePublicationCommitResult& result,
-                               const operations::FilePublicationCommitResult* here);
-    // The engine link whose file-work connection this is.
-    [[nodiscard]] const EngineLink* linkOfWork(const engine::RemoteFileWork* work) const;
+    engineArtworkPlanApplierFactory(std::shared_ptr<engine::RemoteFileWork> work) {
+        return workspace_.engineArtworkPlanApplierFactory(std::move(work));
+    }
     // Parts of an engine's link; null when it or the part is not there.
-    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
-    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
+    [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const {
+        return workspace_.playbackOf(key);
+    }
+    [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const {
+        return workspace_.catalogueOf(key);
+    }
     [[nodiscard]] LocalLibraryPanel* libraryOf(const EngineKey& key) const;
     [[nodiscard]] EnginePlayback* localPlayback() const { return localEngine().playback; }
     [[nodiscard]] EnginePlayback* remotePlayback() const {
@@ -758,79 +765,13 @@ class BenchMainWindow final : public QMainWindow {
     [[nodiscard]] LocalLibraryPanel* remoteLibrary() const {
         return remoteEngine() != nullptr ? remoteEngine()->library : nullptr;
     }
-    // ADR-0233: this window's lists, on the engines that own their files.
-    EngineListSync* list_sync_{nullptr};
-    std::vector<PendingRelocation> pending_relocations_;
-    // The engine the transport follows: the one the playing tab belongs to.
-    // One engine plays at a time, so this is also the one that may.
-    EnginePlayback* transport_{nullptr};
-    // The connection Up Next was filled from, while it holds anything: its
-    // asks are files on that engine's machine.
-    EngineKey up_next_engine_{EngineKey::local()};
-    // The entry the engine last reported. The engine advances its own queue,
-    // so without following it the highlighted row would stay on whatever was
-    // double-clicked while something else played.
-    QString engine_entry_;
-    // The request order last stated to the engine, so an unchanged panel does
-    // not re-send it on every refresh.
-    QString engine_requests_;
-    // The last entry the engine reported consuming, so one drop is mirrored
-    // once however often the state is sampled.
-    QString engine_consumed_;
-    // The queue last pushed to the engine, and the engine revision that
-    // produced. Together they answer "is what I am showing what the engine
-    // holds, and if not, who changed it".
-    QString engine_queue_;
-    quint64 engine_queue_revision_{0};
-    // The last ask for the engine's queue, per purpose: only its answer is
-    // taken, an earlier one being out of date by the time it comes.
-    quint64 engine_queue_asked_{0};
-    quint64 engine_reattach_asked_{0};
-    QTimer* persistence_timer_{nullptr};
     QTimer* transport_timer_{nullptr};
 
-    QFutureWatcher<DiscoveryOutcome> discovery_watcher_;
-    QString discovery_target_document_;
-    int discovery_insertion_row_{-1};
-    QPersistentModelIndex discovery_insertion_anchor_;
-    bool discovery_anchored_{false};
-    bool discovery_replace_and_play_{false};
-    bool discovery_running_{false};
 
-    QFutureWatcher<std::vector<ProbeOutcome>> probe_watcher_;
-    std::deque<ProbeJob> probe_queue_;
-    bool probe_running_{false};
-    core::CancellationSource probe_cancellation_;
 
-    QFutureWatcher<void> artwork_watcher_;
-    std::shared_ptr<ArtworkOutcome> artwork_outcome_;
-    std::deque<ArtworkJob> artwork_queue_;
-    QHash<QString, QImage> artwork_cache_;
-    QSet<QString> artwork_pending_;
-    QSet<QString> artwork_invalidated_while_loading_;
-    bool artwork_running_{false};
-    std::optional<CrossTabMoveEdit> cross_tab_move_edit_;
 
-    // ADR-0237: file work engines could neither finish nor roll back after a
-    // crash, as each reports it -- shown with this window's own, once.
-    struct EngineInterruption {
-        core::StableId id;
-        std::string raw_path;
-        QString detail;
-        bool move{false};
-    };
-    std::vector<EngineInterruption> engine_interruptions_;
-    // This computer's move destinations as last loaded, for offering them to
-    // an engine elsewhere through its mount.
-    std::vector<persistence::SavedDestinationProfile> local_destinations_;
-    // Layout hand-overs to engines, one at a time and in order.
-    QThreadPool layout_pushes_;
     QPointer<QDialog> interrupted_operations_dialog_;
 
-    // Paths opened before the asynchronous list restore finishes are queued
-    // and flushed into the initial tab once it exists.
-    std::vector<std::string> pending_open_paths_;
-    bool lists_restored_{false};
 
     QAction* local_repeat_action_{nullptr};
     QAction* local_random_action_{nullptr};
@@ -840,59 +781,22 @@ class BenchMainWindow final : public QMainWindow {
     std::vector<QToolButton*> local_mode_buttons_;
     QToolButton* local_replaygain_button_{nullptr};
     QActionGroup* local_replaygain_group_{nullptr};
-    QString local_replaygain_{QStringLiteral("off")};
-    double local_rg_preamp_with_{0.0};
-    double local_rg_preamp_without_{0.0};
-    std::optional<ListTab> detached_playback_;
     QDockWidget* up_next_dock_{nullptr};
     QToolButton* up_next_button_{nullptr};
     QLabel* up_next_badge_{nullptr};
     QLabel* device_chevron_{nullptr};
     ui::QueueTableView* up_next_view_{nullptr};
-    LocalListModel* up_next_local_model_{nullptr};
     QLabel* up_next_status_{nullptr};
-    std::vector<std::uint64_t> up_next_display_ids_;
-    bool up_next_restored_{false};
-    std::uint64_t up_next_local_revision_{0};
 
-    // ADR-0220 Phase 0: the playback service. The mode actions, transport
-    // buttons and up-next view above are its views.
-    LocalPlaybackService playback_;
-    bool consuming_row_{false};
-    LastFmService* lastfm_{};
-    QElapsedTimer lastfm_clock_;
-    qint64 lastfm_sample_time_{-1000};
-    void buildLastFm();
+    void buildLastFm() { workspace_.startLastFm(); }
     QWidget* buildLastFmSettings(QWidget* parent);
-    // ADR-0220: an engine's own Last.fm state, into `state`; and this
-    // window's session handed to it, so it scrobbles what it plays.
-    void askEngineLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
-    void handOverLastFm(const protocol::Endpoint& endpoint, QLabel* state, QPushButton* use);
-    // "In use" when the engine already scrobbles as this window's account.
-    void showEngineAccount(QPushButton* use, const QString& engine_user);
-    QString lastfm_user_;
     void addLastFmActions(QMenu* menu, QTableView* view);
-    // Last explicitly played local list; transport stop does not release it.
-    QString active_local_list_id_;
     bool seeking_{false};
     QToolButton* mute_button_{nullptr};
     QHash<QString, int> unmuted_volumes_;
     void refreshMuteButton();
     bool changing_volume_{false};
-    QString selected_buffer_profile_{QStringLiteral("balanced")};
-    std::vector<std::pair<std::string, std::string>> device_choices_;
-    std::optional<std::string> selected_device_;
-    std::optional<std::string> default_device_;
-    bool selected_device_available_{true};
-    // ADR-0228: the engine's outputs, as last shown in the device menu.
-    std::vector<EnginePlayback::State::Output> output_choices_;
-    // Whether the menu's outputs are the remote engine's, which names its
-    // own audio differently.
-    EngineKey output_choices_engine_{EngineKey::local()};
-    [[nodiscard]] QString outputLabel(const EnginePlayback::State::Output& output) const;
-    // Whether an engine state has been seen, so the first one does not read
-    // as the output changing.
-    bool engine_output_seen_{false};
+    QString& selected_buffer_profile_{workspace_.selected_buffer_profile_};
 };
 
 } // namespace trackknife::bench

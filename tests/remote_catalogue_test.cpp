@@ -75,6 +75,11 @@ void a_catalogue_behaves_the_same_either_side(engine::Catalogue& catalogue,
     require(artists->entries.empty(), label + ": an empty library has no artists");
     require(!artists->more, label + ": and no further page");
 
+    // A folder with no music in it holds nothing, either side.
+    const auto nowhere = catalogue.folder("/no/such/folder");
+    require(nowhere.has_value(), label + ": a folder can be asked for");
+    require(nowhere->folders.empty() && nowhere->tracks.empty(), label + ": and an empty one is empty");
+
     const auto browse_paths = catalogue.paths({});
     require(browse_paths.has_value(), label + ": listing paths must succeed");
     require(browse_paths->empty(), label + ": with nothing to list");

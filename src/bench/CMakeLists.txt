@@ -4,33 +4,19 @@ qt_add_library(
     trackknife_bench_ui STATIC
     bench_main_window.cpp
     bench_main_window.hpp
-    bench_main_window_helpers.cpp
-    bench_main_window_helpers.hpp
     bench_list_tabs.cpp
     bench_media_ingest.cpp
     bench_remote.cpp
-    remote_mount.cpp
-    remote_engines.cpp
     bench_playlists.cpp
     playlist_transfer_bar.cpp
     replaygain_dialog.cpp
-    replaygain_scan.cpp
-    file_work_tools.cpp
-    file_work_tools.hpp
-    post_back.hpp
     search_dialog.cpp
     playlist_transfer_bar.hpp
     bench_metadata_operations.cpp
     bench_dynamic_playlists.cpp
-    dynamic_playlist_service.cpp
     dynamic_playlist_dialog.cpp
-    desktop_notifier.cpp
-    mpris_service.cpp
-    mpris_service.hpp
     bench_track_views.cpp
     bench_lastfm.cpp
-    lastfm_service.cpp
-    lastfm_service.hpp
     bench_up_next.cpp
     up_next_delegate.cpp
     quick_pick_popup.cpp
@@ -42,16 +28,8 @@ qt_add_library(
     file_scope_view.hpp
     convert_dialog.cpp
     convert_dialog.hpp
-    engine_playback.cpp
-    engine_list_sync.cpp
     lists_panel.cpp
     bench_lists_panel.cpp
-    engine_playback.hpp
-    catalogue_source.cpp
-    catalogue_source.hpp
-    local_list_model.cpp
-    local_list_history.cpp
-    local_list_model.hpp
     local_list_edit_bar.cpp
     local_list_edit_bar.hpp
     track_list_find_bar.cpp
@@ -61,18 +39,10 @@ qt_add_library(
     cover_thumbnail.cpp
     cover_thumbnail.hpp
     cover_review.cpp
-    artwork_fitting.cpp
-    engine_launcher.cpp
-    engine_launcher.hpp
-    artwork_fitting.hpp
     metadata_artwork_section.cpp
     metadata_artwork_section.hpp
-    metadata_dialog_helpers.cpp
-    metadata_dialog_helpers.hpp
     metadata_exact_value_dialog.cpp
     metadata_exact_value_dialog.hpp
-    metadata_grid_model.cpp
-    metadata_grid_model.hpp
     metadata_field_review_bar.cpp
     metadata_field_review_bar.hpp
     metadata_properties_dialog.cpp
@@ -90,12 +60,10 @@ qt_add_library(
     settings_dialog.hpp
     metadata_transformation_dialog.cpp
     metadata_transformation_dialog.hpp
-    metadata_transformation_preview_model.cpp
     musicbrainz_identify_dialog.cpp
     musicbrainz_identify_dialog.hpp
     musicbrainz_track_match_widget.cpp
     musicbrainz_track_match_widget.hpp
-    metadata_transformation_preview_model.hpp
     preparation_feedback_dialog.cpp
     preparation_feedback_dialog.hpp
 )
@@ -103,7 +71,7 @@ add_library(Trackknife::BenchUi ALIAS trackknife_bench_ui)
 
 target_link_libraries(
     trackknife_bench_ui
-    PUBLIC Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Engine Trackknife::Discovery Trackknife::Persistence
+    PUBLIC Trackknife::Workspace Trackknife::Lists Qt6::Widgets Trackknife::Core Trackknife::UiCommon Trackknife::Engine Trackknife::Discovery Trackknife::Persistence
            Trackknife::Convert Trackknife::Formats Trackknife::Loudness Trackknife::Metadata Trackknife::MusicBrainz
            Trackknife::Operations Trackknife::Audio
            trackknife_project_options

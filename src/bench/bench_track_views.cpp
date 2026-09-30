@@ -24,41 +24,6 @@
 
 namespace trackknife::bench {
 
-ui::TrackViewLayout
-BenchMainWindow::defaultTrackViewLayout(const ui::TrackViewPresentation presentation) const {
-    std::vector<ui::TrackViewColumnLayout> columns;
-    columns.reserve(track_column_specs.size());
-    for (const auto& spec : track_column_specs) {
-        auto width = spec.default_width;
-        // Ratings stay one click away in the Columns menu rather than
-        // claiming space in every default view.
-        bool visible = spec.logical < local_rating_column;
-        if (presentation == ui::TrackViewPresentation::albums_side_artwork &&
-            (spec.logical == local_artist_column || spec.logical == local_album_column ||
-             spec.logical == local_date_column)) {
-            // The album's header says these; a track whose artist differs
-            // says so after its title.
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::albums_header_artwork &&
-                   spec.logical == local_artwork_column) {
-            width = 42;
-        } else if (presentation == ui::TrackViewPresentation::plain_columns &&
-                   spec.logical == local_artwork_column) {
-            visible = false;
-        } else if (presentation == ui::TrackViewPresentation::compact_queue) {
-            visible = spec.logical == local_artist_column ||
-                      spec.logical == local_track_number_column ||
-                      spec.logical == local_title_column || spec.logical == local_album_column ||
-                      spec.logical == local_length_column;
-        }
-        columns.push_back(ui::TrackViewColumnLayout{
-            .id = QString::fromLatin1(spec.id), .width = width, .visible = visible});
-    }
-    return ui::TrackViewLayout{.schema_version = ui::track_view_layout_schema_version,
-                               .presentation = presentation,
-                               .columns = std::move(columns)};
-}
-
 void BenchMainWindow::applyTrackViewLayout(ListTab& tab, const ui::TrackViewLayout& layout) {
     applyTrackViewLayout(tab.view, tab.view_layout, layout);
 }
@@ -187,22 +152,11 @@ void BenchMainWindow::setTrackColumnVisible(const QString& column_id, const bool
     if (tab == nullptr || applying_track_view_layout_) {
         return;
     }
-    auto layout = captureTrackViewLayout(*tab);
-    const auto visible_count =
-        std::ranges::count(layout.columns, true, &ui::TrackViewColumnLayout::visible);
-    const auto found = std::ranges::find(layout.columns, column_id, &ui::TrackViewColumnLayout::id);
-    if (found == layout.columns.end() || (!visible && found->visible && visible_count == 1)) {
+    if (workspace_.setColumnVisible(*tab, captureTrackViewLayout(*tab), column_id, visible)) {
+        applyTrackViewLayout(*tab, tab->view_layout);
+    } else {
         refreshTrackViewActions();
-        return;
     }
-    found->visible = visible;
-    if (visible &&
-        (column_id == QStringLiteral("play-count") || column_id == QStringLiteral("last-played")))
-        tab->model->invalidateListeningHistory();
-    tab->view_layout_persistence_protected = false;
-    tab->preserved_view_layout.clear();
-    applyTrackViewLayout(*tab, layout);
-    schedulePersist();
 }
 
 void BenchMainWindow::resetTrackViewLayout() {
@@ -330,85 +284,22 @@ void BenchMainWindow::refreshSelectionStatus() {
         return;
     }
     auto* tab = currentListTab();
-    if (tab == nullptr || tab->view->selectionModel() == nullptr) {
-        if (properties_action_ != nullptr) {
-            properties_action_->setEnabled(false);
+    const bool viewed = tab != nullptr && tab->view->selectionModel() != nullptr;
+    std::vector<int> rows;
+    if (viewed) {
+        for (const auto& index : tab->view->selectionModel()->selectedRows()) {
+            rows.push_back(index.row());
         }
-        if (convert_action_ != nullptr) {
-            convert_action_->setEnabled(false);
-        }
-        selection_status_->setText(QStringLiteral("No tracks selected"));
-        selection_status_->setToolTip({});
-        return;
     }
-
-    const auto selected = tab->view->selectionModel()->selectedRows();
     if (properties_action_ != nullptr) {
-        properties_action_->setEnabled(!selected.empty());
+        properties_action_->setEnabled(!rows.empty());
     }
     if (convert_action_ != nullptr) {
-        convert_action_->setEnabled(!selected.empty());
+        convert_action_->setEnabled(!rows.empty());
     }
-    if (selected.empty()) {
-        selection_status_->setText(QStringLiteral("No tracks selected"));
-        selection_status_->setToolTip({});
-        return;
-    }
-
-    if (selected.size() == 1) {
-        const auto row_index = selected.front().row();
-        if (row_index < 0 || row_index >= static_cast<int>(tab->model->rows().size())) {
-            selection_status_->setText(QStringLiteral("No tracks selected"));
-            selection_status_->setToolTip({});
-            return;
-        }
-        const auto& track = tab->model->rows()[static_cast<std::size_t>(row_index)];
-        const auto fallback = tab->model->index(row_index, local_title_column).data().toString();
-        const auto title = track.title.empty() ? fallback : displayText(track.title);
-        QStringList details;
-        details.push_back(track.artist.empty()
-                              ? title
-                              : QStringLiteral("%1 — %2").arg(displayText(track.artist), title));
-        if (!track.album.empty() || !track.date.empty()) {
-            auto release = displayText(track.album);
-            if (!track.date.empty()) {
-                release += release.isEmpty() ? displayText(track.date)
-                                             : QStringLiteral(" (%1)").arg(displayText(track.date));
-            }
-            details.push_back(release);
-        }
-        if (track.duration_ms) {
-            details.push_back(formatTime(*track.duration_ms));
-        }
-        const auto summary = details.join(QStringLiteral(" · "));
-        selection_status_->setText(summary);
-        selection_status_->setToolTip(
-            QString::fromStdString(core::display_raw_path(track.raw_path)));
-        return;
-    }
-
-    qint64 total_duration_ms = 0;
-    int unknown_durations = 0;
-    for (const auto& index : selected) {
-        if (index.row() < 0 || index.row() >= static_cast<int>(tab->model->rows().size())) {
-            continue;
-        }
-        const auto& duration =
-            tab->model->rows()[static_cast<std::size_t>(index.row())].duration_ms;
-        if (duration) {
-            total_duration_ms += *duration;
-        } else {
-            ++unknown_durations;
-        }
-    }
-    auto summary = QStringLiteral("%1 tracks selected · %2 total")
-                       .arg(selected.size())
-                       .arg(formatTime(total_duration_ms));
-    if (unknown_durations > 0) {
-        summary += QStringLiteral(" · %1 duration unknown").arg(unknown_durations);
-    }
-    selection_status_->setText(summary);
-    selection_status_->setToolTip(summary);
+    const auto summary = workspace_.selectionSummary(viewed ? tab : nullptr, rows);
+    selection_status_->setText(summary.text);
+    selection_status_->setToolTip(summary.tooltip);
 }
 
 } // namespace trackknife::bench

@@ -11,6 +11,7 @@
 #include "bench/dynamic_playlist_service.hpp"
 #include "bench/engine_folder_dialog.hpp"
 #include "bench/lastfm_service.hpp"
+#include "workspace/lastfm_settings_session.hpp"
 #include "bench/lists_panel.hpp"
 #include "bench/local_library_panel.hpp"
 #include "bench/local_list_edit_bar.hpp"
@@ -279,6 +280,7 @@ class BenchMainWindowTest final : public QObject {
     void fileWorkWithoutAnEngineSaysWhy();
     void metadataApplyCancellationPreservesDraftForFreshPreview();
     void metadataDialogLayoutsPersistAsynchronously();
+    void taggerWindowStateRoundTrips();
     void metadataFieldLayoutsLoadFilterAndPersist();
     void metadataGridDisplaysUnicodePaths();
     void metadataGridReusesExactNativeFieldWithoutInvalidIndexes();
@@ -1971,7 +1973,7 @@ void BenchMainWindowTest::libraryAndFoldersAddToAChosenList() {
     const auto page = catalogue->query(albums);
     QVERIFY(page && !page->entries.empty());
     const auto before = current->model->rowCount();
-    emit window.localLibrary()->addToListRequested(page->entries, chosen_id);
+    emit window.localLibrary()->browser().addToListRequested(page->entries, chosen_id);
     QTRY_COMPARE(chosen->model->rowCount(), 1);
     QCOMPARE(current->model->rowCount(), before);
     QTRY_VERIFY(!window.discovery_running_);
@@ -3533,6 +3535,51 @@ void BenchMainWindowTest::metadataApplyCancellationPreservesDraftForFreshPreview
         aggregate_model->data(aggregate_model->index(*title_row, 2), Qt::EditRole).toString(),
         QStringLiteral("Cancelled batch title"));
     delete properties;
+}
+
+// The size a window of any toolkit restores: stored on close, handed back
+// to the next tagger as it was.
+void BenchMainWindowTest::taggerWindowStateRoundTrips() {
+    QHash<QString, QByteArray> saved_states;
+    TaggerServices services;
+    services.layout_store = MetadataDialogLayoutStore{
+        .load =
+            [this, &saved_states](QString key,
+                                  MetadataDialogLayoutStore::LoadCompletion completion) {
+                const auto state = saved_states.value(key);
+                QTimer::singleShot(0, this, [completion = std::move(completion), state]() mutable {
+                    completion(state, {});
+                });
+            },
+        .save =
+            [&saved_states](QString key, QByteArray value,
+                            MetadataDialogLayoutStore::Completion completion) {
+                saved_states.insert(std::move(key), std::move(value));
+                if (completion) {
+                    completion({});
+                }
+            },
+    };
+    const auto no_source = [](std::size_t) -> std::optional<MetadataPropertiesSource> {
+        return std::nullopt;
+    };
+    {
+        TaggerSession first(0U, no_source, {}, services);
+        first.storeWindowState({{QStringLiteral("width"), 930},
+                                {QStringLiteral("height"), 640},
+                                {QStringLiteral("maximized"), true},
+                                {QStringLiteral("listWidth"), 210}});
+    }
+    QVERIFY(saved_states.contains(QStringLiteral("workspace/metadata-properties-window-v1")));
+
+    TaggerSession second(0U, no_source, {}, services);
+    QVariantMap loaded;
+    second.loadWindowState([&loaded](QVariantMap state) { loaded = std::move(state); });
+    QTRY_VERIFY(!loaded.isEmpty());
+    QCOMPARE(loaded.value(QStringLiteral("width")).toInt(), 930);
+    QCOMPARE(loaded.value(QStringLiteral("height")).toInt(), 640);
+    QCOMPARE(loaded.value(QStringLiteral("maximized")).toBool(), true);
+    QCOMPARE(loaded.value(QStringLiteral("listWidth")).toInt(), 210);
 }
 
 void BenchMainWindowTest::metadataDialogLayoutsPersistAsynchronously() {
@@ -6618,7 +6665,9 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     QVERIFY(begin->property("credentials-saved").toBool());
     // Feed deterministic replies without opening a real browser or contacting Last.fm.
     auto* page = dialog->findChild<QWidget*>(QStringLiteral("lastfm-settings"));
-    page->setProperty("auth-waiting", true);
+    auto* session = page->findChild<LastFmSettingsSession*>();
+    QVERIFY(session != nullptr);
+    session->setWaiting(true);
     reply(QStringLiteral("begin"),
           QByteArray(R"({"credentials_saved":true,"authorization_pending":true})"));
     QVERIFY(poll->isActive());
@@ -6630,9 +6679,9 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
           QByteArray(
               R"({"credentials_saved":true,"connected":true,"user":"listener","enabled":true})"));
     QVERIFY(!poll->isActive());
-    QVERIFY(!page->property("auth-waiting").toBool());
+    QVERIFY(!session->waiting());
     QVERIFY(dialog->findChild<QCheckBox*>(QStringLiteral("lastfm-enabled"))->isChecked());
-    page->setProperty("auth-waiting", true);
+    session->setWaiting(true);
     poll->start();
     cancel->click();
     QVERIFY(!poll->isActive());
@@ -6640,7 +6689,7 @@ void BenchMainWindowTest::lastFmSettingsAndTrackActions() {
     // A late reply after cancellation must not restart polling.
     reply(QStringLiteral("finish"), QByteArray(R"({"authorization_pending":true})"));
     QVERIFY(!poll->isActive());
-    page->setProperty("auth-waiting", true);
+    session->setWaiting(true);
     poll->start();
     QMetaObject::invokeMethod(deadline, "timeout", Qt::DirectConnection);
     QVERIFY(!poll->isActive());
@@ -7151,7 +7200,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
                 EngineKey::of(window.currentListTab()->document).isLocal() &&
                 window.currentListTab()->model->rowCount() == 1);
     auto* local_tab = window.currentListTab();
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(remote_tab->model->rowCount(), 1);
     QCOMPARE(local_tab->model->rowCount(), 1);
     QVERIFY(!remote_tab->model->rows().front().title.empty());
@@ -7169,7 +7218,7 @@ void BenchMainWindowTest::aRemoteEnginePlaysItsOwnTabs() {
     // added -- tagged, with their own identities -- rather than being traded
     // for the engine's bare paths.
     {
-        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_COMPARE(remote_tab->model->rowCount(), 2);
         const auto added = remote_tab->model->rows();
         for (int wait = 0; wait < 40; ++wait) {
@@ -7481,7 +7530,7 @@ void BenchMainWindowTest::aRemoteTabRatesOnItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().album_rating_hash.empty());
     const auto track_hash = tab->model->rows().front().rating_hash;
@@ -7541,7 +7590,7 @@ void BenchMainWindowTest::aRatingSetElsewhereShowsInTheTabs() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_VERIFY(!tab->model->rows().front().rating_hash.empty());
     const auto hash = tab->model->rows().front().rating_hash;
@@ -7661,7 +7710,7 @@ void BenchMainWindowTest::remoteUpNextKeepsItsIdentityAcrossARestart() {
         tracks.kind = persistence::LibraryEntryKind::track;
         const auto page = window.remoteCatalogue()->open()->query(tracks);
         QVERIFY(page && page->entries.size() == 2U);
-        emit window.remoteLibrary()->actionRequested({page->entries[0]},
+        emit window.remoteLibrary()->browser().actionRequested({page->entries[0]},
                                                      LocalLibraryAction::replace);
         QTRY_COMPARE(window.remotePlayback()->state().status, QStringLiteral("playing"));
         window.remotePlayback()->setVolume(0);
@@ -7737,7 +7786,7 @@ void BenchMainWindowTest::locateFindsARemoteTracksAlbumInTheRemoteLibrary() {
     QVERIFY(page && page->entries.size() == 1U);
     const auto album_name = QString::fromStdString(page->entries.front().album);
     const auto artist_name = QString::fromStdString(page->entries.front().artist);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     window.remoteLibrary()->refreshLibrary();
 
@@ -7793,7 +7842,7 @@ void BenchMainWindowTest::replacingARemoteTabFromItsLibraryPlays() {
     QVERIFY(page && page->entries.size() == 1U);
     // "Replace list and play" -- from the menu, or Shift+Enter in the quick
     // album popup -- plays, on the remote as it does here.
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::replace);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::replace);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QTRY_COMPARE_WITH_TIMEOUT(window.remotePlayback()->state().status, QStringLiteral("playing"),
                               10'000);
@@ -7832,7 +7881,7 @@ void BenchMainWindowTest::aRemoteTabGetsTagsAndCoversFromItsEngine() {
     albums.kind = persistence::LibraryEntryKind::album;
     const auto page = window.remoteCatalogue()->open()->query(albums);
     QVERIFY(page && page->entries.size() == 1U);
-    emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+    emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
     QTRY_COMPARE(tab->model->rowCount(), 1);
     QCOMPARE(tab->model->rows().front().title, std::string{"Fixture Tone"});
     QTRY_VERIFY(covered(0));
@@ -8007,7 +8056,7 @@ void BenchMainWindowTest::aRestoredRemoteTabGetsItsCovers() {
         albums.kind = persistence::LibraryEntryKind::album;
         const auto page = catalogue->query(albums);
         QVERIFY(page && page->entries.size() == 1U);
-        emit window.remoteLibrary()->actionRequested(page->entries, LocalLibraryAction::append);
+        emit window.remoteLibrary()->browser().actionRequested(page->entries, LocalLibraryAction::append);
         QTRY_VERIFY(covered(remote_tab(window)));
         window.persistNow(false);
         QVERIFY(window.close());
@@ -8070,7 +8119,7 @@ void BenchMainWindowTest::lastFmIsHandedToTheEngine() {
     playing.duration_ms = 200'000;
     window.lastfm_sample_time_ = -1'000'000;
     window.sampleLastFmFromEngine(playing);
-    QCOMPARE(window.property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
+    QCOMPARE(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString(), QStringLiteral("engine"));
     QFile::remove(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
                   QStringLiteral("/lastfm-v1.json"));
 }
@@ -8118,7 +8167,7 @@ void BenchMainWindowTest::upNextPreservesNormalPlayback() {
     QVERIFY(now_playing != nullptr);
     QTRY_COMPARE(now_playing->text(), QStringLiteral("X"));
     // And it is credited as what it is.
-    QTRY_VERIFY(window.property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
+    QTRY_VERIFY(window.findChild<trackknife::bench::Workspace*>()->property("trackknife-lastfm-sample").toString().contains(QStringLiteral("|X|")));
     QCOMPARE(tab->model->rowCount(), consume ? 1 : 2);
     QTRY_VERIFY_WITH_TIMEOUT(window.playback_.requests.active() &&
                                  window.playback_.requests.active()->id == second,
@@ -14133,12 +14182,17 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
     QCOMPARE(model->rows().front().rating, 8U);
     QCOMPARE(model->index(0, local_rating_column).data().toString(), QStringLiteral("★★★★"));
 
-    // The serialized library queue proves both identities reached the store.
+    // Both identities reach the store. It is written by the workspace, not
+    // through the panel's queue, so the panel is asked until it has them.
     std::optional<std::vector<unsigned>> stored;
-    panel->requestRatings({track_hash, album_hash},
-                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
-    QTRY_VERIFY(stored.has_value());
-    QCOMPARE(*stored, (std::vector<unsigned>{8U, 6U}));
+    const auto ask = [&] {
+        panel->requestRatings({track_hash, album_hash}, [&stored](std::vector<unsigned> values) {
+            stored = std::move(values);
+        });
+    };
+    ask();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (stored.has_value() && *stored == std::vector<unsigned>{8U, 6U}) || (ask(), false), 10'000);
     // The store notification reloads rows, filling the album rating painted
     // over the group's cover artwork.
     QTRY_COMPARE(model->rows().front().album_rating, 6U);
@@ -14154,11 +14208,17 @@ void BenchMainWindowTest::localTrackRatingsPersistByContentIdentity() {
     track_menu->close();
     QCOMPARE(model->rows().front().rating, 0U);
     QCOMPARE(model->index(0, local_rating_column).data().toString(), QString{});
+    // As above, the store is asked until the workspace's write reached it.
     stored.reset();
-    panel->requestRatings({track_hash},
-                          [&stored](std::vector<unsigned> values) { stored = std::move(values); });
-    QTRY_VERIFY(stored.has_value());
-    QCOMPARE(*stored, (std::vector<unsigned>{0U}));
+    const auto ask_track = [&] {
+        panel->requestRatings({track_hash}, [&stored](std::vector<unsigned> values) {
+            stored = std::move(values);
+        });
+    };
+    ask_track();
+    QTRY_VERIFY_WITH_TIMEOUT(
+        (stored.has_value() && *stored == std::vector<unsigned>{0U}) || (ask_track(), false),
+        10'000);
 }
 
 void BenchMainWindowTest::autoAdvancesOncePerFinishedTrack() {

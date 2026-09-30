@@ -248,6 +248,43 @@ int main(const int argc, char** argv) {
         CHECK(page && page->entries.front().key == rock);
     }
 
+    // A result is a whole track row on both paths, as a query row is: its
+    // title, date, length and rating keys, not only a label.
+    {
+        const auto jazz_entry = [&](const std::string& source) -> std::optional<persistence::LibraryEntry> {
+            auto compiled = query::compile_tkq(source);
+            CHECK(compiled.has_value());
+            if (!compiled) {
+                return std::nullopt;
+            }
+            const auto page = library->filter(*compiled, 0U, 200U);
+            CHECK(page.has_value());
+            if (!page) {
+                return std::nullopt;
+            }
+            for (const auto& entry : page->entries) {
+                if (entry.key == jazz) {
+                    return entry;
+                }
+            }
+            return std::nullopt;
+        };
+        const auto fast = jazz_entry("ALL");
+        const auto sorted = jazz_entry("ALL SORT BY %title%");
+        CHECK(fast.has_value() && sorted.has_value());
+        for (const auto& entry : {fast, sorted}) {
+            CHECK(entry && entry->title == "Alpha");
+            CHECK(entry && entry->artist == "Miles Davis");
+            CHECK(entry && entry->album == "Kind of Blue");
+            CHECK(entry && entry->date == "1959");
+            CHECK(entry && entry->duration_ms > 0);
+            CHECK(entry && !entry->rating_hash.empty());
+            CHECK(entry && !entry->album_rating_hash.empty());
+        }
+        CHECK(fast && sorted && fast->rating_hash == sorted->rating_hash);
+        CHECK(fast && sorted && fast->duration_ms == sorted->duration_ms);
+    }
+
     // Cancellation fails closed.
     {
         auto compiled = query::compile_tkq("ALL");
@@ -409,6 +446,29 @@ int main(const int argc, char** argv) {
         CHECK(listed && listed->entries.size() == 6U && listed->entries.front().key == kick[0] &&
               listed->entries.back().key == sensual[1]);
         CHECK(paths_of("artist IS \"Kate Bush\"") == by_year);
+
+        // A folder as the library holds it: the folders below it that hold
+        // music, and the tracks in it -- not those further down.
+        const auto loose = fixture(fixtures, kate, "loose.flac",
+                                   {{"TITLE", "Loose"}, {"ARTIST", "Someone"}, {"ALBUM", "Single"}});
+        CHECK(library->scan({}, progress).has_value());
+        const auto top = library->folder(kate.native());
+        CHECK(top.has_value());
+        CHECK((top && top->folders == std::vector<std::string>{"a", "b", "c"}));
+        CHECK(top && top->tracks.size() == 1U && top->tracks.front().key == loose);
+        CHECK(top && top->tracks.front().title == "Loose");
+        const auto hounds_folder = library->folder((kate / "b").native());
+        CHECK(hounds_folder && hounds_folder->folders.empty());
+        CHECK(hounds_folder && hounds_folder->tracks.size() == 2U &&
+              hounds_folder->tracks[0].key == hounds[0] && hounds_folder->tracks[1].key == hounds[1]);
+        CHECK(hounds_folder && hounds_folder->tracks[0].title == "Hounds of Love 1" &&
+              hounds_folder->tracks[0].duration_ms > 0);
+        // A trailing slash names the same folder; a folder without music
+        // holds nothing.
+        const auto slashed = library->folder(kate.native() + "/");
+        CHECK(slashed && slashed->folders.size() == 3U);
+        const auto empty = library->folder((base / "nowhere").native());
+        CHECK(empty && empty->folders.empty() && empty->tracks.empty());
     }
 
     std::filesystem::remove_all(base, fs_error);

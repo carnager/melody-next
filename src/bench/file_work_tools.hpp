@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "bench/musicbrainz_identify_dialog.hpp"
+#include "bench/musicbrainz_lookup.hpp"
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
 #include "trackknife/engine/remote_file_work.hpp"

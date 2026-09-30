@@ -102,42 +102,15 @@ void BenchMainWindow::showDynamicPlaylists() {
         const auto& rows = dialog->tracks();
         if (static_cast<std::size_t>(row) >= rows.size())
             return;
-        auto* destination =
-            addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                 .kind = persistence::ListKind::scratch,
-                                                 .name = utf8Bytes(name),
-                                                 .pinned = false,
-                                                 .dirty = false,
-                                                 .items = {},
-                                                 .engine = dialog->engine().stored()},
-                       false);
-        destination->model->replaceRows(rows);
+        auto* destination = workspace_.openDynamicResult(name, rows, dialog->engine(), false);
         dialog->setProperty("playback-context",
                             QString::fromStdString(destination->document.id.to_string()));
         applyTrackViewLayout(*destination, layout);
-        markTabDirty(*destination);
-        syncArtwork(*destination);
-        schedulePersist();
         playRow(*destination, row);
     });
     const auto markers = [this, dialog] {
-        auto* model = qobject_cast<LocalListModel*>(dialog->view()->model());
-        int occurrence = 0;
-        if (dialog->property("playback-context").toString() ==
-            document_text(playback_.anchors.document)) {
-            if (const auto* tab = tabForDocument(playback_.anchors.document);
-                tab && tab->model->rowCount() <= 500)
-                for (int i = 0; i < playback_.row && i < tab->model->rowCount(); ++i)
-                    if (tab->model->source(i) == playback_.anchors.source)
-                        ++occurrence;
-        }
-        int hint = -1;
-        for (int i = 0; i < model->rowCount(); ++i)
-            if (model->source(i) == playback_.anchors.source && occurrence-- == 0) {
-                hint = i;
-                break;
-            }
-        model->setCurrentSource(hint >= 0 ? playback_.anchors.source : LocalTrackSource{}, hint);
+        workspace_.markPlaying(*qobject_cast<LocalListModel*>(dialog->view()->model()),
+                               dialog->property("playback-context").toString());
     };
     connect(dialog, &DynamicPlaylistDialog::resultsChanged, dialog, markers);
     auto* marker_timer = new QTimer(dialog);
@@ -230,19 +203,8 @@ void BenchMainWindow::showDynamicPlaylists() {
                 const auto title =
                     name.isEmpty() ? QStringLiteral("Dynamic playlist snapshot") : name;
                 auto* destination =
-                    addListTab(persistence::ListDocument{.id = core::StableId::random(),
-                                                         .kind = persistence::ListKind::scratch,
-                                                         .name = utf8Bytes(title),
-                                                         .pinned = false,
-                                                         .dirty = false,
-                                                         .items = {},
-                                                         .engine = dialog->engine().stored()},
-                               true);
+                    workspace_.openDynamicResult(title, tracks, dialog->engine(), true);
                 applyTrackViewLayout(*destination, layout);
-                destination->model->replaceRows(tracks);
-                markTabDirty(*destination);
-                syncArtwork(*destination);
-                schedulePersist();
             });
     dialog->followLibrary(from);
     dialog->show();

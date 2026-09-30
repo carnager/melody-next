@@ -5,7 +5,7 @@
 #include <QTimer>
 
 #include "trackknife/core/local_sources.hpp"
-#include "uicommon/rating_stars.hpp"
+#include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QBrush>

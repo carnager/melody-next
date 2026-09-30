@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "uicommon/rating_color.hpp"
+
 #include <QColor>
 #include <QRect>
 #include <QString>
@@ -11,16 +13,12 @@ class QPainter;
 
 namespace trackknife::ui {
 
-// The one star color used everywhere ratings render (ADR-0179).
-[[nodiscard]] inline QColor ratingStarColor() { return QColor{245, 197, 24}; }
-
 // Paints a 0-10 rating as filled star shapes (half-star steps) on a
 // translucent band along the bottom edge of an album cover. Does nothing for
 // unrated values or covers too small to stay legible.
 void paintRatingOverlay(QPainter* painter, const QRect& cover, unsigned rating);
 
 // The accessible menu label for a rating ("Unrate", "1 star", … "5 stars").
-[[nodiscard]] QString ratingMenuLabel(unsigned rating);
 
 // One Rate submenu row painted as a full five-star strip: filled yellow
 // stars up to the value, muted outlines for the rest, plus the shared menu

@@ -639,6 +639,15 @@ if(TRACKKNIFE_BUILD_UI)
     )
     add_test(NAME panel-layout COMMAND trackknife_panel_layout_tests)
 
+    qt_add_executable(trackknife_keyed_rows_model_tests keyed_rows_model_test.cpp
+                      ${PROJECT_SOURCE_DIR}/src/quick/keyed_rows_model.cpp)
+    target_include_directories(trackknife_keyed_rows_model_tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(
+        trackknife_keyed_rows_model_tests
+        PRIVATE Qt6::Core Qt6::Test trackknife_project_options trackknife_project_warnings
+    )
+    add_test(NAME keyed-rows-model COMMAND trackknife_keyed_rows_model_tests)
+
     qt_add_executable(trackknife_track_view_layout_tests track_view_layout_test.cpp)
     target_link_libraries(
         trackknife_track_view_layout_tests

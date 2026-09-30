@@ -276,22 +276,7 @@ bool BenchMainWindow::handleTabFileDrop(QDropEvent* drop, const int tab_index) {
 
 void BenchMainWindow::addDroppedPaths(const QString& id, const EngineKey& files_engine,
                                       std::vector<std::string> paths) {
-    auto* destination = tabForDocument(id);
-    if (destination == nullptr) {
-        return;
-    }
-    const auto into = EngineKey::of(destination->document);
-    if (files_engine != into) {
-        paths = crossEnginePaths(std::move(paths), files_engine, into);
-    }
-    if (paths.empty()) {
-        return;
-    }
-    if (!into.isLocal()) {
-        insertRemotePaths(*destination, std::move(paths), -1);
-    } else {
-        startDiscovery(std::move(paths), id, -1);
-    }
+    workspace_.addDroppedPaths(id, files_engine, std::move(paths));
 }
 
 // ADR-0233: a drop on a list in the lists pane. One open here takes it as

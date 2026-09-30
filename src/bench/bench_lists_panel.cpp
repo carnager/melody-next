@@ -6,6 +6,7 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/lists_panel.hpp"
+#include "workspace/lists_catalog.hpp"
 #include "bench/playback_tab_widget.hpp"
 
 #include <QHBoxLayout>
@@ -17,6 +18,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTableView>
@@ -74,36 +76,14 @@ void BenchMainWindow::buildListsPanel() {
         }
     });
 
-    lists_fetch_timer_ = new QTimer(this);
-    lists_fetch_timer_->setSingleShot(true);
-    lists_fetch_timer_->setInterval(150);
-    connect(lists_fetch_timer_, &QTimer::timeout, this, [this] {
-        for (const auto& engine : engines_) {
-            auto* playback = engine->playback;
-            if (playback == nullptr || !playback->active()) {
-                engine->lists.reset();
-                engine->lists_error = QStringLiteral("Not connected");
-                continue;
-            }
-            playback->request(
-                QStringLiteral("list.all"), protocol::Json::object(),
-                [this, key = engine->key](const core::Result<protocol::Json>& answer) {
-                    auto* answered = link(key);
-                    if (answered == nullptr) {
-                        return;
-                    }
-                    if (answer) {
-                        answered->lists = answer->value("lists", std::vector<protocol::Json>{});
-                        answered->lists_error.clear();
-                    } else {
-                        answered->lists.reset();
-                        answered->lists_error = QString::fromStdString(answer.error().message);
-                    }
-                    refreshListsPanel();
-                });
+    lists_catalog_ = new ListsCatalog(workspace_, this);
+    connect(lists_catalog_, &ListsCatalog::changed, this, &BenchMainWindow::refreshListsPanel);
+    connect(lists_catalog_, &ListsCatalog::closeWanted, this, [this](const QString& id) {
+        if (auto* open = tabForDocument(id); open != nullptr) {
+            closeTabAt(tabs_->indexOf(open->view));
         }
-        refreshListsPanel();
     });
+    connect(lists_catalog_, &ListsCatalog::saveWanted, this, [this] { saveCurrentList(); });
     lists_present_timer_ = new QTimer(this);
     lists_present_timer_->setSingleShot(true);
     lists_present_timer_->setInterval(0);
@@ -133,8 +113,8 @@ void BenchMainWindow::applyListsDisplay() {
 }
 
 void BenchMainWindow::fetchEngineLists() {
-    if (lists_fetch_timer_ != nullptr && listsInPanel()) {
-        lists_fetch_timer_->start();
+    if (lists_catalog_ != nullptr && listsInPanel()) {
+        lists_catalog_->fetch();
     }
 }
 
@@ -148,65 +128,25 @@ void BenchMainWindow::presentListsPanel() {
     if (lists_panel_ == nullptr) {
         return;
     }
-    const auto group_for = [this](const EngineLink& engine) {
-        ListsPanel::Group group;
-        group.engine = engine.key;
-        group.name = engine.key.isLocal() ? QStringLiteral("This computer")
-                     : engine.catalogue   ? engine.catalogue->name()
-                                          : QStringLiteral("Remote");
-        std::unordered_map<std::string, std::size_t> at;
-        if (engine.lists) {
-            for (const auto& list : *engine.lists) {
-                const auto id = list.value("id", std::string{});
-                at.emplace(id, group.lists.size());
-                group.lists.push_back(ListsPanel::List{
-                    .id = QString::fromStdString(id),
-                    .name = QString::fromStdString(list.value("name", std::string{})),
-                    .saved = list.value("kind", std::string{}) == "saved",
-                    .tracks = list.value("tracks", -1),
-                });
-            }
-        }
-        // What is open here is as this window has it: newer than the engine's
-        // until it is sent, and there even with the engine away.
-        for (int index = 0; index < tabs_->count(); ++index) {
-            auto* view = tabs_->widget(index);
-            const auto id = view->property("bench-document-id").toString();
-            auto* tab = id.isEmpty() ? nullptr : tabForDocument(id);
-            if (tab == nullptr || tab->view != view || EngineKey::of(tab->document) != engine.key) {
-                continue;
-            }
-            const auto known = at.find(id.toStdString());
-            if (known == at.end()) {
-                at.emplace(id.toStdString(), group.lists.size());
-                group.lists.emplace_back();
-                group.lists.back().id = id;
-            }
-            auto& list = group.lists[at.at(id.toStdString())];
-            list.name = displayText(tab->document.name);
-            list.saved = tab->document.kind == persistence::ListKind::saved;
-            list.open = true;
-            list.dirty = tab->document.dirty;
-            list.playing = view->property("bench-playback-active").toBool();
-            list.tracks = tab->model->rowCount();
-        }
-        // Saved lists first, by name: they are the ones kept for a reason.
-        std::ranges::stable_sort(group.lists, [](const auto& left, const auto& right) {
-            if (left.saved != right.saved) {
-                return left.saved;
-            }
-            return left.saved && QString::localeAwareCompare(left.name, right.name) < 0;
-        });
-        if (group.lists.empty()) {
-            group.note = engine.lists_error.isEmpty()
-                             ? QStringLiteral("No lists")
-                             : QStringLiteral("No lists: %1").arg(engine.lists_error);
-        }
-        return group;
-    };
+    // What is open here as this window has it, gathered again.
+    {
+        const QSignalBlocker blocker{lists_catalog_};
+        lists_catalog_->present();
+    }
     std::vector<ListsPanel::Group> groups;
-    for (const auto& engine : engines_) {
-        groups.push_back(group_for(*engine));
+    for (const auto& group : lists_catalog_->groups()) {
+        ListsPanel::Group shown{.name = group.name, .engine = group.engine, .lists = {},
+                                .note = group.note};
+        for (const auto& list : group.lists) {
+            shown.lists.push_back({.id = list.id,
+                                   .name = list.name,
+                                   .saved = list.saved,
+                                   .open = list.open,
+                                   .dirty = list.dirty,
+                                   .playing = list.playing,
+                                   .tracks = list.tracks});
+        }
+        groups.push_back(std::move(shown));
     }
     std::vector<ListsPanel::Other> others;
     for (int index = 0; index < tabs_->count(); ++index) {
@@ -235,51 +175,27 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
     if (!id.isEmpty()) {
         auto* tab = tabForDocument(id);
         const auto name = item->text(0).remove(QRegularExpression(QStringLiteral(" \\*$")));
-        const auto show = [this, engine, id] { openEngineList(engine, id); };
         if (tab == nullptr) {
-            menu.addAction(QStringLiteral("Open"), this, show);
+            menu.addAction(QStringLiteral("Open"), this,
+                           [this, engine, id] { lists_catalog_->open(engine, id); });
         } else {
-            auto* close = menu.addAction(QStringLiteral("Close"), this, [this, id] {
-                if (auto* open = tabForDocument(id); open != nullptr) {
-                    closeTabAt(tabs_->indexOf(open->view));
-                }
-            });
+            auto* close = menu.addAction(QStringLiteral("Close"), this,
+                                         [this, engine, id] { lists_catalog_->close(engine, id); });
             close->setEnabled(!tab->document.pinned);
             if (tab->document.kind != persistence::ListKind::saved || tab->document.dirty) {
-                menu.addAction(QStringLiteral("Save"), this, [this, engine, id] {
-                    openEngineList(engine, id, [this] { saveCurrentList(); });
-                });
+                menu.addAction(QStringLiteral("Save"), this,
+                               [this, engine, id] { lists_catalog_->save(engine, id); });
             }
         }
         menu.addAction(QStringLiteral("Rename…"), this, [this, engine, id, name] {
-            if (tabForDocument(id) != nullptr) {
-                openEngineList(engine, id, [this] { renameCurrentList(); });
-                return;
-            }
-            auto* playback = playbackOf(engine);
-            if (playback == nullptr) {
-                return;
-            }
             bool accepted = false;
             const auto chosen =
                 QInputDialog::getText(this, QStringLiteral("Rename list"), QStringLiteral("Name:"),
                                       QLineEdit::Normal, name, &accepted)
                     .trimmed();
-            if (!accepted || chosen.isEmpty() || chosen == name) {
-                return;
+            if (accepted && !chosen.isEmpty() && chosen != name) {
+                lists_catalog_->rename(engine, id, chosen);
             }
-            playback->request(
-                QStringLiteral("list.rename"),
-                protocol::Json{{"id", id.toStdString()}, {"name", chosen.toStdString()}},
-                [this](const core::Result<protocol::Json>& answer) {
-                    if (!answer) {
-                        statusBar()->showMessage(
-                            QStringLiteral("Could not rename the list: %1")
-                                .arg(QString::fromStdString(answer.error().message)),
-                            5'000);
-                    }
-                    fetchEngineLists();
-                });
         });
         menu.addAction(QStringLiteral("Delete…"), this, [this, engine, id, name] {
             auto* question =
@@ -294,22 +210,9 @@ void BenchMainWindow::showListsPanelMenu(const QPoint& position) {
             remove->setObjectName(QStringLiteral("bench-lists-delete-confirm"));
             connect(question, &QMessageBox::buttonClicked, this,
                     [this, engine, id, remove](QAbstractButton* clicked) {
-                        if (clicked != remove) {
-                            return;
+                        if (clicked == remove) {
+                            lists_catalog_->remove(engine, id);
                         }
-                        if (auto* open = tabForDocument(id); open != nullptr) {
-                            // Deleted, so nothing unsaved to ask about.
-                            open->document.dirty = false;
-                            open->document.pinned = false;
-                            closeTabAt(tabs_->indexOf(open->view));
-                        }
-                        auto* playback = playbackOf(engine);
-                        if (playback == nullptr) {
-                            return;
-                        }
-                        playback->request(
-                            QStringLiteral("list.delete"), protocol::Json{{"id", id.toStdString()}},
-                            [this](const core::Result<protocol::Json>&) { fetchEngineLists(); });
                     });
             question->open();
         });

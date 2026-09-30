@@ -3,10 +3,9 @@
 #pragma once
 
 #include "bench/local_library_panel.hpp"
-#include "trackknife/persistence/local_library.hpp"
+#include "workspace/quick_pick_session.hpp"
 
 #include <QFrame>
-#include <QFutureWatcher>
 
 #include <memory>
 #include <vector>
@@ -14,15 +13,8 @@
 class QLabel;
 class QLineEdit;
 class QListWidget;
-class QTimer;
-
-namespace trackknife::engine {
-class Catalogue;
-}
 
 namespace trackknife::bench {
-
-enum class QuickPickKind { album, track };
 
 // A popup for putting an album or a track somewhere from the keyboard: type
 // words -- every one must appear in its artist, title, album or date
@@ -50,30 +42,12 @@ class QuickPickPopup final : public QFrame {
     bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
-    void search();
     void showResults();
-    void choose(LocalLibraryAction action);
-    [[nodiscard]] QString idleText() const;
 
-    struct Found {
-        std::vector<persistence::LibraryEntry> entries;
-        bool more{false};
-        // The newest in the library, asked for with nothing typed.
-        bool newest{false};
-        QString error;
-        quint64 generation{0};
-    };
-
-    const QuickPickKind kind_;
-    std::shared_ptr<engine::Catalogue> catalogue_;
+    QuickPickSession* session_;
     QLineEdit* input_{nullptr};
     QListWidget* results_{nullptr};
     QLabel* status_{nullptr};
-    QTimer* debounce_{nullptr};
-    QFutureWatcher<Found> watcher_;
-    quint64 generation_{0};
-    bool pending_{false};
-    std::vector<persistence::LibraryEntry> entries_;
 };
 
 } // namespace trackknife::bench

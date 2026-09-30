@@ -52,6 +52,103 @@ metadata_refresh(const operations::MetadataCommitResult& result) {
 
 } // namespace
 
+Workspace::ConvertOpening Workspace::convertItems(LocalListModel& list, const EngineKey& engine,
+                                                  std::vector<int> rows) {
+    ConvertOpening opening;
+    std::ranges::sort(rows);
+    auto* model = &list;
+    const auto* engine_link = link(engine);
+    const auto remote = !engine.isLocal() && engine_link != nullptr;
+    // A remote tab's files are converted where this computer has them --
+    // through the mount -- and otherwise fetched from their engine first
+    // (ADR-0237 stage 6), as the phone downloads them.
+    const auto work = remote && engine_link->does_file_work ? engine_link->file_work : nullptr;
+    const auto mount = remote ? mountOf(*engine_link) : RemoteMount{};
+    for (const auto row_index : rows) {
+        if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
+            continue;
+        }
+        const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
+        auto label = remote ? displayText(row.title.empty() ? row.raw_path : row.title)
+                            : model->index(row_index, local_title_column).data().toString();
+        if (!row.artist.empty()) {
+            label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
+        }
+        ConvertDialogItem item{.raw_path = row.raw_path,
+                               .selection = row.selection,
+                               .segment = row.segment,
+                               .source_revision = row.source_revision,
+                               .metadata = row.metadata,
+                               .label = std::move(label),
+                               .fetch = {}};
+        if (remote) {
+            if (auto here = mount.to_local(row.raw_path)) {
+                item.raw_path = std::move(*here);
+                // What was known of it came from the remote; read afresh here.
+                item.source_revision.reset();
+            } else if (work) {
+                item.fetch = [work,
+                              from = row.raw_path](const std::filesystem::path& to,
+                                                   const core::CancellationToken& cancellation) {
+                    return work->download_original(from, to, cancellation);
+                };
+            } else {
+                ++opening.unreachable;
+                continue;
+            }
+        }
+        opening.items.push_back(std::move(item));
+    }
+    return opening;
+}
+
+ConvertProfilesLoader Workspace::convertProfiles() {
+    auto* const persistence_service = persistence_;
+    return [persistence_service](
+               std::function<void(std::vector<persistence::SavedOutputLayoutProfile>,
+                                  std::vector<persistence::SavedDestinationProfile>, QString)>
+                   completion) {
+        if (persistence_service == nullptr) {
+            completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
+            return;
+        }
+        persistence_service->loadOutputProfiles(std::move(completion));
+    };
+}
+
+ConvertPresetStore Workspace::convertPresets() {
+    auto* const persistence_service = persistence_;
+    const auto unavailable = QStringLiteral("Trackknife persistence is unavailable");
+    return ConvertPresetStore{
+        .load =
+            [persistence_service, unavailable](ConvertPresetStore::LoadCompletion completion) {
+                if (persistence_service == nullptr) {
+                    completion({}, unavailable);
+                    return;
+                }
+                persistence_service->loadEncoderPresets(std::move(completion));
+            },
+        .save =
+            [persistence_service, unavailable](persistence::SavedEncoderPreset preset,
+                                               ConvertPresetStore::Completion completion) {
+                if (persistence_service == nullptr) {
+                    completion(unavailable);
+                    return;
+                }
+                persistence_service->saveEncoderPreset(std::move(preset), std::move(completion));
+            },
+        .remove =
+            [persistence_service, unavailable](core::StableId id,
+                                               ConvertPresetStore::Completion completion) {
+                if (persistence_service == nullptr) {
+                    completion(unavailable);
+                    return;
+                }
+                persistence_service->removeEncoderPreset(id, std::move(completion));
+            },
+    };
+}
+
 std::span<const std::string_view> Workspace::taggerFields() {
     return std::span{default_metadata_fields};
 }

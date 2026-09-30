@@ -28,6 +28,8 @@ qt_add_library(
     workspace_view.hpp
     artwork_session.cpp
     artwork_session.hpp
+    convert_job.cpp
+    convert_job.hpp
     field_filter.cpp
     identify_session.cpp
     identify_session.hpp

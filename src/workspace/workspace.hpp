@@ -21,6 +21,7 @@
 #include "trackknife/persistence/list_repository.hpp"
 #include "uicommon/list_persistence_service.hpp"
 #include "uicommon/track_view_layout.hpp"
+#include "workspace/convert_job.hpp"
 #include "workspace/tagger_session.hpp"
 
 #include <QElapsedTimer>
@@ -343,6 +344,17 @@ class Workspace final : public QObject {
                                const operations::FilePublicationCommitResult* here);
     // This computer's library, looked up again.
     void refreshLocalLibrary();
+    // What the converter is given for rows of a list (ADR-0237 stage 6): a
+    // remote tab's files where this computer has them, else fetched from
+    // their engine; those it cannot reach are counted, not given.
+    struct ConvertOpening {
+        std::vector<ConvertDialogItem> items;
+        std::size_t unreachable{0U};
+    };
+    [[nodiscard]] ConvertOpening convertItems(LocalListModel& model, const EngineKey& engine,
+                                              std::vector<int> rows);
+    [[nodiscard]] ConvertProfilesLoader convertProfiles();
+    [[nodiscard]] ConvertPresetStore convertPresets();
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
     // An open list, by its document's identity -- or the list that goes on

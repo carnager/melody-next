@@ -406,6 +406,38 @@ void QuickWorkspace::activateRow(const int row) {
     }
 }
 
+void QuickWorkspace::convertFiles() {
+    auto* tab = currentTabPointer();
+    if (tab == nullptr) {
+        return;
+    }
+    auto rows = rows_.selectedRows();
+    if (rows.empty()) {
+        return;
+    }
+    const auto selected = rows.size();
+    auto opening =
+        workspace_.convertItems(*tab->model, bench::EngineKey::of(tab->document), std::move(rows));
+    if (opening.unreachable > 0U) {
+        showMessage(QStringLiteral("%1 of %2 tracks are not reachable on this computer and were "
+                                   "left out. Where that engine's music is reachable here is set "
+                                   "in Settings → Engine.")
+                        .arg(opening.unreachable)
+                        .arg(selected),
+                    10'000);
+    }
+    if (opening.items.empty()) {
+        return;
+    }
+    auto* convert = new QuickConvert(new bench::ConvertJob(std::move(opening.items),
+                                                           workspace_.convertProfiles(),
+                                                           workspace_.convertPresets()),
+                                     this);
+    connect(convert, &QuickConvert::filesConverted, this,
+            [this] { workspace_.refreshLocalLibrary(); });
+    emit convertOpened(convert);
+}
+
 void QuickWorkspace::replayGain() {
     auto* tab = currentTabPointer();
     if (tab == nullptr) {

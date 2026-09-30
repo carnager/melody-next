@@ -2,72 +2,49 @@
 
 #include "convert_dialog.hpp"
 
-#include "bench_main_window_helpers.hpp"
-#include "trackknife/convert/preset.hpp"
-#include "trackknife/core/stable_id.hpp"
-
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDialogButtonBox>
-#include <QFile>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPlainTextEdit>
-#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QSaveFile>
-#include <QSettings>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStandardItemModel>
-#include <QStandardPaths>
-#include <QTimer>
 #include <QVBoxLayout>
-#include <QtConcurrent/QtConcurrentRun>
 
-#include <algorithm>
-#include <array>
-#include <filesystem>
-#include <map>
-#include <system_error>
 #include <utility>
 
 namespace trackknife::bench {
 namespace {
 
-constexpr int preview_limit = 200;
-
-[[nodiscard]] QString settingsText(const QSettings& settings, const char* key,
-                                   const QString& fallback) {
-    const auto value = settings.value(QLatin1String(key)).toString();
-    return value.isEmpty() ? fallback : value;
+void fill(QComboBox* combo, const std::vector<ConvertJob::Choice>& choices) {
+    for (const auto& choice : choices) {
+        combo->addItem(choice.label, choice.value);
+    }
 }
 
-// One fixed encode format per row keeps user presets inside the qualified
-// encoder set; the rate controls adapt to the chosen format.
-struct EditorFormat {
-    const char* label;
-    const char* codec;
-    const char* container;
-    const char* extension;
-    bool lossless;
-    const char* sample_format_hint;
-};
+void choose(QComboBox* combo, const QVariant& value) {
+    const QSignalBlocker blocker{combo};
+    if (const auto position = combo->findData(value); position >= 0) {
+        combo->setCurrentIndex(position);
+    }
+}
 
-constexpr std::array<EditorFormat, 4> editor_formats{{
-    {"FLAC (lossless)", "flac", "flac", "flac", true, "s32"},
-    {"Opus", "libopus", "opus", "opus", false, ""},
-    {"MP3", "libmp3lame", "mp3", "mp3", false, ""},
-    {"Ogg Vorbis", "libvorbis", "ogg", "ogg", false, ""},
-}};
+void setText(QLineEdit* field, const QString& text) {
+    if (field->text() != text) {
+        const QSignalBlocker blocker{field};
+        field->setText(text);
+    }
+}
 
 } // namespace
 
@@ -75,7 +52,7 @@ constexpr std::array<EditorFormat, 4> editor_formats{{
 // built-ins stay immutable, so "editing" always saves a new profile.
 class EncoderPresetEditor final : public QDialog {
   public:
-    explicit EncoderPresetEditor(const convert::EncoderPreset& base, QWidget* parent)
+    explicit EncoderPresetEditor(const ConvertJob::PresetDraft& base, QWidget* parent)
         : QDialog(parent) {
         setWindowTitle(QStringLiteral("New encoder preset"));
         setObjectName(QStringLiteral("bench-preset-editor"));
@@ -88,9 +65,7 @@ class EncoderPresetEditor final : public QDialog {
 
         format_ = new QComboBox(this);
         format_->setObjectName(QStringLiteral("bench-preset-editor-format"));
-        for (const auto& entry : editor_formats) {
-            format_->addItem(QLatin1String(entry.label));
-        }
+        format_->addItems(ConvertJob::editorFormats());
         form->addRow(QStringLiteral("Format:"), format_);
 
         rate_mode_ = new QComboBox(this);
@@ -103,13 +78,11 @@ class EncoderPresetEditor final : public QDialog {
         bitrate_->setObjectName(QStringLiteral("bench-preset-editor-bitrate"));
         bitrate_->setRange(8, 2'000);
         bitrate_->setSuffix(QStringLiteral(" kbps"));
-        bitrate_->setValue(192);
         form->addRow(QStringLiteral("Bit rate:"), bitrate_);
 
         quality_ = new QSpinBox(this);
         quality_->setObjectName(QStringLiteral("bench-preset-editor-quality"));
         quality_->setRange(-2, 12);
-        quality_->setValue(4);
         form->addRow(QStringLiteral("Quality:"), quality_);
 
         auto* buttons =
@@ -121,59 +94,30 @@ class EncoderPresetEditor final : public QDialog {
         save_button_ = buttons->button(QDialogButtonBox::Save);
 
         const auto refresh_controls = [this] {
-            const auto& entry = editor_formats[static_cast<std::size_t>(format_->currentIndex())];
-            rate_mode_->setEnabled(!entry.lossless);
+            const auto lossless = ConvertJob::editorFormatLossless(format_->currentIndex());
+            rate_mode_->setEnabled(!lossless);
             const auto quality_mode = rate_mode_->currentIndex() == 1;
-            bitrate_->setEnabled(!entry.lossless && !quality_mode);
-            quality_->setEnabled(!entry.lossless && quality_mode);
+            bitrate_->setEnabled(!lossless && !quality_mode);
+            quality_->setEnabled(!lossless && quality_mode);
             save_button_->setEnabled(!name_->text().trimmed().isEmpty());
         };
         connect(format_, &QComboBox::currentIndexChanged, this, refresh_controls);
         connect(rate_mode_, &QComboBox::currentIndexChanged, this, refresh_controls);
         connect(name_, &QLineEdit::textChanged, this, refresh_controls);
 
-        // Prefill from the selected preset.
-        for (std::size_t index = 0U; index < editor_formats.size(); ++index) {
-            if (editor_formats[index].codec == base.codec_name) {
-                format_->setCurrentIndex(static_cast<int>(index));
-                break;
-            }
-        }
-        if (base.vbr_quality) {
-            rate_mode_->setCurrentIndex(1);
-            quality_->setValue(*base.vbr_quality);
-        } else if (base.bit_rate) {
-            rate_mode_->setCurrentIndex(0);
-            bitrate_->setValue(static_cast<int>(*base.bit_rate / 1'000));
-        }
+        format_->setCurrentIndex(base.format);
+        rate_mode_->setCurrentIndex(base.quality_mode ? 1 : 0);
+        bitrate_->setValue(base.bitrate_kbps);
+        quality_->setValue(base.quality);
         refresh_controls();
     }
 
-    [[nodiscard]] persistence::SavedEncoderPreset result() const {
-        const auto id = core::StableId::random();
-        const auto& entry = editor_formats[static_cast<std::size_t>(format_->currentIndex())];
-        persistence::SavedEncoderPreset saved;
-        saved.id = id;
-        saved.preset = convert::EncoderPreset{
-            .id = id.to_string(),
-            .version = 1,
-            .display_name = name_->text().trimmed().toStdString(),
-            .codec_name = entry.codec,
-            .container_name = entry.container,
-            .file_extension = entry.extension,
-            .lossless = entry.lossless,
-            .bit_rate = std::nullopt,
-            .vbr_quality = std::nullopt,
-            .sample_format_hint = entry.sample_format_hint,
-        };
-        if (!entry.lossless) {
-            if (rate_mode_->currentIndex() == 1) {
-                saved.preset.vbr_quality = quality_->value();
-            } else {
-                saved.preset.bit_rate = static_cast<std::int64_t>(bitrate_->value()) * 1'000;
-            }
-        }
-        return saved;
+    [[nodiscard]] ConvertJob::PresetDraft result() const {
+        return ConvertJob::PresetDraft{.name = name_->text(),
+                                       .format = format_->currentIndex(),
+                                       .quality_mode = rate_mode_->currentIndex() == 1,
+                                       .bitrate_kbps = bitrate_->value(),
+                                       .quality = quality_->value()};
     }
 
   private:
@@ -187,15 +131,14 @@ class EncoderPresetEditor final : public QDialog {
 
 ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfilesLoader profiles,
                              ConvertPresetStore preset_store, QWidget* parent)
-    : QDialog(parent), items_(std::move(items)), preset_store_(std::move(preset_store)) {
-    setWindowTitle(QStringLiteral("Convert %1 file%2")
-                       .arg(items_.size())
-                       .arg(items_.size() == 1U ? QString{} : QStringLiteral("s")));
+    : QDialog(parent) {
+    const auto preset_store_available = static_cast<bool>(preset_store.load);
+    job_ = new ConvertJob(std::move(items), std::move(profiles), std::move(preset_store), this);
+    setWindowTitle(job_->title());
     setObjectName(QStringLiteral("bench-convert-dialog"));
     setAttribute(Qt::WA_DeleteOnClose);
     resize(720, 520);
 
-    const QSettings settings;
     auto* layout = new QVBoxLayout(this);
     auto* form = new QFormLayout;
     form_ = form;
@@ -210,6 +153,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         QStringLiteral("Save a new encoder preset starting from the selected one"));
     connect(preset_new_, &QPushButton::clicked, this, &ConvertDialog::openPresetEditor);
     preset_row->addWidget(preset_new_);
+    preset_new_->setVisible(preset_store_available);
     preset_export_ = new QPushButton(QStringLiteral("Export…"), this);
     preset_export_->setObjectName(QStringLiteral("bench-convert-preset-export"));
     preset_export_->setToolTip(QStringLiteral("Export the selected encoder preset as JSON"));
@@ -218,25 +162,17 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     preset_delete_ = new QPushButton(QStringLiteral("Delete"), this);
     preset_delete_->setObjectName(QStringLiteral("bench-convert-preset-delete"));
     preset_delete_->setVisible(false);
-    connect(preset_delete_, &QPushButton::clicked, this, &ConvertDialog::deleteSelectedPreset);
+    connect(preset_delete_, &QPushButton::clicked, job_, &ConvertJob::deletePreset);
     preset_row->addWidget(preset_delete_);
     form->addRow(QStringLiteral("Preset:"), preset_row);
-    rebuildPresetCombo(settings.value(QStringLiteral("convert/preset")).toString());
-    if (!preset_store_.load) {
-        preset_new_->setVisible(false);
-    }
 
     auto* destination_row = new QHBoxLayout;
     destination_choice_ = new QComboBox(this);
     destination_choice_->setObjectName(QStringLiteral("bench-convert-destination-choice"));
-    destination_choice_->addItem(QStringLiteral("Custom"));
     destination_choice_->setVisible(false);
-    connect(destination_choice_, &QComboBox::activated, this,
-            &ConvertDialog::applySavedDestination);
     destination_row->addWidget(destination_choice_);
     destination_ = new QLineEdit(this);
     destination_->setObjectName(QStringLiteral("bench-convert-destination"));
-    destination_->setText(settings.value(QStringLiteral("convert/destination-root")).toString());
     destination_->setPlaceholderText(QStringLiteral("Destination folder"));
     auto* browse = new QPushButton(QStringLiteral("Browse…"), this);
     browse->setObjectName(QStringLiteral("bench-convert-browse"));
@@ -244,7 +180,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
         const auto chosen = QFileDialog::getExistingDirectory(
             this, QStringLiteral("Choose the conversion destination"), destination_->text());
         if (!chosen.isEmpty()) {
-            destination_->setText(chosen);
+            job_->setDestination(chosen, true);
         }
     });
     destination_row->addWidget(destination_, 1);
@@ -253,15 +189,11 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     layout_choice_ = new QComboBox(this);
     layout_choice_->setObjectName(QStringLiteral("bench-convert-layout"));
-    layout_choice_->addItem(QStringLiteral("Custom"));
-    connect(layout_choice_, &QComboBox::activated, this, &ConvertDialog::applySavedLayout);
     form->addRow(QStringLiteral("Layout:"), layout_choice_);
     form->setRowVisible(layout_choice_, false);
 
     mirror_structure_ = new QCheckBox(QStringLiteral("Mirror source folders"), this);
     mirror_structure_->setObjectName(QStringLiteral("bench-convert-mirror"));
-    mirror_structure_->setChecked(
-        settings.value(QStringLiteral("convert/mirror-structure"), false).toBool());
     mirror_structure_->setToolTip(
         QStringLiteral("Recreates each source's complete folder path beneath the destination, "
                        "keeping source file names instead of the expressions"));
@@ -269,31 +201,15 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     directory_expression_ = new QLineEdit(this);
     directory_expression_->setObjectName(QStringLiteral("bench-convert-directory-expression"));
-    directory_expression_->setText(settingsText(settings, "convert/directory-expression",
-                                                QStringLiteral("%albumartist%/%album%")));
     form->addRow(QStringLiteral("Folders:"), directory_expression_);
 
     basename_expression_ = new QLineEdit(this);
     basename_expression_->setObjectName(QStringLiteral("bench-convert-basename-expression"));
-    basename_expression_->setText(settingsText(settings, "convert/basename-expression",
-                                               QStringLiteral("%tracknumber% - %title%")));
     form->addRow(QStringLiteral("Names:"), basename_expression_);
 
     resample_ = new QComboBox(this);
     resample_->setObjectName(QStringLiteral("bench-convert-resample"));
-    resample_->addItem(QStringLiteral("Keep source rate"), 0);
-    for (const auto rate : {44'100, 48'000, 88'200, 96'000, 176'400, 192'000}) {
-        resample_->addItem(QStringLiteral("%1 kHz").arg(rate / 1000.0), rate);
-    }
-    // Downsample-only caps (ADR-0134) are stored as negated rates.
-    for (const auto cap : {44'100, 48'000}) {
-        resample_->addItem(QStringLiteral("Downsample to %1 kHz if higher").arg(cap / 1000.0),
-                           -cap);
-    }
-    const auto saved_rate = settings.value(QStringLiteral("convert/resample-rate"), 0).toInt();
-    if (const auto position = resample_->findData(saved_rate); position >= 0) {
-        resample_->setCurrentIndex(position);
-    }
+    fill(resample_, ConvertJob::resampleChoices());
     resample_->setToolTip(QStringLiteral(
         "Encoders that only speak certain rates still constrain the result — Opus maps every "
         "choice into its 48 kHz family"));
@@ -301,14 +217,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     bit_depth_ = new QComboBox(this);
     bit_depth_->setObjectName(QStringLiteral("bench-convert-bit-depth"));
-    bit_depth_->addItem(QStringLiteral("Preset default"), 0);
-    bit_depth_->addItem(QStringLiteral("16-bit (dithered)"), 16);
-    bit_depth_->addItem(QStringLiteral("24-bit"), 24);
-    bit_depth_->addItem(QStringLiteral("Keep source depth"), -1);
-    const auto saved_depth = settings.value(QStringLiteral("convert/bit-depth"), 0).toInt();
-    if (const auto depth_position = bit_depth_->findData(saved_depth); depth_position >= 0) {
-        bit_depth_->setCurrentIndex(depth_position);
-    }
+    fill(bit_depth_, ConvertJob::bitDepthChoices());
     bit_depth_->setToolTip(
         QStringLiteral("Stored bit depth for lossless output; Opus and other float-based "
                        "encoders have no stored depth and ignore this"));
@@ -316,48 +225,23 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     channels_ = new QComboBox(this);
     channels_->setObjectName(QStringLiteral("bench-convert-channels"));
-    channels_->addItem(QStringLiteral("Keep source channels"), 0);
-    channels_->addItem(QStringLiteral("Mono"), 1);
-    channels_->addItem(QStringLiteral("Stereo"), 2);
-    const auto saved_channels = settings.value(QStringLiteral("convert/channels"), 0).toInt();
-    if (const auto position = channels_->findData(saved_channels); position >= 0) {
-        channels_->setCurrentIndex(position);
-    }
+    fill(channels_, ConvertJob::channelChoices());
     form->addRow(QStringLiteral("Channels:"), channels_);
 
     gain_ = new QComboBox(this);
     gain_->setObjectName(QStringLiteral("bench-convert-gain"));
-    gain_->addItem(QStringLiteral("Off — do not change volume"), 0);
-    gain_->addItem(QStringLiteral("Permanently change volume using track ReplayGain"), 1);
-    gain_->addItem(QStringLiteral("Permanently change volume using album ReplayGain"), 2);
-    // Never restore a destructive signal-processing choice from last use or a preset.
-    gain_->setCurrentIndex(0);
+    fill(gain_, ConvertJob::gainChoices());
     gain_->setToolTip(QStringLiteral(
         "Permanently changes PCM before encoding; stale ReplayGain tags are removed"));
     form->addRow(QStringLiteral("Permanent volume adjustment:"), gain_);
-    auto* gain_warning = new QLabel(this);
-    gain_warning->setObjectName(QStringLiteral("bench-convert-gain-warning"));
-    gain_warning->setWordWrap(true);
-    gain_warning->setTextFormat(Qt::RichText);
-    const auto update_gain_warning = [this, gain_warning] {
-        gain_warning->setText(
-            gain_->currentData().toInt() == 0
-                ? QStringLiteral(
-                      "No permanent volume adjustment. This does not calculate ReplayGain tags.")
-                : QStringLiteral(
-                      "<b>Warning: permanently changes the audio samples in the converted "
-                      "files.</b> "
-                      "Uses existing ReplayGain values; does not calculate or write new gain tags. "
-                      "Removing tags cannot undo this. Source files are not changed."));
-    };
-    connect(gain_, &QComboBox::currentIndexChanged, this, update_gain_warning);
-    update_gain_warning();
-    form->addRow(QString{}, gain_warning);
+    gain_warning_ = new QLabel(this);
+    gain_warning_->setObjectName(QStringLiteral("bench-convert-gain-warning"));
+    gain_warning_->setWordWrap(true);
+    gain_warning_->setTextFormat(Qt::RichText);
+    form->addRow(QString{}, gain_warning_);
 
     embed_artwork_ = new QCheckBox(QStringLiteral("Embed cover art"), this);
     embed_artwork_->setObjectName(QStringLiteral("bench-convert-artwork"));
-    embed_artwork_->setChecked(
-        settings.value(QStringLiteral("convert/embed-artwork"), true).toBool());
     embed_artwork_->setToolTip(
         QStringLiteral("Carries each source's cover image (embedded pictures first, then "
                        "cover/folder/front siblings) into the converted file"));
@@ -365,8 +249,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
 
     parallelism_ = new QSpinBox(this);
     parallelism_->setObjectName(QStringLiteral("bench-convert-parallelism"));
-    parallelism_->setRange(1, static_cast<int>(convert::maximum_conversion_parallelism));
-    parallelism_->setValue(settings.value(QStringLiteral("convert/parallelism"), 4).toInt());
+    parallelism_->setRange(1, ConvertJob::maximumParallelism());
     form->addRow(QStringLiteral("Parallel files:"), parallelism_);
     layout->addLayout(form);
 
@@ -385,8 +268,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     status_->setObjectName(QStringLiteral("bench-convert-status"));
     status_->setWordWrap(true);
     layout->addWidget(status_);
-    // Per-file problem reports scroll inside a bounded pane; unbounded
-    // multi-line status text used to stretch the dialog past the screen.
+    // Per-file problem reports scroll inside a bounded pane.
     problems_ = new QPlainTextEdit(this);
     problems_->setObjectName(QStringLiteral("bench-convert-problems"));
     problems_->setReadOnly(true);
@@ -402,7 +284,7 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     stop_ = new QPushButton(QStringLiteral("Stop"), this);
     stop_->setObjectName(QStringLiteral("bench-convert-stop"));
     stop_->setVisible(false);
-    connect(stop_, &QPushButton::clicked, this, [this] { cancellation_.request_cancellation(); });
+    connect(stop_, &QPushButton::clicked, job_, &ConvertJob::stop);
     close_ = new QPushButton(QStringLiteral("Close"), this);
     close_->setObjectName(QStringLiteral("bench-convert-close"));
     connect(close_, &QPushButton::clicked, this, &QDialog::close);
@@ -412,664 +294,171 @@ ConvertDialog::ConvertDialog(std::vector<ConvertDialogItem> items, ConvertProfil
     buttons->addWidget(close_);
     layout->addLayout(buttons);
 
-    connect(&watcher_, &QFutureWatcherBase::finished, this, &ConvertDialog::finishConversion);
-    // The preview recomputes on every edit; planning is pure and fast, so a
-    // short debounce only coalesces bursts of keystrokes.
-    auto* debounce = new QTimer(this);
-    debounce->setSingleShot(true);
-    debounce->setInterval(150);
-    connect(debounce, &QTimer::timeout, this, &ConvertDialog::refreshPreview);
-    const auto schedule = [debounce] { debounce->start(); };
-    connect(destination_, &QLineEdit::textChanged, this, schedule);
-    connect(directory_expression_, &QLineEdit::textChanged, this, schedule);
-    connect(basename_expression_, &QLineEdit::textChanged, this, schedule);
-    const auto apply_mirror_mode = [this, schedule] {
-        const auto mirrored = mirror_structure_->isChecked();
-        directory_expression_->setEnabled(!mirrored);
-        basename_expression_->setEnabled(!mirrored);
-        layout_choice_->setEnabled(!mirrored);
-        schedule();
-    };
-    connect(mirror_structure_, &QCheckBox::toggled, this, apply_mirror_mode);
-    apply_mirror_mode();
-    connect(preset_, &QComboBox::currentIndexChanged, this, schedule);
-    connect(preset_, &QComboBox::currentIndexChanged, this, [this] {
-        gain_->setCurrentIndex(0);
-        const auto chosen = preset_->currentData().toString().toStdString();
-        const auto saved = std::ranges::any_of(
-            saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
-        preset_delete_->setVisible(saved && preset_store_.remove != nullptr);
-        if (saved) {
-            applyJobSettings(preset_->currentData().toString());
-        }
-    });
-    // Hand-editing an expression or the root leaves the saved choice.
-    connect(directory_expression_, &QLineEdit::textEdited, this,
-            [this] { layout_choice_->setCurrentIndex(0); });
-    connect(basename_expression_, &QLineEdit::textEdited, this,
-            [this] { layout_choice_->setCurrentIndex(0); });
+    connect(preset_, &QComboBox::currentIndexChanged, this,
+            [this] { job_->selectPreset(preset_->currentData().toString()); });
+    connect(destination_choice_, &QComboBox::activated, job_, &ConvertJob::selectDestination);
+    connect(layout_choice_, &QComboBox::activated, job_, &ConvertJob::selectLayout);
+    connect(destination_, &QLineEdit::textChanged, this,
+            [this](const QString& text) { job_->setDestination(text, false); });
     connect(destination_, &QLineEdit::textEdited, this,
-            [this] { destination_choice_->setCurrentIndex(0); });
+            [this](const QString& text) { job_->setDestination(text, true); });
+    connect(directory_expression_, &QLineEdit::textChanged, this,
+            [this](const QString& text) { job_->setDirectoryExpression(text, false); });
+    connect(directory_expression_, &QLineEdit::textEdited, this,
+            [this](const QString& text) { job_->setDirectoryExpression(text, true); });
+    connect(basename_expression_, &QLineEdit::textChanged, this,
+            [this](const QString& text) { job_->setBasenameExpression(text, false); });
+    connect(basename_expression_, &QLineEdit::textEdited, this,
+            [this](const QString& text) { job_->setBasenameExpression(text, true); });
+    connect(mirror_structure_, &QCheckBox::toggled, job_, &ConvertJob::setMirror);
+    connect(resample_, &QComboBox::currentIndexChanged, this,
+            [this] { job_->setResample(resample_->currentData()); });
+    connect(bit_depth_, &QComboBox::currentIndexChanged, this,
+            [this] { job_->setBitDepth(bit_depth_->currentData()); });
+    connect(channels_, &QComboBox::currentIndexChanged, this,
+            [this] { job_->setChannels(channels_->currentData()); });
+    connect(gain_, &QComboBox::currentIndexChanged, this,
+            [this] { job_->setGain(gain_->currentData().toInt()); });
+    connect(embed_artwork_, &QCheckBox::toggled, job_, &ConvertJob::setEmbedArtwork);
+    connect(parallelism_, &QSpinBox::valueChanged, job_, &ConvertJob::setParallelism);
 
-    if (profiles) {
-        const QPointer self{this};
-        profiles([self](std::vector<persistence::SavedOutputLayoutProfile> layouts,
-                        std::vector<persistence::SavedDestinationProfile> destinations,
-                        const QString& error) {
-            if (self == nullptr || !error.isEmpty()) {
-                return;
-            }
-            self->layout_catalog_ = std::move(layouts);
-            self->destination_catalog_ = std::move(destinations);
-            for (const auto& saved : self->layout_catalog_) {
-                self->layout_choice_->addItem(displayText(saved.profile.name));
-            }
-            self->form_->setRowVisible(self->layout_choice_, !self->layout_catalog_.empty());
-            for (const auto& destination : self->destination_catalog_) {
-                self->destination_choice_->addItem(displayText(destination.profile.name));
-            }
-            self->destination_choice_->setVisible(!self->destination_catalog_.empty());
-        });
-    }
-
-    reloadPresets(preset_->currentData().toString());
-
-    refreshPreview();
+    connect(job_, &ConvertJob::changed, this, &ConvertDialog::sync);
+    connect(job_, &ConvertJob::presetsChanged, this, &ConvertDialog::rebuildPresets);
+    connect(job_, &ConvertJob::profilesChanged, this, &ConvertDialog::rebuildProfiles);
+    connect(job_, &ConvertJob::filesConverted, this, &ConvertDialog::filesConverted);
+    rebuildPresets();
+    rebuildProfiles();
+    sync();
 }
 
-// The combo lists the immutable built-ins first, then the user's saved
-// presets; unavailable encoders stay visible but disabled with the probe
-// detail as tooltip.
-void ConvertDialog::rebuildPresetCombo(const QString& select_data) {
-    if (gain_)
-        gain_->setCurrentIndex(0);
+// The built-ins first, then the user's saved presets; unavailable encoders
+// stay visible but disabled with the probe detail as tooltip.
+void ConvertDialog::rebuildPresets() {
     const QSignalBlocker blocker{preset_};
     preset_->clear();
-    const auto add_preset = [this](const convert::EncoderPreset& preset) {
-        preset_->addItem(displayText(preset.display_name), displayText(preset.id));
-        const auto availability = convert::probe_encoder_preset(preset);
-        if (!availability.available) {
-            const auto row = preset_->count() - 1;
+    for (const auto& preset : job_->presets()) {
+        if (preset.separator) {
+            preset_->insertSeparator(preset_->count());
+            continue;
+        }
+        preset_->addItem(preset.name, preset.id);
+        if (!preset.available) {
             auto* model = qobject_cast<QStandardItemModel*>(preset_->model());
-            if (model != nullptr && model->item(row) != nullptr) {
-                model->item(row)->setEnabled(false);
-                model->item(row)->setToolTip(displayText(availability.detail));
+            if (auto* item = model != nullptr ? model->item(preset_->count() - 1) : nullptr) {
+                item->setEnabled(false);
+                item->setToolTip(preset.detail);
             }
         }
-    };
-    for (const auto& preset : convert::builtin_encoder_presets()) {
-        add_preset(preset);
     }
-    if (!saved_presets_.empty()) {
-        preset_->insertSeparator(preset_->count());
-        for (const auto& saved : saved_presets_) {
-            add_preset(saved.preset);
-        }
-    }
-    const auto position = preset_->findData(select_data);
-    preset_->setCurrentIndex(position >= 0 ? position : 0);
-    const auto chosen = preset_->currentData().toString().toStdString();
-    const auto saved_selected = std::ranges::any_of(
-        saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
-    preset_delete_->setVisible(saved_selected && preset_store_.remove != nullptr);
+    preset_->setCurrentIndex(job_->presetIndex());
 }
 
-void ConvertDialog::reloadPresets(const QString& select_data) {
-    if (!preset_store_.load) {
-        return;
+void ConvertDialog::rebuildProfiles() {
+    {
+        const QSignalBlocker layouts{layout_choice_};
+        const QSignalBlocker destinations{destination_choice_};
+        layout_choice_->clear();
+        layout_choice_->addItems(job_->layouts());
+        destination_choice_->clear();
+        destination_choice_->addItems(job_->destinations());
     }
-    const QPointer self{this};
-    preset_store_.load([self, select_data](std::vector<persistence::SavedEncoderPreset> presets,
-                                           const QString& error) {
-        if (self == nullptr) {
-            return;
-        }
-        if (!error.isEmpty()) {
-            self->status_->setText(error);
-            return;
-        }
-        self->saved_presets_ = std::move(presets);
-        self->rebuildPresetCombo(select_data);
-        self->refreshPreview();
-    });
+    form_->setRowVisible(layout_choice_, job_->layouts().size() > 1);
+    destination_choice_->setVisible(job_->destinations().size() > 1);
+    sync();
 }
 
-void ConvertDialog::openPresetEditor() {
-    if (!preset_store_.save) {
-        return;
+void ConvertDialog::sync() {
+    const auto& job = *job_;
+    if (preset_->currentIndex() != job.presetIndex()) {
+        const QSignalBlocker blocker{preset_};
+        preset_->setCurrentIndex(job.presetIndex());
     }
-    const auto base = selectedPreset();
-    auto* editor = new EncoderPresetEditor(base ? *base : convert::EncoderPreset{}, this);
-    editor->setAttribute(Qt::WA_DeleteOnClose);
-    connect(editor, &QDialog::accepted, this, [this, editor] {
-        if (!preset_store_.save) {
-            return;
-        }
-        auto saved = editor->result();
-        const auto select = displayText(saved.preset.id);
-        const QPointer self{this};
-        preset_store_.save(std::move(saved), [self, select](const QString& error) {
-            if (self == nullptr) {
-                return;
-            }
-            if (!error.isEmpty()) {
-                self->status_->setText(error);
-                return;
-            }
-            self->saveJobSettings(select);
-            self->reloadPresets(select);
-        });
-    });
-    editor->open();
-}
-
-void ConvertDialog::exportSelectedPreset() {
-    const auto selected = selectedPreset();
-    if (!selected) {
-        status_->setText(QStringLiteral("Select an encoder preset to export."));
-        return;
+    preset_delete_->setVisible(job.canDeletePreset());
+    {
+        const QSignalBlocker layouts{layout_choice_};
+        const QSignalBlocker destinations{destination_choice_};
+        layout_choice_->setCurrentIndex(job.layoutChoice());
+        destination_choice_->setCurrentIndex(job.destinationChoice());
     }
-    const auto suggested = displayText(selected->id) + QStringLiteral(".trackknife-preset.json");
-    const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Export encoder preset"),
-                                                   suggested, QStringLiteral("JSON (*.json)"));
-    if (path.isEmpty()) {
-        return;
+    setText(destination_, job.destination());
+    setText(directory_expression_, job.directoryExpression());
+    setText(basename_expression_, job.basenameExpression());
+    {
+        const QSignalBlocker mirror{mirror_structure_};
+        const QSignalBlocker artwork{embed_artwork_};
+        const QSignalBlocker parallel{parallelism_};
+        mirror_structure_->setChecked(job.mirror());
+        embed_artwork_->setChecked(job.embedArtwork());
+        parallelism_->setValue(job.parallelism());
     }
-    QJsonObject preset{
-        {QStringLiteral("id"), displayText(selected->id)},
-        {QStringLiteral("version"), static_cast<int>(selected->version)},
-        {QStringLiteral("display_name"), displayText(selected->display_name)},
-        {QStringLiteral("codec"), displayText(selected->codec_name)},
-        {QStringLiteral("container"), displayText(selected->container_name)},
-        {QStringLiteral("extension"), displayText(selected->file_extension)},
-        {QStringLiteral("lossless"), selected->lossless},
-        {QStringLiteral("sample_format"), displayText(selected->sample_format_hint)}};
-    if (selected->bit_rate) {
-        preset.insert(QStringLiteral("bit_rate"), static_cast<qint64>(*selected->bit_rate));
+    const auto mirrored = job.mirror();
+    directory_expression_->setEnabled(!mirrored);
+    basename_expression_->setEnabled(!mirrored);
+    layout_choice_->setEnabled(!mirrored);
+    choose(resample_, job.resample());
+    choose(bit_depth_, job.bitDepth());
+    choose(channels_, job.channels());
+    choose(gain_, job.gain());
+    gain_warning_->setText(job.gainWarning());
+    if (preview_->count() != job.preview().size() ||
+        (preview_->count() > 0 && preview_->item(0)->text() != job.preview().front())) {
+        preview_->clear();
+        preview_->addItems(job.preview());
     }
-    if (selected->vbr_quality) {
-        preset.insert(QStringLiteral("vbr_quality"), *selected->vbr_quality);
-    }
-    const QJsonObject document{
-        {QStringLiteral("format"), QStringLiteral("trackknife-encoder-preset-1")},
-        {QStringLiteral("preset"), preset}};
-    QSaveFile output{path};
-    if (!output.open(QIODevice::WriteOnly) ||
-        output.write(QJsonDocument{document}.toJson(QJsonDocument::Indented)) < 0 ||
-        !output.commit()) {
-        status_->setText(
-            QStringLiteral("Could not export encoder preset: %1").arg(output.errorString()));
-        return;
-    }
-    status_->setText(QStringLiteral("Exported encoder preset to %1").arg(path));
-}
-
-void ConvertDialog::saveJobSettings(const QString& preset_id) const {
-    QSettings settings;
-    settings.beginGroup(QStringLiteral("convert/job-presets/") + preset_id);
-    settings.setValue(QStringLiteral("schema"), 1);
-    settings.setValue(QStringLiteral("backend-versions"),
-                      displayText(convert::conversion_backend_versions()));
-    settings.setValue(QStringLiteral("destination-root"), destination_->text());
-    settings.setValue(QStringLiteral("directory-expression"), directory_expression_->text());
-    settings.setValue(QStringLiteral("basename-expression"), basename_expression_->text());
-    settings.setValue(QStringLiteral("mirror"), mirror_structure_->isChecked());
-    settings.setValue(QStringLiteral("resample"), resample_->currentData());
-    settings.setValue(QStringLiteral("bit-depth"), bit_depth_->currentData());
-    settings.setValue(QStringLiteral("channels"), channels_->currentData());
-    settings.remove(QStringLiteral("gain"));
-    settings.setValue(QStringLiteral("artwork"), embed_artwork_->isChecked());
-    settings.setValue(QStringLiteral("parallelism"), parallelism_->value());
-    settings.endGroup();
-}
-
-void ConvertDialog::applyJobSettings(const QString& preset_id) {
-    QSettings settings;
-    settings.beginGroup(QStringLiteral("convert/job-presets/") + preset_id);
-    if (settings.value(QStringLiteral("schema")).toInt() != 1) {
-        settings.endGroup();
-        return;
-    }
-    destination_->setText(settings.value(QStringLiteral("destination-root")).toString());
-    directory_expression_->setText(
-        settings.value(QStringLiteral("directory-expression")).toString());
-    basename_expression_->setText(settings.value(QStringLiteral("basename-expression")).toString());
-    mirror_structure_->setChecked(settings.value(QStringLiteral("mirror")).toBool());
-    const auto select = [&settings](QComboBox* combo, const char* key) {
-        if (const auto position = combo->findData(settings.value(QLatin1String(key)));
-            position >= 0) {
-            combo->setCurrentIndex(position);
-        }
-    };
-    select(resample_, "resample");
-    select(bit_depth_, "bit-depth");
-    select(channels_, "channels");
-    gain_->setCurrentIndex(0);
-    embed_artwork_->setChecked(settings.value(QStringLiteral("artwork"), true).toBool());
-    parallelism_->setValue(settings.value(QStringLiteral("parallelism"), 2).toInt());
-    settings.endGroup();
-}
-
-void ConvertDialog::deleteSelectedPreset() {
-    const auto chosen = preset_->currentData().toString().toStdString();
-    const auto found = std::ranges::find_if(
-        saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
-    if (found == saved_presets_.end() || !preset_store_.remove) {
-        return;
-    }
-    const QPointer self{this};
-    const auto settings_id = displayText(found->preset.id);
-    preset_store_.remove(found->id, [self, settings_id](const QString& error) {
-        if (self == nullptr) {
-            return;
-        }
-        if (!error.isEmpty()) {
-            self->status_->setText(error);
-            return;
-        }
-        QSettings settings;
-        settings.remove(QStringLiteral("convert/job-presets/") + settings_id);
-        self->reloadPresets({});
-    });
-}
-
-// Selecting a saved naming layout fills the expressions; they stay editable
-// and drift back to Custom on the first keystroke.
-void ConvertDialog::applySavedLayout(const int combo_index) {
-    const auto position = static_cast<std::size_t>(combo_index) - 1U;
-    if (combo_index <= 0 || position >= layout_catalog_.size()) {
-        return;
-    }
-    const auto& profile = layout_catalog_[position].profile;
-    directory_expression_->setText(displayText(profile.relative_directory_expression));
-    basename_expression_->setText(displayText(profile.basename_expression));
-}
-
-void ConvertDialog::applySavedDestination(const int combo_index) {
-    const auto position = static_cast<std::size_t>(combo_index) - 1U;
-    if (combo_index <= 0 || position >= destination_catalog_.size()) {
-        return;
-    }
-    destination_->setText(displayText(destination_catalog_[position].profile.root_raw_path));
-}
-
-ConvertDialog::~ConvertDialog() {
-    cancellation_.request_cancellation();
-    watcher_.waitForFinished();
-}
-
-void ConvertDialog::closeEvent(QCloseEvent* event) {
-    if (running_) {
-        cancellation_.request_cancellation();
-        status_->setText(QStringLiteral("Stopping after the files already in flight…"));
-        event->ignore();
-        return;
-    }
-    QDialog::closeEvent(event);
-}
-
-std::optional<convert::EncoderPreset> ConvertDialog::selectedPreset() const {
-    const auto chosen = preset_->currentData().toString().toStdString();
-    if (auto builtin = convert::find_encoder_preset(chosen)) {
-        return builtin;
-    }
-    const auto found = std::ranges::find_if(
-        saved_presets_, [&chosen](const auto& entry) { return entry.preset.id == chosen; });
-    return found != saved_presets_.end() ? std::optional{found->preset} : std::nullopt;
-}
-
-void ConvertDialog::refreshPreview() {
-    if (running_) {
-        return;
-    }
-    plan_.reset();
-    preview_->clear();
-    run_->setEnabled(false);
-
-    const auto preset = selectedPreset();
-    if (!preset) {
-        status_->setText(QStringLiteral("Choose a preset."));
-        return;
-    }
-    if (const auto availability = convert::probe_encoder_preset(*preset); !availability.available) {
-        status_->setText(displayText(availability.detail));
-        return;
-    }
-    const auto root = destination_->text().trimmed().toStdString();
-    if (root.empty()) {
-        status_->setText(QStringLiteral("Choose a destination folder."));
-        return;
-    }
-    std::error_code root_error;
-    if (!std::filesystem::is_directory(std::filesystem::path{root}, root_error)) {
-        status_->setText(QStringLiteral("The destination folder does not exist."));
-        return;
-    }
-
-    std::vector<operations::OutputPathPlanningItem> planning_items;
-    planning_items.reserve(items_.size());
-    QStringList problems;
-    for (std::size_t index = 0U; index < items_.size(); ++index) {
-        auto& item = items_[index];
-        if (!item.source_revision && item.fetch) {
-            // Not on this computer to look at: known by its path, which is
-            // all the plan needs to tell two items apart.
-            item.source_revision =
-                core::LocalSourceRevision{.device = 0U,
-                                          .inode = std::hash<std::string>{}(item.raw_path) | 1U,
-                                          .size = 0U,
-                                          .modification_time_seconds = 0,
-                                          .modification_time_nanoseconds = 0};
-        }
-        if (!item.source_revision) {
-            auto observed = core::observe_local_source_revision(item.raw_path);
-            if (!observed) {
-                problems.push_back(QStringLiteral("%1: %2").arg(
-                    item.label, displayText(observed.error().message)));
-                continue;
-            }
-            item.source_revision = *observed;
-        }
-        planning_items.push_back(operations::OutputPathPlanningItem{
-            .item_index = index,
-            .source_raw_path = item.raw_path,
-            .source_revision = *item.source_revision,
-            .final_metadata = item.metadata,
-        });
-    }
-    if (planning_items.empty()) {
-        status_->setText(
-            problems.isEmpty()
-                ? QStringLiteral("Nothing to convert.")
-                : QStringLiteral("No convertible files (%1 with problems).").arg(problems.size()));
-        showProblems(problems);
-        return;
-    }
-
-    operations::OutputLayoutProfile layout;
-    layout.name = "convert";
-    layout.relative_directory_expression = directory_expression_->text().trimmed().toStdString();
-    layout.basename_expression = basename_expression_->text().trimmed().toStdString();
-    operations::DestinationProfile destination;
-    destination.name = "convert";
-    destination.root_raw_path = std::filesystem::path{root}.lexically_normal().native();
-    operations::ConvertedPublicationPolicy converted{.target_extension = preset->file_extension,
-                                                     .mirror_source_root_raw_path = {}};
-    if (mirror_structure_->isChecked()) {
-        // ADR-0154: mirror recreates each source's complete folder path
-        // beneath the destination — no root inference, no extra knob.
-        preview_->addItem(QStringLiteral("Recreating full source paths beneath the destination"));
-        converted.mirror_source_root_raw_path = "/";
-    }
-    auto planned = operations::plan_output_paths(
-        planning_items, {.rename_files = true, .move_files = true}, std::move(layout),
-        std::move(destination), {}, {}, {}, converted);
-    if (!planned) {
-        status_->setText(displayText(planned.error().message));
-        return;
-    }
-
-    for (const auto& issue : planned->issues) {
-        problems.push_back(displayText(issue.message));
-    }
-    const auto shown =
-        std::min<std::size_t>(planned->sources.size(), static_cast<std::size_t>(preview_limit));
-    for (std::size_t index = 0U; index < shown; ++index) {
-        const auto& source = planned->sources[index];
-        auto relative = source.sanitized_relative_directory;
-        if (!relative.empty()) {
-            relative += '/';
-        }
-        relative += source.sanitized_basename + "." + preset->file_extension;
-        preview_->addItem(displayText(relative));
-    }
-    if (planned->sources.size() > shown) {
-        preview_->addItem(QStringLiteral("… and %1 more").arg(planned->sources.size() - shown));
-    }
-
-    const auto ready = planned->ready();
-    if (!problems.isEmpty()) {
-        status_->setText(QStringLiteral("%1 problem%2 block the plan.")
-                             .arg(problems.size())
-                             .arg(problems.size() == 1 ? QString{} : QStringLiteral("s")));
-    } else {
-        status_->setText(QStringLiteral("%1 file%2 ready.")
-                             .arg(planned->sources.size())
-                             .arg(planned->sources.size() == 1U ? QString{} : QStringLiteral("s")));
-    }
-    showProblems(problems);
-    plan_ = std::move(*planned);
-    run_->setEnabled(ready);
+    status_->setText(job.status());
+    problems_->setVisible(!job.problems().isEmpty());
+    problems_->setPlainText(job.problems().join(QStringLiteral("\n")));
+    const auto running = job.running();
+    run_->setVisible(!running);
+    run_->setEnabled(job.canRun());
+    stop_->setVisible(running);
+    progress_->setVisible(running);
+    progress_->setRange(0, job.progressMaximum());
+    progress_->setValue(job.progressValue());
 }
 
 void ConvertDialog::startConversion() {
-    if (running_ || !plan_ || !plan_->ready()) {
+    if (!job_->canRun()) {
         return;
     }
-    const auto preset = selectedPreset();
-    if (!preset) {
-        return;
-    }
-
-    if (gain_->currentData().toInt() != 0) {
+    if (job_->gain() != 0) {
         QMessageBox confirmation{
             QMessageBox::Warning, QStringLiteral("Permanently change audio volume?"),
-            QStringLiteral(
-                "This will bake %1 ReplayGain into the audio samples of the converted files. "
-                "It does not calculate or write ReplayGain tags. Removing tags cannot undo "
-                "the change; recreate the outputs from the original sources instead.\n\n"
-                "Source files will not be changed.")
-                .arg(gain_->currentData().toInt() == 2
-                         ? QStringLiteral("album (with track fallback)")
-                         : QStringLiteral("track")),
-            QMessageBox::Yes | QMessageBox::Cancel, this};
+            job_->gainConfirmation(), QMessageBox::Yes | QMessageBox::Cancel, this};
         confirmation.setObjectName(QStringLiteral("bench-convert-gain-confirmation"));
         confirmation.button(QMessageBox::Yes)->setText(QStringLiteral("Convert and change volume"));
         confirmation.setDefaultButton(QMessageBox::Cancel);
         confirmation.setEscapeButton(QMessageBox::Cancel);
-        if (confirmation.exec() != QMessageBox::Yes)
+        if (confirmation.exec() != QMessageBox::Yes) {
             return;
-    }
-
-    QSettings settings;
-    settings.setValue(QStringLiteral("convert/preset"), preset_->currentData().toString());
-    settings.setValue(QStringLiteral("convert/destination-root"), destination_->text());
-    settings.setValue(QStringLiteral("convert/directory-expression"),
-                      directory_expression_->text());
-    settings.setValue(QStringLiteral("convert/basename-expression"), basename_expression_->text());
-    settings.setValue(QStringLiteral("convert/parallelism"), parallelism_->value());
-    settings.setValue(QStringLiteral("convert/resample-rate"), resample_->currentData().toInt());
-    settings.setValue(QStringLiteral("convert/bit-depth"), bit_depth_->currentData().toInt());
-    settings.setValue(QStringLiteral("convert/channels"), channels_->currentData().toInt());
-    settings.remove(QStringLiteral("convert/gain"));
-    settings.setValue(QStringLiteral("convert/embed-artwork"), embed_artwork_->isChecked());
-    settings.setValue(QStringLiteral("convert/mirror-structure"), mirror_structure_->isChecked());
-
-    std::vector<convert::ConversionScanItem> scan_items;
-    scan_items.reserve(plan_->sources.size());
-    std::map<std::size_t, decltype(ConvertDialogItem::fetch)> fetches;
-    for (const auto& source : plan_->sources) {
-        for (const auto item_index : source.item_indexes) {
-            const auto& item = items_[item_index];
-            scan_items.push_back(convert::ConversionScanItem{
-                .item_index = item_index,
-                .source_raw_path = item.raw_path,
-                .selection = item.selection,
-                .range = item.segment,
-                .destination_raw_path = source.target_raw_path,
-                .metadata = item.metadata,
-            });
-            if (item.fetch) {
-                fetches.emplace(item_index, item.fetch);
-            }
         }
     }
-
-    running_ = true;
-    running_total_ = scan_items.size();
-    cancellation_ = core::CancellationSource{};
-    completed_ = std::make_shared<std::atomic_size_t>(0U);
-    run_->setVisible(false);
-    stop_->setVisible(true);
-    progress_->setVisible(true);
-    progress_->setRange(0, static_cast<int>(running_total_));
-    progress_->setValue(0);
-    status_->setText(QStringLiteral("Converting · 0 of %1 files").arg(running_total_));
-
-    auto* poll = new QTimer(this);
-    poll->setInterval(100);
-    connect(poll, &QTimer::timeout, this, [this] {
-        const auto done = completed_ ? completed_->load() : 0U;
-        progress_->setValue(static_cast<int>(done));
-        status_->setText(
-            QStringLiteral("Converting · %1 of %2 files").arg(done).arg(running_total_));
-    });
-    connect(&watcher_, &QFutureWatcherBase::finished, poll, &QObject::deleteLater);
-    poll->start();
-
-    const auto cancellation = cancellation_.token();
-    const auto parallelism = static_cast<std::size_t>(parallelism_->value());
-    const auto resample_rate = resample_->currentData().toInt();
-    const auto target_sample_rate = resample_rate > 0 ? std::optional{resample_rate} : std::nullopt;
-    const auto sample_rate_cap = resample_rate < 0 ? std::optional{-resample_rate} : std::nullopt;
-    const auto depth_choice = bit_depth_->currentData().toInt();
-    const auto target_bit_depth = depth_choice > 0 ? std::optional{depth_choice} : std::nullopt;
-    const auto keep_source_depth = depth_choice < 0;
-    const auto channel_policy =
-        channels_->currentData().toInt() == 1   ? convert::ConversionChannelPolicy::mono
-        : channels_->currentData().toInt() == 2 ? convert::ConversionChannelPolicy::stereo
-                                                : convert::ConversionChannelPolicy::keep;
-    const auto gain_mode = gain_->currentData().toInt() == 1   ? convert::ConversionGainMode::track
-                           : gain_->currentData().toInt() == 2 ? convert::ConversionGainMode::album
-                                                               : convert::ConversionGainMode::none;
-    const auto carry_artwork = embed_artwork_->isChecked();
-    watcher_.setFuture(QtConcurrent::run(
-        [scan_items = std::move(scan_items), fetches = std::move(fetches), preset = *preset,
-         parallelism, target_sample_rate, sample_rate_cap, target_bit_depth, keep_source_depth,
-         channel_policy, gain_mode, carry_artwork, completed = completed_, cancellation]() mutable {
-            // ADR-0237 stage 6: files of an engine elsewhere, fetched first
-            // into a folder of their own and converted from there.
-            std::vector<convert::ConvertedItemScan> fetch_failures;
-            std::optional<std::filesystem::path> fetched_folder;
-            if (!fetches.empty()) {
-                // On disk, not in /tmp: a batch of originals can be large.
-                fetched_folder =
-                    std::filesystem::path{QFile::encodeName(QStandardPaths::writableLocation(
-                                                                QStandardPaths::CacheLocation))
-                                              .toStdString()} /
-                    ("convert-" + core::StableId::random().to_string());
-                std::vector<convert::ConversionScanItem> reachable;
-                for (auto& item : scan_items) {
-                    const auto fetch = fetches.find(item.item_index);
-                    if (fetch == fetches.end()) {
-                        reachable.push_back(std::move(item));
-                        continue;
-                    }
-                    const auto folder = *fetched_folder / std::to_string(item.item_index);
-                    std::error_code made;
-                    std::filesystem::create_directories(folder, made);
-                    const auto copy =
-                        folder / std::filesystem::path{item.source_raw_path}.filename();
-                    auto fetched = made ? core::Result<void>{std::unexpected(
-                                              core::Error{.code = core::ErrorCode::io,
-                                                          .message = made.message(),
-                                                          .context = {}})}
-                                        : fetch->second(copy, cancellation);
-                    if (!fetched) {
-                        fetch_failures.push_back(convert::ConvertedItemScan{
-                            .item_index = item.item_index,
-                            .source_raw_path = item.source_raw_path,
-                            .destination_raw_path = item.destination_raw_path,
-                            .state = convert::ConversionScanState::failed,
-                            .converted = std::nullopt,
-                            .source_revision = std::nullopt,
-                            .issue = std::move(fetched.error())});
-                        continue;
-                    }
-                    item.source_raw_path = copy.native();
-                    reachable.push_back(std::move(item));
-                }
-                scan_items = std::move(reachable);
-            }
-            // The conversion core requires existing target directories; create
-            // them up front so parallel workers never race directory creation.
-            for (const auto& item : scan_items) {
-                std::error_code create_error;
-                std::filesystem::create_directories(
-                    std::filesystem::path{item.destination_raw_path}.parent_path(), create_error);
-            }
-            auto scan = convert::scan_conversion(
-                scan_items,
-                {.preset = preset,
-                 .maximum_parallelism = parallelism,
-                 .target_sample_rate = target_sample_rate,
-                 .sample_rate_cap = sample_rate_cap,
-                 .target_bit_depth = target_bit_depth,
-                 .keep_source_bit_depth = keep_source_depth,
-                 .channel_policy = channel_policy,
-                 .gain_mode = gain_mode,
-                 .carry_artwork = carry_artwork},
-                [completed](const convert::ConversionScanProgress& update) {
-                    completed->store(update.completed_items);
-                },
-                cancellation);
-            if (fetched_folder) {
-                std::error_code removed;
-                std::filesystem::remove_all(*fetched_folder, removed);
-            }
-            if (scan) {
-                scan->items.insert(scan->items.end(),
-                                   std::make_move_iterator(fetch_failures.begin()),
-                                   std::make_move_iterator(fetch_failures.end()));
-            }
-            return std::make_shared<core::Result<convert::ConversionScanResult>>(std::move(scan));
-        }));
+    job_->run();
 }
 
-void ConvertDialog::finishConversion() {
-    running_ = false;
-    stop_->setVisible(false);
-    run_->setVisible(true);
-    progress_->setVisible(false);
-    const auto outcome = watcher_.result();
-    if (!outcome || !*outcome) {
-        status_->setText(outcome ? displayText((*outcome).error().message)
-                                 : QStringLiteral("Conversion failed."));
-        refreshPreview();
-        return;
-    }
-    const auto& result = **outcome;
-    if (result.converted_count() > 0U) {
-        emit filesConverted();
-    }
-    QStringList problems;
-    for (const auto& item : result.items) {
-        if (item.state == convert::ConversionScanState::failed && item.issue) {
-            problems.push_back(QStringLiteral("%1: %2").arg(items_[item.item_index].label,
-                                                            displayText(item.issue->message)));
-        }
-    }
-    auto summary = QStringLiteral("Converted %1 of %2 files.")
-                       .arg(result.converted_count())
-                       .arg(result.items.size());
-    if (result.cancellation_requested) {
-        summary += QStringLiteral(" Stopped early.");
-    }
-    if (!problems.isEmpty()) {
-        summary += QStringLiteral(" %1 failed.").arg(problems.size());
-    }
-    status_->setText(summary);
-    showProblems(problems);
+void ConvertDialog::openPresetEditor() {
+    auto* editor = new EncoderPresetEditor(job_->presetDraft(), this);
+    editor->setAttribute(Qt::WA_DeleteOnClose);
+    connect(editor, &QDialog::accepted, this,
+            [this, editor] { job_->savePreset(editor->result()); });
+    editor->open();
 }
 
-void ConvertDialog::showProblems(const QStringList& problems) {
-    if (problems.isEmpty()) {
-        problems_->hide();
-        problems_->clear();
+void ConvertDialog::exportSelectedPreset() {
+    const auto path = QFileDialog::getSaveFileName(this, QStringLiteral("Export encoder preset"),
+                                                   job_->suggestedPresetExportName(),
+                                                   QStringLiteral("JSON (*.json)"));
+    if (!path.isEmpty()) {
+        job_->exportPreset(path);
+    }
+}
+
+void ConvertDialog::closeEvent(QCloseEvent* event) {
+    if (!job_->requestClose()) {
+        event->ignore();
         return;
     }
-    problems_->setPlainText(problems.join(QStringLiteral("\n")));
-    problems_->show();
+    QDialog::closeEvent(event);
 }
 
 } // namespace trackknife::bench

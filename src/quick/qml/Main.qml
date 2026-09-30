@@ -46,6 +46,10 @@ ApplicationWindow {
             sources.openArtistForScreenshot();
             Qt.callLater(() => albumTimer.start());
         }
+        else if (name === "convert") {
+            Tk.rows.selectAll();
+            Tk.convertFiles();
+        }
         else if (name === "replaygain") {
             Tk.rows.selectAll();
             window.replayGainForScreenshot = true;
@@ -225,7 +229,7 @@ ApplicationWindow {
                 objectName: "action-convert"
                 text: "Convert files…"
                 enabled: (Tk.selection.count ?? 0) > 0
-                onTriggered: window.notYet("Converting")
+                onTriggered: Tk.convertFiles()
             }
             MenuSeparator {}
             Action {
@@ -662,8 +666,17 @@ ApplicationWindow {
         id: replayGainComponent
         ReplayGainDialog {}
     }
+    Component {
+        id: convertComponent
+        ConvertDialog {}
+    }
     Connections {
         target: Tk
+        function onConvertOpened(convert) {
+            const opened = convertComponent.createObject(window, {convert: convert});
+            opened.raise();
+            opened.requestActivate();
+        }
         function onReplayGainOpened(replayGain) {
             const opened = replayGainComponent.createObject(window, {replayGain: replayGain});
             if (window.replayGainForScreenshot)

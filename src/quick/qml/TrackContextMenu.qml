@@ -59,7 +59,7 @@ Menu {
         MenuItem {
             text: "Convert files…"
             enabled: contextMenu.selection
-            onTriggered: contextMenu.notYet("Converting")
+            onTriggered: Tk.convertFiles()
         }
     }
     MenuSeparator {}

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "quick/list_tabs_model.hpp"
+#include "quick/quick_convert.hpp"
 #include "quick/quick_replaygain.hpp"
 #include "quick/quick_tagger.hpp"
 #include "quick/track_rows_model.hpp"
@@ -194,6 +195,8 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_INVOKABLE void editTags();
     // "ReplayGain…": the selected rows measured and tagged.
     Q_INVOKABLE void replayGain();
+    // "Convert files…": the selected rows converted below a folder.
+    Q_INVOKABLE void convertFiles();
 
     // The workspace closing: saved at once, and quitting stops this
     // computer's engine.
@@ -259,6 +262,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void quitRequested();
     void taggerOpened(trackknife::quick::QuickTagger* tagger);
     void replayGainOpened(trackknife::quick::QuickReplayGain* replayGain);
+    void convertOpened(trackknife::quick::QuickConvert* convert);
     // Something to be read and acknowledged, in a message box.
     void information(const QString& title, const QString& text);
     void lastFmStateChanged();

@@ -60,160 +60,44 @@ void BenchMainWindow::showConvertDialog() {
 
 void BenchMainWindow::showConvertForView(QTableView* view) {
     auto* model = view ? qobject_cast<LocalListModel*>(view->model()) : nullptr;
-    if (!model || !view->selectionModel()) {
+    if (model == nullptr || !view->selectionModel()) {
         return;
     }
-    const auto engine = engineOfView(view);
-    if (const auto* engine_link = link(engine); !engine.isLocal() && engine_link != nullptr) {
-        // A remote tab's files are converted where this computer has them --
-        // through the mount -- and otherwise fetched from their engine first
-        // (ADR-0237 stage 6), as the phone downloads them.
-        const auto work = engine_link->does_file_work ? engine_link->file_work : nullptr;
-        const auto mount = mountOf(*engine_link);
-        auto selected = view->selectionModel()->selectedRows();
-        std::ranges::sort(selected, {}, &QModelIndex::row);
-        std::vector<ConvertDialogItem> items;
-        std::size_t unreachable = 0U;
-        for (const auto& index : selected) {
-            const auto position = static_cast<std::size_t>(index.row());
-            if (position >= model->rows().size()) {
-                continue;
-            }
-            const auto& row = model->rows()[position];
-            auto label = displayText(row.title.empty() ? row.raw_path : row.title);
-            if (!row.artist.empty()) {
-                label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
-            }
-            ConvertDialogItem item{.raw_path = row.raw_path,
-                                   .selection = row.selection,
-                                   .segment = row.segment,
-                                   .source_revision = row.source_revision,
-                                   .metadata = row.metadata,
-                                   .label = std::move(label),
-                                   .fetch = {}};
-            if (auto here = mount.to_local(row.raw_path)) {
-                item.raw_path = std::move(*here);
-                // What was known of it came from the remote; read afresh here.
-                item.source_revision.reset();
-            } else if (work) {
-                item.fetch = [work,
-                              remote = row.raw_path](const std::filesystem::path& to,
-                                                     const core::CancellationToken& cancellation) {
-                    return work->download_original(remote, to, cancellation);
-                };
-            } else {
-                ++unreachable;
-                continue;
-            }
-            items.push_back(std::move(item));
-        }
-        if (unreachable > 0U) {
-            statusBar()->showMessage(
-                QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
-                               "out. Where that engine's music is reachable here is set in "
-                               "Settings → Engine.")
-                    .arg(unreachable)
-                    .arg(selected.size()),
-                10'000);
-        }
-        if (!items.empty()) {
-            openConvertItems(std::move(items));
-        }
+    std::vector<int> rows;
+    for (const auto& index : view->selectionModel()->selectedRows()) {
+        rows.push_back(index.row());
+    }
+    if (rows.empty()) {
         return;
     }
-    auto selected = view->selectionModel()->selectedRows();
-    std::ranges::sort(selected, {}, &QModelIndex::row);
-    if (selected.empty()) {
-        return;
+    auto opening = workspace_.convertItems(*model, engineOfView(view), std::move(rows));
+    if (opening.unreachable > 0U) {
+        statusBar()->showMessage(
+            QStringLiteral("%1 of %2 tracks are not reachable on this computer and were left "
+                           "out. Where that engine's music is reachable here is set in "
+                           "Settings → Engine.")
+                .arg(opening.unreachable)
+                .arg(opening.unreachable + opening.items.size()),
+            10'000);
     }
-    std::vector<ConvertDialogItem> items;
-    items.reserve(static_cast<std::size_t>(selected.size()));
-    for (const auto& index : selected) {
-        const auto row_index = index.row();
-        if (row_index < 0 || row_index >= static_cast<int>(model->rows().size())) {
-            continue;
-        }
-        const auto& row = model->rows()[static_cast<std::size_t>(row_index)];
-        auto label = model->index(row_index, local_title_column).data().toString();
-        if (!row.artist.empty()) {
-            label = QStringLiteral("%1 — %2").arg(displayText(row.artist), label);
-        }
-        items.push_back(ConvertDialogItem{
-            .raw_path = row.raw_path,
-            .selection = row.selection,
-            .segment = row.segment,
-            .source_revision = row.source_revision,
-            .metadata = row.metadata,
-            .label = std::move(label),
-            .fetch = {},
-        });
+    if (!opening.items.empty()) {
+        openConvertItems(std::move(opening.items));
     }
-    if (items.empty()) {
-        return;
-    }
-    openConvertItems(std::move(items));
 }
 
 void BenchMainWindow::openConvertItems(std::vector<ConvertDialogItem> items) {
-    auto* const persistence_service = persistence_;
-    auto* dialog = new ConvertDialog(
-        std::move(items),
-        [persistence_service](
-            std::function<void(std::vector<persistence::SavedOutputLayoutProfile>,
-                               std::vector<persistence::SavedDestinationProfile>, QString)>
-                completion) {
-            if (persistence_service == nullptr) {
-                completion({}, {}, QStringLiteral("Trackknife persistence is unavailable"));
-                return;
-            }
-            persistence_service->loadOutputProfiles(std::move(completion));
-        },
-        ConvertPresetStore{
-            .load =
-                [persistence_service](ConvertPresetStore::LoadCompletion completion) {
-                    if (persistence_service == nullptr) {
-                        completion({}, QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->loadEncoderPresets(std::move(completion));
-                },
-            .save =
-                [persistence_service](persistence::SavedEncoderPreset preset,
-                                      ConvertPresetStore::Completion completion) {
-                    if (persistence_service == nullptr) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->saveEncoderPreset(std::move(preset),
-                                                           std::move(completion));
-                },
-            .remove =
-                [persistence_service](core::StableId id,
-                                      ConvertPresetStore::Completion completion) {
-                    if (persistence_service == nullptr) {
-                        completion(QStringLiteral("Trackknife persistence is unavailable"));
-                        return;
-                    }
-                    persistence_service->removeEncoderPreset(id, std::move(completion));
-                },
-        },
-        this);
-    connect(dialog, &ConvertDialog::filesConverted, this, [this] {
-        if (localLibrary() != nullptr) {
-            localLibrary()->refreshLibrary();
-        }
-    });
+    auto* dialog = new ConvertDialog(std::move(items), workspace_.convertProfiles(),
+                                     workspace_.convertPresets(), this);
+    connect(dialog, &ConvertDialog::filesConverted, this,
+            [this] { workspace_.refreshLocalLibrary(); });
     dialog->show();
 }
-
-
-
 
 // Observable for tests: what engines could not settle. Shown when some of
 // it is new.
 void BenchMainWindow::engineInterruptionsChanged(const bool reported_now) {
-    const auto moves = std::ranges::count_if(engine_interruptions_,
-                                             [](const auto& known) { return known.move; });
+    const auto moves =
+        std::ranges::count_if(engine_interruptions_, [](const auto& known) { return known.move; });
     setProperty("trackknife-file-reconciliation-count", static_cast<qulonglong>(moves));
     setProperty("trackknife-metadata-reconciliation-count",
                 static_cast<qulonglong>(engine_interruptions_.size()) -
@@ -226,11 +110,6 @@ void BenchMainWindow::engineInterruptionsChanged(const bool reported_now) {
 std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::fileWorkOf(QTableView* view) const {
     return workspace_.fileWorkOf(engineOfView(view));
 }
-
-
-
-
-
 
 void BenchMainWindow::showReplayGainDialog() {
     auto* tab = currentListTab();
@@ -279,8 +158,6 @@ std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::requireFileWork(QTableV
     }
     return work;
 }
-
-
 
 void BenchMainWindow::showMetadataProperties() {
     auto* tab = currentListTab();
@@ -380,11 +257,6 @@ void BenchMainWindow::openMetadataProperties(const std::size_t selected_row_coun
     properties->raise();
     properties->activateWindow();
 }
-
-
-
-
-
 
 // Crash recovery is silent when it succeeds. Only operations recovery could
 // neither finish nor safely roll back are surfaced, each exactly once: shown

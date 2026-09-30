@@ -98,7 +98,6 @@ class LocalFilesMimeData;
 namespace trackknife::bench {
 enum class QuickPickKind;
 class ListsPanel;
-struct ConvertDialogItem;
 
 class LocalLibraryPanel;
 class MetadataPropertiesDialog;

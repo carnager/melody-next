@@ -165,3 +165,9 @@ target_link_libraries(
             trackknife_quick_styleplugin
             trackknife_project_options
 )
+
+# Packaged with the window, as "app": the Qt Quick window beside it, a
+# preview (ADR-0240), with its own desktop entry.
+install(TARGETS trackknife-quick RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT app)
+install(FILES ${PROJECT_SOURCE_DIR}/packaging/arch/trackknife-quick.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications COMPONENT app)

@@ -59,7 +59,7 @@ ApplicationWindow {
         id: stageTimer
         property var opened
         interval: 1500
-        onTriggered: opened.stageForScreenshot()
+        onTriggered: opened.stageForScreenshot(window.taggerForScreenshot)
     }
     Timer {
         id: albumTimer
@@ -657,7 +657,7 @@ ApplicationWindow {
             const opened = taggerComponent.createObject(window, {tagger: tagger});
             opened.raise();
             opened.requestActivate();
-            if (window.taggerForScreenshot === "tagger-edit")
+            if (window.taggerForScreenshot !== "tagger")
                 Qt.callLater(() => stageTimer.start());
             stageTimer.opened = opened;
         }

@@ -67,10 +67,33 @@ QVariant TaggerFieldRows::data(const QModelIndex& index, const int role) const {
 
 QuickTagger::QuickTagger(QString title, const std::size_t count,
                          bench::MetadataPropertiesSourceReader reader,
-                         bench::TaggerServices services, QObject* parent)
+                         bench::TaggerServices services,
+                         bench::ArtworkWritePlanApplierFactory artwork_applier,
+                         bench::ArtworkApplyObserver artwork_observer, QObject* parent)
     : QObject(parent), title_(std::move(title)) {
+    const auto tools = services.tools;
+    const auto unified = static_cast<bool>(services.plan_applier_factory);
     session_ = new bench::TaggerSession(count, std::move(reader), bench::Workspace::taggerFields(),
                                         std::move(services), this);
+    session_->setArtworkServices(std::move(artwork_applier), std::move(artwork_observer));
+    // The covers, as the widgets editor's Artwork page has them: read while
+    // the editor is open (its Fields page shows the front cover too), saved
+    // with the tags' Apply.
+    artwork_session_ = new bench::ArtworkSession(this);
+    artwork_session_->setFileWorkTools(tools);
+    artwork_session_->setUnifiedApply(unified);
+    artwork_session_->setMutationServices(session_->artworkApplierFactory(),
+                                          session_->artworkAppliedObserver());
+    if (auto service = session_->coverArtService()) {
+        artwork_session_->setCoverArtService(std::move(*service));
+    }
+    artwork_session_->setActive(true);
+    connect(artwork_session_, &bench::ArtworkSession::operationRunningChanged, session_,
+            &bench::TaggerSession::setArtworkOperationRunning);
+    connect(artwork_session_, &bench::ArtworkSession::pendingChangesChanged, session_,
+            &bench::TaggerSession::artworkStateChanged);
+    session_->setArtwork(artwork_session_);
+    artwork_ = new QuickArtwork(artwork_session_, this);
     filter_debounce_ = new QTimer(this);
     filter_debounce_->setSingleShot(true);
     filter_debounce_->setInterval(40);
@@ -161,6 +184,7 @@ QuickTagger::QuickTagger(QString title, const std::size_t count,
 }
 
 QuickTagger::~QuickTagger() {
+    session_->setArtwork(nullptr);
     delete session_;
     session_ = nullptr;
 }

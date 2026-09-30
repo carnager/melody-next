@@ -5,6 +5,7 @@
 
 #include "bench/engine_launcher.hpp"
 #include "quick/image_providers.hpp"
+#include "quick/quick_artwork.hpp"
 #include "quick/quick_workspace.hpp"
 #include "uicommon/debug_log.hpp"
 #include "workspace/startup.hpp"
@@ -88,6 +89,7 @@ int main(int argc, char* argv[]) {
     chooseStyle();
     qml.addImageProvider(QStringLiteral("cover"), new trackknife::quick::CoverProvider(workspace));
     qml.addImageProvider(QStringLiteral("icon"), new trackknife::quick::IconProvider());
+    qml.addImageProvider(QStringLiteral("artwork"), new trackknife::quick::ArtworkImageProvider());
     QObject::connect(
         &qml, &QQmlApplicationEngine::objectCreationFailed, &application,
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);

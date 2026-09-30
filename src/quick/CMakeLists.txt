@@ -21,6 +21,8 @@ qt_add_qml_module(
     image_providers.hpp
     list_tabs_model.cpp
     list_tabs_model.hpp
+    quick_artwork.cpp
+    quick_artwork.hpp
     quick_tagger.cpp
     quick_tagger.hpp
     quick_workspace.cpp
@@ -58,6 +60,9 @@ qt_add_qml_module(
     qml/ExactValuesDialog.qml
     qml/AddFieldDialog.qml
     qml/TableDialog.qml
+    qml/ArtworkPage.qml
+    qml/CompactCover.qml
+    qml/CoverPicker.qml
 )
 
 target_include_directories(trackknife-quick PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")

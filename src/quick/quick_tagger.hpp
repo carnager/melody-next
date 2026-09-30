@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "quick/quick_artwork.hpp"
 #include "workspace/field_filter.hpp"
 #include "workspace/tagger_session.hpp"
 
@@ -50,6 +51,7 @@ class QuickTagger final : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("Opened by the workspace")
     Q_PROPERTY(QString title READ title CONSTANT)
+    Q_PROPERTY(trackknife::quick::QuickArtwork* artwork READ artwork CONSTANT)
     Q_PROPERTY(bool ready READ ready NOTIFY gridReady)
     Q_PROPERTY(QAbstractItemModel* files READ files NOTIFY gridReady)
     Q_PROPERTY(QAbstractItemModel* fields READ fields NOTIFY gridReady)
@@ -70,10 +72,13 @@ class QuickTagger final : public QObject {
 
   public:
     QuickTagger(QString title, std::size_t count, bench::MetadataPropertiesSourceReader reader,
-                bench::TaggerServices services, QObject* parent = nullptr);
+                bench::TaggerServices services,
+                bench::ArtworkWritePlanApplierFactory artwork_applier,
+                bench::ArtworkApplyObserver artwork_observer, QObject* parent = nullptr);
     ~QuickTagger() override;
 
     [[nodiscard]] QString title() const { return title_; }
+    [[nodiscard]] QuickArtwork* artwork() const { return artwork_; }
     [[nodiscard]] bool ready() const { return session_->ready(); }
     [[nodiscard]] QAbstractItemModel* files() const;
     [[nodiscard]] QAbstractItemModel* fields() const { return field_rows_; }
@@ -158,6 +163,8 @@ class QuickTagger final : public QObject {
     // Closing: "close", "confirm-artwork", "confirm-drafts" or "wait".
     Q_INVOKABLE QString requestClose();
     Q_INVOKABLE void closing(bool discard) { session_->closing(discard); }
+    // Closing without the covers staged.
+    Q_INVOKABLE void discardArtwork() { artwork_session_->discardPendingChanges(); }
     // Its window closed: gone.
     Q_INVOKABLE void release() { deleteLater(); }
 
@@ -188,6 +195,8 @@ class QuickTagger final : public QObject {
 
     QString title_;
     bench::TaggerSession* session_{nullptr};
+    bench::ArtworkSession* artwork_session_{nullptr};
+    QuickArtwork* artwork_{nullptr};
     TaggerFieldRows* field_rows_{nullptr};
     QItemSelectionModel* field_selection_{nullptr};
     bench::FieldFilter filter_;

@@ -334,26 +334,37 @@ ApplicationWindow {
                         }
                     }
 
-                    TaggerFieldTable {
-                        id: fieldTable
+                    RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        tagger: taggerWindow.tagger
-                        onEditValues: exactValues.edit()
-                        onAddField: addField.open()
+                        spacing: 8
+                        TaggerFieldTable {
+                            id: fieldTable
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            tagger: taggerWindow.tagger
+                            onEditValues: exactValues.edit()
+                            onAddField: addField.open()
+                        }
+                        CompactCover {
+                            Layout.fillHeight: true
+                            artwork: taggerWindow.tagger.artwork
+                            onOpenArtwork: sections.currentIndex = 1
+                            onCoverSettings: taggerWindow.settingsRequested("covers")
+                            onFetch: artworkPage.openPicker()
+                        }
                     }
                 }
 
                 // Artwork.
-                Item {
-                    Label {
-                        anchors.centerIn: parent
-                        width: parent.width * 0.7
-                        horizontalAlignment: Text.AlignHCenter
-                        wrapMode: Text.WordWrap
-                        opacity: 0.7
-                        text: qsTr("Covers are edited in the widgets window for now; they come to this one next.")
-                    }
+                ArtworkPage {
+                    id: artworkPage
+                    artwork: taggerWindow.tagger.artwork
+                    onFeedback: (title, summary, rows) => artworkFeedback.show(title, summary, rows, false, false)
+                    onFolderReview: (note, rows) => artworkFolderReview.show(
+                                        qsTr("Review folder covers"), note,
+                                        [qsTr("Destination"), qsTr("Change"), qsTr("Incoming image")],
+                                        rows, true)
                 }
             }
         }
@@ -461,7 +472,11 @@ ApplicationWindow {
 
     // QA hook (--open tagger-edit): a draft staged and the Actions shown,
     // for a picture of both.
-    function stageForScreenshot() {
+    function stageForScreenshot(name) {
+        if (name === "tagger-art") {
+            sections.currentIndex = 1;
+            return;
+        }
         tagger.setField(0, "Edited title");
         actions.open();
     }
@@ -486,6 +501,15 @@ ApplicationWindow {
         objectName: "bench-folder-cover-review"
         onAccepted: taggerWindow.tagger.folderImagesReviewed(true)
         onRejected: taggerWindow.tagger.folderImagesReviewed(false)
+    }
+    FeedbackDialog {
+        id: artworkFeedback
+    }
+    TableDialog {
+        id: artworkFolderReview
+        objectName: "bench-folder-cover-review"
+        onAccepted: taggerWindow.tagger.artwork.folderImagesReviewed(true)
+        onRejected: taggerWindow.tagger.artwork.folderImagesReviewed(false)
     }
     ExactValuesDialog {
         id: exactValues
@@ -588,6 +612,7 @@ ApplicationWindow {
         }
         onDiscarded: {
             close();
+            taggerWindow.tagger.discardArtwork();
             taggerWindow.close();
         }
     }

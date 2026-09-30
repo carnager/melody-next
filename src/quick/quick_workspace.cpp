@@ -440,7 +440,8 @@ void QuickWorkspace::editTags() {
                             .arg(count)
                             .arg(count == 1U ? QStringLiteral("track") : QStringLiteral("tracks")),
                         count, workspace_.selectionSourceReader(*tab, std::move(selected)),
-                        std::move(opening.services), this);
+                        std::move(opening.services), std::move(opening.artwork_applier),
+                        std::move(opening.artwork_observer), this);
     connect(tagger, &QuickTagger::statusMessage, this,
             [this](const QString& message) { showMessage(message, 12'000); });
     emit taggerOpened(tagger);

@@ -2,6 +2,11 @@
 
 #include "trackknife/operations/metadata_commit.hpp"
 
+#include "backup_links.hpp"
+#include "trackknife/core/atomic_rename.hpp"
+
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -10,6 +15,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 namespace trackknife::operations {
 namespace {
@@ -103,6 +109,85 @@ core::Result<void> remove_matching(int fd, const std::string& name,
         return std::unexpected(io_error());
     return {};
 }
+// The folder is locked against other saves. Where the filesystem has no
+// flock (some SMB and FUSE mounts), the in-process lock and the revision
+// checks before every step carry it, as for media files (ADR-0111).
+core::Result<void> lock_directory(int fd) {
+    if (::flock(fd, LOCK_EX | LOCK_NB) == 0 || errno == ENOLCK || errno == ENOTSUP ||
+        errno == EOPNOTSUPP)
+        return {};
+    return std::unexpected(io_error());
+}
+bool read_all(int fd, std::vector<char>& bytes) {
+    std::size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto count =
+            ::pread(fd, bytes.data() + offset, bytes.size() - offset, static_cast<off_t>(offset));
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0)
+            return false;
+        offset += static_cast<std::size_t>(count);
+    }
+    char extra = 0;
+    return ::pread(fd, &extra, 1, static_cast<off_t>(offset)) == 0;
+}
+// ADR-0248: the backup as a verified copy where the filesystem refuses the
+// hard link, with the original's permissions and time.
+core::Result<core::LocalSourceRevision> copy_backup(int fd, const std::string& name,
+                                                    const std::string& backup) {
+    constexpr off_t limit = 256 * 1024 * 1024;
+    Descriptor source{::openat(fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+    struct stat status{};
+    if (source.fd < 0 || ::fstat(source.fd, &status) != 0)
+        return std::unexpected(io_error());
+    if (status.st_size < 0 || status.st_size > limit)
+        return std::unexpected(error("Folder image is too large to back up by copy"));
+    std::vector<char> original(static_cast<std::size_t>(status.st_size));
+    if (!read_all(source.fd, original))
+        return std::unexpected(error("Folder image changed while backed up"));
+    Descriptor copy{
+        ::openat(fd, backup.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600)};
+    if (copy.fd < 0)
+        return std::unexpected(io_error());
+    const auto discard = [&](core::Error issue) -> core::Result<core::LocalSourceRevision> {
+        static_cast<void>(::unlinkat(fd, backup.c_str(), 0));
+        return std::unexpected(std::move(issue));
+    };
+    for (std::size_t offset = 0; offset < original.size();) {
+        const auto count = ::write(copy.fd, original.data() + offset, original.size() - offset);
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0)
+            return discard(io_error());
+        offset += static_cast<std::size_t>(count);
+    }
+    if (::fchmod(copy.fd, status.st_mode & 07777) != 0 || ::fsync(copy.fd) != 0)
+        return discard(io_error());
+    const int written = std::exchange(copy.fd, -1);
+    if (::close(written) != 0)
+        return discard(io_error());
+    // By path, after the close: the time an SMB mount then keeps. sshfs
+    // refuses it, and the copy keeps its own.
+    const std::array times{status.st_atim, status.st_mtim};
+    static_cast<void>(::utimensat(fd, backup.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
+    Descriptor reread{::openat(fd, backup.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC)};
+    std::vector<char> copied(original.size());
+    struct stat after{};
+    if (reread.fd < 0 || !read_all(reread.fd, copied) || copied != original ||
+        ::fstat(source.fd, &after) != 0 || after.st_size != status.st_size ||
+        after.st_mtim.tv_sec != status.st_mtim.tv_sec ||
+        after.st_mtim.tv_nsec != status.st_mtim.tv_nsec)
+        return discard(error("Folder image backup copy failed verification"));
+    auto identity = revision(fd, backup);
+    if (!identity || !*identity)
+        return discard(!identity ? identity.error() : error("Folder image backup vanished"));
+    return **identity;
+}
+// Filesystems without renameat2 exchange (SMB, CIFS, FUSE) refuse with these.
+bool exchange_refused(int number) {
+    return number == EINVAL || number == ENOTSUP || number == EOPNOTSUPP || number == ENOSYS;
+}
 core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalRecord record,
                                                     MetadataOperationJournal& journal, int fd) {
     const auto target = basename(record.source_raw_path);
@@ -110,6 +195,8 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     const auto backup = basename(record.backup_raw_path);
     const bool existed = record.changes.front().original_present;
     const auto original = existed ? std::optional{record.expected_revision} : std::nullopt;
+    // The backup: the original's own inode, or a copy of it (ADR-0248).
+    const auto kept = existed ? std::optional{backup_identity(record)} : std::nullopt;
     auto current = revision(fd, target);
     auto old = revision(fd, backup);
     const auto reconcile = [&](core::Error issue) -> core::Result<MetadataRecoveryResult> {
@@ -133,7 +220,7 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     if (!unchanged && !published)
         return reconcile(error("Folder image changed outside this operation"));
     if (published) {
-        if (*old != original)
+        if (*old != kept)
             return reconcile(error("Folder image recovery backup is missing or changed"));
         if (existed) {
             auto original_image = metadata::read_artwork_image_file(descriptor_path(fd, backup));
@@ -169,9 +256,16 @@ core::Result<MetadataRecoveryResult> recover_locked(MetadataOperationJournalReco
     auto cleaned = remove_matching(fd, prepared, record.prepared_revision, original);
     if (!cleaned)
         return reconcile(cleaned.error());
-    cleaned = remove_matching(fd, backup, original);
-    if (!cleaned)
-        return reconcile(cleaned.error());
+    if (record.state == State::prepared && existed && !record.backup_revision) {
+        // A copy made but not yet journaled (ADR-0248): the image is
+        // untouched, and the copy at this operation's own path is its debris.
+        if (::unlinkat(fd, backup.c_str(), 0) != 0 && errno != ENOENT)
+            return reconcile(io_error());
+    } else {
+        cleaned = remove_matching(fd, backup, kept);
+        if (!cleaned)
+            return reconcile(cleaned.error());
+    }
     if (::fsync(fd) != 0)
         return reconcile(io_error());
     auto rolled_back = step(journal, record, State::rolled_back);
@@ -201,8 +295,8 @@ recover_folder_image(const MetadataOperationJournalRecord& record,
     if (!opened)
         return std::unexpected(opened.error());
     Descriptor directory{*opened};
-    if (::flock(directory.fd, LOCK_EX | LOCK_NB) != 0)
-        return std::unexpected(io_error());
+    if (auto locked = lock_directory(directory.fd); !locked)
+        return std::unexpected(locked.error());
     return recover_locked(record, journal, directory.fd);
 }
 
@@ -220,8 +314,8 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
     if (!opened)
         return std::unexpected(opened.error());
     Descriptor directory{*opened};
-    if (::flock(directory.fd, LOCK_EX | LOCK_NB) != 0)
-        return std::unexpected(io_error());
+    if (auto locked = lock_directory(directory.fd); !locked)
+        return std::unexpected(locked.error());
     const auto name = basename(plan.raw_path);
     auto current = revision(directory.fd, name);
     if (!current)
@@ -332,22 +426,55 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
     auto fresh = revision(directory.fd, name);
     if (!fresh || *fresh != *current)
         return fail(error("Folder image changed before publication"));
+    const bool without_links = detail::filesystem_without_links_simulated();
     if (*current) {
-        if (::linkat(directory.fd, name.c_str(), directory.fd, backup.c_str(), 0) != 0)
-            return fail(io_error());
+        if (without_links ||
+            ::linkat(directory.fd, name.c_str(), directory.fd, backup.c_str(), 0) != 0) {
+            if (!without_links && !detail::hard_link_refused(errno))
+                return fail(io_error());
+            auto copied = copy_backup(directory.fd, name, backup);
+            if (!copied)
+                return fail(copied.error());
+            auto recorded =
+                journal.transition(record.id, {.expected_state = State::prepared,
+                                               .state = State::prepared,
+                                               .prepared_revision = record.prepared_revision,
+                                               .published_revision = std::nullopt,
+                                               .failure = std::nullopt,
+                                               .backup_revision = *copied});
+            if (!recorded) {
+                static_cast<void>(::unlinkat(directory.fd, backup.c_str(), 0));
+                return fail(recorded.error());
+            }
+            record.backup_revision = *copied;
+        }
         if (::fsync(directory.fd) != 0)
             return fail(io_error());
-        if (::renameat2(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
-                        RENAME_EXCHANGE) != 0)
-            return fail(io_error());
-        auto displaced = revision(directory.fd, prepared);
-        if (!displaced || *displaced != *current) {
-            // Keep all evidence; never replace an unrecognized raced-in file.
-            return fail(error("Folder image changed during publication; recovery required"));
+        const bool exchanged =
+            !without_links && ::renameat2(directory.fd, prepared.c_str(), directory.fd,
+                                          name.c_str(), RENAME_EXCHANGE) == 0;
+        if (exchanged) {
+            auto displaced = revision(directory.fd, prepared);
+            if (!displaced || *displaced != *current) {
+                // Keep all evidence; never replace an unrecognized raced-in file.
+                return fail(error("Folder image changed during publication; recovery required"));
+            }
+        } else {
+            if (!without_links && !exchange_refused(errno))
+                return fail(io_error());
+            // No exchange here: with the folder locked and the image checked
+            // once more, a plain rename replaces it atomically, as a tag save
+            // publishes; the backup holds the original either way.
+            auto again = revision(directory.fd, name);
+            if (!again || *again != *current)
+                return fail(error("Folder image changed during publication; recovery required"));
+            if (::renameat(directory.fd, prepared.c_str(), directory.fd, name.c_str()) != 0)
+                return fail(io_error());
         }
-    } else if (::renameat2(directory.fd, prepared.c_str(), directory.fd, name.c_str(),
-                           RENAME_NOREPLACE) != 0) {
-        return fail(io_error());
+    } else if (auto published =
+                   core::publish_no_replace_at(directory.fd, prepared, directory.fd, name);
+               !published) {
+        return fail(published.error());
     }
     auto recovered = recover_locked(record, journal, directory.fd);
     if (!recovered)

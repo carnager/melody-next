@@ -2,6 +2,8 @@
 
 #include "trackknife/operations/metadata_commit.hpp"
 
+#include "backup_links.hpp"
+
 #include "trackknife/formats/cue_sheet.hpp"
 #include "trackknife/formats/decoder.hpp"
 #include "trackknife/metadata/artwork_writers.hpp"
@@ -817,14 +819,7 @@ unlink_if_matches(const std::string& raw_path,
 
 std::atomic<bool> copied_backups_for_testing{false};
 
-// A filesystem without hard links says so in one of these: SMB on macOS and
-// Linux CIFS without unix extensions (ENOTSUP), FAT and exFAT (EPERM), and
-// FUSE mounts that do not implement link (ENOSYS). A source already at its
-// link limit (EMLINK) is copied the same way.
-[[nodiscard]] bool hard_link_refused(const int number) noexcept {
-    return number == ENOTSUP || number == EOPNOTSUPP || number == EPERM || number == ENOSYS ||
-           number == EMLINK;
-}
+using detail::hard_link_refused;
 
 // False with errno set when the bytes could not all be written.
 [[nodiscard]] bool write_all(const int descriptor, const char* data, std::size_t size) {
@@ -3051,6 +3046,23 @@ recover_metadata_operations(MetadataOperationJournal& journal,
     }
     return results;
 }
+
+namespace detail {
+
+// A filesystem without hard links says so in one of these: SMB on macOS and
+// Linux CIFS without unix extensions (ENOTSUP), FAT and exFAT (EPERM), and
+// FUSE mounts that do not implement link (ENOSYS). A source already at its
+// link limit (EMLINK) is copied the same way.
+bool hard_link_refused(const int number) noexcept {
+    return number == ENOTSUP || number == EOPNOTSUPP || number == EPERM || number == ENOSYS ||
+           number == EMLINK;
+}
+
+bool filesystem_without_links_simulated() noexcept {
+    return copied_backups_for_testing.load(std::memory_order_relaxed);
+}
+
+} // namespace detail
 
 void use_copied_metadata_backups_for_testing(const bool enabled) noexcept {
     copied_backups_for_testing.store(enabled, std::memory_order_relaxed);

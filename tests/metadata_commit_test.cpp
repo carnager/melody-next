@@ -3237,6 +3237,126 @@ void folder_cover_policy_publication_and_recovery(const std::filesystem::path& f
     CHECK(!operations::plan_artwork_storage({intent, second}, policy));
 }
 
+// ADR-0248: on a filesystem without hard links or directory-entry exchange
+// (SMB), a folder image is created by checked rename and replaced by plain
+// rename over a verified backup copy, which recovery and undo recognise.
+void folder_cover_without_hard_links(const std::filesystem::path& fixtures) {
+    TemporaryDirectory directory;
+    const auto donor =
+        materialize(fixtures, "external-blue-jpeg.b64", directory.path() / "donor.jpg");
+    const auto media = materialize(fixtures, "art-tone-flac.b64", directory.path() / "track.flac");
+    const auto red = directory.path() / "red.png";
+    {
+        TagLib::FLAC::File file{media.c_str(), false};
+        CHECK(!file.pictureList().isEmpty());
+        if (file.pictureList().isEmpty())
+            return;
+        const auto data = file.pictureList().front()->data();
+        std::ofstream out(red, std::ios::binary);
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+    auto blue_image = metadata::read_artwork_image_file(donor.native());
+    auto red_image = metadata::read_artwork_image_file(red.native());
+    auto journal = open_journal(directory, "folder-copy.sqlite3");
+    CHECK(blue_image && red_image && journal);
+    if (!blue_image || !red_image || !journal)
+        return;
+    operations::use_copied_metadata_backups_for_testing(true);
+    const auto cover = directory.path() / "cover.jpg";
+    const metadata::FolderImageWritePlan create{
+        .raw_path = cover.native(), .image = *blue_image, .original = std::nullopt};
+    const auto created = operations::commit_folder_image(create, *journal);
+    if (!created)
+        std::cerr << created.error().message << '\n';
+    CHECK(created.has_value());
+    CHECK(read_bytes(cover) == read_bytes(donor));
+
+    const auto replace = [&](const metadata::ArtworkImageFile& image) {
+        auto current = metadata::read_artwork_image_file(cover.native());
+        CHECK(current.has_value());
+        return metadata::FolderImageWritePlan{
+            .raw_path = cover.native(), .image = image, .original = current ? *current : image};
+    };
+    const auto blue_revision = core::observe_local_source_revision(cover.native());
+    const auto replaced = operations::commit_folder_image(replace(*red_image), *journal);
+    if (!replaced)
+        std::cerr << replaced.error().message << '\n';
+    CHECK(replaced.has_value());
+    CHECK(read_bytes(cover) == read_bytes(red));
+    if (replaced) {
+        const auto record = journal->load(replaced->journal_id);
+        const auto copy = core::observe_local_source_revision(replaced->backup_raw_path);
+        CHECK(record && *record && copy && (**record).backup_revision == *copy);
+        CHECK(blue_revision && copy && copy->inode != blue_revision->inode);
+        CHECK(read_bytes(replaced->backup_raw_path) == read_bytes(donor));
+        const auto undone = operations::undo_flac_metadata_operation(replaced->journal_id, *journal,
+                                                                     successful_dependent_commit);
+        if (undone || undone.error().code != core::ErrorCode::unsupported) {
+            CHECK(undone.has_value());
+            CHECK(read_bytes(cover) == read_bytes(donor));
+        }
+    }
+
+    // Published, then interrupted before the journal said so: recovery
+    // completes it and keeps the copy.
+    FailingPublishedTransitionJournal interrupted{*journal};
+    CHECK(!operations::commit_folder_image(replace(*red_image), interrupted));
+    CHECK(read_bytes(cover) == read_bytes(red));
+    auto recovered = operations::recover_metadata_operations(*journal, successful_dependent_commit);
+    CHECK(recovered && recovered->size() == 1 &&
+          recovered->front().outcome == operations::MetadataRecoveryOutcome::completed);
+    if (interrupted.created_id) {
+        const auto record = journal->load(*interrupted.created_id);
+        CHECK(record && *record && (**record).state == State::complete &&
+              (**record).backup_revision.has_value() &&
+              read_bytes((**record).backup_raw_path) == read_bytes(donor));
+    }
+
+    // Copied but not journaled: the image is untouched and the copy goes.
+    CHECK(interrupted.created_id.has_value());
+    if (interrupted.created_id) {
+        const auto before = read_bytes(cover);
+        const auto id = core::StableId::random();
+        auto record = operations::MetadataOperationJournalRecord{};
+        const auto loaded = journal->load(*interrupted.created_id);
+        CHECK(loaded && *loaded);
+        if (loaded && *loaded) {
+            record = **loaded;
+            record.id = id;
+            record.state = State::planned;
+            const auto stem = ".trackknife-" + id.to_string() + ".metadata-";
+            record.prepared_raw_path = (directory.path() / (stem + "prepared")).native();
+            record.backup_raw_path = (directory.path() / (stem + "backup")).native();
+            record.expected_revision = *core::observe_local_source_revision(cover.native());
+            record.changes.front().original_values = record.changes.front().planned_values;
+            record.prepared_revision.reset();
+            record.published_revision.reset();
+            record.backup_revision.reset();
+            record.failure.reset();
+            CHECK(journal->create(record).has_value());
+            std::filesystem::copy_file(donor, record.prepared_raw_path);
+            record.prepared_revision =
+                *core::observe_local_source_revision(record.prepared_raw_path);
+            CHECK(journal
+                      ->transition(id, {.expected_state = State::planned,
+                                        .state = State::prepared,
+                                        .prepared_revision = record.prepared_revision,
+                                        .published_revision = std::nullopt,
+                                        .failure = std::nullopt})
+                      .has_value());
+            std::filesystem::copy_file(cover, record.backup_raw_path);
+            recovered =
+                operations::recover_metadata_operations(*journal, successful_dependent_commit);
+            CHECK(recovered && recovered->size() == 1 &&
+                  recovered->front().outcome == operations::MetadataRecoveryOutcome::rolled_back);
+            CHECK(!std::filesystem::exists(record.backup_raw_path));
+            CHECK(!std::filesystem::exists(record.prepared_raw_path));
+            CHECK(read_bytes(cover) == before);
+        }
+    }
+    operations::use_copied_metadata_backups_for_testing(false);
+}
+
 // Size limits: each destination gets its own conversion of the original, the
 // plan carries it, and the commit writes it. The fitter here pads the donor
 // with trailing JPEG data, one pad per edge, so each conversion is a distinct
@@ -3359,6 +3479,7 @@ int main(const int argc, char** argv) {
         const std::filesystem::path fixture_directory{argv[1]};
         damaged_unrelated_journal_does_not_block_cover_save(fixture_directory);
         folder_cover_policy_publication_and_recovery(fixture_directory);
+        folder_cover_without_hard_links(fixture_directory);
         cover_size_limits_convert_each_destination(fixture_directory);
         commits_atomically_and_retains_verified_backup(fixture_directory);
         rolls_back_dependent_and_journal_failures(fixture_directory);

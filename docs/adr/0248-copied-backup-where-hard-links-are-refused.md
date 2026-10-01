@@ -43,6 +43,14 @@ publication itself all worked there; only the backup could not be made.
   admission and exchange, release, retention -- uses it. A source restored
   from the backup carries that identity too, so undo reports it as the
   published revision and verifies the restored content against it.
+- **Folder images too.** A folder cover (ADR-0184) takes the same copied
+  backup, journaled the same way. Replacing one exchanges directory entries
+  where `renameat2(RENAME_EXCHANGE)` exists; where it is refused (SMB, CIFS,
+  FUSE: `EINVAL`, `ENOTSUP`, `ENOSYS`), the image is checked once more under
+  the folder lock and the prepared file renamed over it -- atomic, as a tag
+  save publishes. A new cover is published with the checked no-replace rename
+  of ADR-0111. A folder whose filesystem has no `flock` relies on the
+  in-process lock and the revision checks, as media files already do.
 - **Crash between copy and record.** The source is then untouched and nothing
   was published: recovery removes the unrecorded copy at this operation's own
   path, as it already removes an unrecorded prepared copy.
@@ -60,8 +68,7 @@ publication itself all worked there; only the backup could not be made.
 - Undo still needs an atomic exchange of directory entries
   (`renameat2(RENAME_EXCHANGE)`), unavailable on these mounts and on macOS; it
   reports itself unavailable there, as before.
-- Folder images (ADR-0184) publish through their own path, which also links
-  and exchanges; it is not covered here.
 - Tests force the copy with `use_copied_metadata_backups_for_testing()` and
   cover rollback, commit, undo, retention, and recovery before and after the
-  copy is journaled.
+  copy is journaled, for tag saves and folder covers; folder covers then also
+  publish by plain rename.

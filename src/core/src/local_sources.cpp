@@ -251,6 +251,39 @@ std::string display_raw_path(const std::string_view raw_path) {
     return shown;
 }
 
+std::string describe_revision_change(const LocalSourceRevision& before,
+                                     const LocalSourceRevision& after) {
+    std::string described;
+    const auto add = [&described](const std::string_view field, const std::string& was,
+                                  const std::string& now) {
+        if (!described.empty()) {
+            described += "; ";
+        }
+        described += std::string{field} + ' ' + was + " -> " + now;
+    };
+    const auto time = [](const std::int64_t seconds, const std::int64_t nanoseconds) {
+        auto fraction = std::to_string(nanoseconds);
+        fraction.insert(0U, fraction.size() < 9U ? 9U - fraction.size() : 0U, '0');
+        return std::to_string(seconds) + '.' + fraction;
+    };
+    if (before.device != after.device) {
+        add("device", std::to_string(before.device), std::to_string(after.device));
+    }
+    if (before.inode != after.inode) {
+        add("inode", std::to_string(before.inode), std::to_string(after.inode));
+    }
+    if (before.size != after.size) {
+        add("size", std::to_string(before.size), std::to_string(after.size));
+    }
+    if (before.modification_time_seconds != after.modification_time_seconds ||
+        before.modification_time_nanoseconds != after.modification_time_nanoseconds) {
+        add("modification time",
+            time(before.modification_time_seconds, before.modification_time_nanoseconds),
+            time(after.modification_time_seconds, after.modification_time_nanoseconds));
+    }
+    return described;
+}
+
 Result<LocalSourceRevision> observe_local_source_revision(const std::string& raw_path) {
     const auto failure = [&raw_path](const ErrorCode code, std::string message) {
         return std::unexpected(Error{

@@ -246,8 +246,12 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
         return std::unexpected(std::move(revision_after.error()));
     }
     if (*revision_before != *revision_after) {
+        // Said in full: on a network mount, which value moved is the clue.
         return std::unexpected(error(core::ErrorCode::conflict,
-                                     "local source changed while metadata was being read",
+                                     "local source changed while metadata was being read (" +
+                                         core::describe_revision_change(*revision_before,
+                                                                        *revision_after) +
+                                         ")",
                                      raw_path));
     }
     if (cancellation.is_cancellation_requested()) {

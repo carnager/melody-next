@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#include "uicommon/application_style.hpp"
+
 #include <QAbstractButton>
 #include <QApplication>
 #include <QCursor>
@@ -93,7 +95,7 @@ class PlaybackTabBar final : public QTabBar {
         // On the style the application uses: a proxy made without one would
         // wrap the desktop's default instead.
         auto* placement =
-            new ButtonPlacement(QStyleFactory::create(QApplication::style()->name()));
+            new ButtonPlacement(ui::createApplicationStyle());
         placement->setParent(this);
         setStyle(placement);
     }

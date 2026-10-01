@@ -37,12 +37,13 @@ bool beginsTrackGroup(const QAbstractItemModel& model, const int row,
         return false;
     }
     if (columns.lone_tracks_grouped) {
+        // The model may know already, as it groups (track_album_group_start_role).
+        if (const auto cached = model.index(row, 0).data(track_album_group_start_role);
+            cached.isValid()) {
+            return cached.toBool();
+        }
         return row == 0 || trackGroupKey(model, row, columns) !=
                                trackGroupKey(model, row - 1, columns);
-    }
-    const auto cached = model.index(row, 0).data(track_album_group_start_role);
-    if (cached.isValid()) {
-        return cached.toBool();
     }
     const auto key = trackGroupKey(model, row, columns);
     return (row == 0 || key != trackGroupKey(model, row - 1, columns)) &&

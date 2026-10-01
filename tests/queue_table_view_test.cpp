@@ -475,6 +475,9 @@ void QueueTableViewTest::thePlayingRowsStarsKeepTheirColour() {
     QueueTableView view{nullptr};
     view.setModel(&model);
     view.setItemDelegate(new QueueItemDelegate{&view});
+    // The album delegate draws a header over a lone track (ADR-0250); its
+    // view gives the row room for it, as grouped lists do.
+    view.setAlbumGroupingEnabled(true);
     view.setColumnWidth(track_rating_column, 90);
     view.resize(900, 200);
     view.show();

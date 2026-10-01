@@ -6,11 +6,13 @@
 
 #include <QApplication>
 #include <QPainter>
+#include <QRegularExpression>
 #include <QStyle>
 #include <QTableView>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace trackknife::ui {
 namespace {
@@ -28,9 +30,11 @@ namespace {
     return view != nullptr && view->property(property).toBool();
 }
 
+// A lone track is an album of its own, as the Qt Quick window draws it.
 [[nodiscard]] TrackGroupColumns groupColumns(const QObject* owner) {
     return {.album = configuredColumn(owner, track_album_column_property, track_album_column),
-            .date = configuredColumn(owner, track_date_column_property, track_date_column)};
+            .date = configuredColumn(owner, track_date_column_property, track_date_column),
+            .lone_tracks_grouped = true};
 }
 
 // A colour between two, `amount` of the way from `from` to `to`.
@@ -43,6 +47,47 @@ namespace {
 }
 
 } // namespace
+
+void paintInitialsTile(QPainter* painter, const QRect& rect, const QString& name,
+                       const QPalette& palette) {
+    QString initials;
+    for (const auto& word :
+         name.split(QRegularExpression{QStringLiteral("\\s+")}, Qt::SkipEmptyParts)) {
+        for (const auto character : word) {
+            if (character.toUpper() != character.toLower() ||
+                (character >= QLatin1Char('0') && character <= QLatin1Char('9'))) {
+                initials += character.toUpper();
+                break;
+            }
+        }
+        if (initials.size() == 2) {
+            break;
+        }
+    }
+    // InitialsTile.qml's hue: hash = hash * 31 + each UTF-16 unit, kept to
+    // 32 bits, so a name is the same colour in both windows.
+    std::uint32_t hash = 0U;
+    for (const auto unit : name) {
+        hash = hash * 31U + unit.unicode();
+    }
+    const auto fill =
+        initials.isEmpty()
+            ? blended(palette.color(QPalette::Base), palette.color(QPalette::Text), 0.12)
+            : QColor::fromHslF(static_cast<float>(hash % 360U) / 360.0F, 0.42F, 0.40F);
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(fill);
+    painter->drawRoundedRect(rect, 3, 3);
+    auto font = painter->font();
+    font.setPixelSize(std::max(8, static_cast<int>(rect.height() * 0.38)));
+    font.setWeight(QFont::DemiBold);
+    painter->setFont(font);
+    painter->setPen(initials.isEmpty() ? palette.color(QPalette::PlaceholderText)
+                                       : QColor{0xf4, 0xf4, 0xf4});
+    painter->drawText(rect, Qt::AlignCenter, initials);
+    painter->restore();
+}
 
 QColor groupHairline(const QPalette& palette) {
     auto line = palette.color(QPalette::Text);
@@ -75,9 +120,9 @@ void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& pale
         const QFontMetrics detail_metrics{font};
         painter->setFont(font);
         painter->setPen(palette.color(QPalette::PlaceholderText));
-        painter->drawText(QPoint{area.left() + used, baseline},
-                          detail_metrics.elidedText(text.details, Qt::ElideRight,
-                                                    area.width() - used));
+        painter->drawText(
+            QPoint{area.left() + used, baseline},
+            detail_metrics.elidedText(text.details, Qt::ElideRight, area.width() - used));
     }
     painter->restore();
 }
@@ -118,7 +163,9 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                                 QueueItemDelegate::album_header_height};
         // Side artwork: the view draws the whole header over the row, beside
         // the cover. Here each cell draws only its share of the strip.
-        paintAlbumHeader(painter, header_rect, option.palette, option.font, {}, index.row() > 0);
+        // Albums are told apart by their headers, not lines between them, as
+        // in the Qt Quick window.
+        paintAlbumHeader(painter, header_rect, option.palette, option.font, {}, false);
         if (!side_artwork && index.column() == artwork_column) {
             const auto cover = index.data(track_album_artwork_role).value<QImage>();
             const QRect cover_bounds{header_rect.left() + 6,
@@ -131,17 +178,12 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                                    cover_bounds.center().y() - fitted.height() / 2, fitted.width(),
                                    fitted.height()};
                 painter->drawImage(target, cover);
-            } else {
-                const auto icon =
-                    QIcon::fromTheme(QStringLiteral("media-optical-audio"),
-                                     QApplication::style()->standardIcon(QStyle::SP_FileIcon));
-                icon.paint(painter, cover_bounds, Qt::AlignCenter, QIcon::Normal);
             }
             painter->restore();
         } else if (!side_artwork && index.column() == title_column) {
-            paintAlbumHeader(painter, header_rect, option.palette, option.font,
-                             albumHeaderText(*index.model(), index.row(), album_column, date_column),
-                             index.row() > 0);
+            paintAlbumHeader(
+                painter, header_rect, option.palette, option.font,
+                albumHeaderText(*index.model(), index.row(), album_column, date_column), false);
         }
         item.rect.setTop(item.rect.top() + QueueItemDelegate::album_header_height);
     }
@@ -159,7 +201,8 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
     }
     if (const auto disc = discStart(index); !disc.isEmpty()) {
         // The disc's name where its tracks start, in line with their titles.
-        const QRect strip{option.rect.x(), item.rect.top(), option.rect.width(), disc_header_height};
+        const QRect strip{option.rect.x(), item.rect.top(), option.rect.width(),
+                          disc_header_height};
         painter->save();
         painter->fillRect(strip, option.palette.base());
         if (index.column() == title_column) {
@@ -183,7 +226,8 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         .title = title_column,
         .side_artwork = side_artwork,
         .separate_number = configuredFlag(this, track_separate_number_property),
-        .hidden = [view](const int column) { return view != nullptr && view->isColumnHidden(column); },
+        .hidden =
+            [view](const int column) { return view != nullptr && view->isColumnHidden(column); },
     };
     const auto cell = trackCell(*index.model(), index.row(), index.column(), context);
     const auto current_track = cell.current;
@@ -209,9 +253,8 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
             item.palette.setColor(QPalette::HighlightedText, accent);
         }
         if (cell.playing_icon) {
-            item.icon =
-                QIcon::fromTheme(QStringLiteral("media-playback-start"),
-                                 QApplication::style()->standardIcon(QStyle::SP_MediaPlay));
+            item.icon = QIcon::fromTheme(QStringLiteral("media-playback-start"),
+                                         QApplication::style()->standardIcon(QStyle::SP_MediaPlay));
             item.decorationSize = QSize{14, 14};
         }
     }
@@ -233,8 +276,8 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         item.text.clear();
         item_style->drawControl(QStyle::CE_ItemViewItem, &item, painter, widget);
         item.text = title;
-        const auto area =
-            item_style->subElementRect(QStyle::SE_ItemViewItemText, &item, widget).adjusted(2, 0, -2, 0);
+        const auto area = item_style->subElementRect(QStyle::SE_ItemViewItemText, &item, widget)
+                              .adjusted(2, 0, -2, 0);
         const QFontMetrics title_metrics{item.font};
         const auto shown = title_metrics.elidedText(title, Qt::ElideRight, area.width());
         painter->save();
@@ -260,8 +303,9 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
         if (extent > 0) {
             const QRect target{item.rect.right() - extent - 4, item.rect.center().y() - extent / 2,
                                extent, extent};
-            const auto cover =
-                index.siblingAtColumn(artwork_column).data(track_album_artwork_role).value<QImage>();
+            const auto cover = index.siblingAtColumn(artwork_column)
+                                   .data(track_album_artwork_role)
+                                   .value<QImage>();
             if (!cover.isNull()) {
                 const auto fitted = cover.size().scaled(target.size(), Qt::KeepAspectRatio);
                 const QRect centered{target.center().x() - fitted.width() / 2,

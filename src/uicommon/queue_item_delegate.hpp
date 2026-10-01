@@ -20,6 +20,12 @@ void paintAlbumHeader(QPainter* painter, const QRect& rect, const QPalette& pale
 // The line between groups: the text colour, faint, so it reads as a line on
 // a dark theme and a light one alike.
 [[nodiscard]] QColor groupHairline(const QPalette& palette);
+// What stands for a cover that is not there, as the Qt Quick window's
+// InitialsTile draws it: a name's first letters on a tile coloured by that
+// name -- the same name always the same colour, in either window -- or quiet
+// grey when there is no name.
+void paintInitialsTile(QPainter* painter, const QRect& rect, const QString& name,
+                       const QPalette& palette);
 
 class QueueItemDelegate final : public QStyledItemDelegate {
     Q_OBJECT

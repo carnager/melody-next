@@ -22,7 +22,7 @@ namespace trackknife::ui {
 
 // The measures of a grouped list.
 inline constexpr int track_row_height = 22;
-inline constexpr int album_header_height = 34;
+inline constexpr int album_header_height = 30;
 // Space above a run of loose tracks that follows an album, where its
 // hairline goes.
 inline constexpr int loose_run_gap = 10;
@@ -36,6 +36,14 @@ inline constexpr int album_cover_extent = 22;
 // A cover beside its album's rows: at most this, inside this padding.
 inline constexpr int maximum_side_artwork_extent = 160;
 inline constexpr int side_artwork_padding = 6;
+// Covers beside the rows, as both windows draw them (ADR-0250): every album's
+// the same size at its top left, beside its header, in a gutter this wide,
+// and the numbers in a narrow column just before the titles.
+inline constexpr int side_cover_extent = 44;
+inline constexpr int side_cover_left = 12;
+inline constexpr int side_cover_top = 6;
+inline constexpr int side_cover_gutter = 66;
+inline constexpr int side_number_width = 36;
 
 // Which of a model's columns hold the album and date its groups are made of.
 // And whether a lone track is an album of its own -- its header and cover

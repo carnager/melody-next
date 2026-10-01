@@ -12616,37 +12616,16 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
         auto* local_model = qobject_cast<LocalListModel*>(view->model());
         QVERIFY(local_model != nullptr);
         local_model->appendRows({std::move(singleton)});
-        // A lone track after an album: a gap above it, where its hairline goes.
+        // A lone track is an album of its own (ADR-0250): its header above it.
         QTRY_COMPARE(view->rowHeight(2),
-                     view->rowHeight(1) + ui::QueueItemDelegate::loose_run_gap);
+                     view->rowHeight(1) + ui::QueueItemDelegate::album_header_height);
         QImage singleton_cover{12, 12, QImage::Format_RGB32};
         singleton_cover.fill(Qt::red);
         local_model->setArtwork(local_model->groupKey(2), singleton_cover);
         QCoreApplication::processEvents();
-        // Its cover stands where an album track's number does, just before
-        // the title; the cover column stays empty.
-        QVERIFY(!view->isColumnHidden(local_track_number_column));
+        // Its cover beside its header, in the cover gutter, as any album's.
         const auto artwork_rect =
-            view->visualRect(local_model->index(2, local_track_number_column));
-        const auto artwork_render = view->viewport()->grab(artwork_rect).toImage();
-        bool found_inline_cover = false;
-        auto leftmost_cover_pixel = artwork_render.width();
-        for (int y = 0; y < artwork_render.height(); ++y) {
-            for (int x = 0; x < artwork_render.width(); ++x) {
-                if (artwork_render.pixelColor(x, y) == QColor(Qt::red)) {
-                    found_inline_cover = true;
-                    leftmost_cover_pixel = std::min(leftmost_cover_pixel, x);
-                }
-            }
-        }
-        QVERIFY(found_inline_cover);
-        // Against the title side of the cell, as a number would be.
-        QVERIFY(leftmost_cover_pixel >= artwork_render.width() - 20 - 8);
-
-        view->selectionModel()->select(local_model->index(2, 0),
-                                       QItemSelectionModel::ClearAndSelect |
-                                           QItemSelectionModel::Rows);
-        QCoreApplication::processEvents();
+            view->visualRect(local_model->index(2, local_artwork_column));
         const auto shows_cover = [](const QImage& render) {
             for (int y = 0; y < render.height(); ++y) {
                 for (int x = 0; x < render.width(); ++x) {
@@ -12657,6 +12636,12 @@ void BenchMainWindowTest::trackViewLayoutMatchesGroupedQueueAndPersists() {
             }
             return false;
         };
+        QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
+
+        view->selectionModel()->select(local_model->index(2, 0),
+                                       QItemSelectionModel::ClearAndSelect |
+                                           QItemSelectionModel::Rows);
+        QCoreApplication::processEvents();
         // Selected or playing, the cover stays on top of the row's tint.
         QVERIFY(shows_cover(view->viewport()->grab(artwork_rect).toImage()));
         view->clearSelection();

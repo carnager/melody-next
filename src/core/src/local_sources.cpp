@@ -4,12 +4,19 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
+#include <cstdint>
+#include <ctime>
+#include <fcntl.h>
 #include <filesystem>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <random>
 #include <string>
 #include <sys/stat.h>
-#include <fcntl.h>
-#include <ctime>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -260,6 +267,80 @@ void settle_written_file_time(const std::string& raw_path) noexcept {
     // Refused, the file keeps its own time: the mounts that refuse are not
     // the ones whose time flickers.
     static_cast<void>(::utimensat(AT_FDCWD, raw_path.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
+}
+
+namespace {
+
+std::atomic<bool> renumbering_simulated{false};
+
+// Renames a fresh temporary file in `directory` and says whether it kept its
+// inode number; empty when that could not be found out.
+std::optional<bool> probe_rename_keeps_inode(const std::filesystem::path& directory) {
+    std::random_device random;
+    const auto token = std::to_string(random()) + std::to_string(random());
+    const auto first = directory / (".trackknife-" + token + ".rename-probe");
+    const auto second = directory / (".trackknife-" + token + ".rename-probe-renamed");
+    const int descriptor =
+        ::open(first.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (descriptor < 0) {
+        return std::nullopt;
+    }
+    const bool written = ::write(descriptor, "t", 1) == 1;
+    static_cast<void>(::close(descriptor));
+    struct stat before{};
+    struct stat after{};
+    std::optional<bool> kept;
+    if (written && ::lstat(first.c_str(), &before) == 0 &&
+        ::rename(first.c_str(), second.c_str()) == 0) {
+        if (::lstat(second.c_str(), &after) == 0) {
+            kept = before.st_ino == after.st_ino;
+        }
+        static_cast<void>(::unlink(second.c_str()));
+    } else {
+        static_cast<void>(::unlink(first.c_str()));
+    }
+    return kept;
+}
+
+bool renames_keep_inodes(const std::string& raw_path, const std::uint64_t device) {
+    if (renumbering_simulated.load(std::memory_order_relaxed)) {
+        return false;
+    }
+    static std::mutex mutex;
+    static std::map<std::uint64_t, bool> known;
+    {
+        const std::scoped_lock lock{mutex};
+        if (const auto found = known.find(device); found != known.end()) {
+            return found->second;
+        }
+    }
+    auto parent = std::filesystem::path{raw_path}.parent_path();
+    if (parent.empty()) {
+        parent = ".";
+    }
+    const auto kept = probe_rename_keeps_inode(parent);
+    if (!kept) {
+        return true;
+    }
+    const std::scoped_lock lock{mutex};
+    known.insert_or_assign(device, *kept);
+    return *kept;
+}
+
+} // namespace
+
+bool same_file_after_rename(const std::string& raw_path, const LocalSourceRevision& before,
+                            const LocalSourceRevision& after) {
+    if (before == after) {
+        return true;
+    }
+    auto renumbered = before;
+    renumbered.inode = after.inode;
+    return renumbered == after && !renames_keep_inodes(raw_path, after.device);
+}
+
+void simulate_renumbering_renames_for_testing(const bool enabled) noexcept {
+    renumbering_simulated.store(enabled, std::memory_order_relaxed);
 }
 
 std::string describe_revision_change(const LocalSourceRevision& before,

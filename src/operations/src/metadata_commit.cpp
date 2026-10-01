@@ -1594,6 +1594,12 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         metadata_applied = std::unexpected(system_error("syncing prepared metadata file failed",
                                                         errno, record.source_raw_path, record.id));
     }
+    // Last, after ownership, permissions and extended attributes -- which on
+    // an SMB mount are data too, and move the time again: a time of its own,
+    // before the copy's identity is recorded for every later check.
+    if (metadata_applied) {
+        core::settle_written_file_time(record.prepared_raw_path);
+    }
     if (!metadata_applied) {
         const auto& failure = metadata_applied.error();
         const auto cleaned = unlink_if_matches(record.prepared_raw_path, initial_prepared_revision,

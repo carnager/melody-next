@@ -22,9 +22,11 @@
 #include <tstringlist.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <fcntl.h>
 #include <map>
 #include <string>
@@ -113,11 +115,10 @@ class PreparedPathGuard final {
                         source_raw_path, prepared_raw_path);
 }
 
-// The prepared copy, written, made to be on its storage before it is read
-// back to be verified. On a network mount the client may still hold the
-// writes: the copy's modification time then moves while it is read -- to
-// the server's "now" when they are sent -- and the read refuses it as
-// changed underneath, as the macOS SMB client showed.
+// The prepared copy, written, made to be on its storage and given a time of
+// its own (core::settle_written_file_time) before it is read back to be
+// verified: on a network mount a fresh file's time otherwise flickers, and
+// the verifying read refused the copy as changed underneath it.
 [[nodiscard]] inline core::Result<void> settle_prepared(const std::string& prepared_raw_path,
                                                         const std::string& source_raw_path) {
     const auto descriptor = ::open(prepared_raw_path.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW);
@@ -132,6 +133,7 @@ class PreparedPathGuard final {
         return std::unexpected(system_error("syncing the prepared copy failed", sync_error,
                                             source_raw_path, prepared_raw_path));
     }
+    core::settle_written_file_time(prepared_raw_path);
     return {};
 }
 

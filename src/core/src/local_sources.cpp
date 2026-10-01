@@ -8,7 +8,8 @@
 #include <filesystem>
 #include <string>
 #include <sys/stat.h>
-#include <system_error>
+#include <fcntl.h>
+#include <ctime>
 #include <utility>
 #include <vector>
 
@@ -249,6 +250,16 @@ std::string display_raw_path(const std::string_view raw_path) {
         }
     }
     return shown;
+}
+
+void settle_written_file_time(const std::string& raw_path) noexcept {
+    struct timespec now{};
+    ::clock_gettime(CLOCK_REALTIME, &now);
+    const struct timespec settled{.tv_sec = now.tv_sec - (now.tv_sec % 2), .tv_nsec = 0};
+    const std::array times{settled, settled};
+    // Refused, the file keeps its own time: the mounts that refuse are not
+    // the ones whose time flickers.
+    static_cast<void>(::utimensat(AT_FDCWD, raw_path.c_str(), times.data(), AT_SYMLINK_NOFOLLOW));
 }
 
 std::string describe_revision_change(const LocalSourceRevision& before,

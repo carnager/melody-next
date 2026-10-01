@@ -73,6 +73,12 @@ struct LocalSourceRevision {
     friend bool operator==(const LocalSourceRevision&, const LocalSourceRevision&) = default;
 };
 
+// What differs between two observations of one file, for the message that
+// refuses it: "modification time 1790815120.409922300 -> 1790815121.0", each
+// field that changed, joined by "; ". Empty when none did.
+[[nodiscard]] std::string describe_revision_change(const LocalSourceRevision& before,
+                                                   const LocalSourceRevision& after);
+
 // Follows the final path target and observes a regular file without decoding
 // the raw Linux path bytes as text.
 [[nodiscard]] Result<LocalSourceRevision>

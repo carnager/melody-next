@@ -1657,7 +1657,11 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
                            ? std::move(current_source.error())
                            : (*current_source != record.expected_revision
                                   ? operation_error(core::ErrorCode::conflict,
-                                                    "metadata source changed before publication",
+                                                    "metadata source changed before publication (" +
+                                                        core::describe_revision_change(
+                                                            record.expected_revision,
+                                                            *current_source) +
+                                                        ")",
                                                     record.source_raw_path, record.id)
                                   : system_error("creating metadata backup failed", errno,
                                                  record.source_raw_path, record.id));

@@ -6,6 +6,7 @@
 #include <QDockWidget>
 
 #include "bench/bench_main_window_helpers.hpp"
+#include "bench/themed_icon.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/eliding_label.hpp"
 #include "uicommon/line_slider.hpp"
@@ -213,18 +214,20 @@ void BenchMainWindow::buildTransport() {
     bar->setIconSize(QSize{18, 18});
     bar->setToolButtonStyle(Qt::ToolButtonIconOnly);
 
-    previous_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipBackward),
+    previous_action_ = new QAction(themedIcon(u"media-skip-backward|sp:SP_MediaSkipBackward"),
                                    QStringLiteral("Previous"), this);
     connect(previous_action_, &QAction::triggered, &workspace_, &Workspace::previous);
     play_pause_action_ =
-        new QAction(style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("Play"), this);
+        new QAction(themedIcon(u"media-playback-start|sp:SP_MediaPlay"), QStringLiteral("Play"),
+                    this);
     play_pause_action_->setShortcut(Qt::Key_Space);
     play_pause_action_->setShortcutContext(Qt::ApplicationShortcut);
     connect(play_pause_action_, &QAction::triggered, this, &BenchMainWindow::togglePlayPause);
     stop_action_ =
-        new QAction(style()->standardIcon(QStyle::SP_MediaStop), QStringLiteral("Stop"), this);
+        new QAction(themedIcon(u"media-playback-stop|sp:SP_MediaStop"), QStringLiteral("Stop"),
+                    this);
     connect(stop_action_, &QAction::triggered, &workspace_, &Workspace::stop);
-    next_action_ = new QAction(style()->standardIcon(QStyle::SP_MediaSkipForward),
+    next_action_ = new QAction(themedIcon(u"media-skip-forward|sp:SP_MediaSkipForward"),
                                QStringLiteral("Next"), this);
     connect(next_action_, &QAction::triggered, &workspace_, &Workspace::next);
 
@@ -930,8 +933,10 @@ void BenchMainWindow::refreshEngineTransport() {
     play_pause_action_->setText(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
     if (transport_icon_playing_ != std::optional{playing}) {
         transport_icon_playing_ = playing;
-        play_pause_action_->setIcon(
-            style()->standardIcon(playing ? QStyle::SP_MediaPause : QStyle::SP_MediaPlay));
+        // Named as the Qt Quick window names them: the desktop's own icons
+        // where it has a theme, the style's otherwise.
+        play_pause_action_->setIcon(themedIcon(playing ? u"media-playback-pause|sp:SP_MediaPause"
+                                                       : u"media-playback-start|sp:SP_MediaPlay"));
     }
 
     const auto duration_ms =

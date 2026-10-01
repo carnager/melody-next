@@ -4,6 +4,7 @@
 #include <QAbstractItemView>
 #include <QComboBox>
 #include <QHeaderView>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
@@ -864,6 +865,99 @@ void Band::paintEvent(QPaintEvent* /*event*/) {
     } else if (edge_ == Edge::bottom) {
         painter.fillRect(QRect{0, height() - 1, width(), 1}, TrackknifeStyle::hairline(palette()));
     }
+}
+
+SegmentedTabBar::SegmentedTabBar(QWidget* parent) : QTabBar{parent} {
+    setDrawBase(false);
+    setExpanding(true);
+    setUsesScrollButtons(false);
+    setMouseTracking(true);
+    lift_.setDuration(180);
+    lift_.setEasingCurve(QEasingCurve::OutCubic);
+    connect(&lift_, &QVariantAnimation::valueChanged, this, [this] { update(); });
+    connect(this, &QTabBar::currentChanged, this, [this](const int index) {
+        const auto from = lift_.state() == QAbstractAnimation::Running
+                              ? lift_.currentValue().toReal()
+                          : lift_.endValue().isValid() ? lift_.endValue().toReal()
+                                                       : static_cast<qreal>(index);
+        lift_.stop();
+        lift_.setStartValue(from);
+        lift_.setEndValue(static_cast<qreal>(index));
+        lift_.start();
+    });
+}
+
+qreal SegmentedTabBar::segment() const {
+    return count() > 0 ? (width() - 4) / static_cast<qreal>(count()) : 0.0;
+}
+
+QSize SegmentedTabBar::tabSizeHint(const int /*index*/) const {
+    return {count() > 0 ? std::max(1, (width() - 4) / count()) : 0, 26};
+}
+
+QSize SegmentedTabBar::minimumTabSizeHint(const int index) const {
+    return {fontMetrics().horizontalAdvance(tabText(index)) + 2 * TrackknifeStyle::gap, 26};
+}
+
+QSize SegmentedTabBar::sizeHint() const {
+    int width = 4;
+    for (int index = 0; index < count(); ++index) {
+        width += minimumTabSizeHint(index).width();
+    }
+    return {width, 26};
+}
+
+QSize SegmentedTabBar::minimumSizeHint() const { return sizeHint(); }
+
+void SegmentedTabBar::paintEvent(QPaintEvent* /*event*/) {
+    QPainter painter{this};
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const auto& colours = palette();
+    const QRectF box = QRectF{rect()}.adjusted(0.5, 0.5, -0.5, -0.5);
+    painter.setPen(QPen{TrackknifeStyle::hairline(colours), 1.0});
+    painter.setBrush(colours.color(QPalette::Base));
+    painter.drawRoundedRect(box, TrackknifeStyle::radius + 1, TrackknifeStyle::radius + 1);
+    if (count() == 0) {
+        return;
+    }
+    const auto step = segment();
+    const auto at = lift_.state() == QAbstractAnimation::Running
+                        ? lift_.currentValue().toReal()
+                        : static_cast<qreal>(currentIndex());
+    if (currentIndex() >= 0) {
+        const QRectF lift{2 + at * step + 0.5, 2.5, step - 1, height() - 5.0};
+        painter.setPen(QPen{TrackknifeStyle::hairline(colours), 1.0});
+        painter.setBrush(TrackknifeStyle::raised(colours));
+        painter.drawRoundedRect(lift, TrackknifeStyle::radius, TrackknifeStyle::radius);
+    }
+    auto small = font();
+    small.setPointSizeF(small.pointSizeF() * 0.9);
+    painter.setFont(small);
+    for (int index = 0; index < count(); ++index) {
+        const QRectF segment_rect{2 + index * step, 2, step, height() - 4.0};
+        const bool lit = index == currentIndex() || index == hovered_;
+        painter.setPen(lit ? colours.color(QPalette::WindowText) : TrackknifeStyle::dim(colours));
+        painter.drawText(segment_rect, Qt::AlignCenter,
+                         QFontMetrics{small}.elidedText(tabText(index), Qt::ElideRight,
+                                                        static_cast<int>(step) - 8));
+    }
+}
+
+void SegmentedTabBar::mouseMoveEvent(QMouseEvent* event) {
+    const auto step = segment();
+    const auto index = step > 0 ? static_cast<int>((event->position().x() - 2) / step) : -1;
+    const auto hovered = index >= 0 && index < count() ? index : -1;
+    if (hovered != hovered_) {
+        hovered_ = hovered;
+        update();
+    }
+    QTabBar::mouseMoveEvent(event);
+}
+
+void SegmentedTabBar::leaveEvent(QEvent* event) {
+    hovered_ = -1;
+    update();
+    QTabBar::leaveEvent(event);
 }
 
 } // namespace trackknife::bench

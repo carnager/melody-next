@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/local_library_panel.hpp"
+
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
+#include "bench/themed_icon.hpp"
 #include "uicommon/library_tree_view.hpp"
 #include "uicommon/rating_stars.hpp"
 
@@ -76,35 +78,34 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     query_error_->setWordWrap(true);
     query_error_->hide();
     layout->addWidget(query_error_);
-    // Refresh and the library's folders are icons on the search row: used
-    // now and then, they need not take a row of their own.
-    const auto icon_button = [this](const QString& name, const QString& icon,
-                                    const QString& text) {
+    // Recently added, refresh and the library's folders are small icons in
+    // the footer beside its news, as the Qt Quick window has them: used now
+    // and then, they need not crowd the search.
+    const auto icon_button = [this](const QString& name, const QString& icon, const QString& text) {
         auto* button = new QToolButton(this);
         button->setObjectName(name);
         button->setText(text);
         button->setToolTip(text);
         button->setAccessibleName(text);
-        button->setIcon(QIcon::fromTheme(icon));
+        button->setIcon(themedIcon(icon));
         button->setToolButtonStyle(Qt::ToolButtonIconOnly);
         button->setAutoRaise(true);
         button->setIconSize(QSize{16, 16});
+        button->setFixedSize(24, 24);
         return button;
     };
     auto* folders = icon_button(QStringLiteral("local-library-folders"),
-                                QStringLiteral("folder"), tr("Folders…"));
+                                QStringLiteral("folder|sp:SP_DirIcon"), tr("Folders…"));
     folders->setToolTip(tr("Choose which folders belong to your music library"));
     connect(folders, &QToolButton::clicked, this, &LocalLibraryPanel::showFolders);
     scan_button_ = icon_button(QStringLiteral("local-library-scan"),
-                               QStringLiteral("view-refresh"), tr("Refresh"));
+                               QStringLiteral("view-refresh|sp:SP_BrowserReload"), tr("Refresh"));
     connect(scan_button_, &QToolButton::clicked, browser_, &LibraryBrowser::toggleScan);
-    newest_toggle_ = icon_button(QStringLiteral("local-library-newest"),
-                                 QStringLiteral("document-open-recent"), tr("Recently added"));
+    newest_toggle_ = icon_button(
+        QStringLiteral("local-library-newest"),
+        QStringLiteral("document-open-recent|sp:SP_FileDialogDetailedView"), tr("Recently added"));
     newest_toggle_->setCheckable(true);
     newest_toggle_->setToolTip(tr("Show albums newest first, as they came into the library"));
-    search_row->addWidget(newest_toggle_);
-    search_row->addWidget(scan_button_);
-    search_row->addWidget(folders);
     auto* library_view = new ui::LibraryTreeView(this);
     tree_ = library_view;
     tree_->setObjectName(QStringLiteral("local-library-tree"));
@@ -195,7 +196,14 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     status_->setWordWrap(true);
     status_->setFont(small);
     status_->setForegroundRole(QPalette::PlaceholderText);
-    footer_layout->addWidget(status_);
+    auto* status_row = new QHBoxLayout;
+    status_row->setContentsMargins(0, 0, 0, 0);
+    status_row->setSpacing(0);
+    status_row->addWidget(status_, 1);
+    status_row->addWidget(newest_toggle_, 0, Qt::AlignTop);
+    status_row->addWidget(scan_button_, 0, Qt::AlignTop);
+    status_row->addWidget(folders, 0, Qt::AlignTop);
+    footer_layout->addLayout(status_row);
     // Which library this is: the tab above says so while it answers, so this
     // line appears only when it does not (ADR-0220), and in full colour.
     source_label_ = new QLabel(footer);
@@ -247,7 +255,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     };
     show_source();
     connect(browser_, &LibraryBrowser::sourceChanged, this, show_source);
-    connect(browser_, &LibraryBrowser::scanningChanged, this, &LocalLibraryPanel::refreshScanButton);
+    connect(browser_, &LibraryBrowser::scanningChanged, this,
+            &LocalLibraryPanel::refreshScanButton);
     connect(browser_, &LibraryBrowser::rootsChanged, this, &LocalLibraryPanel::refreshRoots);
     connect(browser_, &LibraryBrowser::expandRequested, tree_,
             [this](const QModelIndex& index) { tree_->expand(index); });
@@ -307,8 +316,8 @@ void LocalLibraryPanel::refreshScanButton() {
     setProperty("scanning", scanning);
     scan_button_->setText(scanning ? tr("Stop") : tr("Refresh"));
     scan_button_->setToolTip(scanning ? tr("Stop scanning") : tr("Refresh"));
-    scan_button_->setIcon(QIcon::fromTheme(scanning ? QStringLiteral("process-stop")
-                                                    : QStringLiteral("view-refresh")));
+    scan_button_->setIcon(themedIcon(scanning ? u"process-stop|sp:SP_BrowserStop"
+                                              : u"view-refresh|sp:SP_BrowserReload"));
 }
 
 bool LocalLibraryPanel::eventFilter(QObject* watched, QEvent* event) {
@@ -361,19 +370,16 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
     auto* menu = new QMenu(tree_);
     menu->setObjectName(QStringLiteral("local-library-context-menu"));
     menu->setAttribute(Qt::WA_DeleteOnClose);
-    const std::array labels{tr("Append to current list"),
-                            tr("Insert next in current list"),
-                            tr("Replace list and play"),
-                            tr("Open in new tab"),
-                            tr("Play next (Up Next)"),
-                            tr("Add to Up Next")};
+    const std::array labels{tr("Append to current list"), tr("Insert next in current list"),
+                            tr("Replace list and play"),  tr("Open in new tab"),
+                            tr("Play next (Up Next)"),    tr("Add to Up Next")};
     const auto icons = libraryActionIcons(this);
     for (int action = 0; action < static_cast<int>(labels.size()); ++action) {
-        auto* command =
-            menu->addAction(action < 3    ? icons[static_cast<std::size_t>(action)]
-                            : action == 3 ? QIcon::fromTheme(QStringLiteral("tab-new"))
-                                          : QIcon::fromTheme(QStringLiteral("media-playlist-append")),
-                            labels[static_cast<std::size_t>(action)]);
+        auto* command = menu->addAction(
+            action < 3    ? icons[static_cast<std::size_t>(action)]
+            : action == 3 ? QIcon::fromTheme(QStringLiteral("tab-new"))
+                          : QIcon::fromTheme(QStringLiteral("media-playlist-append")),
+            labels[static_cast<std::size_t>(action)]);
         command->setObjectName(QStringLiteral("action-local-library-%1").arg(action));
         command->setEnabled(available);
         connect(command, &QAction::triggered, this, [this, entries, action] {
@@ -390,19 +396,19 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
             create->setObjectName(QStringLiteral("action-local-library-add-to-new-list"));
             connect(create, &QAction::triggered, this, [this, entries] {
                 bool accepted = false;
-                const auto name = QInputDialog::getText(
-                                      this, tr("New list"), tr("Name:"), QLineEdit::Normal,
-                                      entries.size() == 1U
-                                          ? QString::fromStdString(entries.front().label)
-                                          : tr("Library selection"),
-                                      &accepted)
-                                      .trimmed();
+                const auto name =
+                    QInputDialog::getText(this, tr("New list"), tr("Name:"), QLineEdit::Normal,
+                                          entries.size() == 1U
+                                              ? QString::fromStdString(entries.front().label)
+                                              : tr("Library selection"),
+                                          &accepted)
+                        .trimmed();
                 if (accepted && !name.isEmpty()) {
                     emit browser_->newListRequested(entries, name);
                 }
             });
-            const auto targets = list_targets_ ? list_targets_()
-                                               : std::vector<std::pair<QString, QString>>{};
+            const auto targets =
+                list_targets_ ? list_targets_() : std::vector<std::pair<QString, QString>>{};
             if (!targets.empty()) {
                 lists->addSeparator();
             }

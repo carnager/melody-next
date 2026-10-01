@@ -159,6 +159,37 @@ std::shared_ptr<engine::RemoteFileWork> BenchMainWindow::requireFileWork(QTableV
     return work;
 }
 
+void BenchMainWindow::openForScreenshot(const QString& name) {
+    if (name == QStringLiteral("tagger")) {
+        if (auto* view = activeTrackView()) {
+            view->selectAll();
+            showMetadataForView(view);
+        }
+        return;
+    }
+    if (name.startsWith(QStringLiteral("settings"))) {
+        static const std::array pages{
+            std::pair{"general", SettingsDialog::Page::general},
+            std::pair{"playback", SettingsDialog::Page::playback},
+            std::pair{"library", SettingsDialog::Page::library},
+            std::pair{"engine", SettingsDialog::Page::engine},
+            std::pair{"naming", SettingsDialog::Page::naming},
+            std::pair{"replaygain", SettingsDialog::Page::replaygain},
+            std::pair{"covers", SettingsDialog::Page::covers},
+            std::pair{"metadata", SettingsDialog::Page::metadata_services},
+            std::pair{"lastfm", SettingsDialog::Page::lastfm},
+            std::pair{"shortcuts", SettingsDialog::Page::shortcuts},
+        };
+        auto page = SettingsDialog::Page::general;
+        for (const auto& [key, value] : pages) {
+            if (name == QStringLiteral("settings-") + QLatin1String{key}) {
+                page = value;
+            }
+        }
+        showSettingsDialog(page);
+    }
+}
+
 void BenchMainWindow::showMetadataProperties() {
     auto* tab = currentListTab();
     showMetadataForView(tab ? tab->view : nullptr);

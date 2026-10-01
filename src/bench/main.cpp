@@ -3,9 +3,10 @@
 #include "bench/bench_main_window.hpp"
 #include "bench/engine_launcher.hpp"
 #include "bench/widget_color_scheme.hpp"
-#include "workspace/startup.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 #include "uicommon/debug_log.hpp"
+#include "workspace/color_scheme.hpp"
+#include "workspace/startup.hpp"
 
 #include <QApplication>
 #include <QDateTime>
@@ -21,6 +22,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -119,12 +121,35 @@ int main(int argc, char** argv) {
     // background probing has had a moment, and exits -- in test mode, set
     // above.
     QString screenshot_path;
+    bool grab_live = false;
+    QString open_for_screenshot;
+    std::optional<trackknife::bench::ColorScheme> forced_scheme;
     std::vector<std::string> raw_paths;
     const auto arguments = QApplication::arguments();
     raw_paths.reserve(static_cast<std::size_t>(arguments.size()));
     for (qsizetype index = 1; index < arguments.size(); ++index) {
         if (arguments.at(index) == QStringLiteral("--screenshot") && index + 1 < arguments.size()) {
             screenshot_path = arguments.at(++index);
+            continue;
+        }
+        // QA hooks, as trackknife-quick's: --grab <file> is --screenshot on
+        // the real settings and engine, for a sandbox with its own XDG
+        // directories; --open names what to show first; --dark and --light
+        // force a scheme.
+        if (arguments.at(index) == QStringLiteral("--grab") && index + 1 < arguments.size()) {
+            screenshot_path = arguments.at(++index);
+            grab_live = true;
+            continue;
+        }
+        if (arguments.at(index) == QStringLiteral("--open") && index + 1 < arguments.size()) {
+            open_for_screenshot = arguments.at(++index);
+            continue;
+        }
+        if (arguments.at(index) == QStringLiteral("--dark") ||
+            arguments.at(index) == QStringLiteral("--light")) {
+            forced_scheme = arguments.at(index) == QStringLiteral("--dark")
+                                ? trackknife::bench::ColorScheme::dark
+                                : trackknife::bench::ColorScheme::light;
             continue;
         }
         // --debug traces server commands, context switches and what the
@@ -139,7 +164,10 @@ int main(int argc, char** argv) {
     }
     // ADR-0226: only the application starts an engine, and not when it is
     // taking screenshots against test data.
-    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty());
+    trackknife::bench::allowLocalEngine(screenshot_path.isEmpty() || grab_live);
+    if (forced_scheme) {
+        trackknife::bench::ColorSchemes::instance().apply(*forced_scheme);
+    }
     startSoakLog(&application);
     trackknife::bench::BenchMainWindow window;
     window.show();
@@ -152,8 +180,21 @@ int main(int argc, char** argv) {
         window.openLocalPaths(std::move(raw_paths));
     }
     if (!screenshot_path.isEmpty()) {
-        QTimer::singleShot(3'000, &application, [&window, screenshot_path] {
-            const auto image = window.grab().toImage();
+        if (!open_for_screenshot.isEmpty()) {
+            QTimer::singleShot(2'000, &window, [&window, open_for_screenshot] {
+                window.openForScreenshot(open_for_screenshot);
+            });
+        }
+        QTimer::singleShot(grab_live ? 6'000 : 3'000, &application, [&window, screenshot_path] {
+            // The window opened last -- a tag editor, say -- else the main one.
+            QWidget* shown = &window;
+            for (auto* candidate : QApplication::topLevelWidgets()) {
+                if (candidate != &window && candidate->isVisible() && candidate->isWindow() &&
+                    !candidate->inherits("QMenu")) {
+                    shown = candidate;
+                }
+            }
+            const auto image = shown->grab().toImage();
             const auto saved = image.save(screenshot_path);
             QApplication::exit(saved ? 0 : 1);
         });

@@ -10,6 +10,7 @@
 #include "trackknife/metadata/mp3_writer.hpp"
 #include "trackknife/metadata/staged_patch.hpp"
 #include "trackknife/metadata/staged_selection.hpp"
+#include "trackknife/metadata/transformation.hpp"
 #include "trackknife/metadata/write_plan.hpp"
 #include "trackknife/operations/artwork_apply.hpp"
 #include "trackknife/operations/cue_replay_gain_apply.hpp"
@@ -26,6 +27,9 @@
 
 #include <flacfile.h>
 #include <flacpicture.h>
+#include <mp4file.h>
+#include <mp4tag.h>
+#include <xiphcomment.h>
 
 #include <algorithm>
 #include <array>
@@ -999,6 +1003,116 @@ void renamed_files_keep_their_identity_where_renames_renumber(
             // Recorded as it is now, so every later check is exact again.
             CHECK((**loaded).state == State::complete &&
                   (**loaded).published_revision == *published);
+        }
+    }
+}
+
+// A script step that writes a field no format names -- FMPS_RATING, from
+// "Convert rating" -- stages it under the step's logical name, while the
+// file's own field of that name is read under its spelling. The save writes
+// the property either way; verification reads it back where it was written.
+void script_written_rating_verifies_over_an_existing_one(
+    const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    auto journal = open_journal(directory, "rated.sqlite3");
+    CHECK(journal.has_value());
+    if (!journal) {
+        return;
+    }
+    // A player's RATING of 100, converted into FMPS_RATING over an existing
+    // one, into a new one, in FLAC and in M4A -- the M4A as iTunes-tagged
+    // files carry it, a freeform atom spelled FMPS_Rating.
+    struct Case {
+        const char* fixture;
+        const char* name;
+        bool existing;
+    };
+    for (const auto& [fixture, name, existing] : {Case{"tagged-tone-flac", "existing.flac", true},
+                                                  Case{"tagged-tone-flac", "new.flac", false},
+                                                  Case{"tagged-tone-m4a", "existing.m4a", true},
+                                                  Case{"tagged-tone-m4a", "new.m4a", false}}) {
+        const auto source =
+            materialize(fixture_directory, std::string{fixture} + ".b64", directory.path() / name);
+        if (source.extension() == ".flac") {
+            TagLib::FLAC::File file{source.c_str(), false};
+            auto* comment = file.xiphComment(true);
+            comment->addField("RATING", "100");
+            if (existing) {
+                comment->addField("FMPS_RATING", "0.2");
+            }
+            CHECK(file.save());
+        } else {
+            TagLib::MP4::File file{source.c_str(), false};
+            auto* tag = file.tag();
+            tag->setItem("----:com.apple.iTunes:RATING",
+                         TagLib::MP4::Item{TagLib::StringList{"100"}});
+            if (existing) {
+                tag->setItem("----:com.apple.iTunes:FMPS_Rating",
+                             TagLib::MP4::Item{TagLib::StringList{"0.2"}});
+            }
+            CHECK(file.save());
+        }
+        auto read = metadata::read_local_metadata(source.native());
+        CHECK(read.has_value());
+        if (!read) {
+            return;
+        }
+        auto selection = metadata::StagedMetadataSelection::create(
+            {metadata::StagedMetadataSource{.raw_path = read->raw_path,
+                                            .source_revision = read->source_revision,
+                                            .baseline = read->document}});
+        CHECK(selection.has_value());
+        if (!selection) {
+            return;
+        }
+        const metadata::MetadataTransformationChain chain{
+            .schema_version = 1U,
+            .name = "Ratings",
+            .actions = {metadata::MetadataConvertRatingAction{
+                .target_field = "FMPS_RATING",
+                .source_field = "RATING",
+                .scale = metadata::PlainRatingScale::hundred}},
+        };
+        const std::array items{std::size_t{0U}};
+        const auto preview = metadata::plan_metadata_transformation(
+            *selection, metadata::StagedMetadataPatchSet{}, items, chain);
+        CHECK(preview.has_value() && preview->cells.size() == 1U);
+        if (!preview || preview->cells.size() != 1U) {
+            return;
+        }
+        // Staged as the tag editor stages a script's cell.
+        const auto& cell = preview->cells.front();
+        auto field_index = selection->field_index(cell.canonical_field);
+        if (!field_index) {
+            auto inserted =
+                selection->ensure_missing_field(cell.canonical_field, cell.display_field);
+            CHECK(inserted.has_value());
+            if (!inserted) {
+                return;
+            }
+            field_index = *inserted;
+        }
+        metadata::StagedMetadataPatchSet patches;
+        CHECK(cell.after.has_value() &&
+              patches.replace_values(*selection, 0U, *field_index, *cell.after).has_value());
+        auto plan = metadata::revalidate_metadata_write_plan(*selection, patches);
+        CHECK(plan && plan->ready() && plan->sources.size() == 1U);
+        if (!plan || !plan->ready() || plan->sources.size() != 1U) {
+            return;
+        }
+        const auto committed = operations::commit_flac_metadata_source(
+            plan->sources.front(), *journal, successful_dependent_commit);
+        if (!committed) {
+            std::cerr << name << ": " << committed.error().message << '\n';
+        }
+        CHECK(committed.has_value());
+        const auto reread = metadata::read_local_metadata(source.native());
+        CHECK(reread &&
+              reread->document.effective_values("FMPS_RATING") == std::vector<std::string>{"1.0"});
+        if (source.extension() == ".m4a") {
+            TagLib::MP4::File file{source.c_str(), false};
+            CHECK(file.isValid() && file.tag()->contains("----:com.apple.iTunes:FMPS_Rating") &&
+                  !file.tag()->contains("----:com.apple.iTunes:FMPS_RATING"));
         }
     }
 }
@@ -3576,6 +3690,7 @@ int main(const int argc, char** argv) {
         commits_with_copied_backup_where_links_are_refused(fixture_directory);
         recovers_copied_backups_interrupted_around_journaling(fixture_directory);
         renamed_files_keep_their_identity_where_renames_renumber(fixture_directory);
+        script_written_rating_verifies_over_an_existing_one(fixture_directory);
         commits_and_recovers_artwork_at_unchanged_paths(fixture_directory);
         commits_and_undoes_mp4_covr_artwork(fixture_directory);
         recovers_safe_prepublication_debris_but_retains_ambiguous_paths(fixture_directory);

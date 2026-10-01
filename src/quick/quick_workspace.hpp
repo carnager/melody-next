@@ -75,6 +75,9 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     Q_PROPERTY(QVariantMap upNext READ upNext NOTIFY upNextChanged)
     Q_PROPERTY(QVariantMap history READ history NOTIFY historyChanged)
     Q_PROPERTY(int coverRevision READ coverRevision NOTIFY coverRevisionChanged)
+    // ADR-0247: where icons are asked for -- "image://icon/r<n>/" -- new with
+    // each icon theme the colour scheme brings, so every icon is drawn again.
+    Q_PROPERTY(QString iconBase READ iconBase NOTIFY iconBaseChanged)
     Q_PROPERTY(bool notifications READ notifications WRITE setNotifications NOTIFY desktopChanged)
     Q_PROPERTY(bool followPlayback READ followPlayback WRITE setFollowPlayback NOTIFY desktopChanged)
     // Settings › General: panels slide open and closed.
@@ -143,6 +146,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     [[nodiscard]] QString bufferProfile() const { return workspace_.selected_buffer_profile_; }
     [[nodiscard]] KeyedRowsModel* upNextRows() { return &up_next_rows_; }
     [[nodiscard]] QVariantMap upNext() const { return up_next_; }
+    [[nodiscard]] static QString iconBase();
     [[nodiscard]] QVariantMap history() const { return history_; }
     [[nodiscard]] int coverRevision() const { return cover_revision_; }
     [[nodiscard]] bool notifications() const;
@@ -375,6 +379,7 @@ class QuickWorkspace final : public QObject, public bench::WorkspaceView {
     void outputMenuChanged();
     void bufferProfileChanged();
     void upNextChanged();
+    void iconBaseChanged();
     void historyChanged();
     void coverRevisionChanged();
     void desktopChanged();

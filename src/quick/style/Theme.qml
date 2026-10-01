@@ -23,6 +23,10 @@ QtObject {
     readonly property int moderate: 180
     readonly property int slow: 240
     readonly property real smallSize: Qt.application.font.pointSize * 0.9
+    // A disabled control, faded by this much -- the one way the style shows
+    // disabled; its palette's disabled colours are its normal ones, so the
+    // two never stack into something unreadable (ADR-0247).
+    readonly property real disabledOpacity: 0.5
     // Menus read smaller than the window, as the desktop's own do.
     readonly property real menuSize: Qt.application.font.pointSize * 0.95
 

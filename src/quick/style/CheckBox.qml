@@ -30,7 +30,7 @@ T.CheckBox {
         border.width: control.on ? 0 : 1
         border.color: control.visualFocus || control.hovered ? control.palette.highlight
                                                              : Theme.border(control.palette)
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
         Behavior on color {
             ColorAnimation {
                 duration: Theme.quick
@@ -64,6 +64,6 @@ T.CheckBox {
         text: control.text
         font: control.font
         color: control.palette.windowText
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 }

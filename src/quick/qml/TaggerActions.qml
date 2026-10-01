@@ -36,7 +36,7 @@ Popup {
             actions.close();
             activated();
         }
-        opacity: enabled ? 1 : 0.5
+        opacity: enabled ? 1 : Theme.disabledOpacity
         HoverHandler {
             cursorShape: link.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
         }

@@ -52,7 +52,7 @@ T.ComboBox {
         selectionColor: control.palette.highlight
         selectedTextColor: control.palette.highlightedText
         verticalAlignment: Text.AlignVCenter
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 
     background: Rectangle {
@@ -65,7 +65,7 @@ T.ComboBox {
                : Theme.raised(control.palette)
         border.width: control.editable || control.visualFocus ? 1 : 0
         border.color: control.activeFocus ? control.palette.highlight : Theme.border(control.palette)
-        opacity: control.enabled ? 1 : 0.6
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
         Behavior on color {
             ColorAnimation {
                 duration: Theme.quick

@@ -112,7 +112,7 @@ ToolBar {
                 display: AbstractButton.IconOnly
                 enabled: bar.transport.canPrevious ?? false
                 text: "Previous"
-                icon.source: "image://icon/media-skip-backward|sp:SP_MediaSkipBackward"
+                icon.source: Tk.iconBase + "media-skip-backward|sp:SP_MediaSkipBackward"
                 icon.width: 18
                 icon.height: 18
                 onClicked: Tk.previous()
@@ -146,8 +146,8 @@ ToolBar {
                         height: 18
                         sourceSize: Qt.size(18, 18)
                         source: bar.transport.playing
-                                ? "image://icon/media-playback-pause|sp:SP_MediaPause"
-                                : "image://icon/media-playback-start|sp:SP_MediaPlay"
+                                ? Tk.iconBase + "media-playback-pause|sp:SP_MediaPause"
+                                : Tk.iconBase + "media-playback-start|sp:SP_MediaPlay"
                     }
                 }
             }
@@ -158,7 +158,7 @@ ToolBar {
                 display: AbstractButton.IconOnly
                 enabled: bar.transport.canNext ?? false
                 text: "Next"
-                icon.source: "image://icon/media-skip-forward|sp:SP_MediaSkipForward"
+                icon.source: Tk.iconBase + "media-skip-forward|sp:SP_MediaSkipForward"
                 icon.width: 18
                 icon.height: 18
                 onClicked: Tk.next()
@@ -217,8 +217,8 @@ ToolBar {
                 enabled: bar.transport.engine ?? false
                 readonly property bool muted: (bar.transport.volume ?? 0) === 0
                 checked: muted
-                icon.source: muted ? "image://icon/audio-volume-muted|sp:SP_MediaVolumeMuted"
-                                   : "image://icon/audio-volume-high|sp:SP_MediaVolume"
+                icon.source: muted ? Tk.iconBase + "audio-volume-muted|sp:SP_MediaVolumeMuted"
+                                   : Tk.iconBase + "audio-volume-high|sp:SP_MediaVolume"
                 icon.width: 18
                 icon.height: 18
                 text: muted ? qsTr("Unmute") : qsTr("Mute")
@@ -267,7 +267,7 @@ ToolBar {
                     Layout.preferredWidth: 14
                     Layout.preferredHeight: 14
                     sourceSize: Qt.size(14, 14)
-                    source: "image://icon/audio-speakers-symbolic|audio-speakers|sp:SP_ComputerIcon"
+                    source: Tk.iconBase + "audio-speakers-symbolic|audio-speakers|sp:SP_ComputerIcon"
                         + (device.enabled ? "" : "?disabled")
                 }
                 Label {
@@ -287,7 +287,7 @@ ToolBar {
                 width: 10
                 height: 10
                 sourceSize: Qt.size(10, 10)
-                source: "image://icon/pan-down-symbolic|arrow-down|sp:SP_ArrowDown"
+                source: Tk.iconBase + "pan-down-symbolic|arrow-down|sp:SP_ArrowDown"
             }
             onClicked: deviceMenu.popup(device, 0, device.height)
             OutputMenu { id: deviceMenu }

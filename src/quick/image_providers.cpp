@@ -10,6 +10,7 @@
 #include <QMetaEnum>
 #include <QPainter>
 #include <QStyle>
+#include <QRegularExpression>
 #include <QUrl>
 
 namespace trackknife::quick {
@@ -47,7 +48,10 @@ QImage CoverProvider::requestImage(const QString& id, QSize* size, const QSize& 
 IconProvider::IconProvider() : QQuickImageProvider(QQuickImageProvider::Pixmap) {}
 
 QPixmap IconProvider::requestPixmap(const QString& encoded, QSize* size, const QSize& requested) {
-    const auto id = QUrl::fromPercentEncoding(encoded.toUtf8());
+    auto id = QUrl::fromPercentEncoding(encoded.toUtf8());
+    // "r<revision>/" first: only there so a changed icon theme is a new URL.
+    static const QRegularExpression revision{QStringLiteral("^r\\d+/")};
+    id.remove(revision);
     const auto disabled = id.contains(QStringLiteral("?disabled"));
     const auto one_shot = id.contains(QStringLiteral("?oneshot"));
     const auto names = QString{id}

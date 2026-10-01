@@ -12214,6 +12214,29 @@ void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
     QVERIFY(darkPalette().color(QPalette::Window).lightness() <
             lightPalette().color(QPalette::Window).lightness());
 
+    // Icons in the variant the ground needs, found among those installed.
+    {
+        QTemporaryDir icons;
+        QVERIFY(icons.isValid());
+        for (const auto* name : {"Glyphs-Dark", "Glyphs-Light", "breezy", "breezy-dark"}) {
+            QVERIFY(QDir{icons.path()}.mkpath(QString::fromLatin1(name)));
+            QFile index{icons.path() + QLatin1Char('/') + QString::fromLatin1(name) +
+                        QStringLiteral("/index.theme")};
+            QVERIFY(index.open(QIODevice::WriteOnly));
+            index.write("[Icon Theme]\nName=x\n");
+        }
+        const auto paths = QIcon::themeSearchPaths();
+        QIcon::setThemeSearchPaths({icons.path()});
+        QCOMPARE(iconThemeVariant(QStringLiteral("Glyphs-Dark"), false),
+                 QStringLiteral("Glyphs-Light"));
+        QCOMPARE(iconThemeVariant(QStringLiteral("Glyphs-Light"), true),
+                 QStringLiteral("Glyphs-Dark"));
+        QCOMPARE(iconThemeVariant(QStringLiteral("breezy-dark"), false), QStringLiteral("breezy"));
+        QCOMPARE(iconThemeVariant(QStringLiteral("breezy"), true), QStringLiteral("breezy-dark"));
+        QCOMPARE(iconThemeVariant(QStringLiteral("Lonely"), true), QStringLiteral("Lonely"));
+        QIcon::setThemeSearchPaths(paths);
+    }
+
     followColorSchemes();
     BenchMainWindow window;
     window.show();

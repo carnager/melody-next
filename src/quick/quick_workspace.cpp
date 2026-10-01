@@ -8,6 +8,7 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/rating_color.hpp"
 #include "uicommon/track_row_roles.hpp"
+#include "workspace/color_scheme.hpp"
 #include "workspace/command_search.hpp"
 #include "workspace/language_reference.hpp"
 #include "workspace/sources.hpp"
@@ -37,8 +38,14 @@ QuickWorkspace* instance_ = nullptr;
 
 } // namespace
 
+QString QuickWorkspace::iconBase() {
+    return QStringLiteral("image://icon/r%1/").arg(bench::ColorSchemes::instance().iconRevision());
+}
+
 QuickWorkspace::QuickWorkspace(QObject* parent) : QObject(parent) {
     workspace_.setView(this);
+    connect(&bench::ColorSchemes::instance(), &bench::ColorSchemes::applied, this,
+            &QuickWorkspace::iconBaseChanged);
     connect(&rows_, &TrackRowsModel::selectionChanged, this, &QuickWorkspace::selectionEdited);
     connect(&edit_job_, &bench::ListEditJob::edited, this, [this](bench::LocalListModel* model) {
         for (const auto& tab : workspace_.list_tabs_) {

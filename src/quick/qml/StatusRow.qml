@@ -57,7 +57,7 @@ Pane {
         }
         contentItem: Image {
             sourceSize: Qt.size(16, 16)
-            source: "image://icon/" + mode.iconName + "|sp:SP_BrowserReload"
+            source: Tk.iconBase + mode.iconName + "|sp:SP_BrowserReload"
                     + (mode.state.oneshot ? "?oneshot" : "")
                     + (mode.enabled ? "" : "?disabled")
         }

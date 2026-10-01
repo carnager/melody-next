@@ -251,7 +251,18 @@ StagedMetadataSelection::ensure_missing_field(const std::string_view name,
         });
     }
     if (!is_conventional_metadata_field(canonical_name)) {
-        return ensure_exact_native_field(name, display_name, maximum_fields);
+        // A field no format names is known by its spelling. Asked for by its
+        // bare logical name -- "fmpsrating", as a script step's result is --
+        // its spelling is the display name's, "FMPS_RATING", when that is
+        // this field: so the file's own field of that spelling is the one
+        // found, not a second one beside it that verification cannot read
+        // back. A name that is a spelling already ("NEW_FIELD") stays one.
+        const bool bare = canonicalize_native_field_name(name) == canonical_name;
+        const auto spelled =
+            bare && !display_name.empty() && canonicalize_field_name(display_name) == canonical_name
+                ? display_name
+                : name;
+        return ensure_exact_native_field(spelled, display_name, maximum_fields);
     }
     if (const auto existing = field_positions_.find(canonical_name);
         existing != field_positions_.end()) {

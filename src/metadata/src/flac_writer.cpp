@@ -734,6 +734,9 @@ prepare_flac_metadata_write_copy(const MetadataWritePlanSource& source_plan,
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(source_plan.raw_path, prepared_raw_path));
     }
+    if (auto settled = text_writer_detail::settle_prepared(prepared_raw_path, source_plan.raw_path); !settled) {
+        return std::unexpected(std::move(settled.error()));
+    }
     auto after = read_local_metadata(prepared_raw_path, cancellation);
     if (!after) {
         return std::unexpected(std::move(after.error()));
@@ -908,6 +911,9 @@ prepare_flac_artwork_write_copy(const ArtworkWritePlanSource& source_plan,
         return std::unexpected(cancelled(source_plan.raw_media_path, prepared_raw_path));
     }
 
+    if (auto settled = text_writer_detail::settle_prepared(prepared_raw_path, source_plan.raw_media_path); !settled) {
+        return std::unexpected(std::move(settled.error()));
+    }
     auto after_document = read_local_metadata(prepared_raw_path, cancellation);
     if (!after_document) {
         return std::unexpected(std::move(after_document.error()));

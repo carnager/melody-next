@@ -513,22 +513,51 @@ addressed_values(const std::map<std::string, std::vector<std::string>>& fields,
                                            : std::optional<std::vector<std::string>>{found->second};
 }
 
-[[nodiscard]] bool planned_fields_match(const metadata::MetadataDocument& document,
-                                        const MetadataOperationJournalRecord& record) {
+// The first planned field the document does not hold as planned, said for a
+// person: which field, what was planned, what was read. Empty when all match.
+[[nodiscard]] std::optional<std::string>
+planned_field_mismatch(const metadata::MetadataDocument& document,
+                       const MetadataOperationJournalRecord& record) {
+    const auto shown = [](const std::vector<std::string>& values) {
+        std::string joined;
+        for (const auto& value : values) {
+            if (!joined.empty()) {
+                joined += "; ";
+            }
+            joined += value;
+        }
+        constexpr std::size_t limit = 80U;
+        if (joined.size() > limit) {
+            joined = joined.substr(0U, limit) + "...";
+        }
+        return "\"" + joined + "\"";
+    };
     const auto fields = effective_text(document);
     const auto native_fields = effective_native_text(document);
     for (const auto& change : record.changes) {
         const auto values = addressed_values(fields, native_fields, change.canonical_name,
                                              change.exact_native_name);
+        const auto& name =
+            change.exact_native_name ? *change.exact_native_name : change.canonical_name;
         if (change.kind == metadata::StagedMetadataPatchKind::remove_field) {
             if (values) {
-                return false;
+                return name + ": planned removed, read " + shown(*values);
             }
-        } else if (!values || *values != change.planned_values) {
-            return false;
+        } else if (!values) {
+            return name + ": planned " + shown(change.planned_values) + ", read nothing";
+        } else if (*values != change.planned_values) {
+            return name + ": planned " + shown(change.planned_values) + ", read " + shown(*values) +
+                   (change.original_present && *values == change.original_values
+                        ? " (the value before the save)"
+                        : "");
         }
     }
-    return true;
+    return std::nullopt;
+}
+
+[[nodiscard]] bool planned_fields_match(const metadata::MetadataDocument& document,
+                                        const MetadataOperationJournalRecord& record) {
+    return !planned_field_mismatch(document, record);
 }
 
 [[nodiscard]] core::Result<void>
@@ -728,10 +757,12 @@ verify_published_content(const MetadataOperationJournalRecord& record,
                                       "published metadata has an unexpected revision",
                                       record.source_raw_path, record.id));
     }
-    if (!record.changes.empty() && !planned_fields_match(reread->document, record)) {
-        return std::unexpected(operation_error(core::ErrorCode::conflict,
-                                               "published tags failed verification",
-                                               record.source_raw_path, record.id));
+    if (const auto mismatch = record.changes.empty()
+                                  ? std::nullopt
+                                  : planned_field_mismatch(reread->document, record)) {
+        return std::unexpected(operation_error(
+            core::ErrorCode::conflict, "published tags failed verification (" + *mismatch + ")",
+            record.source_raw_path, record.id));
     }
     if (record.content_kind == MetadataOperationContentKind::text_fields) {
         if (!planned_fields_match(reread->document, record)) {

@@ -92,6 +92,10 @@ struct MetadataOperationJournalRecord {
     std::vector<MetadataOperationJournalChange> changes;
     std::optional<MetadataOperationJournalArtwork> artwork;
     std::optional<core::Error> failure;
+    // ADR-0248: the backup's own identity when it is a copy, made where the
+    // filesystem refuses a hard link. Empty for a hard link, which is the
+    // original itself and carries expected_revision.
+    std::optional<core::LocalSourceRevision> backup_revision{};
 
     friend bool operator==(const MetadataOperationJournalRecord&,
                            const MetadataOperationJournalRecord&) = default;
@@ -103,7 +107,17 @@ struct MetadataOperationJournalTransition {
     std::optional<core::LocalSourceRevision> prepared_revision;
     std::optional<core::LocalSourceRevision> published_revision;
     std::optional<core::Error> failure;
+    // Only on prepared -> prepared, which records a copied backup before
+    // publication (ADR-0248); a recorded backup identity is never replaced.
+    std::optional<core::LocalSourceRevision> backup_revision{};
 };
+
+// The identity the backup has, and the source has again once it is restored:
+// the original's for a hard link, the copy's own for a copy (ADR-0248).
+[[nodiscard]] inline const core::LocalSourceRevision&
+backup_identity(const MetadataOperationJournalRecord& record) noexcept {
+    return record.backup_revision ? *record.backup_revision : record.expected_revision;
+}
 
 struct MetadataOperationBackupRecord {
     MetadataOperationJournalRecord operation;

@@ -343,7 +343,8 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
         return to == State::prepared || to == State::rolled_back ||
                to == State::needs_reconciliation;
     case State::prepared:
-        return to == State::published || to == State::rolled_back ||
+        // prepared -> prepared records a copied backup (ADR-0248).
+        return to == State::prepared || to == State::published || to == State::rolled_back ||
                to == State::needs_reconciliation;
     case State::published:
         return to == State::complete || to == State::rolled_back ||
@@ -370,6 +371,11 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
         !transition.published_revision) {
         return std::unexpected(
             invalid_record("Published operation-journal state requires a published revision"));
+    }
+    if ((transition.expected_state == State::prepared && transition.state == State::prepared) !=
+        transition.backup_revision.has_value()) {
+        return std::unexpected(invalid_record(
+            "Only a prepared operation journal records a copied backup, once, by itself"));
     }
     if (transition.state == State::prepared && transition.published_revision) {
         return std::unexpected(
@@ -557,7 +563,7 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
 
 [[nodiscard]] core::Result<void> validate_record(const Record& record) {
     if (record.state != State::planned || record.prepared_revision || record.published_revision ||
-        record.failure) {
+        record.backup_revision || record.failure) {
         return std::unexpected(invalid_record("Invalid planned metadata-operation journal"));
     }
     return validate_record_structure(record);
@@ -566,7 +572,8 @@ read_optional_revision(sqlite3_stmt* statement, const int first) {
 [[nodiscard]] bool valid_loaded_state_evidence(const Record& record) {
     switch (record.state) {
     case State::planned:
-        return !record.prepared_revision && !record.published_revision && !record.failure;
+        return !record.prepared_revision && !record.published_revision && !record.backup_revision &&
+               !record.failure;
     case State::prepared:
         return record.prepared_revision && !record.published_revision && !record.failure;
     case State::published:
@@ -807,8 +814,9 @@ load_records(sqlite3* database, const char* sql, const std::string_view id = {},
         auto expected = read_revision(statement->get(), 5);
         auto prepared_revision = read_optional_revision(statement->get(), 10);
         auto published_revision = read_optional_revision(statement->get(), 15);
+        auto backup_revision = read_optional_revision(statement->get(), 23);
         if (!parsed_id || !valid_state(state_value) || !valid_content_kind(content_kind) ||
-            !expected || !prepared_revision || !published_revision) {
+            !expected || !prepared_revision || !published_revision || !backup_revision) {
             return std::unexpected(core::Error{
                 .code = core::ErrorCode::database,
                 .message = "Operation journal contains an invalid record",
@@ -859,6 +867,7 @@ load_records(sqlite3* database, const char* sql, const std::string_view id = {},
             .changes = {},
             .artwork = std::nullopt,
             .failure = std::move(failure),
+            .backup_revision = *backup_revision,
         });
     }
     if (record_result != SQLITE_DONE) {
@@ -991,7 +1000,8 @@ load_backup_records(sqlite3* database, const char* sql, const std::string_view i
         "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
-        "content_kind "
+        "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
+        "backup_mtime_nanoseconds "
         "FROM operation_journal WHERE id = ?";
     std::vector<BackupRecord> backups;
     backups.reserve(rows.size());
@@ -1290,7 +1300,11 @@ core::Result<void> SqliteMetadataOperationJournal::transition(
                 "prepared_size = ?, prepared_mtime_seconds = ?, prepared_mtime_nanoseconds = ?, "
                 "published_device = ?, published_inode = ?, published_size = ?, "
                 "published_mtime_seconds = ?, published_mtime_nanoseconds = ?, error_code = ?, "
-                "error_message = ? WHERE id = ? AND state = ?");
+                "error_message = ?, backup_device = coalesce(?, backup_device), "
+                "backup_inode = coalesce(?, backup_inode), backup_size = coalesce(?, backup_size), "
+                "backup_mtime_seconds = coalesce(?, backup_mtime_seconds), "
+                "backup_mtime_nanoseconds = coalesce(?, backup_mtime_nanoseconds) "
+                "WHERE id = ? AND state = ? AND (? IS NULL OR backup_device IS NULL)");
     if (!statement ||
         sqlite3_bind_int(statement->get(), 1, static_cast<int>(transition.state)) != SQLITE_OK ||
         !bind_optional_revision(statement->get(), 2, transition.prepared_revision) ||
@@ -1301,9 +1315,12 @@ core::Result<void> SqliteMetadataOperationJournal::transition(
                 !bind_blob(statement->get(), 13, transition.failure->message))
              : (sqlite3_bind_null(statement->get(), 12) != SQLITE_OK ||
                 sqlite3_bind_null(statement->get(), 13) != SQLITE_OK)) ||
-        !bind_blob(statement->get(), 14, id.to_string()) ||
-        sqlite3_bind_int(statement->get(), 15, static_cast<int>(transition.expected_state)) !=
-            SQLITE_OK) {
+        !bind_optional_revision(statement->get(), 14, transition.backup_revision) ||
+        !bind_blob(statement->get(), 19, id.to_string()) ||
+        sqlite3_bind_int(statement->get(), 20, static_cast<int>(transition.expected_state)) !=
+            SQLITE_OK ||
+        (transition.backup_revision ? sqlite3_bind_int(statement->get(), 21, 1)
+                                    : sqlite3_bind_null(statement->get(), 21)) != SQLITE_OK) {
         auto error = statement ? database_error(database, "Could not bind journal transition")
                                : std::move(statement.error());
         rollback();
@@ -1361,7 +1378,8 @@ SqliteMetadataOperationJournal::load(const core::StableId& id) const {
         "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
-        "content_kind "
+        "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
+        "backup_mtime_nanoseconds "
         "FROM operation_journal WHERE id = ?";
     auto records = load_records(implementation_->database, sql, id.to_string());
     if (!records) {
@@ -1386,7 +1404,8 @@ SqliteMetadataOperationJournal::load_incomplete() const {
         "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
-        "content_kind "
+        "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
+        "backup_mtime_nanoseconds "
         "FROM operation_journal WHERE state NOT IN (3, 4) ORDER BY rowid LIMIT 10001";
     auto records = load_records(implementation_->database, sql, {}, DamagedEvidence::reconcile);
     if (!records) {
@@ -1408,7 +1427,8 @@ SqliteMetadataOperationJournal::load_incomplete_for_source(const std::string& ra
         "prepared_device, prepared_inode, prepared_size, prepared_mtime_seconds, "
         "prepared_mtime_nanoseconds, published_device, published_inode, published_size, "
         "published_mtime_seconds, published_mtime_nanoseconds, error_code, error_message, "
-        "content_kind "
+        "content_kind, backup_device, backup_inode, backup_size, backup_mtime_seconds, "
+        "backup_mtime_nanoseconds "
         "FROM operation_journal WHERE source_path = ? AND state NOT IN (3, 4) ORDER BY rowid LIMIT "
         "10001";
     auto records =

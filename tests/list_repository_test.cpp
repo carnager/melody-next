@@ -332,7 +332,7 @@ void list_documents_round_trip_transactionally() {
         }
         require(opened.has_value(), "list repository must create and migrate a new database");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 48U, "state repository schema must be explicit");
+        require(repository.schema_version() == 49U, "state repository schema must be explicit");
         require(repository.replace_all(expected).has_value(),
                 "valid list documents must commit in one transaction");
         require(repository.load_all() == expected,
@@ -719,7 +719,7 @@ void output_layout_and_destination_profiles_round_trip_transactionally() {
         auto opened = persistence::ListRepository::open(database_path);
         require(opened.has_value(), "output-profile repository must open");
         auto repository = std::move(*opened);
-        require(repository.schema_version() == 48U,
+        require(repository.schema_version() == 49U,
                 "output profiles must survive the explicit schema-18 migration");
         require(repository.upsert_output_layout_profile(expected_layout).has_value() &&
                     repository.upsert_destination_profile(expected_destination).has_value(),
@@ -1455,7 +1455,7 @@ void committed_source_relocation_rekeys_every_occurrence_and_stale_snapshot() {
                 repository.load_all() == loaded,
             "a persisted target collision must reject the complete relocation transaction");
     auto reopened = persistence::ListRepository::open(database_path);
-    require(reopened && reopened->schema_version() == 48U && reopened->load_all() == loaded,
+    require(reopened && reopened->schema_version() == 49U && reopened->load_all() == loaded,
             "relocation evidence and resolved paths must survive reopening schema 18");
 
     cleanup();
@@ -1904,17 +1904,17 @@ void engine_lists_round_trip_and_refuse_stale_writes() {
     require(repository.load_engine_lists() && repository.load_engine_lists()->empty(),
             "there are no lists at first");
 
-    persistence::EngineListItem cue{.entry_id = StableId::random(),
-                                    .raw_path = std::string{"/music/Album/album.flac\xff", 24},
-                                    .logical_reference = std::string{"cue:1"},
-                                    .segment = persistence::ListItemSegment{
-                                        .start_sample = 44'100, .end_sample = 88'200},
-                                    .source_selection = persistence::ListItemSourceSelection{
-                                        .audio_stream_index = 1, .subsong_index = std::nullopt},
-                                    .duration_ms = 1'000,
-                                    .title = "One",
-                                    .artist = "Someone",
-                                    .album = "Album"};
+    persistence::EngineListItem cue{
+        .entry_id = StableId::random(),
+        .raw_path = std::string{"/music/Album/album.flac\xff", 24},
+        .logical_reference = std::string{"cue:1"},
+        .segment = persistence::ListItemSegment{.start_sample = 44'100, .end_sample = 88'200},
+        .source_selection = persistence::ListItemSourceSelection{.audio_stream_index = 1,
+                                                                 .subsong_index = std::nullopt},
+        .duration_ms = 1'000,
+        .title = "One",
+        .artist = "Someone",
+        .album = "Album"};
     persistence::EngineListItem plain{.entry_id = StableId::random(),
                                       .raw_path = "/music/Album/02.flac",
                                       .logical_reference = std::nullopt,
@@ -1933,8 +1933,9 @@ void engine_lists_round_trip_and_refuse_stale_writes() {
     auto loaded = repository.load_engine_list(id);
     require(loaded && *loaded && (*loaded)->items == std::vector{cue, plain},
             "every field of every entry comes back, raw bytes and all, in order");
-    require(repository.save_engine_list(id, "Untitled", persistence::EngineListKind::working, {},
-                                        0U, 1'100)
+    require(repository
+                    .save_engine_list(id, "Untitled", persistence::EngineListKind::working, {}, 0U,
+                                      1'100)
                     .error()
                     .code == ErrorCode::conflict,
             "creating it again is a conflict");
@@ -1949,12 +1950,11 @@ void engine_lists_round_trip_and_refuse_stale_writes() {
             "and the new order is the stored one");
 
     // A second client still holding revision 1 cannot overwrite that.
-    auto stale = repository.save_engine_list(id, "Old", persistence::EngineListKind::saved, {},
-                                             1U, 2'100);
+    auto stale =
+        repository.save_engine_list(id, "Old", persistence::EngineListKind::saved, {}, 1U, 2'100);
     require(!stale && stale.error().code == ErrorCode::conflict,
             "a write against an old revision is refused");
-    require(repository.rename_engine_list(id, "Old", 1U, 2'100).error().code ==
-                ErrorCode::conflict,
+    require(repository.rename_engine_list(id, "Old", 1U, 2'100).error().code == ErrorCode::conflict,
             "so is a rename");
     require(repository.delete_engine_list(id, 1U).error().code == ErrorCode::conflict,
             "and a delete");
@@ -1972,13 +1972,13 @@ void engine_lists_round_trip_and_refuse_stale_writes() {
             "renaming a list that is not there says so");
 
     const auto other = StableId::random();
-    require(repository.save_engine_list(other, "Another", persistence::EngineListKind::saved,
-                                        {cue}, std::nullopt, 3'000)
+    require(repository
+                .save_engine_list(other, "Another", persistence::EngineListKind::saved, {cue},
+                                  std::nullopt, 3'000)
                 .has_value(),
             "a second list");
     const auto all = repository.load_engine_lists();
-    require(all && all->size() == 2U && all->front().name == "Another",
-            "lists come by name");
+    require(all && all->size() == 2U && all->front().name == "Another", "lists come by name");
 
     require(!repository.save_engine_list(StableId::random(), "Twice",
                                          persistence::EngineListKind::working, {plain, plain},
@@ -2039,6 +2039,11 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3* db = nullptr;
     require(sqlite3_open(path.c_str(), &db) == SQLITE_OK, "the database opens directly");
     require(sqlite3_exec(db,
+                         "ALTER TABLE operation_journal DROP COLUMN backup_device;"
+                         "ALTER TABLE operation_journal DROP COLUMN backup_inode;"
+                         "ALTER TABLE operation_journal DROP COLUMN backup_size;"
+                         "ALTER TABLE operation_journal DROP COLUMN backup_mtime_seconds;"
+                         "ALTER TABLE operation_journal DROP COLUMN backup_mtime_nanoseconds;"
                          "ALTER TABLE list_documents DROP COLUMN engine;"
                          "UPDATE schema_version SET version = 46;",
                          nullptr, nullptr, nullptr) == SQLITE_OK,
@@ -2046,7 +2051,7 @@ void lists_of_an_older_release_name_their_engine() {
     sqlite3_close(db);
 
     auto reopened = persistence::ListRepository::open(path);
-    require(reopened.has_value() && reopened->schema_version() == 48U, "and is upgraded");
+    require(reopened.has_value() && reopened->schema_version() == 49U, "and is upgraded");
     const auto loaded = reopened->load_all();
     require(loaded.has_value() && loaded->size() == 2U, "with both lists");
     for (const auto& list : *loaded) {

@@ -60,6 +60,10 @@ commit_artwork_source(const metadata::ArtworkWritePlanSource& source_plan,
 commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperationJournal& journal,
                     const core::CancellationToken& cancellation = {});
 
+// Tests only: every backup is made as a copy, as on a filesystem that
+// refuses hard links (ADR-0248).
+void use_copied_metadata_backups_for_testing(bool enabled) noexcept;
+
 enum class MetadataRecoveryOutcome : std::uint8_t {
     completed,
     rolled_back,

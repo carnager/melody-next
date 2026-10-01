@@ -343,6 +343,15 @@ ApplicationWindow {
                             text: qsTr("Animate panel opening and closing")
                         }
                         FieldLabel {
+                            text: qsTr("Colours:")
+                        }
+                        SettingCombo {
+                            objectName: "bench-settings-color-scheme"
+                            key: "appearance/color-scheme"
+                            choices: settingsWindow.options.colorSchemes
+                            tip: qsTr("The system's colours, or Trackknife's own light or dark scheme -- the same on every desktop. As the system uses the dark scheme where the desktop is dark but gives Qt no dark colours.")
+                        }
+                        FieldLabel {
                             text: qsTr("Show lists as:")
                         }
                         SettingCombo {

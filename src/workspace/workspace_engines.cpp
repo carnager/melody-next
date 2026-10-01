@@ -5,6 +5,7 @@
 #include "bench/engine_launcher.hpp"
 #include "bench/remote_engines.hpp"
 #include "bench/settings_keys.hpp"
+#include "workspace/color_scheme.hpp"
 #include "workspace/workspace_view.hpp"
 
 #include <QCursor>
@@ -170,6 +171,8 @@ void Workspace::renewOutdatedLocalEngine() {
 
 
 void Workspace::settingsSaved(const LocalEngineSharing& before) {
+    // ADR-0247: the colours chosen, at once, in every window.
+    ColorSchemes::instance().applyChosen();
     // ADR-0237: the AcoustID key is the engines'; a changed one is handed to
     // each engine that does file work (an emptied one makes them forget it).
     // Stage 2: so is whether ratings also go into the files.

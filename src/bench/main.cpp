@@ -2,6 +2,7 @@
 
 #include "bench/bench_main_window.hpp"
 #include "bench/engine_launcher.hpp"
+#include "bench/widget_color_scheme.hpp"
 #include "workspace/startup.hpp"
 #include "trackknife/persistence/workspace_backup.hpp"
 #include "uicommon/debug_log.hpp"
@@ -110,6 +111,9 @@ int main(int argc, char** argv) {
 
     trackknife::bench::adoptInterimIdentity();
     const auto restore_notice = trackknife::bench::applyPendingWorkspaceRestore();
+
+    // ADR-0247: the colours chosen, with a style that paints them.
+    trackknife::bench::followColorSchemes();
 
     // QA hook: --screenshot <file.png> renders the workspace, grabs it once
     // background probing has had a moment, and exits -- in test mode, set

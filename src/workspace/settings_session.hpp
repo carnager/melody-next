@@ -65,6 +65,8 @@ class SettingsSession final : public QObject {
     [[nodiscard]] static std::vector<Choice> listsDisplays();
     [[nodiscard]] static std::vector<Choice> bufferProfiles();
     [[nodiscard]] static std::vector<Choice> ratingScales();
+    // ADR-0247: the system's colours, or Trackknife's light or dark scheme.
+    [[nodiscard]] static std::vector<Choice> colorSchemes();
     // What to say under the backup tag's name (ADR-0245): why it cannot hold
     // the copy, a warning when it is an official tag whose content the copy
     // replaces, or nothing.

@@ -77,6 +77,7 @@ QVariantMap QuickSettings::options() {
         {QStringLiteral("listsDisplays"), choiceList(bench::SettingsSession::listsDisplays())},
         {QStringLiteral("bufferProfiles"), choiceList(bench::SettingsSession::bufferProfiles())},
         {QStringLiteral("ratingScales"), choiceList(bench::SettingsSession::ratingScales())},
+        {QStringLiteral("colorSchemes"), choiceList(bench::SettingsSession::colorSchemes())},
         {QStringLiteral("fetchSources"), choiceList(bench::SettingsSession::fetchSources())},
         {QStringLiteral("folderImageNames"), bench::SettingsSession::folderImageNames()},
         {QStringLiteral("maximumPreamp"), bench::SettingsSession::maximumPreamp()},

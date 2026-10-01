@@ -6,6 +6,7 @@
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/discovery/mdns.hpp"
 #include "trackknife/metadata/ratings.hpp"
+#include "workspace/color_scheme.hpp"
 
 #include <QPointer>
 #include <QSettings>
@@ -56,6 +57,7 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     read(notifications_key, false);
     read(notifications_background_key, false);
     read(panel_animations_key, true);
+    read(QLatin1String(color_scheme_key), QStringLiteral("system"));
     read(lists_display_key, QStringLiteral("tabs"));
     auto profile = settings.value(buffer_profile_key, QStringLiteral("balanced")).toString();
     const auto capacity = settings.value(buffer_capacity_key, 750).toInt();
@@ -188,6 +190,12 @@ QString SettingsSession::ratingBackupNote(const QString& name) {
             .arg(name.trimmed().toUpper());
     }
     return {};
+}
+
+std::vector<SettingsSession::Choice> SettingsSession::colorSchemes() {
+    return {{QStringLiteral("As the system"), QStringLiteral("system")},
+            {QStringLiteral("Light"), QStringLiteral("light")},
+            {QStringLiteral("Dark"), QStringLiteral("dark")}};
 }
 
 std::vector<SettingsSession::Choice> SettingsSession::ratingScales() {

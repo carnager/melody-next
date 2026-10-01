@@ -84,6 +84,20 @@ struct LocalSourceRevision {
 // FUSE mounts do -- the file keeps the time it has, as before.
 void settle_written_file_time(const std::string& raw_path) noexcept;
 
+// ADR-0249: whether `after` is `before` after this process renamed the file
+// to `raw_path`. Equal, or -- on a filesystem whose renames give a file a new
+// inode number, as the macOS SMB client does -- equal in all but the inode.
+// Whether renames keep inode numbers is asked of the filesystem itself, once
+// per device and only when an inode did change: a temporary file beside
+// `raw_path` is renamed and observed. Where that cannot be done, an inode
+// change counts, as it always did.
+[[nodiscard]] bool same_file_after_rename(const std::string& raw_path,
+                                          const LocalSourceRevision& before,
+                                          const LocalSourceRevision& after);
+
+// Tests only: every filesystem answers that renames renumber files.
+void simulate_renumbering_renames_for_testing(bool enabled) noexcept;
+
 // What differs between two observations of one file, for the message that
 // refuses it: "modification time 1790815120.409922300 -> 1790815121.0", each
 // field that changed, joined by "; ". Empty when none did.

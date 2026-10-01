@@ -917,6 +917,92 @@ void recovers_copied_backups_interrupted_around_journaling(
     CHECK(!std::filesystem::exists(record.backup_raw_path));
 }
 
+// ADR-0249: a file this process renamed into place is the same file when only
+// its inode number changed -- but only on a filesystem whose renames do that,
+// which is asked of the filesystem itself.
+void renamed_files_keep_their_identity_where_renames_renumber(
+    const std::filesystem::path& fixture_directory) {
+    TemporaryDirectory directory;
+    const auto file = materialize(fixture_directory, directory.path() / "renamed.flac");
+    const auto observed = core::observe_local_source_revision(file.native());
+    CHECK(observed.has_value());
+    if (!observed) {
+        return;
+    }
+    auto renumbered = *observed;
+    ++renumbered.inode;
+    auto resized = renumbered;
+    ++resized.size;
+    CHECK(core::same_file_after_rename(file.native(), *observed, *observed));
+    // This filesystem keeps inode numbers across a rename: a new one is a
+    // different file, as it always was.
+    CHECK(!core::same_file_after_rename(file.native(), *observed, renumbered));
+    core::simulate_renumbering_renames_for_testing(true);
+    CHECK(core::same_file_after_rename(file.native(), *observed, renumbered));
+    CHECK(!core::same_file_after_rename(file.native(), *observed, resized));
+    core::simulate_renumbering_renames_for_testing(false);
+    // The question asked of the filesystem leaves nothing behind.
+    CHECK(std::ranges::none_of(
+        std::filesystem::directory_iterator{directory.path()}, [](const auto& entry) {
+            return entry.path().filename().native().starts_with(".trackknife-");
+        }));
+
+    // A publication interrupted before its journal transition, whose prepared
+    // file came back from the rename with a new inode number: recovery
+    // completes it where renames renumber, and refuses it where they do not.
+    for (const bool renumbering : {false, true}) {
+        const auto source = materialize(
+            fixture_directory, directory.path() / (renumbering ? "renumbered.flac" : "kept.flac"));
+        auto plan = title_plan(source, "Renumbered title");
+        auto journal = open_journal(directory, renumbering ? "renumbered.sqlite3" : "kept.sqlite3");
+        CHECK(plan.has_value() && journal.has_value());
+        if (!plan || !journal) {
+            return;
+        }
+        auto record = interrupted_record(*plan, core::StableId::random());
+        CHECK(journal->create(record).has_value());
+        const auto prepared =
+            metadata::prepare_flac_metadata_write_copy(*plan, record.prepared_raw_path);
+        CHECK(prepared.has_value());
+        if (!prepared) {
+            return;
+        }
+        auto before_rename = prepared->prepared_revision;
+        ++before_rename.inode;
+        CHECK(journal
+                  ->transition(record.id,
+                               operations::MetadataOperationJournalTransition{
+                                   .expected_state = State::planned,
+                                   .state = State::prepared,
+                                   .prepared_revision = before_rename,
+                                   .published_revision = std::nullopt,
+                                   .failure = std::nullopt,
+                               })
+                  .has_value());
+        CHECK(::link(record.source_raw_path.c_str(), record.backup_raw_path.c_str()) == 0);
+        CHECK(::rename(record.prepared_raw_path.c_str(), record.source_raw_path.c_str()) == 0);
+        core::simulate_renumbering_renames_for_testing(renumbering);
+        const auto recovered =
+            operations::recover_metadata_operations(*journal, successful_dependent_commit);
+        core::simulate_renumbering_renames_for_testing(false);
+        CHECK(recovered.has_value() && recovered->size() == 1U);
+        if (!recovered || recovered->size() != 1U) {
+            return;
+        }
+        CHECK(recovered->front().outcome ==
+              (renumbering ? operations::MetadataRecoveryOutcome::completed
+                           : operations::MetadataRecoveryOutcome::needs_reconciliation));
+        const auto loaded = journal->load(record.id);
+        const auto published = core::observe_local_source_revision(source.native());
+        CHECK(loaded && *loaded && published);
+        if (renumbering && loaded && *loaded && published) {
+            // Recorded as it is now, so every later check is exact again.
+            CHECK((**loaded).state == State::complete &&
+                  (**loaded).published_revision == *published);
+        }
+    }
+}
+
 // ADR-0137: the commit journal's projected-inventory fingerprint must
 // match what the covr writer actually produces — untyped front-cover
 // items — and undo restores the exact original bytes.
@@ -3489,6 +3575,7 @@ int main(const int argc, char** argv) {
         recovers_publication_interrupted_before_journal_transition(fixture_directory);
         commits_with_copied_backup_where_links_are_refused(fixture_directory);
         recovers_copied_backups_interrupted_around_journaling(fixture_directory);
+        renamed_files_keep_their_identity_where_renames_renumber(fixture_directory);
         commits_and_recovers_artwork_at_unchanged_paths(fixture_directory);
         commits_and_undoes_mp4_covr_artwork(fixture_directory);
         recovers_safe_prepublication_debris_but_retains_ambiguous_paths(fixture_directory);

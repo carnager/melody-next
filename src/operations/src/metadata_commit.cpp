@@ -945,6 +945,14 @@ copy_metadata_backup(const MetadataOperationJournalRecord& record, const Descrip
     return *identity;
 }
 
+// A failure whose rollback failed too: both, the cause first -- the
+// rollback's refusal alone hides why there was one.
+[[nodiscard]] core::Error not_rolled_back(const core::Error& failure, const core::Error& rollback) {
+    auto combined = rollback;
+    combined.message = failure.message + "; not rolled back: " + rollback.message;
+    return combined;
+}
+
 [[nodiscard]] core::Result<void>
 rollback_published(const MetadataOperationJournalRecord& record,
                    const core::LocalSourceRevision& published_revision) {
@@ -953,11 +961,33 @@ rollback_published(const MetadataOperationJournalRecord& record,
     if (!source || !backup) {
         return std::unexpected(!source ? std::move(source.error()) : std::move(backup.error()));
     }
-    if (!*source || !*backup || **source != published_revision ||
+    // The source was renamed into place, so it may carry a new inode number
+    // (ADR-0249); the backup was not.
+    if (!*source || !*backup ||
+        !core::same_file_after_rename(record.source_raw_path, published_revision, **source) ||
         **backup != backup_identity(record)) {
+        // Which one, and how: the message is all a remote user can send back.
+        const auto differs = [&record](const char* what,
+                                       const std::optional<core::LocalSourceRevision>& found,
+                                       const core::LocalSourceRevision& expected) -> std::string {
+            if (!found) {
+                return std::string{what} + " missing";
+            }
+            return *found == expected ||
+                           (std::string_view{what} == "source" &&
+                            core::same_file_after_rename(record.source_raw_path, expected, *found))
+                       ? std::string{}
+                       : std::string{what} + " " + core::describe_revision_change(expected, *found);
+        };
+        auto detail = differs("source", *source, published_revision);
+        const auto backup_detail = differs("backup", *backup, backup_identity(record));
+        if (!backup_detail.empty()) {
+            detail += (detail.empty() ? "" : "; ") + backup_detail;
+        }
         return std::unexpected(operation_error(
             core::ErrorCode::conflict,
-            "published metadata source cannot be rolled back from the recorded identities",
+            "published metadata source cannot be rolled back from the recorded identities (" +
+                detail + ")",
             record.source_raw_path, record.id));
     }
     struct stat source_status{};
@@ -1010,7 +1040,8 @@ rollback_published(const MetadataOperationJournalRecord& record,
         return synced;
     }
     auto restored = core::observe_local_source_revision(record.source_raw_path);
-    if (!restored || *restored != backup_identity(record)) {
+    if (!restored ||
+        !core::same_file_after_rename(record.source_raw_path, backup_identity(record), *restored)) {
         return std::unexpected(operation_error(core::ErrorCode::conflict,
                                                "metadata rollback could not verify the original",
                                                record.source_raw_path, record.id));
@@ -1914,14 +1945,21 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
     }
     auto published_sync = fsync_parent(record.source_raw_path, record.source_raw_path, record.id);
     auto published = core::observe_local_source_revision(record.source_raw_path);
-    const bool published_identity = published && *published == prepared_revision;
+    // The prepared file, renamed into place: on some filesystems with a new
+    // inode number (ADR-0249). What is observed now is what is recorded.
+    const bool published_identity =
+        published &&
+        core::same_file_after_rename(record.source_raw_path, prepared_revision, *published);
     if (!published_sync || !published_identity) {
         const auto failure =
             !published_sync
                 ? published_sync.error()
                 : (!published ? published.error()
                               : operation_error(core::ErrorCode::conflict,
-                                                "published metadata has an unexpected revision",
+                                                "published metadata has an unexpected revision (" +
+                                                    core::describe_revision_change(
+                                                        prepared_revision, *published) +
+                                                    ")",
                                                 record.source_raw_path, record.id));
         const auto rolled_back = rollback_published(record, prepared_revision);
         auto terminal =
@@ -1930,7 +1968,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         if (!terminal) {
             return std::unexpected(std::move(terminal.error()));
         }
-        return std::unexpected(rolled_back ? failure : rolled_back.error());
+        return std::unexpected(rolled_back ? failure
+                                           : not_rolled_back(failure, rolled_back.error()));
     }
 
     auto published_transition = transition(journal, record, State::prepared, State::published,
@@ -1941,7 +1980,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         static_cast<void>(record_terminal_failure(journal, record, State::prepared,
                                                   prepared_revision, *published, failure,
                                                   rolled_back.has_value()));
-        return std::unexpected(rolled_back ? failure : rolled_back.error());
+        return std::unexpected(rolled_back ? failure
+                                           : not_rolled_back(failure, rolled_back.error()));
     }
 
     auto reread = verify_published_content(record, *published, cancellation);
@@ -1958,7 +1998,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         if (!terminal) {
             return std::unexpected(std::move(terminal.error()));
         }
-        return std::unexpected(rolled_back ? failure : rolled_back.error());
+        return std::unexpected(rolled_back ? failure
+                                           : not_rolled_back(failure, rolled_back.error()));
     }
     auto result = verified_commit_result(record, *published, std::move(*reread));
     auto dependent = dependent_state_committer(*result);
@@ -1971,7 +2012,8 @@ finish_metadata_undo(MetadataOperationBackupRecord backup, MetadataOperationJour
         if (!terminal) {
             return std::unexpected(std::move(terminal.error()));
         }
-        return std::unexpected(rolled_back ? failure : rolled_back.error());
+        return std::unexpected(rolled_back ? failure
+                                           : not_rolled_back(failure, rolled_back.error()));
     }
     auto final_revision = core::observe_local_source_revision(record.source_raw_path);
     if (!final_revision || *final_revision != *published) {
@@ -2874,8 +2916,10 @@ recover_metadata_operations(MetadataOperationJournal& journal,
         // back -- that copy (ADR-0248): nothing was published, or it was
         // undone, so the debris goes. A copy made but not yet journaled is
         // this operation's own and unpublished, and goes by its path.
-        if (*source_revision && (**source_revision == record.expected_revision ||
-                                 **source_revision == backup_identity(record))) {
+        if (*source_revision &&
+            (**source_revision == record.expected_revision ||
+             core::same_file_after_rename(record.source_raw_path, backup_identity(record),
+                                          **source_revision))) {
             auto prepared_cleaned = unlink_if_matches(
                 record.prepared_raw_path, record.prepared_revision, record.source_raw_path,
                 record.id, record.state == State::planned && !record.prepared_revision);
@@ -2901,11 +2945,16 @@ recover_metadata_operations(MetadataOperationJournal& journal,
             continue;
         }
 
-        const auto candidate_revision =
+        // The prepared file renamed into place, perhaps renumbered by that
+        // rename (ADR-0249); from here on, as it is observed now.
+        const auto recorded_candidate =
             record.published_revision ? record.published_revision : record.prepared_revision;
         const bool published_candidate =
-            *source_revision && candidate_revision && **source_revision == *candidate_revision &&
+            *source_revision && recorded_candidate &&
+            core::same_file_after_rename(record.source_raw_path, *recorded_candidate,
+                                         **source_revision) &&
             *backup_revision && **backup_revision == backup_identity(record);
+        const auto candidate_revision = published_candidate ? *source_revision : recorded_candidate;
         if (!published_candidate || record.state == State::planned) {
             const auto issue = operation_error(
                 core::ErrorCode::conflict,

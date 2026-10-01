@@ -247,12 +247,16 @@ core::Result<LocalMetadataRead> read_local_metadata(const std::string& raw_path,
     }
     if (*revision_before != *revision_after) {
         // Said in full: on a network mount, which value moved is the clue.
-        return std::unexpected(error(core::ErrorCode::conflict,
-                                     "local source changed while metadata was being read (" +
-                                         core::describe_revision_change(*revision_before,
-                                                                        *revision_after) +
-                                         ")",
-                                     raw_path));
+        // Ending in the name of the file read: shown cut in the middle, the
+        // end still says whether it was the file or a copy prepared from it.
+        const auto slash = raw_path.find_last_of('/');
+        return std::unexpected(error(
+            core::ErrorCode::conflict,
+            "local source changed while metadata was being read (" +
+                core::describe_revision_change(*revision_before, *revision_after) + ") in " +
+                core::display_raw_path(slash == std::string::npos ? raw_path
+                                                                  : raw_path.substr(slash + 1U)),
+            raw_path));
     }
     if (cancellation.is_cancellation_requested()) {
         return std::unexpected(cancelled(raw_path));

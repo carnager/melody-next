@@ -2,6 +2,7 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/trackknife_style.hpp"
 #include "bench/widget_color_scheme.hpp"
 #include "workspace/color_scheme.hpp"
 #include "bench/bench_main_window_helpers.hpp"
@@ -12256,7 +12257,8 @@ void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
     choose(QStringLiteral("dark"));
     QCOMPARE(QApplication::palette().color(QPalette::Window),
              darkPalette().color(QPalette::Window));
-    QCOMPARE(QApplication::style()->name().toLower(), QStringLiteral("fusion"));
+    // ADR-0250: Trackknife's own style under every scheme, as Quick's.
+    QVERIFY(qobject_cast<TrackknifeStyle*>(QApplication::style()) != nullptr);
     QVERIFY(ColorSchemes::instance().ownPalette());
     QCOMPARE(window.palette().color(QPalette::Base), darkPalette().color(QPalette::Base));
 
@@ -12266,6 +12268,7 @@ void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
 
     choose(QStringLiteral("system"));
     QVERIFY(!ColorSchemes::instance().ownPalette());
+    QVERIFY(qobject_cast<TrackknifeStyle*>(QApplication::style()) != nullptr);
     QVERIFY(QApplication::palette().color(QPalette::Window) !=
             darkPalette().color(QPalette::Window));
     QSettings{}.remove(QLatin1String(color_scheme_key));

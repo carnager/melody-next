@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #include "bench/metadata_properties_dialog.hpp"
+
 #include "bench/cover_review.hpp"
 #include "bench/file_scope_view.hpp"
 #include "bench/metadata_artwork_section.hpp"
@@ -12,6 +13,8 @@
 #include "bench/metadata_transformation_dialog.hpp"
 #include "bench/preparation_feedback_dialog.hpp"
 #include "bench/settings_dialog.hpp"
+#include "bench/themed_icon.hpp"
+#include "bench/trackknife_style.hpp"
 
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -148,12 +151,18 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             if (self->metadata_splitter_ != nullptr) {
                 static_cast<void>(
                     self->metadata_splitter_->restoreState(self->pending_metadata_splitter_state_));
+                // A saved state carries its orientation: one from when the
+                // files stood above the fields would stack them again.
+                self->metadata_splitter_->setOrientation(Qt::Horizontal);
             }
         });
 
+    // The Qt Quick tagger's frame (ADR-0250): a shaded header and footer
+    // across the window, the files in a shaded side pane, the fields beside
+    // them with room around.
     root_layout_ = new QVBoxLayout(this);
-    root_layout_->setContentsMargins(10, 8, 10, 8);
-    root_layout_->setSpacing(6);
+    root_layout_->setContentsMargins(0, 0, 0, 0);
+    root_layout_->setSpacing(0);
 
     summary_ = new QLabel(this);
     summary_->setObjectName(QStringLiteral("bench-metadata-summary"));
@@ -165,12 +174,24 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     technical_status_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     technical_status_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     technical_status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    auto* header_row = new QHBoxLayout;
-    header_row->setContentsMargins(0, 0, 0, 0);
+    {
+        auto font = summary_->font();
+        font.setBold(true);
+        summary_->setFont(font);
+        auto quiet = technical_status_->palette();
+        quiet.setColor(QPalette::WindowText, TrackknifeStyle::dim(quiet));
+        technical_status_->setPalette(quiet);
+    }
+    auto* header = new Band(Band::Edge::bottom, this);
+    header->setObjectName(QStringLiteral("bench-metadata-header"));
+    auto* header_row = new QHBoxLayout(header);
+    header_row->setContentsMargins(TrackknifeStyle::gap_large, 10, TrackknifeStyle::gap_large, 10);
     header_row->setSpacing(12);
+    summary_->setParent(header);
+    technical_status_->setParent(header);
     header_row->addWidget(summary_);
     header_row->addWidget(technical_status_, 1);
-    root_layout_->addLayout(header_row);
+    root_layout_->addWidget(header);
 
     read_only_ = new QLabel(this);
     read_only_->setObjectName(QStringLiteral("bench-metadata-read-only"));
@@ -409,7 +430,8 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     grid_tools_layout->addWidget(more_button);
     grid_tools_layout->addStretch(1);
     undo_button_ =
-        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-undo")), QString{}, grid_tools_);
+        new QPushButton(themedIcon(u"edit-undo|sp:SP_ArrowBack"), QString{}, grid_tools_);
+    undo_button_->setFlat(true);
     undo_button_->setObjectName(QStringLiteral("bench-metadata-undo"));
     undo_button_->setAccessibleName(QStringLiteral("Undo"));
     undo_button_->setToolTip(QStringLiteral("Undo the last draft edit (Ctrl+Z)"));
@@ -417,15 +439,17 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     undo_button_->setEnabled(false);
     grid_tools_layout->addWidget(undo_button_);
     redo_button_ =
-        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-redo")), QString{}, grid_tools_);
+        new QPushButton(themedIcon(u"edit-redo|sp:SP_ArrowForward"), QString{}, grid_tools_);
+    redo_button_->setFlat(true);
     redo_button_->setObjectName(QStringLiteral("bench-metadata-redo"));
     redo_button_->setAccessibleName(QStringLiteral("Redo"));
     redo_button_->setToolTip(QStringLiteral("Redo the last undone draft edit (Ctrl+Shift+Z)"));
     redo_button_->setShortcut(QKeySequence::Redo);
     redo_button_->setEnabled(false);
     grid_tools_layout->addWidget(redo_button_);
-    discard_button_ =
-        new QPushButton(QIcon::fromTheme(QStringLiteral("edit-clear")), QString{}, grid_tools_);
+    discard_button_ = new QPushButton(themedIcon(u"edit-clear|sp:SP_DialogDiscardButton"),
+                                      QString{}, grid_tools_);
+    discard_button_->setFlat(true);
     discard_button_->setObjectName(QStringLiteral("bench-metadata-discard"));
     discard_button_->setAccessibleName(QStringLiteral("Discard drafts"));
     discard_button_->setToolTip(QStringLiteral("Throw away every pending draft edit"));
@@ -434,7 +458,14 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
 
     buttons_ = new QDialogButtonBox(QDialogButtonBox::Close, this);
     buttons_->setObjectName(QStringLiteral("bench-metadata-buttons"));
-    apply_plan_button_ = buttons_->addButton(QStringLiteral("Apply"), QDialogButtonBox::ActionRole);
+    // Apply is what this window is for: last, in the accent, after Close --
+    // as the Qt Quick tagger has it -- not ordered among Close by the
+    // platform's button-box rules.
+    apply_plan_button_ = new QPushButton(QStringLiteral("Apply"), this);
+    if (auto* close = buttons_->button(QDialogButtonBox::Close)) {
+        close->setAutoDefault(false);
+        close->setDefault(false);
+    }
     apply_plan_button_->setObjectName(QStringLiteral("bench-metadata-apply-changes"));
     apply_plan_button_->setToolTip(QStringLiteral(
         "Recheck the files, then make every enabled change; problems stop the run and are shown"));
@@ -500,11 +531,12 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     connect(rename_files_check_, &QCheckBox::toggled, session_, &TaggerSession::setRenameFiles);
     connect(move_files_check_, &QCheckBox::toggled, session_, &TaggerSession::setMoveFiles);
     connect(apply_plan_button_, &QPushButton::clicked, session_, &TaggerSession::startWritePlan);
-    auto* footer = new QWidget(this);
+    auto* footer = new Band(Band::Edge::top, this);
     footer->setObjectName(QStringLiteral("bench-metadata-footer"));
     auto* footer_layout = new QHBoxLayout(footer);
-    footer_layout->setContentsMargins(0, 0, 0, 0);
-    footer_layout->setSpacing(8);
+    footer_layout->setContentsMargins(TrackknifeStyle::gap_large, 10, TrackknifeStyle::gap_large,
+                                      10);
+    footer_layout->setSpacing(TrackknifeStyle::gap);
     actions_button_ = new QToolButton(footer);
     actions_button_->setObjectName(QStringLiteral("bench-metadata-actions"));
     actions_button_->setText(QStringLiteral("Actions"));
@@ -533,6 +565,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     connect(apply_stop_button_, &QPushButton::clicked, session_, &TaggerSession::requestApplyStop);
     footer_layout->addWidget(apply_stop_button_);
     footer_layout->addWidget(buttons_);
+    footer_layout->addWidget(apply_plan_button_);
     root_layout_->addWidget(footer);
 
     connect(session_, &TaggerSession::changed, this, &MetadataPropertiesDialog::sync);
@@ -742,16 +775,25 @@ void MetadataPropertiesDialog::buildGrid() {
     metadata_splitter_->setChildrenCollapsible(false);
 
     // The file list and its breadcrumb travel together as one splitter pane.
-    auto* file_pane = new QWidget(metadata_splitter_);
+    auto* file_pane = new Band(Band::Edge::none, metadata_splitter_);
     file_pane->setObjectName(QStringLiteral("bench-metadata-files-pane"));
     auto* file_pane_layout = new QVBoxLayout(file_pane);
-    file_pane_layout->setContentsMargins(0, 0, 0, 0);
-    file_pane_layout->setSpacing(0);
+    file_pane_layout->setContentsMargins(TrackknifeStyle::gap, TrackknifeStyle::gap,
+                                         TrackknifeStyle::gap, TrackknifeStyle::gap);
+    file_pane_layout->setSpacing(TrackknifeStyle::gap_small);
     file_list_dir_ = new QLabel(file_pane);
     file_list_dir_->setObjectName(QStringLiteral("bench-metadata-files-dir"));
     file_list_dir_->setTextFormat(Qt::PlainText);
     file_list_dir_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    file_list_dir_->setContentsMargins(6, 4, 6, 2);
+    file_list_dir_->setContentsMargins(TrackknifeStyle::gap, TrackknifeStyle::gap_small, 0, 0);
+    {
+        auto quiet = file_list_dir_->palette();
+        quiet.setColor(QPalette::WindowText, TrackknifeStyle::dim(quiet));
+        file_list_dir_->setPalette(quiet);
+        auto font = file_list_dir_->font();
+        font.setPointSizeF(font.pointSizeF() * 0.9);
+        file_list_dir_->setFont(font);
+    }
     file_list_dir_->hide();
     file_pane_layout->addWidget(file_list_dir_);
     file_list_ = new FileScopeView(file_pane);
@@ -761,8 +803,14 @@ void MetadataPropertiesDialog::buildGrid() {
     auto* initial_selection = file_list_->selectionModel();
     file_list_->setSelectionModel(session_->fileSelection());
     delete initial_selection;
-    file_list_->setAlternatingRowColors(true);
+    // On the pane's own shade, no frame and no stripes; the check boxes say
+    // which files are in the edit, so rows show no second selection.
+    file_list_->setAlternatingRowColors(false);
     file_list_->setShowGrid(false);
+    file_list_->setFrameShape(QFrame::NoFrame);
+    file_list_->viewport()->setAutoFillBackground(false);
+    file_list_->setProperty(TrackknifeStyle::checks_show_selection, true);
+    file_list_->verticalHeader()->setDefaultSectionSize(30);
     file_list_->setWordWrap(false);
     // Paths render relative to the selection's common folder, so a
     // single-album edit shows plain filenames; the folder itself is the
@@ -816,7 +864,7 @@ void MetadataPropertiesDialog::buildGrid() {
     fields_->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     fields_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     fields_->verticalHeader()->hide();
-    fields_->verticalHeader()->setDefaultSectionSize(24);
+    fields_->verticalHeader()->setDefaultSectionSize(26);
     fields_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
     fields_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     fields_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
@@ -825,8 +873,8 @@ void MetadataPropertiesDialog::buildGrid() {
     auto* fields_pane = new QWidget(metadata_splitter_);
     fields_pane->setObjectName(QStringLiteral("bench-metadata-fields-pane"));
     auto* fields_pane_layout = new QVBoxLayout(fields_pane);
-    fields_pane_layout->setContentsMargins(0, 0, 0, 0);
-    fields_pane_layout->setSpacing(4);
+    fields_pane_layout->setContentsMargins(0, TrackknifeStyle::gap_large, 0, 0);
+    fields_pane_layout->setSpacing(TrackknifeStyle::gap);
     field_review_bar_ =
         new MetadataFieldReviewBar(fields_, aggregate_model, file_list_, fields_pane);
     field_review_bar_->setLayoutFields(session_->activeFieldLayoutFields());
@@ -838,7 +886,15 @@ void MetadataPropertiesDialog::buildGrid() {
     fields_pane_layout->addLayout(fields_body, 1);
     grid_tools_->show();
 
-    metadata_sections_ = new QTabWidget(metadata_splitter_);
+    auto* sections_pane = new QWidget(metadata_splitter_);
+    sections_pane->setObjectName(QStringLiteral("bench-metadata-sections-pane"));
+    auto* sections_layout = new QVBoxLayout(sections_pane);
+    sections_layout->setContentsMargins(TrackknifeStyle::gap_large, TrackknifeStyle::gap,
+                                        TrackknifeStyle::gap_large, TrackknifeStyle::gap_large);
+    sections_layout->setSpacing(0);
+    metadata_sections_ = new QTabWidget(sections_pane);
+    sections_layout->addWidget(metadata_sections_);
+    metadata_sections_->setDocumentMode(true);
     metadata_sections_->setObjectName(QStringLiteral("bench-metadata-sections"));
     metadata_sections_->setAccessibleName(QStringLiteral("Metadata property sections"));
     // Artwork's optional draft and problem tables must scroll inside their
@@ -873,13 +929,19 @@ void MetadataPropertiesDialog::buildGrid() {
             });
     session_->setArtwork(&artwork_section_->session());
 
-    metadata_splitter_->addWidget(file_list_);
-    metadata_splitter_->addWidget(metadata_sections_);
+    // Two panes: the files with their folder above them, and the sections.
+    // Adding the list itself took it out of its pane and left the folder
+    // label standing as a column of its own.
+    metadata_splitter_->addWidget(file_pane);
+    metadata_splitter_->addWidget(sections_pane);
     metadata_splitter_->setStretchFactor(0, 1);
     metadata_splitter_->setStretchFactor(1, 3);
     metadata_splitter_->setSizes({170, 390});
     if (!pending_metadata_splitter_state_.isEmpty()) {
         static_cast<void>(metadata_splitter_->restoreState(pending_metadata_splitter_state_));
+        // A saved state carries its orientation: one from when the files
+        // stood above the fields would stack them again.
+        metadata_splitter_->setOrientation(Qt::Horizontal);
     }
     transformation_panel_->setParent(this);
     transformation_panel_->hide();

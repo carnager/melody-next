@@ -1080,8 +1080,11 @@ void script_written_rating_verifies_over_an_existing_one(
         if (!preview || preview->cells.size() != 1U) {
             return;
         }
-        // Staged as the tag editor stages a script's cell.
+        // Staged as the tag editor stages a script's cell. It shows the rating
+        // the file has, by whatever spelling it is held.
         const auto& cell = preview->cells.front();
+        CHECK(cell.before == (existing ? std::optional{std::vector<std::string>{"0.2"}}
+                                       : std::optional<std::vector<std::string>>{}));
         auto field_index = selection->field_index(cell.canonical_field);
         if (!field_index) {
             auto inserted =
@@ -1113,6 +1116,21 @@ void script_written_rating_verifies_over_an_existing_one(
             TagLib::MP4::File file{source.c_str(), false};
             CHECK(file.isValid() && file.tag()->contains("----:com.apple.iTunes:FMPS_Rating") &&
                   !file.tag()->contains("----:com.apple.iTunes:FMPS_RATING"));
+        }
+        // Run again over the rating it wrote: nothing to stage.
+        const auto again = metadata::read_local_metadata(source.native());
+        CHECK(again.has_value());
+        if (again) {
+            const auto reselected = metadata::StagedMetadataSelection::create(
+                {metadata::StagedMetadataSource{.raw_path = again->raw_path,
+                                                .source_revision = again->source_revision,
+                                                .baseline = again->document}});
+            CHECK(reselected.has_value());
+            if (reselected) {
+                const auto repeated = metadata::plan_metadata_transformation(
+                    *reselected, metadata::StagedMetadataPatchSet{}, items, chain);
+                CHECK(repeated.has_value() && repeated->cells.empty());
+            }
         }
     }
 }

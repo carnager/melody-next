@@ -480,7 +480,8 @@ apply_action(const PreparedAction& prepared, WorkingDocument& document,
                 // nothing and emptied its target.
                 const Values* values = nullptr;
                 if (!prepared.exact_native_source_field.empty()) {
-                    if (const auto native = native_document.find(prepared.exact_native_source_field);
+                    if (const auto native =
+                            native_document.find(prepared.exact_native_source_field);
                         native != native_document.end()) {
                         values = &native->second.values;
                     }
@@ -501,7 +502,8 @@ apply_action(const PreparedAction& prepared, WorkingDocument& document,
                 // is found by its exact native name, as a capture's source is.
                 const Values* values = nullptr;
                 if (!prepared.exact_native_source_field.empty()) {
-                    if (const auto native = native_document.find(prepared.exact_native_source_field);
+                    if (const auto native =
+                            native_document.find(prepared.exact_native_source_field);
                         native != native_document.end()) {
                         values = &native->second.values;
                     }
@@ -1456,6 +1458,28 @@ core::Result<MetadataTransformationPreview> plan_metadata_transformation(
             exact_draft_logical_fields.end());
         for (const auto& canonical_field : exact_draft_logical_fields) {
             rebuild_logical_field(document, native_document, canonical_field);
+        }
+        // A target no format names -- FMPS_RATING -- is kept by its spelling,
+        // not in the logical document; a step naming it logically starts
+        // from the value the file holds under that spelling, so it sees an
+        // existing rating rather than none, and stages nothing when it
+        // would only write the same value again.
+        for (const auto& target : targets) {
+            if (target.match_mode != MetadataFieldMatchMode::logical ||
+                document.contains(target.canonical_field) ||
+                is_conventional_metadata_field(target.canonical_field)) {
+                continue;
+            }
+            const WorkingNativeField* spelled = nullptr;
+            for (const auto& [native_name, field] : native_document) {
+                if (canonicalize_field_name(native_name) == target.canonical_field &&
+                    (spelled == nullptr || field.order < spelled->order)) {
+                    spelled = &field;
+                }
+            }
+            if (spelled != nullptr) {
+                document.emplace(target.canonical_field, spelled->values);
+            }
         }
         std::vector<OptionalValues> before;
         before.reserve(targets.size());

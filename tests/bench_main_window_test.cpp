@@ -2,6 +2,8 @@
 
 #include "bench/animated_panel_dock.hpp"
 #include "bench/bench_main_window.hpp"
+#include "bench/widget_color_scheme.hpp"
+#include "workspace/color_scheme.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -390,6 +392,7 @@ class BenchMainWindowTest final : public QObject {
     void localListUndoActionsRespectAuthorityAndTextEditing();
     void deleteInUpNextTakesItsTrackNotTheLists();
     void settingsLeftOffReadAsOff();
+    void colorSchemesAreChosenAndApplied();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -12194,6 +12197,55 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
     window.replayListEdit(false);
     QCOMPARE(source->rows(), (std::vector<LocalTrackRow>{second}));
     QCOMPARE(target->rows(), (std::vector<LocalTrackRow>{first, second, first}));
+}
+
+// ADR-0247: Trackknife's own light and dark schemes, chosen in Settings,
+// applied at once -- with Fusion, which paints with the palette -- and the
+// system's colours back again.
+void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
+    // Complete schemes: an unfocused window keeps its accent, disabled text
+    // reads as disabled.
+    for (const auto& palette : {lightPalette(), darkPalette()}) {
+        QCOMPARE(palette.color(QPalette::Inactive, QPalette::Highlight),
+                 palette.color(QPalette::Active, QPalette::Highlight));
+        QVERIFY(palette.color(QPalette::Disabled, QPalette::Text) !=
+                palette.color(QPalette::Active, QPalette::Text));
+    }
+    QVERIFY(darkPalette().color(QPalette::Window).lightness() <
+            lightPalette().color(QPalette::Window).lightness());
+
+    followColorSchemes();
+    BenchMainWindow window;
+    window.show();
+    const auto choose = [&window](const QString& scheme) {
+        window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+        auto* dialog = window.findChild<SettingsDialog*>();
+        QVERIFY(dialog != nullptr);
+        auto* combo = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-color-scheme"));
+        QVERIFY(combo != nullptr);
+        combo->setCurrentIndex(combo->findData(scheme));
+        QPointer<SettingsDialog> lifetime = dialog;
+        dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+            ->button(QDialogButtonBox::Save)
+            ->click();
+        QTRY_VERIFY(lifetime.isNull());
+    };
+    choose(QStringLiteral("dark"));
+    QCOMPARE(QApplication::palette().color(QPalette::Window),
+             darkPalette().color(QPalette::Window));
+    QCOMPARE(QApplication::style()->name().toLower(), QStringLiteral("fusion"));
+    QVERIFY(ColorSchemes::instance().ownPalette());
+    QCOMPARE(window.palette().color(QPalette::Base), darkPalette().color(QPalette::Base));
+
+    choose(QStringLiteral("light"));
+    QCOMPARE(QApplication::palette().color(QPalette::Window),
+             lightPalette().color(QPalette::Window));
+
+    choose(QStringLiteral("system"));
+    QVERIFY(!ColorSchemes::instance().ownPalette());
+    QVERIFY(QApplication::palette().color(QPalette::Window) !=
+            darkPalette().color(QPalette::Window));
+    QSettings{}.remove(QLatin1String(color_scheme_key));
 }
 
 // An INI file hands every value back as text, and the text "false" is true to

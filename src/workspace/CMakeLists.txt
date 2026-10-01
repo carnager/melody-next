@@ -50,6 +50,8 @@ qt_add_library(
     quick_pick_session.hpp
     replaygain_job.cpp
     replaygain_job.hpp
+    color_scheme.cpp
+    color_scheme.hpp
     language_reference.cpp
     language_reference.hpp
     script_session.cpp

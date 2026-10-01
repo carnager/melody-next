@@ -75,6 +75,8 @@ qt_add_qml_module(
     RESOURCE_PREFIX /qt/qml
     SOURCES
     image_providers.cpp
+    window_palette.cpp
+    window_palette.hpp
     image_providers.hpp
     keyed_rows_model.cpp
     keyed_rows_model.hpp

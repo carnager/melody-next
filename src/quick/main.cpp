@@ -7,7 +7,9 @@
 #include "quick/image_providers.hpp"
 #include "quick/quick_artwork.hpp"
 #include "quick/quick_workspace.hpp"
+#include "quick/window_palette.hpp"
 #include "uicommon/debug_log.hpp"
+#include "workspace/color_scheme.hpp"
 #include "workspace/startup.hpp"
 
 #include <QApplication>
@@ -16,7 +18,6 @@
 #include <QDir>
 #include <QFile>
 #include <QMouseEvent>
-#include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -39,51 +40,6 @@ void chooseStyle() {
         QQuickStyle::setStyle(QStringLiteral("Trackknife.Style"));
         QQuickStyle::setFallbackStyle(QStringLiteral("Fusion"));
     }
-}
-
-// QA hook (--dark): a dark palette like the desktop's, set on a window so
-// every control in it inherits it over its type's own.
-void darken(QObject* window) {
-    auto* palette = window->property("palette").value<QObject*>();
-    if (palette == nullptr) {
-        return;
-    }
-    const std::pair<const char*, QColor> roles[] = {
-        {"window", QColor(0x2a, 0x2e, 0x32)},
-        {"windowText", QColor(0xfc, 0xfc, 0xfc)},
-        {"base", QColor(0x1b, 0x1e, 0x20)},
-        {"alternateBase", QColor(0x23, 0x26, 0x29)},
-        {"text", QColor(0xfc, 0xfc, 0xfc)},
-        {"button", QColor(0x29, 0x2c, 0x30)},
-        {"buttonText", QColor(0xfc, 0xfc, 0xfc)},
-        {"highlight", QColor(0x3d, 0xae, 0xe9)},
-        {"highlightedText", QColor(0xfc, 0xfc, 0xfc)},
-        {"placeholderText", QColor(0xa1, 0xa9, 0xb1)},
-        {"toolTipBase", QColor(0x31, 0x36, 0x3b)},
-        {"toolTipText", QColor(0xfc, 0xfc, 0xfc)},
-        {"light", QColor(0x40, 0x46, 0x4c)},
-        {"mid", QColor(0x1e, 0x21, 0x24)},
-        {"dark", QColor(0x14, 0x16, 0x18)},
-    };
-    for (const auto& [role, color] : roles) {
-        palette->setProperty(role, color);
-    }
-}
-
-// The same for what reads the application's palette: a model's colours.
-void darkenApplication() {
-    QPalette dark;
-    dark.setColor(QPalette::Window, QColor(0x2a, 0x2e, 0x32));
-    dark.setColor(QPalette::WindowText, QColor(0xfc, 0xfc, 0xfc));
-    dark.setColor(QPalette::Base, QColor(0x1b, 0x1e, 0x20));
-    dark.setColor(QPalette::AlternateBase, QColor(0x23, 0x26, 0x29));
-    dark.setColor(QPalette::Text, QColor(0xfc, 0xfc, 0xfc));
-    dark.setColor(QPalette::Button, QColor(0x29, 0x2c, 0x30));
-    dark.setColor(QPalette::ButtonText, QColor(0xfc, 0xfc, 0xfc));
-    dark.setColor(QPalette::Highlight, QColor(0x3d, 0xae, 0xe9));
-    dark.setColor(QPalette::HighlightedText, QColor(0xfc, 0xfc, 0xfc));
-    dark.setColor(QPalette::PlaceholderText, QColor(0xa1, 0xa9, 0xb1));
-    QApplication::setPalette(dark);
 }
 
 } // namespace
@@ -136,8 +92,7 @@ int main(int argc, char* argv[]) {
             }
             continue;
         }
-        // QA hook: --dark draws in a dark palette like the desktop's, to see
-        // the window as a dark desktop shows it.
+        // QA hook: --dark draws in the dark scheme, whatever Settings holds.
         if (arguments.at(index) == QStringLiteral("--dark")) {
             dark_palette = true;
             continue;
@@ -166,24 +121,13 @@ int main(int argc, char* argv[]) {
         [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     QObject::connect(&workspace, &trackknife::quick::QuickWorkspace::quitRequested, &application,
                      &QCoreApplication::quit, Qt::QueuedConnection);
+    // ADR-0247: the colour scheme chosen -- or, for a picture, the dark one --
+    // on every window this shows, before the first is made.
+    trackknife::bench::ColorSchemes::instance().apply(
+        dark_palette ? trackknife::bench::ColorScheme::dark
+                     : trackknife::bench::chosenColorScheme());
+    const trackknife::quick::WindowPalettes window_palettes;
     qml.loadFromModule("Trackknife.Quick", "Main");
-    if (dark_palette) {
-        darkenApplication();
-        // Every window, the main one and each opened later.
-        auto* sweep = new QTimer(&application);
-        QObject::connect(sweep, &QTimer::timeout, &application, [] {
-            for (auto* window : QGuiApplication::topLevelWindows()) {
-                if (!window->property("trackknifeDark").toBool()) {
-                    window->setProperty("trackknifeDark", true);
-                    darken(window);
-                }
-            }
-        });
-        sweep->start(100);
-        if (auto* root = qml.rootObjects().value(0)) {
-            darken(root);
-        }
-    }
     workspace.start();
     if (!restore_notice.isEmpty()) {
         QTimer::singleShot(0, &workspace, [&workspace, restore_notice] {

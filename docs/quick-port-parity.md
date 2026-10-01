@@ -1684,6 +1684,7 @@ Page enum (`hpp:50-61`): general, playback, library, engine, naming, replaygain,
 | (none) | QCheckBox `…-notifications-background` | "Only while the app is in the background" | `desktop/notifications-background-only` (false) |
 | QPushButton "Test notification" | status QLabel (word-wrapped) | Click shows "Sending…", then `DesktopNotifier::sendTest()`. Result: "Accepted by your desktop. If no popup appears, check Do Not Disturb and desktop notification rules." or "Notification failed: %1" | — |
 | Appearance: | QCheckBox `…-panel-animations` | "Animate panel opening and closing" | `appearance/panel-animations` (true) |
+| Colours: | QComboBox `…-color-scheme` | As the system / Light / Dark (ADR-0247) | `appearance/color-scheme` (`system`) |
 | Show lists as: | QComboBox `…-lists-display` | "Tab bar" (`tabs`), "Side panel" (`panel`) | `appearance/lists-display` ("tabs") |
 
 #### 1.2 Playback (`:226-319`)

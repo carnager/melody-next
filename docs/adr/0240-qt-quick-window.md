@@ -3,7 +3,8 @@
 ## Status
 
 Proposal, 2026-09-30, on branch `qml-mockup`. Builds on ADR-0220 (one
-engine; the UI asks, the core answers).
+engine; the UI asks, the core answers). Its system-palette colours are the default
+since ADR-0247, beside Trackknife's own light and dark schemes.
 
 ## Context
 

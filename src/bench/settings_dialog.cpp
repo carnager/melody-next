@@ -6,6 +6,7 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/discovery/mdns.hpp"
+#include "workspace/color_scheme.hpp"
 
 #include <QAbstractSpinBox>
 #include <QApplication>
@@ -185,6 +186,15 @@ SettingsDialog::SettingsDialog(QWidget* parent, OutputProfileStore profile_store
     panel_animations_->setObjectName(QStringLiteral("bench-settings-panel-animations"));
     bind(panel_animations_, "appearance/panel-animations");
     general_form->addRow(QStringLiteral("Appearance:"), panel_animations_);
+    // ADR-0247: the system's colours, or Trackknife's own.
+    color_scheme_ = new QComboBox(general);
+    color_scheme_->setObjectName(QStringLiteral("bench-settings-color-scheme"));
+    color_scheme_->setToolTip(
+        QStringLiteral("The system's colours, or Trackknife's own light or dark scheme -- the "
+                       "same on every desktop. As the system uses the dark scheme where the "
+                       "desktop is dark but gives Qt no dark colours."));
+    bind(color_scheme_, SettingsSession::colorSchemes(), color_scheme_key);
+    general_form->addRow(QStringLiteral("Colours:"), color_scheme_);
     // ADR-0233: the lists as tabs above the tracks, or as a pane beside them.
     lists_display_ = new QComboBox(general);
     lists_display_->setObjectName(QStringLiteral("bench-settings-lists-display"));

@@ -45,10 +45,11 @@ void recolor(QObject* window) {
     for (const auto& [role, name] : roles) {
         palette->setProperty(name, application.color(QPalette::Active, role));
     }
-    // After the whole, so they stay: what a disabled control reads.
+    // Disabled the same: the Trackknife style fades a disabled control
+    // itself, and a palette's disabled greys under that fade read as nothing.
     if (auto* disabled = palette->property("disabled").value<QObject*>(); disabled != nullptr) {
         for (const auto& [role, name] : roles) {
-            disabled->setProperty(name, application.color(QPalette::Disabled, role));
+            disabled->setProperty(name, application.color(QPalette::Active, role));
         }
     }
 }

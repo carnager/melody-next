@@ -468,7 +468,7 @@ ApplicationWindow {
                             }
                             FieldLabel {
                                 text: qsTr("Backup copy:")
-                                opacity: ratingBackup.enabled ? 1 : 0.45
+                                opacity: ratingBackup.enabled ? 1 : Theme.disabledOpacity
                             }
                             RowLayout {
                                 Layout.fillWidth: true

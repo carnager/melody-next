@@ -32,6 +32,20 @@ for dark.
   Trackknife's palette is in use -- the desktop's style, Kvantum for one,
   paints its own colours -- and the desktop's style again when it is not.
 
+### Icons and disabled controls (2026-10-01, after a first use)
+
+- The icon theme follows the scheme. A desktop's dark icon theme draws light
+  glyphs, light on Trackknife's light ground; the scheme in use picks the
+  theme's sibling for its ground -- Papirus-Dark and Papirus-Light, breeze-dark
+  and breeze -- among those installed, and the desktop's own again with its
+  colours. Qt Quick asks for icons under a revision that changes with the
+  theme, so they are drawn again at once.
+- Disabled controls fade once. The Trackknife style fades a disabled control
+  (`Theme.disabledOpacity`); its windows' palettes carry no separate disabled
+  greys, which under that fade were unreadable. The widgets window, which
+  shows disabled through the palette alone, has disabled text dark enough to
+  read in Light and light enough in Dark.
+
 ## Consequences
 
 - The window looks the same on any desktop when Light or Dark is chosen, and

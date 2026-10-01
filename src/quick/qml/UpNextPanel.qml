@@ -82,7 +82,7 @@ Pane {
                 Layout.alignment: Qt.AlignTop
                 flat: true
                 display: AbstractButton.IconOnly
-                icon.source: "image://icon/window-close|sp:SP_TitleBarCloseButton"
+                icon.source: Tk.iconBase + "window-close|sp:SP_TitleBarCloseButton"
                 icon.width: 14
                 icon.height: 14
                 padding: 4
@@ -352,21 +352,21 @@ Pane {
                 FooterButton {
                     objectName: "up-next-remove"
                     text: "Remove from Up Next"
-                    icon.source: "image://icon/list-remove|sp:SP_TrashIcon"
+                    icon.source: Tk.iconBase + "list-remove|sp:SP_TrashIcon"
                     enabled: footer.first >= 0
                     onClicked: panel.edit(1)
                 }
                 FooterButton {
                     objectName: "up-next-move-up"
                     text: "Move up"
-                    icon.source: "image://icon/go-up|sp:SP_ArrowUp"
+                    icon.source: Tk.iconBase + "go-up|sp:SP_ArrowUp"
                     enabled: footer.first > 0
                     onClicked: panel.edit(2)
                 }
                 FooterButton {
                     objectName: "up-next-move-down"
                     text: "Move down"
-                    icon.source: "image://icon/go-down|sp:SP_ArrowDown"
+                    icon.source: Tk.iconBase + "go-down|sp:SP_ArrowDown"
                     enabled: footer.first >= 0 && footer.last + 1 < panel.count
                     onClicked: panel.edit(3)
                 }
@@ -374,14 +374,14 @@ Pane {
                 FooterButton {
                     objectName: "up-next-clear"
                     text: "Clear pending tracks"
-                    icon.source: "image://icon/edit-clear|sp:SP_DialogResetButton"
+                    icon.source: Tk.iconBase + "edit-clear|sp:SP_DialogResetButton"
                     enabled: panel.count > 0
                     onClicked: Tk.editUpNext(0)
                 }
                 FooterButton {
                     objectName: "up-next-undo"
                     text: "Undo"
-                    icon.source: "image://icon/edit-undo|sp:SP_ArrowBack"
+                    icon.source: Tk.iconBase + "edit-undo|sp:SP_ArrowBack"
                     enabled: Tk.upNext.canUndo ?? false
                     onClicked: Tk.undoUpNext()
                 }
@@ -393,7 +393,7 @@ Pane {
                     Layout.maximumWidth: panel.width - footer.x - 180
                     flat: true
                     LayoutMirroring.enabled: true
-                    icon.source: "image://icon/go-next|sp:SP_ArrowForward"
+                    icon.source: Tk.iconBase + "go-next|sp:SP_ArrowForward"
                     icon.width: 14
                     icon.height: 14
                     topPadding: 4
@@ -413,7 +413,7 @@ Pane {
         property int row: -1
         MenuItem {
             text: qsTr("Play")
-            icon.source: "image://icon/media-playback-start"
+            icon.source: Tk.iconBase + "media-playback-start"
             onTriggered: Tk.playUpNextRow(menu.row)
         }
         MenuSeparator {}

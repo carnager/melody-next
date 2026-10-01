@@ -27,7 +27,7 @@ T.ToolButton {
         text: control.text
         font: control.font
         color: control.checked ? control.palette.highlight : control.palette.windowText
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 
     background: Rectangle {

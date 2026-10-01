@@ -22,7 +22,7 @@ T.TextField {
     selectedTextColor: control.palette.highlightedText
     placeholderTextColor: Theme.dim(control.palette)
     verticalAlignment: TextInput.AlignVCenter
-    opacity: enabled ? 1 : 0.55
+    opacity: enabled ? 1 : Theme.disabledOpacity
 
     PlaceholderText {
         id: placeholder

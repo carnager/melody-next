@@ -349,7 +349,7 @@ Item {
                             anchors.fill: parent
                             visible: !node.album
                             sourceSize: Qt.size(node.iconExtent, node.iconExtent)
-                            source: "image://icon/audio-x-generic|sp:SP_FileIcon"
+                            source: Tk.iconBase + "audio-x-generic|sp:SP_FileIcon"
                                     + (node.available ? "" : "?disabled")
                         }
                     }
@@ -433,7 +433,7 @@ Item {
                                 Image {
                                     anchors.centerIn: parent
                                     sourceSize: Qt.size(12, 12)
-                                    source: "image://icon/" + action.modelData.icon
+                                    source: Tk.iconBase + action.modelData.icon
                                 }
                             }
                         }
@@ -563,7 +563,7 @@ Item {
             StatusButton {
                 objectName: "local-library-newest"
                 text: qsTr("Recently added")
-                icon.source: "image://icon/document-open-recent|sp:SP_FileDialogDetailedView"
+                icon.source: Tk.iconBase + "document-open-recent|sp:SP_FileDialogDetailedView"
                 checkable: true
                 checked: pane.browser ? pane.browser.newestFirst : false
                 onToggled: pane.browser.newestFirst = checked
@@ -574,7 +574,7 @@ Item {
                 objectName: "local-library-scan"
                 readonly property bool scanning: pane.browser ? pane.browser.scanning : false
                 text: scanning ? qsTr("Stop") : qsTr("Refresh")
-                icon.source: scanning ? "image://icon/process-stop|sp:SP_BrowserStop" : "image://icon/view-refresh|sp:SP_BrowserReload"
+                icon.source: scanning ? Tk.iconBase + "process-stop|sp:SP_BrowserStop" : Tk.iconBase + "view-refresh|sp:SP_BrowserReload"
                 ToolTip.visible: hovered
                 ToolTip.text: scanning ? qsTr("Stop scanning") : qsTr("Refresh")
                 onClicked: pane.browser.toggleScan()
@@ -582,7 +582,7 @@ Item {
             StatusButton {
                 objectName: "local-library-folders"
                 text: qsTr("Folders…")
-                icon.source: "image://icon/folder|sp:SP_DirIcon"
+                icon.source: Tk.iconBase + "folder|sp:SP_DirIcon"
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Choose which folders belong to your music library")
                 onClicked: foldersDialog.open()
@@ -633,7 +633,7 @@ Item {
         MenuItem {
             objectName: "action-local-library-0"
             text: qsTr("Append to current list")
-            icon.source: "image://icon/list-add"
+            icon.source: Tk.iconBase + "list-add"
             onTriggered: pane.browser.request(pane.selectedIndexes(), 0)
         }
         Menu {
@@ -674,7 +674,7 @@ Item {
                 required property var modelData
                 objectName: "action-local-library-" + modelData.action
                 text: modelData.label
-                icon.source: "image://icon/" + modelData.icon
+                icon.source: Tk.iconBase + modelData.icon
                 onTriggered: pane.browser.request(pane.selectedIndexes(), modelData.action)
             }
         }

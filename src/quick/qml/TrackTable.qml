@@ -273,7 +273,7 @@ FocusScope {
                             width: visible ? 14 : 0
                             height: 14
                             sourceSize: Qt.size(14, 14)
-                            source: visible ? "image://icon/media-playback-start|sp:SP_MediaPlay" : ""
+                            source: visible ? Tk.iconBase + "media-playback-start|sp:SP_MediaPlay" : ""
                         }
                         Row {
                             x: playing.visible ? playing.x + playing.width + 4 : 4

@@ -341,7 +341,7 @@ ApplicationWindow {
                             }
                             ToolButton {
                                 objectName: "bench-metadata-undo"
-                                icon.source: "image://icon/edit-undo|sp:SP_ArrowBack"
+                                icon.source: Tk.iconBase + "edit-undo|sp:SP_ArrowBack"
                                 enabled: taggerWindow.state.canUndo ?? false
                                 onClicked: taggerWindow.tagger.undo()
                                 ToolTip.visible: hovered
@@ -350,7 +350,7 @@ ApplicationWindow {
                             }
                             ToolButton {
                                 objectName: "bench-metadata-redo"
-                                icon.source: "image://icon/edit-redo|sp:SP_ArrowForward"
+                                icon.source: Tk.iconBase + "edit-redo|sp:SP_ArrowForward"
                                 enabled: taggerWindow.state.canRedo ?? false
                                 onClicked: taggerWindow.tagger.redo()
                                 ToolTip.visible: hovered
@@ -359,7 +359,7 @@ ApplicationWindow {
                             }
                             ToolButton {
                                 objectName: "bench-metadata-discard"
-                                icon.source: "image://icon/edit-clear|sp:SP_DialogDiscardButton"
+                                icon.source: Tk.iconBase + "edit-clear|sp:SP_DialogDiscardButton"
                                 enabled: (taggerWindow.state.draftCount ?? 0) > 0
                                 onClicked: taggerWindow.tagger.discardAll()
                                 ToolTip.visible: hovered

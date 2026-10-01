@@ -211,7 +211,7 @@ Item {
                         width: 14
                         height: 14
                         sourceSize: Qt.size(14, 14)
-                        source: "image://icon/network-server" + (tab.current ? "" : "?disabled")
+                        source: Tk.iconBase + "network-server" + (tab.current ? "" : "?disabled")
                     }
                 }
                 Label {

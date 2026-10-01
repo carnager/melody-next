@@ -17,6 +17,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QIcon>
 #include <QMouseEvent>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
@@ -62,6 +63,8 @@ int main(int argc, char* argv[]) {
     bool grab_live = false;
     QString open_for_screenshot;
     bool dark_palette = false;
+    // QA hook: --light, the light scheme, as --dark the dark one.
+    bool light_palette = false;
     // QA hook: --click <x>,<y> (repeatable) -- left clicks, in order, once
     // what was opened is shown.
     QList<QPoint> clicks;
@@ -92,9 +95,26 @@ int main(int argc, char* argv[]) {
             }
             continue;
         }
+        // QA hook: --icon-theme NAME, the desktop's icon theme where there is
+        // no desktop to say it -- to see icons as a real one draws them.
+        if (arguments.at(index) == QStringLiteral("--icon-theme") && index + 1 < arguments.size()) {
+            // Where a desktop's platform theme would look, too: without one,
+            // Qt looks only in its own resources.
+            auto paths = QIcon::themeSearchPaths();
+            paths += QStandardPaths::locateAll(QStandardPaths::GenericDataLocation,
+                                               QStringLiteral("icons"),
+                                               QStandardPaths::LocateDirectory);
+            QIcon::setThemeSearchPaths(paths);
+            QIcon::setThemeName(arguments.at(++index));
+            continue;
+        }
         // QA hook: --dark draws in the dark scheme, whatever Settings holds.
         if (arguments.at(index) == QStringLiteral("--dark")) {
             dark_palette = true;
+            continue;
+        }
+        if (arguments.at(index) == QStringLiteral("--light")) {
+            light_palette = true;
             continue;
         }
         if (arguments.at(index) == QStringLiteral("--debug")) {
@@ -124,8 +144,9 @@ int main(int argc, char* argv[]) {
     // ADR-0247: the colour scheme chosen -- or, for a picture, the dark one --
     // on every window this shows, before the first is made.
     trackknife::bench::ColorSchemes::instance().apply(
-        dark_palette ? trackknife::bench::ColorScheme::dark
-                     : trackknife::bench::chosenColorScheme());
+        dark_palette    ? trackknife::bench::ColorScheme::dark
+        : light_palette ? trackknife::bench::ColorScheme::light
+                        : trackknife::bench::chosenColorScheme());
     const trackknife::quick::WindowPalettes window_palettes;
     qml.loadFromModule("Trackknife.Quick", "Main");
     workspace.start();

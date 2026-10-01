@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "workspace/color_scheme.hpp"
 
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QSettings>
 #include <QStyleHints>
+
+#include <cstring>
 
 namespace trackknife::bench {
 namespace {
@@ -48,6 +52,49 @@ struct Roles {
                      roles.disabled_highlighted_text);
     return palette;
 }
+
+// The desktop's icon theme in the variant a scheme needs: its glyphs light
+// on dark, dark on light. Papirus-Dark and Papirus-Light, breeze-dark and
+// breeze, Adwaita... -- by the "-dark" and "-light" its family's names carry,
+// among the themes installed. The theme itself when it has no such sibling.
+[[nodiscard]] bool icon_theme_installed(const QString& name) {
+    for (const auto& path : QIcon::themeSearchPaths()) {
+        if (QFileInfo::exists(path + QLatin1Char('/') + name + QStringLiteral("/index.theme"))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+QString iconThemeVariant(const QString& theme, const bool dark) {
+    if (theme.isEmpty()) {
+        return theme;
+    }
+    auto family = theme;
+    for (const auto* suffix : {"-dark", "-light", "_dark", "_light"}) {
+        if (family.endsWith(QLatin1String(suffix), Qt::CaseInsensitive)) {
+            family.chop(static_cast<qsizetype>(std::strlen(suffix)));
+            break;
+        }
+    }
+    const auto capital = !family.isEmpty() && family.front().isUpper();
+    const QStringList candidates =
+        dark ? QStringList{family + (capital ? QStringLiteral("-Dark") : QStringLiteral("-dark")),
+                           family + QStringLiteral("-dark"), family + QStringLiteral("-Dark")}
+             : QStringList{family + (capital ? QStringLiteral("-Light") : QStringLiteral("-light")),
+                           family + QStringLiteral("-light"), family + QStringLiteral("-Light"),
+                           family};
+    for (const auto& candidate : candidates) {
+        if (candidate.compare(theme, Qt::CaseInsensitive) == 0 || icon_theme_installed(candidate)) {
+            return candidate;
+        }
+    }
+    return theme;
+}
+
+namespace {
 
 [[nodiscard]] float luma(const QColor& color) {
     return 0.2126F * color.redF() + 0.7152F * color.greenF() + 0.0722F * color.blueF();
@@ -101,7 +148,7 @@ QPalette darkPalette() {
         .mid = QColor{0x1e, 0x21, 0x25},
         .dark = QColor{0x14, 0x16, 0x19},
         .shadow = QColor{0x00, 0x00, 0x00},
-        .disabled_text = QColor{0x6b, 0x71, 0x7a},
+        .disabled_text = QColor{0x7c, 0x83, 0x8c},
         .disabled_highlight = QColor{0x3c, 0x41, 0x48},
         .disabled_highlighted_text = QColor{0x9a, 0xa0, 0xa8},
     });
@@ -130,7 +177,7 @@ QPalette lightPalette() {
         .mid = QColor{0xc9, 0xcc, 0xd1},
         .dark = QColor{0xa5, 0xa9, 0xb0},
         .shadow = QColor{0x6b, 0x6f, 0x75},
-        .disabled_text = QColor{0x9b, 0xa1, 0xa9},
+        .disabled_text = QColor{0x80, 0x86, 0x8e},
         .disabled_highlight = QColor{0xd5, 0xd8, 0xdc},
         .disabled_highlighted_text = QColor{0x7a, 0x81, 0x8a},
     });
@@ -145,6 +192,9 @@ ColorSchemes::ColorSchemes() = default;
 
 void ColorSchemes::apply(const ColorScheme scheme) {
     scheme_ = scheme;
+    if (!desktop_icon_theme_) {
+        desktop_icon_theme_ = QIcon::themeName();
+    }
     if (scheme == ColorScheme::light) {
         QGuiApplication::setPalette(lightPalette());
         own_ = true;
@@ -162,6 +212,17 @@ void ColorSchemes::apply(const ColorScheme scheme) {
             QGuiApplication::setPalette(darkPalette());
             own_ = true;
         }
+    }
+    // Icons to match: the desktop's own theme with its colours, else its
+    // variant for the scheme in use.
+    const auto icon_theme =
+        !own_ ? *desktop_icon_theme_
+              : iconThemeVariant(*desktop_icon_theme_,
+                               QGuiApplication::palette().color(QPalette::Window).lightness() <
+                                   128);
+    if (icon_theme != QIcon::themeName()) {
+        QIcon::setThemeName(icon_theme);
+        ++icon_revision_;
     }
     if (!following_) {
         following_ = true;

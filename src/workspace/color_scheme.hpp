@@ -5,6 +5,8 @@
 #include <QPalette>
 #include <QString>
 
+#include <optional>
+
 namespace trackknife::bench {
 
 // ADR-0247: Trackknife's colours -- the system's, or one of its own two
@@ -24,6 +26,11 @@ inline constexpr auto color_scheme_key = "appearance/color-scheme";
 [[nodiscard]] QPalette lightPalette();
 [[nodiscard]] QPalette darkPalette();
 
+// The icon theme `theme` in the variant whose glyphs suit a dark or a light
+// ground -- Papirus-Dark and Papirus-Light, breeze-dark and breeze -- among
+// the themes installed; `theme` itself when it has no such sibling.
+[[nodiscard]] QString iconThemeVariant(const QString& theme, bool dark);
+
 // Applies the scheme to the application: its own palettes as chosen; for
 // "system", the desktop's -- unless the desktop says it is dark and hands
 // over a light palette, as a desktop without Qt integration does, when the
@@ -42,6 +49,9 @@ class ColorSchemes final : public QObject {
     // Whether Trackknife's own palette is in use -- the scheme chosen, or
     // the dark one standing in for a desktop that gave none.
     [[nodiscard]] bool ownPalette() const { return own_; }
+    // Changes when the icon theme does: a cache of drawn icons keyed by it
+    // knows to draw them again.
+    [[nodiscard]] int iconRevision() const { return icon_revision_; }
 
   signals:
     void applied();
@@ -51,6 +61,9 @@ class ColorSchemes final : public QObject {
     ColorScheme scheme_{ColorScheme::system};
     bool own_{false};
     bool following_{false};
+    // The desktop's icon theme, as it was before any scheme was applied.
+    std::optional<QString> desktop_icon_theme_;
+    int icon_revision_{0};
 };
 
 } // namespace trackknife::bench

@@ -44,7 +44,7 @@ T.MenuItem {
             name: control.icon.name
             color: control.icon.color
             visible: !control.checkable && (control.icon.source.toString() !== "" || control.icon.name !== "")
-            opacity: control.enabled ? 1 : 0.45
+            opacity: control.enabled ? 1 : Theme.disabledOpacity
         }
         CheckMark {
             anchors.verticalCenter: parent.verticalCenter
@@ -64,7 +64,7 @@ T.MenuItem {
             font: control.font
             color: control.ink
             elide: Text.ElideRight
-            opacity: control.enabled ? 1 : 0.45
+            opacity: control.enabled ? 1 : Theme.disabledOpacity
         }
         Text {
             id: shortcut

@@ -30,7 +30,7 @@ T.ItemDelegate {
         text: control.text
         font: control.font
         color: control.palette.text
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 
     background: Rectangle {

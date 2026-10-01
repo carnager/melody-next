@@ -35,7 +35,7 @@ T.SpinBox {
         validator: control.validator
         inputMethodHints: control.inputMethodHints
         clip: width < implicitWidth
-        opacity: control.enabled ? 1 : 0.45
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 
     up.indicator: Item {
@@ -91,6 +91,6 @@ T.SpinBox {
                 duration: Theme.quick
             }
         }
-        opacity: control.enabled ? 1 : 0.6
+        opacity: control.enabled ? 1 : Theme.disabledOpacity
     }
 }

@@ -73,6 +73,17 @@ struct LocalSourceRevision {
     friend bool operator==(const LocalSourceRevision&, const LocalSourceRevision&) = default;
 };
 
+// A file Trackknife has just written given a modification time of its own:
+// now, rounded down to an even second, which FAT's two-second steps and SMB's
+// 100 ns units both store exactly. On a network mount the client caches a
+// fresh file's attributes -- the macOS SMB client reported a just-written
+// file's time as its own guess, then the server's, then its guess again, for
+// about two seconds -- and a time set explicitly, after the writing is done,
+// is the one both then hold. Only for files written here, never a user's.
+// Best effort: where a filesystem refuses to set times -- some sshfs and
+// FUSE mounts do -- the file keeps the time it has, as before.
+void settle_written_file_time(const std::string& raw_path) noexcept;
+
 // What differs between two observations of one file, for the message that
 // refuses it: "modification time 1790815120.409922300 -> 1790815121.0", each
 // field that changed, joined by "; ". Empty when none did.

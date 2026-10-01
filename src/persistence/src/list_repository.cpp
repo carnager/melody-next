@@ -26,7 +26,7 @@
 namespace trackknife::persistence {
 namespace {
 
-constexpr unsigned current_schema_version = 48U;
+constexpr unsigned current_schema_version = 49U;
 constexpr std::size_t maximum_documents = 1'024U;
 constexpr std::size_t maximum_items_per_document = 1'000'000U;
 constexpr std::size_t maximum_fields_per_item = 4'096U;
@@ -1470,6 +1470,23 @@ INSERT INTO metadata_transformation_action_values SELECT * FROM metadata_transfo
 DROP TABLE metadata_transformation_action_values_v47;
 DROP TABLE metadata_transformation_actions_v47;
 UPDATE schema_version SET version = 48;
+)sql";
+        if (auto result = execute(database, migration); !result) {
+            rollback();
+            return result;
+        }
+    }
+    if (version <= 48) {
+        // ADR-0248: where the filesystem refuses a hard link, a tag save's
+        // backup is a copy with an identity of its own, kept here once it is
+        // made. Empty for every earlier operation, whose backup is a link.
+        constexpr auto migration = R"sql(-- SPDX-License-Identifier: GPL-3.0-only
+ALTER TABLE operation_journal ADD COLUMN backup_device BLOB;
+ALTER TABLE operation_journal ADD COLUMN backup_inode BLOB;
+ALTER TABLE operation_journal ADD COLUMN backup_size BLOB;
+ALTER TABLE operation_journal ADD COLUMN backup_mtime_seconds BLOB;
+ALTER TABLE operation_journal ADD COLUMN backup_mtime_nanoseconds BLOB;
+UPDATE schema_version SET version = 49;
 )sql";
         if (auto result = execute(database, migration); !result) {
             rollback();

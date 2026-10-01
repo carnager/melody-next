@@ -398,7 +398,8 @@ preservation-verified sibling and committed by the Qt-free operations layer.
 The executor locks and revalidates the direct single-link file, journals the
 complete immutable plan and raw sibling paths through reversible SQLite
 migration 6, preserves owner/mode/bounded Linux extended attributes, creates an
-exact hard-link backup, atomically renames the prepared file over the source,
+exact hard-link backup (a verified copy with its own journaled identity where
+the filesystem refuses hard links, ADR-0248), atomically renames the prepared file over the source,
 and rereads its revision, document, and every planned field. Completion also
 requires an idempotent all-or-nothing callback to refresh every affected
 logical occurrence. Failure restores the recorded original identity; startup

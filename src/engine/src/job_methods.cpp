@@ -2,6 +2,7 @@
 
 #include "trackknife/engine/job_methods.hpp"
 
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/engine/file_work_wire.hpp"
 #include "trackknife/loudness/replaygain.hpp"
 #include "trackknife/loudness/scan.hpp"
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <iostream>
 #include <thread>
 #include <utility>
 
@@ -246,6 +248,21 @@ void register_file_work_jobs(JobCatalog& jobs, std::filesystem::path database,
                     token);
                 if (!applied) {
                     return Json{{"error", wire::encode(applied.error())}};
+                }
+                // Each file that could not be written, in full: a window shows
+                // a line of it, and on an unfamiliar filesystem the rest --
+                // which file was read, its prepared copy -- is the clue.
+                for (const auto& source : applied->sources) {
+                    if (!source.issue) {
+                        continue;
+                    }
+                    std::cerr << "melodyd: tags not written to "
+                              << core::display_raw_path(source.raw_path) << ": "
+                              << source.issue->message;
+                    for (const auto& [key, value] : source.issue->context) {
+                        std::cerr << " [" << key << ": " << value << "]";
+                    }
+                    std::cerr << "\n";
                 }
                 return Json{{"result", wire::encode(*applied)}};
             };

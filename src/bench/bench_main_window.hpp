@@ -548,6 +548,7 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     void buildLocalPlaybackControls(QMenu* playback_menu);
     void refreshLocalPlaybackControls() override;
     void saveLocalPlaybackModes() { workspace_.saveLocalPlaybackModes(); }
+    void styleHeader();
     void styleStatusBar();
     void applyLocalPlaybackModes() { workspace_.applyLocalPlaybackModes(); }
     void showReplayGainPreampDialog();

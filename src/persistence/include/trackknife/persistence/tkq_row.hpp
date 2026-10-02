@@ -89,4 +89,12 @@ tkq_format(const titleformat::Program& program, const TkqRowFacts& facts,
            const std::map<std::string, std::string>& host = {},
            const core::CancellationToken& cancellation = {});
 
+// ADR-0254: a tree-level program, once for every value its $each fields
+// select -- one label per branch, in order. A program without $each gives
+// one.
+[[nodiscard]] core::Result<std::vector<std::string>>
+tkq_format_each(const titleformat::Program& program, const TkqRowFacts& facts,
+                const std::map<std::string, std::string>& host = {},
+                const core::CancellationToken& cancellation = {});
+
 } // namespace trackknife::persistence

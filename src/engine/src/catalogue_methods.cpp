@@ -103,8 +103,9 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
                 return std::unexpected(bad_params("kind must be an integer", "kind"));
             }
             const auto raw = kind->get<int>();
-            if (raw < 0 || raw > 2) {
-                return std::unexpected(bad_params("kind is artist, album or track", "kind"));
+            if (raw < 0 || raw > 3) {
+                return std::unexpected(
+                    bad_params("kind is artist, album, track or group", "kind"));
             }
             request.kind = static_cast<persistence::LibraryEntryKind>(raw);
         }
@@ -139,6 +140,36 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
         request.limit = params.value("limit", std::size_t{200});
         request.newest_first = params.value("newest_first", false);
         request.random = params.value("random", false);
+        // ADR-0254: a view's levels, the labels opened, and its filter. A
+        // label is made of tag bytes, so it travels encoded like a key.
+        if (const auto view = params.find("view"); view != params.end()) {
+            if (!view->is_array()) {
+                return std::unexpected(bad_params("view is a list of levels", "view"));
+            }
+            for (const auto& level : *view) {
+                if (!level.is_object() || !level.contains("format") ||
+                    !level["format"].is_string()) {
+                    return std::unexpected(bad_params("each level has a format", "view"));
+                }
+                request.view.push_back({.format = level["format"].get<std::string>(),
+                                        .sort = level.value("sort", std::string{}),
+                                        .descending = level.value("descending", false)});
+            }
+        }
+        if (const auto path = params.find("view_path"); path != params.end()) {
+            if (!path->is_array() ||
+                !std::ranges::all_of(*path, [](const Json& label) { return label.is_string(); })) {
+                return std::unexpected(bad_params("view_path is a list of labels", "view_path"));
+            }
+            for (const auto& label : *path) {
+                auto decoded = protocol::decode_raw_path(label.get<std::string>());
+                if (!decoded) {
+                    return std::unexpected(bad_params("a label is not encoded", "view_path"));
+                }
+                request.view_path.push_back(std::move(*decoded));
+            }
+        }
+        request.view_filter = params.value("view_filter", std::string{});
         return request;
     };
 
@@ -193,6 +224,9 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             put("added", entry.added);
             put("duration_ms", entry.duration_ms);
+            if (!entry.view_value.empty() || entry.kind == persistence::LibraryEntryKind::group) {
+                put("view_value", protocol::encode_raw_path(entry.view_value));
+            }
             entries.push_back(std::move(rendered));
         }
         return Json{{"entries", std::move(entries)}, {"more", page.more}};

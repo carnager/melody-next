@@ -337,6 +337,17 @@ target_link_libraries(
 )
 add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests)
 
+# ADR-0254: library views, grouped by the engine from real tagged files.
+add_executable(trackknife_library_views_tests library_views_test.cpp)
+target_link_libraries(
+    trackknife_library_views_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core PkgConfig::TAGLIB
+            Threads::Threads trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME library-views COMMAND trackknife_library_views_tests
+         "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+set_tests_properties(library-views PROPERTIES TIMEOUT 60)
+
 # ADR-0222: the real client against the real server.
 add_executable(trackknife_protocol_roundtrip_tests protocol_roundtrip_test.cpp)
 target_link_libraries(

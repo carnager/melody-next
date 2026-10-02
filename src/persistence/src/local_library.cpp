@@ -1201,6 +1201,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                         : " ORDER BY artist COLLATE NOCASE,years.album_year,album_key,disc,track,"
                           "title COLLATE NOCASE,raw_path";
             break;
+        case LibraryEntryKind::group:
+            fail("A view's levels are grouped by the engine", core::ErrorCode::invalid_argument);
         }
         // As much as is asked for, up to the library's result cap: a browse
         // lists a whole level, and the cap here was once 200 whatever was
@@ -1682,6 +1684,78 @@ LocalLibrary::filter_paths(const query::CompiledTkq& compiled,
             result.push_back(row.raw_path);
         }
         return result;
+    });
+}
+
+core::Result<void> LocalLibrary::each_track(const std::function<void(LibraryViewTrack&&)>& visit,
+                                            const bool history,
+                                            const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        require_complete_field_index(db);
+        Transaction snapshot{db, true};
+        const auto played = history ? collect_history(db, cancellation)
+                                    : std::map<std::string, std::array<std::int64_t, 6>>{};
+        Statement select{db, std::string{"SELECT "} + filter_columns + ",t.available" +
+                                 filter_from + filter_order};
+        Statement fields{db, "SELECT canonical_name,value,value_lower FROM local_library_fields "
+                             "WHERE raw_path=? ORDER BY canonical_name,position"};
+        while (select.next()) {
+            if (cancellation.is_cancellation_requested()) {
+                fail("Library query cancelled", core::ErrorCode::cancelled);
+            }
+            FilterRow row;
+            read_filter_row(select, row);
+            load_field_rows(fields, row.raw_path, row);
+            if (const auto found = played.find(row.raw_path); found != played.end()) {
+                row.facts.history = found->second;
+            }
+            LibraryViewTrack track{.entry = filter_entry(row),
+                                   .album_key = row.album_key,
+                                   .facts = std::move(row.facts)};
+            // As the tree shows a track, not as a search names it.
+            track.entry.label = format_label(track.entry, false);
+            const auto available = select.number(20) != 0;
+            track.entry.available = available ? 1U : 0U;
+            track.entry.added = track.facts.added;
+            visit(std::move(track));
+        }
+        snapshot.commit();
+        return true;
+    }).transform([](bool) {});
+}
+
+core::Result<std::string> LocalLibrary::view_stamp(const bool history) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        Transaction snapshot{db, true};
+        std::string stamp;
+        Statement tracks{db, "SELECT id, revision FROM local_library_revision LIMIT 1"};
+        if (!tracks.next()) {
+            fail("The library has no revision");
+        }
+        stamp = tracks.bytes(0) + ":" + std::to_string(tracks.number(1));
+        // A rating moved from one track to another keeps the count and the
+        // sum; weighting by the hash's leading digits tells them apart.
+        Statement ratings{db, "SELECT count(*),total(rating),"
+                              "total(rating*(instr('0123456789abcdef',substr(hash,1,1))+"
+                              "16*instr('0123456789abcdef',substr(hash,2,1)))),"
+                              "coalesce(max(updated_at),'') FROM local_ratings"};
+        if (ratings.next()) {
+            stamp += "/r" + std::to_string(ratings.number(0)) + ":" + ratings.bytes(1) + ":" +
+                     ratings.bytes(2) + ":" + ratings.bytes(3);
+        }
+        if (history) {
+            Statement played{db, "SELECT count(*),total(play_count),coalesce(max(last_played_ms),0)"
+                                 " FROM local_listening_history"};
+            if (played.next()) {
+                stamp += "/h" + std::to_string(played.number(0)) + ":" + played.bytes(1) + ":" +
+                         std::to_string(played.number(2));
+            }
+        }
+        snapshot.commit();
+        return stamp;
     });
 }
 

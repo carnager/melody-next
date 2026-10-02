@@ -21,7 +21,7 @@ namespace trackknife::bench {
 // tags without the tag editor's review grid -- grouped into albums as
 // chosen, previewed first if wanted, measured, planned and written through
 // the same journaled pipeline. The options are the tag editor's settings.
-// Both windows' ReplayGain dialogs draw it.
+// The window's ReplayGain dialog draws it.
 class ReplayGainJob final : public QObject {
     Q_OBJECT
 

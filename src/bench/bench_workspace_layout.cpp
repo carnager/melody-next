@@ -135,8 +135,8 @@ void BenchMainWindow::buildWorkspace() {
     // replaces the dropdown and static heading.
     const auto make_source_tabs = [this](const QString& object_name,
                                          const QString& accessible_name) {
-        // As the Qt Quick window's: one box split into its sources, the
-        // chosen one lifted out of it (ADR-0250).
+        // One box split into its sources, the chosen one lifted out of it
+        // (ADR-0250).
         auto* bar = new SegmentedTabBar(folders_panel_);
         bar->setObjectName(object_name);
         bar->setAccessibleName(accessible_name);

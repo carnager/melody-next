@@ -140,7 +140,7 @@ class TaggerArtwork {
 // and shown as a grid of fields, edits staged as a draft with undo, scripts,
 // suggestions, MusicBrainz and ReplayGain staged into it, and Apply -- tags,
 // renaming and moving -- planned, checked and carried out. Everything the
-// window decides is here; both windows' tag editors draw it and pass it what
+// window decides is here; the window's tag editor draws it and passes it what
 // the user does (ADR-0220).
 class TaggerSession final : public QObject {
     Q_OBJECT

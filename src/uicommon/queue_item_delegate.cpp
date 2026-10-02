@@ -30,7 +30,7 @@ namespace {
     return view != nullptr && view->property(property).toBool();
 }
 
-// A lone track is an album of its own, as the Qt Quick window draws it.
+// A lone track is an album of its own (ADR-0250).
 [[nodiscard]] TrackGroupColumns groupColumns(const QObject* owner) {
     return {.album = configuredColumn(owner, track_album_column_property, track_album_column),
             .date = configuredColumn(owner, track_date_column_property, track_date_column),
@@ -64,8 +64,8 @@ void paintInitialsTile(QPainter* painter, const QRect& rect, const QString& name
             break;
         }
     }
-    // InitialsTile.qml's hue: hash = hash * 31 + each UTF-16 unit, kept to
-    // 32 bits, so a name is the same colour in both windows.
+    // A stable hue: hash = hash * 31 + each UTF-16 unit, kept to 32 bits,
+    // so a name is the same colour on every run and every machine.
     std::uint32_t hash = 0U;
     for (const auto unit : name) {
         hash = hash * 31U + unit.unicode();
@@ -163,8 +163,7 @@ void QueueItemDelegate::paint(QPainter* painter, const QStyleOptionViewItem& opt
                                 QueueItemDelegate::album_header_height};
         // Side artwork: the view draws the whole header over the row, beside
         // the cover. Here each cell draws only its share of the strip.
-        // Albums are told apart by their headers, not lines between them, as
-        // in the Qt Quick window.
+        // Albums are told apart by their headers, not lines between them.
         paintAlbumHeader(painter, header_rect, option.palette, option.font, {}, false);
         if (!side_artwork && index.column() == artwork_column) {
             const auto cover = index.data(track_album_artwork_role).value<QImage>();

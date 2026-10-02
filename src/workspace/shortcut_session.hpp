@@ -12,8 +12,8 @@ namespace trackknife::bench {
 
 // The keyboard shortcuts page: every command with a key by default, and
 // every workspace command, given a key of the user's or none; saved by the
-// command's object name, refused while two overlap. Both windows' pages
-// draw it, and both windows' commands take their keys from saved().
+// command's object name, refused while two overlap. The window's page
+// draws it, and the window's commands take their keys from saved().
 class ShortcutSession final : public QObject {
     Q_OBJECT
 

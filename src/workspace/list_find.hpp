@@ -21,8 +21,8 @@ class LocalListModel;
 // Find in the list shown (ADR-0142, ADR-0153): every value a row carries,
 // its duration, its audio format and its path, from the current row on,
 // wrapping round. One cancellable, bounded traversal; workers receive
-// detached text batches and never touch the model. Both windows' find bars
-// draw it.
+// detached text batches and never touch the model. The window's find bar
+// draws it.
 class ListFind final : public QObject {
     Q_OBJECT
 

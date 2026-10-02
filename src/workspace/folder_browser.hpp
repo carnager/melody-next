@@ -16,7 +16,7 @@ namespace trackknife::bench {
 // The Sources panel's Folders: this computer's filesystem as a lazy tree,
 // its root "/" and home shown, and the bookmarked folders beside it. A
 // folder is revealed by walking to it a level at a time; the view is asked
-// to open each level and to put its cursor on the folder. Both windows draw
+// to open each level and to put its cursor on the folder. The window draws
 // it.
 class FolderBrowser final : public QObject {
     Q_OBJECT

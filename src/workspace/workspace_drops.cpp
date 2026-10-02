@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // Drag and drop (ADR-0233): what a drop on a list, a new list, Up Next or
-// a list in the lists pane does, for both windows alike.
+// a list in the lists pane does.
 
 #include "workspace/workspace.hpp"
 

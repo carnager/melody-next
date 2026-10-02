@@ -16,7 +16,7 @@ class QAbstractItemModel;
 namespace trackknife::ui {
 
 // How a track list groups its rows into albums, and what each group adds
-// above its first row -- the rules both windows draw by, so an album reads
+// above its first row -- the rules every track list draws by, so an album reads
 // the same in each. A group is two or more consecutive rows with the same
 // album artist, album and date; a row in none is a loose track.
 
@@ -36,7 +36,7 @@ inline constexpr int album_cover_extent = 22;
 // A cover beside its album's rows: at most this, inside this padding.
 inline constexpr int maximum_side_artwork_extent = 160;
 inline constexpr int side_artwork_padding = 6;
-// Covers beside the rows, as both windows draw them (ADR-0250): every album's
+// Covers beside the rows (ADR-0250): every album's
 // the same size at its top left, beside its header, in a gutter this wide,
 // and the numbers in a narrow column just before the titles.
 inline constexpr int side_cover_extent = 44;
@@ -48,7 +48,7 @@ inline constexpr int side_number_width = 36;
 // Which of a model's columns hold the album and date its groups are made of.
 // And whether a lone track is an album of its own -- its header and cover
 // as any album's -- rather than a loose track with its cover in place of
-// its number (the Qt Quick window's choice).
+// its number.
 struct TrackGroupColumns {
     int album{track_album_column};
     int date{track_date_column};

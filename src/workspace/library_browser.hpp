@@ -57,8 +57,8 @@ enum class LocalLibraryAction { append, next, replace, new_list, request_next, r
 // artists, their albums and tracks loaded a level at a time; a word search or
 // a tkq query; albums newest first; the library's folders and a scan of them;
 // covers for the albums in view. Everything is asked of the engine's
-// catalogue, one request at a time, off the UI thread. Both windows' library
-// panels draw it; the view reports what it shows and the browser says what
+// catalogue, one request at a time, off the UI thread. The window's library
+// panel draws it; the view reports what it shows and the browser says what
 // to expand and where the cursor goes.
 class LibraryBrowser final : public QObject {
     Q_OBJECT

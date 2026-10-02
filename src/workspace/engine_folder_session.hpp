@@ -16,7 +16,7 @@ namespace trackknife::bench {
 
 // ADR-0237: choosing a folder on an engine's machine, as that engine lists
 // it -- down into a folder, up to its parent, and the folder shown or one
-// in it taken. Both windows' folder choosers draw it.
+// in it taken. The window's folder chooser draws it.
 class EngineFolderSession final : public QObject {
     Q_OBJECT
 

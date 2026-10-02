@@ -13,7 +13,7 @@ namespace trackknife::bench {
 // Importing an M3U8 playlist into a new list, and exporting a list as one
 // (ADR-0100). One bounded worker; imports publish a complete detached list,
 // exports capture the selected local model in short slices before
-// serializing or touching disk. Both windows' transfer bars draw it.
+// serializing or touching disk. The window's transfer bar draws it.
 class PlaylistTransfer final : public QObject {
     Q_OBJECT
   public:

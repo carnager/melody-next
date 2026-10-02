@@ -22,7 +22,7 @@ namespace trackknife::bench {
 // root chosen on the machine of the engine it belongs to, and this
 // computer's destinations copied to an engine that reaches them under
 // another name. Everything is saved at once, not on the Settings screen's
-// Save. Both windows' Naming pages draw it.
+// Save. The window's Naming page draws it.
 class ProfilesSession final : public QObject {
     Q_OBJECT
 

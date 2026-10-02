@@ -15,7 +15,7 @@ namespace trackknife::bench {
 
 // What the workspace asks of the window drawing it (ADR-0220): to say
 // something, and -- while the window's logic moves into the workspace --
-// the parts of it that have not moved yet. Both windows implement it.
+// the parts of it that have not moved yet. The window implements it.
 class WorkspaceView {
   public:
     WorkspaceView() = default;

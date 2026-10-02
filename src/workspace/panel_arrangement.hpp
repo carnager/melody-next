@@ -12,7 +12,7 @@ namespace trackknife::bench {
 // How the window's two panels -- the sources and the lists with their
 // tracks -- are arranged: side by side, one above the other, or as tabs;
 // in which order, and how much of the room each has. Changed while editing
-// the layout, and kept. Both windows arrange their panels by it.
+// the layout, and kept. The window arranges its panels by it.
 class PanelArrangement final : public QObject {
     Q_OBJECT
 

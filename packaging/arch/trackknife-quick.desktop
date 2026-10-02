@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Trackknife (Qt Quick preview)
-Comment=Trackknife's window in Qt Quick, a preview
-Exec=trackknife-quick %F
-Icon=multimedia-player
-Categories=AudioVideo;Audio;Qt;
-MimeType=audio/flac;audio/x-flac;audio/mpeg;audio/ogg;audio/x-wavpack;audio/x-musepack;audio/x-wav;
-Terminal=false

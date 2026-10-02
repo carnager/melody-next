@@ -79,8 +79,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     query_error_->hide();
     layout->addWidget(query_error_);
     // Recently added, refresh and the library's folders are small icons in
-    // the footer beside its news, as the Qt Quick window has them: used now
-    // and then, they need not crowd the search.
+    // the footer beside its news: used now and then, they need not crowd
+    // the search.
     const auto icon_button = [this](const QString& name, const QString& icon, const QString& text) {
         auto* button = new QToolButton(this);
         button->setObjectName(name);

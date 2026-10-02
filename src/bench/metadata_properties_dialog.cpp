@@ -157,7 +157,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
             }
         });
 
-    // The Qt Quick tagger's frame (ADR-0250): a shaded header and footer
+    // The tag editor's frame (ADR-0250): a shaded header and footer
     // across the window, the files in a shaded side pane, the fields beside
     // them with room around.
     root_layout_ = new QVBoxLayout(this);
@@ -459,8 +459,7 @@ MetadataPropertiesDialog::MetadataPropertiesDialog(
     buttons_ = new QDialogButtonBox(QDialogButtonBox::Close, this);
     buttons_->setObjectName(QStringLiteral("bench-metadata-buttons"));
     // Apply is what this window is for: last, in the accent, after Close --
-    // as the Qt Quick tagger has it -- not ordered among Close by the
-    // platform's button-box rules.
+    // not ordered among Close by the platform's button-box rules.
     apply_plan_button_ = new QPushButton(QStringLiteral("Apply"), this);
     if (auto* close = buttons_->button(QDialogButtonBox::Close)) {
         close->setAutoDefault(false);

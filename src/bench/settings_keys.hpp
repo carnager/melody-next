@@ -12,7 +12,7 @@ namespace trackknife::bench {
 
 // The QSettings keys the Settings dialog writes and the rest of the
 // workspace reads. Kept apart from the dialog so that what reads them --
-// the engine launcher, the remote engines, either window -- needs no widgets.
+// the engine launcher, the remote engines, the window -- needs no widgets.
 struct SettingsKeys {
     // What to give the remote engine: its own password when one is set,
     // otherwise this computer's -- one password everywhere, as melodyd

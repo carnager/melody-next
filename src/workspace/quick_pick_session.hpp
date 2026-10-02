@@ -23,7 +23,7 @@ enum class QuickPickKind { album, track };
 // Quick album and Quick track: an album or a track found from the keyboard
 // -- every word typed must appear in its artist, title, album or date
 // ("doors 67"), the newest first with nothing typed -- and put somewhere as
-// the library's own menu would. Both windows' popups draw it.
+// the library's own menu would. The window's popup draws it.
 class QuickPickSession final : public QObject {
     Q_OBJECT
 

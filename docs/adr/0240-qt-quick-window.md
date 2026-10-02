@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposal, 2026-09-30, on branch `qml-mockup`. Builds on ADR-0220 (one
+Superseded by ADR-0252 (2026-10-02): the window is retired; its last state is
+the tag `quick-ui-final`. Was: Proposal, 2026-09-30, on branch `qml-mockup`. Builds on ADR-0220 (one
 engine; the UI asks, the core answers). Its system-palette colours are the default
 since ADR-0247, beside Trackknife's own light and dark schemes.
 

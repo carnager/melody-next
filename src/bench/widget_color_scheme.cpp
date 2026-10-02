@@ -10,8 +10,8 @@
 namespace trackknife::bench {
 
 void followColorSchemes() {
-    // ADR-0250: Trackknife's own style always, as the Qt Quick window draws
-    // its own; the scheme chosen decides the colours, the desktop's included.
+    // ADR-0250: Trackknife's own style always; the scheme chosen decides
+    // the colours, the desktop's included.
     QApplication::setStyle(new TrackknifeStyle);
     // A widget's own proxy over the style -- a list header's, a list's --
     // wraps another of these, not the desktop's default.

@@ -15,7 +15,7 @@ class Workspace;
 
 // "Open list": every engine's lists under its name, saved ones first --
 // they are the ones kept for a reason -- as each engine answers; one opened
-// into a tab. Both windows' Open list dialogs draw it.
+// into a tab. The window's Open list dialog draws it.
 class OpenListSession final : public QObject {
     Q_OBJECT
 

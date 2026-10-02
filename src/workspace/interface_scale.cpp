@@ -14,7 +14,7 @@ QList<double> interfaceScales() { return {1.0, 0.75, 0.9, 1.1, 1.25, 1.5, 1.75, 
 
 double chosenInterfaceScale() {
     // The application's own settings file: as it names itself once it
-    // exists, and before then as both windows will name it.
+    // exists, and before then as the window will name it.
     const bool named = QCoreApplication::instance() != nullptr &&
                        !QCoreApplication::organizationName().isEmpty();
     QSettings settings{QSettings::defaultFormat(), QSettings::UserScope,

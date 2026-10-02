@@ -153,6 +153,18 @@ namespace {
 }
 
 constexpr int thumbnail_edge = 60;
+// ADR-0251: thumbnails carry three pixels to each one they are shown at, so
+// they are sharp on a Retina or 5K display (2x) and on 3x screens, and drawn
+// down on an ordinary one.
+constexpr int thumbnail_density = 3;
+
+[[nodiscard]] QImage sharp_thumbnail(const QImage& image) {
+    auto thumbnail = image.scaled(thumbnail_edge * thumbnail_density,
+                                  thumbnail_edge * thumbnail_density, Qt::KeepAspectRatio,
+                                  Qt::SmoothTransformation);
+    thumbnail.setDevicePixelRatio(thumbnail_density);
+    return thumbnail;
+}
 constexpr std::uint64_t maximum_thumbnail_source_bytes = 16U * 1024U * 1024U;
 
 [[nodiscard]] metadata::ArtworkImageFile
@@ -247,8 +259,11 @@ thumbnail_evidence(const metadata::ArtworkInventoryItem& item) {
     if (!size.isValid() || static_cast<qint64>(size.width()) * size.height() > 32 * 1024 * 1024) {
         return {};
     }
-    reader.setScaledSize(size.scaled(128, 128, Qt::KeepAspectRatio));
-    return reader.read().scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // Enough for the largest a cover is shown from it -- the tag editor's
+    // 108 px -- at three device pixels to one (ADR-0251).
+    constexpr int edge = 108 * thumbnail_density;
+    reader.setScaledSize(size.scaled(edge, edge, Qt::KeepAspectRatio));
+    return reader.read().scaled(edge, edge, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
 } // namespace
@@ -846,10 +861,7 @@ void ArtworkSession::present(const BatchResult& result) {
             auto* preview = new QStandardItem;
             preview->setEditable(false);
             if (index < source.thumbnails.size() && !source.thumbnails[index].isNull()) {
-                preview->setData(source.thumbnails[index].scaled(thumbnail_edge, thumbnail_edge,
-                                                                 Qt::KeepAspectRatio,
-                                                                 Qt::SmoothTransformation),
-                                 Qt::DecorationRole);
+                preview->setData(sharp_thumbnail(source.thumbnails[index]), Qt::DecorationRole);
             } else {
                 preview->setText(QStringLiteral("—"));
                 preview->setToolTip(QStringLiteral("No preview available"));
@@ -1485,8 +1497,7 @@ void ArtworkSession::finishPendingPreviews() {
         }
         auto* item = pending_model_->item(static_cast<int>(index), 5);
         item->setText(images[index].isNull() ? QStringLiteral("Unavailable") : QString{});
-        item->setData(images[index].scaled(thumbnail_edge, thumbnail_edge, Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation),
+        item->setData(images[index].isNull() ? QImage{} : sharp_thumbnail(images[index]),
                       Qt::DecorationRole);
         if (pending_rows_[index].kind == metadata::ArtworkWritePlanIntentKind::add &&
             pending_rows_[index].added_role == metadata::ArtworkRole::front) {

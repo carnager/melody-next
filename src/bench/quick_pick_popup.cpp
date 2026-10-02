@@ -132,9 +132,12 @@ QuickPickPopup::QuickPickPopup(const QuickPickKind kind,
 QuickPickPopup::~QuickPickPopup() = default;
 
 void QuickPickPopup::popUp(const QWidget* over) {
-    const auto width = std::min(640, std::max(420, over->width() - 80));
-    resize(width, 420);
-    const auto top_left = over->mapToGlobal(QPoint{(over->width() - width) / 2, 90});
+    // Centred on the window, not on the part asked for: the track area sits
+    // beside the side panels, and centring on it put the popup off the
+    // window's middle. Its own width as laid out, which a minimum can widen.
+    const auto* window = over->window();
+    resize(std::min(640, std::max(420, window->width() - 80)), 420);
+    const auto top_left = window->mapToGlobal(QPoint{(window->width() - width()) / 2, 90});
     move(top_left);
     show();
     input_->setFocus(Qt::PopupFocusReason);

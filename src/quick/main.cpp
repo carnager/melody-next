@@ -10,6 +10,7 @@
 #include "quick/window_palette.hpp"
 #include "uicommon/debug_log.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/interface_scale.hpp"
 #include "workspace/startup.hpp"
 
 #include <QApplication>
@@ -46,6 +47,8 @@ void chooseStyle() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    // ADR-0251: the size chosen, before Qt fixes the screens' scale.
+    trackknife::bench::applyInterfaceScale(argc, argv);
     QApplication application(argc, argv);
     // QA hook: --screenshot renders against test data only, decided before
     // anything reads settings or the workspace.

@@ -2,6 +2,8 @@
 
 #include "workspace/settings_session.hpp"
 
+#include "workspace/interface_scale.hpp"
+
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/audio/local_playback.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -196,6 +198,18 @@ std::vector<SettingsSession::Choice> SettingsSession::colorSchemes() {
     return {{QStringLiteral("As the system"), QStringLiteral("system")},
             {QStringLiteral("Light"), QStringLiteral("light")},
             {QStringLiteral("Dark"), QStringLiteral("dark")}};
+}
+
+// ADR-0251: on top of the desktop's own scaling, which applies by itself.
+std::vector<SettingsSession::Choice> SettingsSession::interfaceScales() {
+    std::vector<Choice> choices;
+    for (const auto scale : bench::interfaceScales()) {
+        const auto percent = QString::number(qRound(scale * 100.0));
+        choices.push_back({scale == 1.0 ? QStringLiteral("As the system (100%)")
+                                        : percent + QLatin1Char('%'),
+                           QString::number(scale)});
+    }
+    return choices;
 }
 
 std::vector<SettingsSession::Choice> SettingsSession::ratingScales() {

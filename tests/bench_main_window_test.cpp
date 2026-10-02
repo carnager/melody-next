@@ -5,6 +5,7 @@
 #include "bench/trackknife_style.hpp"
 #include "bench/widget_color_scheme.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/interface_scale.hpp"
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/catalogue_source.hpp"
 #include "bench/convert_dialog.hpp"
@@ -394,6 +395,7 @@ class BenchMainWindowTest final : public QObject {
     void deleteInUpNextTakesItsTrackNotTheLists();
     void settingsLeftOffReadAsOff();
     void colorSchemesAreChosenAndApplied();
+    void interfaceSizeIsChosenForTheNextStart();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -10666,7 +10668,10 @@ void BenchMainWindowTest::artworkFetchesCoverArtFromArchiveAndAddsFront() {
     QVERIFY(pending != nullptr);
     QTRY_VERIFY(!pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>().isNull());
     const auto preview = pending->model()->index(0, 5).data(Qt::DecorationRole).value<QImage>();
-    QVERIFY(preview.width() <= 60 && preview.height() <= 60);
+    // Shown at 60 px or less, in more device pixels for HiDPI (ADR-0251).
+    const auto shown = preview.deviceIndependentSize();
+    QVERIFY(shown.width() <= 60.0 && shown.height() <= 60.0);
+    QVERIFY(preview.devicePixelRatio() > 1.0);
     QCOMPARE(preview.pixelColor(0, 0), QColor{Qt::darkCyan});
     QCOMPARE(pending->model()->index(0, 4).data().toString(), QStringLiteral("None"));
     QVERIFY(!observed.has_value());
@@ -12203,6 +12208,35 @@ void BenchMainWindowTest::crossTabMoveUndoIsOneTransaction() {
 // ADR-0247: Trackknife's own light and dark schemes, chosen in Settings,
 // applied at once -- with Fusion, which paints with the palette -- and the
 // system's colours back again.
+// ADR-0251: the interface size is offered in Settings, stored, and read back
+// before the application exists -- through the settings file alone, as the
+// next start reads it -- for QT_SCALE_FACTOR; anything unusable is 100%.
+void BenchMainWindowTest::interfaceSizeIsChosenForTheNextStart() {
+    QSettings{}.remove(QLatin1String(interface_scale_key));
+    QCOMPARE(chosenInterfaceScale(), 1.0);
+    BenchMainWindow window;
+    window.show();
+    window.findChild<QAction*>(QStringLiteral("action-settings"))->trigger();
+    auto* dialog = window.findChild<SettingsDialog*>();
+    QVERIFY(dialog != nullptr);
+    auto* combo = dialog->findChild<QComboBox*>(QStringLiteral("bench-settings-interface-scale"));
+    QVERIFY(combo != nullptr);
+    QCOMPARE(combo->count(), static_cast<int>(interfaceScales().size()));
+    QCOMPARE(combo->currentData().toString(), QStringLiteral("1"));
+    combo->setCurrentIndex(combo->findData(QStringLiteral("1.5")));
+    QPointer<SettingsDialog> lifetime = dialog;
+    dialog->findChild<QDialogButtonBox*>(QStringLiteral("bench-settings-buttons"))
+        ->button(QDialogButtonBox::Save)
+        ->click();
+    QTRY_VERIFY(lifetime.isNull());
+    QSettings{}.sync();
+    QCOMPARE(chosenInterfaceScale(), 1.5);
+    QSettings{}.setValue(QLatin1String(interface_scale_key), QStringLiteral("7"));
+    QSettings{}.sync();
+    QCOMPARE(chosenInterfaceScale(), 1.0);
+    QSettings{}.remove(QLatin1String(interface_scale_key));
+}
+
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {
     // Complete schemes: an unfocused window keeps its accent, disabled text
     // reads as disabled.

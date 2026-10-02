@@ -205,7 +205,8 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
         workspace_.openLocalPaths(std::move(raw_paths));
     }
     // QA hook (--open): what to show before a screenshot -- "tagger", the
-    // tag editor on every row of the open list; "settings[-page]".
+    // tag editor on every row of the open list; "settings[-page]";
+    // "quickpick", the quick add popup.
     void openForScreenshot(const QString& name);
 
     // WorkspaceView

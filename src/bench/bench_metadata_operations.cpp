@@ -167,6 +167,12 @@ void BenchMainWindow::openForScreenshot(const QString& name) {
         }
         return;
     }
+    if (name == QStringLiteral("quickpick")) {
+        if (auto* quick_album = findChild<QAction*>(QStringLiteral("action-quick-album"))) {
+            quick_album->trigger();
+        }
+        return;
+    }
     if (name.startsWith(QStringLiteral("settings"))) {
         static const std::array pages{
             std::pair{"general", SettingsDialog::Page::general},

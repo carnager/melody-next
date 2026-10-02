@@ -757,21 +757,26 @@ void QueueTableView::startDrag(const Qt::DropActions supported_actions) {
     auto summary_font = font();
     summary_font.setBold(true);
     const QFontMetrics summary_metrics{summary_font};
-    QPixmap summary_pixmap{summary_metrics.horizontalAdvance(summary) + 24,
-                           summary_metrics.height() + 12};
+    // In device pixels, so the pill is sharp on a HiDPI screen.
+    const QSize summary_size{summary_metrics.horizontalAdvance(summary) + 24,
+                             summary_metrics.height() + 12};
+    const auto ratio = devicePixelRatioF();
+    QPixmap summary_pixmap{summary_size * ratio};
+    summary_pixmap.setDevicePixelRatio(ratio);
     summary_pixmap.fill(Qt::transparent);
     {
         QPainter painter{&summary_pixmap};
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(Qt::NoPen);
         painter.setBrush(palette().highlight());
-        painter.drawRoundedRect(summary_pixmap.rect().adjusted(1, 1, -1, -1), 6, 6);
+        const QRect area{QPoint{}, summary_size};
+        painter.drawRoundedRect(area.adjusted(1, 1, -1, -1), 6, 6);
         painter.setPen(palette().highlightedText().color());
         painter.setFont(summary_font);
-        painter.drawText(summary_pixmap.rect(), Qt::AlignCenter, summary);
+        painter.drawText(area, Qt::AlignCenter, summary);
     }
     drag.setPixmap(summary_pixmap);
-    drag.setHotSpot(QPoint{12, summary_pixmap.height() / 2});
+    drag.setHotSpot(QPoint{12, summary_size.height() / 2});
 
     auto actions = supported_actions;
     if (copy_only)

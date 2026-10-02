@@ -24,8 +24,12 @@ void CoverThumbnail::setCover(const QImage& image, bool mixed) {
     if (mixed || image.isNull()) {
         setText(mixed ? QStringLiteral("Multiple covers") : QStringLiteral("No front cover"));
     } else {
-        setPixmap(QPixmap::fromImage(image).scaled(108, 108, Qt::KeepAspectRatio,
-                                                   Qt::SmoothTransformation));
+        // In device pixels, so it is sharp on a HiDPI screen (ADR-0251).
+        const auto ratio = devicePixelRatioF();
+        auto pixmap = QPixmap::fromImage(image).scaled(QSize{108, 108} * ratio, Qt::KeepAspectRatio,
+                                                       Qt::SmoothTransformation);
+        pixmap.setDevicePixelRatio(ratio);
+        setPixmap(pixmap);
     }
 }
 void CoverThumbnail::dragEnterEvent(QDragEnterEvent* event) {

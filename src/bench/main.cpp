@@ -6,6 +6,7 @@
 #include "trackknife/persistence/workspace_backup.hpp"
 #include "uicommon/debug_log.hpp"
 #include "workspace/color_scheme.hpp"
+#include "workspace/interface_scale.hpp"
 #include "workspace/startup.hpp"
 
 #include <QApplication>
@@ -15,6 +16,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QPainter>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QString>
@@ -97,6 +99,8 @@ void startSoakLog(QObject* parent) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // ADR-0251: the size chosen, before Qt fixes the screens' scale.
+    trackknife::bench::applyInterfaceScale(argc, argv);
     QApplication application(argc, argv);
     default_message_handler = qInstallMessageHandler(filtered_message_handler);
     // QA hook: --screenshot renders against test data only. Decided before
@@ -190,11 +194,26 @@ int main(int argc, char** argv) {
             QWidget* shown = &window;
             for (auto* candidate : QApplication::topLevelWidgets()) {
                 if (candidate != &window && candidate->isVisible() && candidate->isWindow() &&
-                    !candidate->inherits("QMenu")) {
+                    !candidate->inherits("QMenu") &&
+                    !candidate->windowFlags().testFlag(Qt::Popup)) {
                     shown = candidate;
                 }
             }
-            const auto image = shown->grab().toImage();
+            // A popup over the window is part of the picture of it.
+            auto image = shown->grab().toImage();
+            if (shown == &window) {
+                QPainter painter{&image};
+                const auto ratio = image.devicePixelRatio();
+                for (auto* candidate : QApplication::topLevelWidgets()) {
+                    if (candidate->isVisible() && candidate->windowFlags().testFlag(Qt::Popup) &&
+                        !candidate->inherits("QMenu")) {
+                        const auto at = candidate->mapToGlobal(QPoint{}) - window.mapToGlobal(QPoint{});
+                        painter.drawImage(QRectF{QPointF{at}, QSizeF{candidate->size()}},
+                                          candidate->grab().toImage());
+                        static_cast<void>(ratio);
+                    }
+                }
+            }
             const auto saved = image.save(screenshot_path);
             QApplication::exit(saved ? 0 : 1);
         });

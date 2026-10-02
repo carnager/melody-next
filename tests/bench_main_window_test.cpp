@@ -1026,6 +1026,7 @@ void BenchMainWindowTest::ffmpegEncoderIsTheTagTagLibCallsEncoding() {
 
 void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     QSettings{}.remove(QStringLiteral("library/newest-first"));
+    QSettings{}.remove(QStringLiteral("library/view"));
     QTemporaryDir media;
     QVERIFY(media.isValid());
     const auto music = media.filePath(QStringLiteral("music"));
@@ -1069,12 +1070,18 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
                 .startsWith(QStringLiteral("Recently added")));
     QTest::keyClick(popup->input(), Qt::Key_Escape);
 
-    // The library panel's Recently added: albums, the new one first.
+    // The library panel's Recently added -- a view (ADR-0254): albums, the
+    // new one first.
     window.localLibrary()->refreshLibrary();
-    auto* newest =
-        window.localLibrary()->findChild<QToolButton*>(QStringLiteral("local-library-newest"));
-    QVERIFY(newest != nullptr && newest->isCheckable());
-    newest->setChecked(true);
+    auto* views = window.localLibrary()->findChild<QComboBox*>(QStringLiteral("local-library-view"));
+    QVERIFY(views != nullptr);
+    const auto choose = [views](const QString& id) {
+        const auto index = views->findData(id);
+        QVERIFY(index >= 0);
+        views->setCurrentIndex(index);
+        emit views->activated(index);
+    };
+    choose(QStringLiteral("recently-added"));
     auto* tree = window.localLibrary()->findChild<QTreeView*>();
     QTRY_COMPARE(tree->model()->rowCount(), 2);
     const auto first = tree->model()->index(0, 0).data(library_entry_role);
@@ -1082,11 +1089,12 @@ void BenchMainWindowTest::recentlyAddedComesFirstWhereAskedFor() {
     QCOMPARE(first.value<persistence::LibraryEntry>().kind, persistence::LibraryEntryKind::album);
     QVERIFY(first.value<persistence::LibraryEntry>().added >
             tree->model()->index(1, 0).data(library_entry_role).value<persistence::LibraryEntry>().added);
-    newest->setChecked(false);
+    choose(QStringLiteral("artist-album"));
     QTRY_VERIFY(tree->model()->rowCount() >= 1 &&
                 tree->model()->index(0, 0).data(library_entry_role).value<persistence::LibraryEntry>().kind ==
                     persistence::LibraryEntryKind::artist);
     QSettings{}.remove(QStringLiteral("library/newest-first"));
+    QSettings{}.remove(QStringLiteral("library/view"));
 }
 
 void BenchMainWindowTest::settingsListEnginesFoundOnTheNetwork() {

@@ -40,6 +40,8 @@ qt_add_library(
     local_list_edit_bar.hpp
     track_list_find_bar.cpp
     track_list_find_bar.hpp
+    library_views_dialog.cpp
+    library_views_dialog.hpp
     local_library_panel.cpp
     local_library_panel.hpp
     cover_thumbnail.cpp

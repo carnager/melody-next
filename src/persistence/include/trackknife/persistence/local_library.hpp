@@ -106,6 +106,9 @@ struct LibraryEntry {
     // ADR-0254: a view's node -- a group, or an album standing for one -- by
     // the label its level gave it, which is what opening it adds to the path.
     std::string view_value{};
+    // The query listing that node, filled in by the client that browses it:
+    // what it opens to and what its files are, rather than its whole album.
+    std::optional<LibraryQuery> view_node{};
 };
 
 struct LibraryPage {

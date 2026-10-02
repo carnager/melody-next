@@ -34,15 +34,20 @@ value of a multi-value field.
   cover, rating, Go to album and drag work unchanged. Under it come its
   tracks, in album order.
 - **Order.** Nodes sort by their sort expression, or else their label,
-  ignoring case and comparing digit runs as numbers; empty labels last. A
-  node's sort key is the smallest of its tracks'.
+  ignoring case and comparing digit runs as numbers, optionally reversed;
+  empty labels last, shown as "Unknown". A node's sort key is the first of
+  its tracks' in that order.
 - **The default view is the tree as it is.** Artist › Album keeps its own
   queries and is unchanged. Shipped alongside: Genre › Artist › Album,
   Year › Album (newest first), Decade › Artist › Album, Album, and the
   existing Recently added.
-- **Views live in the window's settings**, and are sent with each request;
-  the engine stores nothing. A dropdown in the library panel chooses one, and
-  an editor makes, changes and removes them, with a live preview.
+- **Views live in the window's settings** (`library/views`, each level with
+  its dialect and version), and are sent with each request; the engine stores
+  nothing. A dropdown above the library's search chooses one -- Recently
+  added, until now a footer toggle, is one of its choices -- and an editor
+  makes, changes and removes them, with a live preview. The shipped views can
+  be copied, not changed. Go to album and Go to artist return to the artist
+  tree, as they already left Recently added.
 - **Searching.** A word search shows its results as today. A `tkq-1` query
   in query mode narrows the chosen view before it is grouped.
 

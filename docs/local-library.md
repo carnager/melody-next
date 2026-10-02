@@ -162,6 +162,38 @@ album title, and parent directory identify an album. Tree labels are evaluated
 off the UI thread using shipped `tkfmt-1` expressions. Opened files use the
 existing declarative track-view engine, metadata reader, and local transport.
 
+## Library views
+
+The dropdown above the search chooses how the library is grouped. **Artist ›
+Album** is the usual tree, and **Recently added** lists albums newest first.
+The other views group by tag: **Genre › Artist › Album**, **Year › Album**,
+**Decade › Artist › Album** and **Album**. A track with several genres
+appears under each of them. Tracks with no value for a level are grouped
+under **Unknown**, at the end.
+
+Choose **Edit views…** (the pencil beside the dropdown) to make your own. A
+view is a list of levels, and each level is a
+[`tkfmt-1`](title-formatting.md) expression:
+
+- `%label%` › `%albumartist%` › `%album%` groups by record label.
+- `$each(composer)` › `%album%` puts a track under each of its composers.
+- `$if(%rating%,%rating%,Unrated)` › `%album%` groups by rating.
+
+**Sort by** orders a level by another expression, so `%album%` sorted by
+`%date%` lists albums in release order. **Reverse** turns the order around.
+Without a sort expression, a level is sorted by its labels, ignoring case
+and with numbers in numeric order. The preview shows the library grouped by
+the view as you edit it. The shipped views can be copied but not changed.
+
+With **Query** on, the query narrows the view before it is grouped. A word
+search shows its results as usual. An album row in a view stands for what
+the view shows of it, so adding "One" under Jazz adds only its jazz tracks.
+**Go to album** and **Go to artist** return to the Artist › Album tree.
+
+The engine groups the library, so a view works the same on a remote engine.
+It keeps the result until the library or its ratings change, so opening a
+row is immediate after the first grouping.
+
 ## Current limits
 
 The index catalogs physical audio files. Search-result tabs retain those physical
@@ -170,8 +202,7 @@ when importing a source through the file-intake workflow; separate indexed searc
 external cue-sheet titles are not included. Structured tkq filters (ADR-0150)
 evaluate over the migration-30 field table and technical columns. Schema 33
 requires complete field evidence, with explicit Refresh repairing older rows. Saved searches are available in the standalone Search dialog
-(ADR-0163); autoplaylists, custom library-tree expressions, and an artwork grid
-remain future work.
+(ADR-0163); autoplaylists and an artwork grid remain future work.
 Album cover thumbnails are available in the current tree and search results.
 
 Device checks protect against an unmounted volume exposing a mountpoint on a

@@ -16,6 +16,7 @@
 #include <memory>
 
 class QCheckBox;
+class QComboBox;
 class QDialog;
 class QLabel;
 class QLineEdit;
@@ -102,7 +103,10 @@ class LocalLibraryPanel final : public QWidget {
     QLabel* query_error_{nullptr};
     QTreeView* tree_{nullptr};
     QLabel* status_{nullptr};
-    QToolButton* newest_toggle_{nullptr};
+    // ADR-0254: the view the library is shown in, and its editor.
+    QComboBox* view_choice_{nullptr};
+    void refreshViewChoices();
+    void editViews();
     QToolButton* scan_button_{nullptr};
     QTimer* artwork_timer_{nullptr};
     QPointer<QDialog> folders_dialog_;

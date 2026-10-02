@@ -71,6 +71,7 @@ class LibraryBrowser final : public QObject {
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     Q_PROPERTY(bool queryMode READ queryMode WRITE setQueryMode NOTIFY searchChanged)
     Q_PROPERTY(bool newestFirst READ newestFirst WRITE setNewestFirst NOTIFY searchChanged)
+    Q_PROPERTY(QString viewId READ viewId WRITE setViewId NOTIFY searchChanged)
     Q_PROPERTY(QString search READ search WRITE setSearch NOTIFY searchChanged)
     Q_PROPERTY(QVariantList roots READ roots NOTIFY rootsChanged)
     Q_PROPERTY(QString rootsError READ rootsError NOTIFY rootsChanged)
@@ -99,6 +100,8 @@ class LibraryBrowser final : public QObject {
     [[nodiscard]] bool scanning() const { return scanning_; }
     [[nodiscard]] bool queryMode() const { return query_mode_; }
     [[nodiscard]] bool newestFirst() const { return newest_first_; }
+    // ADR-0254: the library view shown, by its definition's id.
+    [[nodiscard]] QString viewId() const { return view_id_; }
     [[nodiscard]] QString search() const { return search_; }
     [[nodiscard]] QVariantList roots() const;
     [[nodiscard]] const std::vector<Root>& rootList() const { return roots_; }
@@ -115,6 +118,12 @@ class LibraryBrowser final : public QObject {
     void setSearch(const QString& text);
     void setQueryMode(bool enabled);
     void setNewestFirst(bool on);
+    // Shows the view `id`; one that is gone shows the artist tree.
+    void setViewId(const QString& id);
+    // The views were edited: the one shown is read again.
+    void refreshViews();
+    // Shows `levels` as a view without choosing it: an editor's preview.
+    void previewLevels(std::vector<persistence::LibraryViewLevel> levels);
     // ADR-0140: the whole result of the search, kept as a list
     // (searchCommitted). Enter does it.
     Q_INVOKABLE void commitSearch();
@@ -264,6 +273,11 @@ class LibraryBrowser final : public QObject {
     QString previous_search_;
     bool query_mode_{false};
     bool newest_first_{false};
+    QString view_id_;
+    // The shown view's levels; none for the artist tree and Recently added.
+    std::vector<persistence::LibraryViewLevel> view_;
+    // Settles view_id_, view_ and newest_first_ on `id`, saving the choice.
+    void adoptView(const QString& id);
     std::optional<bool> has_roots_;
     std::vector<Root> roots_;
     QString roots_error_;

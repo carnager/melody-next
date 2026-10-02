@@ -41,9 +41,15 @@ QString libraryViewLevelError(const QString& source) {
     if (compiled.isValid()) {
         return {};
     }
-    return QString::fromStdString(!compiled.parse_diagnostics.empty()
-                                      ? compiled.parse_diagnostics.front().message
-                                      : compiled.diagnostics.front().message);
+    auto message = QString::fromStdString(!compiled.parse_diagnostics.empty()
+                                              ? compiled.parse_diagnostics.front().message
+                                              : compiled.diagnostics.front().message);
+    // The usual stumble: text in parentheses, which tkfmt-1 reads as syntax.
+    if (message.contains(QStringLiteral("parenthesis")) ||
+        message.contains(QStringLiteral("comma"))) {
+        message += QStringLiteral(" — write a literal ( ) or , as \\( \\) or \\,");
+    }
+    return message;
 }
 
 std::vector<LibraryViewDefinition> builtinLibraryViews() {

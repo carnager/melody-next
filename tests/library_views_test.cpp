@@ -175,6 +175,14 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
                 labels(*albums) == std::vector<std::string>{"One", "Three", "Ten", "Two"},
             say("a sort expression orders a level, the label breaking ties"));
 
+    // Literal parentheses are escaped; a missing date adds nothing.
+    auto dated = catalogue.query(view(
+        {{.format = R"(%album%$if(%date%, \(%date%\),))", .sort = "%date%", .descending = false}}));
+    require(dated.has_value() &&
+                labels(*dated) == std::vector<std::string>{"One (1999)", "Three (2005)",
+                                                           "Ten (2010)", "Two (2010)"},
+            say("an album with its year in one level"));
+
     // A filter narrows the library before it is grouped.
     auto jazz = catalogue.query(view(genres, {}, "genre IS jazz"));
     require(jazz.has_value() && labels(*jazz) == std::vector<std::string>{"Jazz", "Rock"} &&

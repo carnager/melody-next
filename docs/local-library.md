@@ -190,7 +190,10 @@ the view as you edit it. Every shipped view is listed, Artist › Album
 included, with the levels it groups by, so you can copy one and change it.
 For example, copy Artist › Album and make its album level
 `$if(%date%,$left(%date%,4) – ,)%album%` to show each album's year. Folders
-has no levels, so it can't be copied. The shipped views themselves can't be
+has no levels, so it can't be copied. Parentheses and commas are part of
+the expression syntax, so escape them to show them as text:
+`%album%$if(%date%, \(%date%\),)` shows "Album (1999)", and just "Album"
+when there is no date. The shipped views themselves can't be
 changed.
 
 With **Query** on, the query narrows the view before it is grouped. A word

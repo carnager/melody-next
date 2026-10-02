@@ -107,7 +107,7 @@ class SearchSession final : public QObject {
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] const std::vector<Result>& results() const { return results_; }
-    [[nodiscard]] bool canOpen() const { return !result_rows_.empty(); }
+    [[nodiscard]] bool canOpen() const { return !result_rows_.empty() || !result_paths_.empty(); }
 
     // Saved searches: "Saved searches…" first.
     [[nodiscard]] QStringList savedNames() const;
@@ -155,6 +155,9 @@ class SearchSession final : public QObject {
     struct Outcome {
         std::vector<std::string> labels;
         std::vector<LocalTrackRow> rows;
+        // A query in a library: every match by its file, its rows read only
+        // when they are played or opened (the labels come formatted).
+        std::vector<std::string> paths;
         // Words in a library: artists and albums as well as tracks, each
         // shown under its own heading.
         bool grouped{false};
@@ -177,6 +180,10 @@ class SearchSession final : public QObject {
     [[nodiscard]] EngineKey scopeEngine() const;
     [[nodiscard]] const CatalogueSource* scopeCatalogues() const;
     [[nodiscard]] QString resultName() const;
+    // Rows for the chosen results, read on a worker, then rowsRequested.
+    void resolveTracks(std::vector<std::string> paths,
+                       std::vector<persistence::LibraryEntry> entries,
+                       std::vector<LocalTrackRow> picked, LocalLibraryAction action);
 
     const CatalogueSource* catalogues_{nullptr};
     std::vector<OtherLibrary> others_;
@@ -205,6 +212,8 @@ class SearchSession final : public QObject {
     bool searching_{false};
     // The last successful search's full result payload.
     std::vector<LocalTrackRow> result_rows_;
+    // The matches of a query in a library, when they are not rows yet.
+    std::vector<std::string> result_paths_;
     std::vector<persistence::LibraryEntry> result_artists_;
     std::vector<persistence::LibraryEntry> result_albums_;
     EngineKey result_engine_{EngineKey::local()};

@@ -423,6 +423,32 @@ template <typename Field>
 
 } // namespace
 
+core::Result<std::vector<Catalogue::FoundTrack>>
+RemoteCatalogue::find(const query::CompiledTkq& compiled, const std::string& format,
+                      const std::size_t limit, const core::CancellationToken&) const {
+    // Formatted there, where the tags are: only the lines cross.
+    auto answer = client_->call("catalogue.find", Json{{"query", compiled.source},
+                                                       {"format", format},
+                                                       {"limit", limit}});
+    if (!answer) {
+        return std::unexpected(std::move(answer.error()));
+    }
+    const auto tracks = answer->find("tracks");
+    if (tracks == answer->end() || !tracks->is_array()) {
+        return std::unexpected(malformed("tracks"));
+    }
+    std::vector<FoundTrack> found;
+    found.reserve(tracks->size());
+    for (const auto& track : *tracks) {
+        auto path = protocol::decode_raw_path(track.value("key", std::string{}));
+        if (!path) {
+            return std::unexpected(malformed("tracks"));
+        }
+        found.push_back({.raw_path = std::move(*path), .text = track.value("text", std::string{})});
+    }
+    return found;
+}
+
 core::Result<persistence::LibraryPage>
 RemoteCatalogue::query(const persistence::LibraryQuery& request,
                        const core::CancellationToken&) const {

@@ -1437,13 +1437,25 @@ void LocalLibraryTest::databaseSearchOpensCachedRowsWithoutFiles() {
     mode->setChecked(true);
     input->setText(QStringLiteral("codec IS flac SORT DESCENDING BY %title%"));
     QTRY_COMPARE(results->count(), 2);
+    // A query's matches are shown as lines; their rows are read when opened.
     open->click();
-    QCOMPARE(requested.size(), 1);
+    QTRY_COMPARE(requested.size(), 1);
     const auto rows = requested.takeFirst().at(1).value<std::vector<LocalTrackRow>>();
     QCOMPARE(rows.size(), 2U);
     QCOMPARE(rows[0].raw_path, beta);
     QCOMPARE(rows[1].raw_path, alpha);
     QCOMPARE(rows[1].title, std::string{"Alpha"});
+    // The lines the library formatted read as the window formats its rows.
+    for (int index = 0; index < 2; ++index) {
+        const auto& row = rows[static_cast<std::size_t>(index)];
+        QCOMPARE(results->item(index)->text(),
+                 QString::fromStdString((row.artist.empty() ? std::string{"Unknown artist"}
+                                                            : row.artist) +
+                                        " — " +
+                                        (row.track_number.empty() ? std::string{}
+                                                                  : row.track_number + ". ") +
+                                        row.title));
+    }
     QCOMPARE(rows[1].metadata.first_effective_value("albumartist"),
              std::optional<std::string>{"Björk"});
     QCOMPARE(rows[1].metadata.fields.front().provenance,

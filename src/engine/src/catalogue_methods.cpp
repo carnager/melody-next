@@ -349,36 +349,18 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
             limit = found->get<std::size_t>();
         }
-        auto program = compile_client_format(std::move(*format),
-                                             titleformat::FormatContextKind::track_display);
-        if (!program) {
-            return std::unexpected(std::move(program.error()));
-        }
         auto compiled = query::compile_tkq(*source);
         if (!compiled) {
             return std::unexpected(std::move(compiled.error()));
         }
-        auto paths = catalogue.filter_paths(*compiled);
-        if (!paths) {
-            return std::unexpected(std::move(paths.error()));
-        }
-        if (limit > 0U && paths->size() > limit) {
-            paths->resize(limit);
-        }
-        auto snapshots = catalogue.cached_tracks(*paths);
-        if (!snapshots) {
-            return std::unexpected(std::move(snapshots.error()));
+        auto found = catalogue.find(*compiled, *format, limit);
+        if (!found) {
+            return std::unexpected(std::move(found.error()));
         }
         auto tracks = Json::array();
-        for (auto& snapshot : *snapshots) {
-            name_by_file(snapshot.facts, snapshot.raw_path);
-            auto text = persistence::tkq_format(*program, snapshot.facts,
-                                                track_fields(snapshot.facts, snapshot.raw_path));
-            if (!text) {
-                return std::unexpected(std::move(text.error()));
-            }
-            tracks.push_back(Json{{"key", protocol::encode_raw_path(snapshot.raw_path)},
-                                  {"text", protocol::displayable_text(*text)}});
+        for (const auto& track : *found) {
+            tracks.push_back(Json{{"key", protocol::encode_raw_path(track.raw_path)},
+                                  {"text", protocol::displayable_text(track.text)}});
         }
         return Json{{"tracks", std::move(tracks)}};
     });

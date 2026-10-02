@@ -205,8 +205,7 @@ int main(int argc, char** argv) {
                 QPainter painter{&image};
                 const auto ratio = image.devicePixelRatio();
                 for (auto* candidate : QApplication::topLevelWidgets()) {
-                    if (candidate->isVisible() && candidate->windowFlags().testFlag(Qt::Popup) &&
-                        !candidate->inherits("QMenu")) {
+                    if (candidate->isVisible() && candidate->windowFlags().testFlag(Qt::Popup)) {
                         const auto at = candidate->mapToGlobal(QPoint{}) - window.mapToGlobal(QPoint{});
                         painter.drawImage(QRectF{QPointF{at}, QSizeF{candidate->size()}},
                                           candidate->grab().toImage());

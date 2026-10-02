@@ -7,6 +7,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/themed_icon.hpp"
+#include "workspace/color_scheme.hpp"
 #include "trackknife/audio/local_audition.hpp"
 #include "uicommon/eliding_label.hpp"
 #include "uicommon/line_slider.hpp"
@@ -300,21 +301,6 @@ void BenchMainWindow::buildTransport() {
     play->setObjectName(QStringLiteral("bench-play"));
     play->setAutoRaise(false);
     // The one control that is always the next thing to do.
-    // With nothing to play, a shade off the header rather than a dark hole.
-    const auto idle_play = [this] {
-        const auto ground = palette().color(QPalette::Window);
-        const auto ink = palette().color(QPalette::Text);
-        const auto mix = [](const int a, const int b) { return (a * 88 + b * 12) / 100; };
-        return QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
-                               mix(ground.blue(), ink.blue()))
-            .name();
-    }();
-    play->setStyleSheet(QStringLiteral("QToolButton#bench-play { border: none; border-radius: 18px;"
-                                       " background: palette(highlight); }"
-                                       "QToolButton#bench-play:hover { background: "
-                                       "palette(highlight); border: 1px solid palette(light); }"
-                                       "QToolButton#bench-play:disabled { background: %1; }")
-                            .arg(idle_play));
     add_transport_button(next_action_, 30);
     header_layout->addWidget(transport);
 
@@ -384,27 +370,6 @@ void BenchMainWindow::buildTransport() {
 
     // Where the sound goes and what is waiting: pills, so they read as
     // places to click rather than as more labels.
-    // A shade off the header, with a soft edge -- from the palette, so a
-    // light theme gets the same relationship.
-    const auto shade = [this](const double amount) {
-        const auto from = palette().color(QPalette::Window);
-        const auto to = palette().color(QPalette::Text);
-        const auto mix = [amount](const int a, const int b) {
-            return static_cast<int>(std::lround(a + (b - a) * amount));
-        };
-        return QColor::fromRgb(mix(from.red(), to.red()), mix(from.green(), to.green()),
-                               mix(from.blue(), to.blue()))
-            .name();
-    };
-    const auto pill =
-        QStringLiteral(
-            "QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
-            " padding: 0 10px; }"
-            "QToolButton[chevron=\"true\"] { padding-right: 24px; }"
-            "QToolButton:hover { border-color: palette(highlight); }"
-            "QToolButton:pressed, QToolButton:checked { background: %2; }"
-            "QToolButton::menu-indicator { image: none; width: 0; }")
-            .arg(shade(0.06), shade(0.16));
     auto pill_font = font();
     pill_font.setPointSizeF(pill_font.pointSizeF() * 0.92);
     device_button_ = new QToolButton(header);
@@ -420,7 +385,6 @@ void BenchMainWindow::buildTransport() {
     device_button_->setFont(pill_font);
     device_button_->setPopupMode(QToolButton::InstantPopup);
     device_button_->setAccessibleName(QStringLiteral("Audio output device"));
-    device_button_->setStyleSheet(pill);
     // A chevron at the end says the pill opens a choice.
     auto* device_layout = new QHBoxLayout(device_button_);
     device_layout->setContentsMargins(0, 0, 9, 0);
@@ -448,7 +412,6 @@ void BenchMainWindow::buildTransport() {
     up_next_button_->setFixedHeight(26);
     up_next_button_->setAcceptDrops(true);
     up_next_button_->installEventFilter(this);
-    up_next_button_->setStyleSheet(pill);
     up_next_button_->setFont(pill_font);
     // The count as a badge beside the words, shown only when something waits.
     auto* up_next_layout = new QHBoxLayout(up_next_button_);
@@ -478,6 +441,15 @@ void BenchMainWindow::buildTransport() {
     setUpNextCount(0);
     header_layout->addWidget(up_next_button_);
     bar->addWidget(header);
+    styleHeader();
+    // A scheme applied later -- chosen, or the desktop turning dark --
+    // recolours what is mixed from the palette.
+    connect(&ColorSchemes::instance(), &ColorSchemes::applied, this, [this] {
+        styleHeader();
+        if (local_replaygain_button_ != nullptr) {
+            styleStatusBar();
+        }
+    });
 
     auto* playback_menu = menuBar()->addMenu(QStringLiteral("&Playback"));
     playback_menu->addAction(play_pause_action_);
@@ -734,6 +706,50 @@ void BenchMainWindow::buildLocalPlaybackControls(QMenu* playback_menu) {
     applyLocalPlaybackModes();
 }
 
+// The header's colours, mixed from the palette now: set again whenever a
+// scheme is applied, so a light scheme after a dark one -- or the desktop
+// turning dark -- recolours them rather than leaving the last scheme's.
+void BenchMainWindow::styleHeader() {
+    const auto ground = palette().color(QPalette::Window);
+    const auto ink = palette().color(QPalette::Text);
+    const auto shade = [&ground, &ink](const double amount) {
+        const auto mix = [amount](const int a, const int b) {
+            return static_cast<int>(std::lround(a + (b - a) * amount));
+        };
+        return QColor::fromRgb(mix(ground.red(), ink.red()), mix(ground.green(), ink.green()),
+                               mix(ground.blue(), ink.blue()))
+            .name();
+    };
+    // The one control that is always the next thing to do; with nothing to
+    // play, a shade off the header rather than a dark hole.
+    if (auto* play = findChild<QToolButton*>(QStringLiteral("bench-play"))) {
+        play->setStyleSheet(
+            QStringLiteral("QToolButton#bench-play { border: none; border-radius: 18px;"
+                           " background: palette(highlight); }"
+                           "QToolButton#bench-play:hover { background: "
+                           "palette(highlight); border: 1px solid palette(light); }"
+                           "QToolButton#bench-play:disabled { background: %1; }")
+                .arg(shade(0.12)));
+    }
+    // Where the sound goes and what is waiting: pills, so they read as
+    // places to click rather than as more labels (Quick's PillButton).
+    const auto pill =
+        QStringLiteral(
+            "QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
+            " padding: 0 10px; }"
+            "QToolButton[chevron=\"true\"] { padding-right: 24px; }"
+            "QToolButton:hover { border-color: palette(highlight); }"
+            "QToolButton:pressed, QToolButton:checked { background: %2; }"
+            "QToolButton::menu-indicator { image: none; width: 0; }")
+            .arg(shade(0.06), shade(0.16));
+    if (device_button_ != nullptr) {
+        device_button_->setStyleSheet(pill);
+    }
+    if (up_next_button_ != nullptr) {
+        up_next_button_->setStyleSheet(pill);
+    }
+}
+
 void BenchMainWindow::styleStatusBar() {
     // The status bar as the header's counterpart: the same ground, a hairline
     // above, no frames around its parts, and the modes that are on tinted in
@@ -764,11 +780,15 @@ void BenchMainWindow::styleStatusBar() {
         button->setAutoRaise(false);
         button->setStyleSheet(mode_style);
     }
-    auto* divider = new QFrame(statusBar());
-    divider->setObjectName(QStringLiteral("bench-status-divider"));
-    divider->setFixedSize(1, 16);
+    // Made once; its colour is set again with every scheme.
+    auto* divider = statusBar()->findChild<QFrame*>(QStringLiteral("bench-status-divider"));
+    if (divider == nullptr) {
+        divider = new QFrame(statusBar());
+        divider->setObjectName(QStringLiteral("bench-status-divider"));
+        divider->setFixedSize(1, 16);
+        statusBar()->addPermanentWidget(divider);
+    }
     divider->setStyleSheet(QStringLiteral("background: %1;").arg(mix(ground, ink, 18)));
-    statusBar()->addPermanentWidget(divider);
     // ReplayGain as quiet as the modes beside it: text, no frame, a gain in
     // use told by the text's colour rather than a filled pill.
     local_replaygain_button_->setAutoRaise(false);

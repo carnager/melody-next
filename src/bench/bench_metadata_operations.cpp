@@ -39,6 +39,7 @@
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
+#include <QToolButton>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -164,6 +165,12 @@ void BenchMainWindow::openForScreenshot(const QString& name) {
         if (auto* view = activeTrackView()) {
             view->selectAll();
             showMetadataForView(view);
+        }
+        return;
+    }
+    if (name == QStringLiteral("replaygain-menu")) {
+        if (auto* button = findChild<QToolButton*>(QStringLiteral("bench-local-replaygain"))) {
+            QTimer::singleShot(0, button, &QToolButton::showMenu);
         }
         return;
     }

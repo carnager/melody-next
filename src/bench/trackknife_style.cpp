@@ -672,6 +672,29 @@ void TrackknifeStyle::drawControl(const ControlElement element, const QStyleOpti
                          radius);
             quiet.state.setFlag(State_Selected, false);
         }
+        // A chosen item is ticked, as Quick's MenuItem: no box, no dot.
+        if (item->checkType != QStyleOptionMenuItem::NotCheckable &&
+            item->menuItemType != QStyleOptionMenuItem::Separator) {
+            if (item->checked) {
+                const QRectF tick_box{QRectF{option->rect}.left() + 7,
+                                      QRectF{option->rect}.center().y() - 5, 10, 10};
+                painter->save();
+                painter->setRenderHint(QPainter::Antialiasing, true);
+                auto ink = palette.color(QPalette::Text);
+                if (!option->state.testFlag(State_Enabled)) {
+                    ink.setAlphaF(0.5F);
+                }
+                painter->setPen(QPen{ink, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin});
+                QPainterPath tick;
+                tick.moveTo(tick_box.left(), tick_box.center().y());
+                tick.lineTo(tick_box.left() + 3.5, tick_box.bottom() - 1);
+                tick.lineTo(tick_box.right(), tick_box.top() + 1);
+                painter->drawPath(tick);
+                painter->restore();
+            }
+            quiet.checked = false;
+            quiet.checkType = QStyleOptionMenuItem::NotCheckable;
+        }
         if (item->menuItemType == QStyleOptionMenuItem::Separator) {
             const int y = option->rect.center().y();
             painter->fillRect(

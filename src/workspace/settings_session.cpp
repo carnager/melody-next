@@ -83,6 +83,7 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
          QString::fromLatin1(metadata::default_rating_backup_tag));
     read(QLatin1String(SettingsKeys::engine_password_key), QString{});
     read(QLatin1String(SettingsKeys::library_show_local_key), true);
+    read(QLatin1String(SettingsKeys::engine_upnp_key), false);
     read(QLatin1String(SettingsKeys::engine_share_key), false);
     read(QLatin1String(SettingsKeys::engine_listen_key),
          QString::fromLatin1(SettingsKeys::engine_listen_default));

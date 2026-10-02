@@ -469,9 +469,10 @@ void Player::follow_gapless_locked(const audio::LocalAuditionSnapshot& snapshot)
     prune_asks_locked();
 }
 
-void Player::replace_queue(std::vector<QueueEntry> entries) {
+void Player::replace_queue(std::vector<QueueEntry> entries, std::string list) {
     const std::lock_guard guard{mutex_};
     queue_ = std::move(entries);
+    queue_list_ = std::move(list);
     ++revision_;
     // ADR-0221: the playing entry is followed by identity. If it has gone,
     // playback is not silently handed to whatever now sits at its old row.
@@ -489,6 +490,40 @@ void Player::replace_queue(std::vector<QueueEntry> entries) {
         anchors_.current = core::StableId{};
         anchors_.source = {};
     }
+    reset_order_locked();
+    refresh_gapless_locked();
+}
+
+std::string Player::queue_list() const {
+    const std::lock_guard guard{mutex_};
+    return queue_list_;
+}
+
+bool Player::ends_after_current() const {
+    const std::lock_guard guard{mutex_};
+    if (anchors_.current.is_nil() || !requests_.empty() || modes_.single_active()) {
+        return false;
+    }
+    // Asked of a copy of the order: asking can draw the next random row, and
+    // looking must not change what plays next.
+    auto order = order_;
+    const QueueView view{queue_};
+    return !audio::automatic_playback_row(view, anchors_, modes_, order, request_state_locked(),
+                                          row_);
+}
+
+void Player::append_to_queue(std::vector<QueueEntry> entries) {
+    if (entries.empty()) {
+        return;
+    }
+    const std::lock_guard guard{mutex_};
+    queue_.insert(queue_.end(), std::make_move_iterator(entries.begin()),
+                  std::make_move_iterator(entries.end()));
+    ++revision_;
+    // The entry playing keeps its row. The order is made again over the
+    // longer queue -- as replacing it does -- so the new rows are in it:
+    // in sequence they follow, in random they join a new cycle.
+    row_ = QueueView{queue_}.row_of_entry(anchors_.current, row_);
     reset_order_locked();
     refresh_gapless_locked();
 }
@@ -828,6 +863,7 @@ Player::Persisted Player::persisted() const {
     const auto snapshot = audition_->snapshot();
     Persisted stored;
     stored.queue = queue_;
+    stored.queue_list = queue_list_;
     stored.asks = asks_;
     stored.entry = anchors_.current;
     stored.request_return = anchors_.request_return;
@@ -848,6 +884,7 @@ Player::Persisted Player::persisted() const {
 bool Player::restore(Persisted state) {
     const std::lock_guard guard{mutex_};
     queue_ = std::move(state.queue);
+    queue_list_ = std::move(state.queue_list);
     asks_ = std::move(state.asks);
     modes_ = state.modes;
     replay_gain_mode_ = state.replay_gain_mode;

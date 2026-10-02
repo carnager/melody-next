@@ -76,8 +76,21 @@ class Player final {
     // Replaces the queue wholesale. Playback continues if the playing entry
     // is still present; it stops if the entry has gone, rather than jumping
     // to whatever now occupies its row.
-    void replace_queue(std::vector<QueueEntry> entries);
+    //
+    // ADR-0253: `list` names the list the queue was played from, so the
+    // engine knows which list's continuation applies; empty, none.
+    void replace_queue(std::vector<QueueEntry> entries, std::string list = {});
     [[nodiscard]] std::vector<QueueEntry> queue() const;
+    // The list the queue came from; empty when not known.
+    [[nodiscard]] std::string queue_list() const;
+    // ADR-0253: whether nothing would follow the entry playing now -- the
+    // list ends after it under the modes and asks in force. Repeat never
+    // ends a list; single stops on purpose, which is not ending either.
+    [[nodiscard]] bool ends_after_current() const;
+    // Appends to the queue, keeping what plays: the continuation's batch.
+    // The order is made again so the new rows are in it, and gapless is
+    // re-armed for the new next track.
+    void append_to_queue(std::vector<QueueEntry> entries);
     // ADR-0237: a file this engine moved or renamed, followed wherever the
     // player names it -- the queue, the asks, what plays. Identities stay, so
     // nothing restarts; the playing track keeps its open file.
@@ -274,6 +287,8 @@ class Player final {
     // is what a client renders and includes derived things like the status.
     struct Persisted final {
         std::vector<QueueEntry> queue;
+        // The list the queue was played from (ADR-0253).
+        std::string queue_list;
         // Requested tracks that are not in the list.
         std::vector<QueueEntry> asks;
         core::StableId entry;
@@ -398,6 +413,7 @@ class Player final {
     std::optional<PendingResume> pending_resume_;
     core::ListenAccounting listening_;
     std::vector<QueueEntry> queue_;
+    std::string queue_list_;
     audio::PlaybackAnchors anchors_;
     audio::PlaybackModes modes_;
     // Kept here, not left to the output: an output that is replaced, or an

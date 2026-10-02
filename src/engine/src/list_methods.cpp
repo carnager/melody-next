@@ -388,7 +388,8 @@ void register_list_methods(protocol::Dispatcher& dispatcher, Workspace& workspac
         for (const auto& item : (*list)->items) {
             queue.push_back(queue_entry(item));
         }
-        player.replace_queue(std::move(queue));
+        // ADR-0253: the queue knows its list, for the list's continuation.
+        player.replace_queue(std::move(queue), id->to_string());
         if (auto played = player.play_entry(start); !played) {
             return std::unexpected(std::move(played.error()));
         }

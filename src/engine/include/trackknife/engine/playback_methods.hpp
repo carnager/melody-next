@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <thread>
 
 namespace trackknife::engine {
@@ -48,10 +49,15 @@ class PlaybackWatcher final {
     PlaybackWatcher& operator=(PlaybackWatcher&&) = delete;
     ~PlaybackWatcher();
 
+    // Called on every tick after the player has advanced -- the list
+    // continuation's chance to look (ADR-0253). Set before start().
+    void set_tick(std::function<void()> tick) { tick_ = std::move(tick); }
+
     void start();
     void stop();
 
   private:
+    std::function<void()> tick_;
     Player* player_;
     EventSink sink_;
     std::chrono::milliseconds interval_;

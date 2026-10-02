@@ -332,7 +332,12 @@ void register_playback_methods(protocol::Dispatcher& dispatcher, Player& player)
             }
             queue.push_back(std::move(*entry));
         }
-        player.replace_queue(std::move(queue));
+        // ADR-0253: the list it was played from, when the client says.
+        auto list = params.value("list", std::string{});
+        if (!list.empty() && !core::StableId::parse(list)) {
+            return std::unexpected(bad_params("a list is named by its identity", "list"));
+        }
+        player.replace_queue(std::move(queue), std::move(list));
         return to_json(player.state());
     });
 
@@ -640,6 +645,9 @@ void PlaybackWatcher::start() {
             // would be two things to keep in step; an advance shows up in the
             // very next comparison below, so the change is pushed at once.
             static_cast<void>(player_->advance_if_ended());
+            if (tick_) {
+                tick_();
+            }
             auto current = to_json(player_->state());
             // Position is dropped before comparing: it moves continuously and
             // emitting on it would be a broadcast storm carrying nothing a

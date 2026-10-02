@@ -360,6 +360,13 @@ add_test(
 )
 
 # ADR-0228: an engine playing on an output agent, both real, in one process.
+add_executable(trackknife_list_continuation_tests list_continuation_test.cpp)
+target_link_libraries(trackknife_list_continuation_tests PRIVATE Trackknife::Engine
+    trackknife_project_options trackknife_project_warnings)
+add_test(NAME list-continuation COMMAND trackknife_list_continuation_tests
+                                        "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+set_tests_properties(list-continuation PROPERTIES TIMEOUT 60)
+
 add_executable(trackknife_engine_lastfm_tests engine_lastfm_test.cpp)
 target_link_libraries(trackknife_engine_lastfm_tests PRIVATE Trackknife::Engine
     trackknife_project_options trackknife_project_warnings)

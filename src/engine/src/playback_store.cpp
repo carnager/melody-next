@@ -113,6 +113,9 @@ bool PlaybackStore::restore() {
     if (state.queue.empty() && state.asks.empty()) {
         return false;
     }
+    if (const auto list = document.find("list"); list != document.end() && list->is_string()) {
+        state.queue_list = list->get<std::string>();
+    }
     if (const auto entry = document.find("entry"); entry != document.end() && entry->is_string()) {
         if (auto parsed = core::StableId::parse(entry->get<std::string>())) {
             state.entry = *parsed;
@@ -203,6 +206,8 @@ void PlaybackStore::persist() {
             held.push_back(to_json(entry));
         }
         document["asks"] = std::move(held);
+        // ADR-0253: which list the queue was played from.
+        document["list"] = state.queue_list;
         document["entry"] = state.entry.is_nil() ? Json(nullptr) : Json(state.entry.to_string());
         document["request_return"] =
             state.request_return.is_nil() ? Json(nullptr) : Json(state.request_return.to_string());

@@ -146,6 +146,8 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
     require(std::filesystem::path{tracks->entries[0].key}.filename() == "a-02.flac" &&
                 std::filesystem::path{tracks->entries[1].key}.filename() == "a-10.flac",
             say("in album order"));
+    require(tracks->entries[0].label == "02. a-02.flac",
+            say("a track is labelled as the artist tree labels it"));
 
     auto paths = catalogue.paths(view(genres, {"Rock"}));
     require(paths.has_value() &&

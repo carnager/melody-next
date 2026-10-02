@@ -1714,7 +1714,9 @@ core::Result<void> LocalLibrary::each_track(const std::function<void(LibraryView
             LibraryViewTrack track{.entry = filter_entry(row),
                                    .album_key = row.album_key,
                                    .facts = std::move(row.facts)};
-            // As the tree shows a track, not as a search names it.
+            // As the tree shows a track, not as a search names it: formatted
+            // from its title, which the search label already wraps.
+            track.entry.label = track.entry.title;
             track.entry.label = format_label(track.entry, false);
             const auto available = select.number(20) != 0;
             track.entry.available = available ? 1U : 0U;

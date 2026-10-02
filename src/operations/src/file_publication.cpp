@@ -20,9 +20,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #ifndef __APPLE__
-#ifndef __APPLE__
 #include <sys/syscall.h>
-#endif
 #endif
 #include <sys/xattr.h>
 #include <system_error>

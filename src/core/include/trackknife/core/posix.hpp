@@ -148,8 +148,13 @@ inline int set_path_extended_attribute(const char* path, const char* name, const
 inline bool user_extended_attribute(const std::string_view name) {
 #ifdef __APPLE__
     // Darwin has no Linux-style user namespace. Preserve ordinary and
-    // com.apple metadata, while leaving kernel-owned attributes alone.
-    return !name.starts_with("com.apple.system.");
+    // com.apple metadata (Finder tags, quarantine), while leaving the
+    // attributes the system owns alone: it adds provenance to every file an
+    // app writes and refuses to have it set or removed, and the same holds
+    // for rootless (SIP) and macl (TCC) -- copying or stripping them failed
+    // the save.
+    return !name.starts_with("com.apple.system.") && name != "com.apple.provenance" &&
+           name != "com.apple.rootless" && name != "com.apple.macl";
 #else
     return name.starts_with("user.");
 #endif

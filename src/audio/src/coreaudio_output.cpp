@@ -258,26 +258,44 @@ struct DeviceInventory {
     });
 }
 
+// How long the last sample takes to be heard once handed over: the unit's
+// own latency, two device buffers, and the device's latency and safety
+// offset -- large on Bluetooth and AirPlay, whose tail was cut off without
+// them. Device frames count at the device's rate, not the source's.
 [[nodiscard]] std::chrono::nanoseconds drain_delay(const AudioUnit unit, const AudioDeviceID device,
                                                    const int sample_rate) {
     Float64 unit_latency{0.0};
     UInt32 latency_size = sizeof(unit_latency);
     static_cast<void>(AudioUnitGetProperty(unit, kAudioUnitProperty_Latency, kAudioUnitScope_Global,
                                            0U, &unit_latency, &latency_size));
-    UInt32 buffer_frames{0U};
-    UInt32 frame_size = sizeof(buffer_frames);
-    AudioObjectPropertyAddress address{
-        .mSelector = kAudioDevicePropertyBufferFrameSize,
-        .mScope = kAudioObjectPropertyScopeOutput,
+    const auto frames = [device](const AudioObjectPropertySelector selector) {
+        UInt32 value{0U};
+        UInt32 size = sizeof(value);
+        const AudioObjectPropertyAddress address{
+            .mSelector = selector,
+            .mScope = kAudioObjectPropertyScopeOutput,
+            .mElement = kAudioObjectPropertyElementMain,
+        };
+        static_cast<void>(AudioObjectGetPropertyData(device, &address, 0U, nullptr, &size, &value));
+        return static_cast<double>(value);
+    };
+    Float64 device_rate{0.0};
+    UInt32 rate_size = sizeof(device_rate);
+    const AudioObjectPropertyAddress rate_address{
+        .mSelector = kAudioDevicePropertyNominalSampleRate,
+        .mScope = kAudioObjectPropertyScopeGlobal,
         .mElement = kAudioObjectPropertyElementMain,
     };
     static_cast<void>(
-        AudioObjectGetPropertyData(device, &address, 0U, nullptr, &frame_size, &buffer_frames));
-    const auto buffer_seconds =
-        sample_rate > 0 ? static_cast<double>(buffer_frames) / static_cast<double>(sample_rate)
-                        : 0.0;
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::duration<double>{std::max(0.0, unit_latency) + buffer_seconds * 2.0});
+        AudioObjectGetPropertyData(device, &rate_address, 0U, nullptr, &rate_size, &device_rate));
+    if (device_rate <= 0.0) {
+        device_rate = static_cast<double>(std::max(sample_rate, 1));
+    }
+    const auto device_frames = frames(kAudioDevicePropertyBufferFrameSize) * 2.0 +
+                               frames(kAudioDevicePropertyLatency) +
+                               frames(kAudioDevicePropertySafetyOffset);
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>{
+        std::max(0.0, unit_latency) + device_frames / device_rate});
 }
 
 } // namespace
@@ -285,7 +303,10 @@ struct DeviceInventory {
 struct PipeWireOutput::Impl {
     LocalPlayback* source;
     PipeWireOutputConfig config;
-    std::size_t channels;
+    // The source's channels; the unit always takes two, so mono is spread
+    // over both speakers rather than played on the left alone.
+    std::size_t source_channels;
+    static constexpr std::size_t channels = 2U;
     AudioUnit unit{nullptr};
     AudioDeviceID device{kAudioObjectUnknown};
     std::atomic<PipeWireOutputState> state{PipeWireOutputState::unconnected};
@@ -301,7 +322,7 @@ struct PipeWireOutput::Impl {
 
     Impl(LocalPlayback& playback, PipeWireOutputConfig output_config)
         : source(&playback), config(std::move(output_config)),
-          channels(static_cast<std::size_t>(playback.output_format().channels)) {}
+          source_channels(static_cast<std::size_t>(playback.output_format().channels)) {}
 
     ~Impl() {
         if (started && unit != nullptr) {
@@ -345,9 +366,21 @@ struct PipeWireOutput::Impl {
             return noErr;
         }
 
-        auto samples = std::span<float>{static_cast<float*>(buffers->mBuffers[0].mData),
-                                        static_cast<std::size_t>(frames) * output.channels};
-        const auto copied = output.source->render(samples);
+        auto* data = static_cast<float*>(buffers->mBuffers[0].mData);
+        auto samples = std::span<float>{data, static_cast<std::size_t>(frames) * output.channels};
+        std::size_t copied = 0U;
+        if (output.source_channels == 1U) {
+            // Rendered into the front of the buffer, then spread to both
+            // channels from the back, so nothing is read after it is written.
+            copied = output.source->render(samples.first(frames));
+            for (auto frame = static_cast<std::size_t>(frames); frame-- > 0U;) {
+                const auto sample = data[frame];
+                data[frame * 2U] = sample;
+                data[frame * 2U + 1U] = sample;
+            }
+        } else {
+            copied = output.source->render(samples);
+        }
         const auto gain = static_cast<float>(output.volume.load(std::memory_order_relaxed));
         if (gain != 1.0F) {
             for (auto& sample : samples) {
@@ -393,12 +426,18 @@ core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
         return std::unexpected(std::move(selected.error()));
     }
 
+    // No device chosen: the default output unit, which follows the system
+    // default as it changes -- headphones unplugged, AirPlay chosen -- as
+    // PipeWire's default does. A chosen device is held by its UID, and its
+    // loss is seen by the device monitor.
+    const bool follows_default = !config.target_object.has_value();
     auto output = std::make_unique<Impl>(source, std::move(config));
     output->device = *selected;
     output->state.store(PipeWireOutputState::connecting, std::memory_order_release);
     AudioComponentDescription description{
         .componentType = kAudioUnitType_Output,
-        .componentSubType = kAudioUnitSubType_HALOutput,
+        .componentSubType = follows_default ? kAudioUnitSubType_DefaultOutput
+                                            : kAudioUnitSubType_HALOutput,
         .componentManufacturer = kAudioUnitManufacturer_Apple,
         .componentFlags = 0U,
         .componentFlagsMask = 0U,
@@ -415,12 +454,14 @@ core::Result<PipeWireOutput> PipeWireOutput::connect(LocalPlayback& source,
     if (status != noErr) {
         return std::unexpected(coreaudio_error("could not create CoreAudio output unit", status));
     }
-    status =
-        AudioUnitSetProperty(output->unit, kAudioOutputUnitProperty_CurrentDevice,
-                             kAudioUnitScope_Global, 0U, &output->device, sizeof(output->device));
-    if (status != noErr) {
-        return std::unexpected(
-            coreaudio_error("could not select the CoreAudio output device", status));
+    if (!follows_default) {
+        status = AudioUnitSetProperty(output->unit, kAudioOutputUnitProperty_CurrentDevice,
+                                      kAudioUnitScope_Global, 0U, &output->device,
+                                      sizeof(output->device));
+        if (status != noErr) {
+            return std::unexpected(
+                coreaudio_error("could not select the CoreAudio output device", status));
+        }
     }
 
     AudioStreamBasicDescription stream_format{

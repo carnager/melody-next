@@ -68,3 +68,27 @@ The silent output integration test, local-audition lifecycle test and engine
 playback test run against CoreAudio on macOS. They cover connection, device
 enumeration, per-stream volume, rendering, drain, quiescence, retargeting and
 engine commands without requiring audible test material.
+
+## Amendment, 2026-10-02: merged into the main line
+
+Changed on merging. These are written against Apple's documentation and need
+a run on a Mac.
+
+- **The system default is followed.** With no device chosen, the output uses
+  the default output unit, which moves with the system default: unplugged
+  headphones, or AirPlay chosen. The HAL unit had been pinned to the default
+  as it was at connect. A device chosen by UID keeps the HAL unit, and the
+  device monitor still sees it go.
+- **Mono plays on both speakers.** The unit always takes stereo. A mono
+  source is rendered into the front of the buffer and spread to both
+  channels in place in the callback, with no allocation.
+- **Drain includes the device's latency and safety offset,** counted at the
+  device's own rate. Bluetooth and AirPlay outputs had their last tail cut
+  off.
+- **Undo and rollback exchange atomically** through `core::rename_with_flags`
+  (`renameatx_np` with `RENAME_SWAP`), and `ENOTSUP` counts as "this
+  filesystem can't".
+- **System-owned extended attributes aren't copied or stripped:**
+  `com.apple.provenance`, `com.apple.rootless`, `com.apple.macl` and
+  `com.apple.system.*`. The system refuses to have them set or removed,
+  which failed saves of files carrying them.

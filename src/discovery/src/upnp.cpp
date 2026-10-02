@@ -145,8 +145,18 @@ std::string upnp_xml_escape(const std::string& value) {
         case '\'':
             result += "&apos;";
             break;
-        default:
+        case '\t':
+        case '\n':
+        case '\r':
             result += ch;
+            break;
+        default:
+            // XML 1.0 has no other control characters, escaped or not: one
+            // in a tag made the whole DIDL invalid, and the renderer refused
+            // the track.
+            if (static_cast<unsigned char>(ch) >= 0x20U) {
+                result += ch;
+            }
         }
     }
     return result;

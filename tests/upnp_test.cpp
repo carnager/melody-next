@@ -107,6 +107,8 @@ int main() {
         discovery::parse_upnp_renderer(description, "http://192.0.2.2/device.xml", "192.0.2.1");
     require(parsed && parsed->udn == "uuid:speaker" && parsed->name == "Kitchen & dining",
             "description preserves UDN and decodes XML");
+    require(discovery::upnp_xml_escape("A\x01" "B\tC<") == "AB\tC&lt;",
+            "control characters XML cannot carry are left out");
     require(parsed->manufacturer == "Sonos, Inc." && parsed->model == "Era 100",
             "description keeps renderer identity needed for compatibility limits");
     require(parsed->transport.control_url == "http://192.0.2.2/av/control" &&

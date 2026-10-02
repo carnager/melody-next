@@ -1041,16 +1041,17 @@ rollback_published(const MetadataOperationJournalRecord& record,
                             record.source_raw_path, record.id));
     }
 
+    // renameat2 on Linux, renameatx_np(RENAME_SWAP) on macOS: both exchange
+    // atomically where the filesystem can. Where it cannot, they answer
+    // ENOSYS, EINVAL or ENOTSUP, and the renames below are the fallback.
     bool exchanged = false;
-#ifdef SYS_renameat2
-    if (::syscall(SYS_renameat2, AT_FDCWD, record.source_raw_path.c_str(), AT_FDCWD,
-                  record.backup_raw_path.c_str(), RENAME_EXCHANGE) == 0) {
+    if (core::rename_with_flags(AT_FDCWD, record.source_raw_path.c_str(), AT_FDCWD,
+                                record.backup_raw_path.c_str(), RENAME_EXCHANGE) == 0) {
         exchanged = true;
-    } else if (errno != ENOSYS && errno != EINVAL) {
+    } else if (errno != ENOSYS && errno != EINVAL && errno != ENOTSUP && errno != EOPNOTSUPP) {
         return std::unexpected(system_error("atomically restoring metadata backup failed", errno,
                                             record.source_raw_path, record.id));
     }
-#endif
     if (!exchanged) {
         if (::rename(record.source_raw_path.c_str(), record.prepared_raw_path.c_str()) != 0) {
             return std::unexpected(system_error("parking failed metadata publication failed", errno,
@@ -1546,13 +1547,13 @@ verify_direct_single_link(const std::string& raw_path, const Descriptor& descrip
 // a multi-rename emulation would create additional crash states.
 [[nodiscard]] core::Result<void>
 exchange_source_and_backup(const MetadataOperationJournalRecord& record) {
-#ifdef SYS_renameat2
-    if (::syscall(SYS_renameat2, AT_FDCWD, record.source_raw_path.c_str(), AT_FDCWD,
-                  record.backup_raw_path.c_str(), RENAME_EXCHANGE) == 0) {
+    if (core::rename_with_flags(AT_FDCWD, record.source_raw_path.c_str(), AT_FDCWD,
+                                record.backup_raw_path.c_str(), RENAME_EXCHANGE) == 0) {
         return fsync_parent(record.source_raw_path, record.source_raw_path, record.id);
     }
     const auto number = errno;
-    if (number == ENOSYS || number == EINVAL || number == EOPNOTSUPP || number == EXDEV) {
+    if (number == ENOSYS || number == EINVAL || number == EOPNOTSUPP || number == ENOTSUP ||
+        number == EXDEV) {
         return std::unexpected(operation_error(
             core::ErrorCode::unsupported,
             "metadata undo requires atomic directory-entry exchange on this filesystem",
@@ -1560,12 +1561,6 @@ exchange_source_and_backup(const MetadataOperationJournalRecord& record) {
     }
     return std::unexpected(system_error("atomically exchanging metadata backup failed", number,
                                         record.source_raw_path, record.id));
-#else
-    return std::unexpected(
-        operation_error(core::ErrorCode::unsupported,
-                        "metadata undo requires atomic directory-entry exchange on this platform",
-                        record.source_raw_path, record.id));
-#endif
 }
 
 [[nodiscard]] core::Result<MetadataCommitResult>

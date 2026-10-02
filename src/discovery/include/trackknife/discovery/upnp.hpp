@@ -54,6 +54,10 @@ class UpnpDiscovery final : public UpnpControl {
     [[nodiscard]] static core::Result<std::shared_ptr<UpnpDiscovery>>
     start(Changed changed, const std::string& interface = {});
     ~UpnpDiscovery() override;
+    // This machine's address on the discovery interface, where renderers
+    // reach it.
+    [[nodiscard]] std::string address() const;
+    // Renderers are announced from here on; until then they are only heard.
     void begin();
     void stop();
     [[nodiscard]] core::Result<UpnpValues> action(const UpnpService& service,

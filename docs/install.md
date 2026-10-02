@@ -111,7 +111,7 @@ Relevant build switches are:
 
 | Switch | Default | Effect |
 | --- | --- | --- |
-| `TRACKKNIFE_ENABLE_UPNP` | On | Builds SSDP discovery and UPnP playback and requires libupnp. Set it to `OFF` for a build with no UPnP code or dependency. |
+| `TRACKKNIFE_ENABLE_UPNP` | `AUTO` | Builds SSDP discovery and UPnP playback when libupnp is installed, and leaves them out when it is not. `ON` requires libupnp; `OFF` builds no UPnP code. |
 | `TRACKKNIFE_ENABLE_LOCAL_AUDIO` | On on Linux and macOS | Builds PipeWire on Linux or CoreAudio on macOS. |
 | `TRACKKNIFE_BUILD_WATCH` | On on Linux; off elsewhere | Builds the inotify-based `melody-watch` utility. |
 

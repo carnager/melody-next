@@ -123,11 +123,12 @@ StreamRequest renderer_compatible_request(StreamRequest request,
 }
 UpnpAudition::UpnpAudition(std::string udn, std::shared_ptr<discovery::UpnpControl> control,
                            Prepare prepare, bool background)
-    : control_(std::move(control)), prepare_(std::move(prepare)) {
+    : control_(std::move(control)), prepare_(std::move(prepare)), background_(background) {
     renderer_.udn = std::move(udn);
     renderer_.name = renderer_.udn;
     renderer_.online = false;
-    if (background) {
+    device_ = renderer_;
+    if (background_) {
         worker_ = std::thread{[this] { run(); }};
     }
 }
@@ -135,21 +136,54 @@ UpnpAudition::~UpnpAudition() {
     {
         const std::lock_guard lock{state_mutex_};
         stopping_ = true;
+        jobs_.clear();
         wake_.notify_one();
     }
     if (worker_.joinable()) {
         worker_.join();
     }
 }
-void UpnpAudition::update(discovery::UpnpRenderer renderer) {
-    const std::lock_guard io{io_mutex_};
-    const std::lock_guard lock{state_mutex_};
-    renderer_ = std::move(renderer);
-    sink_.clear();
-    gapless_supported_ = true;
-    if (!renderer_.online && state_.state == State::playing) {
-        state_.state = State::paused;
+core::Result<void> UpnpAudition::submit(Job job, const Topic topic, const bool replaces_track) {
+    if (!background_) {
+        const std::lock_guard io{io_mutex_};
+        return job();
     }
+    const std::lock_guard lock{state_mutex_};
+    // A new track makes what was queued for the old one moot.
+    if (replaces_track) {
+        std::erase_if(jobs_, [](const Queued& queued) { return queued.topic == Topic::track; });
+    }
+    jobs_.push_back({.job = std::move(job), .topic = topic});
+    wake_.notify_one();
+    return {};
+}
+void UpnpAudition::failed(const std::uint64_t generation, core::Error error,
+                          const bool stop_playing) {
+    const std::lock_guard lock{state_mutex_};
+    if (generation != generation_) {
+        return;
+    }
+    state_.error = std::move(error);
+    if (stop_playing) {
+        state_.state = State::paused;
+        playing_requested_ = false;
+    }
+}
+void UpnpAudition::update(discovery::UpnpRenderer renderer) {
+    {
+        const std::lock_guard lock{state_mutex_};
+        renderer_ = renderer;
+        if (!renderer_.online && state_.state == State::playing) {
+            state_.state = State::paused;
+        }
+    }
+    // The worker's own copy, in order with the commands that use it.
+    static_cast<void>(submit([this, renderer = std::move(renderer)]() mutable {
+        device_ = std::move(renderer);
+        sink_.clear();
+        gapless_supported_ = true;
+        return core::Result<void>{};
+    }, Topic::device));
 }
 bool UpnpAudition::online() const {
     const std::lock_guard lock{state_mutex_};
@@ -168,18 +202,18 @@ audio::LocalAuditionSnapshot UpnpAudition::snapshot() const {
     return state_;
 }
 core::Result<Values> UpnpAudition::call(const std::string& action, Values arguments) {
-    if (!renderer_.online || !control_) {
+    if (!device_.online || !control_) {
         return std::unexpected(unsupported("UPnP renderer is offline"));
     }
     arguments["InstanceID"] = "0";
-    return control_->action(renderer_.transport, action, arguments);
+    return control_->action(device_.transport, action, arguments);
 }
 core::Result<RendererTrack> UpnpAudition::prepare(StreamRequest request) {
-    if (!renderer_.online || !control_ || !prepare_) {
+    if (!device_.online || !control_ || !prepare_) {
         return std::unexpected(unsupported("UPnP renderer is offline"));
     }
     if (sink_.empty()) {
-        auto protocols = control_->action(renderer_.connection, "GetProtocolInfo", {});
+        auto protocols = control_->action(device_.connection, "GetProtocolInfo", {});
         if (!protocols) {
             return std::unexpected(protocols.error());
         }
@@ -192,19 +226,27 @@ core::Result<RendererTrack> UpnpAudition::prepare(StreamRequest request) {
         return std::unexpected(format.error());
     }
     request.format = *format;
-    return prepare_(request, renderer_);
+    return prepare_(request, device_);
 }
-void UpnpAudition::adopt(const RendererTrack& track, std::uint64_t token, bool transition) {
-    state_.raw_path = track.source.raw_path;
-    state_.selection = track.source.selection;
-    state_.segment = track.source.segment;
-    state_.source_revision = core::observe_local_source_revision(track.source.raw_path)
-                                 .value_or(core::LocalSourceRevision{});
+bool UpnpAudition::expiring(const RendererTrack& track) const {
+    // Ten minutes is a renderer's slowest re-fetch, with room to spare.
+    return track.expires &&
+           *track.expires - std::chrono::system_clock::now() < std::chrono::minutes{10};
+}
+void UpnpAudition::adopt_locked(const StreamRequest& source,
+                                const std::optional<std::int64_t> duration_ms,
+                                const std::uint64_t token, const bool transition) {
+    state_.raw_path = source.raw_path;
+    state_.selection = source.selection;
+    state_.segment = source.segment;
+    state_.source_revision =
+        core::observe_local_source_revision(source.raw_path).value_or(core::LocalSourceRevision{});
     // Renderer positions are track-relative milliseconds, including converted CUE parts.
     state_.format =
         formats::PcmFormat{.sample_rate = 1000, .channels = 2, .channel_layout = "stereo"};
     state_.position_sample = 0;
-    state_.end_sample = track.duration_ms > 0 ? std::optional{track.duration_ms} : std::nullopt;
+    state_.end_sample =
+        duration_ms && *duration_ms > 0 ? std::optional{*duration_ms} : std::nullopt;
     state_.occurrence_token = token;
     ++state_.playback_instance;
     if (transition) {
@@ -215,11 +257,12 @@ void UpnpAudition::adopt(const RendererTrack& track, std::uint64_t token, bool t
     state_.next_occurrence_token = 0;
     state_.error.reset();
 }
-core::Result<void> UpnpAudition::load(StreamRequest request, bool playing,
-                                      std::int64_t position_ms) {
-    const std::lock_guard io{io_mutex_};
+core::Result<void> UpnpAudition::load_now(StreamRequest request, const bool playing,
+                                          const std::int64_t position_ms,
+                                          const std::uint64_t generation) {
     auto track = prepare(std::move(request));
     if (!track) {
+        failed(generation, track.error(), true);
         return std::unexpected(track.error());
     }
     // Clear any continuation from a previous queue before replacing its URI.
@@ -231,49 +274,59 @@ core::Result<void> UpnpAudition::load(StreamRequest request, bool playing,
     auto set = call("SetAVTransportURI",
                     {{"CurrentURI", track->url}, {"CurrentURIMetaData", track->metadata}});
     if (!set) {
+        failed(generation, set.error(), true);
         return std::unexpected(set.error());
     }
-
+    current_ = std::move(*track);
+    next_.reset();
+    deferred_.reset();
+    saw_playing_ = false;
+    stopped_while_starting_ = 0;
+    startup_rejected_ = false;
+    pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
     {
         const std::lock_guard lock{state_mutex_};
-        current_ = std::move(*track);
-        next_.reset();
-        adopt(*current_, 0, false);
-        state_.position_sample = position_ms;
-        state_.state = playing ? State::buffering : State::paused;
-        playing_requested_ = playing;
-        saw_playing_ = false;
-        stopped_while_starting_ = 0;
-        startup_rejected_ = false;
-        pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
-    }
-    if (playing) {
-        auto started = call("Play", {{"Speed", "1"}});
-        if (!started) {
-            const std::lock_guard lock{state_mutex_};
-            state_.state = State::paused;
-            state_.error = started.error();
-            playing_requested_ = false;
-            return std::unexpected(started.error());
+        if (generation == generation_ && current_->duration_ms > 0) {
+            state_.end_sample = current_->duration_ms;
         }
-        if (pending_seek_ms_) {
-            auto sought =
-                call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
-            if (sought) {
-                pending_seek_ms_.reset();
-            }
+    }
+    if (!playing) {
+        return {};
+    }
+    return start_now(generation);
+}
+core::Result<void> UpnpAudition::start_now(const std::uint64_t generation) {
+    auto started = call("Play", {{"Speed", "1"}});
+    if (!started) {
+        failed(generation, started.error(), true);
+        return std::unexpected(started.error());
+    }
+    if (pending_seek_ms_) {
+        // PLAYING can lag behind the Play response; poll() retries the seek
+        // while keeping the requested position visible.
+        if (call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}})) {
+            pending_seek_ms_.reset();
         }
     }
     return {};
 }
-core::Result<void> UpnpAudition::arm(StreamRequest request, std::uint64_t token) {
-    const std::lock_guard io{io_mutex_};
+core::Result<void> UpnpAudition::arm_now(StreamRequest request, const std::uint64_t token) {
+    const auto refuse = [this, &request](core::Error error) -> core::Result<void> {
+        const std::lock_guard lock{state_mutex_};
+        refused_next_ = std::pair{request.raw_path, request.segment};
+        if (state_.next_raw_path == request.raw_path && state_.next_segment == request.segment) {
+            state_.next_raw_path.clear();
+            state_.next_segment.reset();
+            state_.next_occurrence_token = 0;
+        }
+        return std::unexpected(std::move(error));
+    };
     if (!gapless_supported_) {
-        return std::unexpected(unsupported("renderer does not support gapless continuation"));
+        return refuse(unsupported("renderer does not support gapless continuation"));
     }
-    auto track = prepare(std::move(request));
+    auto track = prepare(request);
     if (!track) {
-        return std::unexpected(track.error());
+        return refuse(track.error());
     }
     auto armed = call("SetNextAVTransportURI",
                       {{"NextURI", track->url}, {"NextURIMetaData", track->metadata}});
@@ -281,50 +334,44 @@ core::Result<void> UpnpAudition::arm(StreamRequest request, std::uint64_t token)
         if (armed.error().code == core::ErrorCode::unsupported) {
             gapless_supported_ = false;
         }
-        return std::unexpected(armed.error());
+        return refuse(armed.error());
     }
-    const std::lock_guard lock{state_mutex_};
     next_ = std::move(*track);
     next_token_ = token;
-    state_.next_raw_path = next_->source.raw_path;
-    state_.next_selection = next_->source.selection;
-    state_.next_segment = next_->source.segment;
-    state_.next_occurrence_token = token;
     return {};
 }
 void UpnpAudition::poll() {
     const std::lock_guard io{io_mutex_};
-    if (!current_ || !renderer_.online) {
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = generation_;
+    }
+    if (!current_ || !device_.online) {
+        return;
+    }
+    // A fetch that would fail soon is renewed where the renderer is.
+    if (expiring(*current_)) {
+        bool playing = false;
+        std::int64_t position = 0;
+        {
+            const std::lock_guard lock{state_mutex_};
+            playing = playing_requested_;
+            position = state_.position_sample;
+        }
+        static_cast<void>(load_now(current_->source, playing, position, generation));
         return;
     }
     auto transport = call("GetTransportInfo");
     auto position = call("GetPositionInfo");
-    const auto event = control_->take_events(renderer_.udn);
-    if (!transport || !position) {
-        // A network fault never looks like end-of-track.
-        const std::lock_guard lock{state_mutex_};
-        state_.state = State::paused;
-        state_.error = !transport ? transport.error() : position.error();
-        return;
-    }
-    const auto uri = value(*position, "TrackURI");
-    if (next_ && uri == next_->url) {
-        current_ = std::move(next_);
-        next_.reset();
-        adopt(*current_, next_token_, true);
-        saw_playing_ = false;
-    } else if (!uri.empty() && uri != current_->url) {
-        // Another control point took over. Do not credit or advance its music.
-        state_.state = State::paused;
-        playing_requested_ = false;
-        return;
-    }
+    const auto event = control_->take_events(device_.udn);
     const auto event_status = value(event, "TransportState");
-    const auto status =
-        event_status.empty() ? value(*transport, "CurrentTransportState") : event_status;
+    const auto status = event_status.empty() && transport
+                            ? value(*transport, "CurrentTransportState")
+                            : event_status;
     std::optional<core::Error> pending_seek_error;
     std::optional<std::int64_t> completed_seek;
-    if (status == "PLAYING" && pending_seek_ms_) {
+    if (transport && position && status == "PLAYING" && pending_seek_ms_) {
         auto sought =
             call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
         if (sought) {
@@ -334,8 +381,30 @@ void UpnpAudition::poll() {
             pending_seek_error = std::move(sought.error());
         }
     }
-
     const std::lock_guard lock{state_mutex_};
+    // A command came in while the renderer was asked: what it said describes
+    // the time before the command, and the next poll asks again.
+    if (generation != generation_) {
+        return;
+    }
+    if (!transport || !position) {
+        // A network fault never looks like end-of-track.
+        state_.state = State::paused;
+        state_.error = !transport ? transport.error() : position.error();
+        return;
+    }
+    const auto uri = value(*position, "TrackURI");
+    if (next_ && uri == next_->url) {
+        current_ = std::move(next_);
+        next_.reset();
+        adopt_locked(current_->source, current_->duration_ms, next_token_, true);
+        saw_playing_ = false;
+    } else if (!uri.empty() && uri != current_->url) {
+        // Another control point took over. Do not credit or advance its music.
+        state_.state = State::paused;
+        playing_requested_ = false;
+        return;
+    }
     if (status == "PLAYING") {
         state_.state = State::playing;
         saw_playing_ = true;
@@ -385,11 +454,24 @@ void UpnpAudition::poll() {
 }
 void UpnpAudition::run() {
     for (;;) {
+        Job job;
         {
             std::unique_lock lock{state_mutex_};
-            if (wake_.wait_for(lock, std::chrono::seconds{1}, [&] { return stopping_; })) {
+            wake_.wait_for(lock, std::chrono::seconds{1},
+                           [&] { return stopping_ || !jobs_.empty(); });
+            if (stopping_) {
                 return;
             }
+            if (!jobs_.empty()) {
+                job = std::move(jobs_.front().job);
+                jobs_.pop_front();
+            }
+        }
+        if (job) {
+            const std::lock_guard io{io_mutex_};
+            // Failures are in the snapshot by now; nothing waits for them.
+            static_cast<void>(job());
+            continue;
         }
         poll();
     }
@@ -397,128 +479,224 @@ void UpnpAudition::run() {
 core::Result<void> UpnpAudition::load_selected_and_play(std::string path,
                                                         formats::AudioSourceSelection selection,
                                                         std::optional<formats::ReplayGainInfo>) {
-    return load({.raw_path = std::move(path), .format = {}, .selection = selection, .segment = {}},
-                true, 0);
+    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
+                          .segment = {}};
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = ++generation_;
+        adopt_locked(request, std::nullopt, 0, false);
+        state_.state = State::buffering;
+        playing_requested_ = true;
+        refused_next_.reset();
+    }
+    return submit([this, request = std::move(request), generation]() mutable {
+        return load_now(std::move(request), true, 0, generation);
+    }, Topic::track, true);
 }
 core::Result<void> UpnpAudition::load_selected_segment_and_play(
     std::string path, formats::AudioSourceSelection selection, formats::SampleRange segment,
     std::optional<formats::ReplayGainInfo>) {
-    return load(
-        {.raw_path = std::move(path), .format = {}, .selection = selection, .segment = segment},
-        true, 0);
+    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
+                          .segment = segment};
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = ++generation_;
+        adopt_locked(request, std::nullopt, 0, false);
+        state_.state = State::buffering;
+        playing_requested_ = true;
+        refused_next_.reset();
+    }
+    return submit([this, request = std::move(request), generation]() mutable {
+        return load_now(std::move(request), true, 0, generation);
+    }, Topic::track, true);
 }
 core::Result<void> UpnpAudition::restore_paused(std::string path, core::LocalSourceRevision,
                                                 formats::AudioSourceSelection selection,
                                                 std::optional<formats::SampleRange> segment,
                                                 std::int64_t position_ms,
                                                 std::optional<formats::ReplayGainInfo>) {
-    return load(
-        {.raw_path = std::move(path), .format = {}, .selection = selection, .segment = segment},
-        false, position_ms);
+    StreamRequest request{.raw_path = std::move(path), .format = {}, .selection = selection,
+                          .segment = segment};
+    {
+        const std::lock_guard lock{state_mutex_};
+        ++generation_;
+        adopt_locked(request, std::nullopt, 0, false);
+        state_.position_sample = position_ms;
+        state_.state = State::paused;
+        playing_requested_ = false;
+        refused_next_.reset();
+    }
+    // Nothing is sent: the speaker may be playing for someone else, and the
+    // track goes to it when it is played here.
+    return submit([this, request = std::move(request), position_ms]() mutable {
+        current_.reset();
+        next_.reset();
+        deferred_ = std::move(request);
+        pending_seek_ms_ = position_ms > 0 ? std::optional{position_ms} : std::nullopt;
+        return core::Result<void>{};
+    }, Topic::track, true);
 }
 core::Result<void>
 UpnpAudition::queue_gapless_next_selected(std::string path, formats::AudioSourceSelection selection,
                                           std::optional<formats::ReplayGainInfo>,
                                           std::uint64_t token) {
-    return arm({.raw_path = std::move(path), .format = {}, .selection = selection, .segment = {}},
-               token);
+    return queue_next(
+        {.raw_path = std::move(path), .format = {}, .selection = selection, .segment = {}}, token);
 }
 core::Result<void> UpnpAudition::queue_gapless_next_selected_segment(
     std::string path, formats::AudioSourceSelection selection, formats::SampleRange segment,
     std::optional<formats::ReplayGainInfo>, std::uint64_t token) {
-    return arm(
+    return queue_next(
         {.raw_path = std::move(path), .format = {}, .selection = selection, .segment = segment},
         token);
 }
-core::Result<void> UpnpAudition::clear_gapless_next() {
-    const std::lock_guard io{io_mutex_};
-    auto cleared = call("SetNextAVTransportURI", {{"NextURI", ""}, {"NextURIMetaData", ""}});
-    if (!cleared && next_) {
-        return std::unexpected(cleared.error());
+core::Result<void> UpnpAudition::queue_next(StreamRequest request, const std::uint64_t token) {
+    {
+        const std::lock_guard lock{state_mutex_};
+        if (refused_next_ && refused_next_->first == request.raw_path &&
+            refused_next_->second == request.segment) {
+            return std::unexpected(unsupported("the renderer refused this continuation"));
+        }
+        state_.next_raw_path = request.raw_path;
+        state_.next_selection = request.selection;
+        state_.next_segment = request.segment;
+        state_.next_occurrence_token = token;
     }
-    const std::lock_guard lock{state_mutex_};
-    next_.reset();
-    state_.next_raw_path.clear();
-    state_.next_segment.reset();
-    return {};
+    return submit([this, request = std::move(request), token]() mutable {
+        return arm_now(std::move(request), token);
+    });
+}
+core::Result<void> UpnpAudition::clear_gapless_next() {
+    {
+        const std::lock_guard lock{state_mutex_};
+        state_.next_raw_path.clear();
+        state_.next_segment.reset();
+        state_.next_occurrence_token = 0;
+    }
+    return submit([this] {
+        const bool held = next_.has_value();
+        next_.reset();
+        auto cleared = call("SetNextAVTransportURI", {{"NextURI", ""}, {"NextURIMetaData", ""}});
+        return cleared || !held ? core::Result<void>{} : std::unexpected(cleared.error());
+    });
 }
 core::Result<void> UpnpAudition::play() {
-    const std::lock_guard io{io_mutex_};
-    auto played = call("Play", {{"Speed", "1"}});
-    if (!played) {
-        return std::unexpected(played.error());
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = ++generation_;
+        playing_requested_ = true;
+        state_.error.reset();
+        state_.state = State::buffering;
     }
-    if (pending_seek_ms_) {
-        auto sought =
-            call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(*pending_seek_ms_)}});
-        if (sought) {
-            pending_seek_ms_.reset();
+    return submit([this, generation]() -> core::Result<void> {
+        saw_playing_ = false;
+        stopped_while_starting_ = 0;
+        startup_rejected_ = false;
+        // A restored track goes to the speaker now, or a stale ticket is
+        // renewed, where it was left.
+        if (deferred_ || (current_ && expiring(*current_))) {
+            auto source = deferred_ ? *deferred_ : current_->source;
+            std::int64_t position = 0;
+            {
+                const std::lock_guard lock{state_mutex_};
+                position = state_.position_sample;
+            }
+            return load_now(std::move(source), true, position, generation);
         }
-        // PLAYING can lag behind the Play response. poll() retries the seek
-        // while keeping the requested position visible.
-    }
-    const std::lock_guard lock{state_mutex_};
-    playing_requested_ = true;
-    saw_playing_ = false;
-    stopped_while_starting_ = 0;
-    startup_rejected_ = false;
-    state_.error.reset();
-    state_.state = State::buffering;
-    return {};
+        return start_now(generation);
+    });
 }
 core::Result<void> UpnpAudition::pause() {
-    const std::lock_guard io{io_mutex_};
-    auto paused = call("Pause");
-    if (!paused) {
-        return std::unexpected(paused.error());
+    std::uint64_t generation = 0;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = ++generation_;
+        playing_requested_ = false;
+        state_.state = State::paused;
     }
-    const std::lock_guard lock{state_mutex_};
-    playing_requested_ = false;
-    state_.state = State::paused;
-    return {};
+    return submit([this, generation]() -> core::Result<void> {
+        if (!current_) {
+            return {};
+        }
+        auto paused = call("Pause");
+        if (!paused) {
+            failed(generation, paused.error(), false);
+            return std::unexpected(paused.error());
+        }
+        return {};
+    });
 }
 core::Result<void> UpnpAudition::stop() {
-    const std::lock_guard io{io_mutex_};
-    auto stopped = call("Stop");
-    const std::lock_guard lock{state_mutex_};
-    current_.reset();
-    next_.reset();
-    pending_seek_ms_.reset();
-    state_.raw_path.clear();
-    state_.next_raw_path.clear();
-    state_.state = State::empty;
-    playing_requested_ = false;
-    return stopped ? core::Result<void>{} : std::unexpected(stopped.error());
+    {
+        const std::lock_guard lock{state_mutex_};
+        ++generation_;
+        state_.raw_path.clear();
+        state_.next_raw_path.clear();
+        state_.state = State::empty;
+        playing_requested_ = false;
+    }
+    return submit([this]() -> core::Result<void> {
+        const bool sent = current_.has_value();
+        current_.reset();
+        next_.reset();
+        deferred_.reset();
+        pending_seek_ms_.reset();
+        if (!sent) {
+            return {};
+        }
+        auto stopped = call("Stop");
+        return stopped ? core::Result<void>{} : std::unexpected(stopped.error());
+    }, Topic::track, true);
 }
 core::Result<void> UpnpAudition::seek_to_seconds(double seconds) {
     if (!std::isfinite(seconds) || seconds < 0 || seconds > 3600000000.0) {
         return std::unexpected(unsupported("invalid seek time"));
     }
-    const std::lock_guard io{io_mutex_};
     const auto ms = static_cast<std::int64_t>(seconds * 1000);
-    auto sought = call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(ms)}});
-    if (!sought) {
-        return std::unexpected(sought.error());
+    std::uint64_t generation = 0;
+    bool playing = false;
+    {
+        const std::lock_guard lock{state_mutex_};
+        generation = ++generation_;
+        state_.position_sample = ms;
+        playing = playing_requested_;
     }
-    const std::lock_guard lock{state_mutex_};
-    state_.position_sample = ms;
-    return {};
+    return submit([this, ms, generation, playing]() -> core::Result<void> {
+        if (deferred_) {
+            pending_seek_ms_ = ms;
+            return {};
+        }
+        // A renderer fetches again to seek: a stale ticket is renewed there.
+        if (current_ && expiring(*current_)) {
+            return load_now(current_->source, playing, ms, generation);
+        }
+        auto sought = call("Seek", {{"Unit", "REL_TIME"}, {"Target", time_text(ms)}});
+        if (!sought) {
+            failed(generation, sought.error(), false);
+            return std::unexpected(sought.error());
+        }
+        return {};
+    });
 }
 core::Result<void> UpnpAudition::set_volume_percent(int percent) {
-    const std::lock_guard io{io_mutex_};
-    if (!control_ || !renderer_.online) {
-        return std::unexpected(unsupported("UPnP renderer is offline"));
-    }
     percent = std::clamp(percent, 0, 100);
-    auto set = control_->action(
-        renderer_.rendering, "SetVolume",
-        {{"InstanceID", "0"}, {"Channel", "Master"}, {"DesiredVolume", std::to_string(percent)}});
-    if (!set) {
-        return std::unexpected(set.error());
+    {
+        const std::lock_guard lock{state_mutex_};
+        state_.volume_percent = percent;
     }
-    const std::lock_guard lock{state_mutex_};
-    state_.volume_percent = percent;
-    return {};
+    return submit([this, percent]() -> core::Result<void> {
+        if (!control_ || !device_.online) {
+            return std::unexpected(unsupported("UPnP renderer is offline"));
+        }
+        auto set = control_->action(device_.rendering, "SetVolume",
+                                    {{"InstanceID", "0"},
+                                     {"Channel", "Master"},
+                                     {"DesiredVolume", std::to_string(percent)}});
+        return set ? core::Result<void>{} : std::unexpected(set.error());
+    }, Topic::device);
 }
 core::Result<void> UpnpAudition::set_replay_gain_mode(audio::ReplayGainMode mode) {
     if (mode != audio::ReplayGainMode::off) {

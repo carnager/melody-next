@@ -92,6 +92,35 @@ disabling the Linux-only inotify watcher. Those capabilities have independent
 same source tree can produce a smaller build without UPnP or platform-specific
 helpers.
 
+## Amendment, 2026-10-02: the engine never waits on a renderer
+
+Merged into the main line with these changes:
+
+- **Commands are queued.** The player calls an output under its own lock, so
+  a renderer's output records what a command means for its state and
+  returns. Its worker then does the transcode and the SOAP calls, which
+  libupnp lets take 30 seconds against a hung speaker. A failure shows in
+  the output's state, as a network fault always did. A new track drops the
+  queued commands about the old one, but not the renderer's details or its
+  volume.
+- **A poll that started before a command doesn't overwrite it.** Every
+  command that changes what plays bumps a generation, and a poll that sees
+  a newer one drops what the renderer told it.
+- **A track restored while paused isn't sent.** At engine start or on
+  switching outputs, sending it would stop whatever the speaker was playing
+  for someone else. It goes to the speaker, where it was left, when it's
+  played.
+- **Tickets outlive the track.** A renderer's URL is good for six hours plus
+  the track's length. Within ten minutes of expiry, the output prepares the
+  track again where it is, on a poll, a resume or a seek, because a renderer
+  fetches again for each.
+- **A local-only engine serves renderers on one address.** With `--upnp` and
+  `--local-only`, `--http 0.0.0.0:PORT` is narrowed to the discovery
+  interface's address, so the stream port isn't open on every network.
+- **Optional at build time means `AUTO`.** `TRACKKNIFE_ENABLE_UPNP` builds
+  UPnP where libupnp is installed and leaves it out where it isn't. `ON`
+  requires it.
+
 ## Out of scope
 
 - **Home Assistant.** An HA integration is a separate project: a Python

@@ -648,6 +648,33 @@ int main(int argc, char** argv) {
     // ADR-0228: the files an agent without its own copy fetches -- only
     // what the player holds, with a token that lives as long as this run and
     // reaches agents only in the URLs the engine gives them.
+#if TRACKKNIFE_ENABLE_UPNP
+    // ADR-0235: discovery starts before the streams, for its address: an
+    // engine kept to this machine serves its renderers there only, not on
+    // every network it is on. Renderers reach the outputs once it begins.
+    std::shared_ptr<trackknife::discovery::UpnpDiscovery> upnp;
+    trackknife::engine::Outputs* upnp_outputs = nullptr;
+    if (upnp_enabled) {
+        auto found = trackknife::discovery::UpnpDiscovery::start(
+            [&upnp_outputs](const auto& renderer) {
+                if (upnp_outputs != nullptr) {
+                    upnp_outputs->renderer_changed(renderer);
+                }
+            },
+            upnp_interface);
+        if (!found) {
+            std::cerr << found.error().message << "\n";
+            return EXIT_FAILURE;
+        }
+        upnp = std::move(*found);
+        if (const auto endpoint = trackknife::protocol::Endpoint::parse(http_address, {});
+            local_only && endpoint && endpoint->tcp() &&
+            (endpoint->host == "0.0.0.0" || endpoint->host == "::" || endpoint->host.empty()) &&
+            !upnp->address().empty()) {
+            http_address = upnp->address() + ":" + std::to_string(endpoint->port);
+        }
+    }
+#endif
     std::unique_ptr<trackknife::engine::TranscodeCache> transcodes;
     std::unique_ptr<trackknife::engine::MediaStreams> media;
     std::unique_ptr<trackknife::engine::StreamServer> streams;
@@ -704,20 +731,12 @@ int main(int argc, char** argv) {
         tcp_server->on_agent(admit);
     }
 #if TRACKKNIFE_ENABLE_UPNP
-    std::shared_ptr<trackknife::discovery::UpnpDiscovery> upnp;
-    if (upnp_enabled) {
+    if (upnp) {
         if (!streams) {
             std::cerr << "melodyd: --upnp needs --http bound to a LAN address\n";
             return EXIT_FAILURE;
         }
-        auto found = trackknife::discovery::UpnpDiscovery::start(
-            [&outputs](const auto& renderer) { outputs.renderer_changed(renderer); },
-            upnp_interface);
-        if (!found) {
-            std::cerr << found.error().message << "\n";
-            return EXIT_FAILURE;
-        }
-        upnp = std::move(*found);
+        upnp_outputs = &outputs;
         outputs.configure_upnp(
             upnp,
             [&media, &transcodes, &streams](const trackknife::output::StreamRequest& request,
@@ -766,8 +785,13 @@ int main(int argc, char** argv) {
                 }
                 const auto base = "http://" + renderer.address + ":" +
                                   std::to_string(streams->port()) + "/stream?";
+                // Long enough to play the track and pause a while; the output
+                // prepares it again before a resume or seek past this.
+                const auto lifetime = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::hours{6} + std::chrono::milliseconds{std::max<std::int64_t>(0, duration)});
+                const auto expires = std::chrono::system_clock::now() + lifetime;
                 // Distinct URLs also distinguish two consecutive occurrences of the same song.
-                const auto url = base + media->ticket(delivery, std::chrono::hours{1}) +
+                const auto url = base + media->ticket(delivery, lifetime) +
                                  "&occurrence=" + core::StableId::random().to_string();
                 std::string title = std::filesystem::path{request.raw_path}.stem().string(), artist,
                             album, artwork;
@@ -792,14 +816,15 @@ int main(int argc, char** argv) {
                                                 .selection = {},
                                                 .segment = {},
                                                 .artwork = true};
-                    artwork = base + media->ticket(cover, std::chrono::hours{1});
+                    artwork = base + media->ticket(cover, lifetime);
                 }
                 return output::RendererTrack{
                     .source = request,
                     .url = url,
                     .metadata =
                         output::renderer_didl(url, mime, duration, title, artist, album, artwork),
-                    .duration_ms = duration};
+                    .duration_ms = duration,
+                    .expires = expires};
             });
     }
 #endif

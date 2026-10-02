@@ -448,6 +448,7 @@ core::Result<std::shared_ptr<UpnpDiscovery>> UpnpDiscovery::start(Changed change
     auto discovery = std::shared_ptr<UpnpDiscovery>{new UpnpDiscovery{std::move(impl)}};
     return discovery;
 }
+std::string UpnpDiscovery::address() const { return impl_->address; }
 void UpnpDiscovery::begin() {
     impl_->worker = std::thread{[this] { impl_->run(); }};
 }

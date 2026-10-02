@@ -4,7 +4,9 @@
 #include "trackknife/audio/local_audition.hpp"
 #include "trackknife/discovery/upnp.hpp"
 #include "trackknife/output/stream_query.hpp"
+#include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -15,6 +17,10 @@ struct RendererTrack final {
     std::string url;
     std::string metadata;
     std::int64_t duration_ms{0};
+    // When the URL's ticket stops being honoured; none, never. A renderer
+    // fetches again on resume and seek, so a track is prepared afresh before
+    // then.
+    std::optional<std::chrono::system_clock::time_point> expires;
 };
 // Select an advertised HTTP MIME type, preferring the original only when the
 // container is known and the whole file is playable. Never assume a wildcard
@@ -80,34 +86,71 @@ class UpnpAudition final : public audio::Audition {
     [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target) override;
 
   private:
-    core::Result<void> load(StreamRequest request, bool playing, std::int64_t position_ms);
-    core::Result<void> arm(StreamRequest request, std::uint64_t token);
+    // A command's network part, run on the worker; its error, when it fails.
+    using Job = std::function<core::Result<void>()>;
+    // What a queued job is about: a new track makes the queued commands about
+    // the old one moot; the renderer's details and its volume are not.
+    enum class Topic { track, device };
+    struct Queued {
+        Job job;
+        Topic topic{Topic::track};
+    };
+    // Queues `job` behind the commands before it -- or, without a worker (the
+    // tests), runs it now and answers its result. The engine calls in under
+    // its player's lock, so nothing here waits on the network or a transcode:
+    // what a command means for the snapshot is recorded before it returns.
+    core::Result<void> submit(Job job, Topic topic = Topic::track, bool replaces_track = false);
+    // A command's failure, shown -- unless a newer command made it moot.
+    void failed(std::uint64_t generation, core::Error error, bool stop_playing);
+    core::Result<void> load_now(StreamRequest request, bool playing, std::int64_t position_ms,
+                                std::uint64_t generation);
+    core::Result<void> queue_next(StreamRequest request, std::uint64_t token);
+    core::Result<void> arm_now(StreamRequest request, std::uint64_t token);
+    core::Result<void> start_now(std::uint64_t generation);
     core::Result<RendererTrack> prepare(StreamRequest request);
     core::Result<discovery::UpnpValues> call(const std::string& action,
                                              discovery::UpnpValues arguments = {});
-    void adopt(const RendererTrack& track, std::uint64_t token, bool transition);
+    [[nodiscard]] bool expiring(const RendererTrack& track) const;
+    // The snapshot made to describe `source`, before or after it is prepared.
+    void adopt_locked(const StreamRequest& source, std::optional<std::int64_t> duration_ms,
+                      std::uint64_t token, bool transition);
     void run();
     std::shared_ptr<discovery::UpnpControl> control_;
     Prepare prepare_;
-    // Serialize SOAP, device updates and track preparation. Snapshot never waits
-    // on network I/O: it uses only state_mutex_.
+    const bool background_;
+
+    // Held while a command or a poll talks to the renderer; only the worker
+    // (or, without one, the caller) takes it. What it guards is the worker's.
     std::mutex io_mutex_;
-    mutable std::mutex state_mutex_;
-    std::condition_variable wake_;
-    discovery::UpnpRenderer renderer_;
-    audio::LocalAuditionSnapshot state_;
+    discovery::UpnpRenderer device_;
     std::optional<RendererTrack> current_;
     std::optional<RendererTrack> next_;
+    // A track restored while paused is not sent until it is played: setting
+    // it would stop whatever the speaker is playing for someone else.
+    std::optional<StreamRequest> deferred_;
     // Some renderers reject Seek while STOPPED. A restored position waits
     // here until Play has put the transport into a seekable state.
     std::optional<std::int64_t> pending_seek_ms_;
     std::uint64_t next_token_{0};
     std::string sink_;
     bool gapless_supported_{true};
-    bool playing_requested_{false};
     bool saw_playing_{false};
     unsigned stopped_while_starting_{0};
     bool startup_rejected_{false};
+
+    // What the engine reads, and the queue; never held across the network.
+    mutable std::mutex state_mutex_;
+    std::condition_variable wake_;
+    discovery::UpnpRenderer renderer_;
+    audio::LocalAuditionSnapshot state_;
+    bool playing_requested_{false};
+    // Bumped by every command that changes what plays, so a poll that began
+    // before it does not overwrite it with what the renderer said then.
+    std::uint64_t generation_{0};
+    std::deque<Queued> jobs_;
+    // A continuation the renderer refused, not offered again until the next
+    // load: the player asks every tick.
+    std::optional<std::pair<std::string, std::optional<formats::SampleRange>>> refused_next_;
     bool stopping_{false};
     std::thread worker_;
 };

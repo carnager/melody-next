@@ -417,6 +417,16 @@ class Workspace final : public QObject {
     // The lists. One is added with its rows as its document holds them, and
     // the window is asked to show it; its tags and covers are looked for.
     ListTab* addList(persistence::ListDocument document, bool select);
+    // A list with its rows already made from its items -- made off the
+    // window's thread, as restoring does.
+    struct PreparedList {
+        persistence::ListDocument document;
+        std::vector<LocalTrackRow> rows;
+    };
+    ListTab* addList(PreparedList prepared, bool select);
+    // The stored lists as rows, for a worker thread: the slow part of a start.
+    [[nodiscard]] static std::vector<PreparedList>
+    prepareLists(std::vector<persistence::ListDocument> documents);
     // Rows a search found (ADR-0153, ADR-0227), put in a tab of the engine
     // whose library they are: the current one if it is, else that engine's
     // first, else (for another engine) its own tab; or a new tab.
@@ -474,7 +484,9 @@ class Workspace final : public QObject {
     // it; the current database kept for rollback.
     static void scheduleWorkspaceRestore(const QString& path);
     // The lists as the workspace starts: those saved, or one to begin with.
-    void restoreLists(std::vector<persistence::ListDocument> documents);
+    void restoreLists(std::vector<PreparedList> documents);
+    // What a start does once the lists are restored.
+    void restoredWorkspace(const QString& error);
     // What is saved of each open list, in the order they are shown.
     [[nodiscard]] std::vector<persistence::ListDocument> collectDocuments();
     // One list as it is stored, with its items; and without them.

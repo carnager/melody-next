@@ -11,10 +11,14 @@
 
 #include <QFile>
 #include <QSettings>
+#include <QThread>
+#include <QThreadPool>
 
 #include <algorithm>
 #include <filesystem>
+#include <iterator>
 #include <ranges>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -25,10 +29,10 @@ namespace {
 
 // A stored list's rows, as a tab shows them: what was cached with each is
 // taken for what the file says until it is read again.
-std::vector<LocalTrackRow> rowsOfDocument(const persistence::ListDocument& document) {
+std::vector<LocalTrackRow> rowsOfItems(const std::span<const persistence::ListItem> items) {
     std::vector<LocalTrackRow> rows;
-    rows.reserve(document.items.size());
-    for (const auto& item : document.items) {
+    rows.reserve(items.size());
+    for (const auto& item : items) {
         if (item.source != persistence::ListSource::local) {
             continue;
         }
@@ -77,15 +81,66 @@ std::vector<LocalTrackRow> rowsOfDocument(const persistence::ListDocument& docum
     return rows;
 }
 
+// A big list in parts, on a pool as wide as the machine: each row's tags are
+// rebuilt and its content identity hashed, and 66,841 rows took 2.8 s on one
+// thread -- on the window's own, at every start.
+std::vector<LocalTrackRow> rowsOfDocument(const persistence::ListDocument& document) {
+    constexpr std::size_t part = 2'048U;
+    const std::span<const persistence::ListItem> items{document.items};
+    if (items.size() <= part) {
+        return rowsOfItems(items);
+    }
+    std::vector<std::vector<LocalTrackRow>> parts((items.size() + part - 1U) / part);
+    {
+        QThreadPool pool;
+        pool.setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+        for (std::size_t index = 0; index < parts.size(); ++index) {
+            pool.start([&parts, items, index, part] {
+                const auto first = index * part;
+                parts[index] = rowsOfItems(items.subspan(first, std::min(part, items.size() - first)));
+            });
+        }
+        pool.waitForDone();
+    }
+    std::vector<LocalTrackRow> rows;
+    rows.reserve(items.size());
+    for (auto& rows_of_part : parts) {
+        std::ranges::move(rows_of_part, std::back_inserter(rows));
+    }
+    return rows;
+}
+
 } // namespace
+
+std::vector<Workspace::PreparedList>
+Workspace::prepareLists(std::vector<persistence::ListDocument> documents) {
+    std::vector<PreparedList> prepared;
+    prepared.reserve(documents.size());
+    for (auto& document : documents) {
+        auto rows = rowsOfDocument(document);
+        // The rows are the list now; the stored items would be a second copy.
+        document.items = {};
+        prepared.push_back({.document = std::move(document), .rows = std::move(rows)});
+    }
+    return prepared;
+}
 
 
 Workspace::ListTab* Workspace::addList(persistence::ListDocument document, const bool select) {
+    auto rows = rowsOfDocument(document);
+    document.items = {};
+    return addList(PreparedList{.document = std::move(document), .rows = std::move(rows)}, select);
+}
+
+Workspace::ListTab* Workspace::addList(PreparedList prepared, const bool select) {
     auto* model = new LocalListModel(view_->modelParent());
-    model->replaceRows(rowsOfDocument(document));
+    model->replaceRows(std::move(prepared.rows));
     model->setListeningHistoryService(persistence_);
     auto tab = std::make_unique<ListTab>();
-    tab->document = std::move(document);
+    // Without its items: nothing reads them once the rows are made, and on a
+    // big list they were the window's second copy of every tag.
+    tab->document = std::move(prepared.document);
+    tab->document.items = {};
     tab->model = model;
     auto* raw_tab = tab.get();
     list_tabs_.push_back(std::move(tab));
@@ -366,20 +421,21 @@ void Workspace::persistNow(const bool wait) {
 }
 
 
-void Workspace::restoreLists(std::vector<persistence::ListDocument> documents) {
+void Workspace::restoreLists(std::vector<PreparedList> documents) {
     lists_restored_ = true;
     qCDebug(tkDebug) << "restoring" << static_cast<int>(documents.size()) << "list documents";
-    for (auto& document : documents) {
+    for (auto& prepared : documents) {
+        const auto& document = prepared.document;
         qCDebug(tkDebug) << "  list" << displayText(document.name) << "kind"
                          << static_cast<int>(document.kind) << "items"
-                         << static_cast<int>(document.items.size());
+                         << static_cast<int>(prepared.rows.size());
         // Documents of the retired MPD backend name server URIs, not files;
         // opened as local lists they would be rows that cannot play.
         if (document.kind == persistence::ListKind::mpd) {
             continue;
         }
         // As stored: saving it again writes its header, not its items.
-        if (auto* tab = addList(std::move(document), false); tab != nullptr) {
+        if (auto* tab = addList(std::move(prepared), false); tab != nullptr) {
             tab->saved = savedStateOf(*tab);
         }
     }

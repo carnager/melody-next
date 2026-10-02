@@ -7,7 +7,9 @@
 #include "workspace/workspace_view.hpp"
 
 #include <QDir>
+#include <QFutureWatcher>
 #include <QStandardPaths>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 
@@ -65,20 +67,33 @@ void Workspace::start() {
                 QByteArray{preset.header_state.data(),
                            static_cast<qsizetype>(preset.header_state.size())});
         }
-        restoreLists(std::move(workspace.lists));
-        restoreUpNext();
-        // After the lists, because the entry the engine names is looked for in
-        // them before a tab is invented for it.
-        reattachToEngine();
-        // ADR-0227: the remote engines too, after the lists for the same
-        // reason -- their tabs may already be among them.
-        bool first = true;
-        for (const auto& setting : loadRemoteEngines()) {
-            connectRemoteEngine(setting, first);
-            first = false;
-        }
-        view_->workspaceRestored(error.isEmpty());
+        // The lists' rows are made off this thread: on a big list that was
+        // seconds of a window that took no clicks. The rest of the start
+        // follows once they are in.
+        auto* preparing = new QFutureWatcher<std::vector<PreparedList>>(this);
+        connect(preparing, &QFutureWatcherBase::finished, this, [this, preparing, error] {
+            preparing->deleteLater();
+            restoreLists(preparing->future().takeResult());
+            restoredWorkspace(error);
+        });
+        preparing->setFuture(QtConcurrent::run(
+            [lists = std::move(workspace.lists)]() mutable { return prepareLists(std::move(lists)); }));
     });
+}
+
+void Workspace::restoredWorkspace(const QString& error) {
+    restoreUpNext();
+    // After the lists, because the entry the engine names is looked for in
+    // them before a tab is invented for it.
+    reattachToEngine();
+    // ADR-0227: the remote engines too, after the lists for the same reason
+    // -- their tabs may already be among them.
+    bool first = true;
+    for (const auto& setting : loadRemoteEngines()) {
+        connectRemoteEngine(setting, first);
+        first = false;
+    }
+    view_->workspaceRestored(error.isEmpty());
 }
 
 Workspace::EngineLink* Workspace::link(const EngineKey& key) const {

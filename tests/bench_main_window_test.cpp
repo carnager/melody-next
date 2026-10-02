@@ -10170,7 +10170,8 @@ void BenchMainWindowTest::aSaveWritesOnlyListsThatChanged() {
         auto* small = window.addListTab(document("Small"), false);
         big_id = big->document.id;
         small_id = small->document.id;
-        big->model->appendRows(rows(200, "big"));
+        // Larger than one part of a restore, which is made in parallel.
+        big->model->appendRows(rows(5000, "big"));
         small->model->appendRows(rows(2, "small"));
         QCOMPARE(carries_items(window, big_id), std::optional{true});
         window.persistNow(true);
@@ -10194,7 +10195,13 @@ void BenchMainWindowTest::aSaveWritesOnlyListsThatChanged() {
     auto* big = reopened.workspace_.tabForDocument(big_id);
     auto* small = reopened.workspace_.tabForDocument(small_id);
     QVERIFY(big != nullptr && small != nullptr);
-    QCOMPARE(big->model->rows().size(), std::size_t{200});
+    QCOMPARE(big->model->rows().size(), std::size_t{5000});
+    // In order, across the parts it was restored in.
+    for (const std::size_t index : {std::size_t{0}, std::size_t{2047}, std::size_t{2048},
+                                    std::size_t{4096}, std::size_t{4999}}) {
+        QCOMPARE(QString::fromStdString(big->model->rows()[index].raw_path),
+                 QStringLiteral("/music/big/%1.flac").arg(index));
+    }
     QCOMPARE(displayText(big->document.name), QStringLiteral("Big, renamed"));
     QCOMPARE(small->model->rows().size(), std::size_t{3});
     QCOMPARE(carries_items(reopened, big_id), std::optional{false});
@@ -12377,6 +12384,8 @@ void BenchMainWindowTest::windowListTabsCloseFromTheirButtons() {
     window.resize(1100, 700);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
+    // The restored lists first: restoring is done off the window's thread.
+    QTRY_VERIFY(window.lists_restored_);
     window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
                                                 .kind = persistence::ListKind::scratch,
                                                 .name = "Second",

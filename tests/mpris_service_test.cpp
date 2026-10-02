@@ -122,6 +122,9 @@ void MprisServiceTest::exportsThePlayerOverTheSessionBus() {
     playing.can_play = true;
     playing.can_pause = true;
     playing.can_seek = true;
+    playing.art_path = QStringLiteral("/tmp/trackknife cover.png");
+    playing.loop_status = QStringLiteral("Playlist");
+    playing.shuffle = true;
     service.publish(playing);
 
     QDBusInterface player{service.serviceName(), QStringLiteral("/org/mpris/MediaPlayer2"),
@@ -133,6 +136,23 @@ void MprisServiceTest::exportsThePlayerOverTheSessionBus() {
     const auto metadata = qdbus_cast<QVariantMap>(player.property("Metadata"));
     QCOMPARE(metadata.value(QStringLiteral("xesam:title")).toString(), QStringLiteral("Bus Song"));
     QCOMPARE(metadata.value(QStringLiteral("mpris:length")).toLongLong(), 90'000'000);
+    // The cover as a file URL, escaped; the order as the desktop names it.
+    QCOMPARE(metadata.value(QStringLiteral("mpris:artUrl")).toString(),
+             QStringLiteral("file:///tmp/trackknife%20cover.png"));
+    QCOMPARE(player.property("LoopStatus").toString(), QStringLiteral("Playlist"));
+    QCOMPARE(player.property("Shuffle").toBool(), true);
+    QSignalSpy loop{&service, &MprisService::loopStatusRequested};
+    QSignalSpy shuffle{&service, &MprisService::shuffleRequested};
+    QVERIFY(player.setProperty("LoopStatus", QStringLiteral("Track")));
+    QVERIFY(player.setProperty("Shuffle", false));
+    QTRY_COMPARE(loop.count(), 1);
+    QCOMPARE(loop.front().front().toString(), QStringLiteral("Track"));
+    QTRY_COMPARE(shuffle.count(), 1);
+    QCOMPARE(shuffle.front().front().toBool(), false);
+    // Not a status MPRIS knows: nothing asked.
+    static_cast<void>(player.setProperty("LoopStatus", QStringLiteral("Sometimes")));
+    QTest::qWait(50);
+    QCOMPARE(loop.count(), 1);
 
     // Desktop commands surface as signals for the transport binding.
     QSignalSpy play_pause{&service, &MprisService::playPauseRequested};

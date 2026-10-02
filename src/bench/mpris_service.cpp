@@ -7,6 +7,7 @@
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusObjectPath>
+#include <QUrl>
 #include <QVariantMap>
 
 #include <cstdlib>
@@ -64,7 +65,7 @@ class MprisPlayerAdaptor final : public QDBusAbstractAdaptor {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.mpris.MediaPlayer2.Player")
     Q_PROPERTY(QString PlaybackStatus READ playbackStatus)
-    Q_PROPERTY(QString LoopStatus READ loopStatus)
+    Q_PROPERTY(QString LoopStatus READ loopStatus WRITE setLoopStatus)
     Q_PROPERTY(double Rate READ rate WRITE setRate)
     Q_PROPERTY(bool Shuffle READ shuffle WRITE setShuffle)
     Q_PROPERTY(QVariantMap Metadata READ metadata)
@@ -84,11 +85,17 @@ class MprisPlayerAdaptor final : public QDBusAbstractAdaptor {
         : QDBusAbstractAdaptor(service), service_(service) {}
 
     [[nodiscard]] QString playbackStatus() const { return service_->currentState().status; }
-    [[nodiscard]] QString loopStatus() const { return QStringLiteral("None"); }
+    [[nodiscard]] QString loopStatus() const { return service_->currentState().loop_status; }
+    void setLoopStatus(const QString& status) {
+        if (status == QStringLiteral("None") || status == QStringLiteral("Track") ||
+            status == QStringLiteral("Playlist")) {
+            emit service_->loopStatusRequested(status);
+        }
+    }
     [[nodiscard]] double rate() const { return 1.0; }
     void setRate(double) {}
-    [[nodiscard]] bool shuffle() const { return false; }
-    void setShuffle(bool) {}
+    [[nodiscard]] bool shuffle() const { return service_->currentState().shuffle; }
+    void setShuffle(const bool shuffle) { emit service_->shuffleRequested(shuffle); }
     [[nodiscard]] QVariantMap metadata() const { return service_->metadataMap(); }
     [[nodiscard]] double volume() const {
         const auto percent = service_->currentState().volume_percent;
@@ -187,6 +194,10 @@ QVariantMap MprisService::metadataMap() const {
     if (!state_.album.isEmpty()) {
         metadata.insert(QStringLiteral("xesam:album"), state_.album);
     }
+    if (!state_.art_path.isEmpty()) {
+        metadata.insert(QStringLiteral("mpris:artUrl"),
+                        QUrl::fromLocalFile(state_.art_path).toString(QUrl::FullyEncoded));
+    }
     return metadata;
 }
 
@@ -218,7 +229,7 @@ void MprisService::publish(const MprisPlaybackState& state) {
     }
     if (previous.track_key != state.track_key || previous.title != state.title ||
         previous.artist != state.artist || previous.album != state.album ||
-        previous.length_us != state.length_us) {
+        previous.length_us != state.length_us || previous.art_path != state.art_path) {
         changed.insert(QStringLiteral("Metadata"), metadataMap());
     }
     if (previous.volume_percent != state.volume_percent) {
@@ -239,6 +250,12 @@ void MprisService::publish(const MprisPlaybackState& state) {
     }
     if (previous.can_seek != state.can_seek) {
         changed.insert(QStringLiteral("CanSeek"), state.can_seek);
+    }
+    if (previous.loop_status != state.loop_status) {
+        changed.insert(QStringLiteral("LoopStatus"), state.loop_status);
+    }
+    if (previous.shuffle != state.shuffle) {
+        changed.insert(QStringLiteral("Shuffle"), state.shuffle);
     }
     emitPropertiesChanged(QLatin1String(player_interface), changed);
 

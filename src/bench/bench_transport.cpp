@@ -1103,6 +1103,18 @@ void BenchMainWindow::buildMprisService() {
             volume_->setValue(volume_percent);
         }
     });
+    // The order set from the desktop: the modes follow, and the controls and
+    // MPRIS with them.
+    connect(mpris_, &MprisService::loopStatusRequested, this, [this](const QString& status) {
+        workspace_.setLoopStatus(status);
+        refreshLocalPlaybackControls();
+        publishMprisState();
+    });
+    connect(mpris_, &MprisService::shuffleRequested, this, [this](const bool shuffle) {
+        workspace_.setShuffled(shuffle);
+        refreshLocalPlaybackControls();
+        publishMprisState();
+    });
     connect(mpris_, &MprisService::raiseRequested, this, [this] {
         showNormal();
         raise();

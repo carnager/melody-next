@@ -8,6 +8,9 @@
 #include "bench/bench_main_window_helpers.hpp"
 #include "workspace/workspace_view.hpp"
 
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QJsonObject>
@@ -86,6 +89,76 @@ void Workspace::sampleLastFm(const EnginePlayback::State& state) {
          {"monotonic", lastfm_sample_time_}});
 }
 
+QString Workspace::loopStatus() const {
+    if (!playback_.modes.repeat) {
+        return QStringLiteral("None");
+    }
+    return playback_.modes.single == audio::ModeState::on ? QStringLiteral("Track")
+                                                          : QStringLiteral("Playlist");
+}
+
+void Workspace::setLoopStatus(const QString& status) {
+    const bool track = status == QStringLiteral("Track");
+    playback_.modes.repeat = track || status == QStringLiteral("Playlist");
+    // Single on is what loops the track; set for "Track", taken off for the
+    // others -- a one-shot single, stopping after the current, is left as is.
+    if (track) {
+        playback_.modes.single = audio::ModeState::on;
+    } else if (playback_.modes.single == audio::ModeState::on) {
+        playback_.modes.single = audio::ModeState::off;
+    }
+    applyLocalPlaybackModes();
+}
+
+bool Workspace::shuffled() const { return playback_.modes.random || playback_.modes.album_random; }
+
+void Workspace::setShuffled(const bool shuffled) {
+    if (shuffled == this->shuffled()) {
+        return;
+    }
+    // Shuffled from the desktop is track shuffle; album shuffle, chosen
+    // here, stays what it is until the desktop turns shuffling off.
+    playback_.modes.random = shuffled;
+    if (!shuffled) {
+        playback_.modes.album_random = false;
+    }
+    applyLocalPlaybackModes();
+}
+
+QString Workspace::desktopCoverPath(const LocalTrackRow& track, const EngineKey& engine) {
+    const auto key = LocalListModel::groupKeyOf(track);
+    if (key == desktop_cover_key_ && !desktop_cover_path_.isEmpty() &&
+        QFileInfo::exists(desktop_cover_path_)) {
+        return desktop_cover_path_;
+    }
+    const auto cover = coverFor(track, engine);
+    if (cover.isNull()) {
+        return {};
+    }
+    const QDir directory{QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
+                         QStringLiteral("/now-playing")};
+    if (!directory.mkpath(QStringLiteral("."))) {
+        return {};
+    }
+    const auto name = QString::fromLatin1(
+        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
+    const auto path = directory.filePath(QStringLiteral("cover-%1.png").arg(name));
+    // Large enough for any panel or notification, small enough to write at
+    // every album change.
+    const auto image = cover.width() > 512 || cover.height() > 512
+                           ? cover.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                           : cover;
+    if (!image.save(path, "PNG")) {
+        return {};
+    }
+    if (!desktop_cover_path_.isEmpty() && desktop_cover_path_ != path) {
+        QFile::remove(desktop_cover_path_);
+    }
+    desktop_cover_key_ = key;
+    desktop_cover_path_ = path;
+    return path;
+}
+
 void Workspace::publishDesktopState() {
     if (mpris_ == nullptr && notifier_ == nullptr) {
         return;
@@ -117,6 +190,11 @@ void Workspace::publishDesktopState() {
                 }
             }
         }
+        if (const auto* track = playingRow(engine.entry); track != nullptr) {
+            const auto* playing = linkOf(transport_);
+            state.art_path =
+                desktopCoverPath(*track, playing != nullptr ? playing->key : EngineKey::local());
+        }
         state.position_us = engine.position_ms * 1'000;
         state.length_us = engine.duration_ms > 0 ? engine.duration_ms * 1'000 : -1;
         state.volume_percent = engine.volume_percent;
@@ -127,6 +205,8 @@ void Workspace::publishDesktopState() {
         state.can_pause = has_queue;
         state.can_seek = !engine.entry.isEmpty() && engine.duration_ms > 0;
     }
+    state.loop_status = loopStatus();
+    state.shuffle = shuffled();
     if (mpris_ != nullptr) {
         mpris_->publish(state);
     }
@@ -136,6 +216,7 @@ void Workspace::publishDesktopState() {
                     static_cast<qulonglong>(notifier_->sentCount()));
         setProperty("trackknife-notification-summary", notifier_->lastSummary());
         setProperty("trackknife-notification-body", notifier_->lastBody());
+        setProperty("trackknife-notification-image", notifier_->lastImage());
     }
 }
 

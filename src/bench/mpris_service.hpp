@@ -28,6 +28,11 @@ struct MprisPlaybackState {
     bool can_play{false};
     bool can_pause{false};
     bool can_seek{false};
+    // The cover, as a file the desktop can read (empty: none).
+    QString art_path;
+    // None | Track | Playlist, and whether the order is shuffled.
+    QString loop_status{QStringLiteral("None")};
+    bool shuffle{false};
 
     [[nodiscard]] bool sameExceptPosition(const MprisPlaybackState& other) const {
         return status == other.status && title == other.title && artist == other.artist &&
@@ -35,7 +40,8 @@ struct MprisPlaybackState {
                length_us == other.length_us && volume_percent == other.volume_percent &&
                can_next == other.can_next && can_previous == other.can_previous &&
                can_play == other.can_play && can_pause == other.can_pause &&
-               can_seek == other.can_seek;
+               can_seek == other.can_seek && art_path == other.art_path &&
+               loop_status == other.loop_status && shuffle == other.shuffle;
     }
 };
 
@@ -69,6 +75,9 @@ class MprisService final : public QObject {
     void previousRequested();
     void positionRequested(qlonglong position_ms);
     void volumeRequested(int volume_percent);
+    // The desktop setting the order: None, Track or Playlist; shuffled.
+    void loopStatusRequested(const QString& status);
+    void shuffleRequested(bool shuffle);
     void raiseRequested();
 
   private:

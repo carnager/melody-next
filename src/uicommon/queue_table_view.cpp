@@ -44,8 +44,8 @@ constexpr int artwork_padding = side_artwork_padding;
     return view->property(property).isValid() ? view->property(property).toInt() : fallback;
 }
 
-// A lone track is an album of its own, its header and cover as any album's,
-// as the Qt Quick window draws it (ADR-0250).
+// A lone track is an album of its own, its header and cover as any album's
+// (ADR-0250).
 [[nodiscard]] TrackGroupColumns groupColumns(const QTableView* view) {
     return {.album = viewColumn(view, track_album_column_property, track_album_column),
             .date = viewColumn(view, track_date_column_property, track_date_column),
@@ -130,7 +130,7 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
                          view->font(), text, false);
 
         // Every album's cover the same size at its top left, beside its
-        // header -- the Qt Quick window's (ADR-0250) -- or its initials.
+        // header (ADR-0250) -- or its initials.
         const QRect target{artwork_left + side_cover_left, top + side_cover_top, side_cover_extent,
                            side_cover_extent};
         const auto cover = model->index(row, column).data(track_album_artwork_role).value<QImage>();
@@ -139,8 +139,7 @@ void paintAlbumArtwork(QueueTableView* view, QPainter* painter) {
             painter->save();
             painter->setRenderHint(QPainter::Antialiasing);
             painter->setRenderHint(QPainter::SmoothPixmapTransform);
-            // The middle square of the cover, filling the tile, as Quick's
-            // PreserveAspectCrop does.
+            // The middle square of the cover, filling the tile.
             const auto side = std::min(cover.width(), cover.height());
             const QRect middle{(cover.width() - side) / 2, (cover.height() - side) / 2, side, side};
             QPainterPath rounded;

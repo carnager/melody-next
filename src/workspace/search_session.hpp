@@ -31,7 +31,7 @@ namespace trackknife::bench {
 // this computer's library, another engine's, or a snapshot of the current
 // local tab through the shared row evaluation (probing missing technicals
 // on demand). Saved searches, presets, and what is found put in a tab.
-// Both windows' Search dialogs draw it.
+// The window's Search dialog draws it.
 class SearchSession final : public QObject {
     Q_OBJECT
 

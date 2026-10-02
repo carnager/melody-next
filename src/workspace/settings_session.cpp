@@ -47,8 +47,7 @@ SettingsSession::SettingsSession(QObject* parent) : QObject(parent) {
     const QSettings settings;
     // As the type its default has: an INI file hands every value back as text,
     // and the text "false" is true to anything that only asks whether a
-    // value is there -- the Qt Quick window's checkboxes showed every option
-    // left off as on.
+    // value is there -- a checkbox would show every option left off as on.
     const auto read = [this, &settings](const QString& key, const QVariant& fallback) {
         auto value = settings.value(key, fallback);
         if (value.metaType() != fallback.metaType() && !value.convert(fallback.metaType())) {

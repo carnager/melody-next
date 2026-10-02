@@ -89,7 +89,7 @@ void Workspace::saveLocalPlaybackModes() {
 }
 
 
-// As they were left, for either window: read once, when the workspace is
+// As they were left, for the window: read once, when the workspace is
 // made, before any engine is reached.
 void Workspace::loadLocalPlaybackModes() {
     const QSettings settings;

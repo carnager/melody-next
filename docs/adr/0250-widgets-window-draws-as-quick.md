@@ -3,7 +3,9 @@
 ## Status
 
 Accepted, 2026-10-02. Revises ADR-0247's "the desktop's style under the
-desktop's colours" for the widgets window.
+desktop's colours" for the widgets window. Amended by ADR-0252: the Qt Quick
+window is retired, and `TrackknifeStyle` is now the source of the measures
+below rather than a copy of Theme.qml.
 
 ## Context
 

@@ -19,7 +19,7 @@ class Workspace;
 // secret pasted, access approved in the browser while this waits for it --
 // scrobbling switched on or off, and the account handed to each engine so
 // it scrobbles what it plays itself. Account actions take effect at once.
-// Both windows' Last.fm pages draw it.
+// The window's Last.fm page draws it.
 class LastFmSettingsSession final : public QObject {
     Q_OBJECT
 

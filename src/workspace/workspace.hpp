@@ -75,8 +75,8 @@ class WorkspaceView;
 
 // ADR-0220: the workspace a window shows -- the engines it reaches, the lists
 // open from them, what plays and waits to, and the work under way -- without
-// any of the window. Both the widgets window and the Qt Quick one are drawn
-// over it, so each behaviour is written once.
+// any of the window, so each behaviour is written once, apart from how it is
+// drawn.
 //
 // For now it holds the state the widgets window kept; that window's logic
 // moves here next, a part at a time, and the window becomes what draws it.

@@ -28,7 +28,7 @@ namespace trackknife::bench {
 // clean, split, number, capture or remove fields -- edited as typed steps
 // or as raw Picard-style source, previewed on the selected files as it
 // changes, saved, imported and exported as native JSON, and added to the
-// tag editor's draft. Both windows' script editors draw it.
+// tag editor's draft. The window's script editor draws it.
 class ScriptSession final : public QObject {
     Q_OBJECT
 

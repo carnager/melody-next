@@ -2,7 +2,7 @@
 
 // ADR-0237: what the file tools are given -- the engine that does the work,
 // the stores their choices are kept in -- and how this workspace follows
-// what they changed. Both windows' tag editors, ReplayGain and converters
+// what they changed. The window's tag editor, ReplayGain and converter
 // are opened with it.
 
 #include "workspace/workspace.hpp"

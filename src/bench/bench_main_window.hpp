@@ -116,7 +116,7 @@ class PlaylistTransferBar;
 class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     Q_OBJECT
     // ADR-0220: the workspace's state and behaviour live in Workspace, which
-    // both windows are drawn over; this window reaches them through these
+    // this window is drawn over; it reaches them through these
     // names while its logic moves across.
     using ListTab = Workspace::ListTab;
     using CrossTabMoveEdit = Workspace::CrossTabMoveEdit;

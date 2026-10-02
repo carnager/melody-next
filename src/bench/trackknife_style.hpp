@@ -10,10 +10,10 @@
 
 namespace trackknife::bench {
 
-// ADR-0250: the widgets window drawn as the Qt Quick window draws itself --
-// the measures and colours of src/quick/style/Theme.qml, kept in step by
-// hand: 28 px controls, 4 px corners, flat fills mixed from the palette, the
-// accent for default and checked buttons, underlined tabs, thin scroll bars.
+// ADR-0250: Trackknife's look, one set of measures and colours for every
+// window -- 28 px controls, 4 px corners, flat fills mixed from the palette,
+// the accent for default and checked buttons, underlined tabs, thin scroll
+// bars. It began as the Qt Quick window's (ADR-0252 retired that window).
 // Fusion beneath, for everything not drawn here.
 class TrackknifeStyle final : public QProxyStyle {
     Q_OBJECT
@@ -25,7 +25,7 @@ class TrackknifeStyle final : public QProxyStyle {
     // draws no selection fill, only an outline where the keyboard is.
     static constexpr const char* checks_show_selection = "trackknife-checks-show-selection";
 
-    // Theme.qml's measures.
+    // The measures: spacing, corners, control and row heights.
     static constexpr int gap_small = 4;
     static constexpr int gap = 8;
     static constexpr int gap_large = 16;
@@ -34,7 +34,7 @@ class TrackknifeStyle final : public QProxyStyle {
     static constexpr int control_height = 28;
     static constexpr int row_height = 28;
 
-    // Theme.qml's colours, from a palette.
+    // The colours, each mixed from a palette.
     [[nodiscard]] static QColor mix(const QColor& a, const QColor& b, qreal t);
     [[nodiscard]] static QColor hairline(const QPalette& palette);
     [[nodiscard]] static QColor border(const QPalette& palette);
@@ -70,8 +70,8 @@ class TrackknifeStyle final : public QProxyStyle {
                             QPainter* painter, const QWidget* widget = nullptr) const override;
 };
 
-// A header, footer or side area as the Qt Quick window shades it: a step off
-// the window (Theme.sunken), with a hairline toward the content on one edge.
+// A header, footer or side area, shaded: a step off the window (sunken),
+// with a hairline toward the content on one edge.
 class Band final : public QWidget {
   public:
     enum class Edge : std::uint8_t { none, top, bottom };
@@ -84,7 +84,7 @@ class Band final : public QWidget {
     Edge edge_;
 };
 
-// A choice of a few sources as the Qt Quick window shows it: one rounded box
+// A choice of a few sources: one rounded box
 // split into equal segments, the chosen one lifted out of it, the lift
 // sliding to a segment chosen. A QTabBar still, for everything that asks it
 // which tab is current.

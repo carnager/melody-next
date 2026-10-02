@@ -67,7 +67,7 @@ struct ConvertPresetStore {
 // mirrored) with a live target preview, resampling, depth, channels, an
 // optional permanent volume change, cover art, and a bounded parallel
 // conversion with problems-only feedback. Choices are remembered, and per
-// saved preset. Both windows' Convert dialogs draw it.
+// saved preset. The window's Convert dialog draws it.
 class ConvertJob final : public QObject {
     Q_OBJECT
 

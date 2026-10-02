@@ -94,8 +94,8 @@ void BenchMainWindow::applyTrackViewLayout(QTableView* view, ui::TrackViewLayout
         const auto logical = trackColumnLogical(column.id);
         const auto spec = std::ranges::find(track_column_specs, logical, &TrackColumnSpec::logical);
         if (logical >= 0 && spec != track_column_specs.end()) {
-            // Covers beside the rows: the cover gutter and the numbers fixed,
-            // as the Qt Quick window has them (ADR-0250).
+            // Covers beside the rows: the cover gutter and the numbers fixed
+            // (ADR-0250).
             const auto fixed = !side_artwork                          ? 0
                                : logical == local_artwork_column      ? ui::side_cover_gutter
                                : logical == local_track_number_column ? ui::side_number_width

@@ -9,7 +9,7 @@
 
 namespace trackknife::bench {
 
-// The Sources panel's settings, as both windows read them: its folder
+// The Sources panel's settings, as the window reads them: its folder
 // bookmarks and which source it opens on.
 
 // The bookmarked folders, in order. The first time there are none saved,

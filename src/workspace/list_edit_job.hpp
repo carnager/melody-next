@@ -22,7 +22,7 @@ class LocalListModel;
 // A whole-list edit -- sorted by a tkfmt-1 expression, reversed, albums
 // shuffled or duplicates removed -- planned off the UI thread from a
 // snapshot of the list's rows, and applied as one step to undo. A change to
-// the list while it is planned stops it. Both windows' edit bars draw it.
+// the list while it is planned stops it. The window's edit bar draws it.
 class ListEditJob final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool active READ active NOTIFY changed)

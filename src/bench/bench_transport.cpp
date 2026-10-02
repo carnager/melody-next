@@ -732,7 +732,8 @@ void BenchMainWindow::styleHeader() {
                 .arg(shade(0.12)));
     }
     // Where the sound goes and what is waiting: pills, so they read as
-    // places to click rather than as more labels (Quick's PillButton).
+    // places to click rather than as more labels: background at 6 % toward
+    // the text, a 1 px edge at 16 %, the accent edge under the pointer.
     const auto pill =
         QStringLiteral(
             "QToolButton { background: %1; border: 1px solid %2; border-radius: 13px;"
@@ -953,8 +954,8 @@ void BenchMainWindow::refreshEngineTransport() {
     play_pause_action_->setText(playing ? QStringLiteral("Pause") : QStringLiteral("Play"));
     if (transport_icon_playing_ != std::optional{playing}) {
         transport_icon_playing_ = playing;
-        // Named as the Qt Quick window names them: the desktop's own icons
-        // where it has a theme, the style's otherwise.
+        // The desktop's own icons where it has a theme, the style's
+        // otherwise.
         play_pause_action_->setIcon(themedIcon(playing ? u"media-playback-pause|sp:SP_MediaPause"
                                                        : u"media-playback-start|sp:SP_MediaPlay"));
     }

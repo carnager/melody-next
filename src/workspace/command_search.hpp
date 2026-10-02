@@ -10,7 +10,7 @@
 namespace trackknife::bench {
 
 // The command palette's match: every word typed appears, in any case, in
-// the command's name, its shortcut or its id. Both windows' palettes use it.
+// the command's name, its shortcut or its id. The window's palette uses it.
 [[nodiscard]] inline bool commandMatches(const QString& filter, const QString& name,
                                          const QString& shortcut, const QString& id) {
     const auto words = filter.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);

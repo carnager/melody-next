@@ -3,9 +3,8 @@
 
 namespace trackknife::bench {
 
-// ADR-0247 and ADR-0250, for the widgets window: Trackknife's own style --
-// the Qt Quick window's look -- with the colours of the scheme chosen, now
-// and whenever another is applied.
+// ADR-0247 and ADR-0250: Trackknife's own style with the colours of the
+// scheme chosen, now and whenever another is applied.
 void followColorSchemes();
 
 } // namespace trackknife::bench

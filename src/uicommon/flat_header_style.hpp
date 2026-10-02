@@ -76,8 +76,7 @@ class FlatHeaderStyle final : public QProxyStyle {
         const auto font = labelFont(widget);
         painter->setFont(font);
         painter->setPen(blend(header->palette, label_share));
-        // Labels read from the left, as the Qt Quick window's do, unless the
-        // model places one otherwise.
+        // Labels read from the left, unless the model places one otherwise.
         auto alignment = header->textAlignment;
         if (alignment.testFlag(Qt::AlignHCenter)) {
             alignment = (alignment & ~Qt::AlignHorizontal_Mask) | Qt::AlignLeft;

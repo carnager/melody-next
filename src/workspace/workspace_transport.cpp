@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 // ADR-0226: what the engine followed reports, taken in -- its modes, the
-// rows it consumed and started, its queue -- and said as both windows show
+// rows it consumed and started, its queue -- and said as the window shows
 // it: what plays, where it sounds, and with how much buffer.
 
 #include "workspace/workspace.hpp"

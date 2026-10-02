@@ -42,8 +42,8 @@ void fill_rounded(QPainter* painter, const QRectF& rect, const QColor& fill, con
 
 // The accent: a checked button, or the one a window names as its primary
 // (QPushButton::isDefault) -- not every button that is the default for a
-// moment because it has focus in a dialog (autoDefault); Quick's accent is
-// on the accepting button alone.
+// moment because it has focus in a dialog (autoDefault): the accent is on
+// the accepting button alone.
 [[nodiscard]] bool accented(const QStyleOptionButton* button, const QWidget* widget) {
     if (button == nullptr) {
         return false;
@@ -136,7 +136,7 @@ QColor TrackknifeStyle::dim(const QPalette& p) {
 void TrackknifeStyle::polish(QWidget* widget) {
     QProxyStyle::polish(widget);
     widget->setAttribute(Qt::WA_Hover, true);
-    // Columns read from the left, as Quick's do; a model's own alignment
+    // Columns read from the left; a model's own alignment
     // (a right-aligned length) still wins.
     if (auto* header = qobject_cast<QHeaderView*>(widget);
         header != nullptr && header->orientation() == Qt::Horizontal) {
@@ -325,7 +325,7 @@ void TrackknifeStyle::drawPrimitive(const PrimitiveElement element, const QStyle
     switch (element) {
     case PE_PanelButtonCommand: {
         const auto* button = qstyleoption_cast<const QStyleOptionButton*>(option);
-        // Flat, as Quick's icon buttons are: a fill only under the pointer.
+        // Flat, as icon buttons are: a fill only under the pointer.
         if (button != nullptr && button->features.testFlag(QStyleOptionButton::Flat)) {
             const bool flat_down = option->state.testFlag(State_Sunken);
             const bool flat_hover =
@@ -336,7 +336,7 @@ void TrackknifeStyle::drawPrimitive(const PrimitiveElement element, const QStyle
             }
             return;
         }
-        // The accent stays on a disabled default button, faded, as Quick's.
+        // The accent stays on a disabled default button, faded.
         const bool accent =
             button != nullptr ? accented(button, widget) : option->state.testFlag(State_On);
         const bool down = option->state.testFlag(State_Sunken);
@@ -524,7 +524,7 @@ void TrackknifeStyle::drawPrimitive(const PrimitiveElement element, const QStyle
             painter->fillRect(option->rect, item->backgroundBrush);
         }
         // A list whose check boxes say what is chosen shows no second
-        // selection; only where the keyboard is, outlined (Quick's file list).
+        // selection; only where the keyboard is, outlined.
         if (widget != nullptr && widget->property(checks_show_selection).toBool()) {
             if (option->state.testFlag(State_MouseOver) && option->state.testFlag(State_Enabled)) {
                 fill_rounded(painter, rect.adjusted(2, 1, -2, -1), rowHover(palette), radius);
@@ -672,7 +672,7 @@ void TrackknifeStyle::drawControl(const ControlElement element, const QStyleOpti
                          radius);
             quiet.state.setFlag(State_Selected, false);
         }
-        // A chosen item is ticked, as Quick's MenuItem: no box, no dot.
+        // A chosen item is ticked: no box, no dot.
         if (item->checkType != QStyleOptionMenuItem::NotCheckable &&
             item->menuItemType != QStyleOptionMenuItem::Separator) {
             if (item->checked) {

@@ -18,8 +18,8 @@ class Workspace;
 // ADR-0233: the lists as a pane instead of a tab bar -- every engine's,
 // under its name, whether open in this window or not: saved ones first, by
 // name; what is open here as this window has it. Each can be opened,
-// closed, saved, renamed or deleted from there. Both windows' lists panes
-// draw it.
+// closed, saved, renamed or deleted from there. The window's lists pane
+// draws it.
 class ListsCatalog final : public QObject {
     Q_OBJECT
 

@@ -4,6 +4,7 @@
 
 #include "bench/bench_main_window_helpers.hpp"
 #include "uicommon/local_artwork.hpp"
+#include "workspace/library_view_definitions.hpp"
 #include "uicommon/local_files_mime_data.hpp"
 
 #include <QFile>
@@ -31,8 +32,18 @@ QString text(const std::string& value) { return QString::fromUtf8(value); }
 std::string bytes(const QString& value) { return value.toUtf8().toStdString(); }
 QString pathLabel(const std::string& value) { return text(core::display_raw_path(value)); }
 QByteArray entryKey(const persistence::LibraryEntry& entry) {
-    return QByteArray::number(static_cast<int>(entry.kind)) + ':' +
-           QByteArray::fromStdString(entry.key);
+    auto key = QByteArray::number(static_cast<int>(entry.kind)) + ':';
+    // A view's node by where it is: one artist under two genres is two rows.
+    if (entry.view_node) {
+        if (entry.view_node->folder) {
+            return key + QByteArray::fromStdString(*entry.view_node->folder);
+        }
+        for (const auto& label : entry.view_node->view_path) {
+            key += QByteArray::fromStdString(label) + '\x1f';
+        }
+        return key;
+    }
+    return key + QByteArray::fromStdString(entry.key);
 }
 
 // The tree: children loaded when a row opens, an album's cover and its
@@ -60,8 +71,10 @@ class LibraryModel final : public QStandardItemModel {
             if (!value.isValid())
                 return QString{};
             const auto entry = value.value<persistence::LibraryEntry>();
-            // An artist's album count is the row's quiet count instead.
-            if (entry.kind == persistence::LibraryEntryKind::artist)
+            // An artist's album count is the row's quiet count instead, and
+            // so is a view's group's.
+            if (entry.kind == persistence::LibraryEntryKind::artist ||
+                entry.kind == persistence::LibraryEntryKind::group)
                 return QString{};
             const auto tracks =
                 LibraryBrowser::tr("%1 track%2").arg(entry.tracks).arg(entry.tracks == 1U ? "" : "s");
@@ -84,9 +97,11 @@ class LibraryModel final : public QStandardItemModel {
             case library_kind_role:
                 return entry.kind == persistence::LibraryEntryKind::artist  ? QStringLiteral("artist")
                        : entry.kind == persistence::LibraryEntryKind::album ? QStringLiteral("album")
+                       : entry.kind == persistence::LibraryEntryKind::group ? QStringLiteral("group")
                                                                             : QStringLiteral("track");
             case library_count_role:
-                return entry.kind == persistence::LibraryEntryKind::artist
+                return entry.kind == persistence::LibraryEntryKind::artist ||
+                               entry.kind == persistence::LibraryEntryKind::group
                            ? QString::number(entry.albums)
                            : QString{};
             case library_rating_role:
@@ -208,6 +223,12 @@ LibraryBrowser::LibraryBrowser(const CatalogueSource& catalogues, EngineKey engi
     status_ = tr("Press Refresh to scan your music folders.");
     query_mode_ = QSettings{}.value(QStringLiteral("library/query-mode"), false).toBool();
     newest_first_ = QSettings{}.value(QStringLiteral("library/newest-first"), false).toBool();
+    // Recently added was a toggle before it was a view.
+    adoptView(QSettings{}
+                  .value(QStringLiteral("library/view"),
+                         newest_first_ ? recent_library_view_id : default_library_view_id)
+                  .toString(),
+              false);
     model_ = new LibraryModel(this, [this](const QModelIndex& index) { fetch(index); });
     search_timer_.setSingleShot(true);
     search_timer_.setInterval(200);
@@ -399,10 +420,64 @@ void LibraryBrowser::setNewestFirst(const bool on) {
     if (on == newest_first_) {
         return;
     }
-    newest_first_ = on;
-    QSettings{}.setValue(QStringLiteral("library/newest-first"), on);
+    setViewId(on ? recent_library_view_id : default_library_view_id);
+}
+
+void LibraryBrowser::adoptView(const QString& id, const bool remember) {
+    const auto views = libraryViews();
+    auto found = std::ranges::find(views, id, &LibraryViewDefinition::id);
+    if (found == views.end()) {
+        found = std::ranges::find(views, default_library_view_id, &LibraryViewDefinition::id);
+    }
+    view_id_ = found->id;
+    view_ = found->own_tree ? std::vector<persistence::LibraryViewLevel>{} : found->levels;
+    newest_first_ = view_id_ == recent_library_view_id;
+    folders_ = view_id_ == folders_library_view_id;
+    if (!remember) {
+        return;
+    }
+    QSettings settings;
+    settings.setValue(QStringLiteral("library/view"), view_id_);
+    settings.setValue(QStringLiteral("library/newest-first"), newest_first_);
+}
+
+void LibraryBrowser::setViewId(const QString& id) {
+    if (id == view_id_) {
+        return;
+    }
+    adoptView(id);
+    expanded_entries_.clear();
+    current_entry_.clear();
     emit searchChanged();
     reload();
+}
+
+void LibraryBrowser::previewLevels(std::vector<persistence::LibraryViewLevel> levels) {
+    view_id_.clear();
+    view_ = std::move(levels);
+    newest_first_ = false;
+    folders_ = false;
+    reload();
+}
+
+void LibraryBrowser::previewView(const QString& id) {
+    adoptView(id, false);
+    // Marked a preview, so an edit of the saved views leaves it alone.
+    view_id_.clear();
+    reload();
+}
+
+void LibraryBrowser::refreshViews() {
+    // A preview shows what it is given, not a saved view.
+    if (view_id_.isEmpty()) {
+        return;
+    }
+    const auto shown = std::make_pair(view_id_, view_);
+    adoptView(view_id_);
+    if (std::make_pair(view_id_, view_) != shown) {
+        emit searchChanged();
+        reload();
+    }
 }
 
 void LibraryBrowser::locatePath(std::string raw_path, bool album) {
@@ -444,10 +519,10 @@ void LibraryBrowser::locatePath(std::string raw_path, bool album) {
                  return;
              auto entry = outcome.page.entries.front();
              search_.clear();
-             // Found under its artist, so the artist tree, not the newest.
-             if (newest_first_) {
-                 newest_first_ = false;
-                 QSettings{}.setValue(QStringLiteral("library/newest-first"), false);
+             // Found under its artist, so the artist tree, not the newest
+             // nor another view.
+             if (view_id_ != default_library_view_id) {
+                 adoptView(default_library_view_id);
              }
              emit searchChanged();
              expanded_entries_.clear();
@@ -487,6 +562,23 @@ void LibraryBrowser::reload() {
     const auto query_text = bytes(search_.trimmed());
     if (query_text.empty()) {
         setQueryError({});
+        // ADR-0254: the engine's folders, from the library's roots down --
+        // on whichever machine it runs.
+        if (folders_) {
+            persistence::LibraryQuery top;
+            top.kind = persistence::LibraryEntryKind::group;
+            top.folders = true;
+            loadChildren({}, top);
+            return;
+        }
+        // ADR-0254: a view's first level, grouped by the engine.
+        if (!view_.empty()) {
+            persistence::LibraryQuery top;
+            top.kind = persistence::LibraryEntryKind::group;
+            top.view = view_;
+            loadChildren({}, top);
+            return;
+        }
         // Recently added: albums newest first, where artists would be.
         if (newest_first_) {
             persistence::LibraryQuery newest;
@@ -509,6 +601,15 @@ void LibraryBrowser::reload() {
             return;
         }
         setQueryError({});
+        // In a view, the query narrows it: what it keeps, grouped as ever.
+        if (!view_.empty()) {
+            persistence::LibraryQuery top;
+            top.kind = persistence::LibraryEntryKind::group;
+            top.view = view_;
+            top.view_filter = query_text;
+            loadChildren({}, top);
+            return;
+        }
         auto* group = new QStandardItem(tr("Tracks"));
         group->setEditable(false);
         group->setDragEnabled(false);
@@ -606,8 +707,24 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  setStatus(search_.trimmed().isEmpty() ? tr("Browse artists and albums.")
                                                        : tr("Search results"));
              }
-             for (const auto& entry : outcome.page.entries) {
-                 auto label = text(entry.label);
+             for (auto entry : outcome.page.entries) {
+                 // ADR-0254: a view's node opens, and resolves, as the view
+                 // lists it -- under a genre, an album is the genre's part
+                 // of it.
+                 if ((!query.view.empty() || query.folders) &&
+                     entry.kind != persistence::LibraryEntryKind::track) {
+                     auto node = query;
+                     node.kind = persistence::LibraryEntryKind::group;
+                     node.offset = 0U;
+                     if (query.folders) {
+                         node.folder = entry.view_value;
+                     } else {
+                         node.view_path.push_back(entry.view_value);
+                     }
+                     entry.view_node = std::move(node);
+                 }
+                 auto label = entry.label.empty() && entry.view_node ? tr("Unknown")
+                                                                     : text(entry.label);
                  if (entry.available == 0U) {
                      label += tr(" — unavailable");
                  } else if (entry.available < entry.tracks) {
@@ -621,15 +738,26 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                                                     ? QStringLiteral("avatar-default")
                                                 : entry.kind == persistence::LibraryEntryKind::album
                                                     ? QStringLiteral("media-optical-audio")
+                                                : entry.kind == persistence::LibraryEntryKind::group
+                                                    ? QStringLiteral("folder-music")
                                                     : QStringLiteral("audio-x-generic")));
                  item->setData(QVariant::fromValue(entry), entry_role);
                  // A track by its file, an album by whose it is, an artist
                  // by name alone.
-                 item->setToolTip(entry.kind == persistence::LibraryEntryKind::track
-                                      ? pathLabel(entry.key)
-                                  : entry.album.empty() ? text(entry.artist)
-                                                        : text(entry.artist + " — " + entry.album));
-                 if (entry.kind != persistence::LibraryEntryKind::track) {
+                 item->setToolTip(
+                     entry.kind == persistence::LibraryEntryKind::track ? pathLabel(entry.key)
+                     : entry.kind == persistence::LibraryEntryKind::group
+                         ? tr("%1 album%2 · %3 track%4")
+                               .arg(entry.albums)
+                               .arg(entry.albums == 1U ? "" : "s")
+                               .arg(entry.tracks)
+                               .arg(entry.tracks == 1U ? "" : "s")
+                     : entry.album.empty() ? text(entry.artist)
+                                           : text(entry.artist + " — " + entry.album));
+                 if (entry.view_node) {
+                     item->setData(QVariant::fromValue(*entry.view_node), query_role);
+                     item->setColumnCount(1);
+                 } else if (entry.kind != persistence::LibraryEntryKind::track) {
                      persistence::LibraryQuery children;
                      if (entry.kind == persistence::LibraryEntryKind::artist) {
                          children.kind = persistence::LibraryEntryKind::album;
@@ -882,7 +1010,9 @@ void LibraryBrowser::resolveEntries(std::vector<persistence::LibraryEntry> entri
                  for (const auto& entry : entries) {
                      unavailable += entry.tracks - entry.available;
                      persistence::LibraryQuery query;
-                     if (entry.kind == persistence::LibraryEntryKind::artist) {
+                     if (entry.view_node) {
+                         query = *entry.view_node;
+                     } else if (entry.kind == persistence::LibraryEntryKind::artist) {
                          query.artist = entry.key;
                      } else if (entry.kind == persistence::LibraryEntryKind::album) {
                          query.album_key = entry.key;

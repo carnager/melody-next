@@ -2,6 +2,7 @@
 #include "bench/trackknife_style.hpp"
 
 #include <QAbstractItemView>
+#include <QAbstractSpinBox>
 #include <QComboBox>
 #include <QHeaderView>
 #include <QMouseEvent>
@@ -17,6 +18,15 @@
 
 namespace trackknife::bench {
 namespace {
+
+// A combo box's list item, drawn as a menu item (Fusion's own test).
+[[nodiscard]] bool combo_popup_item(const QStyleOption* option, const QWidget* widget) {
+    return qobject_cast<const QComboBox*>(widget) != nullptr ||
+           (option->styleObject != nullptr &&
+            option->styleObject->property("_q_isComboBoxPopupItem").toBool());
+}
+// Room for the tick before a combo box list item's text.
+constexpr int combo_tick_column = 20;
 
 // A rounded rectangle on whole pixels, its 1 px edge on the pixel centres.
 void fill_rounded(QPainter* painter, const QRectF& rect, const QColor& fill, const qreal radius,
@@ -265,6 +275,10 @@ QSize TrackknifeStyle::sizeFromContents(const ContentsType type, const QStyleOpt
         const auto* item = qstyleoption_cast<const QStyleOptionMenuItem*>(option);
         if (item != nullptr && item->menuItemType != QStyleOptionMenuItem::Separator) {
             size.setHeight(std::max(size.height(), 26));
+            if (combo_popup_item(option, widget) &&
+                item->checkType != QStyleOptionMenuItem::NotCheckable) {
+                size.rwidth() += combo_tick_column;
+            }
         }
         return size;
     }
@@ -389,7 +403,14 @@ void TrackknifeStyle::drawPrimitive(const PrimitiveElement element, const QStyle
     case PE_PanelLineEdit: {
         const auto* frame = qstyleoption_cast<const QStyleOptionFrame*>(option);
         if (frame != nullptr && frame->lineWidth <= 0) {
-            // Inside a spin box or combo box, which draws the frame.
+            // Inside a spin box or combo box, which draws the frame. Any
+            // other frameless edit -- a table cell's editor -- still needs
+            // its ground, or the cell's text shows through what is typed.
+            const auto* parent = widget != nullptr ? widget->parentWidget() : nullptr;
+            if (qobject_cast<const QAbstractSpinBox*>(parent) == nullptr &&
+                qobject_cast<const QComboBox*>(parent) == nullptr) {
+                painter->fillRect(rect, palette.color(QPalette::Base));
+            }
             return;
         }
         const bool read_only = option->state.testFlag(State_ReadOnly);
@@ -694,6 +715,12 @@ void TrackknifeStyle::drawControl(const ControlElement element, const QStyleOpti
             }
             quiet.checked = false;
             quiet.checkType = QStyleOptionMenuItem::NotCheckable;
+        }
+        // Fusion leaves a combo box's list no column for the tick; the
+        // text moves over to make one.
+        if (combo_popup_item(option, widget) &&
+            item->checkType != QStyleOptionMenuItem::NotCheckable) {
+            quiet.rect.setLeft(quiet.rect.left() + combo_tick_column);
         }
         if (item->menuItemType == QStyleOptionMenuItem::Separator) {
             const int y = option->rect.center().y();

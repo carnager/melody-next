@@ -835,6 +835,9 @@ void SearchSession::openRows(std::vector<int> chosen, const LocalLibraryAction a
                 rows.push_back(result_rows_[index]);
             }
             break;
+        case persistence::LibraryEntryKind::group:
+            // Search finds artists, albums and tracks, never a view's level.
+            break;
         }
     }
     if (!entries.empty()) {

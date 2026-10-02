@@ -293,6 +293,29 @@ namespace {
     if (request.newest_first) {
         params["newest_first"] = true;
     }
+    if (!request.view.empty()) {
+        auto levels = Json::array();
+        for (const auto& level : request.view) {
+            levels.push_back(Json{{"format", level.format},
+                                  {"sort", level.sort},
+                                  {"descending", level.descending}});
+        }
+        params["view"] = std::move(levels);
+        auto path = Json::array();
+        for (const auto& label : request.view_path) {
+            path.push_back(protocol::encode_raw_path(label));
+        }
+        params["view_path"] = std::move(path);
+        if (!request.view_filter.empty()) {
+            params["view_filter"] = request.view_filter;
+        }
+    }
+    if (request.folders) {
+        params["folders"] = true;
+        if (request.folder) {
+            params["folder"] = protocol::encode_raw_path(*request.folder);
+        }
+    }
     return params;
 }
 
@@ -331,6 +354,13 @@ namespace {
         entry.date = value.value("date", std::string{});
         entry.title = value.value("title", std::string{});
         entry.added = value.value("added", std::int64_t{0});
+        if (const auto view_value = value.find("view_value"); view_value != value.end()) {
+            auto decoded = protocol::decode_raw_path(view_value->get<std::string>());
+            if (!decoded) {
+                return std::unexpected(malformed("view_value"));
+            }
+            entry.view_value = std::move(*decoded);
+        }
         page.entries.push_back(std::move(entry));
     }
     return page;

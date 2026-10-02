@@ -4,6 +4,7 @@
 
 #include "trackknife/core/cancellation.hpp"
 #include "trackknife/core/result.hpp"
+#include "trackknife/engine/library_views.hpp"
 #include "trackknife/persistence/local_library.hpp"
 #include "trackknife/query/tkq.hpp"
 
@@ -233,6 +234,8 @@ class LocalCatalogue final : public Catalogue {
     [[nodiscard]] core::Result<persistence::LocalLibrary> open() const;
 
     std::filesystem::path database_;
+    // ADR-0254: the views grouped so far, shared by copies of this catalogue.
+    std::shared_ptr<LibraryViews> views_ = std::make_shared<LibraryViews>();
 };
 
 } // namespace trackknife::engine

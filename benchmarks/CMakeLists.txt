@@ -27,3 +27,13 @@ if(TRACKKNIFE_BUILD_UI)
         trackknife-ui-benchmark-smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     )
 endif()
+
+# ADR-0254: grouping a large library into a view.
+add_executable(trackknife_library_views_benchmark library_views_benchmark.cpp)
+target_link_libraries(
+    trackknife_library_views_benchmark
+    PRIVATE Trackknife::Engine Trackknife::Protocol PkgConfig::SQLITE3
+            trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME library-views-benchmark-smoke COMMAND trackknife_library_views_benchmark
+         "${PROJECT_SOURCE_DIR}/tests/fixtures/audio" --quick)

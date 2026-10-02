@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -38,7 +39,19 @@ struct LibraryHistorySource {
     std::string album_hash;
 };
 
-enum class LibraryEntryKind { artist, album, track };
+// ADR-0254: `group` is a level of a library view.
+enum class LibraryEntryKind { artist, album, track, group };
+
+// ADR-0254: one level of a library view -- a tkfmt-1 expression in the
+// tree-level host, which may use $each, and how its nodes are ordered: by
+// `sort` when given, else by label.
+struct LibraryViewLevel {
+    std::string format;
+    std::string sort;
+    bool descending{false};
+
+    friend bool operator==(const LibraryViewLevel&, const LibraryViewLevel&) = default;
+};
 
 struct LibraryQuery {
     LibraryEntryKind kind{LibraryEntryKind::artist};
@@ -54,6 +67,18 @@ struct LibraryQuery {
     // In no order at all: a random artist, album or tracks, as many as the
     // limit asks for. Outranks newest_first.
     bool random{false};
+    // ADR-0254: browsing a view. Its levels, the labels opened so far -- as
+    // many as there are levels lists that node's tracks -- and a tkq-1 query
+    // narrowing it first. `kind` and the fields above are ignored then.
+    std::vector<LibraryViewLevel> view;
+    std::vector<std::string> view_path;
+    std::string view_filter;
+    // ADR-0254: browsing the index by folder -- the library's roots, or what
+    // is in `folder`: its folders that hold tracks, then its own tracks. A
+    // folder of one album and no folders below is that album's entry. Its
+    // paths are everything below it.
+    bool folders{false};
+    std::optional<std::string> folder;
 };
 
 struct LibraryEntry {
@@ -84,6 +109,12 @@ struct LibraryEntry {
     // A track's length, an album's total; -1 when any of it is unknown, as
     // for an artist. What a client queues needs it to show a duration.
     std::int64_t duration_ms{-1};
+    // ADR-0254: a view's node -- a group, or an album standing for one -- by
+    // the label its level gave it, which is what opening it adds to the path.
+    std::string view_value{};
+    // The query listing that node, filled in by the client that browses it:
+    // what it opens to and what its files are, rather than its whole album.
+    std::optional<LibraryQuery> view_node{};
 };
 
 struct LibraryPage {
@@ -94,6 +125,14 @@ struct LibraryPage {
 // Presentation snapshot only; never a complete native metadata write baseline.
 struct LibraryTrackSnapshot {
     std::string raw_path;
+    TkqRowFacts facts;
+};
+
+// ADR-0254: an indexed track as a view groups it -- the entry the tree shows,
+// its album, and every fact its levels can read.
+struct LibraryViewTrack {
+    LibraryEntry entry;
+    std::string album_key;
     TkqRowFacts facts;
 };
 
@@ -164,6 +203,16 @@ class LocalLibrary final {
     core::Result<std::vector<std::array<std::int64_t, 6>>>
     history_facts(const std::vector<LibraryHistorySource>& sources,
                   const core::CancellationToken& cancellation = {}) const;
+    // ADR-0254: every indexed track, available or not, in library order, with
+    // all its fields -- and its listening history when `history` -- handed
+    // to `visit` one at a time, so a whole library is never held at once.
+    core::Result<void> each_track(const std::function<void(LibraryViewTrack&&)>& visit,
+                                  bool history,
+                                  const core::CancellationToken& cancellation = {}) const;
+    // ADR-0254: what a view grouped from each_track depends on, as one
+    // string: the tracks' revision, the ratings, and the listening history
+    // when `history`. Equal stamps, equal views.
+    core::Result<std::string> view_stamp(bool history) const;
     // Reads cached fields/technicals in input order, preserving raw paths and duplicates.
     // No filesystem access; missing index records fail rather than trigger discovery.
     core::Result<std::vector<LibraryTrackSnapshot>>

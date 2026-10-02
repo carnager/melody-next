@@ -1158,11 +1158,25 @@ namespace {
 
 } // namespace
 
+namespace {
+
+// ADR-0254: the folder view (see LibraryQuery::folders), below.
+[[nodiscard]] LibraryPage folder_page(sqlite3* db, const LibraryQuery& query);
+[[nodiscard]] std::vector<std::string> folder_paths(sqlite3* db, const std::string& folder);
+
+} // namespace
+
 core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                                               const core::CancellationToken& cancellation) const {
     return checked([&] {
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
+        if (query.folders) {
+            Transaction snapshot{db, true};
+            auto page = folder_page(db, query);
+            snapshot.commit();
+            return page;
+        }
         Filter filter{query};
         std::string columns;
         std::string order;
@@ -1201,6 +1215,8 @@ core::Result<LibraryPage> LocalLibrary::query(const LibraryQuery& query,
                         : " ORDER BY artist COLLATE NOCASE,years.album_year,album_key,disc,track,"
                           "title COLLATE NOCASE,raw_path";
             break;
+        case LibraryEntryKind::group:
+            fail("A view's levels are grouped by the engine", core::ErrorCode::invalid_argument);
         }
         // As much as is asked for, up to the library's result cap: a browse
         // lists a whole level, and the cap here was once 200 whatever was
@@ -1248,6 +1264,12 @@ LocalLibrary::paths(const LibraryQuery& query, const core::CancellationToken& ca
     return checked([&] {
         auto* db = implementation_->db;
         QueryCancellation guard{db, cancellation};
+        if (query.folders) {
+            if (!query.folder) {
+                fail("Choose a folder", core::ErrorCode::invalid_argument);
+            }
+            return folder_paths(db, *query.folder);
+        }
         const Filter filter{query};
         // An artist's albums in the order they came out, not the order of
         // their folders' names.
@@ -1589,6 +1611,135 @@ collect_filter_matches(sqlite3* db, const query::CompiledTkq& compiled, const Fi
     return entry;
 }
 
+// ADR-0254: a folder's view entries (see LibraryQuery::folders). A folder
+// is named by its path, which is what opening it asks for.
+[[nodiscard]] LibraryPage folder_page(sqlite3* db, const LibraryQuery& query) {
+    LibraryPage page;
+    if (!query.folder) {
+        for (const auto& root : read_roots(db)) {
+            const auto [from, to] = subtree_range(root.raw_path);
+            Statement counts{db, "SELECT count(*),coalesce(sum(available),0),"
+                                 "count(DISTINCT album_key) FROM local_library_tracks "
+                                 "WHERE raw_path>=?1 AND raw_path<?2"};
+            counts.blob(1, from);
+            counts.blob(2, to);
+            LibraryEntry entry;
+            entry.kind = LibraryEntryKind::group;
+            entry.key = root.raw_path;
+            entry.label = core::display_raw_path(root.raw_path);
+            entry.view_value = root.raw_path;
+            if (counts.next()) {
+                entry.tracks = static_cast<std::size_t>(counts.number(0));
+                entry.available = static_cast<std::size_t>(counts.number(1));
+                entry.albums = static_cast<std::size_t>(counts.number(2));
+            }
+            page.entries.push_back(std::move(entry));
+        }
+        return page;
+    }
+    const auto [from, to] = subtree_range(*query.folder);
+    const auto rest = static_cast<sqlite3_int64>(from.size() + 1U);
+    // Each folder below: its name, what it holds, whether it has folders of
+    // its own, and -- for one album -- that album.
+    Statement below{
+        db,
+        "SELECT g.*,coalesce((SELECT rating FROM local_ratings WHERE hash=g.rating_key),0) "
+        "FROM (SELECT name,count(*),sum(available),count(DISTINCT album_key),min(album_key),"
+        "max(deeper),min(artist),min(album),min(date),max(added),"
+        "CASE WHEN min(duration_ms)<0 THEN -1 ELSE sum(duration_ms) END,"
+        "min(album_rating_hash) AS rating_key FROM ("
+        "SELECT substr(raw_path,?1,instr(substr(raw_path,?1),x'2f')-1) AS name,"
+        "instr(substr(raw_path,?1+instr(substr(raw_path,?1),x'2f')),x'2f')>0 AS deeper,"
+        "available,album_key,artist,album,date,added,duration_ms,album_rating_hash "
+        "FROM local_library_tracks WHERE raw_path>=?2 AND raw_path<?3 "
+        "AND instr(substr(raw_path,?1),x'2f')>0) GROUP BY name) g ORDER BY g.name"};
+    below.number(1, rest);
+    below.blob(2, from);
+    below.blob(3, to);
+    while (below.next()) {
+        LibraryEntry entry;
+        const auto name = below.bytes(0);
+        const auto path = (from == "/" ? std::string{"/"} : from) + name;
+        entry.label = name;
+        entry.view_value = path;
+        entry.tracks = static_cast<std::size_t>(below.number(1));
+        entry.available = static_cast<std::size_t>(below.number(2));
+        entry.albums = static_cast<std::size_t>(below.number(3));
+        entry.date = below.bytes(8);
+        entry.added = below.number(9);
+        entry.duration_ms = below.number(10);
+        if (entry.albums == 1U && below.number(5) == 0) {
+            entry.kind = LibraryEntryKind::album;
+            entry.key = below.bytes(4);
+            entry.artist = below.bytes(6);
+            entry.album = below.bytes(7);
+            entry.rating_hash = below.bytes(11);
+            entry.rating = static_cast<unsigned>(below.number(12));
+            entry.album_rating_hash = entry.rating_hash;
+            entry.album_rating = entry.rating;
+        } else {
+            entry.kind = LibraryEntryKind::group;
+            entry.key = path;
+        }
+        page.entries.push_back(std::move(entry));
+    }
+    Statement in{db, std::string{"SELECT "} + filter_columns +
+                         ",t.available FROM local_library_tracks t WHERE t.raw_path>=?2 "
+                         "AND t.raw_path<?3 AND instr(substr(t.raw_path,?1),x'2f')=0 "
+                         "ORDER BY t.disc,t.track,t.raw_path"};
+    in.number(1, rest);
+    in.blob(2, from);
+    in.blob(3, to);
+    while (in.next()) {
+        FilterRow row;
+        read_filter_row(in, row);
+        auto entry = filter_entry(row);
+        entry.label = entry.title;
+        entry.label = format_label(entry, false);
+        entry.available = in.number(20) != 0 ? 1U : 0U;
+        entry.added = row.facts.added;
+        page.entries.push_back(std::move(entry));
+    }
+    return page;
+}
+
+// Everything below a folder, available, a folder's tracks together in disc
+// and track order.
+[[nodiscard]] std::vector<std::string> folder_paths(sqlite3* db, const std::string& folder) {
+    const auto [from, to] = subtree_range(folder);
+    Statement statement{db, "SELECT raw_path,disc,track FROM local_library_tracks "
+                            "WHERE raw_path>=?1 AND raw_path<?2 AND available=1 LIMIT 100001"};
+    statement.blob(1, from);
+    statement.blob(2, to);
+    struct Row {
+        std::string path;
+        std::int64_t disc;
+        std::int64_t track;
+    };
+    std::vector<Row> rows;
+    while (statement.next()) {
+        if (rows.size() == 100'000U) {
+            fail("Selection exceeds 100000 files; select a folder further down",
+                 core::ErrorCode::limit_exceeded);
+        }
+        rows.push_back({statement.bytes(0), statement.number(1), statement.number(2)});
+    }
+    const auto parent = [](const std::string& path) {
+        return std::string_view{path}.substr(0, path.rfind('/'));
+    };
+    std::ranges::sort(rows, [&parent](const Row& left, const Row& right) {
+        return std::tuple{parent(left.path), left.disc, left.track, std::string_view{left.path}} <
+               std::tuple{parent(right.path), right.disc, right.track,
+                          std::string_view{right.path}};
+    });
+    std::vector<std::string> paths;
+    paths.reserve(rows.size());
+    for (auto& row : rows) {
+        paths.push_back(std::move(row.path));
+    }
+    return paths;
+}
+
 } // namespace
 
 core::Result<std::vector<std::array<std::int64_t, 6>>>
@@ -1682,6 +1833,80 @@ LocalLibrary::filter_paths(const query::CompiledTkq& compiled,
             result.push_back(row.raw_path);
         }
         return result;
+    });
+}
+
+core::Result<void> LocalLibrary::each_track(const std::function<void(LibraryViewTrack&&)>& visit,
+                                            const bool history,
+                                            const core::CancellationToken& cancellation) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        QueryCancellation guard{db, cancellation};
+        require_complete_field_index(db);
+        Transaction snapshot{db, true};
+        const auto played = history ? collect_history(db, cancellation)
+                                    : std::map<std::string, std::array<std::int64_t, 6>>{};
+        Statement select{db, std::string{"SELECT "} + filter_columns + ",t.available" +
+                                 filter_from + filter_order};
+        Statement fields{db, "SELECT canonical_name,value,value_lower FROM local_library_fields "
+                             "WHERE raw_path=? ORDER BY canonical_name,position"};
+        while (select.next()) {
+            if (cancellation.is_cancellation_requested()) {
+                fail("Library query cancelled", core::ErrorCode::cancelled);
+            }
+            FilterRow row;
+            read_filter_row(select, row);
+            load_field_rows(fields, row.raw_path, row);
+            if (const auto found = played.find(row.raw_path); found != played.end()) {
+                row.facts.history = found->second;
+            }
+            LibraryViewTrack track{.entry = filter_entry(row),
+                                   .album_key = row.album_key,
+                                   .facts = std::move(row.facts)};
+            // As the tree shows a track, not as a search names it: formatted
+            // from its title, which the search label already wraps.
+            track.entry.label = track.entry.title;
+            track.entry.label = format_label(track.entry, false);
+            const auto available = select.number(20) != 0;
+            track.entry.available = available ? 1U : 0U;
+            track.entry.added = track.facts.added;
+            visit(std::move(track));
+        }
+        snapshot.commit();
+        return true;
+    }).transform([](bool) {});
+}
+
+core::Result<std::string> LocalLibrary::view_stamp(const bool history) const {
+    return checked([&] {
+        auto* db = implementation_->db;
+        Transaction snapshot{db, true};
+        std::string stamp;
+        Statement tracks{db, "SELECT id, revision FROM local_library_revision LIMIT 1"};
+        if (!tracks.next()) {
+            fail("The library has no revision");
+        }
+        stamp = tracks.bytes(0) + ":" + std::to_string(tracks.number(1));
+        // A rating moved from one track to another keeps the count and the
+        // sum; weighting by the hash's leading digits tells them apart.
+        Statement ratings{db, "SELECT count(*),total(rating),"
+                              "total(rating*(instr('0123456789abcdef',substr(hash,1,1))+"
+                              "16*instr('0123456789abcdef',substr(hash,2,1)))),"
+                              "coalesce(max(updated_at),'') FROM local_ratings"};
+        if (ratings.next()) {
+            stamp += "/r" + std::to_string(ratings.number(0)) + ":" + ratings.bytes(1) + ":" +
+                     ratings.bytes(2) + ":" + ratings.bytes(3);
+        }
+        if (history) {
+            Statement played{db, "SELECT count(*),total(play_count),coalesce(max(last_played_ms),0)"
+                                 " FROM local_listening_history"};
+            if (played.next()) {
+                stamp += "/h" + std::to_string(played.number(0)) + ":" + played.bytes(1) + ":" +
+                         std::to_string(played.number(2));
+            }
+        }
+        snapshot.commit();
+        return stamp;
     });
 }
 

@@ -176,6 +176,9 @@ LocalCatalogue::query(const persistence::LibraryQuery& request,
     if (!library) {
         return std::unexpected(std::move(library.error()));
     }
+    if (!request.view.empty()) {
+        return views_->query(*library, request, cancellation);
+    }
     return library->query(request, cancellation);
 }
 
@@ -185,6 +188,9 @@ LocalCatalogue::paths(const persistence::LibraryQuery& request,
     auto library = open();
     if (!library) {
         return std::unexpected(std::move(library.error()));
+    }
+    if (!request.view.empty()) {
+        return views_->paths(*library, request, cancellation);
     }
     return library->paths(request, cancellation);
 }

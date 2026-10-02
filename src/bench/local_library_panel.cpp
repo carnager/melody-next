@@ -2,6 +2,9 @@
 
 #include "bench/local_library_panel.hpp"
 
+#include "bench/library_views_dialog.hpp"
+#include "workspace/library_view_definitions.hpp"
+
 #include "bench/bench_main_window_helpers.hpp"
 #include "bench/settings_dialog.hpp"
 #include "bench/themed_icon.hpp"
@@ -9,6 +12,7 @@
 #include "uicommon/rating_stars.hpp"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEvent>
@@ -72,15 +76,38 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     query_toggle_->setToolTip(
         tr("Interpret the search as a tkq query, e.g. genre HAS jazz AND date GREATER 1990"));
     search_row->addWidget(query_toggle_);
+    // ADR-0254: how the library is grouped -- the artist tree, Recently
+    // added, or a view of tkfmt-1 levels -- and where views are edited.
+    auto* view_row = new QHBoxLayout;
+    view_row->setSpacing(4);
+    view_choice_ = new QComboBox(this);
+    view_choice_->setObjectName(QStringLiteral("local-library-view"));
+    view_choice_->setAccessibleName(tr("Library view"));
+    view_choice_->setToolTip(tr("How the library is grouped"));
+    view_choice_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    view_choice_->setMinimumContentsLength(8);
+    view_row->addWidget(view_choice_, 1);
+    auto* edit_views = new QToolButton(this);
+    edit_views->setObjectName(QStringLiteral("local-library-edit-views"));
+    edit_views->setText(tr("Edit views…"));
+    edit_views->setToolTip(tr("Make, change and remove library views"));
+    edit_views->setAccessibleName(tr("Edit views"));
+    edit_views->setIcon(themedIcon(QStringLiteral("document-edit|sp:SP_FileDialogContentsView")));
+    edit_views->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    edit_views->setAutoRaise(true);
+    edit_views->setIconSize(QSize{16, 16});
+    edit_views->setFixedSize(24, 24);
+    connect(edit_views, &QToolButton::clicked, this, &LocalLibraryPanel::editViews);
+    view_row->addWidget(edit_views);
+    layout->addLayout(view_row);
     layout->addLayout(search_row);
     query_error_ = new QLabel(this);
     query_error_->setObjectName(QStringLiteral("local-library-query-error"));
     query_error_->setWordWrap(true);
     query_error_->hide();
     layout->addWidget(query_error_);
-    // Recently added, refresh and the library's folders are small icons in
-    // the footer beside its news: used now and then, they need not crowd
-    // the search.
+    // Refresh and the library's folders are small icons in the footer
+    // beside its news: used now and then, they need not crowd the search.
     const auto icon_button = [this](const QString& name, const QString& icon, const QString& text) {
         auto* button = new QToolButton(this);
         button->setObjectName(name);
@@ -101,11 +128,6 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     scan_button_ = icon_button(QStringLiteral("local-library-scan"),
                                QStringLiteral("view-refresh|sp:SP_BrowserReload"), tr("Refresh"));
     connect(scan_button_, &QToolButton::clicked, browser_, &LibraryBrowser::toggleScan);
-    newest_toggle_ = icon_button(
-        QStringLiteral("local-library-newest"),
-        QStringLiteral("document-open-recent|sp:SP_FileDialogDetailedView"), tr("Recently added"));
-    newest_toggle_->setCheckable(true);
-    newest_toggle_->setToolTip(tr("Show albums newest first, as they came into the library"));
     auto* library_view = new ui::LibraryTreeView(this);
     tree_ = library_view;
     tree_->setObjectName(QStringLiteral("local-library-tree"));
@@ -140,9 +162,13 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
                 .track = value.isValid() && entry.kind == persistence::LibraryEntryKind::track,
                 .album = value.isValid() && entry.kind == persistence::LibraryEntryKind::album,
                 .root = !index.parent().isValid(),
-                .artist = value.isValid() && entry.kind == persistence::LibraryEntryKind::artist,
+                // A view's group is drawn as an artist is: one line and a
+                // count of its albums.
+                .artist = value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
+                                              entry.kind == persistence::LibraryEntryKind::group),
                 .secondary = index.data(ui::LibraryTreeDelegate::secondaryTextRole).toString(),
-                .count = value.isValid() && entry.kind == persistence::LibraryEntryKind::artist
+                .count = value.isValid() && (entry.kind == persistence::LibraryEntryKind::artist ||
+                                             entry.kind == persistence::LibraryEntryKind::group)
                              ? QString::number(entry.albums)
                              : QString{},
                 .album_rating = value.isValid() ? entry.rating : 0U};
@@ -200,7 +226,6 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     status_row->setContentsMargins(0, 0, 0, 0);
     status_row->setSpacing(0);
     status_row->addWidget(status_, 1);
-    status_row->addWidget(newest_toggle_, 0, Qt::AlignTop);
     status_row->addWidget(scan_button_, 0, Qt::AlignTop);
     status_row->addWidget(folders, 0, Qt::AlignTop);
     footer_layout->addLayout(status_row);
@@ -228,8 +253,8 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
             query_toggle_->setChecked(browser_->queryMode());
         }
         {
-            const QSignalBlocker blocker{newest_toggle_};
-            newest_toggle_->setChecked(browser_->newestFirst());
+            const QSignalBlocker blocker{view_choice_};
+            view_choice_->setCurrentIndex(view_choice_->findData(browser_->viewId()));
         }
         search_->setPlaceholderText(browser_->queryMode() ? tr("tkq query, e.g. genre HAS jazz")
                                                           : tr("Search albums and tracks"));
@@ -238,7 +263,14 @@ LocalLibraryPanel::LocalLibraryPanel(const CatalogueSource& catalogues, EngineKe
     connect(browser_, &LibraryBrowser::searchChanged, this, show_search);
     connect(search_, &QLineEdit::textChanged, browser_, &LibraryBrowser::setSearch);
     connect(query_toggle_, &QCheckBox::toggled, browser_, &LibraryBrowser::setQueryMode);
-    connect(newest_toggle_, &QToolButton::toggled, browser_, &LibraryBrowser::setNewestFirst);
+    refreshViewChoices();
+    connect(view_choice_, &QComboBox::activated, this, [this](const int index) {
+        browser_->setViewId(view_choice_->itemData(index).toString());
+    });
+    connect(&LibraryViewCatalog::instance(), &LibraryViewCatalog::changed, this, [this] {
+        browser_->refreshViews();
+        refreshViewChoices();
+    });
     // ADR-0140: Enter keeps the current hits as a durable list; the
     // live-filtered tree stays the transient default.
     connect(search_, &QLineEdit::returnPressed, browser_, &LibraryBrowser::commitSearch);
@@ -462,6 +494,36 @@ void LocalLibraryPanel::showContextMenu(const QPoint& position) {
                         });
     }
     menu->popup(tree_->viewport()->mapToGlobal(position));
+}
+
+void LocalLibraryPanel::refreshViewChoices() {
+    const QSignalBlocker blocker{view_choice_};
+    view_choice_->clear();
+    const auto views = libraryViews();
+    for (std::size_t index = 0; index < views.size(); ++index) {
+        // The library's own trees -- by artist, by arrival, by folder --
+        // then the grouped views.
+        if (index == 3U) {
+            view_choice_->insertSeparator(view_choice_->count());
+        }
+        // The user's own after the shipped ones.
+        if (index > 0U && !views[index].builtin && views[index - 1U].builtin) {
+            view_choice_->insertSeparator(view_choice_->count());
+        }
+        view_choice_->addItem(views[index].name, views[index].id);
+    }
+    view_choice_->setCurrentIndex(view_choice_->findData(browser_->viewId()));
+}
+
+void LocalLibraryPanel::editViews() {
+    auto* dialog = window()->findChild<LibraryViewsDialog*>();
+    if (dialog == nullptr) {
+        dialog = new LibraryViewsDialog(*browser_->catalogues(), browser_->engine(), window());
+    }
+    dialog->selectView(browser_->viewId());
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 void LocalLibraryPanel::showFolders() {

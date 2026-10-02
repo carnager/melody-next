@@ -337,6 +337,17 @@ target_link_libraries(
 )
 add_test(NAME remote-catalogue COMMAND trackknife_remote_catalogue_tests)
 
+# ADR-0254: library views, grouped by the engine from real tagged files.
+add_executable(trackknife_library_views_tests library_views_test.cpp)
+target_link_libraries(
+    trackknife_library_views_tests
+    PRIVATE Trackknife::Engine Trackknife::Protocol Trackknife::Core PkgConfig::TAGLIB
+            Threads::Threads trackknife_project_options trackknife_project_warnings
+)
+add_test(NAME library-views COMMAND trackknife_library_views_tests
+         "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+set_tests_properties(library-views PROPERTIES TIMEOUT 60)
+
 # ADR-0222: the real client against the real server.
 add_executable(trackknife_protocol_roundtrip_tests protocol_roundtrip_test.cpp)
 target_link_libraries(
@@ -757,6 +768,19 @@ if(TRACKKNIFE_BUILD_UI)
         TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
     add_test(NAME library-panel-engine COMMAND trackknife_library_panel_engine_tests)
     set_tests_properties(library-panel-engine PROPERTIES TIMEOUT 60 ENVIRONMENT
+        "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+
+    # ADR-0254: the library panel shows a view the engine grouped.
+    qt_add_executable(trackknife_library_views_panel_tests library_views_panel_test.cpp)
+    target_link_libraries(
+        trackknife_library_views_panel_tests
+        PRIVATE Trackknife::BenchUi Trackknife::Engine Trackknife::Protocol Qt6::Test
+                PkgConfig::TAGLIB trackknife_project_options trackknife_project_warnings
+    )
+    target_compile_definitions(trackknife_library_views_panel_tests PRIVATE
+        TRACKKNIFE_AUDIO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/audio")
+    add_test(NAME library-views-panel COMMAND trackknife_library_views_panel_tests)
+    set_tests_properties(library-views-panel PROPERTIES TIMEOUT 60 ENVIRONMENT
         "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 
     # ADR-0220 Phase 2: playing a track drives the engine's player, not the

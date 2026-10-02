@@ -460,4 +460,23 @@ core::Result<std::string> tkq_format(const titleformat::Program& program, const 
     return std::move(value->text);
 }
 
+core::Result<std::vector<std::string>>
+tkq_format_each(const titleformat::Program& program, const TkqRowFacts& facts,
+                const std::map<std::string, std::string>& host,
+                const core::CancellationToken& cancellation) {
+    const HostedRowContext context{facts, program.context(), host};
+    titleformat::EvaluationOptions options;
+    options.cancellation = cancellation;
+    auto values = titleformat::evaluateExpanded(program, context, std::move(options));
+    if (!values) {
+        return std::unexpected(std::move(values.error()));
+    }
+    std::vector<std::string> labels;
+    labels.reserve(values->size());
+    for (auto& value : *values) {
+        labels.push_back(std::move(value.text));
+    }
+    return labels;
+}
+
 } // namespace trackknife::persistence

@@ -200,6 +200,9 @@ class Workspace final : public QObject {
     std::vector<std::unique_ptr<ListTab>> list_tabs_;
     QHash<QString, QByteArray> restored_track_view_layouts_;
     MprisService* mpris_{nullptr};
+    // The cover file given to the desktop, and which album it is.
+    QString desktop_cover_key_;
+    QString desktop_cover_path_;
     DesktopNotifier* notifier_{nullptr};
     ui::ListPersistenceService* persistence_{nullptr};
     std::filesystem::path database_path_;
@@ -789,6 +792,17 @@ class Workspace final : public QObject {
     void sampleLastFm(const EnginePlayback::State& state);
     // What plays, as MPRIS and the track-change notification show it.
     void publishDesktopState();
+    // The play order as MPRIS names it: repeat and single together loop the
+    // track ("Track"), repeat alone the list ("Playlist"), else "None"; and
+    // shuffled is random or album random. Set from the desktop, the modes
+    // follow and every engine is told (ADR-0135).
+    [[nodiscard]] QString loopStatus() const;
+    void setLoopStatus(const QString& status);
+    [[nodiscard]] bool shuffled() const;
+    void setShuffled(bool shuffled);
+    // The playing album's cover as a file the desktop can read -- written
+    // once per album into the cache, the last one removed -- or empty.
+    [[nodiscard]] QString desktopCoverPath(const LocalTrackRow& track, const EngineKey& engine);
 
     // Files into lists: discovered from paths and folders (CUE sheets
     // expanded), probed for their tags a batch at a time, and -- for a list

@@ -7,6 +7,7 @@
 #include <QDBusPendingCall>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
+#include <QUrl>
 #include <QVariantMap>
 
 #include <utility>
@@ -48,8 +49,9 @@ bool DesktopNotifier::publish(const MprisPlaybackState& state, const bool window
     }
     last_summary_ = summary;
     last_body_ = body;
+    last_image_ = state.art_path;
     ++sent_count_;
-    send(summary, markup_escaped(body));
+    send(summary, markup_escaped(body), state.art_path);
     return true;
 }
 
@@ -57,7 +59,7 @@ void DesktopNotifier::sendTest() {
     send(QStringLiteral("Trackknife"), QStringLiteral("Track-change notifications are working."));
 }
 
-void DesktopNotifier::send(const QString& summary, const QString& body) {
+void DesktopNotifier::send(const QString& summary, const QString& body, const QString& image) {
     if (send_override_) {
         send_override_(summary, body);
         emit deliveryFinished({});
@@ -77,6 +79,11 @@ void DesktopNotifier::send(const QString& summary, const QString& body) {
     hints.insert(QStringLiteral("transient"), true);
     hints.insert(QStringLiteral("suppress-sound"), true);
     hints.insert(QStringLiteral("desktop-entry"), QStringLiteral("trackknife"));
+    // The album's cover beside the text, where the desktop shows images.
+    if (!image.isEmpty()) {
+        hints.insert(QStringLiteral("image-path"),
+                     QUrl::fromLocalFile(image).toString(QUrl::FullyEncoded));
+    }
     call << QStringLiteral("Trackknife") << replace_id_ << QStringLiteral("audio-x-generic")
          << summary << body << QStringList{} << hints << -1;
     auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(call), this);

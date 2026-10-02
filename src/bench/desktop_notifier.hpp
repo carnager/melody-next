@@ -34,6 +34,8 @@ class DesktopNotifier final : public QObject {
     [[nodiscard]] quint64 sentCount() const noexcept { return sent_count_; }
     [[nodiscard]] QString lastSummary() const { return last_summary_; }
     [[nodiscard]] QString lastBody() const { return last_body_; }
+    // The cover file the last notification showed; empty, none.
+    [[nodiscard]] QString lastImage() const { return last_image_; }
 
     // Test seam: replaces the D-Bus delivery; the decision stream is
     // unchanged.
@@ -45,13 +47,14 @@ class DesktopNotifier final : public QObject {
     void deliveryFinished(const QString& error);
 
   private:
-    void send(const QString& summary, const QString& body);
+    void send(const QString& summary, const QString& body, const QString& image = {});
 
     bool enabled_{false};
     bool background_only_{false};
     QString last_track_key_;
     QString last_summary_;
     QString last_body_;
+    QString last_image_;
     quint64 sent_count_{0U};
     quint32 replace_id_{0U};
     std::function<void(const QString&, const QString&)> send_override_;

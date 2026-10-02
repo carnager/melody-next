@@ -99,7 +99,7 @@ ADR-0224.
 | Playback modes | Implemented | Repeat, Random, Single/Consume including one-shot modes, owned by the engine (ADRs 0119–0121). |
 | Track and album ratings | Implemented | 0–10 scale (ADR-0179), stored in the engine. Optionally written into files as `FMPS_RATING` and MP3 POPM (ADR-0237), with a plain 0–10 copy in a backup tag of the user's naming (ADR-0245). |
 | Album shuffle, history, and resume | Implemented, bounded | Listening statistics, paused resume including Up Next, one-shot and continuous album shuffle, `HISTORY(...)` predicates and history sorting (ADRs 0207–0216), per engine. Calendar-relative time operators remain open. |
-| MPRIS/media keys/notifications | Partial | MPRIS and media keys control the engine that plays (ADR-0135); opt-in track-change notifications (ADRs 0144, 0195). Notification artwork, MPRIS artwork URLs and LoopStatus/Shuffle mapping remain open. |
+| MPRIS/media keys/notifications | Implemented | MPRIS and media keys control the engine that plays (ADR-0135); opt-in track-change notifications (ADRs 0144, 0195). The playing album's cover reaches both, as an `mpris:artUrl` and a notification image, from a file written once per album into the cache. LoopStatus and Shuffle map to the modes both ways: repeat and single loop the track, repeat the list, random or album random shuffle. |
 
 Evidence: [unified engine](unified-engine.md), [melody.md](melody.md),
 [local library](local-library.md), [playback](playback-library-conversion.md),

@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <map>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -49,8 +50,14 @@ class EngineListSync final : public QObject {
     // An engine known by one key is known by another from now: the remote
     // once it has said who it is. Its lists and pending removals go along.
     void rekey(const EngineKey& from, const EngineKey& to);
-    // After every save of the workspace.
-    void update(const std::vector<persistence::ListDocument>& documents);
+    // A list with its items, when the sync must send one the save handed it
+    // without them; none, it is gone.
+    using WholeList =
+        std::function<std::optional<persistence::ListDocument>(const core::StableId& id)>;
+    // After every save of the workspace: every list, with its items where
+    // they changed since the last save.
+    void update(const std::vector<persistence::ListDocumentWrite>& documents,
+                const WholeList& whole);
     // An engine connected, or connected again: compared anew before anything
     // more is sent to it.
     void reconnected(const EnginePlayback* engine);

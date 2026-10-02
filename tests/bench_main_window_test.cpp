@@ -366,6 +366,7 @@ class BenchMainWindowTest final : public QObject {
     void metadataRetrySkipsSavedFiles_data();
     void metadataRetrySkipsSavedFiles();
     void coverPolicyRoundTrip();
+    void aSaveWritesOnlyListsThatChanged();
     void playbackSettingsApplyLiveAndCancel();
     void librarySettingsManageFoldersWithoutScanning();
     void ratingsInTagsIsAnEngineOption();
@@ -10128,6 +10129,81 @@ void BenchMainWindowTest::playbackSettingsApplyLiveAndCancel() {
                  ->isChecked());
     dialog->reject();
 }
+
+// A save writes a list's items only when they changed since the last save:
+// two kept searches of 66,841 tracks had every save -- a rating, a tab
+// switch -- rewrite 3.2 million rows, and the window froze on every start.
+void BenchMainWindowTest::aSaveWritesOnlyListsThatChanged() {
+    const auto rows = [](const int count, const std::string& folder) {
+        std::vector<LocalTrackRow> made;
+        for (int index = 0; index < count; ++index) {
+            LocalTrackRow row;
+            row.raw_path = "/music/" + folder + "/" + std::to_string(index) + ".flac";
+            row.title = "Track " + std::to_string(index);
+            made.push_back(std::move(row));
+        }
+        return made;
+    };
+    const auto document = [](const std::string& name) {
+        return persistence::ListDocument{.id = core::StableId::random(),
+                                         .kind = persistence::ListKind::scratch,
+                                         .name = name,
+                                         .pinned = false,
+                                         .dirty = false,
+                                         .items = {}};
+    };
+    const auto carries_items = [](BenchMainWindow& window, const core::StableId& id) {
+        for (const auto& write : window.workspace_.collectWrites()) {
+            if (write.document.id == id) {
+                return std::optional{write.items};
+            }
+        }
+        return std::optional<bool>{};
+    };
+    core::StableId big_id;
+    core::StableId small_id;
+    {
+        BenchMainWindow window;
+        window.show();
+        QTRY_VERIFY(window.lists_restored_);
+        auto* big = window.addListTab(document("Big"), false);
+        auto* small = window.addListTab(document("Small"), false);
+        big_id = big->document.id;
+        small_id = small->document.id;
+        big->model->appendRows(rows(200, "big"));
+        small->model->appendRows(rows(2, "small"));
+        QCOMPARE(carries_items(window, big_id), std::optional{true});
+        window.persistNow(true);
+        // Saved and unchanged: headers only.
+        QCOMPARE(carries_items(window, big_id), std::optional{false});
+        QCOMPARE(carries_items(window, small_id), std::optional{false});
+        // One list edited: its items, and only its.
+        small->model->appendRows(rows(1, "more"));
+        QCOMPARE(carries_items(window, small_id), std::optional{true});
+        QCOMPARE(carries_items(window, big_id), std::optional{false});
+        // Renamed: written whole, as an engine's copy names it.
+        big->document.name = "Big, renamed";
+        QCOMPARE(carries_items(window, big_id), std::optional{true});
+        window.persistNow(true);
+        QCOMPARE(carries_items(window, big_id), std::optional{false});
+    }
+    // Restored as stored, and stored right: nothing to write again.
+    BenchMainWindow reopened;
+    reopened.show();
+    QTRY_VERIFY(reopened.lists_restored_);
+    auto* big = reopened.workspace_.tabForDocument(big_id);
+    auto* small = reopened.workspace_.tabForDocument(small_id);
+    QVERIFY(big != nullptr && small != nullptr);
+    QCOMPARE(big->model->rows().size(), std::size_t{200});
+    QCOMPARE(displayText(big->document.name), QStringLiteral("Big, renamed"));
+    QCOMPARE(small->model->rows().size(), std::size_t{3});
+    QCOMPARE(carries_items(reopened, big_id), std::optional{false});
+    QCOMPARE(carries_items(reopened, small_id), std::optional{false});
+    reopened.closeTabAt(reopened.tabs_->indexOf(big->view));
+    reopened.closeTabAt(reopened.tabs_->indexOf(small->view));
+    reopened.persistNow(true);
+}
+
 
 void BenchMainWindowTest::coverPolicyRoundTrip() {
     QSettings{}.setValue(QStringLiteral("convert/embed-artwork"), false);

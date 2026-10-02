@@ -28,6 +28,12 @@ core::Result<void> Workspace::replace_all(std::span<const persistence::ListDocum
     return repository_.replace_all(documents);
 }
 
+core::Result<void>
+Workspace::save_workspace(std::span<const persistence::ListDocumentWrite> documents) {
+    const std::lock_guard guard{*mutex_};
+    return repository_.save_workspace(documents);
+}
+
 core::Result<persistence::LocalMetadataRefreshResult>
 Workspace::refresh_local_metadata(const persistence::LocalMetadataRefresh& refresh) {
     const std::lock_guard guard{*mutex_};

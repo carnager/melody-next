@@ -125,6 +125,7 @@ LocalListModel::LocalListModel(QObject* parent) : QAbstractTableModel(parent) {
 
 void LocalListModel::replaceRows(std::vector<LocalTrackRow> rows, const bool remember,
                                  QString label) {
+    touched();
     Edit edit;
     if (remember) {
         edit.kind = Edit::Kind::replacement;
@@ -219,6 +220,7 @@ QStringList LocalListModel::ratingHashes() const {
 
 void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int insertion_row,
                                 const bool remember) {
+    touched();
     if (rows.empty()) {
         return;
     }
@@ -249,6 +251,7 @@ void LocalListModel::appendRows(std::vector<LocalTrackRow> rows, const int inser
 }
 
 void LocalListModel::removeRowIndexes(std::vector<int> rows, const bool remember, QString label) {
+    touched();
     rows = normalized_rows(std::move(rows), static_cast<int>(rows_.size()));
     if (rows.empty())
         return;
@@ -265,6 +268,7 @@ void LocalListModel::removeRowIndexes(std::vector<int> rows, const bool remember
 }
 
 void LocalListModel::reorderRows(std::vector<int> rows, const int insertion_row) {
+    touched();
     rows = normalized_rows(std::move(rows), static_cast<int>(rows_.size()));
     if (rows.empty()) {
         return;
@@ -330,6 +334,7 @@ void LocalListModel::reorderRows(std::vector<int> rows, const int insertion_row)
 }
 
 bool LocalListModel::applyPermutation(const std::vector<int>& order, QString label) {
+    touched();
     if (order.size() != rows_.size())
         return false;
     Edit edit;
@@ -352,6 +357,7 @@ bool LocalListModel::applyPermutation(const std::vector<int>& order, QString lab
 }
 
 void LocalListModel::applyOrder(const std::vector<int>& order) {
+    touched();
     emit layoutAboutToBeChanged();
     const auto previous = persistentIndexList();
     std::vector<int> destinations(order.size());
@@ -456,6 +462,7 @@ void LocalListModel::trimHistory() {
 }
 void LocalListModel::removePositions(const std::vector<int>& positions,
                                      std::vector<LocalTrackRow>* detached) {
+    touched();
     if (detached != nullptr)
         detached->resize(positions.size());
     for (std::size_t end = positions.size(); end > 0;) {
@@ -482,6 +489,7 @@ void LocalListModel::removePositions(const std::vector<int>& positions,
 }
 
 void LocalListModel::replayEdit(Edit& edit, const bool undoing) {
+    touched();
     if (edit.kind == Edit::Kind::reorder) {
         std::vector<int> inverse(edit.order.size());
         for (std::size_t row = 0; row < edit.order.size(); ++row)
@@ -540,6 +548,7 @@ bool LocalListModel::redo() {
     return true;
 }
 std::vector<LocalTrackRow*> LocalListModel::retainedRows() {
+    touched();
     std::vector<LocalTrackRow*> retained;
     for (auto& edit : history_)
         for (auto& row : edit.detached)
@@ -549,6 +558,7 @@ std::vector<LocalTrackRow*> LocalListModel::retainedRows() {
 
 bool LocalListModel::applyMetadata(const std::string& raw_path, const int hint_row,
                                    LocalTrackRow metadata) {
+    touched();
     const auto row = rowOfPath(raw_path, hint_row);
     if (row < 0) {
         return false;
@@ -571,6 +581,7 @@ bool LocalListModel::applyMetadata(const std::string& raw_path, const int hint_r
 
 bool LocalListModel::applyProbeRows(const std::string& raw_path, const int hint_row,
                                     std::vector<LocalTrackRow> rows) {
+    touched();
     if (rows.empty()) {
         return false;
     }
@@ -619,6 +630,7 @@ core::Result<std::size_t>
 LocalListModel::applyCommittedMetadata(const std::string& raw_path,
                                        const metadata::MetadataDocument& document,
                                        const core::LocalSourceRevision& published_revision) {
+    touched();
     const auto matches = [&raw_path](const LocalTrackRow& row) { return row.raw_path == raw_path; };
     auto retained_rows = retainedRows();
     if (std::ranges::any_of(retained_rows, [&](const auto* row) {
@@ -684,6 +696,7 @@ LocalListModel::applyCommittedMetadata(const std::string& raw_path,
 std::size_t
 LocalListModel::applyCueReplayGain(const std::string& reference, const bool prefix_match,
                                    const std::vector<CueReplayGainFieldUpdate>& fields) {
+    touched();
     if (fields.empty()) {
         return 0U;
     }
@@ -730,6 +743,7 @@ std::size_t
 LocalListModel::applySidecarLoudness(const std::string& raw_path,
                                      const SidecarRowIdentity& identity,
                                      const std::vector<CueReplayGainFieldUpdate>& fields) {
+    touched();
     if (fields.empty()) {
         return 0U;
     }
@@ -779,6 +793,7 @@ LocalListModel::applyCommittedRelocation(const std::string& source_raw_path,
                                          const std::string& target_raw_path,
                                          const core::LocalSourceRevision& previous_revision,
                                          const core::LocalSourceRevision& published_revision) {
+    touched();
     if (source_raw_path.empty() || target_raw_path.empty() || source_raw_path == target_raw_path ||
         previous_revision.inode == 0U || published_revision.inode == 0U) {
         return std::unexpected(core::Error{

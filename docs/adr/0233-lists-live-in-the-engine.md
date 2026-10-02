@@ -137,6 +137,18 @@ ADR-0230 without changing who owns what.
 - Moves span processes; a relocation can be pending while an engine is away,
   and a list on that engine names the old paths until it returns.
 
+## Amendment, 2026-10-02: the window's copy is written where it changed
+
+Until step 3d removes the window's own copy, a save writes each list's
+header (name, kind, place, flags) and its items only when they changed since
+the last successful save (`ListRepository::save_workspace`). It used to
+replace every list on every save. With two kept searches of 66,841 tracks,
+each carrying all its tags, that rewrote 3.2 million rows per save, about
+5 s of which much ran on the window's thread, and grew the database to
+780 MB with a 756 MB log. The engine sync works the same way: an unchanged
+list keeps the fingerprint taken at its last save, and the sync asks the
+workspace for its items only when it has to send them.
+
 ## Verification
 
 - Repository tests: the tables, round trip of every field, revisions and

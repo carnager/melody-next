@@ -108,6 +108,14 @@ struct ListDocument {
     friend bool operator==(const ListDocument&, const ListDocument&) = default;
 };
 
+// A list as a workspace save hands it over: always its header -- name, kind,
+// place, flags -- and its items only when they changed since they were last
+// saved. A list left out is deleted.
+struct ListDocumentWrite {
+    ListDocument document;
+    bool items{true};
+};
+
 // ADR-0233: one entry of a list, as its engine stores it. The track
 // is named by its path on the engine's machine; the entry keeps its identity
 // (ADR-0221). Title, artist and album are what the client that saved it
@@ -281,6 +289,10 @@ class ListRepository final {
     [[nodiscard]] core::Result<unsigned> schema_version() const;
     [[nodiscard]] core::Result<std::vector<ListDocument>> load_all() const;
     [[nodiscard]] core::Result<void> replace_all(std::span<const ListDocument> documents);
+    // The workspace's lists as they are now, writing items only where they
+    // changed: a save costs what changed, not the size of every list -- two
+    // kept searches of 66,841 tracks had every save rewrite 3.2 million rows.
+    [[nodiscard]] core::Result<void> save_workspace(std::span<const ListDocumentWrite> documents);
     // Atomically refreshes every local occurrence of one physical source and
     // its source cache. The operation identity makes recovery replay a no-op.
     [[nodiscard]] core::Result<LocalMetadataRefreshResult>

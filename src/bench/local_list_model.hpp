@@ -224,6 +224,10 @@ class LocalListModel final : public QAbstractTableModel {
     void setArtwork(const QString& key, QImage image);
     [[nodiscard]] QImage artwork(const QString& key) const { return artwork_.value(key); }
     [[nodiscard]] const std::vector<LocalTrackRow>& rows() const noexcept { return rows_; }
+    // Goes up with every change to what the list holds -- rows, their order,
+    // their tags -- so a save writes only lists that changed (and a ratings
+    // or playing-marker refresh, which stores nothing, is not one).
+    [[nodiscard]] std::uint64_t contentRevision() const noexcept { return content_revision_; }
     [[nodiscard]] std::string rawPath(int row) const;
     [[nodiscard]] LocalTrackSource source(int row) const;
     // Finds the row holding raw_path, preferring the hint row so duplicate
@@ -281,6 +285,8 @@ class LocalListModel final : public QAbstractTableModel {
     void removePositions(const std::vector<int>& positions, std::vector<LocalTrackRow>* detached);
     void applyOrder(const std::vector<int>& order);
     [[nodiscard]] std::vector<LocalTrackRow*> retainedRows();
+    void touched() noexcept { ++content_revision_; }
+    std::uint64_t content_revision_{0};
     std::vector<Edit> history_;
     std::size_t history_cursor_{0};
     void refreshCurrentRow();

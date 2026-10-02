@@ -73,6 +73,12 @@ struct LibraryQuery {
     std::vector<LibraryViewLevel> view;
     std::vector<std::string> view_path;
     std::string view_filter;
+    // ADR-0254: browsing the index by folder -- the library's roots, or what
+    // is in `folder`: its folders that hold tracks, then its own tracks. A
+    // folder of one album and no folders below is that album's entry. Its
+    // paths are everything below it.
+    bool folders{false};
+    std::optional<std::string> folder;
 };
 
 struct LibraryEntry {

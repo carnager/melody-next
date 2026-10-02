@@ -170,6 +170,15 @@ void register_catalogue_methods(protocol::Dispatcher& dispatcher, Catalogue& cat
             }
         }
         request.view_filter = params.value("view_filter", std::string{});
+        request.folders = params.value("folders", false);
+        if (const auto folder = params.find("folder");
+            folder != params.end() && folder->is_string()) {
+            auto decoded = protocol::decode_raw_path(folder->get<std::string>());
+            if (!decoded || decoded->empty()) {
+                return std::unexpected(bad_params("folder is not an encoded path", "folder"));
+            }
+            request.folder = std::move(*decoded);
+        }
         return request;
     };
 

@@ -166,6 +166,9 @@ existing declarative track-view engine, metadata reader, and local transport.
 
 The dropdown above the search chooses how the library is grouped. **Artist ›
 Album** is the usual tree, and **Recently added** lists albums newest first.
+**Folders** browses the library's folders from its roots down, as the
+engine indexed them, so it also works for a remote engine. A folder that
+holds one album and no folders shows as that album.
 The other views group by tag: **Genre › Artist › Album**, **Year › Album**,
 **Decade › Artist › Album** and **Album**. A track with several genres
 appears under each of them. Tracks with no value for a level are grouped
@@ -183,7 +186,12 @@ view is a list of levels, and each level is a
 `%date%` lists albums in release order. **Reverse** turns the order around.
 Without a sort expression, a level is sorted by its labels, ignoring case
 and with numbers in numeric order. The preview shows the library grouped by
-the view as you edit it. The shipped views can be copied but not changed.
+the view as you edit it. Every shipped view is listed, Artist › Album
+included, with the levels it groups by, so you can copy one and change it.
+For example, copy Artist › Album and make its album level
+`$if(%date%,$left(%date%,4) – ,)%album%` to show each album's year. Folders
+has no levels, so it can't be copied. The shipped views themselves can't be
+changed.
 
 With **Query** on, the query narrows the view before it is grouped. A word
 search shows its results as usual. An album row in a view stands for what

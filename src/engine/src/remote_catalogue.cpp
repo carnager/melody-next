@@ -310,6 +310,12 @@ namespace {
             params["view_filter"] = request.view_filter;
         }
     }
+    if (request.folders) {
+        params["folders"] = true;
+        if (request.folder) {
+            params["folder"] = protocol::encode_raw_path(*request.folder);
+        }
+    }
     return params;
 }
 

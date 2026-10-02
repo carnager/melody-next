@@ -501,8 +501,9 @@ void LocalLibraryPanel::refreshViewChoices() {
     view_choice_->clear();
     const auto views = libraryViews();
     for (std::size_t index = 0; index < views.size(); ++index) {
-        // The two trees the library always had, then the grouped views.
-        if (index == 2U) {
+        // The library's own trees -- by artist, by arrival, by folder --
+        // then the grouped views.
+        if (index == 3U) {
             view_choice_->insertSeparator(view_choice_->count());
         }
         // The user's own after the shipped ones.

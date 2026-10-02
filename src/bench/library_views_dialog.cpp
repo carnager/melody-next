@@ -43,7 +43,8 @@ LibraryViewsDialog::LibraryViewsDialog(const CatalogueSource& catalogues, Engine
     auto* explanation = new QLabel(
         tr("A view groups the library by levels, each a tkfmt-1 expression evaluated for every "
            "track. $each(genre) lists a track under each of its genres. Tracks always come "
-           "last. The shipped views can be copied, not changed."),
+           "last. The shipped views can be copied, not changed: copy Artist › Album and make "
+           "its album level $if(%date%,$left(%date%,4) – ,)%album% to see each album's year."),
         this);
     explanation->setWordWrap(true);
     layout->addWidget(explanation);
@@ -121,6 +122,12 @@ LibraryViewsDialog::LibraryViewsDialog(const CatalogueSource& catalogues, Engine
     level_buttons->addStretch(1);
     editor_layout->addLayout(level_buttons);
 
+    note_ = new QLabel(editor);
+    note_->setObjectName(QStringLiteral("library-view-note"));
+    note_->setWordWrap(true);
+    note_->setForegroundRole(QPalette::PlaceholderText);
+    note_->hide();
+    editor_layout->addWidget(note_);
     error_ = new QLabel(editor);
     error_->setObjectName(QStringLiteral("library-view-error"));
     error_->setWordWrap(true);
@@ -179,13 +186,7 @@ LibraryViewsDialog::LibraryViewsDialog(const CatalogueSource& catalogues, Engine
 
 void LibraryViewsDialog::loadViews() {
     views_.clear();
-    // The artist tree and Recently added are the library's own trees, not
-    // levels to edit.
-    for (auto& view : libraryViews()) {
-        if (!view.levels.empty()) {
-            views_.push_back(std::move(view));
-        }
-    }
+    views_ = libraryViews();
     const QSignalBlocker blocker{list_};
     list_->clear();
     for (const auto& view : views_) {
@@ -223,7 +224,15 @@ void LibraryViewsDialog::showView(const int row) {
     name_->setReadOnly(!editable);
     showLevels();
     filling_ = false;
-    copy_->setEnabled(view != nullptr);
+    // Folders has no levels to start a copy from.
+    copy_->setEnabled(view != nullptr && !view->levels.empty());
+    note_->setText(view == nullptr || !view->own_tree ? QString{}
+                   : view->levels.empty()
+                       ? tr("Folders browses the engine's folders, as indexed, from the "
+                            "library's roots down. No levels describe it, so it cannot be copied.")
+                       : tr("Shown with the library's own tree. These levels group the same way: "
+                            "copy the view to change them."));
+    note_->setVisible(!note_->text().isEmpty());
     remove_->setEnabled(editable);
     add_level_->setEnabled(editable);
     emit levels_->itemSelectionChanged();
@@ -313,7 +322,14 @@ void LibraryViewsDialog::edited() {
 }
 
 void LibraryViewsDialog::preview() {
-    if (const auto* view = current(); view != nullptr && !view->levels.empty()) {
+    const auto* view = current();
+    if (view == nullptr) {
+        return;
+    }
+    // A shipped tree is previewed as it is shown, not as its levels.
+    if (view->own_tree) {
+        preview_->previewView(view->id);
+    } else if (!view->levels.empty()) {
         preview_->previewLevels(view->levels);
     }
 }
@@ -323,6 +339,7 @@ void LibraryViewsDialog::addView(const bool copy) {
     if (copy && current() != nullptr) {
         view = *current();
         view.name = tr("%1 (copy)").arg(view.name);
+        view.own_tree = false;
     } else {
         view.name = tr("New view");
         view.levels = {{.format = "%albumartist%", .sort = {}, .descending = false},

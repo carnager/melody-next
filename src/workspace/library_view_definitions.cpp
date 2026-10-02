@@ -48,10 +48,18 @@ QString libraryViewLevelError(const QString& source) {
 
 std::vector<LibraryViewDefinition> builtinLibraryViews() {
     return {
-        {.id = default_library_view_id, .name = QStringLiteral("Artist › Album"), .levels = {},
-         .builtin = true},
-        {.id = recent_library_view_id, .name = QStringLiteral("Recently added"), .levels = {},
-         .builtin = true},
+        {.id = default_library_view_id,
+         .name = QStringLiteral("Artist › Album"),
+         .levels = {level("%albumartist%"), level("%album%", "%date%")},
+         .builtin = true,
+         .own_tree = true},
+        {.id = recent_library_view_id,
+         .name = QStringLiteral("Recently added"),
+         .levels = {level("%albumartist% — %album%", "$info(albumdayssinceadded)")},
+         .builtin = true,
+         .own_tree = true},
+        {.id = folders_library_view_id, .name = QStringLiteral("Folders"), .levels = {},
+         .builtin = true, .own_tree = true},
         {.id = QStringLiteral("genre-artist-album"),
          .name = QStringLiteral("Genre › Artist › Album"),
          .levels = {level("$each(genre)"), level("%albumartist%"),

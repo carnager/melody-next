@@ -246,10 +246,43 @@ void LibraryViewsPanelTest::thePanelShowsAView() {
     QVERIFY(preview != nullptr);
     QTRY_COMPARE(rows(preview->model()),
                  (QStringList{QStringLiteral("Beta"), QStringLiteral("Alpha")}));
-    // Shipped views are looked at, not changed.
+    // Every shipped view is there to copy -- the artist tree too, with the
+    // levels that say what it does -- but not to change.
     list->setCurrentRow(0);
+    QCOMPARE(list->currentItem()->text(), QStringLiteral("Artist › Album"));
     QVERIFY(dialog->findChild<QLineEdit*>(QStringLiteral("library-view-name"))->isReadOnly());
+    QCOMPARE(levels->rowCount(), 2);
+    auto* copy = dialog->findChild<QPushButton*>(QStringLiteral("library-views-copy"));
+    QVERIFY(copy != nullptr && copy->isEnabled());
+    // Previewing it shows the artist tree, and does not choose it.
+    QTRY_COMPARE(rows(preview->model()),
+                 (QStringList{QStringLiteral("Alpha"), QStringLiteral("Beta")}));
+    QCOMPARE(QSettings{}.value(QStringLiteral("library/view")).toString(), QStringLiteral("mine"));
+    copy->click();
+    QCOMPARE(list->currentItem()->text(), QStringLiteral("Artist › Album (copy)"));
+    QVERIFY(!dialog->findChild<QLineEdit*>(QStringLiteral("library-view-name"))->isReadOnly());
+    QCOMPARE(levels->rowCount(), 2);
+    const auto folders_row = list->findItems(QStringLiteral("Folders"), Qt::MatchExactly);
+    QCOMPARE(folders_row.size(), 1);
+    list->setCurrentItem(folders_row.front());
+    QVERIFY(!copy->isEnabled());
     dialog->close();
+
+    // Folders: the engine's, from the library's root down.
+    const auto folders = choice->findData(folders_library_view_id);
+    QVERIFY(folders >= 0);
+    choice->setCurrentIndex(folders);
+    emit choice->activated(folders);
+    QTRY_COMPARE(model->rowCount(), 1);
+    const auto root = model->index(0, 0);
+    tree->expand(root);
+    QTRY_COMPARE(rows(model, root), (QStringList{QStringLiteral("one"), QStringLiteral("two")}));
+    QCOMPARE(row(model, QStringLiteral("one"), root).data(library_kind_role).toString(),
+             QStringLiteral("album"));
+    resolved.clear();
+    panel.resolveEntries(LibraryBrowser::selectedEntries({root}),
+                         [&resolved](std::vector<std::string> paths) { resolved = std::move(paths); });
+    QTRY_COMPARE(resolved.size(), std::size_t{3});
 
     // Go to album finds the file under its artist, in the artist tree.
     panel.locatePath(jazz_and_rock, true);

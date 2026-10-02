@@ -63,6 +63,7 @@ class LibraryViewsDialog final : public QDialog {
     QToolButton* remove_level_{nullptr};
     QToolButton* level_up_{nullptr};
     QToolButton* level_down_{nullptr};
+    QLabel* note_{nullptr};
     QLabel* error_{nullptr};
     QTreeView* preview_view_{nullptr};
     LibraryBrowser* preview_{nullptr};

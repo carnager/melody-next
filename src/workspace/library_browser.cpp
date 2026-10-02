@@ -35,6 +35,9 @@ QByteArray entryKey(const persistence::LibraryEntry& entry) {
     auto key = QByteArray::number(static_cast<int>(entry.kind)) + ':';
     // A view's node by where it is: one artist under two genres is two rows.
     if (entry.view_node) {
+        if (entry.view_node->folder) {
+            return key + QByteArray::fromStdString(*entry.view_node->folder);
+        }
         for (const auto& label : entry.view_node->view_path) {
             key += QByteArray::fromStdString(label) + '\x1f';
         }
@@ -224,7 +227,8 @@ LibraryBrowser::LibraryBrowser(const CatalogueSource& catalogues, EngineKey engi
     adoptView(QSettings{}
                   .value(QStringLiteral("library/view"),
                          newest_first_ ? recent_library_view_id : default_library_view_id)
-                  .toString());
+                  .toString(),
+              false);
     model_ = new LibraryModel(this, [this](const QModelIndex& index) { fetch(index); });
     search_timer_.setSingleShot(true);
     search_timer_.setInterval(200);
@@ -419,15 +423,19 @@ void LibraryBrowser::setNewestFirst(const bool on) {
     setViewId(on ? recent_library_view_id : default_library_view_id);
 }
 
-void LibraryBrowser::adoptView(const QString& id) {
+void LibraryBrowser::adoptView(const QString& id, const bool remember) {
     const auto views = libraryViews();
     auto found = std::ranges::find(views, id, &LibraryViewDefinition::id);
     if (found == views.end()) {
         found = std::ranges::find(views, default_library_view_id, &LibraryViewDefinition::id);
     }
     view_id_ = found->id;
-    view_ = found->levels;
+    view_ = found->own_tree ? std::vector<persistence::LibraryViewLevel>{} : found->levels;
     newest_first_ = view_id_ == recent_library_view_id;
+    folders_ = view_id_ == folders_library_view_id;
+    if (!remember) {
+        return;
+    }
     QSettings settings;
     settings.setValue(QStringLiteral("library/view"), view_id_);
     settings.setValue(QStringLiteral("library/newest-first"), newest_first_);
@@ -448,6 +456,14 @@ void LibraryBrowser::previewLevels(std::vector<persistence::LibraryViewLevel> le
     view_id_.clear();
     view_ = std::move(levels);
     newest_first_ = false;
+    folders_ = false;
+    reload();
+}
+
+void LibraryBrowser::previewView(const QString& id) {
+    adoptView(id, false);
+    // Marked a preview, so an edit of the saved views leaves it alone.
+    view_id_.clear();
     reload();
 }
 
@@ -546,6 +562,15 @@ void LibraryBrowser::reload() {
     const auto query_text = bytes(search_.trimmed());
     if (query_text.empty()) {
         setQueryError({});
+        // ADR-0254: the engine's folders, from the library's roots down --
+        // on whichever machine it runs.
+        if (folders_) {
+            persistence::LibraryQuery top;
+            top.kind = persistence::LibraryEntryKind::group;
+            top.folders = true;
+            loadChildren({}, top);
+            return;
+        }
         // ADR-0254: a view's first level, grouped by the engine.
         if (!view_.empty()) {
             persistence::LibraryQuery top;
@@ -686,11 +711,16 @@ void LibraryBrowser::loadChildren(const QPersistentModelIndex& parent,
                  // ADR-0254: a view's node opens, and resolves, as the view
                  // lists it -- under a genre, an album is the genre's part
                  // of it.
-                 if (!query.view.empty() && entry.kind != persistence::LibraryEntryKind::track) {
+                 if ((!query.view.empty() || query.folders) &&
+                     entry.kind != persistence::LibraryEntryKind::track) {
                      auto node = query;
                      node.kind = persistence::LibraryEntryKind::group;
                      node.offset = 0U;
-                     node.view_path.push_back(entry.view_value);
+                     if (query.folders) {
+                         node.folder = entry.view_value;
+                     } else {
+                         node.view_path.push_back(entry.view_value);
+                     }
                      entry.view_node = std::move(node);
                  }
                  auto label = entry.label.empty() && entry.view_node ? tr("Unknown")

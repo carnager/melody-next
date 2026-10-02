@@ -20,6 +20,10 @@ struct LibraryViewDefinition {
     QString name;
     std::vector<persistence::LibraryViewLevel> levels;
     bool builtin{false};
+    // Shown with the library's own tree -- the artist tree, Recently added,
+    // Folders -- not grouped by `levels`, which say the same for a copy to
+    // start from (Folders has none: no levels say what it does).
+    bool own_tree{false};
 
     friend bool operator==(const LibraryViewDefinition&, const LibraryViewDefinition&) = default;
 };
@@ -28,6 +32,8 @@ struct LibraryViewDefinition {
 inline const QString default_library_view_id = QStringLiteral("artist-album");
 // Albums newest first, as they came into the library.
 inline const QString recent_library_view_id = QStringLiteral("recently-added");
+// The library's folders as the engine indexed them, from its roots down.
+inline const QString folders_library_view_id = QStringLiteral("folders");
 
 [[nodiscard]] std::vector<LibraryViewDefinition> builtinLibraryViews();
 // The shipped views, then the user's, in the order they were made.

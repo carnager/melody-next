@@ -122,8 +122,10 @@ class LibraryBrowser final : public QObject {
     void setViewId(const QString& id);
     // The views were edited: the one shown is read again.
     void refreshViews();
-    // Shows `levels` as a view without choosing it: an editor's preview.
+    // Shows `levels`, or the view `id`, without choosing it: an editor's
+    // preview, which the next start does not show.
     void previewLevels(std::vector<persistence::LibraryViewLevel> levels);
+    void previewView(const QString& id);
     // ADR-0140: the whole result of the search, kept as a list
     // (searchCommitted). Enter does it.
     Q_INVOKABLE void commitSearch();
@@ -274,10 +276,13 @@ class LibraryBrowser final : public QObject {
     bool query_mode_{false};
     bool newest_first_{false};
     QString view_id_;
-    // The shown view's levels; none for the artist tree and Recently added.
+    // The shown view's levels; none for the artist tree, Recently added and
+    // Folders.
     std::vector<persistence::LibraryViewLevel> view_;
-    // Settles view_id_, view_ and newest_first_ on `id`, saving the choice.
-    void adoptView(const QString& id);
+    bool folders_{false};
+    // Settles view_id_, view_ and newest_first_ on `id`, saving the choice
+    // when `remember`.
+    void adoptView(const QString& id, bool remember = true);
     std::optional<bool> has_roots_;
     std::vector<Root> roots_;
     QString roots_error_;

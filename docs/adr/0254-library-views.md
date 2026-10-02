@@ -48,6 +48,18 @@ value of a multi-value field.
   makes, changes and removes them, with a live preview. The shipped views can
   be copied, not changed. Go to album and Go to artist return to the artist
   tree, as they already left Recently added.
+- **Folders is a view too.** The engine's index knows every track's folder,
+  so the dropdown offers the library's folders from its roots down, read
+  from the index of whichever engine is shown -- the only way to browse a
+  remote engine's folders, which the Sources panel's Folders tab (this
+  computer's file system) cannot. A folder of one album with no folders
+  below is that album's entry; a folder's files are everything below it.
+- **Every shipped view is in the editor**, the artist tree and Recently
+  added included, each with the levels that group the same way (Recently
+  added sorts by `$info(albumdayssinceadded)`), so a copy starts from it --
+  the artist tree with years before its albums, say. The shipped trees are
+  still shown by their own queries. Folders has no levels and cannot be
+  copied. Previewing a view in the editor never chooses it.
 - **Searching.** A word search shows its results as today. A `tkq-1` query
   in query mode narrows the chosen view before it is grouped.
 
@@ -57,5 +69,6 @@ value of a multi-value field.
   100,000 tracks is tens of megabytes at most, and is dropped as the library
   changes.
 - An engine older than this answers a view's request as the artist level.
-- A folder hierarchy is not a view: tkfmt-1 has no path functions, and the
-  folders pane already browses folders.
+- A folder hierarchy is not expressible as levels -- tkfmt-1 has no path
+  functions and a tree's depth varies -- so Folders is a view of its own,
+  not levels.

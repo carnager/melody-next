@@ -183,6 +183,39 @@ void a_view_groups(const engine::Catalogue& catalogue, const std::string_view si
 
     require(!catalogue.query(view({{.format = "$if(", .sort = {}, .descending = false}})),
             say("a level that does not compile is refused"));
+
+    // Folders: the roots, then what is in each, as indexed -- here as there.
+    LibraryQuery folders;
+    folders.folders = true;
+    auto roots = catalogue.query(folders);
+    require(roots.has_value() && roots->entries.size() == 1U &&
+                roots->entries[0].kind == LibraryEntryKind::group &&
+                roots->entries[0].tracks == 5U,
+            say("the library's root, with what it holds"));
+    folders.folder = roots->entries[0].view_value;
+    auto inside = catalogue.query(folders);
+    std::vector<std::string> names_inside;
+    for (const auto& entry : inside ? inside->entries : std::vector<persistence::LibraryEntry>{}) {
+        names_inside.push_back(entry.label);
+    }
+    require(inside.has_value() &&
+                names_inside == std::vector<std::string>{"one", "ten", "three", "two"},
+            say("the folders in the root, by name"));
+    require(inside->entries[0].kind == LibraryEntryKind::album &&
+                inside->entries[0].tracks == 2U && !inside->entries[0].rating_hash.empty(),
+            say("a folder of one album is that album"));
+    folders.folder = inside->entries[0].view_value;
+    auto one = catalogue.query(folders);
+    require(one.has_value() && one->entries.size() == 2U &&
+                one->entries[0].kind == LibraryEntryKind::track &&
+                one->entries[0].label == "02. a-02.flac" &&
+                one->entries[1].label == "10. a-10.flac",
+            say("a folder's tracks, in track order"));
+    folders.folder = roots->entries[0].view_value;
+    auto everything = catalogue.paths(folders);
+    require(everything.has_value() && everything->size() == 5U &&
+                names(*everything)[0] == "a-02.flac" && names(*everything)[1] == "a-10.flac",
+            say("a folder's files are everything below it"));
     require(!catalogue.query(view(genres, {}, "genre (((")), say("so is a bad filter"));
 }
 

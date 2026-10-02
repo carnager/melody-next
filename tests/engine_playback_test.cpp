@@ -14,21 +14,30 @@
 // device-independent and are exactly the thing that was missing.
 
 #include "bench/bench_main_window.hpp"
+#include "bench/dynamic_playlist_service.hpp"
 #include "bench/local_list_model.hpp"
 #include "bench/mpris_service.hpp"
 #include "bench/settings_dialog.hpp"
 #include "recording_audition.hpp"
+#include "trackknife/core/stable_id.hpp"
+#include "trackknife/engine/catalogue.hpp"
+#include "trackknife/engine/list_continuation.hpp"
 #include "trackknife/engine/playback_methods.hpp"
 #include "trackknife/engine/player.hpp"
 #include "trackknife/engine/server.hpp"
+#include "trackknife/engine/workspace.hpp"
 #include "trackknife/protocol/message.hpp"
 #include "uicommon/track_row_roles.hpp"
 
 #include <QAction>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QInputDialog>
 #include <QLabel>
+#include <QMenu>
+#include <QPushButton>
+#include <QTabBar>
 #include <QSettings>
 #include <QSlider>
 #include <QStandardPaths>
@@ -48,6 +57,7 @@
 
 namespace trackknife::bench {
 
+namespace core = trackknife::core;
 namespace engine = trackknife::engine;
 namespace protocol = trackknife::protocol;
 
@@ -163,6 +173,7 @@ class EnginePlaybackTest final : public QObject {
     void anEngineQueueNoListHoldsBecomesATab();
     void withoutAnEngineNothingChanges();
     void anOlderStateIsNotTakenOverANewerOne();
+    void aListContinuesWithADynamicPlaylist();
 
   private:
     QTemporaryDir settings_directory_;
@@ -1242,6 +1253,104 @@ void EnginePlaybackTest::anOlderStateIsNotTakenOverANewerOne() {
     (*server)->stop();
 }
 
+// ADR-0253: the queue tells the engine its list, the tab's menu sets the rule
+// the list continues with, the tab says so, and deleting the rule ends it.
+void EnginePlaybackTest::aListContinuesWithADynamicPlaylist() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto media = directory.filePath(QStringLiteral("played.flac"));
+    QVERIFY(materialize_audio_fixture(QStringLiteral("rich-metadata-flac.b64"), media));
+    const auto encoded = QFile::encodeName(media);
+    const std::string raw_path{encoded.constData(), static_cast<std::size_t>(encoded.size())};
+
+    DynamicPlaylistDefinition rule;
+    rule.profile = QStringLiteral("local");
+    rule.id = QStringLiteral("rule-everything");
+    rule.name = QStringLiteral("Everything");
+    rule.source = QStringLiteral("rules");
+    rule.query = QStringLiteral("codec PRESENT");
+    DynamicPlaylistDefinition lastfm;
+    lastfm.profile = QStringLiteral("local");
+    lastfm.id = QStringLiteral("rule-lastfm");
+    lastfm.name = QStringLiteral("Loved");
+    lastfm.source = QStringLiteral("loved");
+    QVERIFY(saveDynamicPlaylists(QStringLiteral("local"), {rule, lastfm}).has_value());
+
+    const std::filesystem::path socket{
+        (directory.path() + QStringLiteral("/engine.sock")).toStdString()};
+    const std::filesystem::path database{
+        (directory.path() + QStringLiteral("/engine.sqlite3")).toStdString()};
+    engine::LocalCatalogue catalogue{database};
+    QVERIFY(catalogue.prepare().has_value());
+    auto store = engine::Workspace::open(database);
+    QVERIFY(store.has_value());
+    auto player = engine::Player::create();
+    QVERIFY(player.has_value());
+    RecordingEngine recorder{**player};
+    auto server = engine::Server::listen(socket, recorder.dispatcher());
+    QVERIFY(server.has_value());
+    engine::ListContinuation continuation{*store, catalogue, (*server)->sink()};
+    engine::register_list_continuation_methods(recorder.dispatcher(), continuation);
+    (*server)->start();
+    QSettings{}.setValue(QLatin1String(SettingsDialog::library_local_engine_socket_key),
+                         QString::fromStdString(socket.string()));
+
+    BenchMainWindow window;
+    window.show();
+    window.openLocalPaths({raw_path});
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_COMPARE(tabs->count(), 1);
+    auto* view = qobject_cast<QTableView*>(tabs->currentWidget());
+    QVERIFY(view != nullptr);
+    auto* model = qobject_cast<LocalListModel*>(view->model());
+    QVERIFY(model != nullptr);
+    QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 1, 5'000);
+    emit view->doubleClicked(model->index(0, 0));
+    QTRY_COMPARE_WITH_TIMEOUT((*player)->queue().size(), std::size_t{1}, 5'000);
+    // The queue names its list: the tab's document.
+    const auto list = (*player)->queue_list();
+    QVERIFY(core::StableId::parse(list).has_value());
+
+    // The tab's menu offers the rules the engine can run, not Last.fm's.
+    emit tabs->tabBar()->customContextMenuRequested(tabs->tabBar()->tabRect(0).center());
+    auto* menu = window.findChild<QMenu*>(QStringLiteral("bench-tab-continue-menu"));
+    QVERIFY(menu != nullptr);
+    QVERIFY(menu->findChild<QAction*>(QStringLiteral("continue-rule-rule-lastfm")) == nullptr);
+    auto* nothing = menu->findChild<QAction*>(QStringLiteral("continue-nothing"));
+    QVERIFY(nothing != nullptr && nothing->isChecked());
+    auto* everything = menu->findChild<QAction*>(QStringLiteral("continue-rule-rule-everything"));
+    QVERIFY(everything != nullptr);
+    everything->trigger();
+    window.findChild<QMenu*>(QStringLiteral("bench-tab-context-menu"))->hide();
+
+    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().contains(list), 5'000);
+    QCOMPARE(continuation.all().at(list).query, std::string{"codec PRESENT"});
+    QTRY_VERIFY_WITH_TIMEOUT(tabs->tabText(0).endsWith(QStringLiteral(" ∞")), 5'000);
+    QVERIFY(tabs->tabToolTip(0).contains(QStringLiteral("Continues with Everything")));
+
+    // Deleting the rule ends what continued with it.
+    auto* dynamic = window.findChild<QAction*>(QStringLiteral("action-dynamic-playlists"));
+    QVERIFY(dynamic != nullptr);
+    dynamic->trigger();
+    auto* catalog = window.findChild<QComboBox*>(QStringLiteral("dynamic-catalog"));
+    QVERIFY(catalog != nullptr);
+    const auto index = catalog->findText(QStringLiteral("Everything"), Qt::MatchContains);
+    QVERIFY(index >= 0);
+    catalog->setCurrentIndex(index);
+    emit catalog->activated(index);
+    auto* remove = window.findChild<QPushButton*>(QStringLiteral("dynamic-remove"));
+    QVERIFY(remove != nullptr);
+    QTRY_VERIFY(remove->isEnabled());
+    remove->click();
+    QTRY_VERIFY_WITH_TIMEOUT(continuation.all().empty(), 5'000);
+    QTRY_VERIFY2_WITH_TIMEOUT(!tabs->tabText(0).endsWith(QStringLiteral(" ∞")),
+                              qPrintable(tabs->tabText(0) + QLatin1Char('|') +
+                                         tabs->tabToolTip(0)),
+                              5'000);
+
+    (*server)->stop();
+}
 
 } // namespace trackknife::bench
 

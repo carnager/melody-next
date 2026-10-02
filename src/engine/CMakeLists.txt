@@ -2,7 +2,7 @@
 
 find_package(Threads REQUIRED)
 
-add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/token.cpp src/job_registry.cpp src/playback_methods.cpp src/playback_store.cpp src/player.cpp src/recorder.cpp src/remote_catalogue.cpp src/workspace.cpp src/outputs.cpp src/stream_server.cpp src/lastfm.cpp src/cover_fitting.cpp src/transcode_cache.cpp src/media_streams.cpp src/list_methods.cpp src/now_playing_methods.cpp src/file_work_wire.cpp src/file_work_wire_plan.cpp src/file_work_wire_artwork.cpp src/file_work_wire_paths.cpp src/file_work_methods.cpp src/remote_file_work.cpp src/metadata_services.cpp src/rating_tags.cpp src/naming_methods.cpp)
+add_library(trackknife_engine STATIC src/catalogue.cpp src/catalogue_methods.cpp src/job_methods.cpp src/server.cpp src/token.cpp src/job_registry.cpp src/playback_methods.cpp src/playback_store.cpp src/player.cpp src/recorder.cpp src/remote_catalogue.cpp src/workspace.cpp src/outputs.cpp src/stream_server.cpp src/lastfm.cpp src/cover_fitting.cpp src/transcode_cache.cpp src/media_streams.cpp src/list_methods.cpp src/now_playing_methods.cpp src/file_work_wire.cpp src/file_work_wire_plan.cpp src/file_work_wire_artwork.cpp src/file_work_wire_paths.cpp src/file_work_methods.cpp src/remote_file_work.cpp src/metadata_services.cpp src/rating_tags.cpp src/naming_methods.cpp src/list_continuation.cpp)
 add_library(Trackknife::Engine ALIAS trackknife_engine)
 
 target_include_directories(

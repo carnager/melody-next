@@ -716,6 +716,10 @@ class BenchMainWindow final : public QMainWindow, public WorkspaceView {
     QMenu* buffer_menu_{nullptr};
     QActionGroup* buffer_group_{nullptr};
     QMenu* tab_context_menu_{nullptr};
+    // ADR-0253: "Continue with" -- the dynamic playlist rules, filled as the
+    // tab menu opens.
+    QMenu* continue_menu_{nullptr};
+    void fillContinueMenu();
     QMenu* track_context_menu_{nullptr};
     QMenu* folder_context_menu_{nullptr};
     QActionGroup* layout_arrangement_group_{nullptr};

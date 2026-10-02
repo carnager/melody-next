@@ -74,6 +74,9 @@ void BenchMainWindow::showDynamicPlaylists() {
     }
     auto* dialog =
         new DynamicPlaylistDialog(profile, std::move(libraries), std::move(search), this);
+    // ADR-0253: the lists continuing with a rule follow its edits.
+    connect(dialog, &DynamicPlaylistDialog::definitionsSaved, this,
+            [this] { workspace_.refreshContinuations(); });
     auto layout = defaultTrackViewLayout(ui::TrackViewPresentation::plain_columns);
     applyTrackViewLayout(dialog->view(), layout, layout);
     auto* result_view = dialog->view();

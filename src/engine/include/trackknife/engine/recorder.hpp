@@ -13,6 +13,11 @@
 
 namespace trackknife::engine {
 
+// What played, as the listening store keys it: the source, and the file as it
+// is now -- the store refuses a source it cannot identify. Only the fields the
+// identity is derived from are set.
+[[nodiscard]] persistence::ListItem listened_item(const audio::TrackSource& source);
+
 // Drains the player's observations into the workspace.
 //
 // Player::observe deliberately pulls rather than pushes, so the player has no

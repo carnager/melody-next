@@ -42,6 +42,25 @@ captures the selected inputs so a result refresh cannot retarget the operation.
 Closed dynamic editors do not keep refreshing; persistent live autoplaylist tabs
 remain future work.
 
+## Continuing a list
+
+Any list can carry on past its end with a saved library rule. Right-click its
+tab and choose **Continue with**, then a rule. The tab shows ∞, and its
+tooltip names the rule. When the last track of the list starts and nothing
+would follow it, the engine adds 10 tracks the rule finds. It skips tracks
+already in the list and tracks played in the last 7 days. If the rule finds
+only those, it uses them anyway, still skipping what is in the list.
+
+This happens in the engine, so it works with the window closed. Repeat never
+ends a list, so a repeating list is not extended, and neither is one playing
+in single mode. Added tracks are ordinary entries: remove, move or rate them
+as usual. Choose **Nothing — the list ends** to stop. The tracks already added
+stay.
+
+Editing a rule updates every list that continues with it, and removing the
+rule ends their continuation. Last.fm sources are not offered, because the
+engine cannot query Last.fm on its own. See ADR-0253.
+
 History rules may also order results, for example
 `ALL SORT DESCENDING HISTORY(playcount)`. Turn off **Shuffle results on refresh**
 to retain query ordering. See [history ordering](query-language.md#history-ordering-adr-0216).

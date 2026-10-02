@@ -15,6 +15,7 @@
 #include "trackknife/engine/file_work_methods.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/lastfm.hpp"
+#include "trackknife/engine/list_continuation.hpp"
 #include "trackknife/engine/list_methods.hpp"
 #include "trackknife/engine/media_streams.hpp"
 #include "trackknife/engine/metadata_services.hpp"
@@ -587,6 +588,10 @@ int main(int argc, char** argv) {
     trackknife::engine::register_job_methods(dispatcher, jobs, job_catalogue);
     // ADR-0233: the engine's lists, working and saved, for every client.
     trackknife::engine::register_list_methods(dispatcher, *workspace, sink, *player);
+    // ADR-0253: a list that ends continues with its rule, from this engine's
+    // library, whether or not a window is open.
+    trackknife::engine::ListContinuation continuation{*workspace, catalogue, sink};
+    trackknife::engine::register_list_continuation_methods(dispatcher, continuation);
     // ADR-0237: naming layouts (Trackknife's, copied here) and this engine's
     // move destinations.
     trackknife::engine::register_naming_methods(dispatcher, *workspace, sink);
@@ -603,6 +608,7 @@ int main(int argc, char** argv) {
     std::optional<trackknife::engine::PlaybackStore> playback_store;
     {
         watcher.emplace(*player, sink);
+        watcher->set_tick([&continuation, &player] { static_cast<void>(continuation.tick(*player)); });
         watcher->start();
         recorder.emplace(*player, *workspace);
         recorder->start();

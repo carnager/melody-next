@@ -2,19 +2,23 @@
 
 #include "trackknife/engine/recorder.hpp"
 
+#include "trackknife/core/local_sources.hpp"
 #include "trackknife/persistence/list_repository.hpp"
 
 #include <utility>
 
 namespace trackknife::engine {
-namespace {
 
-// The listening store keys on a ListItem, so an observation is turned back
-// into one. Only the fields the identity is derived from matter.
-[[nodiscard]] persistence::ListItem as_item(const audio::TrackSource& source) {
+persistence::ListItem listened_item(const audio::TrackSource& source) {
     persistence::ListItem item;
     item.source = persistence::ListSource::local;
     item.source_reference = source.raw_path;
+    // The file as it is now: listening history and resume are kept by what
+    // was played, and the store refuses a source it cannot identify -- which,
+    // without this, was every one: the engine recorded no listen at all.
+    if (auto revision = core::observe_local_source_revision(source.raw_path)) {
+        item.source_revision = *revision;
+    }
     if (source.selection.stream_index || source.selection.subsong_index) {
         item.source_selection = persistence::ListItemSourceSelection{
             source.selection.stream_index, source.selection.subsong_index};
@@ -26,8 +30,6 @@ namespace {
     return item;
 }
 
-} // namespace
-
 Recorder::Recorder(Player& player, Workspace& workspace, const std::chrono::milliseconds interval)
     : player_(&player), workspace_(&workspace), interval_(interval) {}
 
@@ -37,7 +39,7 @@ void Recorder::drain(const std::int64_t monotonic_ms, const std::int64_t wall_ms
     const auto observations = player_->observe(monotonic_ms);
 
     if (observations.listened_entry) {
-        auto item = as_item(observations.listened_source);
+        auto item = listened_item(observations.listened_source);
         // A listen that cannot be attributed is dropped rather than recorded
         // against nothing: the store refuses an unqualified source, and
         // forcing one would invent a play count for a file it cannot name.
@@ -45,7 +47,7 @@ void Recorder::drain(const std::int64_t monotonic_ms, const std::int64_t wall_ms
     }
 
     if (observations.resume_entry) {
-        auto item = as_item(observations.resume_source);
+        auto item = listened_item(observations.resume_source);
         if (auto key = workspace_->local_listening_key(item)) {
             static_cast<void>(
                 workspace_->save_local_resume(*key, observations.resume_position_ms, wall_ms));

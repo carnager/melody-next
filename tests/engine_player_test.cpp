@@ -1065,6 +1065,24 @@ using trackknife::testing::RecordingAudition;
 // A sink is a device on one machine. One chosen for an agent while playing
 // there was once saved as this machine's own, and after a restart this
 // machine waited for a device it has never had.
+// What the recorder stores, the store accepts: a listen names the file as it
+// is now. Without its revision every listen was refused, and the engine had
+// recorded none -- no play counts, no history queries, no resume.
+void a_listen_is_stored(const std::filesystem::path& directory,
+                        const std::filesystem::path& audio) {
+    auto workspace = engine::Workspace::open(directory / "listens.sqlite3");
+    require(workspace.has_value(), "the workspace opens");
+    trackknife::audio::TrackSource source;
+    source.raw_path = audio.string();
+    const auto item = engine::listened_item(source);
+    require(item.source_revision.has_value(), "the listen names the file as it is");
+    require(workspace->record_local_listen(item, core::StableId::random(), 1'800'000'000'000)
+                .has_value(),
+            "and is stored");
+    const auto key = workspace->local_listening_key(item);
+    require(key.has_value(), "the track has a listening key");
+}
+
 void an_agents_sink_is_not_kept_as_this_machines(const std::filesystem::path& directory) {
     const auto database = directory / "sink-workspace.sqlite3";
     std::error_code ignored;
@@ -1260,6 +1278,7 @@ int main(int argc, char** argv) {
     what_the_output_was_told_shows_until_it_catches_up();
     a_failure_to_play_says_why();
     clearing_the_queue_ends_what_plays();
+    a_listen_is_stored(directory, audio);
 
     auto player = engine::Player::create();
     if (!player) {
@@ -1295,6 +1314,6 @@ int main(int argc, char** argv) {
     changes_are_pushed_without_asking(**player);
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine player: 24 scenarios\n";
+    std::cout << "engine player: 25 scenarios\n";
     return EXIT_SUCCESS;
 }

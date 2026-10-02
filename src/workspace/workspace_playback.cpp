@@ -215,7 +215,7 @@ void Workspace::syncEngineQueue() {
     }
     // The engine follows identity, so the playing entry survives being handed
     // a queue that no longer holds it in the same row -- or at all.
-    transport_->replaceQueue(rows, overrides);
+    transport_->replaceQueue(rows, overrides, document_text(tab->document.id));
 }
 
 
@@ -521,7 +521,8 @@ void Workspace::playRow(ListTab& tab, const int row) {
     for (const auto& source_row : rows) {
         overrides.push_back(local_replay_gain_override(source_row));
     }
-    transport_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id);
+    transport_->play(rows, overrides, rows[static_cast<std::size_t>(row)].entry_id,
+                     document_text(tab.document.id));
     if (playback_.anchors.document != tab.document.id) {
         if (auto* previous = tabForDocument(playback_.anchors.document); previous != nullptr) {
             previous->model->setCurrentSource({}, -1);

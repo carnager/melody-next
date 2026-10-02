@@ -290,6 +290,14 @@ class Workspace final : public QObject {
     QElapsedTimer lastfm_clock_;
     qint64 lastfm_sample_time_{-1000};
     QString lastfm_user_;
+    // ADR-0253: the tkq-1 rules last seen in the definitions, so that one
+    // gone is told from another window's that this one never knew.
+    std::optional<QSet<QString>> known_rules_;
+    void syncContinuations(EngineLink& engine);
+    // Shows what `engine`'s tabs continue with as it says, and keeps its
+    // copies of the rules in step.
+    void followContinuations(EngineLink& engine);
+    void rememberContinuationRules();
     // Last explicitly played local list; transport stop does not release it.
     QString active_local_list_id_;
   public:
@@ -368,6 +376,22 @@ class Workspace final : public QObject {
     [[nodiscard]] ConvertPresetStore convertPresets();
     [[nodiscard]] EnginePlayback* playbackOf(const EngineKey& key) const;
     [[nodiscard]] CatalogueSource* catalogueOf(const EngineKey& key) const;
+
+    // ADR-0253: a list continues with a dynamic playlist's tkq-1 rule once
+    // it would end. The rules it can continue with, by identity and name.
+    struct ContinuationChoice {
+        QString rule_id;
+        QString name;
+    };
+    [[nodiscard]] std::vector<ContinuationChoice> continuationChoices() const;
+    // The rule `tab` continues with, as its engine keeps it; none, nothing.
+    [[nodiscard]] std::optional<EnginePlayback::Continuation>
+    continuationOf(const ListTab& tab) const;
+    // Continues `tab` with the rule `rule_id`, or with an empty one ends it.
+    void setContinuation(const ListTab& tab, const QString& rule_id);
+    // The rules were saved: the engines' copies are brought in step, and a
+    // rule deleted or made a Last.fm one ends the lists it continued.
+    void refreshContinuations();
     // An open list, by its document's identity -- or the list that goes on
     // playing after its tab was closed.
     [[nodiscard]] ListTab* tabForDocument(const QString& document_id);
@@ -652,6 +676,8 @@ class Workspace final : public QObject {
         bool playing{false};
         // Its files are an engine elsewhere's: an icon says so.
         bool remote{false};
+        // ADR-0253: the rule it continues with; empty, none.
+        QString continues;
     };
     [[nodiscard]] TabChrome tabChrome(const ListTab& tab) const;
     struct Summary {

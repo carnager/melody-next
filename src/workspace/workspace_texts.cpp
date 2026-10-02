@@ -44,6 +44,11 @@ Workspace::TabChrome Workspace::tabChrome(const ListTab& tab) const {
     if (chrome.playing) {
         chrome.tooltip += tr(" · Active playback queue");
     }
+    if (const auto continuation = continuationOf(tab)) {
+        chrome.continues = continuation->name.isEmpty() ? tr("a dynamic playlist") : continuation->name;
+        chrome.text += QStringLiteral(" ∞");
+        chrome.tooltip += tr(" · Continues with %1").arg(chrome.continues);
+    }
     chrome.accessible_name = QStringLiteral("%1 track list").arg(name);
     return chrome;
 }

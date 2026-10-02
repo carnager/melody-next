@@ -396,6 +396,7 @@ class BenchMainWindowTest final : public QObject {
     void settingsLeftOffReadAsOff();
     void colorSchemesAreChosenAndApplied();
     void interfaceSizeIsChosenForTheNextStart();
+    void headerPillsFollowAPaletteChangedLater();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -12235,6 +12236,30 @@ void BenchMainWindowTest::interfaceSizeIsChosenForTheNextStart() {
     QSettings{}.sync();
     QCOMPARE(chosenInterfaceScale(), 1.0);
     QSettings{}.remove(QLatin1String(interface_scale_key));
+}
+
+// The header's pills are mixed from the palette; a palette that changes after
+// the window was built -- the desktop's theme arriving or turning light, not
+// a scheme chosen here -- recolours them rather than leaving dark pills on a
+// light window.
+void BenchMainWindowTest::headerPillsFollowAPaletteChangedLater() {
+    followColorSchemes();
+    QApplication::setPalette(darkPalette());
+    BenchMainWindow window;
+    window.resize(1000, 600);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* up_next = window.findChild<QToolButton*>(QStringLiteral("action-up-next"));
+    QVERIFY(up_next != nullptr);
+    const auto ground_of = [up_next] {
+        const auto image = up_next->grab().toImage();
+        return image.pixelColor(image.width() / 2, 3);
+    };
+    QVERIFY(ground_of().lightness() < 128);
+    QApplication::setPalette(lightPalette());
+    QCoreApplication::processEvents();
+    QTRY_VERIFY(ground_of().lightness() > 128);
+    ColorSchemes::instance().applyChosen();
 }
 
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {

@@ -180,82 +180,122 @@ void Workspace::openEngineList(const EngineKey& key, const QString& id,
 }
 
 
+persistence::ListDocument Workspace::headerOf(const ListTab& tab) {
+    // Field by field: the tab's document can still hold the items it was
+    // opened with, and copying those would be the cost being avoided.
+    return persistence::ListDocument{.id = tab.document.id,
+                                     .kind = tab.document.kind,
+                                     .name = tab.document.name,
+                                     .pinned = tab.document.pinned,
+                                     .dirty = tab.document.dirty,
+                                     .items = {},
+                                     .engine = tab.document.engine};
+}
+
+Workspace::ListTab::Saved Workspace::savedStateOf(const ListTab& tab) {
+    return ListTab::Saved{.revision = tab.model->contentRevision(),
+                          .name = tab.document.name,
+                          .kind = tab.document.kind,
+                          .pinned = tab.document.pinned,
+                          .dirty = tab.document.dirty,
+                          .engine = tab.document.engine};
+}
+
+persistence::ListDocument Workspace::documentOf(const ListTab& tab) const {
+    auto document = headerOf(tab);
+    document.items.reserve(tab.model->rows().size());
+    for (const auto& row : tab.model->rows()) {
+        persistence::ListItem item{
+            // Carry the row's identity rather than letting ListItem mint a
+            // fresh one, which would reassign every entry on every save.
+            .entry_id = row.entry_id,
+            .source = persistence::ListSource::local,
+            .profile_id = std::nullopt,
+            .source_reference = row.raw_path,
+            .logical_reference = row.logical_reference,
+            .segment = row.segment ? std::optional{persistence::ListItemSegment{
+                                         .start_sample = row.segment->start_sample,
+                                         .end_sample = row.segment->end_sample,
+                                     }}
+                                   : std::nullopt,
+            .source_selection = row.selection.stream_index || row.selection.subsong_index
+                                    ? std::optional{persistence::ListItemSourceSelection{
+                                          .audio_stream_index = row.selection.stream_index,
+                                          .subsong_index = row.selection.subsong_index,
+                                      }}
+                                    : std::nullopt,
+            .duration_ms = row.duration_ms,
+            .source_revision = row.source_revision,
+            .fields = {},
+        };
+        if (!row.metadata.fields.empty()) {
+            // This remains a presentation cache, but retaining layers is
+            // necessary so a verified embedded refresh cannot erase CUE,
+            // chapter, or sidecar projections for the same physical file.
+            for (const auto& field : row.metadata.fields) {
+                if (field.canonical_name.empty()) {
+                    continue;
+                }
+                for (const auto& value : field.values) {
+                    item.fields.push_back({
+                        .name = field.canonical_name,
+                        .value = value,
+                        .native_name = field.native_name,
+                        .provenance = field.provenance,
+                        .language = field.qualifier.language,
+                        .description = field.qualifier.description,
+                    });
+                }
+            }
+        } else {
+            if (!row.title.empty()) {
+                item.fields.push_back({.name = "title", .value = row.title});
+            }
+            if (!row.artist.empty()) {
+                item.fields.push_back({.name = "artist", .value = row.artist});
+            }
+            if (!row.album.empty()) {
+                item.fields.push_back({.name = "album", .value = row.album});
+            }
+            if (!row.album_artist.empty()) {
+                item.fields.push_back({.name = "albumartist", .value = row.album_artist});
+            }
+            if (!row.date.empty()) {
+                item.fields.push_back({.name = "date", .value = row.date});
+            }
+            if (!row.track_number.empty()) {
+                item.fields.push_back({.name = "track", .value = row.track_number});
+            }
+        }
+        document.items.push_back(std::move(item));
+    }
+    return document;
+}
+
 std::vector<persistence::ListDocument> Workspace::collectDocuments() {
     std::vector<persistence::ListDocument> documents;
     const auto shown = view_->listsInOrder();
     documents.reserve(shown.size());
     for (auto* tab : shown) {
-        auto document = tab->document;
-        document.items.clear();
-        document.items.reserve(tab->model->rows().size());
-        for (const auto& row : tab->model->rows()) {
-            persistence::ListItem item{
-                // Carry the row's identity rather than letting ListItem mint a
-                // fresh one, which would reassign every entry on every save.
-                .entry_id = row.entry_id,
-                .source = persistence::ListSource::local,
-                .profile_id = std::nullopt,
-                .source_reference = row.raw_path,
-                .logical_reference = row.logical_reference,
-                .segment = row.segment ? std::optional{persistence::ListItemSegment{
-                                             .start_sample = row.segment->start_sample,
-                                             .end_sample = row.segment->end_sample,
-                                         }}
-                                       : std::nullopt,
-                .source_selection = row.selection.stream_index || row.selection.subsong_index
-                                        ? std::optional{persistence::ListItemSourceSelection{
-                                              .audio_stream_index = row.selection.stream_index,
-                                              .subsong_index = row.selection.subsong_index,
-                                          }}
-                                        : std::nullopt,
-                .duration_ms = row.duration_ms,
-                .source_revision = row.source_revision,
-                .fields = {},
-            };
-            if (!row.metadata.fields.empty()) {
-                // This remains a presentation cache, but retaining layers is
-                // necessary so a verified embedded refresh cannot erase CUE,
-                // chapter, or sidecar projections for the same physical file.
-                for (const auto& field : row.metadata.fields) {
-                    if (field.canonical_name.empty()) {
-                        continue;
-                    }
-                    for (const auto& value : field.values) {
-                        item.fields.push_back({
-                            .name = field.canonical_name,
-                            .value = value,
-                            .native_name = field.native_name,
-                            .provenance = field.provenance,
-                            .language = field.qualifier.language,
-                            .description = field.qualifier.description,
-                        });
-                    }
-                }
-            } else {
-                if (!row.title.empty()) {
-                    item.fields.push_back({.name = "title", .value = row.title});
-                }
-                if (!row.artist.empty()) {
-                    item.fields.push_back({.name = "artist", .value = row.artist});
-                }
-                if (!row.album.empty()) {
-                    item.fields.push_back({.name = "album", .value = row.album});
-                }
-                if (!row.album_artist.empty()) {
-                    item.fields.push_back({.name = "albumartist", .value = row.album_artist});
-                }
-                if (!row.date.empty()) {
-                    item.fields.push_back({.name = "date", .value = row.date});
-                }
-                if (!row.track_number.empty()) {
-                    item.fields.push_back({.name = "track", .value = row.track_number});
-                }
-            }
-            document.items.push_back(std::move(item));
-        }
-        documents.push_back(std::move(document));
+        documents.push_back(documentOf(*tab));
     }
     return documents;
+}
+
+std::vector<persistence::ListDocumentWrite> Workspace::collectWrites() {
+    std::vector<persistence::ListDocumentWrite> writes;
+    const auto shown = view_->listsInOrder();
+    writes.reserve(shown.size());
+    for (auto* tab : shown) {
+        // Unchanged since it was last saved: its header only. A save costs
+        // what changed, not the size of every list.
+        if (tab->saved && *tab->saved == savedStateOf(*tab)) {
+            writes.push_back({.document = headerOf(*tab), .items = false});
+        } else {
+            writes.push_back({.document = documentOf(*tab), .items = true});
+        }
+    }
+    return writes;
 }
 
 
@@ -280,24 +320,48 @@ void Workspace::persistNow(const bool wait) {
     if (persistence_ == nullptr) {
         return;
     }
-    auto documents = collectDocuments();
-    if (list_sync_ != nullptr) {
-        list_sync_->update(documents);
+    auto writes = collectWrites();
+    // What each list is as it is written, recorded as saved once the write
+    // succeeds -- a failed save leaves it to be written again.
+    std::vector<std::pair<core::StableId, ListTab::Saved>> written;
+    written.reserve(writes.size());
+    for (const auto& write : writes) {
+        if (const auto* tab = tabForDocument(write.document.id); tab != nullptr) {
+            written.emplace_back(write.document.id, savedStateOf(*tab));
+        }
     }
+    if (list_sync_ != nullptr) {
+        list_sync_->update(writes, [this](const core::StableId& id) {
+            const auto* tab = tabForDocument(id);
+            return tab != nullptr ? std::optional{documentOf(*tab)} : std::nullopt;
+        });
+    }
+    const auto settle = [this](const std::vector<std::pair<core::StableId, ListTab::Saved>>& states) {
+        for (const auto& [id, state] : states) {
+            if (auto* tab = tabForDocument(id); tab != nullptr) {
+                tab->saved = state;
+            }
+        }
+    };
     auto view_layouts = collectTrackViewLayouts();
     if (wait) {
         const auto error =
-            persistence_->saveWorkspaceAndWait(std::move(documents), std::move(view_layouts));
+            persistence_->saveWorkspaceAndWait(std::move(writes), std::move(view_layouts));
         if (!error.isEmpty()) {
             view_->showMessage(QStringLiteral("List save failed: %1").arg(error), 5'000);
+            return;
         }
+        settle(written);
         return;
     }
     persistence_->saveWorkspace(
-        std::move(documents), std::move(view_layouts), [this](QString error) {
+        std::move(writes), std::move(view_layouts),
+        [this, settle, written = std::move(written)](QString error) {
             if (!error.isEmpty()) {
                 view_->showMessage(QStringLiteral("List save failed: %1").arg(error), 5'000);
+                return;
             }
+            settle(written);
         });
 }
 
@@ -314,7 +378,10 @@ void Workspace::restoreLists(std::vector<persistence::ListDocument> documents) {
         if (document.kind == persistence::ListKind::mpd) {
             continue;
         }
-        static_cast<void>(addList(std::move(document), false));
+        // As stored: saving it again writes its header, not its items.
+        if (auto* tab = addList(std::move(document), false); tab != nullptr) {
+            tab->saved = savedStateOf(*tab);
+        }
     }
     if (list_tabs_.empty()) {
         static_cast<void>(addList(
@@ -644,15 +711,9 @@ Workspace::ListTab* Workspace::createList(const QString& name) {
 }
 
 Workspace::ListTab* Workspace::duplicateList(const ListTab& tab) {
-    auto documents = collectDocuments();
-    const auto found =
-        std::ranges::find(documents, tab.document.id, &persistence::ListDocument::id);
-    if (found == documents.end()) {
-        return nullptr;
-    }
-    auto duplicate = *found;
+    auto duplicate = documentOf(tab);
     duplicate.id = core::StableId::random();
-    duplicate.name = utf8Bytes(QStringLiteral("%1 copy").arg(displayText(found->name)));
+    duplicate.name = utf8Bytes(QStringLiteral("%1 copy").arg(displayText(tab.document.name)));
     duplicate.pinned = false;
     duplicate.dirty = true;
     const auto layout = view_->captureTrackViewLayout(tab);

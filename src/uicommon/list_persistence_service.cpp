@@ -178,7 +178,7 @@ void ListPersistenceService::initialize(WorkspaceCallback callback) {
     });
 }
 
-void ListPersistenceService::saveWorkspace(std::vector<persistence::ListDocument> lists,
+void ListPersistenceService::saveWorkspace(std::vector<persistence::ListDocumentWrite> lists,
                                            std::vector<persistence::TrackViewPreset> presets,
                                            CompletionCallback callback) {
     const QPointer self{this};
@@ -186,7 +186,7 @@ void ListPersistenceService::saveWorkspace(std::vector<persistence::ListDocument
                            presets = std::move(presets), callback = std::move(callback)]() mutable {
         QString error = state->initialization_error;
         if (error.isEmpty() && state->workspace) {
-            if (auto stored = state->workspace->replace_all(lists); !stored) {
+            if (auto stored = state->workspace->save_workspace(lists); !stored) {
                 error = errorText(stored.error());
             } else if (auto stored_presets = state->workspace->replace_view_presets(presets);
                        !stored_presets) {
@@ -584,7 +584,7 @@ void ListPersistenceService::saveUiState(QString key, QByteArray value,
 }
 
 QString
-ListPersistenceService::saveWorkspaceAndWait(std::vector<persistence::ListDocument> lists,
+ListPersistenceService::saveWorkspaceAndWait(std::vector<persistence::ListDocumentWrite> lists,
                                              std::vector<persistence::TrackViewPreset> presets) {
     QString error;
     invokeBlocking(
@@ -593,7 +593,7 @@ ListPersistenceService::saveWorkspaceAndWait(std::vector<persistence::ListDocume
             if (!error.isEmpty() || !state->workspace) {
                 return;
             }
-            if (auto stored = state->workspace->replace_all(lists); !stored) {
+            if (auto stored = state->workspace->save_workspace(lists); !stored) {
                 error = errorText(stored.error());
             } else if (auto stored_presets = state->workspace->replace_view_presets(presets);
                        !stored_presets) {

@@ -396,6 +396,9 @@ class BenchMainWindowTest final : public QObject {
     void settingsLeftOffReadAsOff();
     void colorSchemesAreChosenAndApplied();
     void interfaceSizeIsChosenForTheNextStart();
+    void headerPillsFollowAPaletteChangedLater();
+    void listTabCloseButtonsClose();
+    void windowListTabsCloseFromTheirButtons();
     void localListOrderingActionsRespectAuthorityAndPersist();
     void portablePlaylistImportsPreserveAuthorityAndPersist();
     void trackListFindActionsFollowActiveTab();
@@ -12235,6 +12238,87 @@ void BenchMainWindowTest::interfaceSizeIsChosenForTheNextStart() {
     QSettings{}.sync();
     QCOMPARE(chosenInterfaceScale(), 1.0);
     QSettings{}.remove(QLatin1String(interface_scale_key));
+}
+
+// The header's pills are mixed from the palette; a palette that changes after
+// the window was built -- the desktop's theme arriving or turning light, not
+// a scheme chosen here -- recolours them rather than leaving dark pills on a
+// light window.
+void BenchMainWindowTest::headerPillsFollowAPaletteChangedLater() {
+    followColorSchemes();
+    QApplication::setPalette(darkPalette());
+    BenchMainWindow window;
+    window.resize(1000, 600);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* up_next = window.findChild<QToolButton*>(QStringLiteral("action-up-next"));
+    QVERIFY(up_next != nullptr);
+    const auto ground_of = [up_next] {
+        const auto image = up_next->grab().toImage();
+        return image.pixelColor(image.width() / 2, 3);
+    };
+    QVERIFY(ground_of().lightness() < 128);
+    QApplication::setPalette(lightPalette());
+    QCoreApplication::processEvents();
+    QTRY_VERIFY(ground_of().lightness() > 128);
+    ColorSchemes::instance().applyChosen();
+}
+
+// A list tab's close button, clicked, asks for its tab to close -- under
+// Trackknife's own style, and without the widget set closable, as the window
+// has it: QTabWidget passes its bar's request on only when it is.
+void BenchMainWindowTest::listTabCloseButtonsClose() {
+    followColorSchemes();
+    PlaybackTabWidget tabs;
+    tabs.setDocumentMode(true);
+    tabs.addTab(new QWidget, QStringLiteral("First"));
+    tabs.addTab(new QWidget, QStringLiteral("Second"));
+    tabs.resize(700, 120);
+    tabs.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&tabs));
+    QSignalSpy requested{&tabs, &QTabWidget::tabCloseRequested};
+    auto* close = tabs.tabBar()->tabButton(1, QTabBar::RightSide);
+    QVERIFY(close != nullptr && close->isVisible());
+    QTest::mouseClick(close, Qt::LeftButton, {}, close->rect().center());
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(requested.front().front().toInt(), 1);
+}
+
+// The same in the window itself: the click goes to whatever is under the
+// pointer there, as a hand's would.
+void BenchMainWindowTest::windowListTabsCloseFromTheirButtons() {
+    followColorSchemes();
+    BenchMainWindow window;
+    window.resize(1100, 700);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.addListTab(persistence::ListDocument{.id = core::StableId::random(),
+                                                .kind = persistence::ListKind::scratch,
+                                                .name = "Second",
+                                                .pinned = false,
+                                                .dirty = false,
+                                                .items = {}},
+                      true);
+    auto* tabs = window.findChild<QTabWidget*>(QStringLiteral("bench-tabs"));
+    QVERIFY(tabs != nullptr);
+    QTRY_VERIFY(tabs->count() >= 2);
+    const auto before = tabs->count();
+    auto* close = tabs->tabBar()->tabButton(tabs->count() - 1, QTabBar::RightSide);
+    QVERIFY(close != nullptr && close->isVisible());
+    const auto at = window.mapFromGlobal(close->mapToGlobal(close->rect().center()));
+    auto* under = window.childAt(at);
+    QVERIFY2(under == close, qPrintable(QStringLiteral("under the button: %1 (%2)")
+                                            .arg(QString::fromLatin1(under != nullptr
+                                                                         ? under->metaObject()->className()
+                                                                         : "nothing"),
+                                                 under != nullptr ? under->objectName() : QString{})));
+    // Asked for, not answered: closing an unsaved list asks first, in a box
+    // a test cannot answer.
+    QObject::disconnect(tabs, &QTabWidget::tabCloseRequested, &window, nullptr);
+    QSignalSpy requested{tabs, &QTabWidget::tabCloseRequested};
+    QTest::mouseClick(under, Qt::LeftButton, {}, under->mapFrom(&window, at));
+    QCOMPARE(requested.count(), 1);
+    QCOMPARE(requested.front().front().toInt(), before - 1);
 }
 
 void BenchMainWindowTest::colorSchemesAreChosenAndApplied() {

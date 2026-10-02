@@ -75,6 +75,19 @@ void BenchMainWindow::stopBackgroundWork() {
     }
 }
 
+// Whatever changed the palette -- a scheme chosen, the desktop's theme
+// arriving or turning dark after the window was built -- what is mixed from
+// it is mixed again; the scheme's own signal alone missed the desktop's.
+void BenchMainWindow::changeEvent(QEvent* event) {
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange) {
+        styleHeader();
+        if (local_replaygain_button_ != nullptr) {
+            styleStatusBar();
+        }
+    }
+}
+
 void BenchMainWindow::closeEvent(QCloseEvent* event) {
     std::vector<QPointer<MetadataPropertiesDialog>> properties_tabs;
     for (auto* properties : findChildren<MetadataPropertiesDialog*>())

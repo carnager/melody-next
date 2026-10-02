@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 // Format-agnostic core of the prepared-copy text writers (ADR-0043 FLAC,
 // ADR-0095 WavPack). Everything here operates on plans, documents, and

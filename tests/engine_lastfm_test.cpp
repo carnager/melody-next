@@ -4,6 +4,7 @@
 // works for any client, and the session outlives a restart -- against a fake
 // Last.fm on a local port, with the listening clock driven by the test.
 
+#include "trackknife/core/posix.hpp"
 #include "trackknife/engine/catalogue.hpp"
 #include "trackknife/engine/lastfm.hpp"
 #include "trackknife/engine/player.hpp"
@@ -124,8 +125,7 @@ class RecordingAudition final : public audio::Audition {
         return {};
     }
     [[nodiscard]] core::Result<void> refresh_output_devices() override { return {}; }
-    [[nodiscard]] core::Result<void>
-    set_output_target(std::optional<std::string> target) override {
+    [[nodiscard]] core::Result<void> set_output_target(std::optional<std::string> target) override {
         const std::lock_guard guard{mutex_};
         target_ = std::move(target);
         return {};
@@ -145,14 +145,14 @@ class RecordingAudition final : public audio::Audition {
     std::optional<std::string> target_;
 };
 
-
 [[nodiscard]] std::string url_decoded(const std::string& text) {
     std::string decoded;
     for (std::size_t index = 0; index < text.size(); ++index) {
         if (text[index] == '+') {
             decoded.push_back(' ');
         } else if (text[index] == '%' && index + 2U < text.size()) {
-            decoded.push_back(static_cast<char>(std::stoi(text.substr(index + 1U, 2U), nullptr, 16)));
+            decoded.push_back(
+                static_cast<char>(std::stoi(text.substr(index + 1U, 2U), nullptr, 16)));
             index += 2U;
         } else {
             decoded.push_back(text[index]);
@@ -165,7 +165,7 @@ class RecordingAudition final : public audio::Audition {
 class FakeLastFm final {
   public:
     FakeLastFm() {
-        listener_ = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        listener_ = trackknife::core::socket_cloexec(AF_INET, SOCK_STREAM, 0);
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -195,7 +195,7 @@ class FakeLastFm final {
   private:
     void serve() {
         while (running_.load()) {
-            const auto connection = ::accept4(listener_, nullptr, nullptr, SOCK_CLOEXEC);
+            const auto connection = trackknife::core::accept_cloexec(listener_);
             if (connection < 0) {
                 continue;
             }
@@ -211,9 +211,8 @@ class FakeLastFm final {
                 const auto head = request.find("\r\n\r\n");
                 if (head != std::string::npos && wanted == std::string::npos) {
                     const auto at = request.find("Content-Length: ");
-                    wanted = head + 4U + (at != std::string::npos
-                                              ? std::stoul(request.substr(at + 16U))
-                                              : 0U);
+                    wanted = head + 4U +
+                             (at != std::string::npos ? std::stoul(request.substr(at + 16U)) : 0U);
                 }
                 if (wanted != std::string::npos && request.size() >= wanted) {
                     break;
@@ -245,9 +244,11 @@ class FakeLastFm final {
                     answer = R"({"scrobbles":{"@attr":{"accepted":1,"ignored":0}}})";
                 }
             }
-            const auto response = "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n"
-                                  "Content-Length: " + std::to_string(answer.size()) +
-                                  "\r\nConnection: close\r\n\r\n" + answer;
+            const auto response = "HTTP/1.1 " + status +
+                                  "\r\nContent-Type: application/json\r\n"
+                                  "Content-Length: " +
+                                  std::to_string(answer.size()) + "\r\nConnection: close\r\n\r\n" +
+                                  answer;
             static_cast<void>(::send(connection, response.data(), response.size(), MSG_NOSIGNAL));
             ::close(connection);
         }

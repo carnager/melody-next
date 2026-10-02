@@ -1,7 +1,6 @@
 # ADR-0235: UPnP renderers as outputs (optional)
 
-- Status: proposed, optional. Not planned for this project; written down
-  for anyone who wants to build it, here or in a fork.
+- Status: accepted and implemented; optional at build time and runtime.
 - Date: 2026-09-26
 - Builds on: ADR-0228 (outputs), ADR-0230 (the stream port and tickets)
 
@@ -39,6 +38,11 @@ renderer from an agent:
 that a renderer that changes its IP address is still the same output. They
 are selected, restored and persisted like agents.
 
+When playback moves between renderers, the new renderer receives the current
+track and position. Position restoration is deferred until after `Play` because
+some otherwise conforming renderers reject `Seek` while their transport is
+stopped. Polling retries that seek while the device enters `PLAYING`.
+
 **Found by SSDP.** Engines find each other by mDNS (ADR-0229). Renderers
 announce themselves over SSDP (`urn:schemas-upnp-org:device:MediaRenderer:1`),
 so that needs a small listener in `src/discovery`. It could be switched off,
@@ -61,16 +65,32 @@ renderers without FLAC. It uses the same transcode cache, keyed by format.
 Each file is sent with its duration in the DIDL-Lite metadata, and with
 title, artist, album and cover art for renderers that have a display.
 
-**ReplayGain is the open question.** A renderer applies no gain, and
-streams deliberately carry none. There are two ways to go, and whoever
-builds this has to choose:
+Protocol-info MIME declarations do not express every decoder limit. Sonos
+advertises FLAC without its documented 48 kHz ceiling, so higher-rate sources
+are delivered as lossless FLAC capped at 48 kHz. Sources already within that
+limit and renderers without that identified constraint keep the original.
 
-- apply the gain when transcoding for renderers, which means every track
-  is transcoded, originals included; or
-- report ReplayGain as unsupported on this output and play at unity.
+**ReplayGain is unsupported.** UPnP outputs play at unity gain and report
+`replay_gain: false` in their output capability. Originals therefore remain
+originals when the renderer supports their format, and conversion is limited
+to unsupported formats and logical track segments.
 
 Adjusting `SetVolume` per track is ruled out: it fights the user's volume
 and steps audibly at track changes.
+
+**The feature is optional.** `TRACKKNIFE_ENABLE_UPNP` controls whether the
+discovery and renderer output implementation is compiled and whether libupnp
+is required. In a build that includes it, discovery is still off until the
+user enables **Settings → Engine → Discover UPnP speakers**, or starts a
+headless engine with `--upnp`. `--upnp-interface` restricts discovery to one
+network interface. UPnP requires the HTTP stream listener on a LAN-reachable
+address.
+
+The `macos` CMake preset enables UPnP and the CoreAudio local output while
+disabling the Linux-only inotify watcher. Those capabilities have independent
+`TRACKKNIFE_ENABLE_LOCAL_AUDIO` and `TRACKKNIFE_BUILD_WATCH` switches, so the
+same source tree can produce a smaller build without UPnP or platform-specific
+helpers.
 
 ## Out of scope
 

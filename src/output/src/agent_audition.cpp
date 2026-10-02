@@ -67,7 +67,9 @@ file_replay_gain(const std::string& raw_path, const formats::AudioSourceSelectio
     if (!value.is_object() || value.value("format", std::string{}) != "opus") {
         return std::nullopt;
     }
-    return StreamFormat{.bitrate_kbps = std::clamp(value.value("bitrate", 128), 16, 512)};
+    return StreamFormat{.bitrate_kbps = std::clamp(value.value("bitrate", 128), 16, 512),
+                        .codec = StreamCodec::opus,
+                        .sample_rate_cap = {}};
 }
 
 } // namespace

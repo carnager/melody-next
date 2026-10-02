@@ -6,6 +6,7 @@
 // uses neither the codec's framing helpers nor any library beyond POSIX when
 // acting as the client.
 
+#include "trackknife/core/posix.hpp"
 #include "trackknife/engine/job_methods.hpp"
 #include "trackknife/engine/server.hpp"
 #include "trackknife/engine/token.hpp"
@@ -26,11 +27,11 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <memory>
-#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -134,7 +135,8 @@ class Client final {
     void half_close() { ::shutdown(descriptor_, SHUT_WR); }
 
     // Whether the engine has hung up.
-    [[nodiscard]] bool closed_by_peer(const std::chrono::seconds patience = std::chrono::seconds{5}) {
+    [[nodiscard]] bool closed_by_peer(const std::chrono::seconds patience = std::chrono::seconds{
+                                          5}) {
         const auto deadline = std::chrono::steady_clock::now() + patience;
         while (std::chrono::steady_clock::now() < deadline) {
             std::array<char, 1024> buffer{};
@@ -407,7 +409,7 @@ void an_attached_connection_ends_with_its_engine() {
     protocol::Dispatcher dispatcher;
     auto agent_side = engine::Server::detached(dispatcher);
     std::array<int, 2> pair{-1, -1};
-    require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0,
+    require(trackknife::core::socketpair_cloexec(AF_UNIX, SOCK_STREAM, 0, pair.data()) == 0,
             "a connection is made");
     agent_side->attach(pair[0]);
     require(agent_side->connections() == 1U, "the agent serves the engine's connection");
@@ -432,12 +434,13 @@ void attaching_to_a_stopping_server_does_not_end_the_process() {
         auto stopped = engine::Server::detached(dispatcher);
         stopped->stop();
         std::array<int, 2> pair{-1, -1};
-        require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) == 0,
+        require(trackknife::core::socketpair_cloexec(AF_UNIX, SOCK_STREAM, 0, pair.data()) == 0,
                 "a connection is made");
         stopped->attach(pair[0]);
         require(stopped->connections() == 0U, "a stopped server takes nothing on");
         char byte = 0;
-        require(::recv(pair[1], &byte, 1, 0) == 0, "and the connection is closed, not left hanging");
+        require(::recv(pair[1], &byte, 1, 0) == 0,
+                "and the connection is closed, not left hanging");
         ::close(pair[1]);
     }
     // And racing: attaches from another thread while the server stops.
@@ -448,7 +451,8 @@ void attaching_to_a_stopping_server_does_not_end_the_process() {
         std::thread attaching{[&] {
             for (int count = 0; count < 20; ++count) {
                 std::array<int, 2> pair{-1, -1};
-                if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair.data()) != 0) {
+                if (trackknife::core::socketpair_cloexec(AF_UNIX, SOCK_STREAM, 0, pair.data()) !=
+                    0) {
                     return;
                 }
                 server->attach(pair[0]);
@@ -539,7 +543,6 @@ void an_unencodable_answer_does_not_end_the_engine(const std::filesystem::path& 
 
     (*server)->stop();
 }
-
 
 // Every connection had a thread of its own that was only joined when the
 // engine stopped, so each client that came and went -- melody-cli from a key
@@ -699,9 +702,26 @@ void a_stranger_that_leaves_is_let_go() {
     (*server)->stop();
 }
 
+void a_half_closed_client_does_not_block_shutdown(const std::filesystem::path& path) {
+    protocol::Dispatcher dispatcher;
+    dispatcher.on("ping", [](const protocol::Json&) -> core::Result<protocol::Json> {
+        return protocol::Json{{"answer", "pong"}};
+    });
+    auto server = engine::Server::listen(path, dispatcher);
+    require(server.has_value(), "the engine binds for the shutdown regression");
+    (*server)->start();
+    Client client{path};
+    client.send("{\"id\":1,\"method\":\"ping\"}\n");
+    client.half_close();
+    require(client.line().find("pong") != std::string::npos,
+            "a half-closed client receives its final answer");
+    (*server)->stop();
+}
+
 int main() {
-    const auto directory = std::filesystem::temp_directory_path() /
-                           ("trackknife-server-" + core::StableId::random().to_string());
+    const auto directory =
+        std::filesystem::weakly_canonical(std::filesystem::temp_directory_path()) /
+        ("tk-server-" + core::StableId::random().to_string().substr(0, 8));
     std::filesystem::create_directory(directory);
     the_socket_answers_plain_lines(directory / "a.sock");
     events_reach_every_client(directory / "b.sock");
@@ -718,8 +738,9 @@ int main() {
     connections_are_bounded(directory / "h.sock");
     a_stranger_has_seconds_to_authenticate();
     a_stranger_that_leaves_is_let_go();
+    a_half_closed_client_does_not_block_shutdown(directory / "i.sock");
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
-    std::cout << "engine server: 15 scenarios\n";
+    std::cout << "engine server: 16 scenarios\n";
     return EXIT_SUCCESS;
 }

@@ -298,7 +298,7 @@ struct ReadPicture {
 void builtinPresetsProbeAvailable() {
     CHECK(trackknife::convert::conversion_backend_versions().find("ffmpeg=") == 0U);
     const auto& presets = trackknife::convert::builtin_encoder_presets();
-    CHECK(presets.size() == 4U);
+    CHECK(presets.size() == 5U);
     for (const auto& preset : presets) {
         const auto availability = trackknife::convert::probe_encoder_preset(preset);
         if (!availability.available) {
@@ -808,6 +808,10 @@ void carriesArtworkIntoEveryPreset(const std::filesystem::path& fixture_director
         CHECK(converted.has_value());
         if (!converted) {
             std::cerr << preset.id << ": " << converted.error().message << '\n';
+            continue;
+        }
+        // A container without covers converts without one.
+        if (!preset.carries_artwork) {
             continue;
         }
         const auto reread = read_output_picture(destination, preset.file_extension);

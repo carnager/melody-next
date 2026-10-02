@@ -25,15 +25,17 @@ Updated on 2026-09-27, through ADR-0236 and database schema 47.
 
 **The unified engine is in place.** `melodyd` owns the library and playback
 and speaks protocol v1 over a socket or TCP. Trackknife, the Android app and
-`melody-cli` are its clients, and audio comes out of output agents: the
-engine's own speakers, other machines and phones. This supersedes the
+`melody-cli` are its clients, and audio comes out through outputs: the
+engine's own speakers, agents on other machines and phones, and optional UPnP
+renderers. This supersedes the
 two-authority model in older ADRs and in `architecture.md`.
 [The migration plan](unified-engine.md) says how far along each phase is;
 [melody.md](melody.md) says how to run it.
 
+- [ADR-0255: CoreAudio output on macOS](adr/0255-coreaudio-output-on-macos.md).
 - [ADR-0237: File work moves into the engine](adr/0237-file-work-in-the-engine.md) — the UI and workflow stay exactly as they are.
 - [ADR-0236: Playback states are numbered, and say what the output was told](adr/0236-playback-states-are-numbered.md).
-- [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — optional, not planned; for a fork or contributor.
+- [ADR-0235: UPnP renderers as outputs](adr/0235-upnp-renderers-as-outputs.md) — implemented and optional.
 - [ADR-0234: Engines are connections, not a switch](adr/0234-engines-are-connections.md).
 - [ADR-0233: Lists live in the engine](adr/0233-lists-live-in-the-engine.md).
 - [ADR-0232: melody-watch, telling the engine what changed on a NAS](adr/0232-melody-watch.md).

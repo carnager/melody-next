@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/engine/token.hpp"
-
-#include <sys/random.h>
 
 #include <array>
 #include <cerrno>
@@ -15,7 +14,7 @@ namespace {
     std::array<unsigned char, 32> bytes{};
     std::size_t filled = 0;
     while (filled < bytes.size()) {
-        const auto got = ::getrandom(bytes.data() + filled, bytes.size() - filled, 0);
+        const auto got = core::random_bytes(bytes.data() + filled, bytes.size() - filled);
         if (got < 0) {
             if (errno == EINTR) {
                 continue;

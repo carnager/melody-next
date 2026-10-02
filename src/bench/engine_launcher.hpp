@@ -68,6 +68,7 @@ struct LocalEngineSharing final {
     bool play_for_found{false};
     int found_nearby_kbps{0};
     int found_away_kbps{128};
+    bool upnp{false};
     friend bool operator==(const LocalEngineSharing&, const LocalEngineSharing&) = default;
 };
 [[nodiscard]] LocalEngineSharing localEngineSharing();

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/operations/metadata_commit.hpp"
 
@@ -38,7 +39,9 @@
 #include <string_view>
 #include <sys/file.h>
 #include <sys/stat.h>
+#ifndef __APPLE__
 #include <sys/syscall.h>
+#endif
 #include <sys/types.h>
 #include <sys/xattr.h>
 #include <system_error>
@@ -297,7 +300,7 @@ struct ExtendedAttributeListing {
 [[nodiscard]] core::Result<ExtendedAttributeListing>
 read_extended_attributes(const Descriptor& descriptor, const std::string& source_raw_path,
                          const std::optional<core::StableId>& journal_id = std::nullopt) {
-    const auto listed = ::flistxattr(descriptor.get(), nullptr, 0U);
+    const auto listed = core::list_extended_attributes(descriptor.get(), nullptr, 0U);
     if (listed < 0 && (errno == ENOTSUP || errno == EOPNOTSUPP)) {
         return ExtendedAttributeListing{.attributes = {}, .supported = false};
     }
@@ -312,7 +315,8 @@ read_extended_attributes(const Descriptor& descriptor, const std::string& source
     }
     std::vector<char> names(static_cast<std::size_t>(listed));
     if (listed > 0) {
-        const auto repeated = ::flistxattr(descriptor.get(), names.data(), names.size());
+        const auto repeated =
+            core::list_extended_attributes(descriptor.get(), names.data(), names.size());
         if (repeated < 0 || repeated != listed) {
             return std::unexpected(
                 operation_error(repeated < 0 ? core::ErrorCode::io : core::ErrorCode::conflict,
@@ -335,7 +339,8 @@ read_extended_attributes(const Descriptor& descriptor, const std::string& source
                                                    source_raw_path, journal_id));
         }
         std::string name{names.begin() + static_cast<std::ptrdiff_t>(offset), end};
-        const auto value_size = ::fgetxattr(descriptor.get(), name.c_str(), nullptr, 0U);
+        const auto value_size =
+            core::get_extended_attribute(descriptor.get(), name.c_str(), nullptr, 0U);
         if (value_size < 0) {
             return std::unexpected(system_error("sizing extended attribute failed", errno,
                                                 source_raw_path, journal_id));
@@ -348,8 +353,8 @@ read_extended_attributes(const Descriptor& descriptor, const std::string& source
         }
         std::vector<unsigned char> value(static_cast<std::size_t>(value_size));
         if (value_size > 0) {
-            const auto read =
-                ::fgetxattr(descriptor.get(), name.c_str(), value.data(), value.size());
+            const auto read = core::get_extended_attribute(descriptor.get(), name.c_str(),
+                                                           value.data(), value.size());
             if (read < 0 || read != value_size) {
                 return std::unexpected(
                     operation_error(read < 0 ? core::ErrorCode::io : core::ErrorCode::conflict,
@@ -363,7 +368,7 @@ read_extended_attributes(const Descriptor& descriptor, const std::string& source
         // security., and trusted. names are kernel- or filesystem-owned
         // representations (NFS ACLs, SELinux labels) that the destination
         // manages itself and often refuses to accept or remove.
-        if (name.starts_with("user.")) {
+        if (core::user_extended_attribute(name)) {
             attributes.push_back(
                 ExtendedAttribute{.name = std::move(name), .value = std::move(value)});
         }
@@ -388,7 +393,7 @@ apply_filesystem_metadata(const Descriptor& source, const struct stat& source_st
                                      [&attribute](const auto& source_attribute) {
                                          return source_attribute.name == attribute.name;
                                      }) &&
-                ::fremovexattr(prepared.get(), attribute.name.c_str()) != 0) {
+                core::remove_extended_attribute(prepared.get(), attribute.name.c_str()) != 0) {
                 return std::unexpected(system_error("removing unowned extended attribute failed",
                                                     errno, source_raw_path, journal_id));
             }
@@ -421,8 +426,8 @@ apply_filesystem_metadata(const Descriptor& source, const struct stat& source_st
     if (prepared_attributes->supported) {
         for (const auto& attribute : source_attributes.attributes) {
             const auto* data = attribute.value.empty() ? nullptr : attribute.value.data();
-            if (::fsetxattr(prepared.get(), attribute.name.c_str(), data, attribute.value.size(),
-                            0) != 0) {
+            if (core::set_extended_attribute(prepared.get(), attribute.name.c_str(), data,
+                                             attribute.value.size()) != 0) {
                 return std::unexpected(system_error("preserving extended attribute failed", errno,
                                                     source_raw_path, journal_id));
             }

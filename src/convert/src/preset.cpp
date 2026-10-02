@@ -16,6 +16,19 @@ namespace trackknife::convert {
 const std::vector<EncoderPreset>& builtin_encoder_presets() {
     static const std::vector<EncoderPreset> presets{
         {
+            .id = "wav",
+            .version = 1,
+            .display_name = "WAV (PCM 16-bit)",
+            .codec_name = "pcm_s16le",
+            .container_name = "wav",
+            .file_extension = "wav",
+            .lossless = true,
+            .bit_rate = std::nullopt,
+            .vbr_quality = std::nullopt,
+            .sample_format_hint = "s16",
+            .carries_artwork = false,
+        },
+        {
             .id = "flac",
             .version = 1,
             .display_name = "FLAC (lossless)",

@@ -4,6 +4,8 @@
 #include "trackknife/protocol/message.hpp"
 
 #include <charconv>
+#include <filesystem>
+#include <ranges>
 
 namespace trackknife::output {
 namespace {
@@ -21,7 +23,8 @@ namespace {
     return -1;
 }
 
-template <typename T> [[nodiscard]] std::optional<T> number(const std::optional<std::string>& text) {
+template <typename T>
+[[nodiscard]] std::optional<T> number(const std::optional<std::string>& text) {
     if (!text) {
         return std::nullopt;
     }
@@ -100,10 +103,49 @@ std::optional<std::string> query_value(std::string_view query, const std::string
     return std::nullopt;
 }
 
+std::string stream_content_type(const std::string& path) {
+    auto extension = std::filesystem::path{path}.extension().string();
+    std::ranges::transform(extension, extension.begin(), [](const unsigned char value) {
+        return static_cast<char>(std::tolower(value));
+    });
+    if (extension == ".flac") {
+        return "audio/flac";
+    }
+    if (extension == ".wav") {
+        return "audio/wav";
+    }
+    if (extension == ".mp3") {
+        return "audio/mpeg";
+    }
+    if (extension == ".m4a" || extension == ".mp4") {
+        return "audio/mp4";
+    }
+    if (extension == ".aac") {
+        return "audio/aac";
+    }
+    if (extension == ".jpg" || extension == ".jpeg") {
+        return "image/jpeg";
+    }
+    if (extension == ".png") {
+        return "image/png";
+    }
+    if (extension == ".opus" || extension == ".ogg") {
+        return "audio/ogg";
+    }
+    return "application/octet-stream";
+}
+
 std::string stream_query(const StreamRequest& request) {
     std::string query = "path=" + percent_encoded(protocol::encode_raw_path(request.raw_path));
     if (request.format) {
-        query += "&format=opus&bitrate=" + std::to_string(request.format->bitrate_kbps);
+        if (request.format->codec == StreamCodec::opus) {
+            query += "&format=opus&bitrate=" + std::to_string(request.format->bitrate_kbps);
+        } else {
+            query += request.format->codec == StreamCodec::flac ? "&format=flac" : "&format=wav";
+        }
+        if (request.format->sample_rate_cap) {
+            query += "&rate_cap=" + std::to_string(*request.format->sample_rate_cap);
+        }
     }
     if (request.selection.stream_index) {
         query += "&stream=" + std::to_string(*request.selection.stream_index);
@@ -116,6 +158,9 @@ std::string stream_query(const StreamRequest& request) {
         if (request.segment->end_sample) {
             query += "&end=" + std::to_string(*request.segment->end_sample);
         }
+    }
+    if (request.artwork) {
+        query += "&artwork=1";
     }
     return query;
 }
@@ -132,14 +177,26 @@ core::Result<StreamRequest> parse_stream_query(const std::string_view query) {
     }
     request.raw_path = std::move(*raw_path);
     if (const auto format = query_value(query, "format")) {
-        if (*format != "opus") {
-            return std::unexpected(malformed("a format other than opus"));
+        if (*format == "flac" || *format == "wav") {
+            request.format =
+                StreamFormat{.codec = *format == "flac" ? StreamCodec::flac : StreamCodec::wav,
+                             .sample_rate_cap = {}};
+        } else if (*format == "opus") {
+            const auto bitrate = number<int>(query_value(query, "bitrate"));
+            if (!bitrate || *bitrate < 16 || *bitrate > 512) {
+                return std::unexpected(malformed("no bit rate between 16 and 512 kbps"));
+            }
+            request.format = StreamFormat{
+                .bitrate_kbps = *bitrate, .codec = StreamCodec::opus, .sample_rate_cap = {}};
+        } else {
+            return std::unexpected(malformed("an unsupported stream format"));
         }
-        const auto bitrate = number<int>(query_value(query, "bitrate"));
-        if (!bitrate || *bitrate < 16 || *bitrate > 512) {
-            return std::unexpected(malformed("no bit rate between 16 and 512 kbps"));
+        if (const auto rate_cap = number<int>(query_value(query, "rate_cap"))) {
+            if (*rate_cap < 8'000 || *rate_cap > 384'000) {
+                return std::unexpected(malformed("no sample-rate cap between 8000 and 384000 Hz"));
+            }
+            request.format->sample_rate_cap = *rate_cap;
         }
-        request.format = StreamFormat{.bitrate_kbps = *bitrate};
     }
     request.selection.stream_index = number<int>(query_value(query, "stream"));
     request.selection.subsong_index = number<int>(query_value(query, "subsong"));
@@ -147,12 +204,13 @@ core::Result<StreamRequest> parse_stream_query(const std::string_view query) {
         request.segment = formats::SampleRange{
             .start_sample = *start, .end_sample = number<std::int64_t>(query_value(query, "end"))};
     }
-    if (!request.format && (request.segment || request.selection.stream_index ||
-                            request.selection.subsong_index)) {
+    if (!request.format &&
+        (request.segment || request.selection.stream_index || request.selection.subsong_index)) {
         // The original file is sent whole; its parts only as tracks of
         // their own, which is to say converted.
         return std::unexpected(malformed("a part of a file but no format to send it in"));
     }
+    request.artwork = query_value(query, "artwork").value_or("") == "1";
     return request;
 }
 

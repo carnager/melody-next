@@ -30,6 +30,9 @@ struct EncoderPreset {
     // Preferred FFmpeg sample-format name (for example "s32"); empty lets
     // the converter negotiate from the encoder's supported formats.
     std::string sample_format_hint;
+    // Whether the container holds a cover image. WAV does not: a cover asked
+    // for is left out rather than failing the conversion.
+    bool carries_artwork{true};
 
     friend bool operator==(const EncoderPreset&, const EncoderPreset&) = default;
 };

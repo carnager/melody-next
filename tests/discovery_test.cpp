@@ -2,6 +2,7 @@
 
 // Engines announcing themselves on multicast DNS, and being found.
 
+#include "trackknife/core/posix.hpp"
 #include "trackknife/core/stable_id.hpp"
 #include "trackknife/discovery/dns.hpp"
 #include "trackknife/discovery/mdns.hpp"
@@ -89,14 +90,14 @@ void codec_round_trips() {
         0, 0, 0x84, 0, 0, 0, 0, 1, 0, 0, 0, 0,
         // _melody._tcp.local PTR, pointing its target's tail back at offset 12
         7, '_', 'm', 'e', 'l', 'o', 'd', 'y', 4, '_', 't', 'c', 'p', 5, 'l', 'o', 'c', 'a', 'l', 0,
-        0, 12, 0, 1, 0, 0, 0, 120, 0, 6,
-        3, 'd', 'e', 'n', 0xC0, 12};
+        0, 12, 0, 1, 0, 0, 0, 120, 0, 6, 3, 'd', 'e', 'n', 0xC0, 12};
     const auto read = discovery::decode(compressed.data(), compressed.size());
     require(read.has_value() && read->answers.size() == 1U &&
                 read->answers.front().target == "den._melody._tcp.local",
             "a compressed name is followed");
     // A pointer loop, or a packet cut short, is refused rather than read.
-    const std::vector<std::uint8_t> looping{0, 0, 0x84, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 12, 0, 12, 0, 1};
+    const std::vector<std::uint8_t> looping{0, 0, 0x84, 0,    0,  1, 0,  0, 0,
+                                            0, 0, 0,    0xC0, 12, 0, 12, 0, 1};
     require(!discovery::decode(looping.data(), looping.size()).has_value(),
             "a name pointing at itself is refused");
     require(!discovery::decode(compressed.data(), 20U).has_value(), "a short packet is refused");
@@ -104,8 +105,8 @@ void codec_round_trips() {
 
 bool engines_are_found() {
     // A service of its own, so a real engine on this network is not mixed in.
-    const auto service = "_melody-test-" +
-                         trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
+    const auto service =
+        "_melody-test-" + trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
     auto browser = discovery::Browser::start({}, service);
     if (!browser) {
         std::cerr << "discovery: " << browser.error().message << "; skipping\n";
@@ -139,7 +140,7 @@ bool engines_are_found() {
 // told the LAN its Docker bridge's address too, and a phone that took that
 // one could not reach it. Heard as a listener on the group hears it.
 bool each_network_hears_its_own_address() {
-    const int listener = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    const int listener = trackknife::core::socket_cloexec(AF_INET, SOCK_DGRAM, 0);
     require(listener >= 0, "a socket opens");
     const int on = 1;
     static_cast<void>(::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)));
@@ -152,13 +153,14 @@ bool each_network_hears_its_own_address() {
     ::inet_pton(AF_INET, "224.0.0.251", &membership.imr_multiaddr);
     membership.imr_interface.s_addr = htonl(INADDR_ANY);
     if (::bind(listener, reinterpret_cast<const sockaddr*>(&bound), sizeof(bound)) != 0 ||
-        ::setsockopt(listener, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership, sizeof(membership)) != 0) {
+        ::setsockopt(listener, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership, sizeof(membership)) !=
+            0) {
         ::close(listener);
         std::cerr << "discovery: cannot listen on the mDNS port; skipping\n";
         return false;
     }
-    const auto service = "_melody-test-" +
-                         trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
+    const auto service =
+        "_melody-test-" + trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
     auto announcer = discovery::Announcer::start(
         discovery::Advertisement{.instance = "addresses", .port = 6603, .txt = {}}, service);
     require(announcer.has_value(), "an engine announces itself");
@@ -181,9 +183,10 @@ bool each_network_hears_its_own_address() {
             })) {
             continue;
         }
-        const auto addresses = std::ranges::count_if(
-            message->additionals,
-            [](const discovery::Record& record) { return record.type == discovery::RecordType::a; });
+        const auto addresses =
+            std::ranges::count_if(message->additionals, [](const discovery::Record& record) {
+                return record.type == discovery::RecordType::a;
+            });
         require(addresses == 1, "an announcement names one address, the one on its network");
         ++heard;
     }
@@ -200,8 +203,8 @@ bool each_network_hears_its_own_address() {
 // moment after another heard nothing until it asked again -- and melody-cli
 // --engine NAME, waiting a little over a second, now and then gave up.
 bool a_late_asker_is_answered_at_once() {
-    const auto service = "_melody-test-" +
-                         trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
+    const auto service =
+        "_melody-test-" + trackknife::core::StableId::random().to_string().substr(0, 8) + "._tcp";
     auto announcer = discovery::Announcer::start(
         discovery::Advertisement{.instance = "late", .port = 6603, .txt = {{"id", "engine-2"}}},
         service);

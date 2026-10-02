@@ -1,6 +1,6 @@
 # Trackknife
 
-A music player and tag editor for Linux, in the spirit of foobar2000.
+A music player and tag editor for Linux and macOS, in the spirit of foobar2000.
 
 ![A queue grouped by album, with the library beside it](Screenshots/queue.png)
 
@@ -10,8 +10,8 @@ A music player and tag editor for Linux, in the spirit of foobar2000.
   Trackknife is one of its clients. Close the window and the music keeps
   going. Run the engine on a server and every client shares its library,
   queue and history.
-- **Any machine can be a speaker.** Another computer, a Raspberry Pi, your
-  phone. Switch mid-song and it carries on where it was.
+- **Computers, phones, and UPnP speakers are outputs.** Another computer, a
+  Raspberry Pi, your phone, or a network renderer can play for the engine.
 - **A proper tag editor.** Edit many files at once, look albums up on
   MusicBrainz, fix covers, scan ReplayGain, convert and rename. You see every
   change before it's written.

@@ -12,8 +12,12 @@ namespace trackknife::output {
 
 // A track sent as Opus rather than as the file: for a phone on mobile data,
 // or one that cannot decode the original.
+enum class StreamCodec { opus, flac, wav };
+
 struct StreamFormat final {
     int bitrate_kbps{128};
+    StreamCodec codec{StreamCodec::opus};
+    std::optional<int> sample_rate_cap;
 
     friend bool operator==(const StreamFormat&, const StreamFormat&) = default;
 };
@@ -26,6 +30,7 @@ struct StreamRequest final {
     std::optional<StreamFormat> format;
     formats::AudioSourceSelection selection;
     std::optional<formats::SampleRange> segment;
+    bool artwork{false};
 
     friend bool operator==(const StreamRequest&, const StreamRequest&) = default;
 };
@@ -34,6 +39,7 @@ struct StreamRequest final {
 [[nodiscard]] std::optional<std::string> percent_decoded(std::string_view text);
 // The value of `name` in a query string, decoded.
 [[nodiscard]] std::optional<std::string> query_value(std::string_view query, std::string_view name);
+[[nodiscard]] std::string stream_content_type(const std::string& path);
 
 // The request as query parameters, always in the same order and spelling:
 // what the agent's URL carries, and exactly what a download ticket signs.

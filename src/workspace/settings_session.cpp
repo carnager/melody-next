@@ -284,8 +284,8 @@ bool SettingsSession::bufferCustom() const {
 // fields: the one thing the sharing part of the page is for, spelled out.
 QString SettingsSession::agentCommand() const {
     if (!values_.value(QLatin1String(SettingsKeys::engine_share_key)).toBool()) {
-        return QStringLiteral(
-            "Not shared: only this computer plays, and Trackknife here controls it.");
+        return QStringLiteral("Only Trackknife on this computer controls this engine. UPnP "
+                              "speakers can play when discovery is enabled.");
     }
     const auto listen = values_.value(QLatin1String(SettingsKeys::engine_listen_key))
                             .toString()

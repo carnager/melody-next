@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/operations/metadata_commit.hpp"
 
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <limits.h>
 #include <mutex>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -64,7 +66,14 @@ std::string basename(const std::string& path) {
     return std::filesystem::path{path}.filename().native();
 }
 std::string descriptor_path(int fd, const std::string& name) {
+#ifdef __APPLE__
+    std::array<char, PATH_MAX> path{};
+    if (::fcntl(fd, F_GETPATH, path.data()) == 0)
+        return (std::filesystem::path{path.data()} / name).native();
+    return "/dev/fd/" + std::to_string(fd) + "/" + name;
+#else
     return "/proc/self/fd/" + std::to_string(fd) + "/" + name;
+#endif
 }
 core::Result<std::optional<core::LocalSourceRevision>> revision(int fd, const std::string& name) {
     struct stat st{};
@@ -453,7 +462,7 @@ commit_folder_image(const metadata::FolderImageWritePlan& plan, MetadataOperatio
         if (::fsync(directory.fd) != 0)
             return fail(io_error());
         const bool exchanged =
-            !without_links && ::renameat2(directory.fd, prepared.c_str(), directory.fd,
+            !without_links && core::rename_with_flags(directory.fd, prepared.c_str(), directory.fd,
                                           name.c_str(), RENAME_EXCHANGE) == 0;
         if (exchanged) {
             auto displaced = revision(directory.fd, prepared);

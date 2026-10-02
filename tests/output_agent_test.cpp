@@ -450,7 +450,10 @@ int main(int argc, char** argv) {
         // One that wants Opus even nearby gets it, at its rate.
         auto porch = start_agent(port, std::nullopt, "agent-test-token", "porch",
                                  trackknife::agent::StreamChoice{
-                                     .nearby = output::StreamFormat{.bitrate_kbps = 96},
+                                     .nearby = output::StreamFormat{
+                                         .bitrate_kbps = 96,
+                                         .codec = output::StreamCodec::opus,
+                                         .sample_rate_cap = {}},
                                      .away = std::nullopt});
         require(porch != nullptr && eventually([&] { return porch->registered(); }),
                 "an agent wanting Opus registers");

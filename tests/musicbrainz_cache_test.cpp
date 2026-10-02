@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+#include "trackknife/core/stable_id.hpp"
 #include "trackknife/persistence/musicbrainz_cache.hpp"
 
 #include <cstdlib>
@@ -24,11 +25,11 @@ void check(const bool condition, const std::string_view expression, const int li
 
 struct TemporaryDirectory {
     TemporaryDirectory() {
-        auto pattern =
-            (std::filesystem::temp_directory_path() / "trackknife-musicbrainz-cache-XXXXXX")
-                .native();
-        if (::mkdtemp(pattern.data()) != nullptr) {
-            path = pattern;
+        path = std::filesystem::temp_directory_path() /
+               ("trackknife-musicbrainz-cache-" + trackknife::core::StableId::random().to_string());
+        std::error_code error;
+        if (!std::filesystem::create_directory(path, error) || error) {
+            path.clear();
         }
     }
     ~TemporaryDirectory() {

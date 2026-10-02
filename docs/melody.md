@@ -3,8 +3,8 @@
 ```
   Trackknife ──┐                         ┌──► its own speakers
   phone app  ──┼──►  melodyd (engine)  ──┼──► agent: another computer, a Pi
-  melody-cli ──┘     library, queue,     └──► agent: the phone
-                     history, Last.fm
+  melody-cli ──┘     library, queue,     ├──► agent: the phone
+                     history, Last.fm    └──► UPnP network speaker
 ```
 
 - **The engine**, `melodyd`, owns the library and playback: the queue,
@@ -12,9 +12,9 @@
   anything is connected to it.
 - **Clients** control it: Trackknife, the Android app, `melody-cli`. They
   hold nothing of their own; close them and the music goes on.
-- **Outputs** are where the sound comes out: the engine's own speakers, or
-  an *agent*, which is any machine or phone that offers its speakers to
-  engines. You pick one output at a time, and can switch mid-track.
+- **Outputs** are where the sound comes out: the engine's own speakers, an
+  *agent* on a machine or phone, or an optional UPnP network renderer. You
+  pick one output at a time, and can switch mid-track.
 
 ## Finding each other
 
@@ -57,6 +57,8 @@ or with Docker ([Installation](install.md#docker)). Useful options:
 | `--agent` | Also lend this machine's speakers to other engines on the network. |
 | `--agent-music-root DIR` | Where those engines' music is mounted here. |
 | `--transcode-cache MB` | Space for converted tracks. Default 2048. |
+| `--upnp` | Discover UPnP MediaRenderers and offer them as outputs. Requires a LAN-reachable HTTP stream listener. |
+| `--upnp-interface NAME` | Enable UPnP and restrict discovery to one interface. |
 
 With a password it listens on port 6603 for clients and agents, 6604 for
 streams, and 5353/udp for multicast DNS. There's no encryption, so keep these
@@ -108,6 +110,27 @@ mount, say) opens the files directly: start the engine with `--music-root`
 and the agent with `--music-root` (or `--agent-music-root`) pointing at its
 own copy. Otherwise the engine streams the tracks. The phone on mobile data
 gets Opus instead of the original files.
+
+## UPnP speakers
+
+When UPnP support was included at build time, enable **Settings → Engine →
+Discover UPnP speakers**. Trackknife restarts its engine with discovery and a
+LAN-facing stream listener. A headless setup uses, for example:
+
+```sh
+melodyd --upnp --http 0.0.0.0:6604
+```
+
+Each renderer appears as an ordinary output and keeps the stable id
+`upnp:<UDN>` even if its address changes. The engine sends originals when the
+renderer advertises their MIME type; otherwise it caches a lossless FLAC or
+WAV conversion. Logical segments are always converted. Artwork and basic
+track metadata accompany the stream when available.
+
+UPnP playback uses the speaker's own volume and plays at unity gain. The
+engine reports ReplayGain as unsupported for these outputs. Renderers that
+reject `SetNextAVTransportURI` still advance, with a gap, and devices without
+usable events are tracked by polling.
 
 ## melody-cli
 
@@ -170,6 +193,7 @@ the list that plays, or replaces that list and plays it (`melody-rofi tracks
 - **"Could not play: …"** is the engine's own reason: an output it couldn't
   open, a file it couldn't read.
 - **An output shows as offline.** Check the agent's log. Each line names the
-  engine it's about.
+  engine it's about. For a UPnP output, check that multicast SSDP is allowed
+  on the LAN and that the renderer can reach the engine's HTTP stream port.
 - **Converted tracks** are kept in `transcodes/` in the engine's state
   directory. Deleting that folder is safe.

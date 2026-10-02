@@ -117,6 +117,7 @@ class SettingsDialog final : public QDialog, public SettingsKeys {
     QLineEdit* remote_mount_{nullptr};
     QComboBox* remote_stream_{nullptr};
     QListWidget* engines_view_{nullptr};
+    QCheckBox* engine_upnp_{nullptr};
     QCheckBox* engine_share_{nullptr};
     QCheckBox* play_for_remote_{nullptr};
     QComboBox* stream_nearby_{nullptr};

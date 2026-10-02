@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#include "trackknife/core/posix.hpp"
 
 #include "trackknife/protocol/client.hpp"
 
@@ -12,8 +13,8 @@
 #include <unistd.h>
 
 #include <array>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <utility>
@@ -122,7 +123,7 @@ core::Result<int> open_connection(const Endpoint& endpoint) {
                                                .context = {{.key = "path", .value = text}}});
         }
         std::memcpy(address.sun_path, text.c_str(), text.size() + 1U);
-        const auto descriptor = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        const auto descriptor = core::socket_cloexec(AF_UNIX, SOCK_STREAM, 0);
         if (descriptor < 0) {
             return std::unexpected(transport_error("could not create a socket"));
         }
@@ -150,8 +151,8 @@ core::Result<int> open_connection(const Endpoint& endpoint) {
     }
     int descriptor = -1;
     for (auto* candidate = found; candidate != nullptr; candidate = candidate->ai_next) {
-        descriptor = ::socket(candidate->ai_family, candidate->ai_socktype | SOCK_CLOEXEC,
-                              candidate->ai_protocol);
+        descriptor = core::socket_cloexec(
+            candidate->ai_family, candidate->ai_socktype | SOCK_CLOEXEC, candidate->ai_protocol);
         if (descriptor < 0) {
             continue;
         }

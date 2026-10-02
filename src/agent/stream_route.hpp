@@ -20,7 +20,8 @@ enum class Route { nearby, away };
 // original files.
 struct StreamChoice final {
     std::optional<output::StreamFormat> nearby;
-    std::optional<output::StreamFormat> away{output::StreamFormat{.bitrate_kbps = 128}};
+    std::optional<output::StreamFormat> away{output::StreamFormat{
+        .bitrate_kbps = 128, .codec = output::StreamCodec::opus, .sample_rate_cap = {}}};
 
     [[nodiscard]] const std::optional<output::StreamFormat>& on(Route route) const {
         return route == Route::nearby ? nearby : away;
